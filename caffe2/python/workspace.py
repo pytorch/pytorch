@@ -199,11 +199,21 @@ def FeedBlob(name, arr, device_option=None):
     if type(arr) is np.ndarray and arr.dtype.kind == 'S':
         # Plain NumPy strings are weird, let's use objects instead
         arr = arr.astype(np.object)
+
+    if device_option is None:
+        device_option = scope.CurrentDeviceScope()
+
+    if device_option and device_option.device_type == caffe2_pb2.CUDA:
+        if arr.dtype == np.dtype('float64'):
+            raise Exception(
+                "CUDA operators do not support 64-bit doubles, " +
+                "please use arr.astype(nd.float32). Blob:" + name +
+                " type: " + arr.dtype
+            )
+
     name = StringifyBlobName(name)
     if device_option is not None:
         return C.feed_blob(name, arr, StringfyProto(device_option))
-    elif scope.CurrentDeviceScope() is not None:
-        return C.feed_blob(name, arr, StringfyProto(scope.CurrentDeviceScope()))
     else:
         return C.feed_blob(name, arr)
 

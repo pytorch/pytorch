@@ -8,6 +8,7 @@ from caffe2.python import core, test_util, workspace
 import caffe2.python.hypothesis_test_util as htu
 import hypothesis.strategies as st
 from hypothesis import given
+from caffe2.proto import caffe2_pb2
 
 
 class TestWorkspace(unittest.TestCase):
@@ -114,7 +115,6 @@ class TestWorkspace(unittest.TestCase):
         np.testing.assert_array_equal(val, val2)
         self.assertEquals(val3[0], 5.2)
 
-
     def testFetchFeedBlob(self):
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
@@ -155,6 +155,38 @@ class TestWorkspace(unittest.TestCase):
             self.assertEqual(fetched_back.shape, (2, 3, 4))
             self.assertEqual(fetched_back.dtype, dtype)
             np.testing.assert_array_equal(fetched_back, data)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    def testFetchFeedBlobTypeAsserts(self):
+        # This should pass as we are not using CUDA
+        data = np.random.rand(2, 3)
+        workspace.FeedBlob("a", data)
+
+        device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        with core.DeviceScope(device_opt):
+            threw = False
+            try:
+                workspace.FeedBlob("b", data)
+            except Exception as e:
+                print(e)
+                threw = True
+            self.assertTrue(threw, "Should reject float64 type for CUDA")
+
+            threw = False
+            try:
+                workspace.FeedBlob("c", data.astype(np.float32))
+            except Exception as e:
+                print(e)
+                threw = True
+            self.assertFalse(threw, "Should accept float32 type for CUDA")
+
+        threw = False
+        try:
+            workspace.FeedBlob("d", data, device_option=device_opt)
+        except Exception as e:
+            print(e)
+            threw = True
+        self.assertTrue(threw, "Should reject float64 type for CUDA")
 
     def testFetchFeedBlobBool(self):
         """Special case for bool to ensure coverage of both true and false."""
