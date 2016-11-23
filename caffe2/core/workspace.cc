@@ -25,13 +25,6 @@ CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 // Whether or not threadpool caps apply to iOS
 CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, false, "");
 
-// Minimum number of cores before removing threads from the threadpool
-CAFFE2_DEFINE_int(caffe2_threadpool_cap_min, 4, "");
-
-// Over that level, number of threads to subtract (by default 1, so we
-// will run on all cores except for 1)
-CAFFE2_DEFINE_int(caffe2_threadpool_cap_diff, 1, "");
-
 #endif // CAFFE2_MOBILE
 
 namespace caffe2 {
@@ -243,9 +236,20 @@ ThreadPool* Workspace::GetThreadPool() {
 #endif
 
     if (applyCap) {
-      if (numThreads >= caffe2::FLAGS_caffe2_threadpool_cap_min) {
-        numThreads -= caffe2::FLAGS_caffe2_threadpool_cap_diff;
-        numThreads = std::max(1, numThreads);
+      // 1 core  -> 1 thread
+      // 2 cores -> 2 threads
+      // 4 cores -> 3 threads
+      // 8 cores -> 4 threads
+      // more, continue limiting to half of available cores
+
+      if (numThreads <= 3) {
+        // no change
+      } else if (numThreads <= 5) {
+        // limit to 3
+        numThreads = 3;
+      } else {
+        // Use half the cores
+        numThreads = numThreads / 2;
       }
     }
 
