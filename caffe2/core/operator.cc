@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <ctime>
 
+#include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/workspace.h"
@@ -25,6 +26,9 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
         input_str);
     inputs_.push_back(blob);
   }
+
+  GetOperatorLogger()(operator_def_);
+
   for (const string& output_str : operator_def_.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
