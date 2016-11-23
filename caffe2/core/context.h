@@ -141,6 +141,11 @@ class CPUContext final {
 template<>
 inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
     size_t nbytes, const void* src, void* dst) {
+  if (nbytes == 0) {
+    return;
+  }
+  CHECK_NOTNULL(src);
+  CHECK_NOTNULL(dst);
   memcpy(dst, src, nbytes);
 }
 
