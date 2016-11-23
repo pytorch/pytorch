@@ -41,6 +41,7 @@ static THCDeviceAllocator defaultDeviceAllocator = {
   NULL,
   &cudaFreeWrapper,
   NULL,
+  NULL,
   NULL
 };
 
@@ -708,6 +709,33 @@ cudaError_t THCudaFree(THCState *state, void *ptr)
 {
   THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
   return allocator->free(allocator->state, ptr);
+}
+
+cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes)
+{
+  size_t cachedBytes = 0;
+  size_t largestBlock = 0;
+  THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
+
+  /* get info from CUDA first */
+  cudaError_t ret = cudaMemGetInfo(freeBytes, totalBytes);
+  if (ret!= cudaSuccess)
+    return ret;
+
+  int device;
+  ret = cudaGetDevice(&device);
+  if (ret!= cudaSuccess)
+    return ret;
+
+  /* not always true - our optimistic guess here */
+  largestBlock = *freeBytes;
+  
+  if (allocator->cacheInfo != NULL)
+    allocator->cacheInfo(allocator->state, device, &cachedBytes, &largestBlock);
+
+  /* Adjust resulting free bytes number. largesBlock unused for now */
+  *freeBytes += cachedBytes;
+  return cudaSuccess;
 }
 
 static ptrdiff_t applyHeapDelta(THCState *state) {

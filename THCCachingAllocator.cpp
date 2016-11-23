@@ -205,6 +205,27 @@ struct THCCachingAllocator
     return basePtr;
   }
 
+  // Accumulates sizes of all memory blocks for given device in given free list
+  void cacheInfoAux(FreeBlocks& blocks, int dev_id, size_t* total, size_t* largest)
+  {
+    Block search_key(dev_id, 0, 0);
+    auto it = blocks.lower_bound(&search_key);
+    for (;it != blocks.end() && *it && (*it)->device == dev_id; ++it) {
+      size_t blocksize = (*it)->size;
+      *total += blocksize;
+      if (blocksize > *largest)
+	*largest = blocksize;
+    }
+  }
+  
+  void cacheInfo(int dev_id, size_t* total, size_t* largest)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    cacheInfoAux(large_blocks, dev_id, total, largest);
+    cacheInfoAux(small_blocks, dev_id, total, largest);
+  }
+
+
   /** combine previously split blocks */
   void try_merge_blocks(Block* dst, Block* src, FreeBlocks& free_blocks)
   {
@@ -327,12 +348,20 @@ static cudaError_t THCCachingAllocator_emptyCache(void* ctx)
   return a->emptyCache();
 }
 
+static cudaError_t THCCachingAllocator_cacheInfo(void* ctx, int dev_id, size_t* cachedAndFree, size_t* largestBlock)
+{
+  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
+  a->cacheInfo(dev_id, cachedAndFree, largestBlock);
+  return cudaSuccess;
+}
+
 static THCCachingAllocator caching_allocator;
 static THCDeviceAllocator device_allocator = {
   &THCCachingAllocator_malloc,
   NULL,
   &THCCachingAllocator_free,
   &THCCachingAllocator_emptyCache,
+  &THCCachingAllocator_cacheInfo,
   &caching_allocator
 };
 

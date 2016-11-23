@@ -49,6 +49,7 @@ typedef struct _THCDeviceAllocator {
    cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
    cudaError_t (*free)(void*, void*);
    cudaError_t (*emptyCache)(void*);
+   cudaError_t  (*cacheInfo)(void*, int, size_t*, size_t*);
    void* state;
 } THCDeviceAllocator;
 
@@ -177,6 +178,7 @@ THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int 
 
 THC_API cudaError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
 THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
+THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes);
 THC_API void THCSetGCHandler(THCState *state,
                              void (*torchGCHandlerFunction)(void *data),
                              void *data );
