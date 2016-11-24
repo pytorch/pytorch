@@ -98,8 +98,14 @@ class DotProductGradientOp final : public Operator<Context> {
     auto& dDot = Input(DER_DOT_IN);
     auto* dX = Output(DER_X_OUT);
     auto* dY = Output(DER_Y_OUT);
-    int N = X.ndim() > 0 ? X.dim32(0) : 1;
-    int D = X.size() / N;
+    int N, D;
+    if (X.size() > 0) {
+      N = X.ndim() > 0 ? X.dim32(0) : 1;
+      D = X.size() / N;
+    } else {
+      N = 0;
+      D = 0;
+    }
     CAFFE_ENFORCE(X.ndim() == Y.ndim());
     for (int i = 0; i < X.ndim(); ++i) {
       CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
