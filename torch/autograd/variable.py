@@ -508,6 +508,11 @@ class Variable(_C._VariableBase):
         return MaskedSelect()(self, mask)
 
     def expand(self, *sizes):
+        if isinstance(sizes[0], torch.Size):
+            if len(sizes) > 1:
+                raise ValueError("expand expects a several ints or a single "
+                        "torch.Size argument")
+            sizes = sizes[0]
         return Expand(*sizes)(self)
 
     def expand_as(self, tensor):
