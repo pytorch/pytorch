@@ -991,6 +991,30 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
+    def _verify_pixel_shuffle(self, input, output, upscale_factor):
+        for c in range(output.size(1)):
+            for h in range(output.size(2)):
+                for w in range(output.size(3)):
+                    height_idx = h // upscale_factor
+                    weight_idx = w // upscale_factor
+                    channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
+                                  (c * upscale_factor ** 2)
+                    self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
+
+    def test_pixel_shuffle(self):
+        batch_size = random.randint(1, 3)
+        upscale_factor = random.randint(2, 5)
+        channels = random.randint(1, 4) * upscale_factor ** 2
+        height = random.randint(5, 10)
+        width = random.randint(5, 10)
+
+        input = Variable(torch.Tensor(batch_size, channels, height, width).uniform_(), requires_grad=True)
+        ps = nn.PixelShuffle(upscale_factor)
+        output = ps(input)
+        self._verify_pixel_shuffle(input.data, output.data, upscale_factor)
+        output.backward(output.data)
+        self.assertEqual(input.data, input.grad)
+
 
 def add_test(test):
     test_name = test.get_name()
@@ -1184,6 +1208,11 @@ new_module_tests = [
         input_size=(1, 3, 7, 7),
         fullname='FractionalMaxPool2d_size',
         test_cuda=False
+    ),
+    dict(
+        module_name='PixelShuffle',
+        constructor_args=(3,),
+        input_size=(1, 9, 4, 4),
     ),
 ]
 

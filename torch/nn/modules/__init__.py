@@ -17,3 +17,4 @@ from .normalization import CrossMapLRN2d
 from .sparse import Embedding
 from .rnn import RNNBase, RNN, LSTM, GRU, \
         RNNCell, LSTMCell, GRUCell
+from .pixelshuffle import PixelShuffle
