@@ -97,6 +97,7 @@ PyObject *THPVariable_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   THPVariable *self;
   if ((PyObject*)type != THPVariableClass || num_cached == 0) {
     self = (THPVariable*)type->tp_alloc(type, 0);
+    if (!self) return NULL;
     self->version_counter = new THPVariableVersion();
   } else {
     self = pop_cache(NULL, NULL, 0);
@@ -115,8 +116,11 @@ int THPVariable_init(THPVariable *self, PyObject *args, PyObject *kwargs)
   if (self->creator == Py_None)
     self->creator = NULL;
   Py_XINCREF(self->creator);
-  if ((self->creator && !THPFunction_Check(self->creator)) || !THPModule_isTensor(self->data))
-    return -1;
+  THPUtils_assertRet(-1, !self->creator || THPFunction_Check(self->creator),
+          "Variable creator has to be a Function object or None, but got %s",
+          THPUtils_typename(self->creator));
+  THPUtils_assertRet(-1, THPModule_isTensor(self->data), "Variable data has to "
+          "be a tensor, but got %s", THPUtils_typename(self->data));
   return 0;
 }
 
