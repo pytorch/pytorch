@@ -14,6 +14,7 @@ class ClassNLLCriterion(Criterion):
         self.total_weight_tensor = torch.ones(1)
 
     def updateOutput(self, input, target):
+        target = target.long()
         self._backend.ClassNLLCriterion_updateOutput(
             self._backend.library_state,
             input,
@@ -29,6 +30,7 @@ class ClassNLLCriterion(Criterion):
 
     def updateGradInput(self, input, target):
         self.gradInput.resize_as_(input).zero_()
+        target = target.long()
 
         self._backend.ClassNLLCriterion_updateGradInput(
             self._backend.library_state,

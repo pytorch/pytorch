@@ -26,7 +26,7 @@ class NarrowTable(Module):
 
         for i in range(len(input)):
             if i < self.offset or i >= self.offset + self.length:
-                self.gradInput[i] = recursiveResizeAs(self.gradInput[i] or torch.Tensor(), input[i])
+                self.gradInput[i] = recursiveResizeAs(self.gradInput[i] or torch.Tensor(), input[i])[0]
                 recursiveFill(self.gradInput[i], 0)
 
         return self.gradInput

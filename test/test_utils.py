@@ -1,3 +1,4 @@
+from __future__ import print_function
 import sys
 import os
 import math
@@ -9,10 +10,12 @@ import sys
 import traceback
 import torch
 import torch.cuda
+import warnings
 from torch.autograd import Variable
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
+from torch.utils.serialization import load_lua
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -245,5 +248,120 @@ class TestFFI(TestCase):
                 lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
 
 
+class TestLuaReader(TestCase):
+
+    @staticmethod
+    def _module_test(name, test):
+        def do_test(self):
+            module = test['module']
+            input = test['input']
+            grad_output = test['grad_output']
+            if hasattr(self, '_transform_' + name):
+                input = getattr(self, '_transform_' + name)(input)
+            output = module.forward(input)
+            module.zeroGradParameters()
+            grad_input = module.backward(input, grad_output)
+            self.assertEqual(output, test['output'])
+            self.assertEqual(grad_input, test['grad_input'])
+            if module.parameters() is not None:
+                params, d_params = module.parameters()
+                self.assertEqual(params, test['params'])
+                self.assertEqual(d_params, test['d_params'])
+            else:
+                self.assertFalse('params' in test and test['params'])
+                self.assertFalse('params' in test and test['d_params'])
+        return do_test
+
+    @staticmethod
+    def _criterion_test(name, test):
+        def do_test(self):
+            module = test['module']
+            input = test['input']
+            if name == 'L1Cost':
+                target = None
+            else:
+                target = test['target']
+            if hasattr(self, '_transform_' + name):
+                input, target = getattr(self, '_transform_' + name)(input, target)
+
+            output = module.forward(input, target)
+            grad_input = module.backward(input, target)
+            self.assertEqual(output, test['loss'])
+            self.assertEqual(grad_input, test['grad_input'])
+        return do_test
+
+    @classmethod
+    def _download_data(cls, test_file_path):
+        if os.path.exists(test_file_path):
+            return
+        print('Downloading test file for TestLuaReader.')
+        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_modules.t7'
+        urllib = cls._get_urllib('request')
+        data = urllib.urlopen(DATA_URL).read()
+        with open(test_file_path, 'wb') as f:
+            f.write(data)
+
+    @staticmethod
+    def _get_urllib(submodule):
+        if sys.version_info < (3,):
+            import urllib2
+            return urllib2
+        else:
+            import urllib.error
+            import urllib.request
+            return getattr(urllib, submodule)
+
+    @classmethod
+    def init(cls):
+        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        test_file_path = os.path.join(data_dir, 'legacy_modules.t7')
+        urllib = cls._get_urllib('error')
+        try:
+            cls._download_data(test_file_path)
+        except urllib.URLError as e:
+            warnings.warn(("Couldn't download the test file for TestLuaReader! "
+                    "Tests will be incomplete!"), RuntimeWarning)
+            return
+
+        tests = load_lua(test_file_path)
+        for name, test in tests['modules'].items():
+            test_name = 'test_' + name.replace('nn.', '')
+            setattr(cls, test_name, cls._module_test(name, test))
+        for name, test in tests['criterions'].items():
+            test_name = 'test_' + name.replace('nn.', '')
+            setattr(cls, test_name, cls._criterion_test(name, test))
+
+    def _transform_Index(self, input):
+        return [input[0], input[1].sub(1)]
+
+    def _transform_LookupTable(self, input):
+        return input.sub(1)
+
+    def _transform_MultiLabelMarginCriterion(self, input, target):
+        return input, target.sub(1)
+
+    def _transform_ClassNLLCriterion(self, input, target):
+        return input, target.sub(1)
+
+    def _transform_SpatialClassNLLCriterion(self, input, target):
+        return input, target.sub(1)
+
+    def _transform_ClassSimplexCriterion(self, input, target):
+        return input, target.sub(1)
+
+    def _transform_CrossEntropyCriterion(self, input, target):
+        return input, target.sub(1)
+
+    def _transform_ParallelCriterion(self, input, target):
+        return input, [target[0].sub(1), target[1]]
+
+    def _transform_MultiCriterion(self, input, target):
+        return input, target.sub(1)
+
+    def _transform_MultiMarginCriterion(self, input, target):
+        return input, target.sub(1)
+
+
+TestLuaReader.init()
 if __name__ == '__main__':
     unittest.main()
