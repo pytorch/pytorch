@@ -450,6 +450,8 @@ def _Workspace_run(ws, obj):
         return ws._run_net(obj.SerializeToString())
     if isinstance(obj, caffe2_pb2.OperatorDef):
         return ws._run_operator(obj.SerializeToString())
+    raise ValueError(
+        "Don't know how to do Workspace.run() on {}".format(type(obj)))
 
 C.Workspace.run = _Workspace_run
 
