@@ -516,7 +516,7 @@ class Variable(_C._VariableBase):
         return Expand(*sizes)(self)
 
     def expand_as(self, tensor):
-        return Expand(*tensor.size())(self)
+        return Expand(tensor.size())(self)
 
     def t(self):
         return Transpose(0, 1)(self)
@@ -559,8 +559,14 @@ class Variable(_C._VariableBase):
         return self.add(other)
     __radd__ = __add__
 
+    def __iadd__(self, other):
+        return self.add_(other)
+
     def __sub__(self, other):
         return self.sub(other)
+
+    def __isub__(self, other):
+        return self.sub_(other)
 
     def __rsub__(self, other):
         return SubConstant(other, sub_tensor=True)(self)
@@ -568,6 +574,9 @@ class Variable(_C._VariableBase):
     def __mul__(self, other):
         return self.mul(other)
     __rmul__ = __mul__
+
+    def __imul__(self, other):
+        return self.mul_(other)
 
     def __div__(self, other):
         return self.div(other)
@@ -577,8 +586,14 @@ class Variable(_C._VariableBase):
         return DivConstant(other, div_by_tensor=True)(self)
     __rtruediv__ = __rdiv__
 
+    def __idiv__(self, other):
+        return self.div_(other)
+
     def __pow__(self, other):
         return self.pow(other)
+
+    def __ipow__(self, other):
+        raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
         return PowConstant(other, tensor_power=True)(self)
