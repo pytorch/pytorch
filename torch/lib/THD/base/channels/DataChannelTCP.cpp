@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>

@@ -1,32 +1,42 @@
 #include <cstdint>
+#include "TH/THStorage.h"
+#include "base/TensorTraits.hpp"
 
 namespace thd { namespace rpc { namespace detail {
 ////////////////////////////////////////////////////////////////////////////////
 
-constexpr std::size_t MAX_VAR_SIZE = 8;
-
+constexpr size_t INITIAL_BUFFER_SIZE = 256;
 
 template<typename real>
-void _appendData(ByteArray& str, real data) {
-  str.append(reinterpret_cast<char*>(&data), sizeof(real));
+void _appendScalar(ByteArray& str, real data) {
+  str.append((char*)&data, sizeof(real));
 }
 
 template <typename T>
-void _appendTensorOrScalar(ByteArray& str, const T& arg) {
-  _appendData<char>(str, static_cast<char>(tensor_type_traits<T>::type));
-  _appendData<T>(str, arg);
+void _appendData(ByteArray& str, const T& arg) {
+  _appendScalar<TensorType>(str, tensor_type_traits<T>::type);
+  _appendScalar<T>(str, arg);
 }
 
-inline void _appendTensorOrScalar(ByteArray& str, const THDTensor& arg) {
-  _appendData<char>(str, static_cast<char>(TensorType::TENSOR));
-  _appendData<unsigned long long>(str, arg.tensor_id);
+template<typename T,
+         typename = typename std::enable_if<is_any_of<T, THDTensorTypes>::value>::type>
+inline void _appendData(ByteArray& str, const T& arg) {
+  _appendScalar<char>(str, 'T'); // TODO store this char somewhere else
+  _appendScalar<unsigned long long>(str, arg.tensor_id);
+}
+
+inline void _appendData(ByteArray& str, THLongStorage *arg) {
+  _appendScalar<char>(str, 'F');    // 'F' stands for THLongStorage
+  _appendScalar<ptrdiff_t>(str, arg->size);
+  for (ptrdiff_t i = 0; i < arg->size; i++)
+    _appendScalar<long>(str, arg->data[i]);
 }
 
 inline void packIntoString(ByteArray& str) {};
 
 template <typename T, typename ...Args>
 void packIntoString(ByteArray& str, const T& arg, const Args&... args) {
-  _appendTensorOrScalar(str, arg);
+  _appendData(str, arg);
   packIntoString(str, args...);
 }
 
@@ -34,14 +44,14 @@ void packIntoString(ByteArray& str, const T& arg, const Args&... args) {
 } // namespace detail
 
 template <typename ...Args>
-RPCMessage packMessage(function_id_type fid, std::uint16_t num_args,
-    const Args&... args) {
-  ByteArray msg(sizeof(fid) + sizeof(std::uint16_t) + num_args * (sizeof(char) +
-                detail::MAX_VAR_SIZE));
-  detail::_appendData<function_id_type>(msg, fid);
-  detail::_appendData<std::uint16_t>(msg, num_args);
+std::unique_ptr<RPCMessage> packMessage(
+    function_id_type fid,
+    const Args&... args
+) {
+  ByteArray msg(detail::INITIAL_BUFFER_SIZE);
+  detail::_appendScalar<function_id_type>(msg, fid);
   detail::packIntoString(msg, args...);
-  return RPCMessage(std::move(msg));
+  return std::unique_ptr<RPCMessage>(new RPCMessage(std::move(msg)));
 }
 
 }} // namespace rpc, thd

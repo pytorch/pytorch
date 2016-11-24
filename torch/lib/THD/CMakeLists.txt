@@ -60,6 +60,7 @@ ENDIF()
 # Test executables
 ENABLE_TESTING()
 
+FIND_PACKAGE(Threads)
 FOREACH(test_source_file ${test_cpp})
   # Prepare test names
   GET_FILENAME_COMPONENT(test_source_file ${test_source_file} NAME)
@@ -67,7 +68,7 @@ FOREACH(test_source_file ${test_cpp})
   SET(test_executable_name "test_${test_name}")
 
   ADD_EXECUTABLE(${test_executable_name} "test/${test_source_file}")
-  TARGET_LINK_LIBRARIES(${test_executable_name} THD)
+  TARGET_LINK_LIBRARIES(${test_executable_name} THD TH ${CMAKE_THREAD_LIBS_INIT})
   SET_PROPERTY(TARGET ${test_executable_name} PROPERTY CXX_STANDARD 11)
   ADD_TEST(${test_name} ${test_executable_name})
 ENDFOREACH()

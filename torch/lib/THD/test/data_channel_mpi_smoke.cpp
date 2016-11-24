@@ -1,6 +1,9 @@
 #include "../base/channels/DataChannelMPI.hpp"
 #include "../base/tensors/THTensor.hpp"
 
+#include <iostream>
+#include <cassert>
+#include <memory>
 #include <unistd.h>
 #include <cassert>
 #include <iostream>
@@ -141,7 +144,7 @@ void worker(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
 
 int main(int argc, char **argv) {
   if (argc == 1) {
-    execlp("mpirun", "mpirun", "-n", std::to_string(WORKERS_NUM + 1).data(), "-iface", "en0", argv[0], "1", NULL);
+    execlp("mpirun", "mpirun", "-n", std::to_string(WORKERS_NUM + 1).data(), argv[0], "1", NULL);
   }
 
   auto dataChannel = std::make_shared<thd::DataChannelMPI>();

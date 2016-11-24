@@ -111,4 +111,18 @@ Tensor *unpackTensor(RPCMessage& raw_message) {
   throw std::invalid_argument("expected tensor in the raw message");
 }
 
+THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
+  // TODO this might leak on errors
+  char type = *raw_message.read(sizeof(char));
+  if (type != 'F')
+    throw std::invalid_argument("expected THLongStorage in the raw message");
+  ptrdiff_t size = _readValue<ptrdiff_t, ptrdiff_t>(raw_message);
+  THLongStorage* storage = THLongStorage_newWithSize(size);
+  long* data = storage->data;
+  for (int i = 0; i < size; i++) {
+    data[i] = _readValue<long, long>(raw_message); 
+  }
+  return storage;
+}
+
 }} // namespace rpc, thd

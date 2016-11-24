@@ -14,6 +14,7 @@
 #include "../base/tensors/THTensor.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <memory>
 #include <mutex>

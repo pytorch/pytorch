@@ -12,7 +12,7 @@
 constexpr int kWORKERS_NUM = 3;
 constexpr int kWORLD_SIZE = kWORKERS_NUM + 1;
 constexpr char kMASTER_IP_ADDR[] = "127.0.0.1";
-constexpr char kMASTER_PORT[] = "5555";
+constexpr char kMASTER_PORT[] = "55555";
 
 using namespace thd;
 

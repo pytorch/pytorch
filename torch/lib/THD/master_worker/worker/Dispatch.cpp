@@ -1,14 +1,17 @@
 #include <cstdint>
 #include <unordered_map>
+#include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "../common/Functions.hpp"
+#include "../common/RPC.hpp"
 
 namespace thd {
 namespace worker {
 
 
-std::string execute(const std::string& raw_message) {
+std::string execute(std::unique_ptr<rpc::RPCMessage> raw_message) {
   try {
     // TODO: call function from the map
     return std::string();
