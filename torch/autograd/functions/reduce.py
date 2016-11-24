@@ -71,13 +71,14 @@ class Mean(_DimReduceFunction):
 
 class _SelectionFunction(Function):
     has_all_reduce = True
+    # additional_args is prepended before dim when calling the tensor
+    # function. It's a no-op for subclasses other than kthvalue.
+    # kthvalue not only requires us to pass a dim, but also preceed it with k.
+    additional_args = tuple()
 
-    def __init__(self, dim=None, return_indices=False):
+    def __init__(self, dim=None):
         super(_SelectionFunction, self).__init__()
         self.dim = dim
-        self.return_indices = return_indices
-        self.additional_args = tuple()
-        assert not self.return_indices or dim is not None
 
     def forward(self, input):
         fn = getattr(input, type(self).__name__.lower())
@@ -95,13 +96,9 @@ class _SelectionFunction(Function):
             if self.additional_args:
                 args = self.additional_args + args
             output, indices = fn(*args)
-            if self.return_indices:
-                self.save_for_backward(indices)
-                self.mark_non_differentiable(indices)
-                return output, indices
-            else:
-                self.indices = indices
-                return output
+            self.save_for_backward(indices)
+            self.mark_non_differentiable(indices)
+            return output, indices
 
     def backward(self, grad_output, grad_indices=None):
         grad_input = grad_output.new(*self.input_size).zero_()
@@ -112,10 +109,7 @@ class _SelectionFunction(Function):
                 dim = input.dim() - 1
             else:
                 dim = self.dim
-            if self.return_indices:
-                indices, = self.saved_tensors
-            else:
-                indices = self.indices
+            indices, = self.saved_tensors
             grad_input.scatter_(dim, indices, grad_output)
         return grad_input
 
@@ -139,8 +133,8 @@ class Median(_SelectionFunction):
 class Kthvalue(_SelectionFunction):
     has_all_reduce = False
 
-    def __init__(self, k, dim=None, return_indices=False):
-        super(Kthvalue, self).__init__(dim, return_indices)
+    def __init__(self, k, dim=None):
+        super(Kthvalue, self).__init__(dim)
         self.additional_args = (k,)
 
 

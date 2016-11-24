@@ -696,6 +696,8 @@ for test in function_tests:
         if not isinstance(output, tuple):
             output = (output,)
         for i, o in enumerate(output):
+            if not o.requires_grad:
+                continue
             analytical = get_analytical_jacobian(input, o)
             def fn(input):
                 tmp = cls(*constructor_args)(*input)
