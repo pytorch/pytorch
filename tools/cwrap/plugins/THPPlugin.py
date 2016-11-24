@@ -50,8 +50,7 @@ class THPPlugin(CWrapPlugin):
         'float':            Template('THPFloatUtils_checkReal($arg)'),
         'double':           Template('THPDoubleUtils_checkReal($arg)'),
         'real':             Template('THPUtils_(checkReal)($arg)'),
-        # TODO
-        'accreal':          Template('THPUtils_(checkReal)($arg)'),
+        'accreal':          Template('THPUtils_(checkAccreal)($arg)'),
     }
 
     SIZE_VARARG_CHECK = Template('THPUtils_tryUnpackLongVarArgs(args, $idx, __size)')
@@ -61,8 +60,7 @@ class THPPlugin(CWrapPlugin):
         'THLongStorage*':   Template('return THPLongStorage_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long':             Template('return PyInt_FromLong($result);'),
-        # TODO
-        'accreal':          Template('return PyFloat_FromDouble($result);'),
+        'accreal':          Template('return THPUtils_(newAccreal)($result);'),
         'self':             Template('Py_INCREF(self);\nreturn (PyObject*)self;'),
         'real':             Template('return THPUtils_(newReal)($result);'),
     }
