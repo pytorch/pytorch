@@ -114,6 +114,8 @@ def Parallelize_GPU(
             with core.NameScope("gpu_{}".format(device)):
                 param_update_builder_fun(model_helper_obj)
 
+    _AnalyzeOperators(model_helper_obj)
+
     # Add initial parameter syncs
     log.info("Add initial parameter sync")
     if (rendezvous is not None):
@@ -421,6 +423,24 @@ def stripParamName(param):
     name = str(param)
     sep = scope._NAMESCOPE_SEPARATOR
     return name[name.rindex(sep) + 1:]
+
+
+def _AnalyzeOperators(model):
+    '''
+    Look at all the operators and check that they do not cross device scopes
+    '''
+    for op in model.Proto().op:
+        if "NCCL" in op.type or "Copy" in op.type:
+            continue
+        op_dev = op.device_option
+        op_gpu = op_dev.cuda_gpu_id
+        namescope = "gpu_{}/".format(op_gpu)
+        for inp in list(op.input) + list(op.output):
+            if inp.startswith("gpu_") and not inp.startswith(namescope):
+                raise Exception(
+                    "Blob {} of op {}, should have namescope {}. Op: {}".format(
+                        inp, op.type, "gpu_{}/".format(op_gpu), str(op),
+                    ))
 
 
 def _GroupByDevice(devices, params):
