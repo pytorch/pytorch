@@ -39,8 +39,14 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < X.ndim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  int D = X.size() / N;
+  int N, D;
+  if (X.size() > 0) {
+    N = X.ndim() > 0 ? X.dim32(0) : 1;
+    D = X.size() / N;
+  } else {
+    N = 0;
+    D = 0;
+  }
   result->Resize(N);
   float* result_data = result->mutable_data<float>();
   const float* X_data = X.data<float>();
