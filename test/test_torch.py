@@ -2487,6 +2487,16 @@ class TestTorch(TestCase):
         y = x.clone().unsqueeze_(2)
         self.assertEqual(y, x.contiguous().view(2, 4, 1))
 
+    def test_accreal_type(self):
+        x = torch.randn(2, 3, 4) * 10
+        self.assertIsInstance(x.double().sum(), float)
+        self.assertIsInstance(x.float().sum(), float)
+        self.assertIsInstance(x.long().sum(), int)
+        self.assertIsInstance(x.int().sum(), int)
+        self.assertIsInstance(x.short().sum(), int)
+        self.assertIsInstance(x.char().sum(), int)
+        self.assertIsInstance(x.byte().sum(), int)
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_pin_memory(self):
         x = torch.randn(3, 5)
