@@ -57,10 +57,9 @@ class ModelHelperBase(object):
     """
 
     def __init__(self, name=None, init_params=True, allow_not_known_ops=True):
-        if name is None:
-            name = "model"
-        self.net = core.Net(name)
-        self.param_init_net = core.Net(name + '_init')
+        self.name = name or "model"
+        self.net = core.Net(self.name)
+        self.param_init_net = core.Net(self.name + '_init')
 
         self.param_to_grad = {}
         self.params = []
