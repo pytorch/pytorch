@@ -39,7 +39,7 @@ class SpatialReplicationPadding(Module):
         return self.gradInput
 
     def __repr__(self):
-        s = super(SpatialReflectionPadding, self).__repr__()
-        s += '({}, {}, {}, {})'.foramat(self.pad_l, self.pad_r, self.pad_t, self.pad_b)
+        s = super(SpatialReplicationPadding, self).__repr__()
+        s += '({}, {}, {}, {})'.format(self.pad_l, self.pad_r, self.pad_t, self.pad_b)
         return s
 

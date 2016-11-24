@@ -18,13 +18,13 @@ class DepthConcat(Concat):
 
     def windowNarrow(self, output, currentOutput, offset):
         outputWindow = output.narrow(self.dimension, offset, currentOutput.size(self.dimension))
-        for dim in range(len(self.size)):
+        for dim in range(len(self.outputSize)):
            currentSize = currentOutput.size(dim)
-           if dim != self.dimension and self.size[dim] != currentSize:
+           if dim != self.dimension and self.outputSize[dim] != currentSize:
               # 5x5 vs 3x3 -> start = [(5-3)/2] + 1 = 2 (1 pad each side)
               # 9x9 vs 5x5 -> start = [(9-5)/2] + 1 = 3 (2 pad each side)
               # 9x9 vs 4x4 -> start = [(9-4)/2] + 1 = 3.5 (2 pad, 3 pad)
-              start = int(math.floor(((self.size[dim] - currentSize) / 2)))
+              start = int(math.floor(((self.outputSize[dim] - currentSize) / 2)))
               outputWindow = outputWindow.narrow(dim, start, currentSize)
         return outputWindow
 
@@ -37,13 +37,13 @@ class DepthConcat(Concat):
                 size = list(currentOutput.size())
             else:
                 size[self.dimension] += currentOutput.size(self.dimension)
-                for dim in range(len(self.size)):
+                for dim in range(len(self.outputSize)):
                     if dim != self.dimension:
                         # take the maximum size (shouldn't change anything for batch dim)
                         size[dim] = max(size[dim], currentOutput.size(dim))
 
-        self.size = torch.Size(size)
-        self.output.resize_(self.size).zero_()  # zero for padding
+        self.outputSize = torch.Size(size)
+        self.output.resize_(self.outputSize).zero_()  # zero for padding
 
         offset = 0
         for i, module in enumerate(self.modules):

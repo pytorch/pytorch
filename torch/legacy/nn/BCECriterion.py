@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+# TODO: use THNN
 class BCECriterion(Criterion):
     eps = 1e-12
 

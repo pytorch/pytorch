@@ -23,6 +23,8 @@ class Sum(Module):
         torch.sum(self.output, input, dimension)
         if self.sizeAverage:
             self.output.div_(input.size(dimension))
+        if self.output.dim() > 1:
+            self.output.set_(self.output.select(dimension, 0))
 
         return self.output
 
