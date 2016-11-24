@@ -1,9 +1,10 @@
 #include "DataChannelMPI.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
-#include <unordered_map>
 #include <stdexcept>
+#include <unordered_map>
 
 
 namespace std {

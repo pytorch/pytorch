@@ -237,6 +237,7 @@ if WITH_DISTRIBUTED:
         "torch/csrc/distributed/Module.cpp",
         "torch/csrc/distributed/utils.cpp"
     ]
+    include_dirs += [tmp_install_path + "/include/THD"]
     main_libraries += ['THD']
 
 if WITH_CUDA:

@@ -1,9 +1,10 @@
 #pragma once
 
-struct THDTensor {
-  unsigned long long tensor_id;
-  int node_id;
-  int device_id;
-};
+#include <TH/TH.h>
+#include "../../THD.h"
 
-void THDTensor_add(THDTensor *result, THDTensor *source, double value);
+#define THDTensor         TH_CONCAT_3(THD,Real,Tensor)
+#define THDTensor_(NAME)  TH_CONCAT_4(THD,Real,Tensor_,NAME)
+
+#include "generic/THDTensor.h"
+#include <TH/THGenerateAllTypes.h>

@@ -3,8 +3,10 @@
 #include "../../base/Tensor.hpp"
 #include "../master/THDTensor.h"
 #include "ByteArray.hpp"
+#include "TH/THStorage.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace thd { namespace rpc {
@@ -32,15 +34,17 @@ private:
 };
 
 template <typename ...Args>
-RPCMessage packMessage(function_id_type fid,
-                       std::uint16_t num_args,
-                       const Args&... args);
+std::unique_ptr<RPCMessage> packMessage(
+                        function_id_type fid,
+                        const Args&... args
+                        );
 
 std::uint16_t unpackArgCount(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 std::uint16_t unpackFunctionId(RPCMessage& raw_message);
 long long unpackInteger(RPCMessage& raw_message);
 Tensor* unpackTensor(RPCMessage& raw_message);
+THLongStorage* unpackTHLongStorage(RPCMessage& raw_message);
 
 }} // namespace rpc, thd
 

@@ -29,9 +29,9 @@ void sendMessage(std::unique_ptr<rpc::RPCMessage> msg, zmq::socket_t& socket) {
 
 std::unique_ptr<rpc::RPCMessage> recvMessage(zmq::socket_t& socket) {
   zmq::message_t zmsg;
-  if (socket.recv(&zmsg, ZMQ_DONTWAIT) == false)
+  if (socket.recv(&zmsg, ZMQ_DONTWAIT) == false) {
     return nullptr;
-  else {
+  } else {
     // XXX: Excesive copying here! I'm not sure how to avoid it.
     return std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(
         rpc::ByteArray::fromData(zmsg.data<char>(), zmsg.size())));

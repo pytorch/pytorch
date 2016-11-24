@@ -1,7 +1,5 @@
 #pragma once
 
-#include "../master_worker/master/THDTensor.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -96,12 +94,6 @@ struct tensor_type_traits<unsigned long long> {
   static constexpr TensorType type = TensorType::ULONG_LONG;
 };
 
-template<>
-struct tensor_type_traits<THDTensor> {
-  static constexpr TensorType type = TensorType::TENSOR;
-};
-
-
 static const std::unordered_map<char, TensorType> format_to_type = {
   {'c', TensorType::CHAR},
   {'f', TensorType::FLOAT},
@@ -114,7 +106,6 @@ static const std::unordered_map<char, TensorType> format_to_type = {
   {'L', TensorType::ULONG},
   {'q', TensorType::LONG_LONG},
   {'Q', TensorType::ULONG_LONG},
-  {'T', TensorType::TENSOR},
 };
 
 } // namespace thd

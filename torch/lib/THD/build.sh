@@ -11,7 +11,8 @@ cd THD
 
 mkdir -p build
 cd build
-cmake .. -DCMAKE_CXX_FLAGS=" -I${lib_dir}/tmp_install/include "  \
-         -DCMAKE_SHARED_LINKER_FLAGS="-L${lib_dir}/tmp_install/lib -lTH " \
-         -DTorch_FOUND=1
+cmake .. -DCMAKE_CXX_FLAGS=" -I${lib_dir}/tmp_install/include -pthread "  \
+         -DCMAKE_SHARED_LINKER_FLAGS="-L${lib_dir}/tmp_install/lib " \
+         -DCMAKE_EXE_LINKER_FLAGS="-L${lib_dir}/tmp_install/lib -pthread " \
+   -DTorch_FOUND="1"
 make
