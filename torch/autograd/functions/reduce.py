@@ -87,8 +87,14 @@ class _SelectionFunction(Function):
             self.indices = tuple(input.eq(value).nonzero()[0])
             return input.new((value,))
         else:
-            dim = self.dim or input.dim() - 1
-            output, indices = fn(dim, *self.additional_args)
+            if self.dim is None:
+                dim = input.dim() - 1
+            else:
+                dim = self.dim
+            args = (dim,)
+            if self.additional_args:
+                args = self.additional_args + args
+            output, indices = fn(*args)
             if self.return_indices:
                 self.save_for_backward(indices)
                 self.mark_non_differentiable(indices)
@@ -102,11 +108,14 @@ class _SelectionFunction(Function):
         if self.dim is None and self.has_all_reduce:
             grad_input[self.indices] = grad_output[0]
         else:
+            if self.dim is None:
+                dim = input.dim() - 1
+            else:
+                dim = self.dim
             if self.return_indices:
                 indices, = self.saved_tensors
             else:
                 indices = self.indices
-            dim = self.dim or grad_output.dim() - 1
             grad_input.scatter_(dim, indices, grad_output)
         return grad_input
 
