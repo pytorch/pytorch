@@ -15,6 +15,10 @@ class ExpandDims(ModelLayer):
                  name='expand_dims', **kwargs):
         super(ExpandDims, self).__init__(model, name, input_record, **kwargs)
         self.dims = dims
+        # Assume that first dimension is batch, so actual dims[i] in shape is
+        # dims[i] - 1
+        dims = [d - 1 for d in dims]
+        assert all([d >= 0 for d in dims])
         assert isinstance(input_record, schema.Scalar),\
             "Incorrect input type. Excpected Scalar, but received: {0}".\
             format(input_record)
