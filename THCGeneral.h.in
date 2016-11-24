@@ -55,14 +55,11 @@ typedef struct _THCDeviceAllocator {
 
 typedef struct _THCCudaResourcesPerDevice {
   THCStream** streams;
-  /* Number of materialized cuBLAS handles */
-  int numBlasHandles;
-  /* cuBLAS handes are lazily initialized */
   cublasHandle_t* blasHandles;
   /* Size of scratch space per each stream on this device available */
   size_t scratchSpacePerStream;
   /* Device-resident scratch space per stream, used for global memory
-     reduction kernels. Lazily initialized. */
+     reduction kernels. */
   void** devScratchSpacePerStream;
 } THCCudaResourcesPerDevice;
 
@@ -118,6 +115,7 @@ THC_API void THCState_free(THCState* state);
 
 THC_API void THCudaInit(THCState* state);
 THC_API void THCudaShutdown(THCState* state);
+THC_API void THCudaEnablePeerToPeerAccess(THCState* state);
 
 /* If device `dev` can access allocations on device `devToAccess`, this will return */
 /* 1; otherwise, 0. */
