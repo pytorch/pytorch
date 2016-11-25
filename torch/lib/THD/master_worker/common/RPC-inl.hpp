@@ -32,12 +32,12 @@ inline void _appendData(ByteArray& str, THLongStorage *arg) {
     _appendScalar<long>(str, arg->data[i]);
 }
 
-inline void packIntoString(ByteArray& str) {};
+inline void _packIntoString(ByteArray& str) {};
 
 template <typename T, typename ...Args>
-void packIntoString(ByteArray& str, const T& arg, const Args&... args) {
+void _packIntoString(ByteArray& str, const T& arg, const Args&... args) {
   _appendData(str, arg);
-  packIntoString(str, args...);
+  _packIntoString(str, args...);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -50,7 +50,7 @@ std::unique_ptr<RPCMessage> packMessage(
 ) {
   ByteArray msg(detail::INITIAL_BUFFER_SIZE);
   detail::_appendScalar<function_id_type>(msg, fid);
-  detail::packIntoString(msg, args...);
+  detail::_packIntoString(msg, args...);
   return std::unique_ptr<RPCMessage>(new RPCMessage(std::move(msg)));
 }
 

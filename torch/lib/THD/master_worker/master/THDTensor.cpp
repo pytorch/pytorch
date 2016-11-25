@@ -1,3 +1,4 @@
+#include "../../base/TensorTypeTraits.hpp"
 #include "THDTensor.h"
 #include "State.hpp"
 #include "master_worker/common/RPC.hpp"

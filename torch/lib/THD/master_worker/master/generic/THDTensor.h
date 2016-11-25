@@ -11,5 +11,6 @@ struct THDTensor {
 THD_API void THDTensor_(new)();
 THD_API void THDTensor_(newWithSize)(THLongStorage *sizes, THLongStorage *strides);
 THD_API void THDTensor_(add)(THDTensor *result, THDTensor *source, double value);
+THD_API void THDTensor_(free)(THDTensor *tensor);
 
 #endif
