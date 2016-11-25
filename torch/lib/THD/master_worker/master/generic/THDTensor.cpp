@@ -7,23 +7,37 @@ using namespace rpc;
 using namespace master;
 
 void THDTensor_(new)() {
-  std::unique_ptr<RPCMessage> construct_message =
-      packMessage(Functions::construct);
+  std::unique_ptr<RPCMessage> construct_message = packMessage(
+        Functions::construct,
+        static_cast<char>(tensor_type_traits<real>::type)
+  );
   masterCommandChannel->sendMessage(
-      std::move(construct_message),
-      THDState::s_current_worker
+        std::move(construct_message),
+        THDState::s_current_worker
   );
 }
 
 void THDTensor_(newWithSize)(THLongStorage *sizes, THLongStorage *strides) {
   std::unique_ptr<RPCMessage> construct_message = packMessage(
-            Functions::constructWithSize,
-            sizes,
-            strides
+        Functions::constructWithSize,
+        static_cast<char>(tensor_type_traits<real>::type),
+        sizes,
+        strides
   );
   masterCommandChannel->sendMessage(
-            std::move(construct_message),
-            THDState::s_current_worker
+        std::move(construct_message),
+        THDState::s_current_worker
+  );
+}
+
+void THDTensor_(free)(THDTensor *tensor) {
+  std::unique_ptr<RPCMessage> free_message = packMessage(
+        Functions::free,
+        tensor->tensor_id
+  );
+  masterCommandChannel->sendMessage(
+      std::move(free_message),
+      THDState::s_current_worker
   );
 }
 

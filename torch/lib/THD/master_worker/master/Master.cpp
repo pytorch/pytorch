@@ -10,7 +10,7 @@ namespace thd {
 namespace master {
 
 std::unique_ptr<MasterCommandChannel> masterCommandChannel;
-uint64_t tensorCount;
+uint64_t nextTensorId;
 
 } // namespace master
 
