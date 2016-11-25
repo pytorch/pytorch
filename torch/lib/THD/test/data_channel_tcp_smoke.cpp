@@ -68,8 +68,12 @@ void master()
   IntTensor *int_tensor = new THTensor<int>();
   int_tensor->resize({1, 2, 3, 4, 5});
   int_tensor->fill(1000000000);
-
   masterChannel->broadcast(*int_tensor, 0);
+
+  // test spam broadcast
+  for (int i = 0; i < masterChannel->getNumProcesses(); ++i) {
+    masterChannel->broadcast(*int_tensor, i);
+  }
 
   // reduce
   float_tensor->resize({1, 2, 3, 4});
@@ -80,6 +84,11 @@ void master()
       reinterpret_cast<float*>(float_tensor->data())[i],
       static_cast<float>(4.3 + 2.2 * WORKERS_NUM)
     ));
+  }
+
+  // test spam reduce
+  for (int i = 0; i < masterChannel->getNumProcesses(); ++i) {
+    masterChannel->reduce(*float_tensor, THDReduceOp::THDReduceSUM, i);
   }
 
   // allReduce
@@ -105,13 +114,14 @@ void worker(int id)
   setenv("RANK", std::to_string(id).data(), 1);
   setenv("MASTER_ADDR", std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
   auto workerChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
-  g_mutex.unlock();
 
   /*
    * Wait for other processes to initialize.
    * It is to avoid race in acquiring socket and port for listening (in init function).
    */
-  std::this_thread::sleep_for(std::chrono::milliseconds(100 * workerChannel->getRank()));
+  std::this_thread::sleep_for(std::chrono::milliseconds(200 * workerChannel->getRank()));
+  g_mutex.unlock();
+
   assert(workerChannel->init());
   assert(workerChannel->getRank() == id);
   assert(workerChannel->getNumProcesses() == WORKERS_NUM + 1);
@@ -143,11 +153,14 @@ void worker(int id)
   // get broadcasted tensor
   IntTensor *int_tensor = new THTensor<int>();
   int_tensor->resize({1, 2, 3, 4, 5});
-
   workerChannel->broadcast(*int_tensor, 0);
-
   for (int i = 0; i < int_tensor->numel(); i++) {
     assert(reinterpret_cast<int*>(int_tensor->data())[i] == 1000000000);
+  }
+
+  // test spam broadcast
+  for (int i = 0; i < workerChannel->getNumProcesses(); ++i) {
+    workerChannel->broadcast(*int_tensor, i);
   }
 
   // reduce
@@ -159,6 +172,11 @@ void worker(int id)
       reinterpret_cast<float*>(float_tensor->data())[i],
       static_cast<float>(2.2)
     ));
+  }
+
+  // test spam reduce
+  for (int i = 0; i < workerChannel->getNumProcesses(); ++i) {
+    workerChannel->reduce(*float_tensor, THDReduceOp::THDReduceSUM, i);
   }
 
   // allReduce

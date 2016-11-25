@@ -416,7 +416,7 @@ void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank) {
   int dim = static_cast<int>(
     std::ceil(std::log2(static_cast<long double>(_processes.size())))
   );
-  int virtual_rank = _rank ^ dst_rank;
+  int virtual_rank = ((_processes.size() - dst_rank) + _rank) % _processes.size();
   long long mask = 0;
   auto result_tensor = data.clone();
 
@@ -426,7 +426,8 @@ void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank) {
       if (partner >= _processes.size())
         continue;
 
-      if (virtual_rank & (1 << k)) {
+      partner = (partner + dst_rank) % _processes.size();
+      if ((virtual_rank & (1 << k)) != 0) {
         send(*result_tensor, partner);
       } else {
         receive(data, partner);
@@ -457,7 +458,7 @@ void DataChannelTCP::broadcast(Tensor& data, int src_rank) {
   int dim = static_cast<int>(
    std::ceil(std::log2(static_cast<long double>(_processes.size())))
   );
-  int virtual_rank = _rank ^ src_rank;
+  int virtual_rank = ((_processes.size() - src_rank) + _rank) % _processes.size();
   long long mask = (1 << dim) - 1;
 
   for (int k = dim - 1; k >= 0; --k) {
@@ -467,6 +468,7 @@ void DataChannelTCP::broadcast(Tensor& data, int src_rank) {
       if (partner >= _processes.size())
         continue;
 
+      partner = (partner + src_rank) % _processes.size();
       if ((virtual_rank & (1 << k)) == 0) {
         send(data, partner);
       } else {
