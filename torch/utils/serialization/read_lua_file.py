@@ -49,9 +49,11 @@ from functools import wraps
 
 import torch
 import torch.legacy.nn as nn
+import torch.cuda
 from torch._thnn import type2backend
 from torch._utils import _import_dotted_name
 
+HAS_CUDA = torch.cuda.is_available()
 
 LuaFunction = namedtuple('LuaFunction', ['size', 'dumped', 'upvalues'])
 
@@ -165,6 +167,8 @@ def make_storage_reader(typename):
 def register_torch_class(obj_kind, reader_factory):
     for t in ['Double', 'Float', 'Half', 'Long', 'Int', 'Short', 'Char', 'Byte']:
         for prefix in ['', 'Cuda']:
+            if prefix == 'Cuda' and not HAS_CUDA:
+                continue
             if t == 'Half' and prefix == '':
                 continue
             if prefix == 'Cuda' and t == 'Float':
