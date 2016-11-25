@@ -1,43 +1,57 @@
 #!/usr/bin/env bash
 set -e
 
+PYCMD=${PYCMD:="python"}
+if [ "$1" == "coverage" ];
+then
+    coverage erase
+    PYCMD="coverage run --parallel-mode --source torch "
+    echo "coverage flag found. Setting python command to: \"$PYCMD\""
+fi
+
 pushd "$(dirname "$0")"
 
 echo "Running torch tests"
-python test_torch.py
+$PYCMD test_torch.py
 
 echo "Running autograd tests"
-python test_autograd.py
+$PYCMD test_autograd.py
 
 echo "Running nn tests"
-python test_nn.py
+$PYCMD test_nn.py
 
 echo "Running legacy nn tests"
-python test_legacy_nn.py
+$PYCMD test_legacy_nn.py
 
 echo "Running optim tests"
-python test_optim.py
+$PYCMD test_optim.py
 
 echo "Running multiprocessing tests"
-python test_multiprocessing.py
-MULTIPROCESSING_METHOD=spawn python test_multiprocessing.py
-MULTIPROCESSING_METHOD=forkserver python test_multiprocessing.py
+$PYCMD test_multiprocessing.py
+MULTIPROCESSING_METHOD=spawn $PYCMD test_multiprocessing.py
+MULTIPROCESSING_METHOD=forkserver $PYCMD test_multiprocessing.py
 
 echo "Running util tests"
-python test_utils.py
+$PYCMD test_utils.py
 
 echo "Running dataloader tests"
-python test_dataloader.py
+$PYCMD test_dataloader.py
 
 if which nvcc >/dev/null 2>&1
 then
     echo "Running cuda tests"
-    python test_cuda.py
+    $PYCMD test_cuda.py
 
     echo "Running NCCL tests"
-    python test_nccl.py
+    $PYCMD test_nccl.py
 else
     echo "nvcc not found in PATH, skipping CUDA tests"
+fi
+
+if [ "$1" == "coverage" ];
+then
+    coverage combine
+    coverage html
 fi
 
 popd
