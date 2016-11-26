@@ -154,12 +154,12 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, 
 
     def forward(input, weight, hidden):
         if batch_first:
-            input.transpose(0, 1)
+            input = input.transpose(0, 1)
 
         nexth, output = func(input, hidden, weight)
 
         if batch_first:
-            output.transpose(0, 1)
+            output = output.transpose(0, 1)
 
         return output, nexth
 
