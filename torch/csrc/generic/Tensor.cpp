@@ -485,6 +485,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
             // 1D tensor
             sresult = tresult->storage;
             storage_offset = GET_OFFSET(tresult, idx);
+            THTensor_(free)(LIBRARY_STATE tresult.get());
             tresult = NULL;
             return true,
             // >1D tensor
@@ -492,12 +493,15 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
           )
       } else if (PySlice_Check(dimidx)) {
         Py_ssize_t start, end, length;
-        if (!THPUtils_parseSlice(dimidx, THTensor_(size)(LIBRARY_STATE tresult.get(), t_dim), &start, &end, &length))
+        long size_dim = THTensor_(size)(LIBRARY_STATE tresult.get(), t_dim);
+        if (!THPUtils_parseSlice(dimidx, size_dim, &start, &end, &length))
           return false;
         THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, t_dim++, start, length);
       } else {
+        THTensor_(free)(LIBRARY_STATE tresult.get());
         tresult = NULL;
         valid = false;
+        break;
       }
     }
     if (valid) {

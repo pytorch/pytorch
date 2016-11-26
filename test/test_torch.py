@@ -1855,6 +1855,14 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: reference[1, 1, 1, 1:1])
         self.assertRaises(RuntimeError, lambda: reference[3, 3, 3, 3, 3, 3, 3, 3])
 
+        self.assertRaises(RuntimeError, lambda: reference[0.0])
+        self.assertRaises(TypeError,    lambda: reference[0.0:2.0])
+        self.assertRaises(RuntimeError, lambda: reference[0.0, 0.0:2.0])
+        self.assertRaises(RuntimeError, lambda: reference[0.0, :, 0.0:2.0])
+        self.assertRaises(RuntimeError, lambda: reference[0.0, ..., 0.0:2.0])
+        self.assertRaises(RuntimeError, lambda: reference[0.0, :, 0.0])
+
+
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
         # This relies on __index__() being correct - but we have separate tests for that
@@ -1878,6 +1886,20 @@ class TestTorch(TestCase):
             reference[1, 1, 1, (1, 1)] = 1
         with self.assertRaises(RuntimeError):
             reference[3, 3, 3, 3, 3, 3, 3, 3] = 1
+        with self.assertRaises(RuntimeError):
+            reference[0.0] = 1
+        with self.assertRaises(TypeError):
+            reference[0.0:2.0] = 1
+        with self.assertRaises(RuntimeError):
+            reference[0.0, 0.0:2.0] = 1
+        with self.assertRaises(RuntimeError):
+            reference[0.0, :, 0.0:2.0] = 1
+        with self.assertRaises(RuntimeError):
+            reference[0.0, ..., 0.0:2.0] = 1
+        with self.assertRaises(RuntimeError):
+            reference[0.0, :, 0.0] = 1
+
+
 
     def test_index_copy(self):
         num_copy, num_dest = 3, 20
