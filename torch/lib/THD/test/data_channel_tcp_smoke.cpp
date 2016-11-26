@@ -45,7 +45,7 @@ void master()
   assert(masterChannel->getRank() == 0);
   assert(masterChannel->getNumProcesses() == WORKERS_NUM + 1);
 
-  FloatTensor *float_tensor = new THTensor<float>();
+  thd::FloatTensor *float_tensor = new thd::THTensor<float>();
   float_tensor->resize({1, 2, 3});
   float_tensor->fill(4.3);
 
@@ -63,7 +63,7 @@ void master()
   masterChannel->send(*float_tensor, 1);
 
   // broadcast int tensor
-  IntTensor *int_tensor = new THTensor<int>();
+  thd::IntTensor *int_tensor = new thd::THTensor<int>();
   int_tensor->resize({1, 2, 3, 4, 5});
   int_tensor->fill(1000000000);
   masterChannel->broadcast(*int_tensor, 0);
@@ -148,7 +148,7 @@ void worker(int id)
   assert(workerChannel->getRank() == id);
   assert(workerChannel->getNumProcesses() == WORKERS_NUM + 1);
 
-  FloatTensor *float_tensor = new THTensor<float>();
+  thd::FloatTensor *float_tensor = new thd::THTensor<float>();
   float_tensor->resize({1, 2, 3});
 
   if (workerChannel->getRank() == 1) {
@@ -170,7 +170,7 @@ void worker(int id)
   }
 
   // get broadcasted tensor
-  IntTensor *int_tensor = new THTensor<int>();
+  thd::IntTensor *int_tensor = new thd::THTensor<int>();
   int_tensor->resize({1, 2, 3, 4, 5});
   workerChannel->broadcast(*int_tensor, 0);
   for (int i = 0; i < int_tensor->numel(); i++) {

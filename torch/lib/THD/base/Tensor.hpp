@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TensorTypeTraits.hpp"
+#include "TensorType.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -8,6 +8,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+
+namespace thd {
 
 struct Tensor {
   using long_range = std::vector<long>;
@@ -49,11 +51,4 @@ struct TensorScalarInterface : public Tensor {
 using FloatTensor = TensorScalarInterface<double>;
 using IntTensor = TensorScalarInterface<long long>;
 
-template<typename real>
-struct tensor_traits {
-  using scalar_type = typename std::conditional<
-    std::is_floating_point<real>::value,
-    double,
-    long long>::type;
-  using interface_type = TensorScalarInterface<scalar_type>;
-};
+} // namespace thd

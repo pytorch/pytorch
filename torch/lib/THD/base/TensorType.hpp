@@ -10,6 +10,7 @@ namespace thd {
 
 enum class TensorType : char {
   CHAR = 'c',
+  UCHAR = 'B',
   FLOAT = 'f',
   DOUBLE = 'd',
   SHORT = 'h',

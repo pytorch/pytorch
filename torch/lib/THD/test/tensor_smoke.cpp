@@ -8,8 +8,8 @@ using namespace std;
 
 
 int main() {
-  FloatTensor *tensor = new THTensor<float>();
-  FloatTensor *tensor2 = new THTensor<float>();
+    thd::FloatTensor *tensor = new thd::THTensor<float>();
+  thd::FloatTensor *tensor2 = new thd::THTensor<float>();
   assert(tensor->nDim() == 0);
 
   tensor->resize({1, 2, 3});
@@ -31,7 +31,7 @@ int main() {
 
   bool thrown = false;
   try {
-    IntTensor &a = dynamic_cast<IntTensor&>(*tensor);
+      thd::IntTensor &a = dynamic_cast<thd::IntTensor&>(*tensor);
   } catch(std::bad_cast &e) {
     thrown = true;
   }

@@ -7,6 +7,9 @@
 #define THRealTensor TH_CONCAT_3(TH,Real,Tensor)
 
 #include "../Tensor.hpp"
+#include "../TensorTraits.hpp"
+
+namespace thd {
 
 template<typename real>
 struct th_traits {};
@@ -14,10 +17,11 @@ struct th_traits {};
 #include "base/tensors/generic/THTensor.hpp"
 #include <TH/THGenerateAllTypes.h>
 
+
 template<typename real>
-struct THTensor : public tensor_traits<real>::interface_type {
+struct THTensor : public tensor_interface_traits<real>::interface_type {
 private:
-  using interface_type = typename tensor_traits<real>::interface_type;
+  using interface_type = typename tensor_interface_traits<real>::interface_type;
 public:
   using tensor_type = typename th_traits<real>::tensor_type;
   using scalar_type = typename interface_type::scalar_type;
@@ -58,3 +62,5 @@ private:
 protected:
   tensor_type *tensor;
 };
+
+}
