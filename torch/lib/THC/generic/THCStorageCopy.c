@@ -10,33 +10,17 @@ void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *s
 }
 #endif
 
-#ifndef THC_REAL_IS_HALF
-#define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                            \
-  void THCStorage_(copy##TYPEC)(THCState *state, THCStorage *self, struct TH##TYPEC##Storage *src)  \
-  {                                                                      \
-    if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {  \
-      THCStorage_(copyCPU)(state, self, (THStorage*) src);   /* cast just removes compiler warning */ \
-    } else {                                                             \
-      THStorage *buffer;                                                 \
-      THArgCheck(self->size == src->size, 2, "size does not match");     \
-      buffer = THStorage_(newWithSize)(src->size);                       \
-      THStorage_(copy##TYPEC)(buffer, src);                              \
-      THCStorage_(copyCPU)(state, self, buffer);                         \
-      THStorage_(free)(buffer);                                          \
-    }                                                                    \
-  }
-#else
-#define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                            \
-  void THCStorage_(copy##TYPEC)(THCState *state, THCStorage *self, struct TH##TYPEC##Storage *src)  \
-  {                                                                      \
-    THArgCheck(self->size == src->size, 2, "size does not match");       \
-    THCudaStorage *buffer = THCudaStorage_newWithSize(state, src->size); \
-    THCudaStorage_copy##TYPEC(state, buffer, src);                       \
-    THCFloat2Half(state, self->data, buffer->data, src->size);           \
-    THCudaStorage_free(state, buffer);                                   \
-  }
-#endif
-
+#define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                          \
+void THCStorage_(copy##TYPEC)(THCState *state, THCStorage *self, struct TH##TYPEC##Storage *src)  \
+{                                                                      \
+  THCTensor* selfTensor =                                              \
+      THCTensor_(newWithStorage1d)(state, self, 0, self->size, 1);     \
+  struct TH##TYPEC##Tensor* srcTensor =                                \
+      TH##TYPEC##Tensor_newWithStorage1d(src, 0, src->size, 1);        \
+  THCTensor_(copy##TYPEC)(state, selfTensor, srcTensor);               \
+  TH##TYPEC##Tensor_free(srcTensor);                                   \
+  THCTensor_(free)(state, selfTensor);                                 \
+}
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Byte)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Char)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Short)
@@ -53,33 +37,16 @@ void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *s
 }
 #endif
 
-#ifndef THC_REAL_IS_HALF
-#define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                         \
-  void TH_CONCAT_4(TH,TYPEC,Storage_copyCuda,Real)(THCState *state, TH##TYPEC##Storage *self, struct THCStorage *src) \
-  {                                                                     \
-    if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) { \
-      THStorage_(copyCuda)(state, (THStorage*) self, src); /* cast just removes compiler warnings */                    \
-    } else {                                                            \
-      THStorage *buffer;                                                \
-      THArgCheck(self->size == src->size, 2, "size does not match");    \
-      buffer = THStorage_(newWithSize)(src->size);                      \
-      THStorage_(copyCuda)(state, buffer, src);                         \
-      TH_CONCAT_4(TH,TYPEC,Storage_copy,Real)(self, buffer);            \
-      THStorage_(free)(buffer);                                         \
-    }                                                                   \
-  }
-#else
-#define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                         \
-  void TH_CONCAT_4(TH,TYPEC,Storage_copyCuda,Real)(THCState *state, TH##TYPEC##Storage *self, struct THCStorage *src) \
-  {                                                                     \
-    THArgCheck(self->size == src->size, 2, "size does not match");      \
-    THCudaStorage *buffer = THCudaStorage_newWithSize(state, src->size);\
-    THCHalf2Float(state, buffer->data, src->data, src->size);           \
-    TH_CONCAT_3(TH,TYPEC,Storage_copyCudaFloat)(state, self, buffer);   \
-    THCudaStorage_free(state, buffer);                                  \
-  }
-#endif
-
+#define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                             \
+void TH_CONCAT_4(TH,TYPEC,Storage_copyCuda,Real)(THCState *state, TH##TYPEC##Storage *self, struct THCStorage *src) \
+{                                                                           \
+  TH##TYPEC##Tensor* selfTensor =                                           \
+      TH##TYPEC##Tensor_newWithStorage1d(self, 0, self->size, 1);           \
+  struct THCTensor* srcTensor =                                             \
+      THCTensor_(newWithStorage1d)(state, src, 0, src->size, 1);            \
+  TH_CONCAT_4(TH,TYPEC,Tensor_copyCuda,Real)(state, selfTensor, srcTensor); \
+  THCTensor_(free)(state, srcTensor);                                       \
+}
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Byte)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Char)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Short)

@@ -65,6 +65,9 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
     THCudaCheck(err);
 
     if (self->data) {
+      // Enable p2p access when the memcpy is across devices
+      THCState_getPeerToPeerAccess(state, device, self->device);
+
       THCudaCheck(cudaMemcpyAsync(data,
                                   self->data,
                                   THMin(self->size, size) * sizeof(real),

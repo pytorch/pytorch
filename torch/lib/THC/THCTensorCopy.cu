@@ -49,10 +49,12 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
   bool memcpyEligible =
     ((srcContig && dstContig) || (totalElements == 1)) && sameType;
 
-
   int srcDev = TensorUtils<TensorTypeSrc>::getDevice(state, src);
   int dstDev = TensorUtils<TensorTypeDst>::getDevice(state, dst);
   int oldDev = curGPU();
+
+  // Try to enable p2p access. This also handles the case srcDev == dstDev.
+  bool p2pEnabled = THCState_getPeerToPeerAccess(state, srcDev, dstDev);
 
   // We always perform the copy on the source device, using the
   // current stream on the source device.
@@ -109,10 +111,7 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
     // if both src and dst innermost dimensions are contiguous. If
     // they are not, then taking the hit of the memory allocation/free
     // might be worth it to avoid non-coalesced reads or writes.
-
-    // A device always has access to itself, so this also handles the
-    // case srcDev == dstDev
-    if (THCState_getPeerToPeerAccess(state, srcDev, dstDev)) {
+    if (p2pEnabled) {
       bool succ =
         THC_pointwiseApply2(
           state, dst, src,
