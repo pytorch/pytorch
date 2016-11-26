@@ -52,6 +52,16 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
     nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
   }
 
+  if (padW || padH)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((nOutputRows - 1)*dH >= nInputRows + padH)
+      --nOutputRows;
+    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
+      --nOutputCols;
+  }
+
   if (nOutputCols < 1 || nOutputRows < 1)
     THError("Given input size: (%dx%dx%d). "
             "Calculated output size: (%dx%dx%d). Output size is too small",
