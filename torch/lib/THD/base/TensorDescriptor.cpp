@@ -1,5 +1,7 @@
 #include "TensorDescriptor.hpp"
+#include "tensors/THTensor.hpp"
 
+using namespace thd;
 
 THDTensorDescriptor* THDTensorDescriptor_newFromTHDoubleTensor(THDoubleTensor *tensor) {
   THDoubleTensor_retain(tensor);

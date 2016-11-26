@@ -6,7 +6,8 @@
 #include <string>
 #include <unordered_map>
 
-#include "../../base/TensorTypeTraits.hpp"
+#include "../../base/TensorTraits.hpp"
+#include "../../base/tensors/THTensor.hpp"
 #include "../common/Functions.hpp"
 #include "../common/RPC.hpp"
 #include "../master/Master.hpp"

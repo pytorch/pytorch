@@ -26,7 +26,7 @@ void master()
 
   assert(masterChannel->init());
 
-  FloatTensor *float_tensor = new THTensor<float>();
+  thd::FloatTensor *float_tensor = new thd::THTensor<float>();
   float_tensor->resize({1, 2, 3});
   float_tensor->fill(4);
 
@@ -56,7 +56,7 @@ void worker(int id)
   g_mutex.unlock();
   assert(workerChannel->init());
 
-  FloatTensor *float_tensor = new THTensor<float>();
+  thd::FloatTensor *float_tensor = new thd::THTensor<float>();
   float_tensor->resize({1, 2, 3});
 
   workerChannel->broadcast(*float_tensor, 0);

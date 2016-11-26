@@ -12,13 +12,13 @@
 constexpr int WORKERS_NUM = 2;
 
 void master(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
-  FloatTensor *float_tensor = new THTensor<float>();
+    thd::FloatTensor *float_tensor = new thd::THTensor<float>();
   float_tensor->resize({1, 2, 3});
   float_tensor->fill(4);
 
   dataChannel->send(*float_tensor, 1);
 
-  IntTensor *int_tensor = new THTensor<int>();
+  thd::IntTensor *int_tensor = new thd::THTensor<int>();
   int_tensor->resize({1, 2, 3, 4, 5});
   int_tensor->fill(1000000000);
 
@@ -69,7 +69,7 @@ void master(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
 }
 
 void worker(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
-  FloatTensor *float_tensor = new THTensor<float>();
+  thd::FloatTensor *float_tensor = new thd::THTensor<float>();
   float_tensor->resize({1, 2, 3});
 
   if (dataChannel->getRank() == 1) {
@@ -80,7 +80,7 @@ void worker(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
     }
   }
 
-  IntTensor *int_tensor = new THTensor<int>();
+  thd::IntTensor *int_tensor = new thd::THTensor<int>();
   int_tensor->resize({1, 2, 3, 4, 5});
 
   dataChannel->broadcast(*int_tensor, 0);
