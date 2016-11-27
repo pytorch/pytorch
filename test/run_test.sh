@@ -55,7 +55,33 @@ $PYCMD test_cuda.py $@
 echo "Running NCCL tests"
 $PYCMD test_nccl.py $@
 
-if [[ $COVERAGE -eq 1 ]]; then
+################################################################################
+distributed_set_up() {
+    export TEMP_DIR="$(mktemp -d)"
+    rm -rf "$TEMP_DIR/"*
+    mkdir "$TEMP_DIR/barrier"
+    mkdir "$TEMP_DIR/test_dir"
+}
+
+distributed_tear_down() {
+    rm -rf "$TEMP_DIR"
+}
+
+trap distributed_tear_down EXIT SIGHUP SIGINT SIGTERM
+
+echo "Running distributed tests for the TCP backend"
+distributed_set_up
+BACKEND=tcp WORLD_SIZE=3 python ./test_distributed.py
+distributed_tear_down
+
+echo "Running distributed tests for the MPI backend"
+distributed_set_up
+BACKEND=mpi mpiexec -n 3 python ./test_distributed.py
+distributed_tear_down
+################################################################################
+
+if [ "$1" == "coverage" ];
+then
     coverage combine
     coverage html
 fi
