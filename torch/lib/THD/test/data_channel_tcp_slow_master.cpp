@@ -22,7 +22,7 @@ void master()
   auto masterChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
   g_mutex.unlock();
 
-  std::this_thread::sleep_for(std::chrono::seconds(5));
+  std::this_thread::sleep_for(std::chrono::seconds(4));
 
   assert(masterChannel->init());
 
@@ -32,7 +32,6 @@ void master()
 
   // send good tensor
   masterChannel->broadcast(*float_tensor, 0);
-
 
   // wait for all workers to finish
   for (auto& worker : g_all_workers) {
@@ -48,13 +47,13 @@ void worker(int id)
   setenv("RANK", std::to_string(id).data(), 1);
   setenv("MASTER_ADDR", std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
   auto workerChannel = std::make_shared<thd::DataChannelTCP>();  // reads all env variable
-  g_mutex.unlock();
 
   /*
    * Wait for other processes to initialize.
    * It is to avoid race in acquiring socket and port for listening (in init function).
    */
   std::this_thread::sleep_for(std::chrono::milliseconds(100 * workerChannel->getRank()));
+  g_mutex.unlock();
   assert(workerChannel->init());
 
   FloatTensor *float_tensor = new THTensor<float>();

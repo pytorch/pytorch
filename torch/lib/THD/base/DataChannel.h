@@ -6,3 +6,6 @@ enum THDReduceOp {
   THDReduceSUM,
   THDReducePRODUCT,
 };
+
+typedef int THDGroup;
+static THDGroup THDGroupWORLD = 0;

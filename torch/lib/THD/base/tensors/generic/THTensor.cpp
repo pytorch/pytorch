@@ -123,6 +123,7 @@ template<>
 auto THTensor<real>::add(const Tensor &source, scalar_type value) -> THTensor& {
   THTensor &source_t = non_const_cast(source);
   THTensor_(add)(tensor, source_t.tensor, value);
+  return *this;
 }
 
 template<>

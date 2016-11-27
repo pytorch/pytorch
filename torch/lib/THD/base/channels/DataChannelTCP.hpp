@@ -4,6 +4,8 @@
 #include "../ChannelEnvVars.hpp"
 
 #include <cstdint>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <utility>
@@ -20,11 +22,15 @@ struct DataChannelTCP : DataChannel {
   int getRank() override;
   int getNumProcesses() override;
 
-  void allReduce(Tensor& data, THDReduceOp operation) override;
-  void reduce(Tensor& data, THDReduceOp operation, int dst_rank) override;
-  void broadcast(Tensor& data, int src_id) override;
+  void allReduce(Tensor& data, THDReduceOp operation,
+                 THDGroup group_id = THDGroupWORLD) override;
+  void reduce(Tensor& data, THDReduceOp operation, int dst_rank,
+              THDGroup group_id = THDGroupWORLD) override;
+  void broadcast(Tensor& data, int src_id, THDGroup group_id = THDGroupWORLD) override;
   void send(Tensor& data, int dst_id) override;
   void receive(Tensor& data, int src_id) override;
+
+  THDGroup newGroup(std::vector<int> ranks) override;
 
 private:
   // Defines process to which master or worker is connected
@@ -54,6 +60,7 @@ private:
   int _timeout; // Accept waiting timeout in milliseconds (it is optional, default = infinity)
 
   std::vector<Process> _processes; // Other processes in network
+  std::unordered_map<THDGroup, std::vector<int>> _groups;
 };
 
 } // namespace thd

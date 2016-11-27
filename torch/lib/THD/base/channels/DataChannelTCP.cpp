@@ -4,12 +4,14 @@
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <algorithm>
 #include <fcntl.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -373,11 +375,15 @@ bool DataChannelTCP::initMaster() {
 
 
 bool DataChannelTCP::init() {
-  if (_rank == MASTER_RANK) {
-    return initMaster();
+  bool ok = (_rank == MASTER_RANK ? initMaster() : initWorker());
+  if (ok) {
+    std::vector<int> ranks;
+    for (size_t rank = 0; rank < _processes.size(); ++rank)
+      ranks.push_back(rank);
+    _groups.insert({THDGroupWORLD, ranks});
   }
 
-  return initWorker();
+  return ok;
 }
 
 
@@ -391,46 +397,63 @@ int DataChannelTCP::getNumProcesses() {
 }
 
 
-void DataChannelTCP::allReduce(Tensor& data, THDReduceOp operation) {
+void DataChannelTCP::allReduce(Tensor& data, THDReduceOp operation, THDGroup group_id) {
   /*
    * Since an all-reduce operation is semantically equivalent to an
    * all-to-one reduction followed by a one-to-all broadcast, the asymptotically
    * optimal algorithms for these two operations can be used to construct
    * a similar algorithm for the all-reduce operation.
    *
-   * Even though we use 0 rank as point of broadcast and aggregation we should
-   * not see any bottlenecks here.
+   * Even though we use first rank from group as point of broadcast and aggregation
+   * we should not see any bottlenecks here.
    */
 
-  reduce(data, operation, 0);
-  broadcast(data, 0);
+  const auto& group = _groups.at(group_id);
+  if (std::find(group.begin(), group.end(), _rank) == group.end())
+   return;
+
+  auto main_rank = group.at(0);
+  reduce(data, operation, main_rank, group_id);
+  broadcast(data, main_rank, group_id);
 }
 
 
-void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank) {
+void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank, THDGroup group_id) {
   /*
    * Idea of this algorithm is similar to broadcast but with reversed
    * order and direction of communication.
    */
 
+  const auto& group = _groups.at(group_id);
+  auto rank_it = std::find(group.begin(), group.end(), _rank);
+  if (rank_it == group.end())
+   return;
+
+  auto dst_rank_it = std::find(group.begin(), group.end(), dst_rank);
+  if (dst_rank_it == group.end())
+   throw std::logic_error("cannot use reduce in group of rank which is not its member");
+
+  auto group_rank = std::distance(group.begin(), rank_it);
+  auto group_dst_rank = std::distance(group.begin(), dst_rank_it);
+
   int dim = static_cast<int>(
-    std::ceil(std::log2(static_cast<long double>(_processes.size())))
+    std::ceil(std::log2(static_cast<long double>(group.size())))
   );
-  int virtual_rank = ((_processes.size() - dst_rank) + _rank) % _processes.size();
+  int virtual_rank = ((group.size() - group_dst_rank) + group_rank) % group.size();
   long long mask = 0;
   auto result_tensor = data.clone();
 
   for (int k = 0; k <= dim - 1; ++k) {
     if ((virtual_rank & mask) == 0) {
       int partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
-      if (partner >= _processes.size())
+      if (partner >= group.size())
         continue;
 
-      partner = (partner + dst_rank) % _processes.size();
+      partner = (partner + group_dst_rank) % group.size();
       if ((virtual_rank & (1 << k)) != 0) {
-        send(*result_tensor, partner);
+        send(*result_tensor, group[partner]);
       } else {
-        receive(data, partner);
+        receive(data, group[partner]);
         reduce_(*result_tensor, data, operation);
       }
     }
@@ -444,7 +467,7 @@ void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank) {
 }
 
 
-void DataChannelTCP::broadcast(Tensor& data, int src_rank) {
+void DataChannelTCP::broadcast(Tensor& data, int src_rank, THDGroup group_id) {
   /*
    * General idea of this algorithm is to send data in `d` dimensional
    * hypercube where vertices are nodes (processes) and edges are
@@ -455,24 +478,36 @@ void DataChannelTCP::broadcast(Tensor& data, int src_rank) {
    * virtual ones where `virtual_rank` for `src_rank` is 0.
    */
 
+  const auto& group = _groups.at(group_id);
+  auto rank_it = std::find(group.begin(), group.end(), _rank);
+  if (rank_it == group.end())
+    return;
+
+  auto src_rank_it = std::find(group.begin(), group.end(), src_rank);
+  if (src_rank_it == group.end())
+    throw std::logic_error("cannot use broadcast in group of rank which is not its member");
+
+  auto group_rank = std::distance(group.begin(), rank_it);
+  auto group_src_rank = std::distance(group.begin(), src_rank_it);
+
   int dim = static_cast<int>(
-   std::ceil(std::log2(static_cast<long double>(_processes.size())))
+   std::ceil(std::log2(static_cast<long double>(group.size())))
   );
-  int virtual_rank = ((_processes.size() - src_rank) + _rank) % _processes.size();
+  int virtual_rank = ((group.size() - group_src_rank) + group_rank) % group.size();
   long long mask = (1 << dim) - 1;
 
   for (int k = dim - 1; k >= 0; --k) {
     mask ^= (1 << k); // clear bit `k`
     if ((virtual_rank & mask) == 0) {
       int partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
-      if (partner >= _processes.size())
+      if (partner >= group.size())
         continue;
 
-      partner = (partner + src_rank) % _processes.size();
+      partner = (partner + group_src_rank) % group.size();
       if ((virtual_rank & (1 << k)) == 0) {
-        send(data, partner);
+        send(data, group[partner]);
       } else {
-        receive(data, partner);
+        receive(data, group[partner]);
       }
     }
   }
@@ -480,7 +515,14 @@ void DataChannelTCP::broadcast(Tensor& data, int src_rank) {
 
 
 void DataChannelTCP::send(Tensor& data, int dst_rank) {
-  const auto& process_dst = _processes[dst_rank];
+  /*
+   * We have to check if dst_rank is positive to properly use `.at` function in vector.
+   * Not checking that can result in int overflow and strange errors.
+   */
+  if (dst_rank < 0)
+    throw std::out_of_range("destination rank is invalid (< 0)");
+
+  const auto& process_dst = _processes.at(dst_rank);
   if (process_dst.rank == _rank)
     throw std::logic_error("cannot send tensor to process with same rank");
 
@@ -501,7 +543,14 @@ void DataChannelTCP::send(Tensor& data, int dst_rank) {
 
 
 void DataChannelTCP::receive(Tensor& data, int src_rank) {
-  const auto& process_src = _processes[src_rank];
+  /*
+   * We have to check if src_rank is positive to properly use `.at` function in vector.
+   * Not checking that can result in int overflow and strange errors.
+   */
+  if (src_rank < 0)
+    throw std::out_of_range("source rank is invalid (< 0)");
+
+  const auto& process_src = _processes.at(src_rank);
   if (process_src.rank == _rank)
     throw std::logic_error("cannot receive tensor from process with same rank");
 
@@ -568,6 +617,20 @@ void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation
       throw std::logic_error("unsupported reduce operation");
     }
   }
+}
+
+
+THDGroup DataChannelTCP::newGroup(std::vector<int> ranks) {
+  if (ranks.size() == 0)
+    throw std::logic_error("cannot create empty group");
+
+  sort(ranks.begin(), ranks.end());
+  if (ranks.front() < 0 || ranks.back() >= _processes.size())
+    throw std::out_of_range("array of ranks contains invalid rank");
+
+  THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
+  _groups.insert({new_group_id, ranks});
+  return new_group_id;
 }
 
 } // namespace thd
