@@ -5,6 +5,8 @@
 
 #include "torch/csrc/THP.h"
 #include "Module.h"
+#include "Storage.h"
+#include "Tensor.h"
 #include "utils.h"
 
 #endif
