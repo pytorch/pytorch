@@ -14,7 +14,8 @@ typedef class THPPointer<THPTensor>      THPTensorPtr;
 typedef class THPPointer<THSTensor>      THSTensorPtr;
 typedef class THPPointer<THSPTensor>     THSPTensorPtr;
 
-#if !defined(THC_GENERIC_FILE) || defined(THC_REAL_IS_HALF)
+#if (!defined(THC_GENERIC_FILE) || defined(THC_REAL_IS_HALF)) && \
+    (!defined(THD_GENERIC_FILE))
 template<>
 struct THPUtils_typeTraits<real> {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \

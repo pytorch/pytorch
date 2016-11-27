@@ -44,6 +44,20 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *_backend)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *_backend)
+{
+  HANDLE_TH_ERRORS
+  THPObjectPtr backend_bytes = _ensureBytes(_backend);
+  THPUtils_assert(backend_bytes, "backend argument has to be a string/bytes "
+      "object, but got %s", THPUtils_typename(_backend));
+  char *backend_name = THPUtils_bytesAsString(backend_bytes.get());
+  THDChannelType channel_type = name2channel_type.at(backend_name);
+  THPUtils_assert(THDMasterWorkerInit(channel_type), "failed to initialize "
+      "distributed library (THD)");
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THDPModule_getRank(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
@@ -248,6 +262,7 @@ PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
 static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_init_extension", (PyCFunction)THDPModule_initExtension, METH_VARARGS, NULL},
   {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_O, NULL},
+  {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_O, NULL},
   {"_dist_get_rank", (PyCFunction)THDPModule_getRank, METH_NOARGS, NULL},
   {"_dist_get_num_processes", (PyCFunction)THDPModule_getNumProcesses, METH_NOARGS, NULL},
   {"_dist_send", (PyCFunction)THDPModule_send, METH_VARARGS, NULL},
