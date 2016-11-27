@@ -128,6 +128,16 @@ using THDTensorTypes = std::tuple<
     THDDoubleTensor
 >;
 
+template<typename T>
+struct map_to_ptr {};
+
+template<typename... Types>
+struct map_to_ptr<std::tuple<Types...>> {
+  using type = std::tuple<typename std::add_pointer<Types>::type...>;
+};
+
+using THDTensorPtrTypes = map_to_ptr<THDTensorTypes>::type;
+
 template <typename T>
 struct tensor_type_char {};
 

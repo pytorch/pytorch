@@ -10,9 +10,12 @@ namespace thd {
 namespace master {
 
 std::unique_ptr<MasterCommandChannel> masterCommandChannel;
-uint64_t nextTensorId;
 
 } // namespace master
+
+} // namespace thd
+
+using namespace thd;
 
 bool THDMasterWorkerInit(THDChannelType channel_type) {
   if (!THDProcessGroupInit(channel_type)) return false;
@@ -25,4 +28,3 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
   return true;
 }
 
-} // namespace thd
