@@ -1,20 +1,20 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "master_worker/master/generic/THDTensor.cpp"
+#define TH_GENERIC_FILE "master_worker/master/generic/THDStorage.cpp"
 #else
 
 using namespace thd;
 using namespace rpc;
 using namespace master;
 
-static THDTensor* THDTensor_(_alloc)() {
-  THDTensor* new_tensor = new THDTensor();
-  new_tensor->tensor_id = THDState::s_nextId++;
-  new_tensor->refcount = 1;
+static THDStorage* THDStorage_(_alloc)() {
+  THDStorage* new_tensor = new THDStorage();
+  new_tensor->storage_id = THDState::s_nextId++;
+  new_tensor->node_id = THDState::s_current_worker;
   return new_tensor;
 }
 
-THDTensor* THDTensor_(new)() {
-  THDTensor* tensor = THDTensor_(_alloc)();
+THDStorage* THDStorage_(new)() {
+  THDStorage* tensor = THDStorage_(_alloc)();
   std::unique_ptr<RPCMessage> construct_message = packMessage(
       Functions::construct,
       static_cast<char>(tensor_type_traits<real>::type),
@@ -27,8 +27,8 @@ THDTensor* THDTensor_(new)() {
   return tensor;
 }
 
-THDTensor* THDTensor_(newWithSize)(THLongStorage *sizes, THLongStorage *strides) {
-  THDTensor* tensor = THDTensor_(_alloc)();
+THDStorage* THDStorage_(newWithSize)(THLongStorage *sizes, THLongStorage *strides) {
+  THDStorage* tensor = THDStorage_(_alloc)();
   std::unique_ptr<RPCMessage> construct_message = packMessage(
       Functions::constructWithSize,
       static_cast<char>(tensor_type_traits<real>::type),
@@ -43,8 +43,7 @@ THDTensor* THDTensor_(newWithSize)(THLongStorage *sizes, THLongStorage *strides)
   return tensor;
 }
 
-void THDTensor_(free)(THDTensor *tensor) {
-  // TODO: refcount
+void THDStorage_(free)(THDStorage *tensor) {
   std::unique_ptr<RPCMessage> free_message = packMessage(
       Functions::free,
       tensor->tensor_id

@@ -38,16 +38,19 @@ static std::unique_ptr<Tensor> createTensor(char tp) {
 }
 
 static void construct(rpc::RPCMessage& raw_message) {
-  // assert_empty(raw_message)
-  char type = (char)rpc::unpackInteger(raw_message);
+  // TODO: assert_empty(raw_message)
+  char type = rpc::unpackScalar<char>(raw_message);
+  thd::tensor_id_type id = rpc::unpackTensorAsId(raw_message);
   workerTensors.insert(std::make_pair(
-    master::nextTensorId++,
+    id,
     createTensor(type)
   ));
 }
 
 static void constructWithSize(rpc::RPCMessage& raw_message) {
-  char type = (char)rpc::unpackInteger(raw_message);
+  // TODO: assert_empty(raw_message)
+  char type = rpc::unpackScalar<char>(raw_message);
+  tensor_id_type id = rpc::unpackTensorAsId(raw_message);
   THLongStorage *sizes = rpc::unpackTHLongStorage(raw_message);
   THLongStorage *strides = rpc::unpackTHLongStorage(raw_message);
 }

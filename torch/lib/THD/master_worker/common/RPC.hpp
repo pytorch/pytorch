@@ -9,7 +9,11 @@
 #include <memory>
 #include <string>
 
-namespace thd { namespace rpc {
+namespace thd {
+
+using tensor_id_type = std::uint64_t;
+
+namespace rpc {
 
 using function_id_type = std::uint16_t;
 
@@ -39,11 +43,14 @@ std::unique_ptr<RPCMessage> packMessage(
                         const Args&... args
                         );
 
+template<typename T>
+T unpackScalar(RPCMessage& raw_message);
 std::uint16_t unpackArgCount(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 std::uint16_t unpackFunctionId(RPCMessage& raw_message);
 long long unpackInteger(RPCMessage& raw_message);
 Tensor* unpackTensor(RPCMessage& raw_message);
+tensor_id_type unpackTensorAsId(RPCMessage& raw_message);
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message);
 
 }} // namespace rpc, thd

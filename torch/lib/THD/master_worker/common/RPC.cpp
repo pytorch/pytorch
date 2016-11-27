@@ -111,6 +111,13 @@ Tensor *unpackTensor(RPCMessage& raw_message) {
   throw std::invalid_argument("expected tensor in the raw message");
 }
 
+unsigned long long unpackTensorAsId(RPCMessage& raw_message) {
+  const TensorType& type = format_to_type.at(*raw_message.read(sizeof(char)));
+  if (type == TensorType::TENSOR)
+    return _readValue<long long int>(raw_message);
+  throw std::invalid_argument("expected tensor in the raw message");
+}
+
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
   // TODO this might leak on errors
   char type = *raw_message.read(sizeof(char));
@@ -120,7 +127,7 @@ THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
   THLongStorage* storage = THLongStorage_newWithSize(size);
   long* data = storage->data;
   for (int i = 0; i < size; i++) {
-    data[i] = _readValue<long, long>(raw_message); 
+    data[i] = _readValue<long, long>(raw_message);
   }
   return storage;
 }
