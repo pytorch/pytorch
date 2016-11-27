@@ -62,7 +62,7 @@ SET(AVX_CODE "
 
   int main()
   {
-     __m256 a;
+    __m256 a;
     a = _mm256_set1_ps(0);
     return 0;
   }
@@ -109,3 +109,4 @@ CHECK_SSE(CXX "SSE2" " ;-msse2;/arch:SSE2")
 CHECK_SSE(CXX "SSE3" " ;-msse3;/arch:SSE3")
 CHECK_SSE(CXX "SSE4_1" " ;-msse4.1;-msse4;/arch:SSE4")
 CHECK_SSE(CXX "SSE4_2" " ;-msse4.2;-msse4;/arch:SSE4")
+CHECK_SSE(CXX "AVX" " ;-mavx;/arch:AVX")

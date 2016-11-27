@@ -121,6 +121,9 @@ ENDIF(C_SSE2_FOUND)
 IF(C_SSE3_FOUND)
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
 ENDIF(C_SSE3_FOUND)
+IF(C_AVX_FOUND)
+  SET(CMAKE_C_FLAGS "${C_AVX_FLAGS} -DUSE_AVX ${CMAKE_C_FLAGS}")
+ENDIF(C_AVX_FOUND)
 
 IF(C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
   SET(simd generic/simd/convolve.c)
@@ -394,13 +397,12 @@ INSTALL(FILES
   generic/THTensorLapack.c
   generic/THTensorLapack.h
   generic/THTensorMath.c
+  generic/THTensorMathDispatch.c
   generic/THTensorMath.h
   generic/THTensorRandom.c
   generic/THTensorRandom.h
   generic/THVectorDispatch.c
   generic/THVector.h
-  generic/THTensorMathDispatch.c
-  generic/THTensorMathDispatch.h
   DESTINATION "${TH_INSTALL_INCLUDE_SUBDIR}/TH/generic")
 
 
