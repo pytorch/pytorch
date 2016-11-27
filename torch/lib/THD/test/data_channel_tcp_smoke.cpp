@@ -49,13 +49,10 @@ void master()
   float_tensor->fill(4.3);
 
   // we cannot send to ourselves
-  bool thrown = false;
   try {
     masterChannel->send(*float_tensor, 0);
-  } catch (const std::logic_error& e) {
-    thrown = true;
-  }
-  assert(thrown);
+    assert(false);
+  } catch (const std::logic_error& e) {}
 
   // send good tensor
   masterChannel->send(*float_tensor, 1);
@@ -99,6 +96,30 @@ void master()
     assert(reinterpret_cast<int*>(int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
   }
 
+  // groups
+  THDGroup group = masterChannel->newGroup({1, 2});
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(1000);
+
+  /*
+   * We call this functions to check if our data does not change and if it will not
+   * affect any computations when process outside group join any of this functions.
+   *
+   * Processes which do not belong to group do not have to call those methods!
+   */
+  masterChannel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM, group);
+  auto tensor_data_ptr = reinterpret_cast<int*>(int_tensor->data());
+  for (int i = 0; i < int_tensor->numel(); i++)
+    assert(tensor_data_ptr[i] == 1000);
+
+  masterChannel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, 1, group);
+  for (int i = 0; i < int_tensor->numel(); i++)
+    assert(tensor_data_ptr[i] == 1000);
+
+  masterChannel->broadcast(*int_tensor, 1, group);
+  for (int i = 0; i < int_tensor->numel(); i++)
+    assert(tensor_data_ptr[i] == 1000);
+
   // wait for all workers to finish
   for (auto& worker : g_all_workers) {
     worker.join();
@@ -141,13 +162,10 @@ void worker(int id)
     }
 
     // new sizes does not match
-    bool thrown = false;
     try {
       workerChannel->receive(*float_tensor, 0);
-    } catch (const std::logic_error& e) {
-      thrown = true;
-    }
-    assert(thrown);
+      assert(false);
+    } catch (const std::logic_error& e) {}
   }
 
   // get broadcasted tensor
@@ -183,8 +201,43 @@ void worker(int id)
   int_tensor->resize({1, 2, 3, 4, 5});
   int_tensor->fill(10);
   workerChannel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM);
-  for (int i = 0; i < int_tensor->numel(); i++) {
+  for (int i = 0; i < int_tensor->numel(); i++)
     assert(reinterpret_cast<int*>(int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
+
+  // group
+  THDGroup group = workerChannel->newGroup({1, 2});
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  workerChannel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM, group);
+  if (id == 1 || id == 2) {
+    for (int i = 0; i < int_tensor->numel(); i++) {
+      assert(reinterpret_cast<int*>(int_tensor->data())[i] == 20);
+    }
+
+    // rank 0 (master) is not part of group, we cannot perform reduce to it
+    try {
+      workerChannel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, 0, group);
+      assert(false);
+    } catch (const std::logic_error& e) {}
+  }
+
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  workerChannel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, 1, group);
+  for (int i = 0; i < int_tensor->numel(); i++) {
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == (id == 1 ? 20 : 10));
+  }
+
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  if (id == 1)
+    int_tensor->fill(2000);
+
+  workerChannel->broadcast(*int_tensor, 1, group);
+  if (id == 1 || id == 2) {
+    for (int i = 0; i < int_tensor->numel(); i++) {
+      assert(reinterpret_cast<int*>(int_tensor->data())[i] == 2000);
+    }
   }
 
   delete float_tensor;
