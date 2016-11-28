@@ -53,7 +53,7 @@ public:
   virtual THTensor& fill(scalar_type value) override;
   virtual THTensor& add(const Tensor& source, scalar_type scalar) override;
 
-  virtual thd::TensorType type() const override;
+  virtual thd::Type type() const override;
 
 private:
   template<typename iterator>

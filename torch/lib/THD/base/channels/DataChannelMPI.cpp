@@ -17,8 +17,8 @@ struct hash<THDReduceOp> {
 };
 
 template<>
-struct hash<thd::TensorType> {
-  std::size_t operator()(const thd::TensorType& type) const {
+struct hash<thd::Type> {
+  std::size_t operator()(const thd::Type& type) const {
     return hash<char>()(static_cast<char>(type));
   }
 };
@@ -37,18 +37,18 @@ std::unordered_map<THDReduceOp, MPI_Op> mpi_op = {
   {THDReduceOp::THDReducePRODUCT, MPI_PROD},
 };
 
-std::unordered_map<TensorType, MPI_Datatype> mpi_datatype = {
-  {TensorType::CHAR, MPI_CHAR},
-  {TensorType::FLOAT, MPI_FLOAT},
-  {TensorType::DOUBLE, MPI_DOUBLE},
-  {TensorType::SHORT, MPI_SHORT},
-  {TensorType::USHORT, MPI_UNSIGNED_SHORT},
-  {TensorType::INT, MPI_INT},
-  {TensorType::UINT, MPI_UNSIGNED},
-  {TensorType::LONG, MPI_LONG},
-  {TensorType::ULONG, MPI_UNSIGNED_LONG},
-  {TensorType::LONG_LONG, MPI_LONG_LONG},
-  {TensorType::ULONG_LONG, MPI_UNSIGNED_LONG_LONG},
+std::unordered_map<Type, MPI_Datatype> mpi_datatype = {
+  {Type::CHAR, MPI_CHAR},
+  {Type::FLOAT, MPI_FLOAT},
+  {Type::DOUBLE, MPI_DOUBLE},
+  {Type::SHORT, MPI_SHORT},
+  {Type::USHORT, MPI_UNSIGNED_SHORT},
+  {Type::INT, MPI_INT},
+  {Type::UINT, MPI_UNSIGNED},
+  {Type::LONG, MPI_LONG},
+  {Type::ULONG, MPI_UNSIGNED_LONG},
+  {Type::LONG_LONG, MPI_LONG_LONG},
+  {Type::ULONG_LONG, MPI_UNSIGNED_LONG_LONG},
 };
 
 } // namespace

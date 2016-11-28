@@ -1,5 +1,5 @@
 #include "THDTensor.h"
-#include "../../base/TensorTraits.hpp"
+#include "base/TensorTraits.hpp"
 #include "State.hpp"
 #include "master_worker/common/RPC.hpp"
 #include "master_worker/common/Functions.hpp"
