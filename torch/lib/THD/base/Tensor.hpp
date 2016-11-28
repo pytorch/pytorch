@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TensorType.hpp"
+#include "Type.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -38,7 +38,7 @@ struct Tensor {
   virtual Tensor& resize(const std::initializer_list<long>& new_size) = 0;
   virtual Tensor& resize(const std::vector<long>& new_size) = 0;
 
-  virtual thd::TensorType type() const = 0;
+  virtual thd::Type type() const = 0;
 };
 
 template<typename real>

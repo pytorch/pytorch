@@ -578,19 +578,19 @@ void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation
   if ((result.numel() != data.numel()) || (result.elementSize() != data.elementSize()))
     throw std::logic_error("tensor sizes do not match when performing reduce");
 
-  TensorType tensor_type = data.type();
+  Type tensor_type = data.type();
   switch(tensor_type) {
-    case TensorType::CHAR:   reduce_<char>(result, data, operation); break;
-    case TensorType::FLOAT:  reduce_<float>(result, data, operation); break;
-    case TensorType::DOUBLE: reduce_<double>(result, data, operation); break;
-    case TensorType::SHORT:  reduce_<short>(result, data, operation); break;
-    case TensorType::USHORT: reduce_<unsigned short>(result, data, operation); break;
-    case TensorType::INT:    reduce_<int>(result, data, operation); break;
-    case TensorType::UINT:   reduce_<unsigned int>(result, data, operation); break;
-    case TensorType::LONG:   reduce_<long>(result, data, operation); break;
-    case TensorType::ULONG:  reduce_<unsigned long>(result, data, operation); break;
-    case TensorType::LONG_LONG:  reduce_<long long>(result, data, operation); break;
-    case TensorType::ULONG_LONG: reduce_<unsigned long long>(result, data, operation); break;
+    case Type::CHAR:   reduce_<char>(result, data, operation); break;
+    case Type::FLOAT:  reduce_<float>(result, data, operation); break;
+    case Type::DOUBLE: reduce_<double>(result, data, operation); break;
+    case Type::SHORT:  reduce_<short>(result, data, operation); break;
+    case Type::USHORT: reduce_<unsigned short>(result, data, operation); break;
+    case Type::INT:    reduce_<int>(result, data, operation); break;
+    case Type::UINT:   reduce_<unsigned int>(result, data, operation); break;
+    case Type::LONG:   reduce_<long>(result, data, operation); break;
+    case Type::ULONG:  reduce_<unsigned long>(result, data, operation); break;
+    case Type::LONG_LONG:  reduce_<long long>(result, data, operation); break;
+    case Type::ULONG_LONG: reduce_<unsigned long long>(result, data, operation); break;
     default:
       throw std::logic_error("unsupported tensor type in reduce");
   }

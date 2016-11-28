@@ -8,7 +8,7 @@ namespace thd {
  * except from 'T', which stands for Tensor
  */
 
-enum class TensorType : char {
+enum class Type : char {
   CHAR = 'c',
   UCHAR = 'B',
   FLOAT = 'f',
@@ -21,7 +21,9 @@ enum class TensorType : char {
   ULONG = 'L',
   LONG_LONG = 'q',
   ULONG_LONG = 'Q',
+  LONG_STORAGE = 'X',
   TENSOR = 'T',
+  STORAGE = 'S',
 };
 
 } // namespace thd

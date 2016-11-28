@@ -15,44 +15,44 @@ static THDTensor* THDTensor_(_alloc)() {
 
 THDTensor* THDTensor_(new)() {
   THDTensor* tensor = THDTensor_(_alloc)();
-  std::unique_ptr<RPCMessage> construct_message = packMessage(
-      Functions::construct,
-      static_cast<char>(tensor_type_traits<real>::type),
-      *tensor
-  );
+  Type constructed_type = tensor_type_traits<real>::type;
   masterCommandChannel->sendMessage(
-      std::move(construct_message),
-      THDState::s_current_worker
+    packMessage(
+      Functions::construct,
+      constructed_type,
+      tensor
+    ),
+    THDState::s_current_worker
   );
   return tensor;
 }
 
 THDTensor* THDTensor_(newWithSize)(THLongStorage *sizes, THLongStorage *strides) {
   THDTensor* tensor = THDTensor_(_alloc)();
-  std::unique_ptr<RPCMessage> construct_message = packMessage(
+  Type constructed_type = tensor_type_traits<real>::type;
+  masterCommandChannel->sendMessage(
+    packMessage(
       Functions::constructWithSize,
-      static_cast<char>(tensor_type_traits<real>::type),
-      *tensor,
+      constructed_type,
+      tensor,
       sizes,
       strides
-  );
-  masterCommandChannel->sendMessage(
-      std::move(construct_message),
-      THDState::s_current_worker
+    ),
+    THDState::s_current_worker
   );
   return tensor;
 }
 
 void THDTensor_(free)(THDTensor *tensor) {
   // TODO: refcount
-  std::unique_ptr<RPCMessage> free_message = packMessage(
+  masterCommandChannel->sendMessage(
+    packMessage(
       Functions::free,
       tensor->tensor_id
-  );
-  masterCommandChannel->sendMessage(
-      std::move(free_message),
-      THDState::s_current_worker
+    ),
+    THDState::s_current_worker
   );
 }
+
 
 #endif

@@ -18,28 +18,27 @@ namespace worker {
 
 namespace detail {
 
-static std::unique_ptr<Tensor> createTensor(char tp) {
-  const TensorType& type = format_to_type.at(tp);
-  if (type == TensorType::UCHAR)
+static std::unique_ptr<Tensor> createTensor(Type type) {
+  if (type == Type::UCHAR)
     return std::unique_ptr<Tensor>(new THTensor<unsigned char>());
-  else if (type == TensorType::CHAR)
+  else if (type == Type::CHAR)
     return std::unique_ptr<Tensor>(new THTensor<char>());
-  else if (type == TensorType::SHORT)
+  else if (type == Type::SHORT)
     return std::unique_ptr<Tensor>(new THTensor<short>());
-  else if (type == TensorType::INT)
+  else if (type == Type::INT)
     return std::unique_ptr<Tensor>(new THTensor<int>());
-  else if (type == TensorType::LONG)
+  else if (type == Type::LONG)
     return std::unique_ptr<Tensor>(new THTensor<long>());
-  else if (type == TensorType::FLOAT)
+  else if (type == Type::FLOAT)
     return std::unique_ptr<Tensor>(new THTensor<float>());
-  else if (type == TensorType::DOUBLE)
+  else if (type == Type::DOUBLE)
     return std::unique_ptr<Tensor>(new THTensor<double>());
   throw std::invalid_argument("passed characted doesn't represent a tensor type");
 }
 
 static void construct(rpc::RPCMessage& raw_message) {
   // TODO: assert_empty(raw_message)
-  char type = rpc::unpackScalar<char>(raw_message);
+  Type type = rpc::unpackType(raw_message);
   thd::tensor_id_type id = rpc::unpackTensorAsId(raw_message);
   workerTensors.insert(std::make_pair(
     id,
@@ -49,7 +48,7 @@ static void construct(rpc::RPCMessage& raw_message) {
 
 static void constructWithSize(rpc::RPCMessage& raw_message) {
   // TODO: assert_empty(raw_message)
-  char type = rpc::unpackScalar<char>(raw_message);
+  Type type = rpc::unpackType(raw_message);
   tensor_id_type id = rpc::unpackTensorAsId(raw_message);
   THLongStorage *sizes = rpc::unpackTHLongStorage(raw_message);
   THLongStorage *strides = rpc::unpackTHLongStorage(raw_message);

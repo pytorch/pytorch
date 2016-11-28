@@ -8,7 +8,7 @@
 
 #include "master_worker/master/THDTensor.h"
 #include "Tensor.hpp"
-#include "TensorType.hpp"
+#include "Type.hpp"
 
 namespace thd {
 
@@ -26,76 +26,62 @@ struct tensor_type_traits {};
 
 template<>
 struct tensor_type_traits<char> {
-  static constexpr TensorType type = TensorType::CHAR;
+  static constexpr Type type = Type::CHAR;
 };
 
 template<>
 struct tensor_type_traits<unsigned char> {
-  static constexpr TensorType type = TensorType::UCHAR;
+  static constexpr Type type = Type::UCHAR;
 };
 
 template<>
 struct tensor_type_traits<float> {
-  static constexpr TensorType type = TensorType::FLOAT;
+  static constexpr Type type = Type::FLOAT;
 };
 
 template<>
 struct tensor_type_traits<double> {
-  static constexpr TensorType type = TensorType::DOUBLE;
+  static constexpr Type type = Type::DOUBLE;
 };
 
 template<>
 struct tensor_type_traits<short> {
-  static constexpr TensorType type = TensorType::SHORT;
+  static constexpr Type type = Type::SHORT;
 };
 
 template<>
 struct tensor_type_traits<unsigned short> {
-  static constexpr TensorType type = TensorType::USHORT;
+  static constexpr Type type = Type::USHORT;
 };
 
 template<>
 struct tensor_type_traits<int> {
-  static constexpr TensorType type = TensorType::INT;
+  static constexpr Type type = Type::INT;
 };
 
 template<>
 struct tensor_type_traits<unsigned int> {
-  static constexpr TensorType type = TensorType::UINT;
+  static constexpr Type type = Type::UINT;
 };
 
 template<>
 struct tensor_type_traits<long> {
-  static constexpr TensorType type = TensorType::LONG;
+  static constexpr Type type = Type::LONG;
 };
 
 template<>
 struct tensor_type_traits<unsigned long> {
-  static constexpr TensorType type = TensorType::ULONG;
+  static constexpr Type type = Type::ULONG;
 };
 
 template<>
 struct tensor_type_traits<long long> {
-  static constexpr TensorType type = TensorType::LONG_LONG;
+  static constexpr Type type = Type::LONG_LONG;
 };
 
 template<>
 struct tensor_type_traits<unsigned long long> {
-  static constexpr TensorType type = TensorType::ULONG_LONG;
-};
-
-static const std::unordered_map<char, TensorType> format_to_type = {
-  {'c', TensorType::CHAR},
-  {'f', TensorType::FLOAT},
-  {'d', TensorType::DOUBLE},
-  {'h', TensorType::SHORT},
-  {'H', TensorType::USHORT},
-  {'i', TensorType::INT},
-  {'I', TensorType::UINT},
-  {'l', TensorType::LONG},
-  {'L', TensorType::ULONG},
-  {'q', TensorType::LONG_LONG},
-  {'Q', TensorType::ULONG_LONG},
+  static constexpr Type type = Type::ULONG_LONG;
 };
 
 template<typename...>
@@ -137,43 +123,5 @@ struct map_to_ptr<std::tuple<Types...>> {
 };
 
 using THDTensorPtrTypes = map_to_ptr<THDTensorTypes>::type;
-
-template <typename T>
-struct tensor_type_char {};
-
-template <>
-struct tensor_type_char<THDByteTensor>{
-  static constexpr char value = static_cast<char>(TensorType::UCHAR);
-};
-
-template <>
-struct tensor_type_char<THDCharTensor>{
-  static constexpr char value = static_cast<char>(TensorType::CHAR);
-};
-
-template <>
-struct tensor_type_char<THDShortTensor>{
-  static constexpr char value = static_cast<char>(TensorType::SHORT);
-};
-
-template <>
-struct tensor_type_char<THDIntTensor>{
-  static constexpr char value = static_cast<char>(TensorType::INT);
-};
-
-template <>
-struct tensor_type_char<THDLongTensor>{
-  static constexpr char value = static_cast<char>(TensorType::LONG);
-};
-
-template <>
-struct tensor_type_char<THDFloatTensor>{
-  static constexpr char value = static_cast<char>(TensorType::FLOAT);
-};
-
-template <>
-struct tensor_type_char<THDDoubleTensor>{
-  static constexpr char value = static_cast<char>(TensorType::DOUBLE);
-};
 
 } // namespace thd

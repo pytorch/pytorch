@@ -43,9 +43,7 @@ std::unique_ptr<RPCMessage> packMessage(
                         const Args&... args
                         );
 
-template<typename T>
-T unpackScalar(RPCMessage& raw_message);
-std::uint16_t unpackArgCount(RPCMessage& raw_message);
+Type unpackType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 std::uint16_t unpackFunctionId(RPCMessage& raw_message);
 long long unpackInteger(RPCMessage& raw_message);
