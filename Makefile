@@ -60,12 +60,13 @@ CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 CXXFLAGS  += -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR)
 
-.PHONY : lib clean test mpitest install deb debian debclean forlib fortest forclean
-.DEFAULT : lib
+.PHONY : all lib staticlib clean test mpitest install deb debian debclean forlib fortest forclean
+.DEFAULT : all
 
 INCEXPORTS  := nccl.h
 LIBSRCFILES := libwrap.cu core.cu all_gather.cu all_reduce.cu broadcast.cu reduce.cu reduce_scatter.cu
 LIBNAME     := libnccl.so
+STATICLIBNAME := libnccl_static.a
 
 INCDIR := $(BUILDDIR)/include
 LIBDIR := $(BUILDDIR)/lib
@@ -74,11 +75,16 @@ OBJDIR := $(BUILDDIR)/obj
 INCTARGETS := $(patsubst %, $(INCDIR)/%, $(INCEXPORTS))
 LIBSONAME  := $(patsubst %,%.$(NCCL_MAJOR),$(LIBNAME))
 LIBTARGET  := $(patsubst %,%.$(NCCL_MAJOR).$(NCCL_MINOR).$(NCCL_PATCH),$(LIBNAME))
+STATICLIBTARGET := $(STATICLIBNAME)
 LIBLINK    := $(patsubst lib%.so, -l%, $(LIBNAME))
 LIBOBJ     := $(patsubst %.cu, $(OBJDIR)/%.o, $(filter %.cu, $(LIBSRCFILES)))
 DEPFILES   := $(patsubst %.o, %.d, $(LIBOBJ)) $(patsubst %, %.d, $(TESTBINS)) $(patsubst %, %.d, $(MPITESTBINS))
 
+all : lib staticlib
+
 lib : $(INCTARGETS) $(LIBDIR)/$(LIBTARGET)
+
+staticlib : $(INCTARGETS) $(LIBDIR)/$(STATICLIBTARGET)
 
 -include $(DEPFILES)
 
@@ -88,6 +94,11 @@ $(LIBDIR)/$(LIBTARGET) : $(LIBOBJ)
 	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LDFLAGS) $(LIBOBJ)
 	ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
 	ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
+
+$(LIBDIR)/$(STATICLIBTARGET) : $(LIBOBJ)
+	@printf "Archiving %-35s > %s\n" $(STATICLIBTARGET) $@
+	mkdir -p $(LIBDIR)
+	ar cr $@ $(LIBOBJ)
 
 $(INCDIR)/%.h : src/%.h
 	@printf "Grabbing  %-35s > %s\n" $< $@
