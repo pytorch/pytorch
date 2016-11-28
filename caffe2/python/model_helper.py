@@ -56,7 +56,8 @@ class ModelHelperBase(object):
     take care of adding their parameters to params
     """
 
-    def __init__(self, name=None, init_params=True, allow_not_known_ops=True):
+    def __init__(self, name=None, init_params=True, allow_not_known_ops=True,
+                 skip_sparse_optim=False):
         self.name = name or "model"
         self.net = core.Net(self.name)
         self.param_init_net = core.Net(self.name + '_init')
@@ -68,6 +69,7 @@ class ModelHelperBase(object):
         self.gradient_ops_added = False
         self.init_params = init_params
         self.allow_not_known_ops = allow_not_known_ops
+        self.skip_sparse_optim = skip_sparse_optim
 
     def _infer_param_shape(self, param):
         for op in self.param_init_net.Proto().op:
@@ -174,6 +176,24 @@ class ModelHelperBase(object):
             if str(p) in self.grad_map:
                 param_to_grad[p] = self.grad_map[str(p)]
         return param_to_grad
+
+    def GetOptimizationPairs(self, params=None):
+        '''
+        Returns a map for param => grad.
+        If params is not specified, all parameters will be considered.
+        '''
+        if not self.gradient_ops_added:
+            raise RuntimeError("Need to call AddGradientOperators first")
+
+        param_to_grad = self.param_to_grad
+        if params:
+            param_to_grad = self.get_param_to_grad(params)
+
+        if not self.skip_sparse_optim:
+            return param_to_grad
+        else:
+            return {param: grad for param, grad in param_to_grad.items()
+                    if not isinstance(grad, core.GradientSlice)}
 
     def TensorProtosDBInput(
         self, unused_blob_in, blob_out, batch_size, db, db_type, **kwargs
