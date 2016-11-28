@@ -11,6 +11,31 @@ static std::unordered_map<std::string, THDChannelType> name2channel_type = {
     {"tcp", THDChannelTCP},
 };
 
+static bool THDPModule_loadClasses(PyObject *module_dict)
+{
+#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
+  ASSERT_NOT_NULL(THDPDoubleStorageClass = PyMapping_GetItemString(module_dict, (char*)"DoubleStorage"));
+  ASSERT_NOT_NULL(THDPFloatStorageClass  = PyMapping_GetItemString(module_dict, (char*)"FloatStorage"));
+  //ASSERT_NOT_NULL(THDPHalfStorageClass   = PyMapping_GetItemString(module_dict, (char*)"HalfStorage"));
+  ASSERT_NOT_NULL(THDPLongStorageClass   = PyMapping_GetItemString(module_dict, (char*)"LongStorage"));
+  ASSERT_NOT_NULL(THDPIntStorageClass    = PyMapping_GetItemString(module_dict, (char*)"IntStorage"));
+  ASSERT_NOT_NULL(THDPShortStorageClass  = PyMapping_GetItemString(module_dict, (char*)"ShortStorage"));
+  ASSERT_NOT_NULL(THDPCharStorageClass   = PyMapping_GetItemString(module_dict, (char*)"CharStorage"));
+  ASSERT_NOT_NULL(THDPByteStorageClass   = PyMapping_GetItemString(module_dict, (char*)"ByteStorage"));
+
+  ASSERT_NOT_NULL(THDPDoubleTensorClass  = PyMapping_GetItemString(module_dict, (char*)"DoubleTensor"));
+  //ASSERT_NOT_NULL(THDPHalfTensorClass    = PyMapping_GetItemString(module_dict, (char*)"HalfTensor"));
+  ASSERT_NOT_NULL(THDPFloatTensorClass   = PyMapping_GetItemString(module_dict, (char*)"FloatTensor"));
+  ASSERT_NOT_NULL(THDPLongTensorClass    = PyMapping_GetItemString(module_dict, (char*)"LongTensor"));
+  ASSERT_NOT_NULL(THDPIntTensorClass     = PyMapping_GetItemString(module_dict, (char*)"IntTensor"));
+  ASSERT_NOT_NULL(THDPShortTensorClass   = PyMapping_GetItemString(module_dict, (char*)"ShortTensor"));
+  ASSERT_NOT_NULL(THDPCharTensorClass    = PyMapping_GetItemString(module_dict, (char*)"CharTensor"));
+  ASSERT_NOT_NULL(THDPByteTensorClass    = PyMapping_GetItemString(module_dict, (char*)"ByteTensor"));
+
+  return true;
+#undef ASSERT_NOT_NULL
+}
+
 static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;
 static std::unordered_map<PyObject*, THDGroup> obj2group;
 
@@ -230,13 +255,17 @@ invalid_arguments:
 }
 
 PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
-  if (PyTuple_GET_SIZE(args) != 2) {
-    THPUtils_invalidArguments(args, "initExtension", 1, "(reduce_op obj, group obj)");
+  if (PyTuple_GET_SIZE(args) != 3) {
+    THPUtils_invalidArguments(args, "initExtension", 1, "(bool is_master_worker, reduce_op obj, group obj)");
     return NULL;
   }
 
-  PyObject* reduce_op_obj = PyTuple_GET_ITEM(args, 0);
-  PyObject* group_obj = PyTuple_GET_ITEM(args, 1);
+  PyObject* is_master_worker_obj = PyTuple_GET_ITEM(args, 0);
+  PyObject* reduce_op_obj = PyTuple_GET_ITEM(args, 1);
+  PyObject* group_obj = PyTuple_GET_ITEM(args, 2);
+
+  THPUtils_assert(PyBool_Check(is_master_worker_obj), "first argument should be a bool");
+  bool is_master_worker = is_master_worker_obj == Py_True;
 
   THPObjectPtr reduce_op;
 #define REGISTER_REDUCE_OP(NAME)                                               \
@@ -256,6 +285,13 @@ PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
   obj2group.emplace(group.get(), THDGroup##NAME);
   REGISTER_GROUP(WORLD);
 #undef REGISTER_GROUP
+
+  if (is_master_worker) {
+    PyObject *module = PyImport_ImportModule("torch.distributed");
+    THPUtils_assert(module, "class loader couldn't access torch.distributed module");
+    PyObject* module_dict = PyModule_GetDict(module);
+    if (!THDPModule_loadClasses(module_dict)) return NULL;
+  }
   Py_RETURN_TRUE;
 }
 

@@ -1,6 +1,7 @@
 #include <cstdint>
 #include "TH/THStorage.h"
-#include "base/TensorTraits.hpp"
+#include "base/Traits.hpp"
+#include "Traits.hpp"
 
 namespace thd { namespace rpc { namespace detail {
 ////////////////////////////////////////////////////////////////////////////////
@@ -19,15 +20,24 @@ inline void _appendType(ByteArray& str, Type _type) {
 }
 
 template<typename T>
-inline void __appendData(ByteArray& str, const T& arg, std::false_type is_tensor) {
-  _appendType(str, tensor_type_traits<T>::type);
+inline void __appendData(ByteArray& str, const T& arg,
+    std::false_type is_tensor, std::false_type is_storage) {
+  _appendType(str, type_traits<T>::type);
   _appendScalar<T>(str, arg);
 }
 
 template<typename T>
-inline void __appendData(ByteArray& str, const T& arg, std::true_type is_tensor) {
+inline void __appendData(ByteArray& str, const T& arg,
+    std::true_type is_tensor, std::false_type is_storage) {
   _appendType(str, Type::TENSOR);
-  _appendScalar<unsigned long long>(str, arg->tensor_id);
+  _appendScalar<object_id_type>(str, arg->tensor_id);
+}
+
+template<typename T>
+inline void __appendData(ByteArray& str, const T& arg,
+    std::false_type is_tensor, std::true_type is_storage) {
+  _appendType(str, Type::STORAGE);
+  _appendScalar<object_id_type>(str, arg->storage_id);
 }
 
 template<typename T>
@@ -35,7 +45,8 @@ inline void _appendData(ByteArray& str, const T& arg) {
   __appendData(
       str,
       arg,
-      is_any_of<T, THDTensorPtrTypes>()
+      is_any_of<T, THDTensorPtrTypes>(),
+      is_any_of<T, THDStoragePtrTypes>()
   );
 }
 

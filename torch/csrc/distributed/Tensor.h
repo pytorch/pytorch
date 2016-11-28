@@ -25,7 +25,7 @@
 
 #ifdef _THP_CORE
 #define THDPTensorType TH_CONCAT_3(THDP,Real,TensorType)
-#define THDPTensorBaseStr TH_CONCAT_STRING_3(THDP,Real,TensorBase)
+#define THDPTensorBaseStr TH_CONCAT_STRING_3(Distributed,Real,TensorBase)
 #define THDPTensor_stateless_(NAME) TH_CONCAT_4(THDP,Real,Tensor_stateless_,NAME)
 #define THDPTensorStatelessType TH_CONCAT_3(THDP,Real,TensorStatelessType)
 #define THDPTensorStateless TH_CONCAT_3(THDP,Real,TensorStateless)
@@ -34,7 +34,7 @@
 
 #include "override_macros.h"
 
-#define TH_GENERIC_FILE "torch/csrc/generic/Tensor.h"
-#include <TH/THGenerateAllTypes.h>
+#define THD_GENERIC_FILE "torch/csrc/generic/Tensor.h"
+#include <THD/base/THDGenerateAllTypes.h>
 
 #endif

@@ -128,7 +128,7 @@ auto THTensor<real>::add(const Tensor &source, scalar_type value) -> THTensor& {
 
 template<>
 thd::Type THTensor<real>::type() const {
-  return thd::tensor_type_traits<real>::type;
+  return thd::type_traits<real>::type;
 }
 
 #endif

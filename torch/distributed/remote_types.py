@@ -32,8 +32,8 @@ class CharStorage(_DistributedBase, torch._C.DistributedCharStorageBase, _Storag
     pass
 class ByteStorage(_DistributedBase, torch._C.DistributedByteStorageBase, _StorageBase):
     pass
-class HalfStorage(_DistributedBase, torch._C.DistributedHalfStorageBase, _StorageBase):
-    pass
+# class HalfStorage(_DistributedBase, torch._C.DistributedHalfStorageBase, _StorageBase):
+    # pass
 
 class DoubleTensor(_DistributedBase, torch._C.DistributedDoubleTensorBase, _TensorBase):
     def is_signed(self):
@@ -78,12 +78,12 @@ class ByteTensor(_DistributedBase, torch._C.DistributedByteTensorBase, _TensorBa
     @classmethod
     def storage_type(cls):
         return ByteStorage
-class HalfTensor(_DistributedBase, torch._C.DistributedHalfTensorBase, _TensorBase):
-    def is_signed(self):
-        return True
-    @classmethod
-    def storage_type():
-        return HalfStorage
+# class HalfTensor(_DistributedBase, torch._C.DistributedHalfTensorBase, _TensorBase):
+    # def is_signed(self):
+        # return True
+    # @classmethod
+    # def storage_type():
+        # return HalfStorage
 
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
