@@ -231,7 +231,7 @@ def _AddDistributedParameterSync(
         comm_world = net.CreateCommonWorld(
             rendezvous['kv_handler'],
             "iter_cw",
-            name="iter_cw_op",
+            name=net.Proto().name + ".iter_cw_op",
             size=rendezvous['num_shards'],
             rank=rendezvous['shard_id'],
             engine=rendezvous['engine'],
@@ -252,7 +252,7 @@ def _AddDistributedParameterSync(
             comm_world = net.CreateCommonWorld(
                 rendezvous['kv_handler'],
                 "{}_cw".format(param_name),
-                name="{}_cw_op".format(param_name),
+                name=net.Proto().name + ".{}_cw_op".format(param_name),
                 size=rendezvous['num_shards'],
                 rank=rendezvous['shard_id'],
                 engine=rendezvous['engine'],
