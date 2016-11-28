@@ -235,6 +235,8 @@ if WITH_DISTRIBUTED:
     extra_compile_args += ['-DWITH_DISTRIBUTED']
     main_sources += [
         "torch/csrc/distributed/Module.cpp",
+        "torch/csrc/distributed/Tensor.cpp",
+        "torch/csrc/distributed/Storage.cpp",
         "torch/csrc/distributed/utils.cpp"
     ]
     include_dirs += [tmp_install_path + "/include/THD"]

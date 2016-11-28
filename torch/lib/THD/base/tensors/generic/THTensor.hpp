@@ -3,7 +3,7 @@
 #else
 
 template<>
-struct th_traits<real> {
+struct th_tensor_traits<real> {
   using tensor_type = THRealTensor;
 };
 

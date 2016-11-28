@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../base/Tensor.hpp"
+#include "../../base/Storage.hpp"
 #include "../master/THDTensor.h"
 #include "ByteArray.hpp"
 #include "TH/THStorage.h"
@@ -11,7 +12,7 @@
 
 namespace thd {
 
-using tensor_id_type = std::uint64_t;
+using object_id_type = std::uint64_t;
 
 namespace rpc {
 
@@ -47,8 +48,8 @@ Type unpackType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 std::uint16_t unpackFunctionId(RPCMessage& raw_message);
 long long unpackInteger(RPCMessage& raw_message);
-Tensor* unpackTensor(RPCMessage& raw_message);
-tensor_id_type unpackTensorAsId(RPCMessage& raw_message);
+object_id_type unpackTensor(RPCMessage& raw_message);
+object_id_type unpackStorage(RPCMessage& raw_message);
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message);
 
 }} // namespace rpc, thd

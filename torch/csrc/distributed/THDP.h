@@ -7,6 +7,8 @@
 #include "Module.h"
 #include "Storage.h"
 #include "Tensor.h"
+#ifdef _THP_CORE
 #include "utils.h"
+#endif
 
 #endif

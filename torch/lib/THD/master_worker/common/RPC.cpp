@@ -104,21 +104,22 @@ long long unpackInteger(RPCMessage& raw_message) {
   else if (type == Type::LONG_LONG)
     return unpackScalar<long long>(raw_message);
 
-  throw std::invalid_argument("wrong integer type in the raw message");
+  throw std::invalid_argument(std::string("wrong integer type in the raw message (") +
+          std::to_string(static_cast<char>(type)) + ")");
 }
 
-Tensor *unpackTensor(RPCMessage& raw_message) {
+object_id_type unpackTensor(RPCMessage& raw_message) {
   Type type = unpackType(raw_message);
   if (type == Type::TENSOR)
-    return NULL; //unpackScalar<long long int>(raw_message); TODO
+    return unpackScalar<object_id_type>(raw_message);
   throw std::invalid_argument("expected tensor in the raw message");
 }
 
-tensor_id_type unpackTensorAsId(RPCMessage& raw_message) {
+object_id_type unpackStorage(RPCMessage& raw_message) {
   Type type = unpackType(raw_message);
-  if (type == Type::TENSOR)
-    return unpackScalar<tensor_id_type>(raw_message);
-  throw std::invalid_argument("expected tensor in the raw message");
+  if (type == Type::STORAGE)
+    return unpackScalar<object_id_type>(raw_message);
+  throw std::invalid_argument("expected storage in the raw message");
 }
 
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {

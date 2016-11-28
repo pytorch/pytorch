@@ -30,6 +30,7 @@
 
 #define LIBRARY_STATE_NOARGS
 #define LIBRARY_STATE
+#define TH_GENERIC_FILE THD_GENERIC_FILE
 
 #define THHostTensor TH_CONCAT_3(TH,Real,Tensor)
 #define THHostTensor_(NAME) TH_CONCAT_4(TH,Real,Tensor_,NAME)

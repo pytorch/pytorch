@@ -17,7 +17,7 @@ def init_process_group(backend):
     _initialized = True
     import torch.distributed.collectives as collectives
     extend_scope(collectives)
-    assert torch._C._dist_init_extension(reduce_op)
+    assert torch._C._dist_init_extension(False, reduce_op, group)
 
 
 def init_master_worker(backend):
@@ -27,8 +27,8 @@ def init_master_worker(backend):
     torch._C._dist_init_master_worker(backend)
     _initialized = True
     import torch.distributed.collectives as collectives
-    # import torch.distributed.remote_types as remote_types
+    import torch.distributed.remote_types as remote_types
     extend_scope(collectives)
-    # extend_scope(remote_types)
-    assert torch._C._dist_init_extension(reduce_op)
+    extend_scope(remote_types)
+    assert torch._C._dist_init_extension(True, reduce_op, group)
 

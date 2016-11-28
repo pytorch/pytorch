@@ -33,7 +33,7 @@
 
 #ifdef _THP_CORE
 #define THDPStorageType TH_CONCAT_3(THDP,Real,StorageType)
-#define THDPStorageBaseStr TH_CONCAT_STRING_3(Cuda,Real,StorageBase)
+#define THDPStorageBaseStr TH_CONCAT_STRING_3(Distributed,Real,StorageBase)
 #endif
 
 #include "override_macros.h"

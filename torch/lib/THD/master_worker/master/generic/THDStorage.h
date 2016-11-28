@@ -2,12 +2,16 @@
 #define TH_GENERIC_FILE "master_worker/master/generic/THDStorage.h"
 #else
 
-typedef struct {
+typedef struct THDStorage {
   unsigned long long storage_id;
   ptrdiff_t size;
   int refcount;
   char flag;
-  // TODO: what about allocators?
+  // these are here only so that the struct has a similar structure to TH
+  void* allocator;
+  void* allocatorContext;
+  struct THDStorage *view;
+  // Additional fields
   int node_id;
   int device_id; // unused at the moment
 } THDStorage;

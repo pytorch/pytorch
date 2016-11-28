@@ -6,7 +6,10 @@
 #include <string>
 #include <unordered_map>
 
-#include "../../base/TensorTraits.hpp"
+#include "../../process_group/General.hpp"
+#include "../../base/Tensor.hpp"
+#include "../../base/Traits.hpp"
+#include "../../base/storages/THStorage.hpp"
 #include "../../base/tensors/THTensor.hpp"
 #include "../common/Functions.hpp"
 #include "../common/RPC.hpp"
@@ -17,6 +20,14 @@ namespace thd {
 namespace worker {
 
 namespace detail {
+
+Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {
+  return workerTensors.at(unpackTensor(message)).get();
+}
+
+Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
+  return workerStorages.at(unpackStorage(message)).get();
+}
 
 static std::unique_ptr<Tensor> createTensor(Type type) {
   if (type == Type::UCHAR)
@@ -36,36 +47,39 @@ static std::unique_ptr<Tensor> createTensor(Type type) {
   throw std::invalid_argument("passed characted doesn't represent a tensor type");
 }
 
-static void construct(rpc::RPCMessage& raw_message) {
-  // TODO: assert_empty(raw_message)
-  Type type = rpc::unpackType(raw_message);
-  thd::tensor_id_type id = rpc::unpackTensorAsId(raw_message);
-  workerTensors.insert(std::make_pair(
-    id,
-    createTensor(type)
-  ));
+static std::unique_ptr<Storage> createStorage(Type type) {
+  if (type == Type::UCHAR)
+    return std::unique_ptr<Storage>(new THStorage<unsigned char>());
+  else if (type == Type::CHAR)
+    return std::unique_ptr<Storage>(new THStorage<char>());
+  else if (type == Type::SHORT)
+    return std::unique_ptr<Storage>(new THStorage<short>());
+  else if (type == Type::INT)
+    return std::unique_ptr<Storage>(new THStorage<int>());
+  else if (type == Type::LONG)
+    return std::unique_ptr<Storage>(new THStorage<long>());
+  else if (type == Type::FLOAT)
+    return std::unique_ptr<Storage>(new THStorage<float>());
+  else if (type == Type::DOUBLE)
+    return std::unique_ptr<Storage>(new THStorage<double>());
+  throw std::invalid_argument("passed characted doesn't represent a storage type");
 }
 
-static void constructWithSize(rpc::RPCMessage& raw_message) {
-  // TODO: assert_empty(raw_message)
-  Type type = rpc::unpackType(raw_message);
-  tensor_id_type id = rpc::unpackTensorAsId(raw_message);
-  THLongStorage *sizes = rpc::unpackTHLongStorage(raw_message);
-  THLongStorage *strides = rpc::unpackTHLongStorage(raw_message);
+static std::unique_ptr<Storage> createStorage(Type type, std::size_t size) {
+  std::unique_ptr<Storage> storage = createStorage(type);
+  storage->resize(size);
+  return storage;
 }
 
-static void add(rpc::RPCMessage& raw_message) {
-//THTensor& result = parse_tensor(raw_message);
-  //THTensor& source = parse_tensor(raw_message);
-  //double x = parse_scalar(raw_message);
-  //assert_end(raw_message);
-  //result.add(source, x);
+
+static void finalize(rpc::RPCMessage& raw_message) {
+  if (raw_message.remaining() > 0)
+    throw std::invalid_argument("message is too long");
 }
 
-static void free(rpc::RPCMessage& raw_message) {
-  unsigned long long tensor_id = unpackInteger(raw_message);
-  (void)workerTensors.erase(tensor_id);
-}
+#include "dispatch/Storage.cpp"
+#include "dispatch/Tensor.cpp"
+#include "dispatch/Communication.cpp"
 
 using dispatch_fn = void (*)(rpc::RPCMessage&);
 using Functions = thd::Functions;
@@ -75,7 +89,12 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::construct, construct},
     {Functions::constructWithSize, constructWithSize},
     {Functions::add, add},
-    {Functions::free, free}
+    {Functions::free, free},
+    {Functions::storageConstruct, storageConstruct},
+    {Functions::storageConstructWithSize, storageConstructWithSize},
+    {Functions::storageFree, storageFree},
+    {Functions::sendTensor, sendTensor},
+    {Functions::sendStorage, sendStorage}
 };
 
 } // namespace detail
@@ -89,7 +108,7 @@ std::string execute(std::unique_ptr<rpc::RPCMessage> raw_message_ptr) {
     if (iter != detail::functions.end())
       (*iter->second)(raw_message);
     else
-      throw std::invalid_argument("invalid function id");
+      throw std::invalid_argument(std::string("invalid function id: ") + std::to_string(fid));
     return std::string();
   } catch(std::exception& e) {
     return std::string(e.what());

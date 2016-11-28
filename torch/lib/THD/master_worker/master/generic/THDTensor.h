@@ -3,8 +3,6 @@
 #else
 
 typedef struct {
-  unsigned long long tensor_id;
-
   long *size;
   long *stride;
   int nDimension;
@@ -14,6 +12,9 @@ typedef struct {
 
   int refcount;
   char flag;
+
+  // Additional fields
+  unsigned long long tensor_id;
 } THDTensor;
 
 /**** access methods ****/
@@ -24,7 +25,6 @@ THD_API long THDTensor_(size)(const THDTensor *self, int dim);
 THD_API long THDTensor_(stride)(const THDTensor *self, int dim);
 THD_API THLongStorage *THDTensor_(newSizeOf)(THDTensor *self);
 THD_API THLongStorage *THDTensor_(newStrideOf)(THDTensor *self);
-THD_API real *THDTensor_(data)(const THDTensor *self);
 
 THD_API void THDTensor_(setFlag)(THDTensor *self, const char flag);
 THD_API void THDTensor_(clearFlag)(THDTensor *self, const char flag);

@@ -697,6 +697,24 @@ bool THCSPShortTensor_init(PyObject *module);
 bool THCSPCharTensor_init(PyObject *module);
 bool THCSPByteTensor_init(PyObject *module);
 
+bool THDPDoubleStorage_init(PyObject *module);
+bool THDPFloatStorage_init(PyObject *module);
+//bool THDPHalfStorage_init(PyObject *module);
+bool THDPLongStorage_init(PyObject *module);
+bool THDPIntStorage_init(PyObject *module);
+bool THDPShortStorage_init(PyObject *module);
+bool THDPCharStorage_init(PyObject *module);
+bool THDPByteStorage_init(PyObject *module);
+
+bool THDPDoubleTensor_init(PyObject *module);
+bool THDPFloatTensor_init(PyObject *module);
+//bool THDPHalfTensor_init(PyObject *module);
+bool THDPLongTensor_init(PyObject *module);
+bool THDPIntTensor_init(PyObject *module);
+bool THDPShortTensor_init(PyObject *module);
+bool THDPCharTensor_init(PyObject *module);
+bool THDPByteTensor_init(PyObject *module);
+
 static std::vector<PyMethodDef> methods;
 
 #ifdef WITH_DISTRIBUTED
@@ -810,6 +828,27 @@ PyMODINIT_FUNC PyInit__C()
 #endif
   Py_INCREF(has_cudnn);
   ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
+
+#ifdef WITH_DISTRIBUTED
+  // See comment on CUDA objects
+  ASSERT_TRUE(THDPDoubleStorage_init(module));
+  ASSERT_TRUE(THDPFloatStorage_init(module));
+  //ASSERT_TRUE(THDPHalfStorage_init(module));
+  ASSERT_TRUE(THDPLongStorage_init(module));
+  ASSERT_TRUE(THDPIntStorage_init(module));
+  ASSERT_TRUE(THDPShortStorage_init(module));
+  ASSERT_TRUE(THDPCharStorage_init(module));
+  ASSERT_TRUE(THDPByteStorage_init(module));
+
+  ASSERT_TRUE(THDPDoubleTensor_init(module));
+  ASSERT_TRUE(THDPFloatTensor_init(module));
+  //ASSERT_TRUE(THDPHalfTensor_init(module));
+  ASSERT_TRUE(THDPLongTensor_init(module));
+  ASSERT_TRUE(THDPIntTensor_init(module));
+  ASSERT_TRUE(THDPShortTensor_init(module));
+  ASSERT_TRUE(THDPCharTensor_init(module));
+  ASSERT_TRUE(THDPByteTensor_init(module));
+#endif
 
   THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
   ASSERT_TRUE(THPDefaultGenerator != nullptr);

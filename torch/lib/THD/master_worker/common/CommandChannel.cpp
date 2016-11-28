@@ -27,9 +27,9 @@ void sendMessage(std::unique_ptr<rpc::RPCMessage> msg, zmq::socket_t& socket) {
                              msg.release()));
 }
 
-std::unique_ptr<rpc::RPCMessage> recvMessage(zmq::socket_t& socket) {
+std::unique_ptr<rpc::RPCMessage> recvMessage(zmq::socket_t& socket, bool block = true) {
   zmq::message_t zmsg;
-  if (socket.recv(&zmsg, ZMQ_DONTWAIT) == false) {
+  if (socket.recv(&zmsg, block ? 0 : ZMQ_DONTWAIT) == false) {
     return nullptr;
   } else {
     // XXX: Excesive copying here! I'm not sure how to avoid it.
@@ -139,7 +139,7 @@ void MasterCommandChannel::sendMessage(std::unique_ptr<rpc::RPCMessage> msg,
 }
 
 std::unique_ptr<rpc::RPCMessage> MasterCommandChannel::recvMessage(int rank) {
-  return thd::recvMessage(_pull_sockets.at(rank));
+  return thd::recvMessage(_pull_sockets.at(rank), false);
 }
 
 // TODO: Validate this environmental variable.

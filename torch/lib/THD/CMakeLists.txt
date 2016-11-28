@@ -1,5 +1,23 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+
+################################################################################
+# Helper functions
+################################################################################
+
+FUNCTION(EXCLUDE_DIR list_name dir_name)
+  # A helper that excludes all files that contain dir_name in their file path
+  SET(local_list ${${list_name}})
+  FOREACH(source ${local_list})
+    IF(${source} MATCHES ${dir_name})
+      MESSAGE(STATUS "Excluding " ${source} " from the build")
+      LIST(REMOVE_ITEM local_list ${source})
+    ENDIF()
+  ENDFOREACH()
+  SET(${list_name} ${local_list} PARENT_SCOPE)
+ENDFUNCTION()
+
+################################################################################
 
 
 FIND_PACKAGE(ZMQ REQUIRED)
@@ -34,8 +52,12 @@ IF(NOT MPI_FOUND)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
 ENDIF()
 
+EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
+
 SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
 SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
+
+EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THD SHARED ${all_cpp})
@@ -80,6 +102,5 @@ INSTALL(TARGETS THD
 
 FOREACH(HEADER ${all_h})
   STRING(REGEX MATCH "(.*)[/\\]" DIR ${HEADER})
-  MESSAGE(STATUS ${DIR})
   INSTALL(FILES ${HEADER} DESTINATION ${THD_INSTALL_INCLUDE_DIR}/THD/${DIR})
 ENDFOREACH()
