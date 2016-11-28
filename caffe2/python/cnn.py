@@ -15,9 +15,11 @@ class CNNModelHelper(ModelHelperBase):
 
     def __init__(self, order="NCHW", name=None,
                  use_cudnn=True, cudnn_exhaustive_search=False,
-                 ws_nbytes_limit=None, init_params=True):
+                 ws_nbytes_limit=None, init_params=True,
+                 skip_sparse_optim=False):
         super(CNNModelHelper, self).__init__(
-            name="CNN" if name is None else name, init_params=init_params)
+            name="CNN" if name is None else name, init_params=init_params,
+            skip_sparse_optim=skip_sparse_optim)
 
         self.weights = []
         self.biases = []
