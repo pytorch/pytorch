@@ -5,10 +5,10 @@
 #include "../common.h"
 
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
-  THCState *state,
-	THCTensor *input, THCTensor *gradOutput, THCIndexTensor *indices,
-	int kH, int kW, int dH, int dW, int padH, int padW,
-	int dilationH, int dilationW, bool ceil_mode) {
+                         THCState *state,
+                         THCTensor *input, THCTensor *gradOutput, THCIndexTensor *indices,
+                         int kH, int kW, int dH, int dW, int padH, int padW,
+                         int dilationH, int dilationW, bool ceil_mode) {
 
   THArgCheck(kW > 0 && kH > 0, 5,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
