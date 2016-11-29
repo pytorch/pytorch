@@ -112,8 +112,10 @@ class TestOptim(TestCase):
             wrap_old_fn(old_optim.sgd, learningRate=1e-3)
         )
         self._test_rosenbrock(
-            lambda params: optim.SGD(params, lr=1e-3, momentum=0.9, dampening=0),
-            wrap_old_fn(old_optim.sgd, learningRate=1e-3, momentum=0.9, dampening=0)
+            lambda params: optim.SGD(params, lr=1e-3, momentum=0.9,
+                                     dampening=0, weight_decay=1e-4),
+            wrap_old_fn(old_optim.sgd, learningRate=1e-3, momentum=0.9,
+                        dampening=0, weightDecay=1e-4)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
@@ -276,4 +278,3 @@ class TestOptim(TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
