@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
 
-#include <immintrin.h>
-
 #define TH_OMP_OVERHEAD_THRESHOLD 100000
 
 void THTensor_(fill)(THTensor *r_, real value)
@@ -477,67 +475,6 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
   }
 }
-
-#if defined(TH_REAL_IS_DOUBLE)
-
-#include <immintrin.h>
-
-void THTensor_(add_AVX)(THTensor *r_, THTensor *t, real value)
-{
-  THTensor_(resizeAs)(r_, t);
-
-  real *tp = THTensor_(data)(t);
-  real *rp = THTensor_(data)(r_);
-  long sz = THTensor_(nElement)(t);
-
-  __m256d c = _mm256_broadcast_sd(&value);
-  long batch_size = 20;
-  sz -= batch_size;
-  if (sz > 0) {
-    // pipelined loop prologue
-    __m256d x0 = _mm256_load_pd(tp);
-
-    __m256d x1 = _mm256_load_pd(tp + 4);
-    __m256d y0 = _mm256_add_pd(x0, c);
-    for (; sz > batch_size; sz -= batch_size) { // tp incremented in loop
-      __m256d x2 = _mm256_load_pd(tp + 8);
-      __m256d y1 = _mm256_add_pd(x1, c);
-      _mm256_store_pd(rp, y0);
-
-      __m256d x3 = _mm256_load_pd(tp + 12);
-      __m256d y2 = _mm256_add_pd(x2, c);
-      _mm256_store_pd(rp + 4, y1);
-
-      __m256d x4 = _mm256_load_pd(tp + 16);
-      __m256d y3 = _mm256_add_pd(x3, c);
-      _mm256_store_pd(rp + 8, y2);
-      tp += batch_size;
-
-      x0 = _mm256_load_pd(tp);
-      __m256d y4 = _mm256_add_pd(x4, c);
-      _mm256_store_pd(rp + 12, y3);
-
-      x1 = _mm256_load_pd(tp + 4);
-      y0 = _mm256_add_pd(x0, c);
-      _mm256_store_pd(rp + 16, y4);
-      rp += batch_size;
-    }
-    __m256d y1 = _mm256_add_pd(x1, c);
-    _mm256_store_pd(rp, y0);
-
-    _mm256_store_pd(rp + 4, y1);
-
-    rp += 8;
-    tp += 8;
-  }
-  sz += batch_size;
-  long i;
-  for (i = 0; i < sz; ++i) {
-    rp[i] = tp[i] + value;
-  }
-  return;
-}
-#endif
 
 void THTensor_(sub)(THTensor *r_, THTensor *t, real value)
 {
