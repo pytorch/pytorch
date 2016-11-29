@@ -1262,7 +1262,7 @@ class Net(object):
 
     def DeduplicateGradientSlices(self, g):
         assert isinstance(g, GradientSlice)
-        unique, remapping = self.Unique([g.indices], 2)
+        unique, remapping = self.Unique([g.indices], 2, engine='SparseHash')
         sum_g = self.UnsortedSegmentSum([g.values, remapping], 1)
         return GradientSlice(indices=unique, values=sum_g)
 
