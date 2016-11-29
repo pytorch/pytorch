@@ -7,6 +7,7 @@ REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Flatten, FlattenOp<CPUContext>);
 REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
+
 REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Sum, SumOp<float, CPUContext>);
@@ -664,6 +665,16 @@ class GetGatherGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Gather, GetGatherGradient);
+
+struct GetFlattenToVecGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "ResizeLike", "", vector<string>{GO(0), I(0)}, vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(FlattenToVec, GetFlattenToVecGradient);
+
 SHOULD_NOT_DO_GRADIENT(Unique);
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
