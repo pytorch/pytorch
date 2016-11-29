@@ -112,6 +112,12 @@ class Workspace {
    */
   Blob* CreateBlob(const string& name);
   /**
+   * Remove the blob of the given name. Return true if removed and false if
+   * not exist.
+   * Will NOT remove from the shared workspace.
+   */
+  bool RemoveBlob(const string& name);
+  /**
    * Gets the blob with the given name as a const pointer. If the blob does not
    * exist, a nullptr is returned.
    */

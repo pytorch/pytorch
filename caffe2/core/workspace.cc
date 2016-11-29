@@ -102,6 +102,19 @@ Blob* Workspace::CreateBlob(const string& name) {
   return GetBlob(name);
 }
 
+bool Workspace::RemoveBlob(const string& name) {
+  auto it = blob_map_.find(name);
+  if (it != blob_map_.end()) {
+    VLOG(1) << "Removing blob " << name << " from this workspace.";
+    blob_map_.erase(it);
+    return true;
+  }
+
+  // won't go into share_ here
+  VLOG(1) << "Blob " << name << " not exists. Skipping.";
+  return false;
+}
+
 const Blob* Workspace::GetBlob(const string& name) const {
   if (blob_map_.count(name)) {
     return blob_map_.at(name).get();
