@@ -1,6 +1,7 @@
 #include "State.hpp"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace thd {
 namespace master {
