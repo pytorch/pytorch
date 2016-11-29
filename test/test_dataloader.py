@@ -92,6 +92,12 @@ class TestDataLoader(TestCase):
     def test_sequential_batch(self):
         self._test_sequential(DataLoader(self.dataset, batch_size=2))
 
+    def test_sequential_pin_memory(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for input, target in loader:
+            self.assertTrue(input.is_pinned())
+            self.assertTrue(target.is_pinned())
+
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))
 
@@ -110,6 +116,12 @@ class TestDataLoader(TestCase):
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
 
+    def test_shuffle_pin_memory(self):
+        loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
+        for input, target in loader:
+            self.assertTrue(input.is_pinned())
+            self.assertTrue(target.is_pinned())
+
     def test_error(self):
         self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))
 
@@ -118,8 +130,9 @@ class TestDataLoader(TestCase):
 
     def test_partial_workers(self):
         "check that workers exit even if the iterator is not exhausted"
-        loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4))
+        loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=True))
         workers = loader.workers
+        pin_thread = loader.pin_thread
         for i, sample in enumerate(loader):
             if i == 3:
                 break
@@ -128,6 +141,8 @@ class TestDataLoader(TestCase):
             w.join(1.0)  # timeout of one second
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
+        pin_thread.join(1.0)
+        self.assertFalse(pin_thread.is_alive())
 
 
 if __name__ == '__main__':

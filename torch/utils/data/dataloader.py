@@ -4,6 +4,11 @@ from .sampler import SequentialSampler, RandomSampler
 import collections
 import sys
 import traceback
+import threading
+if sys.version_info[0] == 2:
+    import Queue as queue
+else:
+    import queue
 
 
 class ExceptionWrapper(object):
@@ -19,6 +24,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
     while True:
         r = index_queue.get()
         if r is None:
+            data_queue.put(None)
             break
         idx, batch_indices = r
         try:
@@ -27,6 +33,23 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
             data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
             data_queue.put((idx, samples))
+
+
+def _pin_memory_loop(in_queue, out_queue):
+    while True:
+        r = in_queue.get()
+        if r is None:
+            break
+        if isinstance(r[1], ExceptionWrapper):
+            out_queue.put(r)
+            continue
+        idx, batch = r
+        try:
+            batch = pin_memory_batch(batch)
+        except Exception:
+            out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+        else:
+            out_queue.put((idx, batch))
 
 
 def default_collate(batch):
@@ -49,6 +72,15 @@ def default_collate(batch):
                      .format(type(batch[0]))))
 
 
+def pin_memory_batch(batch):
+    if torch.is_tensor(batch):
+        return batch.pin_memory()
+    elif isinstance(batch, collections.Iterable):
+        return [pin_memory_batch(sample) for sample in batch]
+    else:
+        return batch
+
+
 class DataLoaderIter(object):
     "Iterates once over the DataLoader's dataset, as specified by the sampler"
 
@@ -58,6 +90,7 @@ class DataLoaderIter(object):
         self.collate_fn = loader.collate_fn
         self.sampler = loader.sampler
         self.num_workers = loader.num_workers
+        self.pin_memory = loader.pin_memory
 
         self.samples_remaining = len(self.sampler)
         self.sample_iter = iter(self.sampler)
@@ -81,6 +114,15 @@ class DataLoaderIter(object):
                 w.daemon = True  # ensure that the worker exits on process exit
                 w.start()
 
+            if self.pin_memory:
+                in_data = self.data_queue
+                self.data_queue = queue.Queue()
+                self.pin_thread = threading.Thread(
+                    target=_pin_memory_loop,
+                    args=(in_data, self.data_queue))
+                self.pin_thread.daemon = True
+                self.pin_thread.start()
+
             # prime the prefetch loop
             for _ in range(2 * self.num_workers):
                 self._put_indices()
@@ -94,7 +136,10 @@ class DataLoaderIter(object):
             if self.samples_remaining == 0:
                 raise StopIteration
             indices = self._next_indices()
-            return self.collate_fn([self.dataset[i] for i in indices])
+            batch = self.collate_fn([self.dataset[i] for i in indices])
+            if self.pin_memory:
+                batch = pin_memory_batch(batch)
+            return batch
 
         # check if the next sample has already been generated
         if self.rcvd_idx in self.reorder_dict:
@@ -166,11 +211,12 @@ class DataLoader(object):
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
-                 num_workers=0, collate_fn=default_collate):
+                 num_workers=0, collate_fn=default_collate, pin_memory=False):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.collate_fn = collate_fn
+        self.pin_memory = pin_memory
 
         if sampler is not None:
             self.sampler = sampler
