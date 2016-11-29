@@ -1452,11 +1452,16 @@ class TestOperators(hu.HypothesisTestCase):
            slice_dim=st.integers(),
            a=st.integers(),
            b=st.integers(),
+           is_empty=st.booleans(),
            **hu.gcs_cpu_only)
-    def test_slice(self, input, slice_dim, a, b, gc, dc):
-        slice_dim %= len(input.shape)
-        a %= input.shape[slice_dim]
-        b %= input.shape[slice_dim] + 1
+    def test_slice(self, input, slice_dim, a, b, is_empty, gc, dc):
+        slice_dim = slice_dim % len(input.shape)
+        if (is_empty):
+            input = np.random.rand(*([0] + list(input.shape))).astype(np.int32)
+            slice_dim += 1
+
+        a = a % input.shape[slice_dim]
+        b = b % input.shape[slice_dim] + 1
         start_vec = np.zeros(len(input.shape), dtype=np.int32)
         end_vec = np.ones(len(input.shape), dtype=np.int32) * -1
         start_vec[slice_dim] = min(a, b)
