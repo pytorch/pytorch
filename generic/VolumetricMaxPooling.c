@@ -30,16 +30,21 @@ void THNN_(VolumetricMaxPooling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THIndexTensor *indices,
+          int kT,
+          int kW,
+          int kH,
           int dT,
           int dW,
           int dH,
           int pT,
           int pW,
-          int pH)
+          int pH,
+          bool ceilMode)
 {
   THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
           state, input, gradOutput, gradInput, indices,
-          dT, dW, dH, pT, pW, pH, 1, 1, 1);
+          kT, kW, kH, dT, dW, dH,
+          pT, pW, pH, 1, 1, 1, ceilMode);
 }
 
 #endif
