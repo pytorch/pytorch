@@ -287,6 +287,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
     for (TIndex i = 0; i < block_num; ++i) {
       r.template process<FixedSize>(ctx, d + in_block_size * i, i, &context_);
     }
+    r.template finish<FixedSize>(ctx, &context_);
     return true;
   }
 
@@ -342,7 +343,8 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
 
     ReducerGradient r(ctx, r_grad, &context_);
     for (TIndex i = 0; i < block_num; ++i) {
-      r.template fillGrad<FixedSize>(ctx, out + block_size * i, i, &context_);
+      r.template fillGrad<FixedSize>(
+          ctx, out + block_size * i, i, &context_, block_num);
     }
     return true;
   }
@@ -532,6 +534,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
             ctx, d + in_block_size * idx, i, &context_);
       }
 
+      r.template finish<FixedSize>(ctx, &context_);
       // check correctness of the next segment
       if (i < N) {
         CAFFE_ENFORCE_EQ(
@@ -611,11 +614,17 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
         K - 1, s_ids[N - 1], "Indices must be sorted and not have gaps");
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
+      TIndex end = start;
+
+      if (ReducerGradient::computeLength()) {
+        for (; end < N && s_ids[start] == s_ids[end]; ++end) {
+        }
+      }
 
       ReducerGradient r(ctx, s_grads + s_block_size * s_ids[start], &context_);
       for (; i < N && s_ids[start] == s_ids[i]; ++i) {
         r.template fillGrad<FixedSize>(
-            ctx, out + d_block_size * i, i, &context_);
+            ctx, out + d_block_size * i, i, &context_, end - start);
       }
 
       // check correctness of the next segment
@@ -918,6 +927,10 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
       reducers_[s_id].template process<FixedSize>(
           ctx, d + in_block_size * idx, i, &context_);
     }
+
+    for (TIndex i = 0; i < K; ++i) {
+      reducers_[i].template finish<FixedSize>(ctx, &context_);
+    }
     // call reducers destructors (if there is any)
     reducers_.clear();
     return true;
@@ -985,6 +998,20 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     TIndex s_block_size = segment_grads.size_from_dim(1);
     T* out = data_grads->template mutable_data<T>();
 
+    if (ReducerGradient::computeLength()) {
+      segment_length_.resize(K, 0);
+      for (int i = 0; i < N; ++i) {
+        auto s_id = s_ids[i];
+        CAFFE_ENFORCE(
+            0 <= s_id && s_id < K,
+            "Segment id out of range: ",
+            s_id,
+            ", range 0 to ",
+            K);
+        segment_length_[s_ids[i]]++;
+      }
+    }
+
     reducers_.clear();
     reducers_.reserve(K);
     for (SIndex i = 0; i < K; ++i) {
@@ -993,14 +1020,13 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
 
     for (TIndex i = 0; i < N; ++i) {
       auto s_id = s_ids[i];
-      CAFFE_ENFORCE(
-          0 <= s_id && s_id < K,
-          "Segment id out of range: ",
-          s_id,
-          ", range 0 to ",
-          K);
-      reducers_[s_id].template fillGrad<FixedSize>(
-          ctx, out + d_block_size * i, i, &context_);
+      if (ReducerGradient::computeLength()) {
+        reducers_[s_id].template fillGrad<FixedSize>(
+            ctx, out + d_block_size * i, i, &context_, segment_length_[s_id]);
+      } else {
+        reducers_[s_id].template fillGrad<FixedSize>(
+            ctx, out + d_block_size * i, i, &context_, 0);
+      }
     }
     // call reducers destructors (if there is any)
     reducers_.clear();
@@ -1021,6 +1047,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
  private:
   // member field to reuse memory
   vector<ReducerGradient> reducers_;
+  vector<int> segment_length_;
 };
 
 template <typename T, typename SIndex, typename Context, typename ReducerDef>
@@ -1259,6 +1286,7 @@ class AbstractLengthsOp : public Operator<Context> {
         reducer.template process<FixedSize>(
             ctx, data + in_block_size * idx, dataIndex, &context_);
       }
+      reducer.template finish<FixedSize>(ctx, &context_);
     }
     CAFFE_ENFORCE(
         dataIndex == dataToReduceSize, dataIndex, " != ", dataToReduceSize);
@@ -1337,7 +1365,8 @@ class AbstractLengthsGradientOp : public Operator<Context> {
             ctx,
             dataGrads + dataGradsBlockSize * dataIndex,
             dataIndex,
-            &context_);
+            &context_,
+            lengths[rangeIndex]);
       }
     }
     CAFFE_ENFORCE(
@@ -1551,5 +1580,6 @@ REGISTER_SEGMENT_DEF(
 
 REGISTER_REDUCER_WITH_ALL_OPS(SumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(WeightedSumReducerDef);
+REGISTER_REDUCER_WITH_ALL_OPS(MeanReducerDef);
 }
 }
