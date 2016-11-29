@@ -900,22 +900,35 @@ class SliceOp : public Operator<Context> {
         ends_idx[i] = data.dims()[i];
         continue;
       }
-      auto start = starts_data[i];
-      auto end = ends_data[i];
-      if (start < 0) {
-        start = data.dims()[i] + 1 + start;
+      if (data.dims()[i] > 0) {
+        auto start = starts_data[i];
+        auto end = ends_data[i];
+        if (start < 0) {
+          start = data.dims()[i] + 1 + start;
+        }
+        if (end < 0) {
+          end = data.dims()[i] + 1 + end;
+        }
+        CAFFE_ENFORCE_GE(start, 0);
+        CAFFE_ENFORCE_GE(end, 0);
+        CAFFE_ENFORCE_LT(start, data.dims()[i]);
+        CAFFE_ENFORCE_LE(end, data.dims()[i]);
+        CAFFE_ENFORCE_GE(end, start);
+        starts_idx[i] = start;
+        ends_idx[i] = end;
+        dst_sizes[i] = end - start;
+      } else {
+        starts_idx[i] = 0;
+        ends_idx[i] = 0;
+        dst_sizes[i] = 0;
       }
-      if (end < 0) {
-        end = data.dims()[i] + 1 + end;
-      }
-      CAFFE_ENFORCE_GE(start, 0);
-      CAFFE_ENFORCE_GE(end, 0);
-      CAFFE_ENFORCE_LT(start, data.dims()[i]);
-      CAFFE_ENFORCE_LE(end, data.dims()[i]);
-      CAFFE_ENFORCE_GE(end, start);
-      starts_idx[i] = start;
-      ends_idx[i] = end;
-      dst_sizes[i] = end - start;
+    }
+
+    if (data.size() <= 0) {
+      // When the input is empty, we do not need to do copy.
+      output->Resize(dst_sizes);
+      output->raw_mutable_data(data.meta());
+      return true;
     }
     // for now only supports slicing in 1 dimension
     int dim = -1;
