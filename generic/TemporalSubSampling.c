@@ -5,9 +5,12 @@
 static inline void THNN_(TemporalSubSampling_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
+                         THTensor *gradOutput,
                          int kW,
                          int dW,
                          int *inputFrameSize) {
+  int nInputFrame, nOutputFrame;
+
   THArgCheck(kW > 0, 6,
              "kernel size should be greater than zero, but got kW: %d", kW);
   THArgCheck(dW > 0, 7,
@@ -23,6 +26,16 @@ static inline void THNN_(TemporalSubSampling_shapeCheck)(
   THArgCheck( input->size[0] >= kW, 2,
               "input sequence smaller than kernel size.  Got %d, Expected: %d",
               input->size[0], kW);
+
+  nInputFrame = input->size[0];
+  nOutputFrame = (nInputFrame - kW) / dW + 1;
+
+  if (gradOutput != NULL) {
+    THNN_CHECK_DIM_SIZE(gradOutput, input->nDimension, 0, nOutputFrame);
+    if (inputFrameSize != NULL) {
+      THNN_CHECK_DIM_SIZE(gradOutput, input->nDimension, 1, *inputFrameSize);
+    }
+  }
 }
 
 void THNN_(TemporalSubSampling_updateOutput)(
@@ -39,7 +52,7 @@ void THNN_(TemporalSubSampling_updateOutput)(
   int nInputFrame, nOutputFrame;
   long k;
   
-  THNN_(TemporalSubSampling_shapeCheck)(state, input, kW, dW, &inputFrameSize);
+  THNN_(TemporalSubSampling_shapeCheck)(state, input, NULL, kW, dW, &inputFrameSize);
 
   outputFrame = THTensor_(new)();
   inputWindow = THTensor_(new)();
@@ -78,7 +91,7 @@ void THNN_(TemporalSubSampling_updateGradInput)(
   THTensor *gradInputWindow, *buffer, *kwunit;
   long k;
 
-  THNN_(TemporalSubSampling_shapeCheck)(state, input, kW, dW, NULL);
+  THNN_(TemporalSubSampling_shapeCheck)(state, input, gradOutput, kW, dW, NULL);
 
   gradOutputFrame = THTensor_(new)();
   gradInputWindow = THTensor_(new)();
@@ -117,7 +130,7 @@ void THNN_(TemporalSubSampling_accGradParameters)(
   THTensor *inputWindow, *buffer;
   long k;
 
-  THNN_(TemporalSubSampling_shapeCheck)(state, input, kW, dW, NULL);
+  THNN_(TemporalSubSampling_shapeCheck)(state, input, gradOutput, kW, dW, NULL);
   gradOutputFrame = THTensor_(new)();
   inputWindow = THTensor_(new)();
   buffer = THTensor_(new)();
