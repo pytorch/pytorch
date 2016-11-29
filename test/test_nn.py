@@ -564,7 +564,7 @@ class TestNN(NNTestCase):
         expected_out = l(i).data
         l.cuda(0)
         out = dp.data_parallel(l, i, (0, 1))
-        self.assertEqual(out.get_device(), 1)
+        self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -598,6 +598,15 @@ class TestNN(NNTestCase):
         gpus = range(torch.cuda.device_count())
         output = dp.data_parallel(Net(), input, gpus)
         self.assertEqual(output, fn(input))
+
+    def test_data_parallel_module(self):
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        expected_out = l(i).data
+        net = nn.DataParallel(l)
+        out = net(i)
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out.data, expected_out)
 
     def test_parameter_dict(self):
         l = nn.Linear(5, 5)
