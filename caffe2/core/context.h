@@ -144,8 +144,8 @@ inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
   if (nbytes == 0) {
     return;
   }
-  CHECK_NOTNULL(src);
-  CHECK_NOTNULL(dst);
+  CAFFE_ENFORCE(src);
+  CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
 

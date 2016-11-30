@@ -128,7 +128,8 @@ bool Blob::Deserialize(const BlobProto& blob_proto) {
         blob_proto.tensor().device_detail().device_type()));
     // Tensor's deserializer should always be registered, but we will double
     // check if it is not null anyway.
-    return CHECK_NOTNULL(deserializer.get())->Deserialize(blob_proto, this);
+    CAFFE_ENFORCE(deserializer.get());
+    return deserializer->Deserialize(blob_proto, this);
   } else {
     auto deserializer = CreateDeserializer(blob_proto.type());
     if (!deserializer.get()) {

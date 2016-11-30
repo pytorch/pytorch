@@ -50,8 +50,9 @@ template <typename T, typename Context>
 void applyOffsetAlias(const OffsetAlias& oc, Workspace* ws, Context* context) {
   VLOG(1) << "Aliasing: " << oc.src << " to: " << oc.dst
           << " at offset: " << oc.offset;
-  auto* src = CHECK_NOTNULL(ws->GetBlob(oc.src))
-                  ->template GetMutable<Tensor<Context>>();
+  auto srcBlob = ws->GetBlob(oc.src);
+  CAFFE_ENFORCE(srcBlob);
+  auto* src = srcBlob->template GetMutable<Tensor<Context>>();
   auto* dst = ws->CreateBlob(oc.dst)->template GetMutable<Tensor<Context>>();
   auto timestep = src->size() / src->dim(0);
   auto dims = src->dims();
@@ -75,10 +76,13 @@ void initializeRecurrentInput(
     int32_t batchSize,
     Workspace* ws,
     Context* context) {
-  auto* state = CHECK_NOTNULL(ws->GetBlob(rc.state))
-                    ->template GetMutable<Tensor<Context>>();
-  const auto& input =
-      CHECK_NOTNULL(ws->GetBlob(rc.input))->template Get<Tensor<Context>>();
+  auto stateBlob = ws->GetBlob(rc.state);
+  CAFFE_ENFORCE(stateBlob);
+  auto* state = stateBlob->template GetMutable<Tensor<Context>>();
+
+  auto inputBlob = ws->GetBlob(rc.input);
+  CAFFE_ENFORCE(inputBlob);
+  const auto& input = inputBlob->template Get<Tensor<Context>>();
   CAFFE_ENFORCE(input.ndim() == 3, input.ndim());
   CAFFE_ENFORCE(input.dim(0) == 1, input.dim(0));
   CAFFE_ENFORCE(input.dim(1) == batchSize, input.dim(1), batchSize);
@@ -98,7 +102,7 @@ void initializeScratch(
     int32_t seqLength,
     int32_t batchSize,
     Workspace* ws) {
-  CHECK_NOTNULL(ws);
+  CAFFE_ENFORCE(ws);
   VLOG(1) << "Initializing scratch: " << scratch.name;
   ws->GetBlob(scratch.name)
       ->template GetMutable<Tensor<Context>>()
@@ -109,10 +113,15 @@ template <typename T, typename Context>
 void applyLink(const Link& link, size_t t, Workspace* ws) {
   VLOG(1) << "Linking: " << link.internal << " to: " << link.external
           << " at offset: " << link.offset;
-  auto* internalTensor = CHECK_NOTNULL(ws->CreateBlob(link.internal))
-                             ->template GetMutable<Tensor<Context>>();
-  auto* externalTensor = CHECK_NOTNULL(ws->GetBlob(link.external))
-                             ->template GetMutable<Tensor<Context>>();
+  auto internalTensorBlob = ws->CreateBlob(link.internal);
+  CAFFE_ENFORCE(internalTensorBlob);
+  auto* internalTensor =
+      internalTensorBlob->template GetMutable<Tensor<Context>>();
+
+  auto externalTensorBlob = ws->GetBlob(link.external);
+  CAFFE_ENFORCE(externalTensorBlob);
+  auto* externalTensor =
+      externalTensorBlob->template GetMutable<Tensor<Context>>();
   CAFFE_ENFORCE_GT(externalTensor->size(), 0);
   const TIndex externalTimestepSize =
       externalTensor->size() / externalTensor->dim(0);
@@ -164,7 +173,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
         timestep_(OperatorBase::template GetSingleArgument<std::string>(
             "timestep",
             "timestep")) {
-    CHECK_NOTNULL(ws);
+    CAFFE_ENFORCE(ws);
     const auto stepNet =
         OperatorBase::GetSingleArgument<string>("step_net", "");
     NetDef stepNetDef;
@@ -280,8 +289,9 @@ class RecurrentNetworkOp final : public Operator<Context> {
         detail::applyLink<T, Context>(link, t, &ws_);
       }
       // Since we have a SimpleNet, there are no races here.
-      CHECK_NOTNULL(ws_.GetBlob(timestep_))
-          ->template GetMutable<TensorCPU>()
+      auto timestepBlob = ws_.GetBlob(timestep_);
+      CAFFE_ENFORCE(timestepBlob);
+      timestepBlob->template GetMutable<TensorCPU>()
           ->template mutable_data<int32_t>()[0] = t;
       stepNet_->RunAsync();
     }
@@ -332,7 +342,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       Output(5)->Resize(1);
       Output(5)->template mutable_data<float>();
     }
-    CHECK_NOTNULL(ws);
+    CAFFE_ENFORCE(ws);
     const auto stepNet =
         OperatorBase::GetSingleArgument<string>("backward_step_net", "");
     NetDef stepNetDef;
@@ -446,12 +456,17 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto seqLen = Input(0).dim32(0);
     const auto batchSize = Input(0).dim32(1);
     for (auto& param : params_) {
-      const auto& p = CHECK_NOTNULL(ws_.GetBlob(param.param))
-                          ->template Get<Tensor<Context>>();
-      auto* g = CHECK_NOTNULL(ws_.CreateBlob(param.grad))
-                    ->template GetMutable<Tensor<Context>>();
-      auto* ag = CHECK_NOTNULL(ws_.CreateBlob(param.accGrad))
-                     ->template GetMutable<Tensor<Context>>();
+      auto pBlob = ws_.GetBlob(param.param);
+      CAFFE_ENFORCE(pBlob);
+      const auto& p = pBlob->template Get<Tensor<Context>>();
+
+      auto gBlob = ws_.CreateBlob(param.grad);
+      CAFFE_ENFORCE(gBlob);
+      auto* g = gBlob->template GetMutable<Tensor<Context>>();
+
+      auto agBlob = ws_.CreateBlob(param.accGrad);
+      CAFFE_ENFORCE(agBlob);
+      auto* ag = agBlob->template GetMutable<Tensor<Context>>();
       g->ResizeLike(p);
       ag->ResizeLike(p);
       math::Set<T, Context>(
@@ -459,10 +474,13 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
 
     for (auto& rg : recurrentGradients_) {
-      const auto& p =
-          CHECK_NOTNULL(ws_.GetBlob(rg.param))->template Get<Tensor<Context>>();
-      auto* g = CHECK_NOTNULL(ws_.CreateBlob(rg.grad))
-                    ->template GetMutable<Tensor<Context>>();
+      auto pBlob = ws_.GetBlob(rg.param);
+      CAFFE_ENFORCE(pBlob);
+      const auto& p = pBlob->template Get<Tensor<Context>>();
+
+      auto gBlob = ws_.CreateBlob(rg.grad);
+      CAFFE_ENFORCE(gBlob);
+      auto* g = gBlob->template GetMutable<Tensor<Context>>();
       g->ResizeLike(p);
       CAFFE_ENFORCE_EQ(g->ndim(), 3);
       const auto timestep = g->size() / g->dim(0);
@@ -480,10 +498,13 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
     auto accumulateParameterGradients = [&]() {
       for (const auto& param : params_) {
-        const auto& g = CHECK_NOTNULL(ws_.GetBlob(param.grad))
-                            ->template Get<Tensor<Context>>();
-        auto* ag = CHECK_NOTNULL(ws_.GetBlob(param.accGrad))
-                       ->template GetMutable<Tensor<Context>>();
+        auto gBlob = ws_.GetBlob(param.grad);
+        CAFFE_ENFORCE(gBlob);
+        const auto& g = gBlob->template Get<Tensor<Context>>();
+
+        auto agBlob = ws_.GetBlob(param.accGrad);
+        CAFFE_ENFORCE(agBlob);
+        auto* ag = agBlob->template GetMutable<Tensor<Context>>();
         CAFFE_ENFORCE(ag->dims() == g.dims());
         math::Add<T, Context>(
             g.size(),
@@ -503,10 +524,13 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         VLOG(1) << "Accumulating into: " << rg.grad << " from "
                 << rg.externalGrad << " at time: " << t
                 << ", offset: " << rg.offset;
-        auto* g = CHECK_NOTNULL(ws_.GetBlob(rg.grad))
-                      ->template GetMutable<Tensor<Context>>();
-        const auto& og = CHECK_NOTNULL(ws_.GetBlob(rg.externalGrad))
-                             ->template Get<Tensor<Context>>();
+        auto gBlob = ws_.GetBlob(rg.grad);
+        CAFFE_ENFORCE(gBlob);
+        auto* g = gBlob->template GetMutable<Tensor<Context>>();
+
+        auto ogBlob = ws_.GetBlob(rg.externalGrad);
+        CAFFE_ENFORCE(ogBlob);
+        const auto& og = ogBlob->template Get<Tensor<Context>>();
 
         // g[T+offset] += og[T]
         CAFFE_ENFORCE_EQ(g->size() / g->dim(0), og.size() / og.dim(0));
@@ -543,9 +567,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       // Swap the accumulated gradients with the actual gradients so
       // the rest of the network sees the accumulated gradients.
       using std::swap;
-      swap(
-          *(CHECK_NOTNULL(ws_.GetBlob(param.accGrad))),
-          *(CHECK_NOTNULL(ws_.GetBlob(param.grad))));
+      auto accGradBlob = ws_.GetBlob(param.accGrad);
+      auto gradBlob = ws_.GetBlob(param.grad);
+      CAFFE_ENFORCE(accGradBlob);
+      CAFFE_ENFORCE(gradBlob);
+      swap(*accGradBlob, *gradBlob);
     }
     return true;
   }
