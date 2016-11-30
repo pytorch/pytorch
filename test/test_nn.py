@@ -364,6 +364,16 @@ class TestNN(NNTestCase):
         net.double()
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
+        net.type(torch.FloatTensor)
+        self.assertIsInstance(l.weight.data, torch.FloatTensor)
+        self.assertIsInstance(l.bias.data, torch.FloatTensor)
+        net.type(torch.DoubleTensor)
+        self.assertIsInstance(l.weight.data, torch.DoubleTensor)
+        self.assertIsInstance(l.bias.data, torch.DoubleTensor)
+        if TEST_CUDA:
+            net.type(torch.cuda.FloatTensor)
+            self.assertIsInstance(l.weight.data, torch.cuda.FloatTensor)
+            self.assertIsInstance(l.bias.data, torch.cuda.FloatTensor)
 
     def test_non_leaf_parameters(self):
         l1 = nn.Linear(10, 10)

@@ -164,9 +164,11 @@ class Module(object):
     def cuda(self, device_id=None):
         return self._apply(lambda t: t.cuda(device_id))
 
-
     def cpu(self, device_id=None):
         return self._apply(lambda t: t.cpu())
+
+    def type(self, dst_type):
+        return self._apply(lambda t: t.type(dst_type))
 
     def float(self):
         return self._apply(lambda t: t.float())
