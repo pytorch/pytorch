@@ -263,7 +263,7 @@ simple_pointwise_float = [
     'trunc',
     'ceil',
 ]
-    
+
 for fn in simple_pointwise_float:
     tests.append((fn, small_3d, lambda t: [], None, float_types))
 
@@ -510,6 +510,19 @@ class TestCuda(TestCase):
             self.assertEqual(copy, original)
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), 0)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "detected only one GPU")
+    def test_cuda_set_device(self):
+        x = torch.randn(5, 5)
+        with torch.cuda.device(1):
+            self.assertEqual(x.cuda().get_device(), 1)
+            torch.cuda.set_device(0)
+            self.assertEqual(x.cuda().get_device(), 0)
+            with torch.cuda.device(1):
+                self.assertEqual(x.cuda().get_device(), 1)
+            self.assertEqual(x.cuda().get_device(), 0)
+            torch.cuda.set_device(1)
+        self.assertEqual(x.cuda().get_device(), 0)
 
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()

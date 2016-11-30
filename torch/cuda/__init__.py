@@ -96,6 +96,11 @@ class device_of(device):
         super(device_of, self).__init__(idx)
 
 
+def set_device(device):
+    if device >= 0:
+        torch._C._cuda_setDevice(device)
+
+
 @contextlib.contextmanager
 def stream(stream):
     if stream is None:
