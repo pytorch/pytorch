@@ -19,7 +19,8 @@ class BCECriterion(Criterion):
         if input.nelement() != target.nelement():
             raise RuntimeError("input and target size mismatch")
 
-        self.buffer = self.buffer or input.new()
+        if self.buffer is None:
+              self.buffer = input.new()
 
         buffer = self.buffer
         weights = self.weights
@@ -61,7 +62,8 @@ class BCECriterion(Criterion):
          if input.nelement() != target.nelement():
             raise RuntimeError("input and target size mismatch")
 
-         self.buffer = self.buffer or input.new()
+         if self.buffer is None:
+              self.buffer = input.new()
 
          buffer = self.buffer
          weights = self.weights

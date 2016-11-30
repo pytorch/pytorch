@@ -7,11 +7,13 @@ class SpatialDilatedConvolution(SpatialConvolution):
         super(SpatialDilatedConvolution, self).__init__(nInputPlane, nOutputPlane, kW, kH, dW, dH, padW, padH)
 
         self.dilationH = dilationH
-        self.dilationW = dilationW or dilationH or 1
+        self.dilationW = dilationW if dilationW is not None else dilationH
 
     def updateOutput(self, input):
-        self.finput = self.finput or self.weight.new()
-        self.fgradInput = self.fgradInput or self.weight.new()
+        if self.finput is None:
+              self.finput = self.weight.new()
+        if self.fgradInput is None:
+              self.fgradInput = self.weight.new()
         input = self._makeContiguous(input)
         self._backend.SpatialDilatedConvolution_updateOutput(
             self._backend.library_state,
@@ -29,11 +31,12 @@ class SpatialDilatedConvolution(SpatialConvolution):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
 
         input, gradOutput = self._makeContiguous(input, gradOutput)
-        self.fgradInput = self.fgradInput or self.weight.new()
+        if self.fgradInput is None:
+              self.fgradInput = self.weight.new()
         self._backend.SpatialDilatedConvolution_updateGradInput(
             self._backend.library_state,
             input,
@@ -50,7 +53,8 @@ class SpatialDilatedConvolution(SpatialConvolution):
 
     def accGradParameters(self, input, gradOutput, scale=1):
         input, gradOutput = self._makeContiguous(input, gradOutput)
-        self.fgradInput = self.fgradInput or self.weight.new()
+        if self.fgradInput is None:
+              self.fgradInput = self.weight.new()
         self._backend.SpatialDilatedConvolution_accGradParameters(
             self._backend.library_state,
             input,
@@ -78,7 +82,7 @@ class SpatialDilatedConvolution(SpatialConvolution):
         s += ', {}, {}'.format(self.dilationW, self.dilationH)
 
         s += ')'
-        if not self.bias:
+        if self.bias is None:
            s += ' without bias'
         return s
 

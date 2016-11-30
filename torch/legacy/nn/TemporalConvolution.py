@@ -43,7 +43,7 @@ class TemporalConvolution(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
         self._backend.TemporalConvolution_updateGradInput(
             self._backend.library_state,

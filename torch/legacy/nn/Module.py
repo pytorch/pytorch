@@ -91,7 +91,7 @@ class Module(object):
         raise NotImplementedError
 
     def type(self, type=None, tensorCache=None):
-        if not type:
+        if type is None:
            return self._type
 
         tensorCache = tensorCache or {}

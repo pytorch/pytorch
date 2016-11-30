@@ -34,8 +34,10 @@ class MM(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput[0] = self.gradInput[0] or input[0].new()
-        self.gradInput[1] = self.gradInput[1] or input[1].new()
+        if self.gradInput[0] is None:
+              self.gradInput[0] = input[0].new()
+        if self.gradInput[1] is None:
+              self.gradInput[1] = input[1].new()
 
         assert len(input) == 2
         a, b = input

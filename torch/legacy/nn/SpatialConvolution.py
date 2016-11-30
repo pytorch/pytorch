@@ -16,7 +16,7 @@ class SpatialConvolution(Module):
         self.dW = dW
         self.dH = dH
         self.padW = padW
-        self.padH = padH or self.padW
+        self.padH = padH if padH is not None else padW
 
         self.weight = torch.Tensor(nOutputPlane, nInputPlane, kH, kW)
         self.bias = torch.Tensor(nOutputPlane)
@@ -46,13 +46,15 @@ class SpatialConvolution(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
-           self._input = self._input or input.new()
+           if self._input is None:
+                  self._input = input.new()
            self._input.resize_as_(input).copy_(input)
            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.is_contiguous():
-                self._gradOutput = self._gradOutput or gradOutput.new()
+                if self._gradOutput is None:
+                      self._gradOutput = gradOutput.new()
                 self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
@@ -60,9 +62,9 @@ class SpatialConvolution(Module):
         return input
 
     def _init(self):
-        if not self.finput:
+        if self.finput is None:
             self.finput = self.weight.new()
-        if not self.fgradInput:
+        if self.fgradInput is None:
             self.fgradInput = self.weight.new()
 
     # function to re-view the weight layout in a way that would make the MM ops happy
@@ -97,7 +99,7 @@ class SpatialConvolution(Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
 
         self._init()
@@ -154,7 +156,7 @@ class SpatialConvolution(Module):
             s += ', {}, {}'.format(self.padW, self.padH)
 
         s += ')'
-        if not self.bias:
+        if self.bias is None:
            s += ' without bias'
         return s
 

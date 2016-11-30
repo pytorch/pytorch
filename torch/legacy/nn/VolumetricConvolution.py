@@ -17,8 +17,8 @@ class VolumetricConvolution(Module):
         self.dW = dW
         self.dH = dH
         self.padT = padT
-        self.padW = padW or self.padT
-        self.padH = padH or self.padW
+        self.padW = padW if padW is not None else self.padT
+        self.padH = padH if padH is not None else self.padW
 
         self.weight = torch.Tensor(nOutputPlane, nInputPlane, kT, kH, kW)
         self.bias = torch.Tensor(nOutputPlane)
@@ -40,13 +40,15 @@ class VolumetricConvolution(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
-           self._input = self._input or input.new()
+           if self._input is None:
+                  self._input = input.new()
            self._input.resize_as_(input).copy_(input)
            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.is_contiguous():
-                self._gradOutput = self._gradOutput or gradOutput.new()
+                if self._gradOutput is None:
+                      self._gradOutput = gradOutput.new()
                 self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
@@ -65,8 +67,10 @@ class VolumetricConvolution(Module):
             self.gradWeight = self.gradWeight.view(self.nOutputPlane, self.nInputPlane, self.kT, self.kH, self.kW)
 
     def updateOutput(self, input):
-        self.finput = self.finput or input.new()
-        self.fgradInput = self.fgradInput or input.new()
+        if self.finput is None:
+              self.finput = input.new()
+        if self.fgradInput is None:
+              self.fgradInput = input.new()
         if input.type() == 'torch.cuda.FloatTensor':
             self._backend.VolumetricConvolution_updateOutput(
                 self._backend.library_state,
@@ -98,7 +102,7 @@ class VolumetricConvolution(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
         if input.type() == 'torch.cuda.FloatTensor':
             self._backend.VolumetricConvolution_updateGradInput(

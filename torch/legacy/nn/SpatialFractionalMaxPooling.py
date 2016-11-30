@@ -92,7 +92,8 @@ class SpatialFractionalMaxPooling(Module):
         return self
 
     def updateOutput(self, input):
-        self.indices = self.indices or input.new()
+        if self.indices is None:
+              self.indices = input.new()
         self.indices = self.indices.long()
         self._initSampleBuffer(input)
         outW, outH = self._getOutputSizes(input)

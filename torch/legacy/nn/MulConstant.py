@@ -21,7 +21,7 @@ class MulConstant(Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
 
         if self.inplace:

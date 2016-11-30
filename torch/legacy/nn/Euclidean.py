@@ -46,12 +46,18 @@ class Euclidean(Module):
 
     def updateOutput(self, input):
         # lazy initialize buffers
-        self._input = self._input or input.new()
-        self._weight = self._weight or self.weight.new()
-        self._expand = self._expand or self.output.new()
-        self._expand2 = self._expand2 or self.output.new()
-        self._repeat = self._repeat or self.output.new()
-        self._repeat2 = self._repeat2 or self.output.new()
+        if self._input is None:
+              self._input = input.new()
+        if self._weight is None:
+              self._weight = self.weight.new()
+        if self._expand is None:
+              self._expand = self.output.new()
+        if self._expand2 is None:
+              self._expand2 = self.output.new()
+        if self._repeat is None:
+              self._repeat = self.output.new()
+        if self._repeat2 is None:
+              self._repeat2 = self.output.new()
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -81,13 +87,17 @@ class Euclidean(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
            return
 
-        self._div = self._div or input.new()
-        self._output = self._output or self.output.new()
-        self._gradOutput = self._gradOutput or input.new()
-        self._expand3 = self._expand3 or input.new()
+        if self._div is None:
+              self._div = input.new()
+        if self._output is None:
+              self._output = self.output.new()
+        if self._gradOutput is None:
+              self._gradOutput = input.new()
+        if self._expand3 is None:
+              self._expand3 = input.new()
 
         if not self.fastBackward:
            self.updateOutput(input)
@@ -133,7 +143,8 @@ class Euclidean(Module):
         """
         # assumes a preceding call to updateGradInput
         assert input.dim() == 2
-        self._sum = self._sum or input.new()
+        if self._sum is None:
+              self._sum = input.new()
         torch.sum(self._sum, self._repeat2, 0)
         self._sum.resize_(inputSize, outputSize)
         self.gradWeight.add_(-scale, self._sum)

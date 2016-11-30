@@ -9,7 +9,7 @@ class Threshold(Module):
         self.value = value
 
         # default for inplace is False
-        self.inplace = inplace or False
+        self.inplace = inplace
         self.validateParameters()
 
     def updateOutput(self, input):

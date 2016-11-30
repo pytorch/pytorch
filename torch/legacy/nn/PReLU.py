@@ -35,8 +35,10 @@ class PReLU(Module):
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
-        self.gradWeightBuf = self.gradWeightBuf or input.new()
-        self.gradWeightBuf2 = self.gradWeightBuf2 or input.new()
+        if self.gradWeightBuf is None:
+              self.gradWeightBuf = input.new()
+        if self.gradWeightBuf2 is None:
+              self.gradWeightBuf2 = input.new()
         self._backend.PReLU_accGradParameters(
             self._backend.library_state,
             input,

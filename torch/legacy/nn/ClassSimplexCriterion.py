@@ -72,7 +72,8 @@ class ClassSimplexCriterion(MSECriterion):
          self._transformTarget(target)
 
          assert input.nelement() == self._target.nelement()
-         self.output_tensor = self.output_tensor or input.new(1)
+         if self.output_tensor is None:
+              self.output_tensor = input.new(1)
          self._backend.MSECriterion_updateOutput(
             self._backend.library_state,
             input,

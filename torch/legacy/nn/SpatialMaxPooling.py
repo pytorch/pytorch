@@ -30,7 +30,8 @@ class SpatialMaxPooling(Module):
         return self
 
     def updateOutput(self, input):
-        self.indices = self.indices or input.new()
+        if self.indices is None:
+              self.indices = input.new()
         self.indices = self.indices.long()
 
         dims = input.dim()

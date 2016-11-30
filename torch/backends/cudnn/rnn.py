@@ -189,7 +189,7 @@ def forward(fn, input, hx, weight, output, hy):
         x = input.contiguous()
         output.resize_(*output_size)
         hy.resize_(*hidden_size).zero_()
-        if cy:
+        if cy is not None:
             cy.resize_(*hidden_size).zero_()
         y = output
 
@@ -302,9 +302,9 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         w = fn.weight_buf
         dx = grad_input.resize_as_(input)
         dhy = grad_hy.resize_(*hidden_size)
-        dcy = grad_cy.resize_(*hidden_size) if grad_cy else None
+        dcy = grad_cy.resize_(*hidden_size) if grad_cy is not None else None
         dhx = grad_hx.resize_(*hidden_size)
-        dcx = grad_cx.resize_(*hidden_size) if grad_cx else None
+        dcx = grad_cx.resize_(*hidden_size) if grad_cx is not None else None
 
         if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v 5.1 and above')
@@ -316,16 +316,16 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         if tuple(output.size()) != _output_size(fn):
             raise RuntimeError('Expected output size {}, got {}'.format(
                 output_size, output.size()))
-        if hx and tuple(hx.size()) != hidden_size:
+        if hx is not None and tuple(hx.size()) != hidden_size:
             raise RuntimeError('Expected hidden size {}, got {}'.format(
                 hidden_size, hx.size()))
-        if cx and tuple(cx.size()) != hidden_size:
+        if cx is not None and tuple(cx.size()) != hidden_size:
             raise RuntimeError('Expected cell size {}, got {}'.format(
                 hidden_size, cx.size()))
-        if dhy and tuple(dhy.size()) != hidden_size:
+        if dhy is not None and tuple(dhy.size()) != hidden_size:
             raise RuntimeError('Expected d_hidden size {}, got {}'.format(
                 hidden_size, dhy.size()))
-        if dcy and tuple(dcy.size()) != hidden_size:
+        if dcy is not None and tuple(dcy.size()) != hidden_size:
             raise RuntimeError('Expected d_cell size {}, got {}'.format(
                 hidden_size, dcy.size()))
 
@@ -336,13 +336,13 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
             fn.y_descs, ctypes.c_void_p(y.data_ptr()),
             fn.y_descs, ctypes.c_void_p(dy.data_ptr()),
             fn.hy_desc, ctypes.c_void_p(dhy.data_ptr()),
-            fn.cy_desc, ctypes.c_void_p(dcy.data_ptr()) if cx else None,
+            fn.cy_desc, ctypes.c_void_p(dcy.data_ptr()) if cx is not None else None,
             fn.w_desc, ctypes.c_void_p(w.data_ptr()),
             fn.hx_desc, ctypes.c_void_p(hx.data_ptr()),
-            fn.cx_desc, ctypes.c_void_p(cx.data_ptr()) if cx else None,
+            fn.cx_desc, ctypes.c_void_p(cx.data_ptr()) if cx is not None else None,
             fn.x_descs, ctypes.c_void_p(dx.data_ptr()),
             fn.hx_desc, ctypes.c_void_p(dhx.data_ptr()),
-            fn.cx_desc, ctypes.c_void_p(dcx.data_ptr()) if cx else None,
+            fn.cx_desc, ctypes.c_void_p(dcx.data_ptr()) if cx is not None else None,
             ctypes.c_void_p(fn.workspace.data_ptr()), fn.workspace.size(0),
             ctypes.c_void_p(fn.reserve.data_ptr()), fn.reserve.size(0)
         ))

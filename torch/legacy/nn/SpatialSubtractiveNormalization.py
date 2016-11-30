@@ -17,7 +17,9 @@ class SpatialSubtractiveNormalization(Module):
 
         # get args
         self.nInputPlane = nInputPlane
-        self.kernel = kernel or torch.Tensor(9, 9).fill_(1)
+        if kernel is None:
+            kernel = torch.Tensor(9, 9).fill_(1)
+        self.kernel = kernel
         kdim = self.kernel.ndimension()
 
         # check args
@@ -75,8 +77,10 @@ class SpatialSubtractiveNormalization(Module):
         # compute side coefficients
         dim = input.dim()
         if input.dim() + 1 != self.coef.dim() or (input.size(dim-1) != self.coef.size(dim-1)) or (input.size(dim-2) != self.coef.size(dim-2)):
-            self.ones = self.ones or input.new()
-            self._coef = self._coef or self.coef.new()
+            if self.ones is None:
+                self.ones = input.new()
+            if self._coef is None:
+                self._coef = self.coef.new()
 
             self.ones.resize_as_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)

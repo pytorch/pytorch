@@ -11,7 +11,8 @@ class SpatialAdaptiveMaxPooling(Module):
         self.indices = None
 
     def updateOutput(self, input):
-        self.indices = self.indices or input.new()
+        if self.indices is None:
+              self.indices = input.new()
         self.indices = self.indices.long()
         self._backend.SpatialAdaptiveMaxPooling_updateOutput(
             self._backend.library_state,

@@ -63,7 +63,7 @@ class CMul(Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
            return
 
         if self._gradOutput is None:

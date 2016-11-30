@@ -90,7 +90,8 @@ class LookupTable(Module):
             raise RuntimeError("input must be a vector or matrix")
 
         if not gradOutput.is_contiguous():
-            self._gradOutput = self._gradOutput or gradOutput.new()
+            if self._gradOutput is None:
+                self._gradOutput = gradOutput.new()
             self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
             gradOutput = self._gradOutput
 
@@ -108,7 +109,7 @@ class LookupTable(Module):
         )
 
     def renorm(self, input):
-        if not self.maxNorm:
+        if self.maxNorm is None:
            return
 
         # copy input into _input, so _input is continous.
@@ -130,7 +131,7 @@ class LookupTable(Module):
         )
 
     def type(self, type=None, tensorCache=None):
-        if not type:
+        if type is None:
             return self._type
         super(LookupTable, self).type(type, tensorCache)
 

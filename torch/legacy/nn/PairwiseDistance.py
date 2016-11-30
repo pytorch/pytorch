@@ -19,7 +19,8 @@ class PairwiseDistance(Module):
         self.output.resize_(1)
         assert input[0].dim() == 2
 
-        self.diff = self.diff or input[0].new()
+        if self.diff is None:
+              self.diff = input[0].new()
 
         torch.add(self.diff, input[0], -1, input[1]).abs_()
 
@@ -36,8 +37,12 @@ class PairwiseDistance(Module):
         if len(self.gradInput) != 2:
             self.gradInput[:] = [None, None]
 
-        self.gradInput[0] = (self.gradInput[0] or input[0].new()).resize_(input[0].size())
-        self.gradInput[1] = (self.gradInput[1] or input[1].new()).resize_(input[1].size())
+        if self.gradInput[0] is None:
+              self.gradInput[0] = input[0].new()
+        self.gradInput[0].resize_(input[0].size())
+        if self.gradInput[1] is None:
+              self.gradInput[1] = input[1].new()
+        self.gradInput[1].resize_(input[1].size())
         self.gradInput[0].copy_(input[0])
         self.gradInput[0].add_(-1, input[1])
 
@@ -49,7 +54,8 @@ class PairwiseDistance(Module):
             if self.norm > 2:
                 self.gradInput[0].mul_(self.gradInput[0].abs().pow_(self.norm-2))
 
-            self.outExpand = self.outExpand or self.output.new()
+            if self.outExpand is None:
+                  self.outExpand = self.output.new()
             self.outExpand.resize_(self.output.size(0), 1)
             self.outExpand.copy_(self.output)
             self.outExpand.add_(1e-6)  # Prevent divide by zero errors
@@ -57,8 +63,10 @@ class PairwiseDistance(Module):
             self.gradInput[0].mul_(self.outExpand.expand(self.gradInput[0].size(0),
                 self.gradInput[0].size(1)))
 
-        self.grad = self.grad or gradOutput.new()
-        self.ones = self.ones or gradOutput.new()
+        if self.grad is None:
+              self.grad = gradOutput.new()
+        if self.ones is None:
+              self.ones = gradOutput.new()
 
         self.grad.resize_as_(input[0]).zero_()
         self.ones.resize_(input[0].size(1)).fill_(1)
