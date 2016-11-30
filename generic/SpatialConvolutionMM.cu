@@ -85,6 +85,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   THNN_(SpatialConvolutionMM_shapeCheck)
        (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW);
 
+  input = THCTensor_(newContiguous)(state, input);
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -198,6 +199,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     THCTensor_(resize3d)(state, output, nOutputPlane, outputHeight, outputWidth);
     THCTensor_(resize3d)(state, input, nInputPlane, inputHeight, inputWidth);
   }
+
+  THCTensor_(free)(state, input);
 }
 
 void THNN_(SpatialConvolutionMM_updateGradInput)(
@@ -230,6 +233,8 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   THNN_(SpatialConvolutionMM_shapeCheck)
        (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW);
 
+  input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -307,6 +312,9 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
     THCTensor_(resize3d)(state, input, nInputPlane, inputHeight, inputWidth);
     THCTensor_(resize3d)(state, gradInput, nInputPlane, inputHeight, inputWidth);
   }
+
+  THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
 }
 
 void THNN_(SpatialConvolutionMM_accGradParameters)(
@@ -342,6 +350,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   THNN_(SpatialConvolutionMM_shapeCheck)
        (state, input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW);
 
+  input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -460,6 +470,9 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
     THCTensor_(resize3d)(state, gradOutput, nOutputPlane, outputHeight, outputWidth);
     THCTensor_(resize3d)(state, input, nInputPlane, inputHeight, inputWidth);
   }
+
+  THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
 }
 
 #endif

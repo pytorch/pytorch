@@ -203,6 +203,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
         inputHeight, inputWidth, outputHeight, outputWidth);
 
   input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   long nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
   long nOutputPlane = THCTensor_(size)(state,weight,1);
@@ -290,6 +291,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   THCTensor_(transpose)(state, weight, weight, 1, 2);
 
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
   if (freeWeight)
      THCTensor_(free)(state, weight);
 }
