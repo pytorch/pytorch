@@ -256,11 +256,32 @@ def CreateOperator(
     return operator
 
 
-def CreatePythonOperator(f, inputs, outputs, grad_f=None, *args, **kwargs):
-    token = C.register_python_op(f)
+def _RegisterPythonImpl(f, grad_f=None, pass_workspace=False):
+    token = C.register_python_op(f, pass_workspace)
     if grad_f:
         C.register_python_gradient_op(token, grad_f)
-    kwargs["token"] = token
+    return token
+
+
+def CreatePythonOperator(
+    f, inputs,
+    outputs,
+    grad_f=None,
+    pass_workspace=False,
+    *args,
+    **kwargs
+):
+    """
+    `f` should have a signature (inputs, outputs)
+
+    If `pass_workspace` is True, the signature is changed to
+    (inputs, outputs, workspace) where `workspace` is the workspace the op
+    is going to run on. This is potentially dangerous (as the op can manipulate
+    the workspace directly), use on your own risk.
+    """
+    kwargs["token"] = _RegisterPythonImpl(
+        f, grad_f, pass_workspace=pass_workspace
+    )
     return CreateOperator("Python", inputs, outputs, *args, **kwargs)
 
 
@@ -1314,11 +1335,17 @@ class Net(object):
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             op_type, *args, **kwargs)
 
-    def Python(self, f, grad_f=None):
+    def Python(self, f, grad_f=None, pass_workspace=False):
+        """
+        `f` should have a signature (inputs, outputs)
+
+        If `pass_workspace` is True, the signature is changed to
+        (inputs, outputs, workspace) where `workspace` is the workspace the op
+        is going to run on. This is potentially dangerous (as the op can
+        manipulate the workspace directly), use on your own risk.
+        """
         assert(IsOperator('Python'))
-        token = C.register_python_op(f)
-        if grad_f:
-            C.register_python_gradient_op(token, grad_f)
+        token = _RegisterPythonImpl(f, grad_f, pass_workspace=pass_workspace)
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             'Python', token=token, *args, **kwargs)
 
