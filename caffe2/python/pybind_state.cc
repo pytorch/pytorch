@@ -105,13 +105,22 @@ void switchWorkspaceInternal(const std::string& name, bool create_if_missing) {
   gCurrentWorkspaceName = name;
 }
 
+namespace python_detail {
+
+// Python Op implementations.
+struct Func {
+  py::object py_func;
+  bool needs_workspace;
+};
+using FuncRegistery = std::unordered_map<std::string, Func>;
+
 FuncRegistery& gRegistery() {
   // Always leak the objects registered here.
   static FuncRegistery* r = new FuncRegistery();
   return *r;
 }
 
-py::object& getOpFunc(const std::string& token) {
+const Func& getOpFunc(const std::string& token) {
   CAFFE_ENFORCE(
       gRegistery().count(token),
       "Python operator for ",
@@ -121,8 +130,72 @@ py::object& getOpFunc(const std::string& token) {
   return gRegistery()[token];
 }
 
-py::object& getGradientFunc(const std::string& token) {
+const Func& getGradientFunc(const std::string& token) {
   return getOpFunc(token + "_gradient");
+}
+}
+
+bool PythonOpBase::RunOnDevice() {
+  std::vector<TensorCPU*> inputs;
+  inputs.reserve(InputSize());
+  for (auto i = 0; i < InputSize(); ++i) {
+    inputs.push_back(const_cast<TensorCPU*>(&Input(i)));
+  }
+  std::vector<TensorCPU*> outputs;
+  outputs.reserve(OutputSize());
+  for (auto i = 0; i < OutputSize(); ++i) {
+    outputs.push_back(Output(i));
+  }
+  auto& pyFunc = getFunc();
+  {
+    // Acquire GIL for call to Python runtime.
+    py::gil_scoped_acquire g;
+    try {
+      if (pyFunc.needs_workspace) {
+        pyFunc.py_func(inputs, outputs, ws_);
+      } else {
+        pyFunc.py_func(inputs, outputs);
+      }
+    } catch (const py::error_already_set& e) {
+      LOG(ERROR) << "Exception encountered running PythonOp function: "
+                 << e.what() << "\nTraceback: ";
+      PyObject *type = nullptr, *value = nullptr, *trace = nullptr;
+      PyErr_Fetch(&type, &value, &trace);
+      PyTracebackObject* traceback =
+          reinterpret_cast<PyTracebackObject*>(trace);
+      vector<PyTracebackObject*> trace_vec;
+      while (traceback) {
+        trace_vec.push_back(traceback);
+        traceback = traceback->tb_next;
+      }
+      for (int i = trace_vec.size() - 1; i >= 0; --i) {
+        int line = trace_vec[i]->tb_lineno;
+        const char* filename =
+            PyString_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
+        const char* funcname =
+            PyString_AsString(trace_vec[i]->tb_frame->f_code->co_name);
+        LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
+                   << " (" << line << "): " << funcname;
+      }
+      Py_XDECREF(type);
+      Py_XDECREF(value);
+      Py_XDECREF(trace);
+      return false;
+    }
+  }
+  return true;
+}
+
+const python_detail::Func& PythonOp::getFunc() {
+  const std::string& token =
+      OperatorBase::GetSingleArgument<std::string>("token", "");
+  return python_detail::getOpFunc(token);
+}
+
+const python_detail::Func& PythonGradientOp::getFunc() {
+  const std::string& token =
+      OperatorBase::GetSingleArgument<std::string>("token", "");
+  return python_detail::getGradientFunc(token);
 }
 
 struct GetPythonGradient : public GradientMakerBase {
@@ -657,22 +730,27 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob->Deserialize(serialized.cast<std::string>()));
       });
 
-  m.def("register_python_op", [](py::object func) {
+  // we support 2 possible signatures of python op: (inputs, outputs) or
+  // (inputs, outputs, workspace)
+  m.def("register_python_op", [](py::object func, bool pass_workspace) {
+    using namespace python_detail;
     CAFFE_ENFORCE(func != py::none());
     const std::string name = func.attr("__name__").cast<std::string>();
     // Unique name since registry is never cleared.
     const std::string token = name + to_string(gRegistery().size());
     CAFFE_ENFORCE(gRegistery().find(name) == gRegistery().end());
-    gRegistery()[token] = func;
+    gRegistery()[token] = Func{func, pass_workspace};
     return token;
   });
 
   m.def(
       "register_python_gradient_op",
       [](const std::string& token, py::object func) {
+        using namespace python_detail;
         CAFFE_ENFORCE(func != py::none());
         CAFFE_ENFORCE(gRegistery().find(token) != gRegistery().end());
-        gRegistery()[token + "_gradient"] = func;
+        // For global sanity gradient ops shouldn't access workspace
+        gRegistery()[token + "_gradient"] = Func{func, false};
       });
 
 #define CAFFE2_CPU_FEATURE_SUPPORT(feature)      \

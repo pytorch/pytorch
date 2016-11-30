@@ -74,6 +74,21 @@ class PythonOpTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(x, y)
 
     @given(x=hu.tensor())
+    def test_workspace_manipulation(self, x):
+        """
+        Verify that python op can manipulate workspace directly
+        """
+        def f(inputs, outputs, ws):
+            fetched = ws.blobs['internal'].fetch()
+            np.testing.assert_almost_equal(fetched, x)
+
+        ws = workspace.C.Workspace()
+        net = core.Net("test")
+        net.GivenTensorFill([], ['internal'], values=x, shape=x.shape)
+        net.Python(f, pass_workspace=True)([], [])
+        ws.run(net)
+
+    @given(x=hu.tensor())
     def test_caught_exception_doesnt_terminate(self, x):
         def f(inputs, outputs):
             try:
