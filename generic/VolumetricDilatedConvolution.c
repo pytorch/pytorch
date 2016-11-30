@@ -29,6 +29,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   int nInputPlane = weight->size[1];
   int nOutputPlane = weight->size[0];
 
+  input = THTensor_(newContiguous)(input);
   int batch = 1;
   if (input->nDimension == 4) {
     THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match. Expected: %d, got %d", nInputPlane, input->size[0]);
@@ -136,6 +137,8 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
     THTensor_(resize4d)(output, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
 }
 
 void THNN_(VolumetricDilatedConvolution_updateGradInput)(
@@ -165,6 +168,8 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
   int nInputPlane = weight->size[1];
   int nOutputPlane = weight->size[0];
 
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   int batch = 1;
   if (input->nDimension == 4) {
     THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
@@ -239,6 +244,9 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
     THTensor_(resize4d)(gradInput, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
 }
 
 void THNN_(VolumetricDilatedConvolution_accGradParameters)(
@@ -271,6 +279,8 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   int nInputPlane = gradWeight->size[1];
   int nOutputPlane = gradWeight->size[0];
 
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   int batch = 1;
   if (input->nDimension == 4) {
     THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
@@ -365,6 +375,9 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
     THTensor_(resize4d)(gradOutput, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
 }
 
 #endif

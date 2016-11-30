@@ -80,6 +80,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
   int nInputPlane = weight->size[1];
   int nOutputPlane = weight->size[0];
 
+  input = THTensor_(newContiguous)(input);
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -175,6 +176,8 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     THTensor_(resize3d)(output, nOutputPlane, outputHeight, outputWidth);
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
 }
 
 void THNN_(SpatialDilatedConvolution_updateGradInput)(
@@ -197,6 +200,8 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
   int nInputPlane = weight->size[1];
   int nOutputPlane = weight->size[0];
 
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -266,6 +271,9 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
     THTensor_(resize3d)(gradInput, nInputPlane, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
 }
 
 
@@ -291,6 +299,8 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
   int nInputPlane = gradWeight->size[1];
   int nOutputPlane = gradWeight->size[0];
 
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -380,6 +390,9 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     THTensor_(resize3d)(gradOutput, nOutputPlane, outputHeight, outputWidth);
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
 }
 
 #endif

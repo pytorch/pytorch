@@ -114,6 +114,7 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
 		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
+  input = THTensor_(newContiguous)(input);
   int batch = 1;
   if (input->nDimension == 4)
   {
@@ -223,6 +224,8 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
     THTensor_(resize4d)(output, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
 }
 
 void THNN_(VolumetricFullConvolution_updateGradInput)(
@@ -252,6 +255,9 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
 
   THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
 		"4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
 
   int batch = 1;
   if (input->nDimension == 4)
@@ -331,6 +337,9 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
     THTensor_(resize4d)(gradInput, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
 }
 
 void THNN_(VolumetricFullConvolution_accGradParameters)(
@@ -362,6 +371,9 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
 
   THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
 		"4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
 
   int batch = 1;
   if (input->nDimension == 4)
@@ -461,6 +473,9 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
     THTensor_(resize4d)(gradOutput, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
+
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
 }
 
 #endif

@@ -224,6 +224,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
      inputHeight, inputWidth, outputHeight, outputWidth);
 
   input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   long nInputPlane = THTensor_(size)(weight,2)/(kW*kH);
   long nOutputPlane = THTensor_(size)(weight,1);
 
@@ -266,6 +267,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   THTensor_(transpose)(weight, weight, 1, 2);
 
   THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
   if (freeWeight)
     THTensor_(free)(weight);
 
