@@ -1,7 +1,7 @@
-from copy import copy
 from collections import defaultdict
 
 required = object()
+
 
 class Optimizer(object):
 
@@ -51,4 +51,3 @@ class Optimizer(object):
 
     def step(self, forward_closure):
         raise NotImplementedError
-
