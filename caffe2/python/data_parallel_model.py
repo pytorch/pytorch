@@ -38,8 +38,12 @@ def Parallelize_GPU(
       param_update_builder_fun:
                         Function that adds operators that are run after
                         gradient update, such as updating the weights and
-                        weight decaying.
-                        Signature: param_update_builder_fun(model)
+                        weight decaying. Function is also passed the learning
+                        rate scaling factor. You should multiple the learning
+                        rate by the factor to maintain invariant of same
+                        results with same total batch size, regardless of
+                        number of gpus.
+                        Signature: param_update_builder_fun(model, lr_scale)
       devices:          List of GPU ids, such as [0, 1, 2, 3],
       rendezvous:       used for rendezvous in distributed computation, if None
                         then only one node is used. To create rendezvous,
@@ -108,11 +112,13 @@ def Parallelize_GPU(
     )
 
     log.info("Post-iteration operators for updating params")
+    num_shards = 1 if rendezvous is None else rendezvous['num_shards']
+    lr_scale = 1.0 / (len(devices) * num_shards)
     for device in devices:
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
         with core.DeviceScope(device_opt):
             with core.NameScope("gpu_{}".format(device)):
-                param_update_builder_fun(model_helper_obj)
+                param_update_builder_fun(model_helper_obj, lr_scale)
 
     _AnalyzeOperators(model_helper_obj)
 
@@ -393,9 +399,10 @@ def _AllReduceGradientsSingleHost(devices, model):
     # Pick GPU #0 as a master GPU.
     master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
     last_out = None
-    with core.DeviceScope(master_device_opt):
-        # Group by grads for reduce.
-        for grad_name in reverse_ordered_grads:
+
+    for grad_name in reverse_ordered_grads:
+        with core.DeviceScope(master_device_opt):
+            # Group by grads for reduce.
             grads_group = model._device_grouped_blobs[grad_name].values()
             assert len(grads_group) == len(devices), \
                 "Each GPU from {}, should have a copy of {}.".format(
@@ -405,6 +412,7 @@ def _AllReduceGradientsSingleHost(devices, model):
                 grads_group,
                 control_input=last_out,
             )
+
             # last_out is used to serialize the execution of nccls
             last_out = grads_group[0]
 
