@@ -16,7 +16,8 @@ class CMulTable(Module):
         return self.output
 
     def updateGradInput_efficient(self, input, gradOutput):
-        self.tout = self.tout or input[0].new()
+        if self.tout is None:
+              self.tout = input[0].new()
         self.tout.resize_as_(self.output)
         for i in range(len(input)):
             if len(self.gradInput) <= i:

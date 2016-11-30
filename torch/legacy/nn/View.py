@@ -27,13 +27,15 @@ class View(Module):
         self.resetSize(*args)
 
     def updateOutput(self, input):
-        self.output = self.output or input.new()
+        if self.output is None:
+              self.output = input.new()
         self.output = input.view(self.size)
         return self.output
 
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput = self.gradInput or gradOutput.new()
+        if self.gradInput is None:
+              self.gradInput = gradOutput.new()
         self.gradInput = gradOutput.view(input.size())
         return self.gradInput
 

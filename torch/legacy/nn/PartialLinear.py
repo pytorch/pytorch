@@ -55,16 +55,17 @@ class PartialLinear(Module):
 
     def updateOutput(self, input):
         self.output.set_(self.network.forward([input, self.partition]))
-        if self.bias:
+        if self.bias is not None:
             self.output.add_(torch.index_select(self.bias, 1, self.partition).expand_as(self.output))
-            self.addBuffer = self.addBuffer or input.new()
+            if self.addBuffer is None:
+                  self.addBuffer = input.new()
             if self.addBuffer.nelement() != input.size(0):
                 self.addBuffer.resize_(input.size(0)).fill_(1)
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if self.gradInput:
+        if self.gradInput is not None:
            self.network.updateGradInput([input, self.partition], gradOutput)
            self.gradInput.set_(self.network.gradInput[0])
 
@@ -72,8 +73,9 @@ class PartialLinear(Module):
 
     def accGradParameters(self, input, gradOutput, scale=1):
         self.network.accGradParameters([input, self.partition], gradOutput, scale)
-        if self.bias:
-            self.buffer = self.buffer or input.new()
+        if self.bias is not None:
+            if self.buffer is None:
+                self.buffer = input.new()
             self.buffer.resize_(gradOutput.size(1))
             torch.mv(self.buffer, gradOutput.t(), self.addBuffer).mul_(scale)
             self.gradBias.index_add_(

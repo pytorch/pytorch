@@ -9,7 +9,8 @@ class LogSigmoid(Module):
         self.buffer = None
 
     def updateOutput(self, input):
-        self.buffer = self.buffer or input.new()
+        if self.buffer is None:
+              self.buffer = input.new()
         self._backend.LogSigmoid_updateOutput(
             self._backend.library_state,
             input,

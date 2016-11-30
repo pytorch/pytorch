@@ -6,9 +6,9 @@ class SpatialReflectionPadding(Module):
     def __init__(self, pad_l, pad_r=None, pad_t=None, pad_b=None):
         super(SpatialReflectionPadding, self).__init__()
         self.pad_l = pad_l
-        self.pad_r = pad_r or self.pad_l
-        self.pad_t = pad_t or self.pad_l
-        self.pad_b = pad_b or self.pad_l
+        self.pad_r = pad_r if pad_r is not None else pad_l
+        self.pad_t = pad_t if pad_t is not None else pad_l
+        self.pad_b = pad_b if pad_b is not None else pad_l
 
     def updateOutput(self, input):
         assert input.dim() == 4

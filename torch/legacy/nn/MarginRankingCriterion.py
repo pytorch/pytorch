@@ -17,7 +17,8 @@ class MarginRankingCriterion(Criterion):
         if input[0].size(0) == 1:
            self.output = max(0, -y*(input[0][0]-input[1][0]) + self.margin)
         else:
-           self._output = self._output or input[0].clone()
+           if self._output is None:
+                  self._output = input[0].clone()
            self._output.resize_as_(input[0])
            self._output.copy_(input[0])
 
@@ -44,7 +45,8 @@ class MarginRankingCriterion(Criterion):
                 self.gradInput[0][0] = -y
                 self.gradInput[1][0] = y
         else:
-            self.dist = self.dist or input[0].new()
+            if self.dist is None:
+                  self.dist = input[0].new()
             self.dist = self.dist.resize_as_(input[0]).copy_(input[0])
             dist = self.dist
 
@@ -52,7 +54,8 @@ class MarginRankingCriterion(Criterion):
             dist.mul_(-1).mul_(y)
             dist.add_(self.margin)
 
-            self.mask = self.mask or input[0].new()
+            if self.mask is None:
+                  self.mask = input[0].new()
             self.mask = self.mask.resize_as_(input[0]).copy_(dist)
             mask = self.mask
 

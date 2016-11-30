@@ -26,9 +26,12 @@ class MixtureTable(Module):
         gaterInput, expertInputs = input
 
         # buffers
-        self._gaterView = self._gaterView or input[0].new()
-        self._expert = self._expert or input[0].new()
-        self._expertView = self._expertView or input[0].new()
+        if self._gaterView is None:
+              self._gaterView = input[0].new()
+        if self._expert is None:
+              self._expert = input[0].new()
+        if self._expertView is None:
+              self._expertView = input[0].new()
 
         self.dimG = 1
         batchSize = gaterInput.size(0)
@@ -79,9 +82,12 @@ class MixtureTable(Module):
         gaterGradInput, expertGradInputs = self.gradInput
 
         # buffers
-        self._sum = self._sum or input[0].new()
-        self._expertView2 = self._expertView2 or input[0].new()
-        self._expert2 = self._expert2 or input[0].new()
+        if self._sum is None:
+              self._sum = input[0].new()
+        if self._expertView2 is None:
+              self._expertView2 = input[0].new()
+        if self._expert2 is None:
+              self._expert2 = input[0].new()
 
         if self.table:
             if not self.backwardSetup:

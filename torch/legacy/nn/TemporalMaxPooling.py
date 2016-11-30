@@ -11,7 +11,8 @@ class TemporalMaxPooling(Module):
         self.indices = None
 
     def updateOutput(self, input):
-        self.indices = self.indices or input.new()
+        if self.indices is None:
+              self.indices = input.new()
         self._backend.TemporalMaxPooling_updateOutput(
             self._backend.library_state,
             input,
@@ -24,7 +25,7 @@ class TemporalMaxPooling(Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
              return
         self._backend.TemporalMaxPooling_updateGradInput(
             self._backend.library_state,

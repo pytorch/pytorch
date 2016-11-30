@@ -24,9 +24,12 @@ class Normalize(Module):
         assert input.dim() == 2
         input_size = input.size()
 
-        self._output = self._output or input.new()
-        self.norm = self.norm or input.new()
-        self.buffer = self.buffer or input.new()
+        if self._output is None:
+              self._output = input.new()
+        if self.norm is None:
+              self.norm = input.new()
+        if self.buffer is None:
+              self.buffer = input.new()
 
         self._output.resize_as_(input)
 
@@ -40,7 +43,8 @@ class Normalize(Module):
             torch.max(self.norm, self._indices, self.buffer, 1)
             self.norm.add_(self.eps)
         else:
-            self.normp = self.normp or input.new()
+            if self.normp is None:
+                  self.normp = input.new()
             if self.p % 2 != 0:
                 torch.abs(self.buffer, input).pow_(self.p)
             else:
@@ -62,8 +66,10 @@ class Normalize(Module):
         n = input.size(0) # batch size
         d = input.size(1) # dimensionality of vectors
 
-        self._gradInput = self._gradInput or input.new()
-        self.cross = self.cross or input.new()
+        if self._gradInput is None:
+              self._gradInput = input.new()
+        if self.cross is None:
+              self.cross = input.new()
         # compute diagonal term with gradOutput
         self._gradInput.resize_(n, d)
         if self.p == float('inf'):
@@ -98,7 +104,8 @@ class Normalize(Module):
         # instead of having a huge temporary matrix (b1*b2),
         #: the computations as b1*(b2*gradOutput). This avoids redundant
         # computation and also a huge buffer of size n*d^2
-        self.buffer2 = self.buffer2 or input.new() # nxd
+        if self.buffer2 is None:
+              self.buffer2 = input.new() # nxd
         torch.mul(self.buffer2, input, gradOutput)
         torch.sum(self.cross, self.buffer2, 1)
 

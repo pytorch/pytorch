@@ -13,8 +13,10 @@ class CSubTable(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput[0] = self.gradInput[0] or input[0].new()
-        self.gradInput[1] = self.gradInput[1] or input[1].new()
+        if self.gradInput[0] is None:
+              self.gradInput[0] = input[0].new()
+        if self.gradInput[1] is None:
+              self.gradInput[1] = input[1].new()
         self.gradInput[0].resize_as_(input[0]).copy_(gradOutput)
         self.gradInput[1].resize_as_(input[1]).copy_(gradOutput).mul_(-1)
 

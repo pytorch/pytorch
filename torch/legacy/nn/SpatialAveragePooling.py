@@ -51,7 +51,7 @@ class SpatialAveragePooling(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if self.gradInput:
+        if self.gradInput is not None:
             self._backend.SpatialAveragePooling_updateGradInput(
                 self._backend.library_state,
                 input,

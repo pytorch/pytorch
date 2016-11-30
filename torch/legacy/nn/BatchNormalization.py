@@ -80,13 +80,15 @@ class BatchNormalization(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
-            self._input = self._input or input.new()
+            if self._input is None:
+                  self._input = input.new()
             self._input.resize_as_(input).copy_(input)
             input = self._input
 
         if gradOutput:
             if not gradOutput.is_contiguous():
-                self._gradOutput = self._gradOutput or gradOutput.new()
+                if self._gradOutput is None:
+                      self._gradOutput = gradOutput.new()
                 self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
 
@@ -98,9 +100,11 @@ class BatchNormalization(Module):
         input = self._makeContiguous(input)[0]
 
         self.output.resize_as_(input)
-        self.save_mean = self.save_mean or input.new()
+        if self.save_mean is None:
+              self.save_mean = input.new()
         self.save_mean.resize_as_(self.running_mean)
-        self.save_std = self.save_std or input.new()
+        if self.save_std is None:
+              self.save_std = input.new()
         self.save_std.resize_as_(self.running_var)
 
         self._backend.BatchNormalization_updateOutput(

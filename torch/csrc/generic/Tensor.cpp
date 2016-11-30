@@ -628,10 +628,17 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+Py_ssize_t THPTensor_(length)(THPTensor *self)
+{
+  if (self->cdata->nDimension == 0)
+    return 0;
+  return self->cdata->size[0];
+}
+
 #include "TensorMethods.cpp"
 
 static PyMappingMethods THPTensor_(mappingmethods) = {
-  NULL,
+  (lenfunc)THPTensor_(length),
   (binaryfunc)THPTensor_(getValue)<false>,
   (objobjargproc)THPTensor_(setValue)<false>
 };

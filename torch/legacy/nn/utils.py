@@ -110,7 +110,8 @@ def addSingletondimension(*args):
         return view.unsqueeze_(dim)
 
 def contiguousView(output, input, *args):
-    output = output or input.new()
+    if output is None:
+        output = input.new()
     if input.is_contiguous():
         output.set_(input.view(*args))
     else:

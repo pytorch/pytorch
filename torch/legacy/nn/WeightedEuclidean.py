@@ -51,16 +51,25 @@ class WeightedEuclidean(Module):
 
     def updateOutput(self, input):
         # lazy-initialize
-        self._diagCov = self._diagCov or self.output.new()
+        if self._diagCov is None:
+              self._diagCov = self.output.new()
 
-        self._input = self._input or input.new()
-        self._weight = self._weight or self.weight.new()
-        self._expand = self._expand or self.output.new()
-        self._expand2 = self._expand or self.output.new()
-        self._expand3 = self._expand3 or self.output.new()
-        self._repeat = self._repeat or self.output.new()
-        self._repeat2 = self._repeat2 or self.output.new()
-        self._repeat3 = self._repeat3 or self.output.new()
+        if self._input is None:
+              self._input = input.new()
+        if self._weight is None:
+              self._weight = self.weight.new()
+        if self._expand is None:
+              self._expand = self.output.new()
+        if self._expand2 is None:
+              self._expand2 = self.output.new()
+        if self._expand3 is None:
+              self._expand3 = self.output.new()
+        if self._repeat is None:
+              self._repeat = self.output.new()
+        if self._repeat2 is None:
+              self._repeat2 = self.output.new()
+        if self._repeat3 is None:
+              self._repeat3 = self.output.new()
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -106,13 +115,17 @@ class WeightedEuclidean(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
            return
 
-        self._div = self._div or input.new()
-        self._output = self._output or self.output.new()
-        self._expand4 = self._expand4 or input.new()
-        self._gradOutput = self._gradOutput or input.new()
+        if self._div is None:
+              self._div = input.new()
+        if self._output is None:
+              self._output = self.output.new()
+        if self._expand4 is None:
+              self._expand4 = input.new()
+        if self._gradOutput is None:
+              self._gradOutput = input.new()
 
         if not self.fastBackward:
            self.updateOutput(input)
@@ -193,7 +206,8 @@ class WeightedEuclidean(Module):
 
             self.gradDiagCov.add_(self._repeat2)
         elif input.dim() == 2:
-            self._sum = self._sum or input.new()
+            if self._sum is None:
+                  self._sum = input.new()
             torch.sum(self._sum, self._repeat2, 0)
             self._sum.resize_(inputSize, outputSize)
             self.gradWeight.add_(-scale, self._sum)

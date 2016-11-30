@@ -10,7 +10,8 @@ class MultiLabelMarginCriterion(Criterion):
         self.output_tensor = None
 
     def updateOutput(self, input, target):
-        self.output_tensor = self.output_tensor or input.new(1)
+        if self.output_tensor is None:
+              self.output_tensor = input.new(1)
         target = target.long()
         self._backend.MultiLabelMarginCriterion_updateOutput(
             self._backend.library_state,

@@ -26,7 +26,7 @@ class SplitTable(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
         dimension = self._getPositiveDimension(input)
         slices = input.size(dimension)

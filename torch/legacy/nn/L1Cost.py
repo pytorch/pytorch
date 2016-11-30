@@ -10,7 +10,8 @@ class L1Cost(Criterion):
 
     def updateOutput(self, input, target=None):
         assert target is None
-        self.output_tensor = self.output_tensor or input.new(1)
+        if self.output_tensor is None:
+              self.output_tensor = input.new(1)
         self._backend.L1Cost_updateOutput(
             self._backend.library_state,
             input,

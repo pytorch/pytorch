@@ -57,13 +57,15 @@ class VolumetricFullConvolution(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
-           self._input = self._input or input.new()
+           if self._input is None:
+                  self._input = input.new()
            self._input.resize_as_(input).copy_(input)
            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.is_contiguous():
-                self._gradOutput = self._gradOutput or gradOutput.new()
+                if self._gradOutput is None:
+                      self._gradOutput = gradOutput.new()
                 self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
@@ -142,7 +144,8 @@ class VolumetricFullConvolution(Module):
 
         if isinstance(input, list):
             # Create a zero tensor to be expanded and used as gradInput[1].
-            self.zeroScalar = self.zeroScalar or input[1].new(1).zero_()
+            if self.zeroScalar is None:
+                  self.zeroScalar = input[1].new(1).zero_()
             self.ones.resize_(input[1].dim()).fill_(1)
             zeroTensor =  self.zeroScalar.view(self.ones.tolist()).expand_as(input[1])
             self.gradInput = [self.gradInput, zeroTensor]

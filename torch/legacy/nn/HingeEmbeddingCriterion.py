@@ -10,7 +10,8 @@ class HingeEmbeddingCriterion(Criterion):
         self.buffer = None
 
     def updateOutput(self, input, y):
-        self.buffer = self.buffer or input.new()
+        if self.buffer is None:
+              self.buffer = input.new()
         self.buffer.resize_as_(input).copy_(input)
         self.buffer[torch.eq(y, -1.)] = 0
         self.output = self.buffer.sum()

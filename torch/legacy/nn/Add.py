@@ -41,7 +41,7 @@ class Add(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if self.gradInput:
+        if self.gradInput is not None:
            self.gradInput.resize_as_(gradOutput).copy_(gradOutput)
            return self.gradInput
 

@@ -11,7 +11,8 @@ class WeightedMSECriterion(Criterion):
         self.sizeAverage = sizeAverage
 
     def updateOutput(self, input, target):
-        self.buffer = self.buffer or input.new()
+        if self.buffer is None:
+              self.buffer = input.new()
         self.buffer.resize_as_(input).copy_(target)
         if input.dim() - 1 == self.weight.dim():
             for i in range(input.size(0)):
@@ -19,7 +20,8 @@ class WeightedMSECriterion(Criterion):
         else:
             self.buffer.mul_(self.weight)
 
-        self.output_tensor = self.output_tensor or input.new(1)
+        if self.output_tensor is None:
+              self.output_tensor = input.new(1)
         self._backend.MSECriterion_updateOutput(
             self._backend.library_state,
             input,

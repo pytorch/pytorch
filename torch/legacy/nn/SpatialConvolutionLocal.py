@@ -18,7 +18,7 @@ class SpatialConvolutionLocal(Module):
         self.dW = dW
         self.dH = dH
         self.padW = padW
-        self.padH = padH or self.padW
+        self.padH = padH if padH is not None else padW
         self.oW = int(math.floor((self.padW * 2 + iW - self.kW) / self.dW)) + 1
         self.oH = int(math.floor((self.padH * 2 + iH - self.kH) / self.dH)) + 1
         assert 1 <= self.oW and 1 <= self.oH
@@ -43,13 +43,15 @@ class SpatialConvolutionLocal(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
-           self._input = self._input or input.new()
+           if self._input is None:
+               self._input = input.new()
            self._input.resize_as_(input).copy_(input)
            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.is_contiguous():
-                self._gradOutput = self._gradOutput or gradOutput.new()
+                if self._gradOutput is None:
+                    self._gradOutput = gradOutput.new()
                 self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
@@ -94,8 +96,10 @@ class SpatialConvolutionLocal(Module):
             raise RuntimeError('3D or 4D(batch mode) tensor expected')
 
     def updateOutput(self, input):
-        self.finput = self.finput or input.new()
-        self.fgradInput = self.fgradInput or input.new()
+        if self.finput is None:
+              self.finput = input.new()
+        if self.fgradInput is None:
+              self.fgradInput = input.new()
         self._checkInputSize(input)
         self._viewWeight()
         input = self._makeContiguous(input)
@@ -117,7 +121,7 @@ class SpatialConvolutionLocal(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
 
         self._checkInputSize(input)

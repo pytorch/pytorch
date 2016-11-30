@@ -18,7 +18,8 @@ class SpatialCrossMapLRN(Module):
     def updateOutput(self, input):
         assert input.dim() == 4
 
-        self.scale = self.scale or input.new()
+        if self.scale is None:
+              self.scale = input.new()
         if input.type() == 'torch.cuda.FloatTensor':
             self._backend.SpatialCrossMapLRN_updateOutput(
                 self._backend.library_state,
@@ -95,8 +96,10 @@ class SpatialCrossMapLRN(Module):
             inputHeight = input.size(2)
             inputWidth  = input.size(3)
 
-            self.paddedRatio = self.paddedRatio or input.new()
-            self.accumRatio = self.accumRatio or input.new()
+            if self.paddedRatio is None:
+                  self.paddedRatio = input.new()
+            if self.accumRatio is None:
+                  self.accumRatio = input.new()
             self.paddedRatio.resize_(channels + self.size - 1, inputHeight, inputWidth)
             self.accumRatio.resize_(inputHeight, inputWidth)
 

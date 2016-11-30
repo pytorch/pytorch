@@ -31,8 +31,10 @@ class Cosine(Module):
         inputSize = self.weight.size(1)
         outputSize = self.weight.size(0)
 
-        self._weightNorm = self._weightNorm or self.weight.new()
-        self._inputNorm = self._inputNorm or self.weight.new()
+        if self._weightNorm is None:
+              self._weightNorm = self.weight.new()
+        if self._inputNorm is None:
+              self._inputNorm = self.weight.new()
 
         # y_j = (w_j * x) / ( || w_j || * || x || )
 
@@ -55,7 +57,7 @@ class Cosine(Module):
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 2
 
-        if not self.gradInput:
+        if self.gradInput is None:
            return
 
         inputSize = self.weight.size(1)
@@ -75,8 +77,10 @@ class Cosine(Module):
         inputNorm = self._inputNorm.expand_as(input)
         weightNorm = self._weightNorm.view(1, outputSize).expand_as(gradOutput)
 
-        self._gradOutput = self._gradOutput or gradOutput.new()
-        self._sum = self._sum or input.new()
+        if self._gradOutput is None:
+              self._gradOutput = gradOutput.new()
+        if self._sum is None:
+              self._sum = input.new()
 
         self.gradInput.copy_(input).div_(inputNorm)
         self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
@@ -102,11 +106,14 @@ class Cosine(Module):
         dw_ji   || w_j || * || x ||         || w_j ||^2
         """
 
-        self._weight = self._weight or self.weight.new()
-        self._sum = self._sum or input.new()
+        if self._weight is None:
+              self._weight = self.weight.new()
+        if self._sum is None:
+              self._sum = input.new()
 
         self._weight.resize_as_(self.weight).copy_(self.weight)
-        self._gradOutput = self._gradOutput or gradOutput.new()
+        if self._gradOutput is None:
+              self._gradOutput = gradOutput.new()
         self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
         self._gradOutput.mul_(self.output)
         torch.sum(self._sum, self._gradOutput, 0)

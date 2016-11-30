@@ -20,9 +20,11 @@ class SpatialDivisiveNormalization(Module):
 
         # get args
         self.nInputPlane = nInputPlane
-        self.kernel = kernel or torch.Tensor(9, 9).fill_(1)
+        if kernel is None:
+            kernel = torch.Tensor(9, 9).fill_(1)
+        self.kernel = kernel
         self.threshold = threshold
-        self.thresval = thresval or threshold or 1e-4
+        self.thresval = thresval if thresval is not None else threshold
         kdim = self.kernel.ndimension()
 
         # check args
@@ -101,10 +103,12 @@ class SpatialDivisiveNormalization(Module):
         # compute side coefficients
         dim = input.dim()
         if self.localstds.dim() != self.coef.dim() or (input.size(dim-1) != self.coef.size(dim-1)) or (input.size(dim-2) != self.coef.size(dim-2)):
-            self.ones = self.ones or input.new()
+            if self.ones is None:
+                  self.ones = input.new()
             self.ones.resize_as_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
-            self._coef = self._coef or input.new()
+            if self._coef is None:
+              self._coef = input.new()
             self._coef.resize_as_(coef).copy_(coef) # make contiguous for view
             self.coef = self._coef.view(1, *self._coef.size()).expand_as(self.localstds)
 

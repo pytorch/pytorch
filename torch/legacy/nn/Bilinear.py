@@ -58,7 +58,8 @@ class Bilinear(Module):
         self._assertInput(input)
 
         # set up buffer:
-        self.buff2 = self.buff2 or input[0].new()
+        if self.buff2 is None:
+              self.buff2 = input[0].new()
         self.buff2.resize_as_(input[1])
 
         # compute output scores:
@@ -75,7 +76,7 @@ class Bilinear(Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
 
         self._assertInputGradOutput(input, gradOutput)
@@ -93,7 +94,8 @@ class Bilinear(Module):
 
         #: remaining slices of weight tensor
         if self.weight.size(0) > 1:
-            self.buff1 = self.buff1 or input[0].new()
+            if self.buff1 is None:
+                  self.buff1 = input[0].new()
             self.buff1.resize_as_(input[0])
 
             for k in range(1, self.weight.size(0)):
@@ -115,7 +117,8 @@ class Bilinear(Module):
         self._assertInputGradOutput(input, gradOutput)
 
         # make sure we have buffer:
-        self.buff1 = self.buff1 or input[0].new()
+        if self.buff1 is None:
+              self.buff1 = input[0].new()
         self.buff1.resize_as_(input[0])
 
         # accumulate parameter gradients:

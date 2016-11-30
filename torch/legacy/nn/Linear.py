@@ -34,7 +34,8 @@ class Linear(Module):
 
     def _updateAddBuffer(self, input):
         nframe = input.size(0)
-        self.addBuffer = self.addBuffer or input.new()
+        if self.addBuffer is None:
+              self.addBuffer = input.new()
         if self.addBuffer.nelement() != nframe:
             self.addBuffer.resize_(nframe).fill_(1)
 
@@ -54,7 +55,7 @@ class Linear(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not self.gradInput:
+        if self.gradInput is None:
             return
 
         nelement = self.gradInput.nelement()
