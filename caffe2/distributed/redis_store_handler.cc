@@ -46,6 +46,9 @@ void RedisStoreHandler::set(const std::string& name, const std::string& data) {
 }
 
 std::string RedisStoreHandler::get(const std::string& name) {
+  // Block until key is set
+  wait({name});
+
   auto key = compoundKey(name);
   void* ptr = redisCommand(redis_, "GET %b", key.c_str(), (size_t)key.size());
   CAFFE_ENFORCE_NE(ptr, (void*)nullptr, redis_->errstr);
