@@ -179,14 +179,14 @@ def Train(args):
         return [loss]
 
     # SGD
-    def add_parameter_update_ops(model):
+    def add_parameter_update_ops(model, lr_scale):
         model.AddWeightDecay(args.weight_decay)
         ITER = model.Iter("ITER")
         stepsz = int(30 * args.epoch_size / total_batch_size)
         LR = model.net.LearningRate(
             [ITER],
             "LR",
-            base_lr=args.base_learning_rate,
+            base_lr=args.base_learning_rate * lr_scale,
             policy="step",
             stepsize=stepsz,
             gamma=0.1,
