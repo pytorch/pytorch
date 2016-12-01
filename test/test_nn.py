@@ -1108,7 +1108,7 @@ new_module_tests = [
         module_name='Embedding',
         constructor_args=(4, 3),
         input=Variable(
-            torch.randperm(2).repeat(1, 2).long(),
+            torch.randperm(2).repeat(1, 2),
             requires_grad=False
         ),
         jacobian_input=False

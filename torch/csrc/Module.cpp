@@ -423,7 +423,6 @@ IMPLEMENT_STATELESS(exponential)
 IMPLEMENT_STATELESS(random)
 IMPLEMENT_STATELESS(geometric)
 IMPLEMENT_STATELESS(bernoulli)
-IMPLEMENT_STATELESS(randperm)
 IMPLEMENT_STATELESS(unfold)
 IMPLEMENT_STATELESS(range)
 IMPLEMENT_STATELESS(gather)
@@ -510,6 +509,18 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
       tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
   THPObjectPtr method = PyObject_GetAttrString(methods, "nonzero");
   THPUtils_assert(method, "Type %s doesn't implement stateless method nonzero",
+      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
+  return PyObject_Call(method, args, NULL);
+}
+
+static PyObject * THPModule_randperm(PyObject *_unused, PyObject *args)
+{
+  PyObject *tensor = THPLongTensorClass;
+  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
+  THPUtils_assert(methods, "Type %s doesn't implement stateless methods",
+      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
+  THPObjectPtr method = PyObject_GetAttrString(methods, "randperm");
+  THPUtils_assert(method, "Type %s doesn't implement stateless method randperm",
       tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
   return PyObject_Call(method, args, NULL);
 }
