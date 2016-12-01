@@ -14,7 +14,8 @@
 #include "test_utilities.h"
 
 int errors = 0;
-double min_bw = 10000.0;
+double avg_bw = 0.0;
+int avg_count = 0;
 bool is_reduction = false;
 
 template<typename T>
@@ -89,7 +90,9 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
         maxDelta);
 
     if (maxDelta > deltaMaxValue(type, is_reduction)) errors++;
-    if (busbw < min_bw) min_bw = busbw;
+    avg_bw += busbw;
+    avg_count++;
+
   }
 
   for (int i = 0; i < nDev; ++i) {
@@ -218,12 +221,13 @@ int main(int argc, char* argv[]) {
   free(comms);
 
   char* str = getenv("NCCL_TESTS_MIN_BW");
-  double check_min_bw = str ? atof(str) : -1;
+  double check_avg_bw = str ? atof(str) : -1;
+  avg_bw /= avg_count;
 
   printf(" Out of bounds values : %d %s\n", errors, errors ? "FAILED" : "OK");
-  printf(" Min bus bandwidth    : %g %s\n", min_bw, check_min_bw == -1 ? "" : (min_bw < check_min_bw ? "FAILED" : "OK"));
+  printf(" Avg bus bandwidth    : %g %s\n", avg_bw, check_avg_bw == -1 ? "" : (avg_bw < check_avg_bw ? "FAILED" : "OK"));
   printf("\n");
-  if (errors || min_bw < check_min_bw)
+  if (errors || avg_bw < check_avg_bw)
     exit(EXIT_FAILURE);
   else 
     exit(EXIT_SUCCESS);
