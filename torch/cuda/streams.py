@@ -80,17 +80,24 @@ class Event(object):
 
         ptr = ctypes.c_void_p()
         self._cudart = cudart()
-        check_error(self._cudart.cudaEventCreateWithFlags(ctypes.byref(ptr), flags))
+        check_error(self._cudart.cudaEventCreateWithFlags(
+            ctypes.byref(ptr), ctypes.c_uint(flags)))
         self._as_parameter_ = ptr
 
     def __del__(self):
-        check_error(self._cudart.cudaEventDestroy(self._as_parameter_))
-        del self._as_parameter_
+        if hasattr(self, '_as_parameter_'):
+            check_error(self._cudart.cudaEventDestroy(self._as_parameter_))
+            del self._as_parameter_
 
     def record(self, stream=None):
         if stream is None:
             stream = torch.cuda.current_stream()
         stream.record_event(self)
+
+    def wait(self, stream=None):
+        if stream is None:
+            stream = torch.cuda.current_stream()
+        stream.wait_event(self)
 
     def query(self):
         res = cudart().cudaEventQuery(self)

@@ -267,6 +267,20 @@ simple_pointwise_float = [
 for fn in simple_pointwise_float:
     tests.append((fn, small_3d, lambda t: [], None, float_types))
 
+_cycles_per_ms = None
+def get_cycles_per_ms():
+    """Approximate number of cycles per millisecond for torch.cuda._sleep"""
+    global _cycles_per_ms
+    if _cycles_per_ms is None:
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        torch.cuda._sleep(1000000)
+        end.record()
+        end.synchronize()
+        _cycles_per_ms = 1000000 / start.elapsed_time(end)
+    return _cycles_per_ms
+
 def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
     def tmp(self):
         cpu_tensor = tensor_constructor(t)
@@ -567,16 +581,33 @@ class TestCuda(TestCase):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)
         self.assertTrue(event.query())
-        # copy 10 MB tensor from CPU-GPU which should take some time
-        tensor1 = torch.ByteTensor(10000000).pin_memory()
         start_event = torch.cuda.Event(enable_timing=True)
         stream.record_event(start_event)
-        tensor2 = tensor1.cuda(async=True)
+        torch.cuda._sleep(int(50 * get_cycles_per_ms()))
         stream.record_event(event)
         self.assertFalse(event.query())
         event.synchronize()
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
+
+    def test_caching_pinned_memory(self):
+        cycles_per_ms = get_cycles_per_ms()
+
+        # check that allocations are re-used after deletion
+        t = torch.FloatTensor([1]).pin_memory()
+        ptr = t.data_ptr()
+        del t
+        t = torch.FloatTensor([1]).pin_memory()
+        self.assertEqual(t.data_ptr(), ptr, 'allocation not reused')
+
+        # check that the allocation is not re-used if it's in-use by a copy
+        gpu_tensor = torch.cuda.FloatTensor([0])
+        torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
+        gpu_tensor.copy_(t, async=True)
+        del t
+        t = torch.FloatTensor([1]).pin_memory()
+        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+        self.assertEqual(list(gpu_tensor), [1])
 
 
 for decl in tests:
