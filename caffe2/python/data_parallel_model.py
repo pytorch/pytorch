@@ -129,6 +129,7 @@ def Parallelize_GPU(
             devices,
             model_helper_obj,
             model_helper_obj.param_init_net,
+            model_helper_obj.param_init_net,
             rendezvous,
         )
 
@@ -174,13 +175,17 @@ def FinalizeAfterCheckpoint(model, blobs, sync_iter=True):
         model._checkpoint_net.RunAllOnGPU()
 
         if (model._rendezvous is not None):
+            checkpoint_init_net = core.Net("checkpoint_init_net")
+            checkpoint_init_net.RunAllOnGPU()
             _AddDistributedParameterSync(
                 devices,
                 model,
+                checkpoint_init_net,
                 model._checkpoint_net,
                 model._rendezvous,
                 uniq_blob_names,
             )
+            workspace.RunNetOnce(checkpoint_init_net)
 
         # Setup sync of initial params
         _SyncParams(devices, model, model._checkpoint_net, uniq_blob_names)
@@ -193,10 +198,11 @@ def FinalizeAfterCheckpoint(model, blobs, sync_iter=True):
                         "gpu_{}/ITER".format(devices[0]),
                         "gpu_{}/ITER".format(gpu_idx),
                     )
+        workspace.CreateNet(model._checkpoint_net)
 
     # Run the sync
     log.info("Run checkpoint net")
-    workspace.RunNetOnce(model._checkpoint_net)
+    workspace.RunNet(model._checkpoint_net.Proto().name)
 
 
 def _Broadcast(devices, model, net, param):
@@ -223,6 +229,7 @@ def _SyncParams(devices, model, net, unique_param_names=None):
 def _AddDistributedParameterSync(
     devices,
     model,
+    init_net,
     net,
     rendezvous,
     uniq_param_names=None,
@@ -234,7 +241,7 @@ def _AddDistributedParameterSync(
 
     # ITER is in CPU scope :(
     with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-        comm_world = net.CreateCommonWorld(
+        comm_world = init_net.CreateCommonWorld(
             rendezvous['kv_handler'],
             "iter_cw",
             name=net.Proto().name + ".iter_cw_op",
@@ -255,7 +262,7 @@ def _AddDistributedParameterSync(
             param_cpu = net.CopyGPUToCPU(param, str(param) + "cpu")
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-            comm_world = net.CreateCommonWorld(
+            comm_world = init_net.CreateCommonWorld(
                 rendezvous['kv_handler'],
                 "{}_cw".format(param_name),
                 name=net.Proto().name + ".{}_cw_op".format(param_name),
