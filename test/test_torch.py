@@ -781,7 +781,7 @@ class TestTorch(TestCase):
     def test_randperm(self):
         _RNGState = torch.get_rng_state()
         res1 = torch.randperm(100)
-        res2 = torch.Tensor()
+        res2 = torch.LongTensor()
         torch.set_rng_state(_RNGState)
         torch.randperm(res2, 100)
         self.assertEqual(res1, res2, 0)
@@ -1905,7 +1905,7 @@ class TestTorch(TestCase):
         num_copy, num_dest = 3, 20
         dest = torch.randn(num_dest, 4, 5)
         src = torch.randn(num_copy, 4, 5)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy).long()
+        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
         dest2 = dest.clone()
         dest.index_copy_(0, idx, src)
         for i in range(idx.size(0)):
@@ -1914,7 +1914,7 @@ class TestTorch(TestCase):
 
         dest = torch.randn(num_dest)
         src = torch.randn(num_copy)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy).long()
+        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
         dest2 = dest.clone()
         dest.index_copy_(0, idx, src)
         for i in range(idx.size(0)):
@@ -1925,7 +1925,7 @@ class TestTorch(TestCase):
         num_copy, num_dest = 3, 3
         dest = torch.randn(num_dest, 4, 5)
         src = torch.randn(num_copy, 4, 5)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy).long()
+        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
         dest2 = dest.clone()
         dest.index_add_(0, idx, src)
         for i in range(idx.size(0)):
@@ -1934,7 +1934,7 @@ class TestTorch(TestCase):
 
         dest = torch.randn(num_dest)
         src = torch.randn(num_copy)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy).long()
+        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
         dest2 = dest.clone()
         dest.index_add_(0, idx, src)
         for i in range(idx.size(0)):
@@ -2283,7 +2283,7 @@ class TestTorch(TestCase):
 
     def test_permute(self):
         orig = [1, 2, 3, 4, 5, 6, 7]
-        perm = list(torch.randperm(7).long())
+        perm = list(torch.randperm(7))
         x = torch.Tensor(*orig).fill_(0)
         new = list(map(lambda x: x - 1, x.permute(*perm).size()))
         self.assertEqual(perm, new)
