@@ -15,8 +15,8 @@ void THNN_(LookupTable_accGradParameters)(
            real scale)
 {
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sorted, indices);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
-        THCTensor_(isContiguous)(state, gradOutput) &&
         THCTensor_(isContiguous)(state, gradWeight)))
   {
     THError("Tensors must be contiguous");
@@ -108,6 +108,8 @@ void THNN_(LookupTable_accGradParameters)(
     stride,
     paddingValue
   );
+
+  THCTensor_(free)(state, gradOutput);
   THCudaCheck(cudaGetLastError());
 }
 
