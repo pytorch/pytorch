@@ -160,14 +160,11 @@ class Container(Module):
                 module.state_dict(result, prefix + name + '.')
         return result
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, prefix=''):
         super(Container, self).load_state_dict(state_dict)
         for name, module in self._modules.items():
             if module is not None:
-                filtered_params = {param_name[len(name)+1:]: param
-                        for param_name, param in state_dict.items()
-                        if param_name.startswith(name)}
-                module.load_state_dict(filtered_params)
+                module.load_state_dict(state_dict, prefix + name + '.')
 
     def parameters(self, memo=None):
         if memo is None:

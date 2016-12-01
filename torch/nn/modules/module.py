@@ -253,16 +253,16 @@ class Module(object):
                 destination[prefix + name] = param
         return destination
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, prefix=''):
         for name, param in self._parameters.items():
-            new_param = state_dict.get(name, param)
-            if not isinstance(new_param, Parameter):
-                raise TypeError(("state_dict contains keys corresponding to "
-                        "parameter {}, but it has a type of {}, "
-                        "not Parameter").format(name, torch.typename(new_param)))
+            new_param = state_dict.get(prefix + name, param)
+            if not isinstance(new_param, Parameter) and new_param is not None:
+                raise TypeError(
+                    "expected torch.autograd.Parameter for key '{}' (got {})"
+                    .format(prefix + name, torch.typename(new_param)))
             self._parameters[name] = new_param
         for name, buf in self._buffers.items():
-            self._buffers[name] = state_dict.get(name, buf)
+            self._buffers[name] = state_dict.get(prefix + name, buf)
 
     def parameters(self, memo=None):
         if memo is None:

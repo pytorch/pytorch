@@ -649,7 +649,8 @@ class TestNN(NNTestCase):
     def test_load_parameter_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Container(
-            conv=nn.Conv2d(3, 3, 3, bias=False)
+            conv1=nn.Conv2d(3, 3, 3, bias=False),
+            conv2=nn.Conv2d(3, 3, 3, bias=False),
         )
         net = nn.Container(
             linear1=l,
@@ -660,12 +661,14 @@ class TestNN(NNTestCase):
         )
         state_dict = {
             'linear1.weight': Parameter(torch.ones(5, 5)),
-            'block.conv.bias': Parameter(torch.range(1, 3)),
+            'block.conv1.bias': Parameter(torch.range(1, 3)),
+            'block.conv2.bias': None,
             'bn.running_mean': torch.randn(2),
         }
         net.load_state_dict(state_dict)
         self.assertIs(net.linear1.weight, state_dict['linear1.weight'])
-        self.assertIs(net.block.conv.bias, state_dict['block.conv.bias'])
+        self.assertIs(net.block.conv1.bias, state_dict['block.conv1.bias'])
+        self.assertIs(net.block.conv2.bias, state_dict['block.conv2.bias'])
         self.assertIs(net.bn.running_mean, state_dict['bn.running_mean'])
 
         state_dict = {
