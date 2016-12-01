@@ -203,6 +203,11 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     long nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += THStorage_(size)(LIBRARY_STATE self->cdata);
+    if (nindex < 0 || nindex >= self->cdata->size) {
+      PyErr_Format(PyExc_IndexError, "index %ld out of range for storage of "
+              "size %ld", nindex, self->cdata->size);
+      return NULL;
+    }
     real value = THStorage_(get)(LIBRARY_STATE self->cdata, nindex);
     return THPUtils_(newReal)(value);
   /* Slice index */
@@ -222,7 +227,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     new_storage.release();
     return _ret;
   }
-  THPUtils_setError("can't index a " THPStorageStr " with %s",
+  PyErr_Format(PyExc_TypeError, "can't index a " THPStorageStr " with %s",
       THPUtils_typename(index));
   return NULL;
   END_HANDLE_TH_ERRORS
