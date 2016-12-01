@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include "core.h"
 #include "libwrap.h"
+#include "common_coll.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -22,6 +23,7 @@ DebugLevel ncclDebugLevel;
 
 NCCL_API(ncclResult_t, ncclGetUniqueId, ncclUniqueId* out);
 ncclResult_t ncclGetUniqueId(ncclUniqueId* out) {
+  NCCLCHECK(PtrCheck(out, "GetUniqueId", "out"));
   pid_t pid = getpid();
   static int count = 0;
   int commId = __sync_fetch_and_add(&count, 1);
@@ -578,15 +580,6 @@ static void commFree(ncclComm_t comm) {
 }
 
 static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, const ncclUniqueId* commId, int rank) {
-  if (ndev < 1) {
-    WARN("invalid device count (%d) requested", ndev);
-    return ncclUnsupportedDeviceCount;
-  }
-  if (rank >= ndev || rank < 0) {
-    WARN("rank %d exceeds ndev=%d", rank, ndev);
-    return ncclInvalidRank;
-  }
-
   size_t commBytes = offsetof(ncclComm, ptrs) + ndev*sizeof(NodeRef);
   struct ncclComm* comm = (struct ncclComm*)malloc(commBytes);
   if (comm == NULL) {
@@ -731,6 +724,17 @@ NCCL_API(ncclResult_t, ncclCommInitRank, ncclComm_t* newcomm, int ndev, ncclUniq
 ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId, int myrank) {
   if (myrank == 0) showVersion();
 
+  NCCLCHECK(PtrCheck(newcomm, "CommInitRank", "newcomm"));
+
+  if (ndev < 1) {
+    WARN("Invalid device count requested : %d", ndev);
+    return ncclUnsupportedDeviceCount;
+  }
+  if (myrank >= ndev || myrank < 0) {
+    WARN("Invalid rank %d, should be in the range 0..%d", myrank, ndev-1);
+    return ncclInvalidRank;
+  }
+
   if (strlen(commId.internal) < 1 ||
       strlen(commId.internal) >= NCCL_UNIQUE_ID_BYTES) {
     WARN("rank %d invalid commId", myrank);
@@ -818,6 +822,13 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
   initDebug();
 
   showVersion();
+
+  NCCLCHECK(PtrCheck(comms, "CommInitRank", "comms"));
+
+  if (ndev < 1) {
+    WARN("Invalid device count requested : %d", ndev);
+    return ncclUnsupportedDeviceCount;
+  }
 
   ncclResult_t res;
   int savedDevice;
@@ -949,7 +960,7 @@ void ncclCommDestroy(ncclComm_t comm) {
   int commDevice = comm->cudaDev;
 
   if (savedDevice != commDevice) {
-    CUDACHECK(cudaSetDevice(commDevice));
+    CUDACHECK(cudaSetDevice(commDevice), void());
   }
 
   commFree(comm);
@@ -982,18 +993,24 @@ const char* ncclGetErrorString(ncclResult_t code) {
 
 NCCL_API(ncclResult_t, ncclCommCount, const ncclComm_t comm, int* count);
 ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
+  NCCLCHECK(PtrCheck(comm, "CommCount", "comm"));
+  NCCLCHECK(PtrCheck(count, "CommCount", "count"));
   *count = comm->nRanks;
   return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclCommCuDevice, const ncclComm_t comm, int* devid);
 ncclResult_t ncclCommCuDevice(const ncclComm_t comm, int* devid) {
+  NCCLCHECK(PtrCheck(comm, "CommCuDevice", "comm"));
+  NCCLCHECK(PtrCheck(devid, "CommCuDevice", "devid"));
   *devid = comm->cudaDev;
   return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclCommUserRank, const ncclComm_t comm, int* rank);
 ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) {
+  NCCLCHECK(PtrCheck(comm, "CommUserRank", "comm"));
+  NCCLCHECK(PtrCheck(rank, "CommUserRank", "rank"));
   *rank = comm->rank;
   return ncclSuccess;
 }

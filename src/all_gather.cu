@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "core.h"
+#include "common_coll.h"
 #include "enqueue.h"
 #include "primitives.h"
 
@@ -164,18 +165,15 @@ __global__ void AllGatherKernel(const KernelArgs<T> args) {
   }
 }
 
-#define THREADS 384
+#define THREADS 512
 #define UNROLL 8
 
 template<class FUNC, typename T>
 ncclResult_t RingAllGather(const void* sendbuff, void* recvbuff,
     const int count, ncclComm* comm, cudaStream_t stream) {
-  if (count == 0)
-    return ncclSuccess;
-
   if (comm->nRanks == 1) {
     if (sendbuff != recvbuff)
-      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream));
+      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream), ncclUnhandledCudaError);
   } else {
     KernelArgs<T> args;
     ArgsSetup(&args, sendbuff, recvbuff, 0, count, comm);
@@ -198,6 +196,7 @@ NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, int count, ncclDataT
     void* recvbuff, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t ncclAllGather(const void* sendbuff, int count, ncclDataType_t datatype,
     void* recvbuff, ncclComm_t comm, cudaStream_t stream) {
+  NCCLCHECK(ArgsCheck(sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, "AllGather"));
   return enqueue<AllGather, FuncNull>(sendbuff, recvbuff, count, datatype, 0, comm, stream);
 }
 
