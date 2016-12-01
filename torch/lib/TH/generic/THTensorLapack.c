@@ -605,7 +605,7 @@ void THTensor_(potrf)(THTensor *ra_, THTensor *a, const char *uplo)
   THLapack_(potrf)(uplo[0], n, THTensor_(data)(ra__), lda, &info);
   THLapackCheckWithCleanup("Lapack Error in %s : the leading minor of order %d is not positive definite",
                            THCleanup(THTensor_(free)(ra__);),
-                           "potrf", info);
+                           "potrf", info, "");
 
   THTensor_(clearUpLoTriangle)(ra__, uplo);
   THTensor_(freeCopyTo)(ra__, ra_);
