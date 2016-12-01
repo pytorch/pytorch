@@ -414,9 +414,15 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   long dimsize = THTensor_(size)(LIBRARY_STATE TENSOR_VARIABLE, DIM);          \
   idx = (idx < 0) ? dimsize + idx : idx;                                       \
                                                                                \
-  THPUtils_assertRet(false, dimsize > 0, "indexing an empty tensor");          \
-  THPUtils_assertRet(false, idx >= 0 && idx < dimsize, "index %ld is out of range for " \
-      "dimension %ld (of size %ld)", idx, DIM, dimsize);                       \
+  if (dimsize <= 0) {                                                          \
+    PyErr_SetString(PyExc_IndexError, "indexing an empty tensor");             \
+    return false;                                                              \
+  }                                                                            \
+  if (idx < 0 || idx >= dimsize) {                                             \
+    PyErr_Format(PyExc_IndexError, "index %ld is out of range for dimension "  \
+        "%ld (of size %ld)", idx, DIM, dimsize);                               \
+    return false;                                                              \
+  }                                                                            \
                                                                                \
   if(THTensor_(nDimension)(LIBRARY_STATE TENSOR_VARIABLE) == 1) {              \
     CASE_1D;                                                                   \
@@ -469,9 +475,12 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
         break;
       }
     }
-    THPUtils_assertRet(false, num_effective_index <= num_tensor_dim,
-        "trying to index %ld dimensions of a %ld dimensional tensor",
-        num_effective_index, num_tensor_dim);
+    if (num_effective_index > num_tensor_dim) {
+      PyErr_Format(PyExc_IndexError,
+          "trying to index %ld dimensions of a %ld dimensional tensor",
+          num_effective_index, num_tensor_dim);
+      return false;
+    }
 
     tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
     int t_dim = 0;
@@ -511,8 +520,8 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     }
   }
 
-  THPUtils_setError("indexing a tensor with an object of type %s. The only "
-      "supported types are integers, slices"
+  PyErr_Format(PyExc_TypeError, "indexing a tensor with an object of type %s. "
+      "The only supported types are integers, slices"
 #ifdef WITH_NUMPY
       ", numpy scalars"
 #endif

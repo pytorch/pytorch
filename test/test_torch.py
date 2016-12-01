@@ -1851,17 +1851,16 @@ class TestTorch(TestCase):
         self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
 
-        self.assertRaises(RuntimeError, lambda: reference[1, 1, 1, 1])
-        self.assertRaises(RuntimeError, lambda: reference[1, 1, 1, 1:1])
-        self.assertRaises(RuntimeError, lambda: reference[3, 3, 3, 3, 3, 3, 3, 3])
+        self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1])
+        self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1:1])
+        self.assertRaises(IndexError, lambda: reference[3, 3, 3, 3, 3, 3, 3, 3])
 
-        self.assertRaises(RuntimeError, lambda: reference[0.0])
-        self.assertRaises(TypeError,    lambda: reference[0.0:2.0])
-        self.assertRaises(RuntimeError, lambda: reference[0.0, 0.0:2.0])
-        self.assertRaises(RuntimeError, lambda: reference[0.0, :, 0.0:2.0])
-        self.assertRaises(RuntimeError, lambda: reference[0.0, ..., 0.0:2.0])
-        self.assertRaises(RuntimeError, lambda: reference[0.0, :, 0.0])
-
+        self.assertRaises(TypeError, lambda: reference[0.0])
+        self.assertRaises(TypeError, lambda: reference[0.0:2.0])
+        self.assertRaises(TypeError, lambda: reference[0.0, 0.0:2.0])
+        self.assertRaises(TypeError, lambda: reference[0.0, :, 0.0:2.0])
+        self.assertRaises(TypeError, lambda: reference[0.0, ..., 0.0:2.0])
+        self.assertRaises(TypeError, lambda: reference[0.0, :, 0.0])
 
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
@@ -1880,26 +1879,24 @@ class TestTorch(TestCase):
         checkPartialAssign((1, 2))
         checkPartialAssign((0, 2))
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(IndexError):
             reference[1, 1, 1, 1] = 1
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(IndexError):
             reference[1, 1, 1, (1, 1)] = 1
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(IndexError):
             reference[3, 3, 3, 3, 3, 3, 3, 3] = 1
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             reference[0.0] = 1
         with self.assertRaises(TypeError):
             reference[0.0:2.0] = 1
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             reference[0.0, 0.0:2.0] = 1
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             reference[0.0, :, 0.0:2.0] = 1
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             reference[0.0, ..., 0.0:2.0] = 1
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             reference[0.0, :, 0.0] = 1
-
-
 
     def test_index_copy(self):
         num_copy, num_dest = 3, 20
@@ -2508,6 +2505,11 @@ class TestTorch(TestCase):
         self.assertEqual(y, x.contiguous().view(2, 1, 4))
         y = x.clone().unsqueeze_(2)
         self.assertEqual(y, x.contiguous().view(2, 4, 1))
+
+    def test_iter(self):
+        x = torch.randn(5, 5)
+        for i, sub in enumerate(x):
+            self.assertEqual(sub, x[i])
 
     def test_accreal_type(self):
         x = torch.randn(2, 3, 4) * 10
