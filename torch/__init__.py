@@ -206,3 +206,12 @@ del IntTensorBase
 del ShortTensorBase
 del CharTensorBase
 del ByteTensorBase
+
+################################################################################
+# Import most common subpackages
+################################################################################
+
+import torch.cuda
+import torch.autograd
+import torch.nn
+import torch.optim
