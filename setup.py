@@ -9,10 +9,10 @@ import shutil
 import sys
 import os
 
-CUDA_HOME = os.getenv('CUDA_HOME', '/usr/local/cuda')
-WITH_CUDA = os.path.exists(CUDA_HOME)
-WITH_CUDNN = WITH_CUDA
-DEBUG = False
+from tools.setup_helpers.env import check_env_flag
+from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
+from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
+DEBUG = check_env_flag('DEBUG')
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -200,6 +200,8 @@ if WITH_CUDA:
 
 if WITH_CUDNN:
     main_libraries += ['cudnn']
+    include_dirs.append(CUDNN_INCLUDE_DIR)
+    extra_link_args.append('-L' + CUDNN_LIB_DIR)
     main_sources += [
         "torch/csrc/cudnn/Module.cpp",
         "torch/csrc/cudnn/Conv.cpp",
