@@ -15,7 +15,8 @@ import numpy as np
 
 
 class SparseLookup(ModelLayer):
-    _supported_reducers = ['LogMeanExp', 'LogSumExp', 'Max', 'Mean', 'Sum']
+    _supported_reducers = ['PositionWeighted', 'LogMeanExp', 'LogSumExp', 'Max',
+                           'Mean', 'Sum']
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
@@ -60,6 +61,21 @@ class SparseLookup(ModelLayer):
                 optimizer=weight_optim
             ))
 
+        if reducer == 'PositionWeighted':
+            self.pos_w = core.ScopedBlobReference(
+                model.net.NextName(self.name + "_pos_w"))
+            self.params.append(
+                LayerParameter(
+                    parameter=self.pos_w,
+                    initializer=core.CreateOperator('ConstantFill',
+                                                    [],
+                                                    self.pos_w,
+                                                    shape=[input_dim, ],
+                                                    value=1.0
+                                                    ),
+                    optimizer=weight_optim
+                ))
+
     def add_ops(self, net):
         if schema.equal_schemas(self.input_record, IdList):
             if self.reducer == 'Sum':
@@ -69,6 +85,33 @@ class SparseLookup(ModelLayer):
                         self.input_record.items(),
                         self.input_record.lengths()
                     ],
+                    self.output_schema.field_blobs()
+                )
+            elif self.reducer == 'PositionWeighted':
+                inc_seq = net.LengthsRangeFill(
+                    [self.input_record.lengths()],
+                    self.input_record.lengths() + '_seq'
+                )
+                gather_pos_w = net.Gather(
+                    [self.pos_w, inc_seq], self.pos_w + '_gather')
+                gather_w = net.Gather(
+                    [self.w, self.input_record.items()], self.w + '_gather')
+                # TODO(cxj): refactor this when gradient of Mul with
+                # broadcast is ready:
+                # weighted_w = net.Mul(
+                #    [gather_w, gather_pos_w], gather_w + '_weighted',
+                #    broadcast=1)
+
+                gather_w_t = net.Transpose(gather_w, gather_w + '_t')
+                gather_w_t_weighted = net.Mul(
+                    [gather_w_t, gather_pos_w],
+                    gather_w_t + '_weighted',
+                    broadcast=1, use_grad_hack=1, axis=1
+                )
+                weighted_w = net.Transpose(
+                    gather_w_t_weighted, gather_w_t_weighted + '_t')
+                net.LengthsSum(
+                    [weighted_w, self.input_record.lengths()],
                     self.output_schema.field_blobs()
                 )
             else:
