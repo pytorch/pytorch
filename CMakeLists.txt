@@ -22,17 +22,20 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   endif(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9.3")
 endif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.7" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.7" )
-    # add c++11 flag
-    set_source_files_properties(THCTensorRandom.cpp THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++11)
-  else()
-    # add c++0x flag
-    set_source_files_properties(THCTensorRandom.cpp THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++0x)
-  endif()
-else()
+IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  IF(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.7" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.7" )
+    SET(CXX_VERSION "c++11")
+  ELSE()
+    SET(CXX_VERSION "c++0x")
+  ENDIF()
+  SET_SOURCE_FILES_PROPERTIES(
+    THCTensorRandom.cpp
+    THCCachingAllocator.cpp
+    THCCachingHostAllocator.cpp
+    PROPERTIES COMPILE_FLAGS -std=${CXX_VERSION})
+ELSE()
   SET(CMAKE_CXX_STANDARD 11)
-endif()
+ENDIF()
 
 
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
@@ -125,6 +128,7 @@ ENDIF()
 
 SET(src
     THCCachingAllocator.cpp
+    THCCachingHostAllocator.cpp
     THCGeneral.c
     THCStorageCopy.c
     THCStream.c
@@ -221,6 +225,7 @@ INSTALL(FILES
           THCSortUtils.cuh
           THCAllocator.h
           THCCachingAllocator.h
+          THCCachingHostAllocator.h
           THCDeviceUtils.cuh
           THCDeviceTensor.cuh
           THCDeviceTensor-inl.cuh

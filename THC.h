@@ -5,6 +5,7 @@
 #include "THCAllocator.h"
 #include "THCBlas.h"
 #include "THCCachingAllocator.h"
+#include "THCCachingHostAllocator.h"
 #include "THCSleep.h"
 #include "THCStorage.h"
 #include "THCStorageCopy.h"

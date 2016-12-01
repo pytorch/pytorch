@@ -213,18 +213,18 @@ struct THCCachingAllocator
     for (;it != blocks.end() && *it && (*it)->device == dev_id; ++it) {
       size_t blocksize = (*it)->size;
       *total += blocksize;
-      if (blocksize > *largest)
-	*largest = blocksize;
+      if (blocksize > *largest) {
+        *largest = blocksize;
+      }
     }
   }
-  
+
   void cacheInfo(int dev_id, size_t* total, size_t* largest)
   {
     std::lock_guard<std::mutex> lock(mutex);
     cacheInfoAux(large_blocks, dev_id, total, largest);
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
-
 
   /** combine previously split blocks */
   void try_merge_blocks(Block* dst, Block* src, FreeBlocks& free_blocks)

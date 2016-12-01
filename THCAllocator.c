@@ -18,11 +18,11 @@ static void THCudaHostAllocator_free(void* ctx, void* ptr) {
   THCudaCheck(cudaFreeHost(ptr));
 }
 
-void THCAllocator_init(THCState *state) {
-  state->cudaHostAllocator->malloc = &THCudaHostAllocator_malloc;
-  state->cudaHostAllocator->realloc = NULL;
-  state->cudaHostAllocator->free = &THCudaHostAllocator_free;
-}
+THAllocator THCudaHostAllocator = {
+  &THCudaHostAllocator_malloc,
+  NULL,
+  &THCudaHostAllocator_free
+};
 
 static cudaError_t THCIpcAllocator_malloc(void* ctx, void** devPtr, size_t size, cudaStream_t stream)
 {
@@ -60,8 +60,8 @@ static void THCUVAAllocator_free(void* ctx, void* ptr) {
   THCudaCheck(cudaFree(ptr));
 }
 
-void THCUVAAllocator_init(THAllocator *cudaUVAAllocator) {
-  cudaUVAAllocator->malloc = &THCUVAAllocator_alloc;
-  cudaUVAAllocator->realloc = NULL;
-  cudaUVAAllocator->free = &THCUVAAllocator_free;
-}
+THAllocator THCUVAAllocator = {
+  &THCUVAAllocator_alloc,
+  NULL,
+  &THCUVAAllocator_free
+};
