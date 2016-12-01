@@ -2,6 +2,38 @@
 #define TH_GENERIC_FILE "generic/TemporalConvolution.c"
 #else
 
+static inline void THNN_(TemporalConvolution_shapeCheck)(
+                         THNNState *state,
+                         THTensor *input,
+                         int kW,
+                         int dW,
+                         int *inputFrameSize) {
+
+  THArgCheck(kW > 0, 9,
+             "kernel size should be greater than zero, but got kW: %d", kW);
+  THArgCheck(dW > 0, 11,
+             "stride should be greater than zero, but got dW: %d", dW);
+
+  int dimS = 0; // sequence dimension
+  int dimF = 1; // feature dimension
+
+  if (input->nDimension == 3)
+  {
+    dimS = 1;
+    dimF = 2;
+  }
+  THNN_ARGCHECK(input->nDimension == 2 || input->nDimension == 3, 2, input,
+                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
+  if (inputFrameSize != NULL) {
+    THArgCheck(input->size[dimF] == *inputFrameSize, 2,
+               "invalid input frame size. Got: %d, Expected: %d",
+               input->size[dimF], *inputFrameSize);
+  }
+  THArgCheck(input->size[dimS] >= kW, 2,
+             "input sequence smaller than kernel size. Got: %d, Expected: %d",
+             input->size[dimS], kW);
+}
+
 void THNN_(TemporalConvolution_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -20,21 +52,14 @@ void THNN_(TemporalConvolution_updateOutput)(
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
   
-  THNN_ARGCHECK(input->nDimension == 2 || input->nDimension == 3, 2, input,
-		"2D or 3D (batch mode) tensor expected for input, but got: %s");
-  
   if (input->nDimension == 3) 
   {
     dimS = 1;
     dimF = 2;
   }
-  THArgCheck(input->size[dimF] == inputFrameSize, 2,
-	     "invalid input frame size. Got: %d, Expected: %d",
-	     input->size[dimF], inputFrameSize);
-  THArgCheck(input->size[dimS] >= kW, 2,
-	     "input sequence smaller than kernel size. Got: %d, Expected: %d",
-	     input->size[dimS], kW);
 
+  THNN_(TemporalConvolution_shapeCheck)
+       (state, input, kW, dW, &inputFrameSize);
   input = THTensor_(newContiguous)(input);
   outputWindow = THTensor_(new)();
   inputWindow = THTensor_(new)();
@@ -159,7 +184,9 @@ void THNN_(TemporalConvolution_updateGradInput)(
     dimS = 1;
     dimF = 2;
   }
-  
+
+  THNN_(TemporalConvolution_shapeCheck)(
+        state, input, kW, dW, NULL);
   nInputFrame = input->size[dimS];
   nOutputFrame = gradOutput->size[dimS];
 
@@ -264,7 +291,9 @@ void THNN_(TemporalConvolution_accGradParameters)(
     dimS = 1;
     dimF = 2;
   }
-  
+
+  THNN_(TemporalConvolution_shapeCheck)(
+        state, input, kW, dW, NULL);
   nInputFrame = input->size[dimS];
   nOutputFrame = gradOutput->size[dimS];
 
