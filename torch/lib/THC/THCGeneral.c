@@ -1,10 +1,11 @@
 #include "THCGeneral.h"
 #include "TH.h"
-#include "THCTensorRandom.h"
-#include "THCBlas.h"
 #include "THCAllocator.h"
-#include "THCThreadLocal.h"
+#include "THCBlas.h"
+#include "THCCachingHostAllocator.h"
 #include "THCStream.h"
+#include "THCThreadLocal.h"
+#include "THCTensorRandom.h"
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -50,6 +51,12 @@ void THCudaInit(THCState* state)
   if (!state->cudaDeviceAllocator) {
     state->cudaDeviceAllocator = &defaultDeviceAllocator;
   }
+  if (!state->cudaHostAllocator) {
+    state->cudaHostAllocator = &THCudaHostAllocator;
+  }
+  if (!state->cudaUVAAllocator) {
+    state->cudaUVAAllocator = &THCUVAAllocator;
+  }
 
   int numDevices = 0;
   THCudaCheck(cudaGetDeviceCount(&numDevices));
@@ -74,12 +81,6 @@ void THCudaInit(THCState* state)
 
   state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
   THCRandom_init(state, numDevices, device);
-
-  state->cudaHostAllocator = (THAllocator*)malloc(sizeof(THAllocator));
-  THCAllocator_init(state);
-
-  state->cudaUVAAllocator = (THAllocator*)malloc(sizeof(THAllocator));
-  THCUVAAllocator_init(state->cudaUVAAllocator);
 
   // By default, all direct p2p kernel access (besides copy) is disallowed,
   // since direct access without knowing whether or not a certain operation
@@ -130,8 +131,6 @@ void THCudaShutdown(THCState* state)
   THCRandom_shutdown(state);
 
   free(state->rngState);
-  free(state->cudaHostAllocator);
-  free(state->cudaUVAAllocator);
   free(state->deviceProperties);
 
   int deviceCount = 0;
@@ -174,6 +173,9 @@ void THCudaShutdown(THCState* state)
   free(state->resourcesPerDevice);
   if (state->cudaDeviceAllocator->emptyCache) {
     state->cudaDeviceAllocator->emptyCache(state->cudaDeviceAllocator->state);
+  }
+  if (state->cudaHostAllocator == &THCCachingHostAllocator) {
+    THCCachingHostAllocator_emptyCache();
   }
   free(state->currentStreams);
   THCThreadLocal_free(state->currentPerDeviceBlasHandle);
@@ -603,6 +605,14 @@ void __THCudaCheck(cudaError_t err, const char *file, const int line)
   }
 }
 
+void __THCudaCheckWarn(cudaError_t err, const char *file, const int line)
+{
+  if(err != cudaSuccess)
+  {
+    fprintf(stderr, "THCudaCheckWarn FAIL file=%s line=%i error=%i : %s\n", file, line, err, cudaGetErrorString(err));
+  }
+}
+
 void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
 {
   if(status != CUBLAS_STATUS_SUCCESS)
@@ -698,7 +708,7 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
 
   /* not always true - our optimistic guess here */
   largestBlock = *freeBytes;
-  
+
   if (allocator->cacheInfo != NULL)
     allocator->cacheInfo(allocator->state, device, &cachedBytes, &largestBlock);
 

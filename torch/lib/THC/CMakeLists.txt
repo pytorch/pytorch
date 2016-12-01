@@ -22,17 +22,20 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   endif(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9.3")
 endif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.7" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.7" )
-    # add c++11 flag
-    set_source_files_properties(THCTensorRandom.cpp THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++11)
-  else()
-    # add c++0x flag
-    set_source_files_properties(THCTensorRandom.cpp THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++0x)
-  endif()
-else()
+IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  IF(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.7" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.7" )
+    SET(CXX_VERSION "c++11")
+  ELSE()
+    SET(CXX_VERSION "c++0x")
+  ENDIF()
+  SET_SOURCE_FILES_PROPERTIES(
+    THCTensorRandom.cpp
+    THCCachingAllocator.cpp
+    THCCachingHostAllocator.cpp
+    PROPERTIES COMPILE_FLAGS -std=${CXX_VERSION})
+ELSE()
   SET(CMAKE_CXX_STANDARD 11)
-endif()
+ENDIF()
 
 
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
@@ -87,7 +90,7 @@ IF(APPLE)
 ENDIF(APPLE)
 
 # Detect CUDA architecture and get best NVCC flags
-IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
+IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS OR MSVC)
   INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
 ENDIF()
 LIST(APPEND CUDA_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
@@ -125,6 +128,7 @@ ENDIF()
 
 SET(src
     THCCachingAllocator.cpp
+    THCCachingHostAllocator.cpp
     THCGeneral.c
     THCStorageCopy.c
     THCStream.c
@@ -137,6 +141,7 @@ SET(src
 SET(src-cuda
   THCReduceApplyUtils.cu
   THCBlas.cu
+  THCSleep.cu
   THCStorage.cu
   THCStorageCopy.cu
   THCTensor.cu
@@ -199,6 +204,7 @@ INSTALL(FILES
           THC.h
           ${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h
           THCBlas.h
+          THCSleep.h
           THCStorage.h
           THCStorageCopy.h
           THCStream.h
@@ -219,6 +225,7 @@ INSTALL(FILES
           THCSortUtils.cuh
           THCAllocator.h
           THCCachingAllocator.h
+          THCCachingHostAllocator.h
           THCDeviceUtils.cuh
           THCDeviceTensor.cuh
           THCDeviceTensor-inl.cuh
