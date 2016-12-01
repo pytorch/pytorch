@@ -2,6 +2,7 @@ import torch
 import torch.multiprocessing as multiprocessing
 from .sampler import SequentialSampler, RandomSampler
 import collections
+import math
 import sys
 import traceback
 import threading
@@ -128,7 +129,7 @@ class DataLoaderIter(object):
                 self._put_indices()
 
     def __len__(self):
-        return len(self.sampler)
+        return int(math.ceil(len(self.sampler) / float(self.batch_size)))
 
     def __next__(self):
         if self.num_workers == 0:
@@ -229,4 +230,4 @@ class DataLoader(object):
         return DataLoaderIter(self)
 
     def __len__(self):
-        return len(self.sampler)
+        return int(math.ceil(len(self.sampler) / float(self.batch_size)))

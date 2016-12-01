@@ -144,6 +144,17 @@ class TestDataLoader(TestCase):
         pin_thread.join(1.0)
         self.assertFalse(pin_thread.is_alive())
 
+    def test_len(self):
+        def check_len(dl, expected):
+            self.assertEqual(len(dl), expected)
+            n = 0
+            for sample in dl:
+                n += 1
+            self.assertEqual(n, expected)
+        check_len(self.dataset, 100)
+        check_len(DataLoader(self.dataset, batch_size=2), 50)
+        check_len(DataLoader(self.dataset, batch_size=3), 34)
+
 
 if __name__ == '__main__':
     unittest.main()
