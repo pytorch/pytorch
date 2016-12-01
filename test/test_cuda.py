@@ -541,6 +541,15 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.current_stream().device, 1)
             self.assertNotEqual(torch.cuda.current_stream(), default_stream)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "multi-GPU not supported")
+    def test_tensor_device(self):
+        self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 0)
+        self.assertEqual(torch.cuda.FloatTensor(1, device=1).get_device(), 1)
+        with torch.cuda.device(1):
+            self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 1)
+            self.assertEqual(torch.cuda.FloatTensor(1, device=0).get_device(), 0)
+            self.assertEqual(torch.cuda.FloatTensor(1, device=None).get_device(), 1)
+
     def test_events(self):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)

@@ -151,12 +151,14 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   THCPAutoGPU gpu_guard;
 #endif
 
-  // Internally we allow constructing with a keywoard only argument cdata
+  // Internally we allow constructing with a keyword only argument cdata
   if (kwargs != NULL) {
     Py_ssize_t num_kwargs = PyDict_Size(kwargs);
 #ifdef THC_GENERIC_FILE
     PyObject *device_id = PyDict_GetItemString(kwargs, "device");
-    if (device_id) {
+    if (device_id == Py_None) {
+      num_kwargs--;
+    } else if (device_id) {
       THPUtils_assert(THPUtils_checkLong(device_id), "device argument "
           " has to be an int, but got %s", THPUtils_typename(device_id));
       gpu_guard.setDevice(THPUtils_unpackLong(device_id));
