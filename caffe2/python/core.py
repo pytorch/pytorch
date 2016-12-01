@@ -1003,7 +1003,7 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None):
         blob_remap: (optional) dict with additional blob name remapping.
         inputs:     (optional) input record that will provide actual input
                     values for the cloned net. Must be compatible with the
-                    net's input schema.
+                    net's input schema or be a strict superset of it
     Returns:
         Tuple (cloned_net, blob_remap)
         clone_net:  the cloned Net
@@ -1018,12 +1018,14 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None):
         original = net.input_record()
         assert original is not None
         # TODO(azzolini): improve schema type checking
-        assert set(original.field_names()) == set(inputs.field_names()), (
-            'Schemas do not match.')
+        diff = set(original.field_names()) - set(inputs.field_names())
+        assert len(diff) == 0, \
+            'Schemas do not match, extra fields found in the net'.format(diff)
         original_mapping = dict(zip(original.field_names(),
                                     original.field_blobs()))
-        for a, b in zip(inputs.field_names(), inputs.field_blobs()):
-            blob_remap[str(original_mapping[a])] = str(b)
+        for fn, fb in zip(inputs.field_names(), inputs.field_blobs()):
+            if fn in original_mapping:
+                blob_remap[str(original_mapping[fn])] = str(fb)
     proto = net.Proto()
     ssa, blob_versions = get_ssa(proto)
     undef_blobs = get_undefined_blobs(ssa)
@@ -1213,7 +1215,14 @@ class Net(object):
             raise KeyError('Net does not define blob %s' % blob_name)
         return BlobReference(blob_name, self)
 
-    def Clone(self, name, blob_remap=None, op_id_mask=None, remap_funcs=None):
+    def Clone(
+        self,
+        name,
+        blob_remap=None,
+        op_id_mask=None,
+        remap_funcs=None,
+        keep_schema=True
+    ):
         """
         Clone this net.
         Args:
@@ -1229,6 +1238,7 @@ class Net(object):
         new_proto.CopyFrom(proto)
         new_proto.name = name
         if blob_remap is None and op_id_mask is None:
+            # TODO(azzolini): should we also clone input_record here
             return Net(new_proto)
 
         if blob_remap is None:
@@ -1256,23 +1266,24 @@ class Net(object):
         remap_list(new_proto.external_output)
         new_net = Net(new_proto)
 
-        from caffe2.python import schema
-        if self._input_record:
-            new_net._input_record = schema.from_blob_list(
-                self._input_record,
-                [
-                    BlobReference(str(blob_remap[str(blob)]), net=new_net)
-                    for blob in self._input_record.field_blobs()
-                ],
-            )
-        if self._output_record:
-            new_net._output_record = schema.from_blob_list(
-                self._output_record,
-                [
-                    BlobReference(str(blob_remap[str(blob)]), net=new_net)
-                    for blob in self._output_record.field_blobs()
-                ],
-            )
+        if keep_schema:
+            from caffe2.python import schema
+            if self._input_record:
+                new_net._input_record = schema.from_blob_list(
+                    self._input_record,
+                    [
+                        BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                        for blob in self._input_record.field_blobs()
+                    ],
+                )
+            if self._output_record:
+                new_net._output_record = schema.from_blob_list(
+                    self._output_record,
+                    [
+                        BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                        for blob in self._output_record.field_blobs()
+                    ],
+                )
         new_net._attr_dict.update(self._attr_dict)
         return new_net
 
