@@ -125,8 +125,8 @@ class Module(object):
         self._backend = thnn_backend
         self._parameters = OrderedDict(parameters)
         self._buffers = {}
-        self.backward_hooks = OrderedDict()
-        self.forward_hooks = OrderedDict()
+        self._backward_hooks = OrderedDict()
+        self._forward_hooks = OrderedDict()
         self.training = True
         for name, param in self._parameters.items():
             if not isinstance(param, Parameter):
@@ -177,35 +177,38 @@ class Module(object):
         return self._apply(lambda t: t.double())
 
     def register_backward_hook(self, name, hook):
-        assert name not in self.backward_hooks, \
+        assert name not in self._backward_hooks, \
             "Trying to register a second backward hook with name {}".format(name)
-        self.backward_hooks[name] = hook
+        self._backward_hooks[name] = lambda gi, go: hook(self, gi, go)
 
     def remove_backward_hook(self, name):
-        assert name in self.backward_hooks, \
+        assert name in self._backward_hooks, \
             "Trying to remove an inexistent backward hook with name {}".format(name)
-        del self.backward_hooks[name]
+        del self._backward_hooks[name]
 
     def register_forward_hook(self, name, hook):
-        assert name not in self.forward_hooks, \
+        assert name not in self._forward_hooks, \
             "Trying to register a second forward hook with name {}".format(name)
-        self.forward_hooks[name] = hook
+        self._forward_hooks[name] = hook
 
     def remove_forward_hook(self, name):
-        assert name in self.forward_hooks, \
+        assert name in self._forward_hooks, \
             "Trying to remove an inexistent forward hook with name {}".format(name)
-        del self.forward_hooks[name]
+        del self._forward_hooks[name]
 
     def __call__(self, *input, **kwargs):
         result = self.forward(*input, **kwargs)
-        for hook in self.forward_hooks.values():
-            hook(self, input, result)
+        for name, hook in self._forward_hooks.items():
+            hook_result = hook(self, input, result)
+            if hook_result is not None:
+                raise RuntimeError("forward hooks should never return any "
+                        "values, but '{}' didn't return None".format(name))
         var = result
         while not isinstance(var, Variable):
             var = var[0]
         creator = var.creator
-        for key, hook in self.backward_hooks.items():
-            creator.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
+        if creator is not None:
+            creator._backward_hooks = self._backward_hooks
         return result
 
     def __getattr__(self, name):
