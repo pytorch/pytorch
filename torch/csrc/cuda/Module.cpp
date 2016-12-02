@@ -233,6 +233,15 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
+  THC_sleep(LIBRARY_STATE THPUtils_unpackLong(cycles));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_getLibPath(PyObject *_unused)
 {
 #define _STR(x) #x
@@ -254,6 +263,7 @@ bool THCPModule_initCuda(PyObject *module_dict) {
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
   state = THCState_alloc();
   THCState_setDeviceAllocator(state, THCCachingAllocator_get());
+  state->cudaHostAllocator = &THCCachingHostAllocator;
   THCudaInit(state);
 
 #ifdef USE_MAGMA

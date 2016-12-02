@@ -8,9 +8,14 @@ import torch
 _initialized = False
 _cudart = None
 
+
 def is_available():
     return (hasattr(torch._C, '_cuda_isDriverSufficient') and
             torch._C._cuda_isDriverSufficient())
+
+
+def _sleep(cycles):
+    torch._C._cuda_sleep(cycles)
 
 
 def _load_cudart():
