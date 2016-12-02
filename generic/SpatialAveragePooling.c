@@ -133,11 +133,6 @@ void THNN_(SpatialAveragePooling_updateOutput)(
       --outputWidth;
   }
 
-  THArgCheck(inputWidth >= kW - 2 * padW && inputHeight >= kH - 2 * padH, 2,
-	     "input image smaller than (kernel size - 2 * padW). Got "
-	     "inputHeight: %d inputWidth: %d kH %d kW %d padH %d padW %d",
-	     inputHeight, inputWidth, kH, kW, padH, padW);
-
   if (input->nDimension == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
