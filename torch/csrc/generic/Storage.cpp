@@ -318,6 +318,52 @@ static struct PyMemberDef THPStorage_(members)[] = {
   {NULL}
 };
 
+extern THPCopyList THStorage_(copy_functions);
+THPCopyList THStorage_(copy_functions);
+
+void THPStorage_(initCopyMethods)()
+{
+  auto& h = THStorage_(copy_functions);
+  // copy from CPU types
+  THPInsertCopyFunction(h, &THStorage_(copyByte));
+  THPInsertCopyFunction(h, &THStorage_(copyChar));
+  THPInsertCopyFunction(h, &THStorage_(copyShort));
+  THPInsertCopyFunction(h, &THStorage_(copyInt));
+  THPInsertCopyFunction(h, &THStorage_(copyLong));
+  THPInsertCopyFunction(h, &THStorage_(copyFloat));
+  THPInsertCopyFunction(h, &THStorage_(copyDouble));
+#ifdef THC_GENERIC_FILE
+  // copy from GPU types
+  THPInsertCopyFunction(h, &THStorage_(copyCudaByte));
+  THPInsertCopyFunction(h, &THStorage_(copyCudaChar));
+  THPInsertCopyFunction(h, &THStorage_(copyCudaShort));
+  THPInsertCopyFunction(h, &THStorage_(copyCudaInt));
+  THPInsertCopyFunction(h, &THStorage_(copyCudaLong));
+  THPInsertCopyFunction(h, &THStorage_(copyCudaFloat));
+  THPInsertCopyFunction(h, &THStorage_(copyCudaDouble));
+#ifdef CUDA_HALF_TENSOR
+  THPInsertCopyFunction(h, &THStorage_(copyCudaHalf));
+#endif
+#ifndef THC_REAL_IS_HALF
+  // add CPU <- GPU copies to base type
+  #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
+  extern THPCopyList THCpuStorage_(copy_functions);
+  auto& b = THCpuStorage_(copy_functions);
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaByte));
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaChar));
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaShort));
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaInt));
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaLong));
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaFloat));
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaDouble));
+#ifdef CUDA_HALF_TENSOR
+  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaHalf));
+#endif
+  #undef THCpuStorage_
+#endif
+#endif
+}
+
 #include "StorageMethods.cpp"
 
 bool THPStorage_(init)(PyObject *module)
@@ -328,6 +374,7 @@ bool THPStorage_(init)(PyObject *module)
     return false;
   Py_INCREF(&THPStorageType);
   PyModule_AddObject(module, THPStorageBaseStr, (PyObject *)&THPStorageType);
+  THPStorage_(initCopyMethods)();
   return true;
 }
 

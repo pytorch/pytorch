@@ -15,13 +15,6 @@ class _StorageBase(object):
     def __iter__(self):
         return iter(map(lambda i: self[i], _range(self.size())))
 
-    def copy_(self, source, async=False):
-        if async:
-            torch._C._storageCopyAsync(self, source)
-        else:
-            torch._C._storageCopy(self, source)
-        return self
-
     def __copy__(self):
         return self.clone()
 

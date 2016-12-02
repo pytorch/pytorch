@@ -666,3 +666,16 @@ invalid_arguments:
     - THTensor* self
     - THTensor* other
 ]]
+
+[[
+  python_name: copy_
+  name: THPTensor_(copy_)
+  method_flags: METH_KEYWORDS
+  only_register: True
+]]
+PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPCopyMethod(THTensor_(copy_functions), self, args, kwargs);
+  END_HANDLE_TH_ERRORS
+}

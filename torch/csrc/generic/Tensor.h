@@ -23,9 +23,17 @@ THP_API PyObject * THPTensor_(NewEmpty)(void);
 extern PyObject *THPTensorClass;
 
 #ifdef _THP_CORE
+#include "torch/csrc/Types.h"
+
 // TODO: init stateless in THPTensor_(init) and remove this
 extern PyTypeObject THPTensorStatelessType;
 bool THPTensor_(init)(PyObject *module);
+
+extern PyTypeObject THPTensorType;
+template <> struct THPTypeInfo<THTensor> {
+  static PyTypeObject* pyType() { return &THPTensorType; }
+  static THTensor* cdata(PyObject* p) { return ((THPTensor*)p)->cdata; }
+};
 #endif
 
 #endif

@@ -7,7 +7,6 @@ extern PyObject *THPDefaultTensorClass;
 extern THPGenerator *THPDefaultGenerator;
 
 #ifdef _THP_CORE
-bool THPModule_tensorCopy(PyObject *dst, PyObject *src);
 bool THPModule_isTensor(PyObject *obj);
 #endif
 
