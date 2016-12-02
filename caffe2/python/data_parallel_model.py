@@ -21,6 +21,7 @@ def Parallelize_GPU(
     param_update_builder_fun,
     devices=range(0, workspace.NumCudaDevices()),
     rendezvous=None,
+    net_type='dag',
 ):
     '''
     Function to create a model that can run on many GPUs.
@@ -48,12 +49,13 @@ def Parallelize_GPU(
       rendezvous:       used for rendezvous in distributed computation, if None
                         then only one node is used. To create rendezvous,
                         use <TBD>.
+      net_type:         Network type
 
     '''
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
     model_helper_obj.net.Proto().num_workers = len(devices) * 2 + extra_workers
-    model_helper_obj.net.Proto().type = 'dag'
+    model_helper_obj.net.Proto().type = net_type
 
     # Store some information in the model -- a bit ugly
     model_helper_obj._devices = devices
