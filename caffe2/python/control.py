@@ -197,6 +197,9 @@ def MergeConditionNets(name, condition_nets, relation):
             last_cond = curr_cond
         else:
             last_cond = merged_net.__getattr__(relation)([last_cond, curr_cond])
+        # merge attributes
+        for k, v in condition_nets[i]._attr_dict.items():
+            merged_net._attr_dict[k] += v
 
     merged_net.AddExternalOutput(last_cond)
 
