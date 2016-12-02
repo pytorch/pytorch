@@ -2,6 +2,70 @@
 #define TH_GENERIC_FILE "generic/VolumetricAveragePooling.c"
 #else
 
+static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
+                         THNNState *state,
+                         THTensor *input,
+                         THTensor *gradOutput,
+                         int kT,
+                         int kW,
+                         int kH,
+                         int dT,
+                         int dW,
+                         int dH) {
+  long nslices;
+  long itime;
+  long iheight;
+  long iwidth;
+  long otime;
+  long oheight;
+  long owidth;
+  int ndim = input->nDimension;
+  int dimN = 0;
+  int dimt = 1;
+  int dimh = 2;
+  int dimw = 3;
+
+  if (input->nDimension == 5)
+  {
+    dimN++;
+    dimt++;
+    dimh++;
+    dimw++;
+  }
+
+  THArgCheck(kT > 0 && kW > 0 && kH > 0, 5,
+             "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d",
+             kT, kH, kW);
+  THArgCheck(dT > 0 && dW > 0 && dH > 0, 8,
+             "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
+             dT, dH, dW);
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+                "4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+             && input->size[dimt] >= kT, 2,
+             "input image (T: %d H: %d W: %d) smaller than "
+             "kernel size (kT: %d kH: %d kW: %d)",
+             input->size[dimt], input->size[dimh], input->size[dimw],
+             kT, kH, kW);
+
+  /* sizes */
+  nslices = input->size[dimN];
+  itime   = input->size[dimt];
+  iheight = input->size[dimh];
+  iwidth  = input->size[dimw];
+  otime   = (itime   - kT) / dT + 1;
+  oheight = (iheight - kH) / dH + 1;
+  owidth  = (iwidth  - kW) / dW + 1;
+
+  if (gradOutput != NULL) {
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimN, nslices);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimt, otime);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, oheight);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, owidth);
+  }
+}
+
 static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
@@ -81,8 +145,9 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   real *input_data;
   real *output_data;
 
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-		"4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THNN_(VolumetricAveragePooling_shapeCheck)(
+        state, input, NULL, kT, kW, kH,
+        dT, dW, dH);
 
   int dimN = 0;
   int dimt = 1;
@@ -96,13 +161,6 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     dimh++;
     dimw++;
   }
-
-  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
-	     && input->size[dimt] >= kT, 2,
-	     "input image (T: %d H: %d W: %d) smaller than "
-	     "kernel size (kT: %d kH: %d kW: %d)",
-	     input->size[dimt], input->size[dimh], input->size[dimw],
-	     kT, kH, kW);
 
   /* sizes */
   nslices = input->size[dimN];
@@ -244,7 +302,10 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   int dimh = 2;
   int dimw = 3;
 
-  // TODO: gradOutput shape check
+  THNN_(VolumetricAveragePooling_shapeCheck)(
+        state, input, gradOutput, kT, kW, kH,
+        dT, dW, dH);
+
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
 

@@ -2,6 +2,51 @@
 #define TH_GENERIC_FILE "generic/VolumetricMaxUnpooling.c"
 #else
 
+static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
+                         THNNState *state,
+                         THTensor *input,
+                         THTensor *gradOutput,
+                         THIndexTensor *indices,
+                         int oT,
+                         int oW,
+                         int oH,
+                         int dT,
+                         int dW,
+                         int dH,
+                         int pT,
+                         int pW,
+                         int pH)
+{
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+                "4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  THNN_CHECK_SHAPE_INDICES(input, indices);
+
+  THArgCheck(dT > 0 && dW > 0 && dH > 0, 10,
+             "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
+             dT, dH, dW);
+
+  int dimw = 3;
+  int dimh = 2;
+  int dimt = 1;
+  if (input->nDimension == 5)
+  {
+    dimt++;
+    dimw++;
+    dimh++;
+  }
+
+  if (gradOutput != NULL) {
+    if (oT != gradOutput->size[dimt] || oW != gradOutput->size[dimw] || oH != gradOutput->size[dimh])
+    {
+      THError(
+        "Inconsistent gradOutput size. oT= %d, oH= %d, oW= %d, gradOutput: %dx%dx%d",
+        oT, oH, oW, gradOutput->size[dimt], gradOutput->size[dimh], gradOutput->size[dimw]
+      );
+    }
+  }
+}
+
 static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
@@ -95,10 +140,9 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   real *output_data;
   THIndex_t *indices_data;
 
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-		"4D or 5D (batch mode) tensor expected for input, but got: %s");
-
-  THNN_CHECK_SHAPE_INDICES(input, indices);
+  THNN_(VolumetricMaxUnpooling_shapeCheck)(
+        state, input, NULL, indices,
+        oT, oW, oH, dT, dW, dH, pT, pW, pH);
 
   if (input->nDimension == 5)
   {
@@ -252,7 +296,9 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   real *gradOutput_data;
   THIndex_t *indices_data;
 
-  THNN_CHECK_SHAPE_INDICES(input, indices);
+  THNN_(VolumetricMaxUnpooling_shapeCheck)(
+        state, input, gradOutput, indices,
+        oT, oW, oH, dT, dW, dH, pT, pW, pH);
 
   // TODO: check gradOutput shape
   /* get contiguous gradOutput */
@@ -276,14 +322,6 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   iT = input->size[dimt];
   iH = input->size[dimh];
   iW = input->size[dimw];
-
-  if (oT != gradOutput->size[dimt] || oW != gradOutput->size[dimw] || oH != gradOutput->size[dimh])
-  {
-    THError(
-      "Inconsistent gradOutput size. oT= %d, oH= %d, oW= %d, gradOutput: %dx%d",
-      oT, oH, oW,gradOutput->size[dimh], gradOutput->size[dimw]
-    );
-  }
 
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);
