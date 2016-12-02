@@ -116,6 +116,8 @@ class LayoutWrapper {
 /**
  * @brief A wrapper around an opaque MKL internal resource that has certain
  * layouts and convertion primitives set up.
+ *
+ * Most of the MKLMemory functions are not thread safe.
  */
 template <typename T>
 class MKLMemory {
@@ -125,6 +127,29 @@ class MKLMemory {
   // Initialize an MKLMemory with the given size, strides, dnn
   // primitive and type.
   MKLMemory(
+      const size_t dimension,
+      const size_t size[],
+      const size_t strides[],
+      const dnnPrimitive_t primitive = nullptr,
+      const dnnResourceType_t type = dnnResourceNumber,
+      bool share_mem_if_possible = false) {
+    Reset(dimension, size, strides, primitive, type, share_mem_if_possible);
+  }
+
+  // Initialize an MKLMemory, with the given dimension assuming a C-contiguous
+  // storage.
+  template <typename IndexType>
+  explicit MKLMemory(
+      const vector<IndexType>& dims,
+      const dnnPrimitive_t primitive = nullptr,
+      const dnnResourceType_t type = dnnResourceNumber,
+      bool share_mem_if_possible = false) {
+    Reset(dims, primitive, type, share_mem_if_possible);
+  }
+
+  // Initialize an MKLMemory with the given size, strides, dnn
+  // primitive and type.
+  void Reset(
       const size_t dimension,
       const size_t size[],
       const size_t strides[],
@@ -143,27 +168,22 @@ class MKLMemory {
     }
     convert_in_.Reset(dnnConversionCreate<T>, user_layout_, layout_);
     convert_out_.Reset(dnnConversionCreate<T>, layout_, user_layout_);
-    share_mem_ =
-        share_mem_if_possible && dnnLayoutCompare(layout_, user_layout_);
-    if (!share_mem_) {
-      // If we do not do copy, we will create the buffer and own it.
-      void* allocated = nullptr;
-      MKLDNN_SAFE_CALL(dnnAllocateBuffer<T>(&allocated, layout_));
-      buffer_.reset(allocated, [](void* ptr) -> void {
-        MKLDNN_CHECK(dnnReleaseBuffer<T>(ptr));
-      });
-    }
+    share_mem_if_possible_ = share_mem_if_possible;
+    layout_is_user_layout_ = dnnLayoutCompare<T>(layout_, user_layout_);
   }
 
   // Initialize an MKLMemory, with the given dimension assuming a C-contiguous
   // storage.
   template <typename IndexType>
-  explicit MKLMemory(
+  void Reset(
       const vector<IndexType>& dims,
       const dnnPrimitive_t primitive = nullptr,
       const dnnResourceType_t type = dnnResourceNumber,
       bool share_mem_if_possible = false) {
-    dims_ = dims;
+    dims_.resize(dims.size());
+    for (int i = 0; i < dims.size(); ++i) {
+      dims_[i] = dims[i];
+    }
     size_t dimension = dims.size();
     size_t size[dimension];
     size_t strides[dimension];
@@ -179,27 +199,19 @@ class MKLMemory {
     }
     convert_in_.Reset(dnnConversionCreate<T>, user_layout_, layout_);
     convert_out_.Reset(dnnConversionCreate<T>, layout_, user_layout_);
-    share_mem_ =
-        share_mem_if_possible && dnnLayoutCompare<T>(layout_, user_layout_);
-    if (!share_mem_) {
-      // If we do not do copy, we will create the buffer and own it.
-      void* allocated = nullptr;
-      MKLDNN_SAFE_CALL(dnnAllocateBuffer<T>(&allocated, layout_));
-      buffer_.reset(allocated, [](void* ptr) -> void {
-        MKLDNN_CHECK(dnnReleaseBuffer<T>(ptr));
-      });
-    }
+    share_mem_if_possible_ = share_mem_if_possible;
+    layout_is_user_layout_ = dnnLayoutCompare<T>(layout_, user_layout_);
   }
 
   // Destructs the MKLMemory.
   ~MKLMemory() {}
 
   void CopyFrom(const void* ptr) {
-    if (share_mem_) {
+    if (share_mem_if_possible_ && layout_is_user_layout_) {
       buffer_.reset(const_cast<void*>(ptr), [](void*) -> void {});
     } else {
       MKLDNN_SAFE_CALL(dnnConversionExecute<T>(
-          convert_in_, const_cast<void*>(ptr), buffer_.get()));
+          convert_in_, const_cast<void*>(ptr), buffer()));
     }
   }
 
@@ -211,8 +223,19 @@ class MKLMemory {
     CopyFrom(tensor.template data<T>());
   }
 
+  void CopyFrom(const MKLMemory<T>& other) {
+    if (share_mem_if_possible_ && dnnLayoutCompare(other.layout_, layout_)) {
+      buffer_ = other.buffer_;
+    } else {
+      PrimitiveWrapper<T> convert(
+          dnnConversionCreate<T>, other.layout_, layout_);
+      MKLDNN_SAFE_CALL(
+          dnnConversionExecute<T>(convert, other.buffer_, buffer()));
+    }
+  }
+
   bool ShareFrom(const void* ptr) {
-    if (share_mem_) {
+    if (share_mem_if_possible_ && layout_is_user_layout_) {
       buffer_.reset(const_cast<void*>(ptr), [](void*) -> void {});
       return true;
     } else {
@@ -228,13 +251,22 @@ class MKLMemory {
     return ShareFrom(tensor.template data<T>());
   }
 
+  bool ShareFrom(const MKLMemory<T>& other) {
+    if (share_mem_if_possible_ && dnnLayoutCompare(other.layout_, layout_)) {
+      buffer_ = other.buffer_;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   void CopyTo(void* ptr) const {
     if (buffer_.get() == ptr) {
       // This is already mapping to the same memory region. Skip copy.
       return;
     }
     CAFFE_ENFORCE(
-        buffer_.get(), "Canot copy out from an empty internal resource.");
+        buffer_.get(), "Canot copy out from an uninitialized MKLMemory.");
     MKLDNN_SAFE_CALL(dnnConversionExecute<T>(convert_out_, buffer_.get(), ptr));
   }
 
@@ -247,7 +279,29 @@ class MKLMemory {
     CopyTo(tensor->mutable_data<T>());
   }
 
+  void CopyTo(MKLMemory<T>* other) {
+    if (buffer_.get() == other->buffer_.get()) {
+      return;
+    }
+    CAFFE_ENFORCE(
+        buffer_.get(), "Canot copy out from an uninitialized MKLMemory.");
+    // TODO(jiayq): if primitive creation is a big overhead and we will be
+    // consistently copying stuff with fixed src and dst layouts, consider
+    // making a cache for the primitive below.
+    PrimitiveWrapper<T> convert(
+        dnnConversionCreate<T>, layout_, other->layout_);
+    MKLDNN_SAFE_CALL(
+        dnnConversionExecute<T>(convert, buffer_, other->buffer()));
+  }
+
   inline void* buffer() {
+    if (buffer_ == nullptr) {
+      void* allocated = nullptr;
+      MKLDNN_SAFE_CALL(dnnAllocateBuffer<T>(&allocated, layout_));
+      buffer_.reset(allocated, [](void* ptr) -> void {
+        MKLDNN_CHECK(dnnReleaseBuffer<T>(ptr));
+      });
+    }
     return buffer_.get();
   }
 
@@ -279,7 +333,8 @@ class MKLMemory {
   }
 
  private:
-  bool share_mem_;
+  bool share_mem_if_possible_;
+  bool layout_is_user_layout_;
   // The internal buffer in the specific dnn layout.
   std::shared_ptr<void> buffer_;
   // The dimensions in the same order as Caffe2 does. This is used to

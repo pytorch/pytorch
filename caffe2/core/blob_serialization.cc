@@ -69,7 +69,14 @@ std::string TensorDeviceTypeName(const int32_t& d) {
     case MKLDNN:
       return "TensorMKLDNN";
     default:
-      CAFFE_THROW("Unknown device: ", d);
+      CAFFE_THROW(
+          "Unknown device: ",
+          d,
+          ". If you have recently updated the caffe2.proto file to add a new "
+          "device type, did you forget to update the TensorDeviceTypeName() "
+          "function to reflect such recent changes?");
+      // The below code won't run but is needed to suppress some compiler
+      // warnings.
       return "";
   }
 };
