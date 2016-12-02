@@ -1076,6 +1076,9 @@ TH_API void THNN_(VolumetricConvolutionMM_accGradParameters)(
           THTensor *gradWeight,
           THTensor *gradBias,
           THTensor *finput,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int pT, int pW, int pH,
           real scale);
 
 TH_API void THNN_(VolumetricFullConvolution_updateOutput)(
