@@ -21,15 +21,15 @@ class Function(_C._FunctionBase):
         self.non_differentiable = args
 
     def register_hook(self, name, hook):
-        self.backward_hooks = self.backward_hooks or OrderedDict()
-        assert name not in self.backward_hooks, \
+        self._backward_hooks = self._backward_hooks or OrderedDict()
+        assert name not in self._backward_hooks, \
             "Trying to register a second hook with name {}".format(name)
-        self.backward_hooks[name] = hook
+        self._backward_hooks[name] = hook
 
     def remove_hook(self, name):
-        assert self.backward_hooks and name in self.backward_hooks, \
+        assert self._backward_hooks and name in self._backward_hooks, \
             "Trying to remove an inexistent hook with name {}".format(name)
-        del self.backward_hooks[name]
+        del self._backward_hooks[name]
 
     def forward(self, *input):
         raise NotImplementedError

@@ -78,6 +78,20 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 5)
 
+        def bw_hook_modify(grad):
+            return grad.mul(2)
+
+        z.remove_hook('test')
+        z.register_hook('test', bw_hook_modify)
+        y.grad.zero_()
+        z.backward(torch.ones(5, 5), retain_variables=True)
+        self.assertEqual(y.grad, (x.data + 1) * 2)
+
+        y.register_hook('test', bw_hook_modify)
+        y.grad.zero_()
+        z.backward(torch.ones(5, 5))
+        self.assertEqual(y.grad, (x.data + 1) * 4)
+
     def _test_backward(self):
         v_t = torch.randn(5, 5)
         x_t = torch.randn(5, 5)
@@ -147,12 +161,12 @@ class TestAutograd(TestCase):
         def error():
             raise RuntimeError
         # Make sure backward isn't called on these
-        a.backward_hooks = OrderedDict()
-        x.backward_hooks = OrderedDict()
-        y.backward_hooks = OrderedDict()
-        a.backward_hooks['test'] = error
-        x.backward_hooks['test'] = error
-        y.backward_hooks['test'] = error
+        a._backward_hooks = OrderedDict()
+        x._backward_hooks = OrderedDict()
+        y._backward_hooks = OrderedDict()
+        a._backward_hooks['test'] = error
+        x._backward_hooks['test'] = error
+        y._backward_hooks['test'] = error
         b.backward(torch.ones(5, 5))
 
     def test_inplace(self):

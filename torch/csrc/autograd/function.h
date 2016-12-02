@@ -36,6 +36,7 @@ struct THPFunction {
 
     PyObject *needs_input_grad;
     PyObject *backward_hooks;
+    THPObjectPtr *output_backward_hooks;
 
     PyObject *to_save;
     PyObject *shared_pairs;

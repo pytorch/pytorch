@@ -258,6 +258,65 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 13)
         self.assertEqual(counter['backwards'], 7)
 
+        module.remove_forward_hook('test')
+        module.remove_backward_hook('test')
+
+    def test_hook_fail(self):
+        module = nn.Sigmoid()
+        input = Variable(torch.randn(5, 5), requires_grad=True)
+
+        def fw_fail1(self, input, output):
+            return output
+
+        def fw_fail2(self, input, output):
+            return input
+
+        def bw_fail1(self, grad_input, grad_output):
+            return grad_input[:-1]
+
+        def bw_fail2(self, grad_input, grad_output):
+            return grad_input + (torch.randn(2, 2),)
+
+        module.register_forward_hook('fw_fail', fw_fail1)
+        with self.assertRaises(RuntimeError) as err:
+            module(input)
+        self.assertIn("fw_fail", err.exception.args[0])
+        self.assertIn("didn't return None", err.exception.args[0])
+        module.remove_forward_hook('fw_fail')
+
+        module.register_forward_hook('fw_fail2', fw_fail2)
+        with self.assertRaises(RuntimeError) as err:
+            module(input)
+        self.assertIn("fw_fail2", err.exception.args[0])
+        self.assertIn("didn't return None", err.exception.args[0])
+        module.remove_forward_hook('fw_fail2')
+
+        module.register_backward_hook('bw_fail', bw_fail1)
+        with self.assertRaises(RuntimeError) as err:
+            module(input).sum().backward()
+        self.assertIn("bw_fail", err.exception.args[0])
+        self.assertIn("got 0, but expected 1", err.exception.args[0])
+        module.remove_backward_hook('bw_fail')
+
+        module.register_backward_hook('bw_fail2', bw_fail2)
+        with self.assertRaises(RuntimeError) as err:
+            module(input).sum().backward()
+        self.assertIn("bw_fail2", err.exception.args[0])
+        self.assertIn("got 2, but expected 1", err.exception.args[0])
+        module.remove_backward_hook('bw_fail2')
+
+    def test_hook_writeable(self):
+        module = nn.Linear(5, 5)
+        input = Variable(torch.randn(5, 5), requires_grad=True)
+
+        def bw_hook(self, grad_input, grad_output):
+            return tuple(gi * 2 for gi in grad_input)
+
+        module.register_backward_hook('test', bw_hook)
+        module(input).backward(torch.ones(5, 5))
+        expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
+        self.assertEqual(input.grad, expected_grad)
+
     def test_volatile(self):
         module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
         input = torch.randn(1, 2, 10, 10)

@@ -96,35 +96,35 @@ class Variable(_C._VariableBase):
 
     def register_hook(self, name, hook):
         if self.volatile:
-            raise RuntimeError('registering hook on a volatile variable')
+            raise RuntimeError("registering hook on a volatile variable")
         if not self.requires_grad:
             raise RuntimeError("registering hook on a variable that doesn't require gradient")
-        if self.creator is not None:
-            self.creator.register_hook(name, lambda gi, go: hook(go[self.output_nr]))
-        else:
-            self.backward_hooks = self.backward_hooks or OrderedDict()
-            assert name not in self.backward_hooks, \
-                "Trying to register a second hook with name {}".format(name)
-            self.backward_hooks[name] = hook
+        if self._backward_hooks is None:
+            self._backward_hooks = OrderedDict()
+            if self.creator is not None:
+                self.creator._register_hook_dict(self)
+        assert name not in self._backward_hooks, \
+            "Trying to register a second hook with name {}".format(name)
+        self._backward_hooks[name] = hook
 
     def remove_hook(self, name):
         if self.volatile:
             raise RuntimeError("volatile variables don't support hooks")
-        if self.creator is not None:
-            self.creator.remove_hook(name)
-        else:
-            assert self.backward_hooks and name in self.backward_hooks, \
-                "Trying to remove an inexistent hook with name {}".format(name)
-            del self.backward_hooks[name]
+        assert self._backward_hooks and name in self._backward_hooks, \
+            "Trying to remove an inexistent hook with name {}".format(name)
+        del self._backward_hooks[name]
 
     def _do_backward(self, grad_output, retain_variables):
         assert len(grad_output) == 1
         assert self._version == 0 and self.creator is None, \
             "leaf variable was used in an inplace operation"
-        if self.backward_hooks:
-            for hook in self.backward_hooks.values():
-                hook(grad_output[0])
-        self.grad.add_(grad_output[0])
+        unpacked_grad = grad_output[0]
+        if self._backward_hooks:
+            for hook in self._backward_hooks.values():
+                result = hook(unpacked_grad)
+                if result is not None:
+                    unpacked_grad = result
+        self.grad.add_(unpacked_grad)
         return tuple()
 
     def no_grad(self):
