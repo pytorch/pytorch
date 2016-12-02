@@ -123,6 +123,12 @@ struct HostAllocator
     Block& block = it->second;
     THAssert(block.allocated);
 
+    // process outstanding cuda events which may have occurred
+    err = processEvents();
+    if (err != cudaSuccess) {
+      return err;
+    }
+
     // create and record an event in the given stream
     cudaEvent_t event;
     err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
