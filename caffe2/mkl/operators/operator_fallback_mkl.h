@@ -10,10 +10,10 @@
 namespace caffe2 {
 
 /**
- * @brief A templated class to allow one to wrap a CPU operator as a CUDA
+ * @brief A templated class to allow one to wrap a CPU operator as an MKL
  * operator.
  *
- * This class can be used when one does not have the CUDA implementation ready
+ * This class can be used when one does not have the MKL implementation ready
  * yet for an operator. Essentially, what this op does is to automatically
  * deal with data copy for you. Plausibly, this causes a lot of overhead and
  * is not optimal, so you should use this operator mostly for quick prototyping
@@ -24,25 +24,25 @@ namespace caffe2 {
  * Example usage: if you have a class MyMagicOp that is CPU based, and you use
  * the registration code
  *     REGISTER_CPU_OPERATOR(MyMagic, MyMagicOp);
- * to register the CPU side, you can create its corresponding GPU operator
+ * to register the CPU side, you can create its corresponding MKL operator
  * (with performance hits of course) via
- *     REGISTER_CUDA_OPERATOR(MyMagic,
- *                            GPUFallbackOp<MyMagicOp>);
+ *     REGISTER_MKL_OPERATOR(MyMagic,
+ *                            MKLFallbackOp<MyMagicOp>);
  *
  * Advanced usage: if you want to have some specific outputs never copied, you
  * can use the SkipOutputCopy template argument to do that. For example, if
  * MyMagic produces two outputs and the first output is always going to live on
  * the CPU, you can do
  *     REGISTER_CUDA_OPERATOR(MyMagic,
- *                            GPUFallbackOp<MyMagicOp, SkipIndices<0>>);
+ *                            MKLFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
 template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
-class GPUFallbackOp final : public Operator<CUDAContext> {
+class MKLFallbackOp final : public Operator<MKLContext> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
-  GPUFallbackOp(const OperatorDef& def, Workspace* ws)
-      : Operator<CUDAContext>(def, ws) {
-    CAFFE_ENFORCE_EQ(def.device_option().device_type(), CUDA);
+  USE_OPERATOR_FUNCTIONS(MKLContext);
+  MKLFallbackOp(const OperatorDef& def, Workspace* ws)
+      : Operator<MKLContext>(def, ws) {
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), MKLDNN);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     base_def_.clear_device_option();
@@ -60,14 +60,15 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
-    bool need_sync = false;
     for (int i = 0; i < InputSize(); ++i) {
-      if (OperatorBase::InputIsType<TensorCUDA>(i)) {
-        local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
-            Input(i), &context_);
-        need_sync = true;
+      if (OperatorBase::InputIsType<MKLMemory<float>>(i)) {
+        OperatorBase::Input<MKLMemory<float>>(i).CopyTo(
+            local_input_blobs_[i]->template GetMutable<TensorCPU>());
+      } else if (OperatorBase::InputIsType<MKLMemory<double>>(i)) {
+        OperatorBase::Input<MKLMemory<double>>(i).CopyTo(
+            local_input_blobs_[i]->template GetMutable<TensorCPU>());
       } else {
-        VLOG(1) << "Input " << i << " is not TensorCUDA. Skipping copy.";
+        VLOG(1) << "Input " << i << " is not MKLMemory. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
         // local_input_blobs will only be used as const blob input for the
         // base op so we are still fine.
@@ -77,16 +78,12 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
       }
     }
 
-    // Sync to make sure copies are done.
-    if (need_sync) {
-      context_.FinishDeviceComputation();
-    }
-
     if (!base_op_->Run()) {
-      LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
+      LOG(ERROR) << "Base op run failed in MKLFallbackOp. Def: "
                  << ProtoDebugString(def());
       return false;
     }
+
     for (int i = 0; i < OutputSize(); ++i) {
       if (SkipOutputCopy::Contains(i)) {
         VLOG(1) << "Copy output: index " << i << " skipped.";
@@ -94,10 +91,26 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
       }
       CAFFE_ENFORCE(
           local_output_blobs_[i]->template IsType<TensorCPU>(),
-          "GPU fallback op currently does not support non-TensorCPU "
+          "MKL fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
-      Output(i)->CopyFrom(
-          local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
+      const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
+      if (src.IsType<float>()) {
+        Blob& dst = OperatorBase::OutputAt(i);
+        if (!dst.IsType<MKLMemory<float>>() ||
+            dst.Get<MKLMemory<float>>().dims() != src.dims()) {
+          dst.Reset(new MKLMemory<float>(src.dims());
+        }
+        dst.GetMutable < MKLMemory<float>()->CopyFrom(src);
+      } else if (src.IsType<double>()) {
+        Blob& dst = OperatorBase::OutputAt(i);
+        if (!dst.IsType<MKLMemory<double>>() ||
+            dst.Get<MKLMemory<double>>().dims() != src.dims()) {
+          dst.Reset(new MKLMemory<double>(src.dims());
+        }
+        dst.GetMutable < MKLMemory<double>()->CopyFrom(src);
+      } else {
+        CAFFE_THROW("MKLMemory only supports float and double.");
+      }
     }
     return true;
   }

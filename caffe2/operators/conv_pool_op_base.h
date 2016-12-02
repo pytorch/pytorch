@@ -97,9 +97,14 @@ class ConvPoolOpBase : public Operator<Context> {
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
   // sizes.
+  // Note(jiayq): the templatization of this function is mainly to help
+  // implementations that do not use first-class Tensor objects, such as the
+  // MKL operator. One can still call this function with dummy
+  // Tensor<CPUContext> objects in order to obtain the sizes.
+  template <typename AlternativeContext>
   void SetOutputSize(
-      const Tensor<Context>& input,
-      Tensor<Context>* output,
+      const Tensor<AlternativeContext>& input,
+      Tensor<AlternativeContext>* output,
       int output_channel) {
     CAFFE_ENFORCE(4 == input.ndim());
     CAFFE_ENFORCE(input.size() > 0);
@@ -119,7 +124,7 @@ class ConvPoolOpBase : public Operator<Context> {
         W = input.dim32(3);
         break;
       default:
-        LOG(FATAL) << "Unknown Storage order: " << order_;
+        CAFFE_THROW("Unknown Storage order: ", order_);
     }
 
     int output_height = 0, output_width = 0;
@@ -191,7 +196,7 @@ class ConvPoolOpBase : public Operator<Context> {
         // VLOG(2) << "Running NCHW";
         return RunOnDeviceWithOrderNCHW();
       default:
-        LOG(FATAL) << "Unknown storage order: " << order_;
+        CAFFE_THROW("Unknown Storage order: ", order_);
     }
     // To suppress old compiler warnings
     return true;

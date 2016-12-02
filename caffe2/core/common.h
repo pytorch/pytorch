@@ -114,6 +114,35 @@ inline Dst dynamic_cast_if_rtti(Src ptr) {
 #endif
 }
 
+// SkipIndices are used in operator_fallback_gpu.h and operator_fallback_mkl.h
+// as utilty functions that marks input / output indices to skip when we use a
+// CPU operator as the fallback of GPU/MKL operator option.
+template <int... values>
+class SkipIndices {
+ private:
+  template <int V>
+  static inline bool ContainsInternal(const int i) {
+    return (i == V);
+  }
+  template <int First, int Second, int... Rest>
+  static inline bool ContainsInternal(const int i) {
+    return (i == First) && ContainsInternal<Second, Rest...>(i);
+  }
+
+ public:
+  static inline bool Contains(const int i) {
+    return ContainsInternal<values...>(i);
+  }
+};
+
+template <>
+class SkipIndices<> {
+ public:
+  static inline bool Contains(const int i) {
+    return false;
+  }
+};
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_COMMON_H_
