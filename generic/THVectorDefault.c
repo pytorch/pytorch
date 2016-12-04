@@ -33,6 +33,22 @@ void THVector_(cadd_DEFAULT)(real *z, const real *x, const real *y, const real c
     z[i] = x[i] + c * y[i];
 }
 
+void THVector_(add_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
+{
+  ptrdiff_t i = 0;
+
+  for(; i<n-4; i+=4)
+  {
+    y[i] = x[i] + c;
+    y[i+1] = x[i+1] + c;
+    y[i+2] = x[i+2] + c;
+    y[i+3] = x[i+3] + c;
+  }
+
+  for(; i<n; i++)
+    y[i] = x[i] + c;
+}
+
 void THVector_(diff_DEFAULT)(real *z, const real *x, const real *y, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;

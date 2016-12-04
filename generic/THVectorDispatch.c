@@ -65,6 +65,20 @@ void THVector_(cadd)(real *z, const real *x, const real *y, const real c, const 
   THVector_(cadd_DISPATCHPTR)(z, x, y, c, n);
 }
 
+static void (*THVector_(add_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(add_DEFAULT);
+static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
+  #if defined(USE_AVX)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(add_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  FUNCTION_IMPL(THVector_(add_DEFAULT), SIMDExtension_DEFAULT)
+};
+// Dispatch stubs that just call the pointers
+TH_API void THVector_(add)(real *r_, const real *t, const real value, const ptrdiff_t n) {
+  THVector_(add_DISPATCHPTR)(r_, t, value, n);
+}
 
 static void (*THVector_(diff_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(diff_DEFAULT);
 static FunctionDescription THVector_(diff_DISPATCHTABLE)[] = {
@@ -161,6 +175,7 @@ void THVector_(vectorDispatchInit)(void)
   uint32_t hostSimdExts = detectHostSIMDExtensions();
   INIT_VECTOR_DISPATCH_PTR(fill);
   INIT_VECTOR_DISPATCH_PTR(cadd);
+  INIT_VECTOR_DISPATCH_PTR(add);
   INIT_VECTOR_DISPATCH_PTR(diff);
   INIT_VECTOR_DISPATCH_PTR(scale);
   INIT_VECTOR_DISPATCH_PTR(mul);

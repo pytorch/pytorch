@@ -468,15 +468,24 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
-      real *tp = THTensor_(data)(t);
-      real *rp = THTensor_(data)(r_);
-      ptrdiff_t sz = THTensor_(nElement)(t);
-      ptrdiff_t i;
-      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<sz; i++)
-          rp[i] = tp[i] + value;
+    real *tp = THTensor_(data)(t);
+    real *rp = THTensor_(data)(r_);
+    ptrdiff_t sz = THTensor_(nElement)(t);
+    #pragma omp parallel if(sz > TH_OMP_OVERHEAD_THRESHOLD)
+    {
+      #ifdef _OPENMP
+      size_t num_threads = omp_get_num_threads();
+      size_t tid = omp_get_thread_num();
+      #else
+      size_t num_threads = 1;
+      size_t tid = 0;
+      #endif
+      ptrdiff_t i = tid * (sz / num_threads);
+      ptrdiff_t i_end = tid == num_threads - 1 ? sz : i + sz / num_threads;
+      THVector_(add)(rp+i, tp+i, value, i_end-i); 
+    }
   } else {
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
   }
 }
 
