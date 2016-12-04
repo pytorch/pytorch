@@ -62,17 +62,17 @@ static void THFloatVector_mul_NEON(float *y, const float *x, const ptrdiff_t n) 
     y[i] *= x[i];
 }
 
-static void THFloatVector_add_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
+static void THFloatVector_cadd_NEON(float *z, const float *x, const float *y, const float c, const ptrdiff_t n) {
   long i = 0;
 
   for(;i < n-4; i += 4)
   {
-    y[i] += c * x[i];
-    y[i+1] += c * x[i+1];
-    y[i+2] += c * x[i+2];
-    y[i+3] += c * x[i+3];
+    z[i] = x[i] + c * y[i];
+    z[i+1] = x[i+1] + c * y[i+1];
+    z[i+2] = x[i+2] + c * y[i+2];
+    z[i+3] = x[i+3] + c * y[i+3];
   }
 
   for(; i < n; i++)
-    y[i] += c * x[i];
+    z[i] = x[i] + c * y[i];
 }

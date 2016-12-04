@@ -38,11 +38,11 @@ void THVector_(fill)(real *x, const real c, const ptrdiff_t n) {
   THVector_(fill_DISPATCHPTR)(x, c, n);
 }
 
-static void (*THVector_(add_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(add_DEFAULT);
-static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
+static void (*THVector_(cadd_DISPATCHPTR))(real *, const real *, const real *, const real, const ptrdiff_t) = &THVector_(cadd_DEFAULT);
+static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(add_NEON), SIMDExtension_NEON),
+      FUNCTION_IMPL(THVector_(cadd_NEON), SIMDExtension_NEON),
     #endif
   #endif
 
@@ -55,14 +55,14 @@ static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(add_SSE), SIMDExtension_SSE),
+      FUNCTION_IMPL(THVector_(cadd_SSE), SIMDExtension_SSE),
     #endif
   #endif
 
-  FUNCTION_IMPL(THVector_(add_DEFAULT), SIMDExtension_DEFAULT)
+  FUNCTION_IMPL(THVector_(cadd_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(add)(real *y, const real *x, const real c, const ptrdiff_t n) {
-  THVector_(add_DISPATCHPTR)(y, x, c, n);
+void THVector_(cadd)(real *z, const real *x, const real *y, const real c, const ptrdiff_t n) {
+  THVector_(cadd_DISPATCHPTR)(z, x, y, c, n);
 }
 
 
@@ -160,7 +160,7 @@ void THVector_(vectorDispatchInit)(void)
 {
   uint32_t hostSimdExts = detectHostSIMDExtensions();
   INIT_VECTOR_DISPATCH_PTR(fill);
-  INIT_VECTOR_DISPATCH_PTR(add);
+  INIT_VECTOR_DISPATCH_PTR(cadd);
   INIT_VECTOR_DISPATCH_PTR(diff);
   INIT_VECTOR_DISPATCH_PTR(scale);
   INIT_VECTOR_DISPATCH_PTR(mul);

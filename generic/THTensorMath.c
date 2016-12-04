@@ -2,6 +2,10 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #define TH_OMP_OVERHEAD_THRESHOLD 100000
 
 void THTensor_(fill)(THTensor *r_, real value)
@@ -731,13 +735,22 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
       ptrdiff_t sz = THTensor_(nElement)(t);
-      ptrdiff_t i;
-      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i< sz; i++)
-          rp[i] = tp[i] + value * sp[i];
+      #pragma omp parallel if(sz > TH_OMP_OVERHEAD_THRESHOLD)
+      {
+        #ifdef _OPENMP
+        size_t num_threads = omp_get_num_threads();
+        size_t tid = omp_get_thread_num();
+        #else
+        size_t num_threads = 1;
+        size_t tid = 0;
+        #endif
+        ptrdiff_t i = tid * (sz / num_threads);
+        ptrdiff_t i_end = tid == num_threads - 1 ? sz : i + sz / num_threads;
+	THVector_(cadd)(rp+i, tp+i, sp+i, value, i_end-i); 
+      }
     }
   } else {
-      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
+    TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
   }
 }
 
