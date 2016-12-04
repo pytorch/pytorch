@@ -21,10 +21,6 @@ CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 
 namespace caffe2 {
 
-// Data type for Tensor Index. We use size_t to be safe here as well as for
-// large matrices that are common in sparse math.
-typedef int64_t TIndex;
-
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
  */

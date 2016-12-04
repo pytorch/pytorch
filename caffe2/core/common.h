@@ -15,6 +15,10 @@
 
 namespace caffe2 {
 
+// Data type for caffe2 Index/Size. We use size_t to be safe here as well as for
+// large matrices that are common in sparse math.
+typedef int64_t TIndex;
+
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
 // in some cases, but in most of the computation code we do not access map very
