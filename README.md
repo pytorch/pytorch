@@ -8,3 +8,10 @@ Read [the installation instructions](https://github.com/Yangqing/caffe2/blob/mas
 
 Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/caffe2/blob/master/LICENSE).
 
+### Building Caffe2
+
+    git clone https://github.com/caffe2/caffe2
+    cd caffe2 && mkdir bin
+    cd bin && cmake ..
+    make
+
