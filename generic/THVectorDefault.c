@@ -81,7 +81,7 @@ void THVector_(scale_DEFAULT)(real *y, const real c, const ptrdiff_t n)
     y[i] *= c;
 }
 
-void THVector_(mul_DEFAULT)(real *y, const real *x, const ptrdiff_t n)
+void THVector_(cmul_DEFAULT)(real *y, const real *x, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 

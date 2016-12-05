@@ -84,7 +84,7 @@ static void THDoubleVector_scale_SSE(double *y, const double c, const ptrdiff_t 
 }
 
 
-static void THDoubleVector_mul_SSE(double *y, const double *x, const ptrdiff_t n) {
+static void THDoubleVector_cmul_SSE(double *y, const double *x, const ptrdiff_t n) {
   ptrdiff_t i;
   for (i=0; i<=((n)-8); i+=8) {
     __m128d XMM0 = _mm_loadu_pd((x)+i  );
@@ -189,7 +189,7 @@ static void THFloatVector_scale_SSE(float *y, const float c, const ptrdiff_t n) 
   }
 }
 
-static void THFloatVector_mul_SSE(float *y, const float *x, const ptrdiff_t n) {
+static void THFloatVector_cmul_SSE(float *y, const float *x, const ptrdiff_t n) {
   ptrdiff_t i;
   for (i=0; i<=((n)-16); i+=16) {
     __m128 XMM0 = _mm_loadu_ps((x)+i   );
