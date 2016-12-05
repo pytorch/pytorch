@@ -29,12 +29,16 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
   int dimw = 3;
   int dimh = 2;
   int dimt = 1;
+  int dimn = 0;
+
   if (input->nDimension == 5)
   {
     dimt++;
     dimw++;
     dimh++;
+    dimn++;
   }
+  int nslices = input->size[dimn];
 
   if (gradOutput != NULL) {
     if (oT != gradOutput->size[dimt] || oW != gradOutput->size[dimw] || oH != gradOutput->size[dimh])
@@ -44,6 +48,8 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
         oT, oH, oW, gradOutput->size[dimt], gradOutput->size[dimh], gradOutput->size[dimw]
       );
     }
+
+    THNN_CHECK_DIM_SIZE(gradOutput, input->nDimension, dimn, nslices);
   }
 }
 
