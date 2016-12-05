@@ -12,6 +12,8 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
   int dimw = 3;
   int dimh = 2;
   int dimd = 1;
+  int dimslices = 0;
+  long nslices;
   long idepth;
   long iheight;
   long iwidth;
@@ -27,9 +29,11 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
     dimw++;
     dimh++;
     dimd++;
+    dimslices++;
   }
 
   /* sizes */
+  nslices = input->size[dimslices];
   idepth = input->size[dimd];
   iheight = input->size[dimh];
   iwidth = input->size[dimw];
@@ -43,6 +47,9 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
              idepth, iheight, iwidth, odepth, oheight, owidth);
 
   if (gradOutput != NULL) {
+    THArgCheck(nslices == THTensor_(size)(gradOutput, dimslices), 3,
+               "gradOutput width unexpected. Expected: %d, Got: %d",
+               nslices, THTensor_(size)(gradOutput, dimslices));
     THArgCheck(owidth == THTensor_(size)(gradOutput, dimw), 3,
                "gradOutput width unexpected. Expected: %d, Got: %d",
                owidth, THTensor_(size)(gradOutput, dimw));
