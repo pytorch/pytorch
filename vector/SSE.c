@@ -84,7 +84,7 @@ static void THDoubleVector_scale_SSE(double *y, const double c, const ptrdiff_t 
 }
 
 
-static void THDoubleVector_cmul_SSE(double *y, const double *x, const ptrdiff_t n) {
+static void THDoubleVector_cmul_SSE(double *z, const double *x, const double *y, const ptrdiff_t n) {
   ptrdiff_t i;
   for (i=0; i<=((n)-8); i+=8) {
     __m128d XMM0 = _mm_loadu_pd((x)+i  );
@@ -99,14 +99,13 @@ static void THDoubleVector_cmul_SSE(double *y, const double *x, const ptrdiff_t 
     XMM5 = _mm_mul_pd(XMM5, XMM1);
     XMM6 = _mm_mul_pd(XMM6, XMM2);
     XMM7 = _mm_mul_pd(XMM7, XMM3);
-    _mm_storeu_pd((y)+i  , XMM4);
-    _mm_storeu_pd((y)+i+2, XMM5);
-    _mm_storeu_pd((y)+i+4, XMM6);
-    _mm_storeu_pd((y)+i+6, XMM7);
+    _mm_storeu_pd((z)+i  , XMM4);
+    _mm_storeu_pd((z)+i+2, XMM5);
+    _mm_storeu_pd((z)+i+4, XMM6);
+    _mm_storeu_pd((z)+i+6, XMM7);
   }
-  ptrdiff_t off = (n) - ((n)%8);
-  for (i=0; i<((n)%8); i++) {
-    y[off+i] *= x[off+i];
+  for (; i<(n); i++) {
+    z[i] = x[i] * y[i];
   }
 }
 
@@ -189,7 +188,7 @@ static void THFloatVector_scale_SSE(float *y, const float c, const ptrdiff_t n) 
   }
 }
 
-static void THFloatVector_cmul_SSE(float *y, const float *x, const ptrdiff_t n) {
+static void THFloatVector_cmul_SSE(float *z, const float *x, const float *y, const ptrdiff_t n) {
   ptrdiff_t i;
   for (i=0; i<=((n)-16); i+=16) {
     __m128 XMM0 = _mm_loadu_ps((x)+i   );
@@ -204,14 +203,13 @@ static void THFloatVector_cmul_SSE(float *y, const float *x, const ptrdiff_t n) 
     XMM5 = _mm_mul_ps(XMM5, XMM1);
     XMM6 = _mm_mul_ps(XMM6, XMM2);
     XMM7 = _mm_mul_ps(XMM7, XMM3);
-    _mm_storeu_ps((y)+i   , XMM4);
-    _mm_storeu_ps((y)+i+ 4, XMM5);
-    _mm_storeu_ps((y)+i+ 8, XMM6);
-    _mm_storeu_ps((y)+i+12, XMM7);
+    _mm_storeu_ps((z)+i   , XMM4);
+    _mm_storeu_ps((z)+i+ 4, XMM5);
+    _mm_storeu_ps((z)+i+ 8, XMM6);
+    _mm_storeu_ps((z)+i+12, XMM7);
   }
-  ptrdiff_t off = (n) - ((n)%16);
-  for (i=0; i<((n)%16); i++) {
-    y[off+i] *= x[off+i];
+  for (; i<(n); i++) {
+    z[i] = x[i] * y[i];
   }
 }
 

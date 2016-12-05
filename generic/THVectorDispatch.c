@@ -107,7 +107,6 @@ void THVector_(diff)(real *z, const real *x, const real *y, const ptrdiff_t n) {
   THVector_(diff_DISPATCHPTR)(z, x, y, n);
 }
 
-
 static void (*THVector_(scale_DISPATCHPTR))(real *, const real, const ptrdiff_t) = &THVector_(scale_DEFAULT);
 static FunctionDescription THVector_(scale_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
@@ -136,7 +135,7 @@ TH_API void THVector_(scale)(real *y, const real c, const ptrdiff_t n) {
 }
 
 
-static void (*THVector_(cmul_DISPATCHPTR))(real *, const real *, const ptrdiff_t) = &THVector_(cmul_DEFAULT);
+static void (*THVector_(cmul_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(cmul_DEFAULT);
 static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -159,8 +158,8 @@ static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(cmul_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(cmul)(real *y, const real *x, const ptrdiff_t n) {
-  THVector_(cmul_DISPATCHPTR);
+void THVector_(cmul)(real *z, const real *x, const real *y, const ptrdiff_t n) {
+  THVector_(cmul_DISPATCHPTR)(z, x, y, n);
 }
 
 /* This needs to be called in order to initialize the dispatch pointers at runtime.
