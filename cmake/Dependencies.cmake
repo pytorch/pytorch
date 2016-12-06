@@ -80,3 +80,14 @@ endif()
 
 # ---[ EIGEN
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/eigen)
+
+# ---[ pybind11
+include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/pybind11/include)
+
+# ---[ Python + Numpy
+find_package(PythonInterp 2.7)
+find_package(PythonLibs 2.7)
+find_package(NumPy REQUIRED)
+
+include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIRS})
+list(APPEND Caffe2_LINKER_LIBS ${PYTHON_LIBRARIES})
