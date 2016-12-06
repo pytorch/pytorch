@@ -31,22 +31,6 @@ static void THFloatVector_diff_NEON(float *z, const float *x, const float *y, co
 
 }
 
-
-static void THFloatVector_scale_NEON(float *y, const float c, const ptrdiff_t n) {
-  long i = 0;
-
-  for(; i < n-4; i +=4)
-  {
-    y[i] *= c;
-    y[i+1] *= c;
-    y[i+2] *= c;
-    y[i+3] *= c;
-  }
-
-  for(; i < n; i++)
-    y[i] *= c;
-}
-
 static void THFloatVector_cmul_NEON(float *z, const float *x, const float* y, const ptrdiff_t n) {
   long i = 0;
 

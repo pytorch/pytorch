@@ -65,22 +65,6 @@ void THVector_(diff_DEFAULT)(real *z, const real *x, const real *y, const ptrdif
     z[i] = x[i] - y[i];
 }
 
-void THVector_(scale_DEFAULT)(real *y, const real c, const ptrdiff_t n)
-{
-  ptrdiff_t i = 0;
-
-  for(; i < n-4; i +=4)
-  {
-    y[i] *= c;
-    y[i+1] *= c;
-    y[i+2] *= c;
-    y[i+3] *= c;
-  }
-
-  for(; i < n; i++)
-    y[i] *= c;
-}
-
 void THVector_(cmul_DEFAULT)(real *z, const real *x, const real *y, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
