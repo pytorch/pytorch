@@ -1,0 +1,8 @@
+# Regexps
+x = /\//
+x = /\n/
+x = /ab\/ ab/
+x = f /6 * 2/ - 3
+x = f /foo * 2/gm
+x = if true then /\n/ else /[.,]+/
+x = ///^key-#{key}-\d+///

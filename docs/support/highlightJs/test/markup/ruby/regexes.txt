@@ -1,0 +1,5 @@
+str =~ /^(?:foo)$/
+str =~ %r{foo|bar|buz$}
+str =~ %r!foo|bar$!
+str =~ %r[foo|bar$]
+str =~ %r(\(foo|bar\)$)

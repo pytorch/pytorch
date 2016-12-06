@@ -1,0 +1,26 @@
+package json
+
+source helper.tcl
+# randomness verified by a die throw
+set ::rand 4
+
+proc give::recursive::count {base p} { ; # 2 mandatory params
+    while {$p > 0} {
+        set result [expr $result * $base]; incr p -1
+    }
+    return $result
+}
+
+set a 'a'; set b "bcdef"; set lst [list "item"]
+puts [llength $a$b]
+
+set ::my::tid($id) $::my::tid(def)
+lappend lst $arr($idx) $::my::arr($idx) $ar(key)
+lreplace ::my::tid($id) 4 4
+puts $::rand ${::rand} ${::AWESOME::component::variable}
+
+puts "$x + $y is\t [expr $x + $y]"
+
+proc isprime x {
+    expr {$x>1 && ![regexp {^(oo+?)\1+$} [string repeat o $x]]}
+}

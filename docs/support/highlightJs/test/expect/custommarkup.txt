@@ -1,0 +1,3 @@
+<span class="hljs-tag">&lt;</span><a href="http://dev.w3.org/html5/spec/Overview.html#the-div-element"><span class="hljs-tag"><span class="hljs-title">div</span></span></a><span class="hljs-tag"> <span class="hljs-attribute">id</span>=<span class="hljs-value">"contents"</span>&gt;</span>
+  <del><span class="hljs-tag">&lt;<span class="hljs-title">p</span>&gt;</span>Hello, World!</del><ins>Goodbye, cruel world!</ins>
+<span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span>

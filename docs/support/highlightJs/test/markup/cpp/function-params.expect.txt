@@ -1,0 +1,5 @@
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">f</span><span class="hljs-params">(
+    <span class="hljs-keyword">int</span> a = <span class="hljs-number">1</span>,
+    <span class="hljs-keyword">char</span>* b = <span class="hljs-string">"2"</span>, <span class="hljs-comment">// Line comment</span>
+    <span class="hljs-keyword">double</span> c = <span class="hljs-number">3.0</span> <span class="hljs-comment">/* Block comment */</span>
+)</span></span>;

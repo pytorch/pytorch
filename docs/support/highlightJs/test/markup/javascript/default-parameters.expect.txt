@@ -1,0 +1,32 @@
+<span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">visibleTodoFilter</span>(<span class="hljs-params">state = 'watch', action</span>) </span>{
+  <span class="hljs-keyword">switch</span> (action.type) {
+  <span class="hljs-keyword">case</span> <span class="hljs-string">'CHANGE_VISIBLE_FILTER'</span>:
+    <span class="hljs-keyword">return</span> action.filter;
+  <span class="hljs-keyword">default</span>:
+    <span class="hljs-keyword">return</span> state;
+  }
+}
+
+<span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">todos</span>(<span class="hljs-params">state, action</span>) </span>{
+  <span class="hljs-keyword">switch</span> (action.type) {
+  <span class="hljs-keyword">case</span> <span class="hljs-string">'ADD_TODO'</span>:
+    <span class="hljs-keyword">return</span> [...state, {
+      text: action.text,
+      completed: <span class="hljs-literal">false</span>
+    }];
+  <span class="hljs-keyword">case</span> <span class="hljs-string">'COMPLETE_TODO'</span>:
+    <span class="hljs-keyword">return</span> [
+      ...state.slice(<span class="hljs-number">0</span>, action.index),
+      <span class="hljs-built_in">Object</span>.assign({}, state[action.index], {
+        completed: <span class="hljs-literal">true</span>
+      }),
+      ...state.slice(action.index + <span class="hljs-number">1</span>)
+    ]
+  <span class="hljs-keyword">default</span>:
+    <span class="hljs-keyword">return</span> state;
+  }
+}
+
+<span class="hljs-keyword">import</span> { combineReducers, createStore } <span class="hljs-keyword">from</span> <span class="hljs-string">'redux'</span>;
+<span class="hljs-keyword">let</span> reducer = combineReducers({ visibleTodoFilter, todos });
+<span class="hljs-keyword">let</span> store = createStore(reducer);
