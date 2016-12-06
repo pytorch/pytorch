@@ -1,0 +1,5 @@
+a = <span class="hljs-matrix">[<span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>]</span><span class="hljs-operator">'</span>;
+b = <span class="hljs-cell">{<span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>}</span><span class="hljs-operator">'</span>;
+c = y<span class="hljs-operator">'</span>;
+d = sum(<span class="hljs-matrix">[<span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>]</span>)<span class="hljs-operator">'</span>;
+s = <span class="hljs-string">'string'</span>;

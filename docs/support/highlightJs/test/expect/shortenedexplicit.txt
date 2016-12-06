@@ -1,0 +1,2 @@
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">add_one</span><span class="hljs-params">(x)</span>:</span>
+    <span class="hljs-keyword">return</span> x + <span class="hljs-number">1</span>

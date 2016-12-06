@@ -1,0 +1,6 @@
+const uint64_t MAX_INT_64;
+
+struct position_tag;
+struct texcoord_tag;
+struct color_tag;
+struct normal_tag;

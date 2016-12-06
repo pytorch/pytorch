@@ -1,0 +1,16 @@
+SETS
+    I   canning plants   / SEATTLE, SAN-DIEGO /
+    J   markets          / NEW-YORK, CHICAGO, TOPEKA / ;
+PARAMETERS
+    A(I)  capacity of plant i in cases
+      /    SEATTLE     350
+           SAN-DIEGO   600  /
+    B(J)  demand at market j in cases
+      /    NEW-YORK    325
+           CHICAGO     300
+           TOPEKA      275  / ;
+TABLE D(I,J)  distance in thousands of miles
+    NEW-YORK       CHICAGO      TOPEKA
+    SEATTLE          2.5           1.7          1.8
+    SAN-DIEGO        2.5           1.8          1.4  ;
+SCALAR F  freight in dollars per case per thousand miles  /90/ ;

@@ -1,0 +1,6 @@
+<span class="hljs-tag">%<span class="hljs-title">span</span><span class="hljs-value">.badge</span><span class="hljs-value">.badge--pill</span><span class="hljs-value">.badge--green-light</span></span>
+<span class="hljs-tag">%<span class="hljs-title">span</span><span class="hljs-value">.badge</span><span class="hljs-value">.badge--pill</span><span class="hljs-value">.badge--red-light</span></span>
+<span class="hljs-tag">%<span class="hljs-title">span</span><span class="hljs-value">.badge</span><span class="hljs-value">.badge--pill</span><span class="hljs-value">.badge--blue-light</span></span>
+<span class="hljs-tag">%<span class="hljs-title">span</span><span class="hljs-value">.badge</span><span class="hljs-value">.badge__pill</span><span class="hljs-value">.badge__orange_light</span></span>
+<span class="hljs-tag">%<span class="hljs-title">span</span><span class="hljs-value">.badge</span><span class="hljs-value">.badge__pill</span><span class="hljs-value">.badge__white_light</span></span>
+<span class="hljs-tag">%<span class="hljs-title">span</span><span class="hljs-value">.badge</span><span class="hljs-value">.badge__pill</span><span class="hljs-value">.badge__white_dark</span></span>
