@@ -389,15 +389,22 @@ CAFFE2_SPECIALIZED_AXPBY(double, d)
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef CAFFE2_USE_MKL
 
-#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc)              \
-template <>                                                                    \
-void Funcname<T, CPUContext>(                                                  \
-    const int N, const T* x, T* y,                                             \
-    CPUContext* context) {                                                     \
-  OriginalFunc(N, x, y);                                                       \
-}
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, vsExp)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, vdExp)
+#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc, ...) \
+  template <>                                                          \
+  void Funcname<T, CPUContext>(                                        \
+      const int N, const T* x, T* y, CPUContext* context) {            \
+    OriginalFunc(N, x, y, ##__VA_ARGS__);                              \
+  }
+DELEGATE_SIMPLE_UNARY_FUNCTION(
+    float,
+    Exp,
+    vmsExp,
+    VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE)
+DELEGATE_SIMPLE_UNARY_FUNCTION(
+    double,
+    Exp,
+    vmdExp,
+    VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, vsLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, vdLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
