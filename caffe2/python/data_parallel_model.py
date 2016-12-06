@@ -87,8 +87,15 @@ def Parallelize_GPU(
     # Create parameter map
     model_helper_obj._device_grouped_blobs =\
         _GroupByDevice(devices, model_helper_obj.params)
+
+    # computed params
+    computed_params_grouped =\
+        _GroupByDevice(devices, model_helper_obj.computed_params)
+    model_helper_obj._device_grouped_blobs.update(computed_params_grouped)
+
     model_helper_obj._param_names =\
         model_helper_obj._device_grouped_blobs.keys()
+    model_helper_obj._computed_param_names = computed_params_grouped.keys()
 
     if (param_update_builder_fun is None):
         log.info("Parameter update function not defined --> only forward")
@@ -109,6 +116,7 @@ def Parallelize_GPU(
     model_helper_obj._grad_names = gradients_grouped.keys()
 
     log.info("Add gradient all-reduces for SyncSGD")
+    _AllReduceComputedParams(devices, model_helper_obj, rendezvous)
     _AllReduceGradients(
         devices, model_helper_obj, rendezvous
     )
@@ -424,6 +432,35 @@ def _AllReduceGradientsSingleHost(devices, model):
 
             # last_out is used to serialize the execution of nccls
             last_out = grads_group[0]
+
+
+def _AllReduceComputedParams(devices, model, rendezvous):
+    if rendezvous is None:
+        _AllReduceComputedParamsSingleHost(devices, model)
+    else:
+        _AllReduceComputedParamsDistributed(devices, model, rendezvous)
+
+
+def _AllReduceComputedParamsDistributed(
+    devices,
+    model,
+    rendezvous,
+):
+    _AllReduceComputedParamsSingleHost(devices, model)
+    log.warn("Distribetud computed params all-reduce not implemented yet")
+
+
+def _AllReduceComputedParamsSingleHost(devices, model):
+    '''
+    Average computed params over all devices
+    '''
+    if len(devices) == 1:
+        return
+
+    for param_name in model._computed_param_names:
+        # Copy from master to others -- averaging would be perhaps better,
+        # but currently NCCLAllReduce is too prone to deadlock
+        _Broadcast(devices, model, model.net, param_name)
 
 
 def _GetReverseOrderedGrads(model):
