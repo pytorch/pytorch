@@ -494,7 +494,7 @@ void THTensor_(sub)(THTensor *r_, THTensor *t, real value)
   THTensor_(add)(r_, t, -value);
 }
 
-void THTensor_(mul_DEFAULT)(THTensor *r_, THTensor *t, real value)
+void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
