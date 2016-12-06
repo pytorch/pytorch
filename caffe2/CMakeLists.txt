@@ -77,11 +77,20 @@ add_subdirectory(proto)
 include_directories(BEFORE ${CMAKE_BINARY_DIR})
 
 # Compile exposed libraries.
-add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
+LIST(APPEND CMAKE_CXX_FLAGS "--std=c++11 -fPIC")
+add_library(Caffe2_CPU SHARED ${Caffe2_CPU_SRCS})
 target_link_libraries(Caffe2_CPU Caffe2_PROTO)
+
+# CUDA library
+# TODO(slayton): Move this somewhere sane
+find_package(CUDA)
+LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
+LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,compute=sm_52)
+CUDA_ADD_LIBRARY(Caffe2_GPU SHARED ${Caffe2_GPU_SRCS})
+target_link_libraries(Caffe2_GPU Caffe2_PROTO glog gflags)
 
 # Compile test binaries.
 add_executable(Caffe2_CPU_TEST ${Caffe2_CPU_TEST_SRCS})
 
-target_link_libraries(Caffe2_CPU_TEST Caffe2_CPU gtest)
+target_link_libraries(Caffe2_CPU_TEST Caffe2_CPU gtest glog atlas cblas)
 target_compile_features(Caffe2_CPU_TEST PRIVATE cxx_range_for)
