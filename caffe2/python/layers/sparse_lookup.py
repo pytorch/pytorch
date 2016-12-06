@@ -96,20 +96,9 @@ class SparseLookup(ModelLayer):
                     [self.pos_w, inc_seq], self.pos_w + '_gather')
                 gather_w = net.Gather(
                     [self.w, self.input_record.items()], self.w + '_gather')
-                # TODO(cxj): refactor this when gradient of Mul with
-                # broadcast is ready:
-                # weighted_w = net.Mul(
-                #    [gather_w, gather_pos_w], gather_w + '_weighted',
-                #    broadcast=1)
 
-                gather_w_t = net.Transpose(gather_w, gather_w + '_t')
-                gather_w_t_weighted = net.Mul(
-                    [gather_w_t, gather_pos_w],
-                    gather_w_t + '_weighted',
-                    broadcast=1, use_grad_hack=1, axis=1
-                )
-                weighted_w = net.Transpose(
-                    gather_w_t_weighted, gather_w_t_weighted + '_t')
+                weighted_w = net.RowMul([gather_w, gather_pos_w],
+                                        gather_w + '_weighted')
                 net.LengthsSum(
                     [weighted_w, self.input_record.lengths()],
                     self.output_schema.field_blobs()
