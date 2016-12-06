@@ -163,7 +163,10 @@ class Tensor {
       return;
     }
     auto newSize = std::accumulate(
-        newDims.begin(), newDims.end(), 1, std::multiplies<TIndex>());
+        newDims.begin(),
+        newDims.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
     if (newSize * meta_.itemsize() <= capacity_) {
       dims_ = newDims;
       size_ = newSize;
@@ -180,7 +183,10 @@ class Tensor {
   template <class T, class ContextForCopy>
   void Reserve(const std::vector<T>& newCapacity, ContextForCopy* context) {
     auto newSize = std::accumulate(
-        newCapacity.begin(), newCapacity.end(), 1, std::multiplies<TIndex>());
+        newCapacity.begin(),
+        newCapacity.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
     if (newSize * meta_.itemsize() <= capacity_) {
       return;
     }
@@ -208,7 +214,10 @@ class Tensor {
         "New outer dimension must be smaller than current.");
     dims_[0] = outer_dim;
     size_ = std::accumulate(
-        dims_.begin(), dims_.end(), 1, std::multiplies<TIndex>());
+        dims_.begin(),
+        dims_.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
   }
 
   /**
