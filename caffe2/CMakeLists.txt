@@ -94,3 +94,6 @@ add_executable(Caffe2_CPU_TEST ${Caffe2_CPU_TEST_SRCS})
 
 target_link_libraries(Caffe2_CPU_TEST Caffe2_CPU gtest glog atlas cblas)
 target_compile_features(Caffe2_CPU_TEST PRIVATE cxx_range_for)
+
+# ---[ Python
+add_subdirectory(python)
