@@ -497,7 +497,9 @@ class CNNModelHelper(ModelHelperBase):
         scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
         running_mean = init_blob(0.0, "rm")
         running_inv_var = init_blob(1.0, "riv")
+
         self.params.extend([scale, bias])
+        self.computed_params.extend([running_mean, running_inv_var])
         self.weights.append(scale)
         self.biases.append(bias)
         blob_outs = [blob_out, running_mean, running_inv_var,

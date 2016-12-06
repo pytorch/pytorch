@@ -13,11 +13,12 @@ class ResNetBuilder():
     '''
     Helper class for constructing residual blocks.
     '''
-    def __init__(self, model, prev_blob):
+    def __init__(self, model, prev_blob, is_test):
         self.model = model
         self.comp_count = 0
         self.comp_idx = 0
         self.prev_blob = prev_blob
+        self.is_test = is_test
 
     def add_conv(self, in_filters, out_filters, kernel, stride=1, pad=0):
         self.comp_idx += 1
@@ -45,7 +46,8 @@ class ResNetBuilder():
             self.prev_blob,
             'comp_%d_spatbn_%d' % (self.comp_count, self.comp_idx),
             num_filters,
-            epsilon=1e-3
+            epsilon=1e-3,
+            is_test=self.is_test,
         )
         return self.prev_blob
 
@@ -113,6 +115,7 @@ class ResNetBuilder():
                     'shortcut_projection_%d_spatbn' % self.comp_count,
                     output_filters,
                     epsilon=1e-3,
+                    is_test=self.is_test,
                 )
 
         self.prev_blob = self.model.Sum(
@@ -168,7 +171,8 @@ class ResNetBuilder():
                     shortcut_blob,
                     'shortcut_projection_%d_spatbn' % self.comp_count,
                     num_filters,
-                    epsilon=1e-3
+                    epsilon=1e-3,
+                    is_test=self.is_test,
                 )
 
         self.prev_blob = self.model.Sum(
@@ -182,15 +186,16 @@ class ResNetBuilder():
         self.comp_count += 1
 
 
-def create_resnet50(model, data, num_input_channels, num_labels, label=None):
+def create_resnet50(model, data, num_input_channels,
+    num_labels, label=None, is_test=False):
     # conv1 + maxpool
     model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}), kernel=7, stride=2, pad=3)
-    model.SpatialBN('conv1', 'conv1_spatbn', 64, epsilon=1e-3)
+    model.SpatialBN('conv1', 'conv1_spatbn', 64, epsilon=1e-3, is_test=is_test)
     model.Relu('conv1_spatbn', 'relu1')
     model.MaxPool('relu1', 'pool1', kernel=3, stride=2)
 
     # Residual blocks...
-    builder = ResNetBuilder(model, 'pool1')
+    builder = ResNetBuilder(model, 'pool1', is_test=is_test)
 
     # conv2_x (ref Table 1 in He et al. (2015))
     builder.add_bottleneck(64, 64, 256)
@@ -231,7 +236,7 @@ def create_resnet50(model, data, num_input_channels, num_labels, label=None):
         return model.Softmax("pred", "softmax")
 
 def create_resnet_32x32(
-    model, data, num_input_channels, num_groups, num_labels
+    model, data, num_input_channels, num_groups, num_labels, is_test=False
 ):
     '''
     Create residual net for smaller images (sec 4.2 of He et. al (2015))
@@ -239,13 +244,13 @@ def create_resnet_32x32(
     '''
     # conv1 + maxpool
     model.Conv(data, 'conv1', num_input_channels, 16, kernel=3, stride=1)
-    model.SpatialBN('conv1', 'conv1_spatbn', 16, epsilon=1e-3)
+    model.SpatialBN('conv1', 'conv1_spatbn', 16, epsilon=1e-3, is_test=is_test)
     model.Relu('conv1_spatbn', 'relu1')
 
     # Number of blocks as described in sec 4.2
     filters = [16, 32, 64]
 
-    builder = ResNetBuilder(model, 'relu1')
+    builder = ResNetBuilder(model, 'relu1', is_test=is_test)
     prev_filters = 16
     for groupidx in range(0, 3):
         for blockidx in range(0, 2 * num_groups):
