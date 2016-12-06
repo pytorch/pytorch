@@ -22,14 +22,37 @@ endforeach()
 set(${OUTPUT} ${OUT} PARENT_SCOPE)
 endfunction(prepend)
 
+# ---[ CMake scripts + modules
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
+
+# External projects
+include(ExternalProject)
+
+include(cmake/Utils.cmake)
+
+# options
+option(USE_NERVANA_GPU
+       "Use Nervana GPU backend" OFF)
+option(USE_LMDB
+       "Use LMDB" ON)
+option(USE_LEVELDB
+       "Use LMDB" ON)
+option(USE_OPENCV
+       "Use openCV" ON)
+
+# ---[ Dependencies
+include(cmake/Dependencies.cmake)
+
 # Third party builds.
 include_directories(${CMAKE_SOURCE_DIR})
-file(GLOB Caffe2_THIRD_PARTY "${CMAKE_SOURCE_DIR}/third_party/*")
-include_directories(${Caffe2_THIRD_PARTY})
 
-# googletest.
-add_subdirectory("${CMAKE_SOURCE_DIR}/third_party/googletest")
-include_directories("${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include")
+# add_subdirectory(third_party)
+
+# add all subdirectories here because CMake sucks.
+# include_directories("${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include")
+# include_directories("${CMAKE_SOURCE_DIR}/third_party/eigen")
+# include_directories("${CMAKE_SOURCE_DIR}/third_party/cub")
+# include_directories("${CMAKE_SOURCE_DIR}/third_party/cnmem/include")
 
 # Old caffe protobuf.
 add_subdirectory(caffe/proto)
