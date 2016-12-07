@@ -67,12 +67,7 @@ class FillerOp : public Operator<Context> {
     } else {
       output->Resize(shape_);
     }
-    if (output->size()) {
-      return Fill(output);
-    } else {
-      VLOG(1) << "Output has zero size, skipping filling.";
-      return true;
-    }
+    return Fill(output);
   }
 
   virtual bool Fill(Tensor<Context>* output) = 0;
@@ -162,8 +157,10 @@ class ConstantFillOp final : public FillerOp<Context> {
   template <typename T>
   bool FillWithType(Tensor<Context>* output) {
     T value = OperatorBase::GetSingleArgument<T>("value", 0);
-    math::Set<T, Context>(
-        output->size(), value, output->template mutable_data<T>(), &context_);
+    auto* data = output->template mutable_data<T>();
+    if (output->size()) {
+      math::Set<T, Context>(output->size(), value, data, &context_);
+    }
     return true;
   }
 
@@ -188,8 +185,11 @@ class GivenTensorFillOp final : public FillerOp<Context> {
     DCHECK_EQ(output->size(), values_.size())
         << "output size: " << output->size()
         << " given size: " << values_.size();
-    context_.template Copy<T, CPUContext, Context>(
-        output->size(), values_.data(), output->template mutable_data<T>());
+    auto* data = output->template mutable_data<T>();
+    if (output->size()) {
+      context_.template Copy<T, CPUContext, Context>(
+          output->size(), values_.data(), data);
+    }
     return true;
   }
 
