@@ -14,6 +14,7 @@
 #include "../base/tensors/THTensor.hpp"
 
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -22,6 +23,7 @@
 
 constexpr int WORKERS_NUM = 2;
 constexpr int MASTER_PORT = 45678;
+constexpr int BARRIER_WAIT_TIME = 500; // milliseconds
 
 std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
@@ -63,7 +65,7 @@ void master()
   masterChannel->send(*float_tensor, 1);
 
   // broadcast int tensor
-  thd::IntTensor *int_tensor = new thd::THTensor<int>();
+  thd::IntTensor* int_tensor = new thd::THTensor<int>();
   int_tensor->resize({1, 2, 3, 4, 5});
   int_tensor->fill(1000000000);
   masterChannel->broadcast(*int_tensor, 0);
@@ -97,6 +99,74 @@ void master()
     assert(reinterpret_cast<int*>(int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
   }
 
+  // scatter
+  // TODO: change number of tensosrs to WORKERS + 1
+  thd::IntTensor* t1 = new thd::THTensor<int>();
+  thd::IntTensor* t2 = new thd::THTensor<int>();
+  thd::IntTensor* t3 = new thd::THTensor<int>();
+  t1->resize({1, 2, 3, 4, 5});
+  t1->fill(0);
+  t2->resize({1, 2, 3, 4, 5});
+  t2->fill(1);
+  t3->resize({1, 2, 3, 4, 5});
+  t3->fill(2);
+  std::vector<thd::Tensor*> v_scatter = {t1, t2, t3};
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(-1);
+  masterChannel->scatter(v_scatter, *int_tensor, 0);
+  for (int i = 0; i < int_tensor->numel(); i++)
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == masterChannel->getRank());
+
+  // gather
+  t1->resize({1, 2, 3, 4, 5});
+  t1->fill(-1);
+  t2->resize({1, 2, 3, 4, 5});
+  t2->fill(-1);
+  t3->resize({1, 2, 3, 4, 5});
+  t3->fill(-1);
+  std::vector<thd::Tensor*> v_gather = {t1, t2, t3};
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  masterChannel->allGather(v_gather, *int_tensor);
+  for (auto tensor : v_gather) {
+    for (int i = 0; i < tensor->numel(); i++)
+      assert(reinterpret_cast<int*>(tensor->data())[i] == 10);
+  }
+
+  // allGather
+  t1->resize({1, 2, 3, 4, 5});
+  t1->fill(-1);
+  t2->resize({1, 2, 3, 4, 5});
+  t2->fill(-1);
+  t3->resize({1, 2, 3, 4, 5});
+  t3->fill(-1);
+  std::vector<thd::Tensor*> v_allGather = {t1, t2, t3};
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  masterChannel->gather(v_allGather, *int_tensor, 0);
+  for (auto tensor : v_allGather) {
+    for (int i = 0; i < tensor->numel(); i++)
+      assert(reinterpret_cast<int*>(tensor->data())[i] == 10);
+  }
+
+  // barrier
+  for (int i = 0; i < masterChannel->getNumProcesses(); ++i) {
+    if (i == masterChannel->getRank()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(BARRIER_WAIT_TIME));
+      masterChannel->barrier();
+    } else {
+      auto start = std::chrono::system_clock::now();
+      masterChannel->barrier();
+      auto end = std::chrono::system_clock::now();
+
+      std::chrono::duration<double> elapsed = end - start;
+      std::chrono::milliseconds ms_elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+
+      assert(ms_elapsed.count() >= (BARRIER_WAIT_TIME / 2));
+    }
+  }
+
   // groups
   THDGroup group = masterChannel->newGroup({1, 2});
   int_tensor->resize({1, 2, 3, 4, 5});
@@ -126,6 +196,7 @@ void master()
     worker.join();
   }
 
+  delete t1; delete t2; delete t3;
   delete float_tensor;
   delete int_tensor;
 }
@@ -205,6 +276,57 @@ void worker(int id)
   for (int i = 0; i < int_tensor->numel(); i++)
     assert(reinterpret_cast<int*>(int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
 
+
+  // scatter
+  std::vector<thd::Tensor*> v;
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(-1);
+  workerChannel->scatter(v, *int_tensor, 0);
+  for (int i = 0; i < int_tensor->numel(); i++)
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == workerChannel->getRank());
+
+  // gather
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  workerChannel->gather(v, *int_tensor, 0);
+
+  // allGather
+  thd::IntTensor* t1 = new thd::THTensor<int>();
+  thd::IntTensor* t2 = new thd::THTensor<int>();
+  thd::IntTensor* t3 = new thd::THTensor<int>();
+  t1->resize({1, 2, 3, 4, 5});
+  t1->fill(-1);
+  t2->resize({1, 2, 3, 4, 5});
+  t2->fill(-1);
+  t3->resize({1, 2, 3, 4, 5});
+  t3->fill(-1);
+  std::vector<thd::Tensor*> v_allGather = {t1, t2, t3};
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  workerChannel->allGather(v_allGather, *int_tensor);
+  for (auto tensor : v_allGather) {
+    for (int i = 0; i < tensor->numel(); i++)
+      assert(reinterpret_cast<int*>(tensor->data())[i] == 10);
+  }
+
+  // barrier
+  for (int i = 0; i < workerChannel->getNumProcesses(); ++i) {
+    if (i == workerChannel->getRank()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(BARRIER_WAIT_TIME));
+      workerChannel->barrier();
+    } else {
+      auto start = std::chrono::system_clock::now();
+      workerChannel->barrier();
+      auto end = std::chrono::system_clock::now();
+
+      std::chrono::duration<double> elapsed = end - start;
+      std::chrono::milliseconds ms_elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+
+      assert(ms_elapsed.count() >= (BARRIER_WAIT_TIME / 2));
+    }
+  }
+
   // group
   THDGroup group = workerChannel->newGroup({1, 2});
   int_tensor->resize({1, 2, 3, 4, 5});
@@ -241,6 +363,7 @@ void worker(int id)
     }
   }
 
+  delete t1; delete t2; delete t3;
   delete float_tensor;
   delete int_tensor;
 }

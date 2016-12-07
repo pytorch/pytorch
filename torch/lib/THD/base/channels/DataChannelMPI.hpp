@@ -19,13 +19,20 @@ public:
   int getRank() override;
   int getNumProcesses() override;
 
+  void allGather(std::vector<Tensor*>& output, Tensor& input, THDGroup group_id = THDGroupWORLD) override;
+  void gather(std::vector<Tensor*>& output, Tensor& input,
+              int dst_rank, THDGroup group_id = THDGroupWORLD) override;
+  void scatter(std::vector<Tensor*>& input, Tensor& output,
+               int src_rank, THDGroup group_id = THDGroupWORLD) override;
   void allReduce(Tensor& data, THDReduceOp operation, THDGroup group_id = THDGroupWORLD) override;
   void reduce(Tensor& data, THDReduceOp operation, int dst_rank, THDGroup group_id = THDGroupWORLD) override;
   void broadcast(Tensor& data, int src_rank, THDGroup group_id = THDGroupWORLD) override;
   void send(Tensor& data, int dst_rank) override;
   void receive(Tensor& data, int src_rank) override;
 
-  THDGroup newGroup(std::vector<int> ranks) override;
+  void barrier(THDGroup group_id = THDGroupWORLD) override;
+
+  THDGroup newGroup(const std::vector<int>& ranks) override;
 
 private:
   void broadcastPack(Tensor& data, int src_rank, MPI_Comm comm) const;
@@ -34,7 +41,9 @@ private:
 
   int _rank; // Current process' rank
   int _num_processes; // Number of processes in network
-  std::unordered_map<THDGroup, std::pair<MPI_Comm, std::vector<int>>> _groups;
+
+  // Existing groups of processes with assigned MPI communicator and corresponding group ids
+  std::unordered_map<THDGroup, std::pair<MPI_Comm, DataChannel::Group>> _groups;
 };
 
 } // namespace thd

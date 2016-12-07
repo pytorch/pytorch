@@ -1,10 +1,12 @@
 #include "DataChannelMPI.hpp"
+#include "DataChannelUtils.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 
 
@@ -84,7 +86,7 @@ bool DataChannelMPI::init() {
 
   _groups.insert({
     THDGroupWORLD,
-    std::make_pair(MPI_COMM_WORLD, ranks)
+    std::make_pair(MPI_COMM_WORLD, DataChannel::Group(ranks, _num_processes - 1))
   });
   return true;
 }
@@ -100,9 +102,110 @@ int DataChannelMPI::getNumProcesses() {
 }
 
 
+void DataChannelMPI::allGather(std::vector<Tensor*>& output, Tensor& input, THDGroup group_id) {
+  const auto& group_pair = _groups.at(group_id);
+  const auto& comm = group_pair.first;
+  if (comm == MPI_COMM_NULL)
+    return;
+
+  if (output.size() != group_pair.second.size())
+    throw std::logic_error("allGather: number of output tensors and group size does not match");
+
+  for (auto out_tensor : output)
+    assertTensorEqual(*out_tensor, input, "allGather");
+
+  std::uint64_t tensor_bytes = input.elementSize() * input.numel();
+  std::uint64_t all_tensors_bytes = tensor_bytes * output.size();
+  std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensors_bytes]);
+
+  MPI_Allgather(
+    input.data(), input.numel(), mpi_datatype.at(input.type()),
+    tmp_data.get(), input.numel(), mpi_datatype.at(input.type()),
+    comm
+  );
+
+  for (std::size_t i = 0; i < output.size(); ++i)
+    memcpy(output.at(i)->data(), tmp_data.get() + (i * tensor_bytes), tensor_bytes);
+}
+
+
+void DataChannelMPI::gather(std::vector<Tensor*>& output, Tensor& input, int dst_rank, THDGroup group_id) {
+  /*
+   * Output vector size is 0 for _rank != dst_rank.
+   */
+
+  const auto& group_pair = _groups.at(group_id);
+  const auto& comm = group_pair.first;
+  if (comm == MPI_COMM_NULL)
+    return;
+
+  if (_rank != dst_rank) {
+    if (output.size() > 0)
+      throw std::logic_error("scatter: number of input tensors should be 0 for non root");
+  } else {
+    if (output.size() != group_pair.second.size())
+      throw std::logic_error("gather: number of output tensors and group size does not match");
+
+    for (auto out_tensor : output)
+      assertTensorEqual(*out_tensor, input, "gather");
+  }
+
+  auto group_dst_rank = group_pair.second.mustGetGroupRank(dst_rank);
+  std::uint64_t tensor_bytes = input.elementSize() * input.numel();
+  std::uint64_t all_tensors_bytes = tensor_bytes * output.size();
+  std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensors_bytes]);
+
+  MPI_Gather(
+    input.data(), input.numel(), mpi_datatype.at(input.type()),
+    tmp_data.get(), input.numel(), mpi_datatype.at(input.type()),
+    group_dst_rank, comm
+  );
+
+  for (std::size_t i = 0; i < output.size(); ++i)
+    memcpy(output.at(i)->data(), tmp_data.get() + (i * tensor_bytes), tensor_bytes);
+}
+
+
+void DataChannelMPI::scatter(std::vector<Tensor*>& input, Tensor& output, int src_rank, THDGroup group_id) {
+  /*
+   * Input vector size is 0 for _rank != dst_rank.
+   */
+
+  const auto& group_pair = _groups.at(group_id);
+  const auto& comm = group_pair.first;
+  if (comm == MPI_COMM_NULL)
+    return;
+
+  if (_rank != src_rank) {
+    if (input.size() > 0)
+      throw std::logic_error("scatter: number of input tensors should be 0 for non root");
+  } else {
+    if (input.size() != group_pair.second.size())
+      throw std::logic_error("scatter: number of input tensors and group size does not match");
+
+    for (auto in_tensor : input)
+      assertTensorEqual(*in_tensor, output, "scatter");
+  }
+
+  auto group_src_rank = group_pair.second.mustGetGroupRank(src_rank);
+  std::uint64_t tensor_bytes = output.elementSize() * output.numel();
+  std::uint64_t all_tensors_bytes = tensor_bytes * input.size();
+  std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensors_bytes]);
+
+  for (std::size_t i = 0; i < input.size(); ++i)
+    memcpy(tmp_data.get() + (i * tensor_bytes), input.at(i)->data(), tensor_bytes);
+
+  MPI_Scatter(
+    tmp_data.get(), output.numel(), mpi_datatype.at(output.type()),
+    output.data(), output.numel(), mpi_datatype.at(output.type()),
+    group_src_rank, comm
+  );
+}
+
+
 void DataChannelMPI::allReduce(Tensor& data, THDReduceOp operation,
                                THDGroup group_id) {
-  auto comm = _groups.at(group_id).first;
+  const auto& comm = _groups.at(group_id).first;
   if (comm == MPI_COMM_NULL)
     return;
 
@@ -117,18 +220,14 @@ void DataChannelMPI::allReduce(Tensor& data, THDReduceOp operation,
 
 void DataChannelMPI::reduce(Tensor& data, THDReduceOp operation, int dst_rank,
                             THDGroup group_id) {
-  auto group_pair = _groups.at(group_id);
-  auto comm = group_pair.first;
+  const auto& group_pair = _groups.at(group_id);
+  const auto& comm = group_pair.first;
   if (comm == MPI_COMM_NULL)
     return;
 
-  const auto& group = group_pair.second;
-  auto dst_rank_it = std::find(group.begin(), group.end(), dst_rank);
-  if (dst_rank_it == group.end())
-    throw std::logic_error("cannot use reduce in group of rank which is not its member");
-
-  auto group_dst_rank = std::distance(group.begin(), dst_rank_it);
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  auto group_dst_rank = group_pair.second.mustGetGroupRank(dst_rank);
+  // we want to allocate recv memory only for dst_rank
+  std::uint64_t tensor_bytes = (_rank == dst_rank) ? (data.elementSize() * data.numel()) : 0;
   std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[tensor_bytes]);
 
   MPI_Reduce(data.data(), tmp_data.get(), data.numel(), mpi_datatype.at(data.type()),
@@ -162,17 +261,12 @@ void DataChannelMPI::broadcastUnpack(Tensor& data, int src_rank, MPI_Comm comm) 
 
 
 void DataChannelMPI::broadcast(Tensor& data, int src_rank, THDGroup group_id) {
-  auto group_pair = _groups.at(group_id);
-  auto comm = group_pair.first;
+  const auto& group_pair = _groups.at(group_id);
+  const auto& comm = group_pair.first;
   if (comm == MPI_COMM_NULL)
     return;
 
-  const auto& group = group_pair.second;
-  auto src_rank_it = std::find(group.begin(), group.end(), src_rank);
-  if (src_rank_it == group.end())
-    throw std::logic_error("cannot use broadcast in group of rank which is not its member");
-
-  auto group_src_rank = std::distance(group.begin(), src_rank_it);
+  auto group_src_rank = group_pair.second.mustGetGroupRank(src_rank);
   if (src_rank == _rank) {
     broadcastPack(data, group_src_rank, comm);
   } else {
@@ -210,14 +304,16 @@ void DataChannelMPI::receive(Tensor& data, int src_rank) {
 }
 
 
-THDGroup DataChannelMPI::newGroup(std::vector<int> ranks) {
-  if (ranks.size() == 0)
-    throw std::logic_error("cannot create empty group");
+void DataChannelMPI::barrier(THDGroup group_id) {
+  const auto& comm = _groups.at(group_id).first;
+  if (comm == MPI_COMM_NULL)
+    return;
 
-  sort(ranks.begin(), ranks.end());
-  if (ranks.front() < 0 || ranks.back() >= _num_processes)
-    throw std::out_of_range("array of ranks contains invalid rank");
+  MPI_Barrier(comm);
+}
 
+
+THDGroup DataChannelMPI::newGroup(const std::vector<int>& ranks) {
   MPI_Group world_group;
   MPI_Comm_group(MPI_COMM_WORLD, &world_group);
 
@@ -231,7 +327,7 @@ THDGroup DataChannelMPI::newGroup(std::vector<int> ranks) {
   MPI_Group_free(&ranks_group);
 
   // this vector maps new ranks to ranks in COMM_WORLD (global ranks)
-  std::vector<int> new_ranks;
+  DataChannel::Group new_group;
   if (new_comm != MPI_COMM_NULL) {
     int size, mapping_ranks[2];
     MPI_Comm_size(new_comm, &size);
@@ -241,13 +337,15 @@ THDGroup DataChannelMPI::newGroup(std::vector<int> ranks) {
     std::unique_ptr<int[]> all_mapping_ranks(new int[2 * size]);
     MPI_Allgather(&mapping_ranks, 2, MPI_INT, all_mapping_ranks.get(), 2, MPI_INT, new_comm);
 
-    new_ranks.resize(size);
+    std::vector<int> new_ranks(size);
     for (size_t i = 0; i < 2 * size; i += 2)
       new_ranks[all_mapping_ranks[i]] = all_mapping_ranks[i + 1];
+
+    new_group = DataChannel::Group(new_ranks, _num_processes - 1);
   }
 
   THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
-  _groups.insert({new_group_id, std::make_pair(new_comm, new_ranks)});
+  _groups.insert({new_group_id, std::make_pair(new_comm, new_group)});
   return new_group_id;
 }
 

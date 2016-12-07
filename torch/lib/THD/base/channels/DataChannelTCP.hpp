@@ -22,6 +22,11 @@ struct DataChannelTCP : DataChannel {
   int getRank() override;
   int getNumProcesses() override;
 
+  void allGather(std::vector<Tensor*>& output, Tensor& input, THDGroup group_id = THDGroupWORLD) override;
+  void gather(std::vector<Tensor*>& output, Tensor& input,
+              int dst_rank, THDGroup group_id = THDGroupWORLD) override;
+  void scatter(std::vector<Tensor*>& input, Tensor& output,
+               int src_rank, THDGroup group_id = THDGroupWORLD) override;
   void allReduce(Tensor& data, THDReduceOp operation,
                  THDGroup group_id = THDGroupWORLD) override;
   void reduce(Tensor& data, THDReduceOp operation, int dst_rank,
@@ -30,7 +35,9 @@ struct DataChannelTCP : DataChannel {
   void send(Tensor& data, int dst_id) override;
   void receive(Tensor& data, int src_id) override;
 
-  THDGroup newGroup(std::vector<int> ranks) override;
+  void barrier(THDGroup group_id = THDGroupWORLD) override;
+
+  THDGroup newGroup(const std::vector<int>& ranks) override;
 
 private:
   // Defines process to which master or worker is connected
@@ -60,7 +67,9 @@ private:
   int _timeout; // Accept waiting timeout in milliseconds (it is optional, default = infinity)
 
   std::vector<Process> _processes; // Other processes in network
-  std::unordered_map<THDGroup, std::vector<int>> _groups;
+
+  // Existing groups of processes and corresponding group ids
+  std::unordered_map<THDGroup, DataChannel::Group> _groups;
 };
 
 } // namespace thd

@@ -214,6 +214,69 @@ class _DistTestBase(object):
             tensor = _build_tensor(dest + 1).mul_(world_size)
             self._reduce(dist.reduce_op.SUM, tensor, dest, broadcast=True)
 
+    def test_scatter(self):
+        rank = dist.get_rank()
+        world_size = dist.get_num_processes()
+        for dest in range(0, world_size):
+            tensor = _build_tensor(dest + 1, -1)
+            expected_tensor = _build_tensor(dest + 1, rank)
+            if rank == dest:
+                tensors = [_build_tensor(dest + 1, i) for i in range(0, world_size)]
+                dist.scatter_send(tensors, tensor)
+                self.assertEqual(tensor, expected_tensor)
+            else:
+                dist.scatter_recv(tensor, dest)
+                self.assertEqual(tensor, expected_tensor)
+
+            self._barrier()
+
+    def test_gather(self):
+        rank = dist.get_rank()
+        world_size = dist.get_num_processes()
+        for dest in range(0, world_size):
+            tensor = _build_tensor(dest + 1, rank)
+            if rank == dest:
+                tensors = [_build_tensor(dest + 1, -1) for i in range(0, world_size)]
+                dist.gather_recv(tensors, tensor)
+
+                expected_tensors = [_build_tensor(dest + 1, i) for i in range(0, world_size)]
+                for t1, t2 in zip(tensors, expected_tensors):
+                    self.assertEqual(t1, t2)
+            else:
+                dist.gather_send(tensor, dest)
+
+            self._barrier()
+
+    def test_all_gather(self):
+        rank = dist.get_rank()
+        world_size = dist.get_num_processes()
+        for dest in range(0, world_size):
+            tensor = _build_tensor(dest + 1, rank)
+            tensors = [_build_tensor(dest + 1, -1) for i in range(0, world_size)]
+            dist.all_gather(tensors, tensor)
+
+            expected_tensors = [_build_tensor(dest + 1, i) for i in range(0, world_size)]
+            for t1, t2 in zip(tensors, expected_tensors):
+                self.assertEqual(t1, t2)
+
+            self._barrier()
+
+    def test_barrier(self):
+        WAIT_TIME = 0.3 # seconds
+
+        rank = dist.get_rank()
+        world_size = dist.get_num_processes()
+        for dest in range(0, world_size):
+            expected_time = torch.DoubleTensor(1).fill_(0.0)
+            if dest == rank:
+                dist.broadcast(expected_time.fill_(time.time() + WAIT_TIME), dest)
+                time.sleep(WAIT_TIME + 0.1) # sleep a little bit longer
+                dist.barrier()
+            else:
+                dist.broadcast(expected_time, dest)
+                dist.barrier()
+                self.assertGreaterEqual(time.time(), expected_time[0])
+
 if BACKEND == 'tcp':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 

@@ -222,11 +222,187 @@ PyObject* THDPModule_broadcast(PyObject *_unused, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject* sequence = PyTuple_GET_ITEM(args, 0);
+  Py_ssize_t tmp_length;
+  std::size_t length;
+  std::vector<THDPTensorDesc> descriptors;
+  std::vector<THDTensorDescriptor*> raw_descriptors;
+
+  if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence) ||
+        !THPModule_isTensor(PyTuple_GET_ITEM(args, 1))) {
+    goto invalid_arguments;
+  }
+
+  tmp_length = PySequence_Length(sequence);
+  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
+      THPUtils_typename(sequence));
+
+  length = static_cast<std::size_t>(tmp_length);
+  descriptors.reserve(length);
+  for (std::size_t i = 0; i < length; ++i) {
+    if (!THPModule_isTensor(PySequence_ITEM(sequence, i)))
+      goto invalid_arguments;
+
+    descriptors.push_back(
+      THDPTensorDesc(_makeDescriptor(PySequence_ITEM(sequence, i)))
+    );
+    raw_descriptors.push_back(descriptors.back());
+  }
+
+  THDAllGather(
+    raw_descriptors.data(), length,
+    THDPTensorDesc(_makeDescriptor(PyTuple_GET_ITEM(args, 1))),
+    _getGroup(PyTuple_GET_ITEM(args, 2))
+  );
+  Py_RETURN_NONE;
+
+invalid_arguments:
+  THPUtils_invalidArguments(args, "allGather", 1,
+      "(list[tensor] output, tensor input, group gr)");
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THDPModule_gatherSend(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  if (PyTuple_GET_SIZE(args) != 3 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0))) {
+    THPUtils_invalidArguments(args, "gatherSend", 1,
+        "(tensor input, int dst_rank, group gr)");
+    return NULL;
+  }
+
+  THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
+  THDPTensorDesc desc = _makeDescriptor(PyTuple_GET_ITEM(args, 0));
+  int dst_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
+  THDGatherSend(desc, dst_rank, group);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject* sequence = PyTuple_GET_ITEM(args, 0);
+  Py_ssize_t tmp_length;
+  std::size_t length;
+  std::vector<THDPTensorDesc> descriptors;
+  std::vector<THDTensorDescriptor*> raw_descriptors;
+
+  if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence) ||
+        !THPModule_isTensor(PyTuple_GET_ITEM(args, 1))) {
+    goto invalid_arguments;
+  }
+
+  tmp_length = PySequence_Length(sequence);
+  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
+      THPUtils_typename(sequence));
+
+  length = static_cast<std::size_t>(tmp_length);
+  descriptors.reserve(length);
+  for (std::size_t i = 0; i < length; ++i) {
+    if (!THPModule_isTensor(PySequence_ITEM(sequence, i)))
+      goto invalid_arguments;
+
+    descriptors.push_back(
+      THDPTensorDesc(_makeDescriptor(PySequence_ITEM(sequence, i)))
+    );
+    raw_descriptors.push_back(descriptors.back());
+  }
+
+  THDGatherRecv(
+    raw_descriptors.data(), length,
+    THDPTensorDesc(_makeDescriptor(PyTuple_GET_ITEM(args, 1))),
+    _getGroup(PyTuple_GET_ITEM(args, 2))
+  );
+  Py_RETURN_NONE;
+
+invalid_arguments:
+  THPUtils_invalidArguments(args, "gatherRecv", 1,
+      "(list[tensor] output, tensor input, group gr)");
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject* sequence = PyTuple_GET_ITEM(args, 0);
+  Py_ssize_t tmp_length;
+  std::size_t length;
+  std::vector<THDPTensorDesc> descriptors;
+  std::vector<THDTensorDescriptor*> raw_descriptors;
+
+  if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence) ||
+        !THPModule_isTensor(PyTuple_GET_ITEM(args, 1))) {
+    goto invalid_arguments;
+  }
+
+  tmp_length = PySequence_Length(sequence);
+  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
+      THPUtils_typename(sequence));
+
+  length = static_cast<std::size_t>(tmp_length);
+  descriptors.reserve(length);
+  for (std::size_t i = 0; i < length; ++i) {
+    if (!THPModule_isTensor(PySequence_ITEM(sequence, i)))
+      goto invalid_arguments;
+
+    descriptors.push_back(
+      THDPTensorDesc(_makeDescriptor(PySequence_ITEM(sequence, i)))
+    );
+    raw_descriptors.push_back(descriptors.back());
+  }
+
+  THDScatterSend(
+    raw_descriptors.data(), length,
+    THDPTensorDesc(_makeDescriptor(PyTuple_GET_ITEM(args, 1))),
+    _getGroup(PyTuple_GET_ITEM(args, 2))
+  );
+  Py_RETURN_NONE;
+
+invalid_arguments:
+  THPUtils_invalidArguments(args, "scatterSend", 1,
+      "(list[tensor] input, tensor output, group gr)");
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THDPModule_scatterRecv(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  if (PyTuple_GET_SIZE(args) != 3 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
+        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
+    THPUtils_invalidArguments(args, "scatterRecv", 1,
+        "(tensor output, int src_rank, group gr)");
+    return NULL;
+  }
+
+  THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
+  THDPTensorDesc desc = _makeDescriptor(PyTuple_GET_ITEM(args, 0));
+  int src_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
+  THDScatterRecv(desc, src_rank, group);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THDPModule_barrier(PyObject *_unused, PyObject *_group)
+{
+  HANDLE_TH_ERRORS
+  THDBarrier(_getGroup(_group));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THDPModule_newGroup(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   PyObject* sequence = PyTuple_GET_ITEM(args, 0);
   Py_ssize_t tmp_length;
+  std::size_t length;
   std::vector<int> ranks;
 
   if (PyTuple_GET_SIZE(args) != 1 || !PySequence_Check(sequence))
@@ -236,8 +412,9 @@ PyObject* THDPModule_newGroup(PyObject *_unused, PyObject *args)
   THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
       THPUtils_typename(sequence));
 
-  ranks.reserve(static_cast<std::size_t>(tmp_length));
-  for (std::size_t i = 0; i < ranks.capacity(); ++i) {
+  length = static_cast<std::size_t>(tmp_length);
+  ranks.reserve(length);
+  for (std::size_t i = 0; i < length; ++i) {
     if (!THPUtils_checkLong(PySequence_ITEM(sequence, i)))
       goto invalid_arguments;
 
@@ -246,7 +423,7 @@ PyObject* THDPModule_newGroup(PyObject *_unused, PyObject *args)
       THPUtils_assert(ranks[i] != ranks[j], "ranks should be unique");
   }
 
-  return PyInt_FromLong(THDNewGroup(ranks.data(), ranks.size()));
+  return PyInt_FromLong(THDNewGroup(ranks.data(), length));
 
 invalid_arguments:
   THPUtils_invalidArguments(args, "newGroup", 1, "(list[int] ranks)");
@@ -306,6 +483,12 @@ static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_all_reduce", (PyCFunction)THDPModule_allReduce, METH_VARARGS, NULL},
   {"_dist_reduce", (PyCFunction)THDPModule_reduce, METH_VARARGS, NULL},
   {"_dist_broadcast", (PyCFunction)THDPModule_broadcast, METH_VARARGS, NULL},
+  {"_dist_all_gather", (PyCFunction)THDPModule_allGather, METH_VARARGS, NULL},
+  {"_dist_gather_send", (PyCFunction)THDPModule_gatherSend, METH_VARARGS, NULL},
+  {"_dist_gather_recv", (PyCFunction)THDPModule_gatherRecv, METH_VARARGS, NULL},
+  {"_dist_scatter_send", (PyCFunction)THDPModule_scatterSend, METH_VARARGS, NULL},
+  {"_dist_scatter_recv", (PyCFunction)THDPModule_scatterRecv, METH_VARARGS, NULL},
+  {"_dist_barrier", (PyCFunction)THDPModule_barrier, METH_O, NULL},
   {"_dist_new_group", (PyCFunction)THDPModule_newGroup, METH_VARARGS, NULL},
   {NULL}
 };
