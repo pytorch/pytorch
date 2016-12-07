@@ -2,6 +2,82 @@
 #define THC_GENERIC_FILE "generic/VolumetricAveragePooling.cu"
 #else
 
+static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input,
+                         THCTensor *gradOutput,
+                         int kT,
+                         int kW,
+                         int kH,
+                         int dT,
+                         int dW,
+                         int dH) {
+  int inputSlices;
+  int inputTime;
+  int inputHeight;
+  int inputWidth;
+
+  int ndim = input->nDimension;
+  int dimN = 0;
+  int dimt = 1;
+  int dimh = 2;
+  int dimw = 3;
+
+  if (input->nDimension == 5)
+  {
+    dimN++;
+    dimt++;
+    dimh++;
+    dimw++;
+  }
+
+  if (THCTensor_(nDimension)(state, input) == 4)
+  {
+    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+               && input->size[dimt] >= kT, 2,
+               "input image (T: %d H: %d W: %d) smaller than "
+               "kernel size (kT: %d kH: %d kW: %d)",
+               input->size[dimt], input->size[dimh], input->size[dimw],
+               kT, kH, kW);
+
+    /* sizes */
+    inputSlices = THCTensor_(size)(state, input, 0);
+    inputTime   = THCTensor_(size)(state, input, 1);
+    inputHeight = THCTensor_(size)(state, input, 2);
+    inputWidth  = THCTensor_(size)(state, input, 3);
+  }
+  else if (THCTensor_(nDimension)(state, input) == 5)
+  {
+    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+               && input->size[dimt] >= kT, 2,
+               "input image (T: %d H: %d W: %d) smaller than "
+               "kernel size (kT: %d kH: %d kW: %d)",
+               input->size[dimt], input->size[dimh], input->size[dimw],
+               kT, kH, kW);
+
+    /* sizes */
+    inputSlices = THCTensor_(size)(state, input, 1);
+    inputTime   = THCTensor_(size)(state, input, 2);
+    inputHeight = THCTensor_(size)(state, input, 3);
+    inputWidth  = THCTensor_(size)(state, input, 4);
+  }
+  else
+  {
+    THArgCheck(false, 2, "4D or 5D tensor expected, but got: %d", input->nDimension);
+  }
+
+  int outputTime   = (inputTime   - kT) / dT + 1;
+  int outputHeight = (inputHeight - kH) / dH + 1;
+  int outputWidth  = (inputWidth  - kW) / dW + 1;
+
+  if (gradOutput != NULL) {
+     THCUNN_check_dim_size(state, gradOutput, ndim, dimN, inputSlices);
+     THCUNN_check_dim_size(state, gradOutput, ndim, dimt, outputTime);
+     THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
+     THCUNN_check_dim_size(state, gradOutput, ndim, dimw, outputWidth);
+  }
+}
+
 void THNN_(VolumetricAveragePooling_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -26,15 +102,11 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     dimw++;
   }
 
+  THNN_(VolumetricAveragePooling_shapeCheck)
+       (state, input, NULL, kT, kW, kH, dT, dW, dH);
+
   if (THCTensor_(nDimension)(state, input) == 4)
   {
-    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
-               && input->size[dimt] >= kT, 2,
-               "input image (T: %d H: %d W: %d) smaller than "
-               "kernel size (kT: %d kH: %d kW: %d)",
-               input->size[dimt], input->size[dimh], input->size[dimw],
-               kT, kH, kW);
-
     /* sizes */
     batchSize   = 1;
     inputSlices = THCTensor_(size)(state, input, 0);
@@ -44,23 +116,12 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   }
   else if (THCTensor_(nDimension)(state, input) == 5)
   {
-    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
-               && input->size[dimt] >= kT, 2,
-               "input image (T: %d H: %d W: %d) smaller than "
-               "kernel size (kT: %d kH: %d kW: %d)",
-               input->size[dimt], input->size[dimh], input->size[dimw],
-               kT, kH, kW);
-
     /* sizes */
     batchSize   = THCTensor_(size)(state, input, 0);
     inputSlices = THCTensor_(size)(state, input, 1);
     inputTime   = THCTensor_(size)(state, input, 2);
     inputHeight = THCTensor_(size)(state, input, 3);
     inputWidth  = THCTensor_(size)(state, input, 4);
-  }
-  else
-  {
-    THArgCheck(false, 2, "4D or 5D tensor expected, but got: %d", input->nDimension);
   }
 
   int outputTime   = (inputTime   - kT) / dT + 1;
@@ -139,7 +200,9 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
            int kT, int kW, int kH,
            int dT, int dW, int dH)
 {
-  // TODO: gradOutput shape check
+
+  THNN_(VolumetricAveragePooling_shapeCheck)
+       (state, input, gradOutput, kT, kW, kH, dT, dW, dH);
   bool kernelsOverlap = (dT < kT) || (dH < kH) || (dW < kW);
 
   // Resize and initialize result tensor.

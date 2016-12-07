@@ -2,6 +2,66 @@
 #define THC_GENERIC_FILE "generic/VolumetricMaxUnpooling.cu"
 #else
 
+static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input,
+                         THCTensor *gradOutput,
+                         THCIndexTensor *indices,
+                         int oT,
+                         int oW,
+                         int oH,
+                         int dT,
+                         int dW,
+                         int dH,
+                         int pT,
+                         int pW,
+                         int pH) {
+  int inputSlices;
+
+  THCUNN_check_shape_indices(state, indices, input);
+
+  THArgCheck(dT > 0 && dW > 0 && dH > 0, 10,
+             "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
+             dT, dH, dW);
+
+  if (THCTensor_(nDimension)(state, input) == 4)
+  {
+    inputSlices = THCTensor_(size)(state, input, 0);
+  }
+  else if (THCTensor_(nDimension)(state, input) == 5)
+  {
+    inputSlices = THCTensor_(size)(state, input, 1);
+  }
+  else
+  {
+    THArgCheck(false, 2, "4D or 5D tensor expected, got %d",
+               THCTensor_(nDimension)(state, input));
+  }
+
+  int dimw = 3;
+  int dimh = 2;
+  int dimt = 1;
+  int dimn = 0;
+  if (input->nDimension == 5)
+  {
+    dimt++;
+    dimw++;
+    dimh++;
+    dimn++;
+  }
+
+  if (gradOutput != NULL) {
+    if (oT != gradOutput->size[dimt] || oW != gradOutput->size[dimw] || oH != gradOutput->size[dimh])
+    {
+      THError(
+        "Inconsistent gradOutput size. oT= %d, oH= %d, oW= %d, gradOutput: %dx%dx%d",
+        oT, oH, oW, gradOutput->size[dimt], gradOutput->size[dimh], gradOutput->size[dimw]);
+    }
+
+    THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimn, inputSlices);
+  }
+}
+
 void THNN_(VolumetricMaxUnpooling_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -17,6 +77,10 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   int inputHeight;
   int inputWidth;
 
+  THNN_(VolumetricMaxUnpooling_shapeCheck)(
+        state, input, NULL, indices,
+        outputTime, outputWidth, outputHeight,
+        dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 3, input, indices, output);
 
   if (THCTensor_(nDimension)(state, input) == 4)
@@ -36,11 +100,6 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     inputTime   = THCTensor_(size)(state, input, 2);
     inputHeight = THCTensor_(size)(state, input, 3);
     inputWidth  = THCTensor_(size)(state, input, 4);
-  }
-  else
-  {
-    THArgCheck(false, 2, "4D or 5D tensor expected, got %d",
-               THCTensor_(nDimension)(state, input));
   }
 
   if (input->nDimension == 4) /* 4D */
@@ -117,7 +176,10 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   int inputHeight;
   int inputWidth;
 
-  // TODO: check gradOutput shape
+  THNN_(VolumetricMaxUnpooling_shapeCheck)(
+        state, input, gradOutput, indices,
+        outputTime, outputWidth, outputHeight,
+        dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
   if (THCTensor_(nDimension)(state, input) == 4) /* 4D */

@@ -1054,9 +1054,11 @@ TH_API void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCIndexTensor *indices,
+                  int kT, int kW, int kH,
                   int dT, int dW, int dH,
                   int padT, int padW, int padH,
-                  int dilationT, int dilationW, int dilationH);
+                  int dilationT, int dilationW, int dilationH,
+                  bool ceilMode);
 
 TH_API void THNN_(VolumetricFullConvolution_updateOutput)(
                   THCState *state,
@@ -1111,8 +1113,10 @@ TH_API void THNN_(VolumetricMaxPooling_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCIndexTensor *indices,
+                  int kT, int kW, int kH,
                   int dT, int dW, int dH,
-                  int padT, int padW, int padH);
+                  int padT, int padW, int padH,
+                  bool ceilMode);
 
 TH_API void THNN_(VolumetricMaxUnpooling_updateOutput)(
                   THCState *state,

@@ -2,6 +2,69 @@
 #define THC_GENERIC_FILE "generic/VolumetricDilatedConvolution.cu"
 #else
 
+static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input,
+                         THCTensor *gradOutput,
+                         THCTensor *weight,
+                         THCTensor *bias,
+                         int kT, int kH, int kW,
+                         int dT, int dH, int dW,
+                         int padT, int padH, int padW,
+                         int dilationT, int dilationH, int dilationW) {
+  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
+                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
+                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+                  "expected for weight, but got: %s");
+  THArgCheck(kT > 0 && kW > 0 && kH > 0, 8,
+             "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
+  THArgCheck(dT > 0 && dW > 0 && dH > 0, 11,
+             "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
+  THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 15,
+             "dilation should be greater than zero, but got dilationT: %d, dilationH: %d, dilationW: %d",
+             dilationT, dilationH, dilationW);
+
+  if (bias != NULL) {
+    THCUNN_check_dim_size(state, bias, 1, 0, weight->size[0]);
+  }
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimd = 1;
+  int dimh = 2;
+  int dimw = 3;
+
+  if (ndim == 5) {
+    dimf++;
+    dimd++;
+    dimh++;
+    dimw++;
+  }
+
+  int nInputPlane = weight->size[1];
+  int nOutputPlane = weight->size[0];
+  long inputDepth  = input->size[dimd];
+  long inputHeight  = input->size[dimh];
+  long inputWidth   = input->size[dimw];
+  long outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+  long outputWidth  = (inputWidth  + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+
+  if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1)
+    THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
+            nInputPlane,inputDepth,inputHeight,inputWidth,nOutputPlane,outputDepth,outputHeight,outputWidth);
+
+  THCUNN_check_dim_size(state, input, ndim, dimf, nInputPlane);
+
+   if (gradOutput != NULL) {
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimd, outputDepth);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimw, outputWidth);
+  }
+}
+
 void THNN_(VolumetricDilatedConvolution_updateOutput)(
            THCState *state,
            THCTensor  *input,
@@ -19,15 +82,10 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   if (bias) {
     THCUNN_assertSameGPU(state, 2, weight, bias);
   }
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
-  THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
-                  "expected for weight, but got: %s");
-  THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
-  THArgCheck(kT > 0 && kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
-  THArgCheck(dT > 0 && dW > 0 && dH > 0, 10, "stride should be greater than zero");
-  THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 16, "dilation should be greater than 0");
+  THNN_(VolumetricDilatedConvolution_shapeCheck)(
+        state, input, NULL, weight, bias,
+        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+        dilationT, dilationH, dilationW);
 
   // Params:
   int nInputPlane = weight->size[1];
@@ -36,12 +94,9 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   int batch = 1;
   if (input->nDimension == 4) {
-    THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
     // Force batch
     batch = 0;
     THCTensor_(resize5d)(state, input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
-  } else {
-    THArgCheck(input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
   }
 
   long inputDepth  = input->size[2];
@@ -50,10 +105,6 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   long outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
   long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
   long outputWidth  = (inputWidth  + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
-
-  if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1)
-    THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
-            nInputPlane,inputDepth,inputHeight,inputWidth,nOutputPlane,outputDepth,outputHeight,outputWidth);
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -174,16 +225,10 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
-  THCUNN_argCheck(state, gradOutput->nDimension == 4 || gradOutput->nDimension == 5, 3,
-                  gradOutput,
-                  "4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
-  THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
-                  "expected for weight, but got: %s");
-  THArgCheck(kT > 0 && kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
-  THArgCheck(dT > 0 && dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THNN_(VolumetricDilatedConvolution_shapeCheck)(
+        state, input, gradOutput, weight, NULL,
+        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+        dilationT, dilationH, dilationW);
 
   // Params
   int nInputPlane = weight->size[1];
@@ -293,16 +338,10 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   if (gradBias) {
    THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
   }
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
-  THCUNN_argCheck(state, gradOutput->nDimension == 4 || gradOutput->nDimension == 5, 3,
-                  gradOutput,
-                  "4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
-  THCUNN_argCheck(state, gradWeight->nDimension == 5, 4, gradWeight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
-                  "expected for gradWeight, but got: %s");
-  THArgCheck(kT > 0 && kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
-  THArgCheck(dT > 0 && dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THNN_(VolumetricDilatedConvolution_shapeCheck)(
+        state, input, gradOutput, gradWeight, gradBias,
+        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+        dilationT, dilationH, dilationW);
 
   // Params
   int nInputPlane = gradWeight->size[1];
