@@ -32,12 +32,13 @@ class RowMulOp : public Operator<Context> {
         mat.dim32(0),
         "Length of w should be equal to the first dim of mat");
 
-    ConstEigenArrayMap<T> mat_array(
-        mat_data, mat.dim32(0), mat.size_from_dim(1));
-    ConstEigenVectorArrayMap<T> w_array(w_data, w.size());
-    EigenArrayMap<T> output_array(
-        output_data, output->dim32(0), output->size_from_dim(1));
-    output_array = mat_array.colwise() * w_array;
+    auto block_size = mat.size_from_dim(1);
+    for (int i = 0; i < w.size(); i++) {
+      for (int j = 0; j < block_size; j++) {
+        output_data[i * block_size + j] =
+            mat_data[i * block_size + j] * w_data[i];
+      }
+    }
 
     return true;
   }
@@ -61,7 +62,6 @@ class ReduceTailSumOp : public Operator<Context> {
     T* output_data = output->template mutable_data<T>();
     const T* mat_data = mat.template data<T>();
 
-    auto row_size = mat.size_from_dim(1);
     for (int i = 0; i < N; i++) {
       output_data[i] = 0;
       for (int j = 0; j < block_size; j++) {
