@@ -39,20 +39,18 @@ option(USE_LEVELDB
        "Use LMDB" ON)
 option(USE_OPENCV
        "Use openCV" ON)
+option(USE_ZMQ
+       "Use ZMQ" OFF)
+option(USE_ROCKSDB
+       "Use RocksDB" OFF)
+option(USE_MPI
+       "Use MPI" OFF)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
 
 # Third party builds.
 include_directories(${CMAKE_SOURCE_DIR})
-
-# add_subdirectory(third_party)
-
-# add all subdirectories here because CMake sucks.
-# include_directories("${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include")
-# include_directories("${CMAKE_SOURCE_DIR}/third_party/eigen")
-# include_directories("${CMAKE_SOURCE_DIR}/third_party/cub")
-# include_directories("${CMAKE_SOURCE_DIR}/third_party/cnmem/include")
 
 # Old caffe protobuf.
 add_subdirectory(caffe/proto)
