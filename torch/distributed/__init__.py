@@ -31,4 +31,3 @@ def init_master_worker(backend):
     extend_scope(collectives)
     extend_scope(remote_types)
     assert torch._C._dist_init_extension(True, reduce_op, group)
-

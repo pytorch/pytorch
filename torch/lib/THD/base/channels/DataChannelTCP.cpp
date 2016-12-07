@@ -1,23 +1,26 @@
 #include "DataChannelTCP.hpp"
+#include "DataChannelUtils.hpp"
 
 #include <arpa/inet.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <algorithm>
 #include <fcntl.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
+#include <tuple>
 
 
 #define SYSCHECK(expr) { \
@@ -77,6 +80,19 @@ void recv_bytes(int socket, T* buffer, std::size_t length)
 
 inline bool validatePort(int port) {
   return (port > 0 && port < 65536);
+}
+
+
+inline int log2ceil(std::uint32_t value) {
+  int dim = 0;
+#if defined(__GNUC__)
+  if (value <= 1)
+    return 0;
+  dim = 32 - __builtin_clz(value - 1);
+#else
+  for (int size = 1; size < value; ++dim, size <<= 1) /* empty */;
+#endif // defined(__GNUC__)
+  return dim;
 }
 
 } // namespace
@@ -379,9 +395,14 @@ bool DataChannelTCP::init() {
   bool ok = (_rank == MASTER_RANK ? initMaster() : initWorker());
   if (ok) {
     std::vector<int> ranks;
+    ranks.reserve(_processes.size());
     for (size_t rank = 0; rank < _processes.size(); ++rank)
       ranks.push_back(rank);
-    _groups.insert({THDGroupWORLD, ranks});
+
+    _groups.insert({
+      THDGroupWORLD,
+      DataChannel::Group(ranks, _processes.size() - 1)
+    });
   }
 
   return ok;
@@ -398,6 +419,95 @@ int DataChannelTCP::getNumProcesses() {
 }
 
 
+void DataChannelTCP::allGather(std::vector<Tensor*>& output, Tensor& input, THDGroup group_id) {
+  /*
+   * Since all-gather is semantically equivalent to gather followed by
+   * broadcast we use those functions to implement all-gather function.
+   *
+   * Even though we use first rank from group as point of gather and broadcast
+   * we should not see any bottlenecks here.
+   */
+
+  const auto& group = _groups.at(group_id);
+  bool exists;
+  std::tie(std::ignore, exists) = group.getGroupRank(_rank);
+  if (!exists)
+    return;
+
+  if (output.size() != group.size())
+    throw std::logic_error("allGather: number of output tensors and group size does not match");
+
+  for (auto out_tensor : output)
+    assertTensorEqual(*out_tensor, input, "allGather");
+
+  auto main_rank = group.mustGetGlobalRank(0);
+  gather(output, input, main_rank, group_id);
+
+  for (std::size_t i = 0; i < group.size(); ++i)
+    broadcast(*(output.at(i)), main_rank, group_id);
+}
+
+
+void DataChannelTCP::gather(std::vector<Tensor*>& output, Tensor& input, int dst_rank, THDGroup group_id) {
+  const auto& group = _groups.at(group_id);
+  bool exists;
+
+  std::tie(std::ignore, exists) = group.getGroupRank(_rank);
+  if (!exists)
+    return;
+
+  if (_rank != dst_rank) {
+    send(input, dst_rank);
+  } else {
+    if (output.size() != group.size())
+      throw std::logic_error("gather: number of output tensors and group size does not match");
+
+    for (auto out_tensor : output)
+      assertTensorEqual(*out_tensor, input, "gather");
+
+    for (std::size_t i = 0; i < group.size(); ++i) {
+      // TODO: change it to some kind of helper
+      auto group_rank = group.mustGetGlobalRank(i);
+      if (_rank != group_rank) {
+        receive(*(output.at(i)), group_rank);
+      } else {
+        memcpy(output.at(i)->data(), input.data(), input.numel() * input.elementSize());
+      }
+    }
+  }
+}
+
+
+void DataChannelTCP::scatter(std::vector<Tensor*>& input, Tensor& output, int src_rank, THDGroup group_id) {
+  const auto& group = _groups.at(group_id);
+  bool exists;
+
+  std::tie(std::ignore, exists) = group.getGroupRank(_rank);
+  if (!exists)
+    return;
+
+  if (_rank != src_rank) {
+    receive(output, src_rank);
+  } else {
+    if (input.size() != group.size())
+      throw std::logic_error("scatter: number of input tensors and group size does not match");
+
+    for (auto in_tensor : input)
+      assertTensorEqual(*in_tensor, output, "scatter");
+
+    for (std::size_t i = 0; i < group.size(); ++i) {
+      // TODO: change it to some kind of helper
+      auto group_rank = group.mustGetGlobalRank(i);
+      if (_rank != group_rank) {
+        send(*(input.at(i)), group_rank);
+      } else {
+        memcpy(output.data(), input.at(i)->data(), output.numel() * output.elementSize());
+      }
+    }
+  }
+}
+
+
 void DataChannelTCP::allReduce(Tensor& data, THDReduceOp operation, THDGroup group_id) {
   /*
    * Since an all-reduce operation is semantically equivalent to an
@@ -410,10 +520,13 @@ void DataChannelTCP::allReduce(Tensor& data, THDReduceOp operation, THDGroup gro
    */
 
   const auto& group = _groups.at(group_id);
-  if (std::find(group.begin(), group.end(), _rank) == group.end())
-   return;
+  bool exists;
 
-  auto main_rank = group.at(0);
+  std::tie(std::ignore, exists) = group.getGroupRank(_rank);
+  if (!exists)
+    return;
+
+  auto main_rank = group.mustGetGlobalRank(0);
   reduce(data, operation, main_rank, group_id);
   broadcast(data, main_rank, group_id);
 }
@@ -426,39 +539,33 @@ void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank, T
    */
 
   const auto& group = _groups.at(group_id);
-  auto rank_it = std::find(group.begin(), group.end(), _rank);
-  if (rank_it == group.end())
-   return;
+  unsigned int group_rank;
+  bool exists;
 
-  auto dst_rank_it = std::find(group.begin(), group.end(), dst_rank);
-  if (dst_rank_it == group.end())
-   throw std::logic_error("cannot use reduce in group of rank which is not its member");
+  std::tie(group_rank, exists) = group.getGroupRank(_rank);
+  if (!exists)
+    return;
 
-  auto group_rank = std::distance(group.begin(), rank_it);
-  auto group_dst_rank = std::distance(group.begin(), dst_rank_it);
-
-  int dim = static_cast<int>(
-    std::ceil(std::log2(static_cast<long double>(group.size())))
-  );
+  unsigned int group_dst_rank = group.mustGetGroupRank(dst_rank);
+  int dim = log2ceil(group.size());
   int virtual_rank = ((group.size() - group_dst_rank) + group_rank) % group.size();
   long long mask = 0;
   auto result_tensor = data.clone();
 
-  for (int k = 0; k <= dim - 1; ++k) {
+  for (int k = 0; k <= dim - 1; mask ^= (1 << k), ++k) {
     if ((virtual_rank & mask) == 0) {
       int partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
       if (partner >= group.size())
         continue;
 
-      partner = (partner + group_dst_rank) % group.size();
+      partner = group.mustGetGlobalRank((partner + group_dst_rank) % group.size());
       if ((virtual_rank & (1 << k)) != 0) {
-        send(*result_tensor, group[partner]);
+        send(*result_tensor, partner);
       } else {
-        receive(data, group[partner]);
+        receive(data, partner);
         reduce_(*result_tensor, data, operation);
       }
     }
-    mask ^= (1 << k); // set bit `k`
   }
 
   if (_rank == dst_rank)
@@ -480,20 +587,15 @@ void DataChannelTCP::broadcast(Tensor& data, int src_rank, THDGroup group_id) {
    */
 
   const auto& group = _groups.at(group_id);
-  auto rank_it = std::find(group.begin(), group.end(), _rank);
-  if (rank_it == group.end())
+  unsigned int group_rank;
+  bool exists;
+
+  std::tie(group_rank, exists) = group.getGroupRank(_rank);
+  if (!exists)
     return;
 
-  auto src_rank_it = std::find(group.begin(), group.end(), src_rank);
-  if (src_rank_it == group.end())
-    throw std::logic_error("cannot use broadcast in group of rank which is not its member");
-
-  auto group_rank = std::distance(group.begin(), rank_it);
-  auto group_src_rank = std::distance(group.begin(), src_rank_it);
-
-  int dim = static_cast<int>(
-   std::ceil(std::log2(static_cast<long double>(group.size())))
-  );
+  unsigned int group_src_rank = group.mustGetGroupRank(src_rank);
+  int dim = log2ceil(group.size());
   int virtual_rank = ((group.size() - group_src_rank) + group_rank) % group.size();
   long long mask = (1 << dim) - 1;
 
@@ -504,11 +606,11 @@ void DataChannelTCP::broadcast(Tensor& data, int src_rank, THDGroup group_id) {
       if (partner >= group.size())
         continue;
 
-      partner = (partner + group_src_rank) % group.size();
+      partner = group.mustGetGlobalRank((partner + group_src_rank) % group.size());
       if ((virtual_rank & (1 << k)) == 0) {
-        send(data, group[partner]);
+        send(data, partner);
       } else {
-        receive(data, group[partner]);
+        receive(data, partner);
       }
     }
   }
@@ -575,8 +677,7 @@ void DataChannelTCP::receive(Tensor& data, int src_rank) {
 
 
 void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const {
-  if ((result.numel() != data.numel()) || (result.elementSize() != data.elementSize()))
-    throw std::logic_error("tensor sizes do not match when performing reduce");
+  assertTensorEqual(result, data, "reduce");
 
   Type tensor_type = data.type();
   switch(tensor_type) {
@@ -599,8 +700,7 @@ void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation
 
 template<typename T>
 void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const {
-  if ((result.numel() != data.numel()) || (result.elementSize() != data.elementSize()))
-    throw std::logic_error("tensor sizes do not match when performing reduce");
+  assertTensorEqual(result, data, "reduce");
 
   auto result_data = reinterpret_cast<T*>(result.data());
   auto new_data = reinterpret_cast<T*>(data.data());
@@ -621,16 +721,50 @@ void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation
 }
 
 
-THDGroup DataChannelTCP::newGroup(std::vector<int> ranks) {
-  if (ranks.size() == 0)
-    throw std::logic_error("cannot create empty group");
+void DataChannelTCP::barrier(THDGroup group_id) {
+  /*
+   * Barrier is implementation of Bruck algorithm. All processes send to
+   * other processes with rank (i + 2^k) and recv from process with rank (i - 2^k)
+   * with wrap-around. Since we cannot do recv and send at the same time
+   * we do recv asynchronously (thread), send byte and then wait for recv to complete.
+   */
 
-  sort(ranks.begin(), ranks.end());
-  if (ranks.front() < 0 || ranks.back() >= _processes.size())
-    throw std::out_of_range("array of ranks contains invalid rank");
+  const auto& group = _groups.at(group_id);
+  unsigned int group_rank;
+  bool exists;
 
+  std::tie(group_rank, exists) = group.getGroupRank(_rank);
+  if (!exists)
+    return;
+
+  std::uint8_t byte = 1;
+  for (int distance = 1; distance < group.size(); distance <<= 1) {
+    int recv_partner = (group_rank + group.size() - distance) % group.size();
+    const auto& recv_process = _processes.at(group.mustGetGlobalRank(recv_partner));
+    // start aka asynchronous recv
+    auto async_recv = std::async(std::launch::async, [&recv_process, &byte]() {
+      recv_bytes<std::uint8_t>(recv_process.socket, &byte, 1);
+    });
+
+
+    int send_partner = (group_rank + distance) % group.size();
+    const auto& send_process = _processes.at(group.mustGetGlobalRank(send_partner));
+    send_bytes<std::uint8_t>(send_process.socket, &byte, 1);
+
+    // if future is not valid before `wait`, it can result in undefined behaviour
+    if (!async_recv.valid())
+      throw std::future_error(std::future_errc::no_state);
+
+    async_recv.wait(); // wait for recv to complete
+  }
+}
+
+
+THDGroup DataChannelTCP::newGroup(const std::vector<int>& ranks) {
+  auto new_group = DataChannel::Group(ranks, _processes.size() - 1);
   THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
-  _groups.insert({new_group_id, ranks});
+
+  _groups.insert({new_group_id, new_group});
   return new_group_id;
 }
 
