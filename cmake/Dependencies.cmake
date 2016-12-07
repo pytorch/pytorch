@@ -91,3 +91,13 @@ find_package(NumPy REQUIRED)
 
 include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIRS})
 list(APPEND Caffe2_LINKER_LIBS ${PYTHON_LIBRARIES})
+
+# ---[ MPI
+if(USE_MPI)
+  find_package(MPI)
+  if(MPI_CXX_FOUND)
+    include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
+    list(APPEND Caffe2_LINKER_LIBS ${MPI_CXX_LIBRARIES})
+    set(CMAKE_EXE_LINKER_FLAGS ${MPI_CXX_LINK_FLAGS})
+  endif()
+endif()
