@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-__global__ void MomentumSGDUpdate(
+__global__ void MomentumSGDKernel(
     int N,
     const float* g,
     const float* m,
@@ -12,19 +12,27 @@ __global__ void MomentumSGDUpdate(
     float* nm,
     const float* lr,
     float momentum,
-    bool nesterov) {
+    bool nesterov,
+    float* param) {
+  const float LR = lr[0];
   if (!nesterov) {
     CUDA_1D_KERNEL_LOOP(i, N) {
-      const float adjusted_gradient = lr[0] * g[i] + momentum * m[i];
+      const float adjusted_gradient =  LR * g[i] + momentum * m[i];
       nm[i] = adjusted_gradient;
       ng[i] = adjusted_gradient;
+      if (param) {
+        param[i] -= adjusted_gradient;
+      }
     }
   } else {
     CUDA_1D_KERNEL_LOOP(i, N) {
       const float mi = m[i];
-      const float mi_new = momentum * mi + lr[0] * g[i];
+      const float mi_new = momentum * mi + LR * g[i];
       nm[i] = mi_new;
       ng[i] = (1 + momentum) * mi_new - momentum * mi;
+      if (param) {
+        param[i] -= ng[i];
+      }
     }
   }
 }
@@ -39,17 +47,20 @@ void momentum_sgd_update<CUDAContext>(
     const float* lr,
     float momentum,
     bool nesterov,
+    float *param,
     CUDAContext* context) {
-  MomentumSGDUpdate<<<
+  MomentumSGDKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
-      N, g, m, ng, nm, lr, momentum, nesterov);
+      N, g, m, ng, nm, lr, momentum, nesterov, param);
 }
 
 namespace {
 REGISTER_CUDA_OPERATOR(MomentumSGD, MomentumSGDOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MomentumSGDUpdate, MomentumSGDUpdateOp<float, CUDAContext>);
+
 }
 
 }
