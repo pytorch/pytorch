@@ -38,33 +38,6 @@ static void THDoubleVector_cadd_SSE(double *z, const double *x, const double *y,
   }
 }
 
-
-static void THDoubleVector_diff_SSE(double *z, const double *x, const double *y, const ptrdiff_t n) {
-  ptrdiff_t i;
-  for (i=0; i<=((n)-8); i+=8) {
-    __m128d XMM0 = _mm_loadu_pd((x)+i  );
-    __m128d XMM1 = _mm_loadu_pd((x)+i+2);
-    __m128d XMM2 = _mm_loadu_pd((x)+i+4);
-    __m128d XMM3 = _mm_loadu_pd((x)+i+6);
-    __m128d XMM4 = _mm_loadu_pd((y)+i  );
-    __m128d XMM5 = _mm_loadu_pd((y)+i+2);
-    __m128d XMM6 = _mm_loadu_pd((y)+i+4);
-    __m128d XMM7 = _mm_loadu_pd((y)+i+6);
-    XMM0 = _mm_sub_pd(XMM0, XMM4);
-    XMM1 = _mm_sub_pd(XMM1, XMM5);
-    XMM2 = _mm_sub_pd(XMM2, XMM6);
-    XMM3 = _mm_sub_pd(XMM3, XMM7);
-    _mm_storeu_pd((z)+i  , XMM0);
-    _mm_storeu_pd((z)+i+2, XMM1);
-    _mm_storeu_pd((z)+i+4, XMM2);
-    _mm_storeu_pd((z)+i+6, XMM3);
-  }
-  ptrdiff_t off = (n) - ((n)%8);
-  for (i=0; i<((n)%8); i++) {
-    z[off+i] = x[off+i] - y[off+i];
-  }
-}
-
 static void THDoubleVector_cmul_SSE(double *z, const double *x, const double *y, const ptrdiff_t n) {
   ptrdiff_t i;
   for (i=0; i<=((n)-8); i+=8) {
@@ -142,33 +115,6 @@ static void THFloatVector_cadd_SSE(float *z, const float *x, const float *y, con
   }
   for (; i<(n); i++) {
     z[i] = x[i] + c * y[i];
-  }
-}
-
-
-static void THFloatVector_diff_SSE(float *z, const float *x, const float *y, const ptrdiff_t n) {
-  ptrdiff_t i;
-  for (i=0; i<=((n)-16); i+=16) {
-    __m128 XMM0 = _mm_loadu_ps((x)+i   );
-    __m128 XMM1 = _mm_loadu_ps((x)+i+ 4);
-    __m128 XMM2 = _mm_loadu_ps((x)+i+ 8);
-    __m128 XMM3 = _mm_loadu_ps((x)+i+12);
-    __m128 XMM4 = _mm_loadu_ps((y)+i   );
-    __m128 XMM5 = _mm_loadu_ps((y)+i+ 4);
-    __m128 XMM6 = _mm_loadu_ps((y)+i+ 8);
-    __m128 XMM7 = _mm_loadu_ps((y)+i+12);
-    XMM0 = _mm_sub_ps(XMM0, XMM4);
-    XMM1 = _mm_sub_ps(XMM1, XMM5);
-    XMM2 = _mm_sub_ps(XMM2, XMM6);
-    XMM3 = _mm_sub_ps(XMM3, XMM7);
-    _mm_storeu_ps((z)+i   , XMM0);
-    _mm_storeu_ps((z)+i+ 4, XMM1);
-    _mm_storeu_ps((z)+i+ 8, XMM2);
-    _mm_storeu_ps((z)+i+12, XMM3);
-  }
-  ptrdiff_t off = (n) - ((n)%16);
-  for (i=0; i<((n)%16); i++) {
-    z[off+i] = x[off+i] - y[off+i];
   }
 }
 

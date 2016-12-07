@@ -80,33 +80,6 @@ TH_API void THVector_(add)(real *r_, const real *t, const real value, const ptrd
   THVector_(add_DISPATCHPTR)(r_, t, value, n);
 }
 
-static void (*THVector_(diff_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(diff_DEFAULT);
-static FunctionDescription THVector_(diff_DISPATCHTABLE)[] = {
-  #if defined(__NEON__)
-    #if defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(diff_NEON), SIMDExtension_NEON),
-    #endif
-  #endif
-
-  #if defined(__PPC64__)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(diff_VSX), SIMDExtension_VSX),
-    #endif
-  #endif
-
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(diff_SSE), SIMDExtension_SSE),
-    #endif
-  #endif
-
-  FUNCTION_IMPL(THVector_(diff_DEFAULT), SIMDExtension_DEFAULT)
-};
-void THVector_(diff)(real *z, const real *x, const real *y, const ptrdiff_t n) {
-  THVector_(diff_DISPATCHPTR)(z, x, y, n);
-}
-
 static void (*THVector_(cmul_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(cmul_DEFAULT);
 static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
@@ -161,7 +134,6 @@ void THVector_(vectorDispatchInit)(void)
   INIT_VECTOR_DISPATCH_PTR(fill);
   INIT_VECTOR_DISPATCH_PTR(cadd);
   INIT_VECTOR_DISPATCH_PTR(add);
-  INIT_VECTOR_DISPATCH_PTR(diff);
   INIT_VECTOR_DISPATCH_PTR(cmul);
   INIT_VECTOR_DISPATCH_PTR(mul);
 }
