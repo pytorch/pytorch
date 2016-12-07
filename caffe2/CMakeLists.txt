@@ -4,7 +4,6 @@ set(Caffe2_DIR_EXCLUDES
         "/contrib"
         "/distributed"
         "/mpi"
-        "/image"
         "/experiments"
         "/python"
 )
@@ -78,7 +77,7 @@ include_directories(BEFORE ${CMAKE_BINARY_DIR})
 
 # Compile exposed libraries.
 LIST(APPEND CMAKE_CXX_FLAGS "--std=c++11 -fPIC")
-add_library(Caffe2_CPU SHARED ${Caffe2_CPU_SRCS})
+add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
 target_link_libraries(Caffe2_CPU Caffe2_PROTO)
 
 # CUDA library
@@ -86,14 +85,49 @@ target_link_libraries(Caffe2_CPU Caffe2_PROTO)
 find_package(CUDA)
 LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
 LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,compute=sm_52)
-CUDA_ADD_LIBRARY(Caffe2_GPU SHARED ${Caffe2_GPU_SRCS})
-target_link_libraries(Caffe2_GPU Caffe2_PROTO glog gflags)
+CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
+target_link_libraries(Caffe2_GPU Caffe2_PROTO glog gflags )
 
 # Compile test binaries.
 add_executable(Caffe2_CPU_TEST ${Caffe2_CPU_TEST_SRCS})
-
-target_link_libraries(Caffe2_CPU_TEST Caffe2_CPU gtest glog atlas cblas)
+# TODO: Make BLAS backend interchangeable
+target_link_libraries(Caffe2_CPU_TEST Caffe2_CPU gtest glog atlas cblas ${Caffe2_LINKER_LIBS})
 target_compile_features(Caffe2_CPU_TEST PRIVATE cxx_range_for)
 
 # ---[ Python
 add_subdirectory(python)
+
+# ---[ All binaries
+file(GLOB Caffe2_BINARY_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/binaries/*.cc)
+
+# ZMQ src
+set(Caffe2_ZMQ_BINARY_SRC
+    "zmq_feeder.cc"
+)
+# Prune out ZMQ if no support
+if(NOT USE_ZMQ)
+  message(STATUS "Excluding ZMQ binary")
+  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_ZMQ_BINARY_SRC}")
+  exclude(Caffe2_BINARY_SRCS "${Caffe2_BINARY_SRCS}" "${tmp}")
+endif()
+
+# MPI-based binaries
+set(Caffe2_MPI_BINARY_SRC
+    "fb_run_plan_mpi.cc"
+    "run_plan_mpi.cc"
+)
+if(NOT USE_MPI)
+  message(STATUS "Excluding MPI binaries")
+  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_MPI_BINARY_SRC}")
+  exclude(Caffe2_BINARY_SRCS "${Caffe2_BINARY_SRCS}" "${tmp}")
+endif()
+
+foreach(binary_src ${Caffe2_BINARY_SRCS})
+  get_filename_component(bin_name ${binary_src} NAME_WE)
+  # message(STATUS ${bin_name})
+  # message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}/"${binary_src})
+  add_executable(${bin_name} "${CMAKE_CURRENT_SOURCE_DIR}/"${binary_src})
+  target_link_libraries(${bin_name} Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO glog atlas cblas ${Caffe2_LINKER_LIBS})
+endforeach()
+
+
