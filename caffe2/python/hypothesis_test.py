@@ -150,6 +150,23 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X1, X2], [0])
         self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
 
+    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs)
+    def test_row_mul(self, inputs, gc, dc):
+        op = core.CreateOperator("RowMul", ["X1", "X2"], ["Y"])
+        X1, Xtmp = inputs
+        X2 = Xtmp[:, 0]
+
+        def ref(x, y):
+            ret = np.zeros(shape=x.shape, dtype=x.dtype)
+            for i in range(y.size):
+                ret[i, ] = x[i, ] * y[i]
+            return [ret]
+
+        self.assertDeviceChecks(dc, op, [X1, X2], [0])
+        for i in range(2):
+            self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
+        self.assertReferenceChecks(gc, op, [X1, X2], ref)
+
     @given(inputs=hu.tensors(n=2), **hu.gcs)
     def test_max(self, inputs, gc, dc):
         op = core.CreateOperator("Max", ["X1", "X2"], ["Y"])
