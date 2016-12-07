@@ -121,6 +121,34 @@ void THVector_(mul)(real *y, const real *x, const real c, const ptrdiff_t n) {
   THVector_(mul_DISPATCHPTR)(y, x, c, n);
 }
 
+static void (*THVector_(cdiv_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(cdiv_DEFAULT);
+static FunctionDescription THVector_(cdiv_DISPATCHTABLE)[] = {
+  #if defined(USE_AVX)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(cdiv_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  FUNCTION_IMPL(THVector_(cdiv_DEFAULT), SIMDExtension_DEFAULT)
+};
+void THVector_(cdiv)(real *z, const real *x, const real *y, const ptrdiff_t n) {
+  THVector_(cdiv_DISPATCHPTR)(z, x, y, n);
+}
+
+static void (*THVector_(div_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(div_DEFAULT);
+static FunctionDescription THVector_(div_DISPATCHTABLE)[] = {
+  #if defined(USE_AVX)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(div_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  FUNCTION_IMPL(THVector_(div_DEFAULT), SIMDExtension_DEFAULT)
+};
+void THVector_(div)(real *y, const real *x, const real c, const ptrdiff_t n) {
+  THVector_(div_DISPATCHPTR)(y, x, c, n);
+}
+
 /* This needs to be called in order to initialize the dispatch pointers at runtime.
  * This function simply checks what SIMD extensions are available, and then walks the dispatch table
  * to choose the best function.
@@ -136,6 +164,8 @@ void THVector_(vectorDispatchInit)(void)
   INIT_VECTOR_DISPATCH_PTR(add);
   INIT_VECTOR_DISPATCH_PTR(cmul);
   INIT_VECTOR_DISPATCH_PTR(mul);
+  INIT_VECTOR_DISPATCH_PTR(cdiv);
+  INIT_VECTOR_DISPATCH_PTR(div);
 }
 
 #endif
