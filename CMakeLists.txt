@@ -58,3 +58,11 @@ add_subdirectory(caffe/proto)
 add_subdirectory(caffe2)
 target_link_libraries(Caffe2_CPU)
 target_compile_features(Caffe2_CPU PRIVATE cxx_range_for)
+
+# ---[ Copy all python files to build directory
+# ---[ Assemble list of python files to copy
+# Copy the files
+# file(COPY ${Caffe2_PYTHON_SRC} DESTINATION ${CMAKE_BINARY_DIR})
+install(DIRECTORY ${CMAKE_SOURCE_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}
+        FILES_MATCHING PATTERN "*.py")
+
