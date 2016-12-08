@@ -101,3 +101,18 @@ if(USE_MPI)
     set(CMAKE_EXE_LINKER_FLAGS ${MPI_CXX_LINK_FLAGS})
   endif()
 endif()
+
+# ---[ OpenMP
+find_package(OpenMP)
+if(OpenMP_FOUND)
+  # set(CMAKE_CXX_FLAGS ${OpenMP_CXX_FLAGS})
+  list(APPEND Caffe2_LINKER_LIBS ${OpenMP_CXX_FLAGS})
+endif()
+
+# ---[ CUB
+include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cub)
+
+# ---[ CNMEM
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/cnmem)
+include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cnmem/include)
+list(APPEND ${Caffe2_LINKER_LIBS} ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so)
