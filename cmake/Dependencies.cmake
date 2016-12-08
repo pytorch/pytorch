@@ -1,6 +1,8 @@
 # This list is required for static linking and exported to Caffe2Config.cmake
 set(Caffe2_LINKER_LIBS "")
 
+# ---[ Custom Protobuf
+include(cmake/ProtoBuf.cmake)
 # ---[ Threads
 find_package(Threads REQUIRED)
 list(APPEND Caffe2_LINKER_LIBS ${CMAKE_THREAD_LIBS_INIT})
