@@ -85,7 +85,6 @@ struct KernelArgs {
   T * __restrict__ ThisOutput;
 
   DevRing<char>* ring;
-  int nRings;
 };
 
 template<typename T>
@@ -93,21 +92,19 @@ void ArgsSetup(KernelArgs<T> *args, const void* sendbuff, void* recvbuff,
 		const int root, const int count, ncclComm *comm) {
   args->nRanks = comm->nRanks;
   args->root = root;
-  args->buffSize = comm->buffSizePerRing;
+  args->buffSize = comm->buffSize;
   args->N = count;
   args->opIndex = comm->opSched;
   args->opCounter = comm->opCounter;
-  args->doneCount = &comm->devMem->doneCount;
   args->ThisInput = (const T*)sendbuff;
   args->ThisOutput = (T*)recvbuff;
   args->ring = comm->devRing;
   args->pushrecv = comm->globalMemSpace;
-  args->nRings = comm->nRings;
 }
 
 #define LAUNCH_KERNEL(K, THREADS, UNROLL, FUNC, T, \
 		args, stream) do { \
-  dim3 grid(args.nRings, 1, 1); \
+  dim3 grid(1, 1, 1); \
   dim3 block(THREADS+1, 1, 1); \
   void* argptrs[] = {&args}; \
   CUDACHECK(cudaLaunchKernel( \
