@@ -33,29 +33,36 @@ struct grad_buffer_type: public grad_list_type {
 
   size_t buffer_id;
 };
+// used for the queue of nodes ready for processing
+using ready_queue_type = std::deque<std::pair<THPFunction *, grad_buffer_type>>;
 
 // Computes graph dependencies (using a super simple topological sort)
-dependencies_type THPEngine_compute_dependencies(THPFunction *function)
+void THPEngine_compute_dependencies(THPFunction *function,
+    dependencies_type& dependencies, ready_queue_type& ready)
 {
-  dependencies_type dependencies;
   std::set<THPFunction *> seen;
   std::vector<THPFunction *> queue = {function};
   while (queue.size() > 0) {
     THPFunction *fn = queue.back(); queue.pop_back();
     for (int i = 0; i < fn->num_inputs; i++) {
       THPFunction *prev_fn = (THPFunction*)fn->previous_functions[i].get();
+      // Stochastic functions are ready for backward immediately
       // We can ignore variables (their backprop is called every time we have
-      // gradient ready) and functions that don't require gradient.
-      if (THPVariable_Check((PyObject*)prev_fn) || !prev_fn->requires_grad)
+      // gradient ready).
+      if (THPVariable_Check((PyObject*)prev_fn))
         continue;
-      dependencies[prev_fn] += 1;
+      if (PyObject_IsInstance((PyObject*)prev_fn, THPStochasticFunctionClass) &&
+          seen.count(prev_fn) == 0) {
+        ready.emplace_back(prev_fn, grad_buffer_type(0));
+      } else {
+        dependencies[prev_fn] += 1;
+      }
       if (seen.count(prev_fn) == 0) {
         seen.insert(prev_fn);
         queue.push_back(prev_fn);
       }
     }
   }
-  return dependencies;
 }
 
 // Frees backward dependency and returns true if prev_fn is ready for backward
@@ -117,17 +124,24 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     Py_RETURN_NONE;
   }
 
-  std::deque<std::pair<THPFunction *, grad_buffer_type>> ready;
+  ready_queue_type ready;
   std::unordered_map<THPFunction *, grad_buffer_type> not_ready;
+  dependencies_type dependencies;
   buffer_set_type need_copy;
 
   // Initialize the queue
-  grad_buffer_type buf(next_buf_id++, ((THPFunction*)variable->creator)->num_outputs);
-  Py_INCREF(grad_variable);
-  buf[variable->output_nr] = grad_variable;
-  ready.emplace_front((THPFunction*)variable->creator, std::move(buf));
+  if (variable->requires_grad ||
+      PyObject_IsInstance(variable->creator, THPStochasticFunctionClass)) {
+    grad_buffer_type buf(next_buf_id++, ((THPFunction*)variable->creator)->num_outputs);
+    Py_INCREF(grad_variable);
+    buf[variable->output_nr] = grad_variable;
+    ready.emplace_front((THPFunction*)variable->creator, std::move(buf));
+  }
 
-  dependencies_type dependencies = THPEngine_compute_dependencies((THPFunction*)variable->creator);
+  THPEngine_compute_dependencies((THPFunction*)variable->creator, dependencies, ready);
+
+  THPUtils_assert(ready.size() > 0, "there are no graph nodes that require "
+          "computing gradients");
 
   while (ready.size() > 0) {
     std::pair<THPFunction *, grad_buffer_type> ready_pair =

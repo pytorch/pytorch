@@ -83,9 +83,7 @@ class Variable(_C._VariableBase):
     def backward(self, gradient=None, retain_variables=False):
         if self.volatile:
             raise RuntimeError('calling backward on a volatile variable')
-        if not self.requires_grad:
-            raise RuntimeError("calling backward on a variable that doesn't require gradient")
-        if gradient is None:
+        if gradient is None and self.requires_grad:
             if self.data.numel() != 1:
                 raise RuntimeError('backward should be called only on a scalar (i.e. 1-element tensor) or with gradient w.r.t. the variable')
             gradient = self.data.new(1).fill_(1)
@@ -126,6 +124,12 @@ class Variable(_C._VariableBase):
                     unpacked_grad = result
         self.grad.add_(unpacked_grad)
         return tuple()
+
+    def reinforce(self, reward):
+        if not isinstance(self.creator, StochasticFunction):
+            raise RuntimeError("reinforce() can be only called on outputs "
+                    "of stochastic functions")
+        self.creator._reinforce(reward)
 
     def no_grad(self):
         return NoGrad()(self)
@@ -555,6 +559,12 @@ class Variable(_C._VariableBase):
     def triu(self, diagonal_idx=0):
         return Triu(diagonal_idx)(self)
 
+    def multinomial(self, num_samples=1):
+        return Multinomial(num_samples)(self)
+
+    def bernoulli(self):
+        return Bernoulli()(self)
+
     def __add__(self, other):
         return self.add(other)
     __radd__ = __add__
@@ -606,6 +616,13 @@ class Variable(_C._VariableBase):
         @staticmethod
         def cat(iterable, dim=0):
             return Concat(dim)(*iterable)
+
+        @staticmethod
+        def normal(means, stddev=1):
+            if isinstance(stddev, Variable):
+                return Normal()(means, stddev)
+            else:
+                return Normal(stddev)(means)
 
         @staticmethod
         def _blas(cls, args, inplace):

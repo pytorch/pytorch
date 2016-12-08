@@ -44,6 +44,7 @@ class InplaceFunction(Function):
         super(InplaceFunction, self).__init__()
         self.inplace = inplace
 
+
 def _nested_map(condition, fn):
     def _map(obj):
         if condition(obj):

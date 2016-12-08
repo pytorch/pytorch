@@ -81,6 +81,65 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
       default: 1
 ]]
 
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+static void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, real stddev)
+{
+  THTensor_(resizeAs)(self, means);
+  THTensor_(normal)(self, gen, 0, stddev);
+  THTensor_(cadd)(self, self, 1, means);
+}
+
+static void THTensor_(normal_stddevs)(THTensor *self, THGenerator *gen, real mean, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(self, stddevs);
+  THTensor_(normal)(self, gen, 0, 1);
+  THTensor_(cmul)(self, self, stddevs);
+  THTensor_(add)(self, self, mean);
+}
+
+static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor *means, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(self, means);
+  THTensor_(normal)(self, gen, 0, 1);
+  THTensor_(cmul)(self, self, stddevs);
+  THTensor_(cadd)(self, self, 1, means);
+}
+#endif
+
+[[
+  name: normal
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return: argument 0
+  only_stateless: True
+  options:
+    - cname: normal_means
+      arguments:
+        - arg: THTensor* output
+          allocate: True
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - THTensor* means
+        - arg: real stddev
+          default: 1
+    - cname: normal_stddevs
+      arguments:
+        - arg: THTensor* output
+          allocate: True
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - arg: real mean
+          default: 0
+        - THTensor* stddevs
+    - cname: normal_means_stddevs
+      arguments:
+        - arg: THTensor* output
+          allocate: True
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - THTensor* means
+        - THTensor* stddevs
+]]
+
 [[
   name: normal_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -195,6 +254,67 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
       default: 1
 ]]
 
+#if CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+static void THTensor_(normal_means)(THCState *_, THTensor *self, THTensor *means, double stddev)
+{
+  THTensor_(resizeAs)(LIBRARY_STATE self, means);
+  THTensor_(normal)(LIBRARY_STATE self, 0, stddev);
+  THTensor_(cadd)(LIBRARY_STATE self, self, AS_REAL(1), means);
+}
+
+static void THTensor_(normal_stddevs)(THCState *_, THTensor *self, double mean, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(LIBRARY_STATE self, stddevs);
+  THTensor_(normal)(LIBRARY_STATE self, 0, 1);
+  THTensor_(cmul)(LIBRARY_STATE self, self, stddevs);
+  THTensor_(add)(LIBRARY_STATE self, self, AS_REAL(mean));
+}
+
+static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTensor *means, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(LIBRARY_STATE self, means);
+  THTensor_(normal)(LIBRARY_STATE self, 0, 1);
+  THTensor_(cmul)(LIBRARY_STATE self, self, stddevs);
+  THTensor_(cadd)(LIBRARY_STATE self, self, AS_REAL(1), means);
+}
+#endif
+
+[[
+  name: normal
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  return: argument 0
+  only_stateless: True
+  options:
+    - cname: normal
+      arguments:
+        - arg: THTensor* output
+          allocate: True
+        - arg: double mean
+          default: 0
+        - arg: double stddev
+          default: 1
+    - cname: normal_means
+      arguments:
+        - arg: THTensor* output
+          allocate: True
+        - THTensor* means
+        - arg: double stddev
+          default: 1
+    - cname: normal_stddevs
+      arguments:
+        - arg: THTensor* output
+          allocate: True
+        - arg: double mean
+          default: 0
+        - THTensor* stddevs
+    - cname: normal_means_stddevs
+      arguments:
+        - arg: THTensor* output
+          allocate: True
+        - THTensor* means
+        - THTensor* stddevs
+]]
+
 [[
   name: normal_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
@@ -282,6 +402,28 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - double p
 ]]
 
+#define THDoubleTensor_BERNOULLI_TENSOR THDoubleTensor_bernoulli_DoubleTensor
+#define THFloatTensor_BERNOULLI_TENSOR THFloatTensor_bernoulli_FloatTensor
+
+[[
+  name: bernoulli
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return: argument 0
+  with_stateless: True
+  before_call:
+    THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg2)->cdata);
+  cname: BERNOULLI_TENSOR
+  arguments:
+    - arg: THTensor* output
+      allocate: True
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - THTensor* self
+]]
+
+#undef THDoubleTensor_BERNOULLI_TENSOR
+#undef THFloatTensor_BERNOULLI_TENSOR
+
 [[
   name: bernoulli_
   defined_if: "!IS_CUDA"
@@ -317,6 +459,26 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - THTensor* self
     - double p
 ]]
+
+#define THCudaDoubleTensor_BERNOULLI_TENSOR THCudaDoubleTensor_bernoulli_DoubleTensor
+#define THCudaTensor_BERNOULLI_TENSOR THCudaTensor_bernoulli_FloatTensor
+
+[[
+  name: bernoulli
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE
+  return: argument 0
+  with_stateless: True
+  cname: BERNOULLI_TENSOR
+  before_call:
+    THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg1)->cdata);
+  arguments:
+    - arg: THTensor* output
+      allocate: True
+    - THTensor* self
+]]
+
+#undef THCudaDoubleTensor_BERNOULLI_TENSOR
+#undef THCudaTensor_BERNOULLI_TENSOR
 
 [[
   name: bernoulli_

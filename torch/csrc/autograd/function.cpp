@@ -19,6 +19,7 @@ class python_error : public std::exception {};
 
 
 PyObject *THPFunctionClass = NULL;
+PyObject *THPStochasticFunctionClass = NULL;
 
 // Traverse and clear are required for supporting Python's GC cycle handling.
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
@@ -392,7 +393,8 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
       _mark_dirty(self, t2var);
       _wrap_outputs(self, t2var, raw_output, outputs);
       _join_version_counters(self, t2var);
-      if (self->requires_grad) {
+      if (self->requires_grad ||
+          PyObject_IsInstance((PyObject*)self, THPStochasticFunctionClass)) {
         _save_variables(self, t2var);
         _mark_non_differentiable(self, t2var);
       }

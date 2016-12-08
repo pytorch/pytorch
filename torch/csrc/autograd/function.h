@@ -54,6 +54,7 @@ struct THPFunction {
 
 bool THPFunction_initModule(PyObject *module);
 extern PyObject *THPFunctionClass;
+extern PyObject *THPStochasticFunctionClass;
 
 #define THPFunction_Check(obj) PyObject_IsInstance(obj, THPFunctionClass)
 
