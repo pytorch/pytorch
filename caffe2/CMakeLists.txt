@@ -6,7 +6,6 @@ set(Caffe2_DIR_EXCLUDES
         "/mpi"           # Exclude for now
         "/experiments"   # Exclude for now
         "/python"        # handled below
-        "/cuda_rtc"      # TODO: Handle this somehow
 )
 set(Caffe2_FILE_EXCLUDES
         "/operators/fully_connected_op_sparse.cc"
@@ -115,7 +114,7 @@ add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
 target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS})
 list(APPEND Caffe2_LINK_LIBS Caffe2_CPU)
 
-# CUDA library
+# ---[ CUDA library
 if(HAVE_CUDA)
   CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
   target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} glog gflags atlas cblas)
