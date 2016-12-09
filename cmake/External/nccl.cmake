@@ -6,12 +6,8 @@ if (NOT __NCCL_INCLUDED)
   if (NCCL_FOUND)
       set(NCCL_EXTERNAL FALSE)
   else()
-    # fetch and build glog from github
-
     # build directory
     set(nccl_PREFIX ${CMAKE_SOURCE_DIR}/third_party/nccl)
-    # install directory
-    set(nccl_INSTALL ${CMAKE_BINARY_DIR}/external/nccl-install)
 
     # we build glog statically, but want to link it into the caffe shared library
     # this requires position-independent code
@@ -31,9 +27,9 @@ if (NOT __NCCL_INCLUDED)
       )
 
     set(NCCL_FOUND TRUE)
-    set(NCCL_INCLUDE_DIRS ${nccl_INSTALL}/include)
-    set(NCCL_LIBRARIES ${nccl_INSTALL}/lib/libnccl.a)
-    set(NCCL_LIBRARY_DIRS ${nccl_INSTALL}/lib)
+    set(NCCL_INCLUDE_DIRS ${nccl_PREFIX}/build/include)
+    set(NCCL_LIBRARIES ${nccl_PREFIX}/build/lib/libnccl.so)
+    set(NCCL_LIBRARY_DIRS ${nccl_PREFIX}/build/lib)
     set(NCCL_EXTERNAL TRUE)
 
     list(APPEND external_project_dependencies nccl_external)
