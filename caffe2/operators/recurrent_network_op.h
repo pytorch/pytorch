@@ -334,10 +334,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       Output(1)->Resize(1);
       Output(1)->template mutable_data<float>();
     }
-    if (OutputSize() >= 5) {
-      Output(4)->Resize(1, 1, recurrentSizes_[0]);
-      Output(4)->template mutable_data<float>();
-    }
     if (OutputSize() >= 6) {
       Output(5)->Resize(1);
       Output(5)->template mutable_data<float>();
@@ -455,6 +451,10 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   bool RunOnDevice() {
     const auto seqLen = Input(0).dim32(0);
     const auto batchSize = Input(0).dim32(1);
+    if (OutputSize() >= 5) {
+      Output(4)->Resize(1, batchSize, recurrentSizes_[0]);
+      Output(4)->template mutable_data<float>();
+    }
     for (auto& param : params_) {
       auto pBlob = ws_.GetBlob(param.param);
       CAFFE_ENFORCE(pBlob);
