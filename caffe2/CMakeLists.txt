@@ -113,9 +113,6 @@ target_link_libraries(Caffe2_CPU Caffe2_PROTO)
 
 # CUDA library
 # TODO(slayton): Move this somewhere sane
-find_package(CUDA)
-LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
-LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
 CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
 target_link_libraries(Caffe2_GPU Caffe2_CPU Caffe2_PROTO glog gflags atlas cblas)
 
