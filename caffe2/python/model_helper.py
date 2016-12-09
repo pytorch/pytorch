@@ -279,6 +279,8 @@ class ModelHelperBase(object):
             "AveragedLoss",
             "Cast",
             "ConstantFill",
+            "CopyGPUToCPU",
+            "CopyCPUToGPU",
             "DequeueBlobs",
             "EnsureCPUOutput",
             "FlattenToVec",
