@@ -55,15 +55,9 @@ endif()
 
 # ---[ CUDA
 include(cmake/Cuda.cmake)
-if(NOT HAVE_CUDA)
-  if(CPU_ONLY)
-    message(STATUS "-- CUDA is disabled. Building without it...")
-  else()
-    message(WARNING "-- CUDA is not detected by cmake. Building without it...")
-  endif()
-
-  # TODO: remove this not cross platform define in future. Use caffe_config.h instead.
-  add_definitions(-DCPU_ONLY)
+if(HAVE_CUDA)
+  LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
+  LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
 endif()
 
 # ---[ NCCL
