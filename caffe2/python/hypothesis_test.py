@@ -164,7 +164,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X1, X2], [0])
         for i in range(2):
-            self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
+            self.assertGradientChecks(gc, op, [X1, X2], i, [0])
         self.assertReferenceChecks(gc, op, [X1, X2], ref)
 
     @given(inputs=hu.tensors(n=2), **hu.gcs)
