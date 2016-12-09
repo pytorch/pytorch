@@ -3,14 +3,28 @@ set(Caffe2_LINKER_LIBS "")
 
 # ---[ Custom Protobuf
 include(cmake/ProtoBuf.cmake)
+
 # ---[ Threads
 find_package(Threads REQUIRED)
 list(APPEND Caffe2_LINKER_LIBS ${CMAKE_THREAD_LIBS_INIT})
 
-# ---[ ATLAS
-find_package(Atlas REQUIRED)
-include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
-list(APPEND Caffe2_LINKER_LIBS ${ATLAS_LIBRARIES})
+# ---[ BLAS
+set(BLAS "Atlas" CACHE STRING "Selected BLAS library")
+set_property(CACHE BLAS PROPERTY STRINGS "Atlas;OpenBLAS;MKL")
+
+if(BLAS STREQUAL "Atlas")
+  find_package(Atlas REQUIRED)
+  include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
+  list(APPEND Caffe2_LINKER_LIBS ${ATLAS_LIBRARIES})
+elseif(BLAS STREQUAL "OpenBLAS")
+  find_package(OpenBLAS REQUIRED)
+  include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
+  list(APPEND Caffe2_LINKER_LIBS ${OpenBLAS_LIB})
+elseif(BLAS STREQUAL "MKL")
+  find_package(MKL REQUIRED)
+  include_directories(SYSTEM ${MKL_INCLUDE_DIR})
+  list(APPEND Caffe2_LINKER_LIBS ${MKL_LIBRARIES})
+endif()
 
 # ---[ Google-glog
 include("cmake/External/glog.cmake")
@@ -53,18 +67,6 @@ if(USE_LEVELDB)
   list(APPEND Caffe2_LINKER_LIBS ${Snappy_LIBRARIES})
 endif()
 
-# ---[ CUDA
-include(cmake/Cuda.cmake)
-if(HAVE_CUDA)
-  LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
-  LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
-endif()
-
-# ---[ NCCL
-include("cmake/External/nccl.cmake")
-include_directories(SYSTEM ${NCCL_INCLUDE_DIRS})
-list(APPEND Caffe2_LINKER_LIBS ${NCCL_LIBRARIES})
-
 # ---[ OpenCV
 if(USE_OPENCV)
   find_package(OpenCV QUIET COMPONENTS core highgui imgproc imgcodecs)
@@ -77,9 +79,6 @@ endif()
 # ---[ EIGEN
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/eigen)
 
-# ---[ pybind11
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/pybind11/include)
-
 # ---[ Python + Numpy
 find_package(PythonInterp 2.7)
 find_package(PythonLibs 2.7)
@@ -87,6 +86,9 @@ find_package(NumPy REQUIRED)
 
 include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIRS})
 list(APPEND Caffe2_LINKER_LIBS ${PYTHON_LIBRARIES})
+
+# ---[ pybind11
+include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/pybind11/include)
 
 # ---[ MPI
 if(USE_MPI)
@@ -105,10 +107,37 @@ if(OpenMP_FOUND)
   list(APPEND Caffe2_LINKER_LIBS ${OpenMP_CXX_FLAGS})
 endif()
 
+# ---[ CUDA
+include(cmake/Cuda.cmake)
+if(HAVE_CUDA)
+  LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
+  LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
+endif()
+
+# ---[ CUDNN
+if(HAVE_CUDA)
+  find_package(CuDNN REQUIRED)
+  if(CUDNN_FOUND)
+    include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
+    list(APPEND Caffe2_LINKER_LIBS ${CUDNN_LIBRARIES})
+  endif()
+endif()
+
+# ---[ NCCL
+if(HAVE_CUDA)
+  include("cmake/External/nccl.cmake")
+  include_directories(SYSTEM ${NCCL_INCLUDE_DIRS})
+  list(APPEND Caffe2_LINKER_LIBS ${NCCL_LIBRARIES})
+endif()
+
 # ---[ CUB
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cub)
+if(HAVE_CUDA)
+  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cub)
+endif()
 
 # ---[ CNMEM
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/cnmem)
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cnmem/include)
-list(APPEND ${Caffe2_LINKER_LIBS} ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so)
+if(HAVE_CUDA)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/cnmem)
+  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cnmem/include)
+  list(APPEND ${Caffe2_LINKER_LIBS} ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so)
+endif()

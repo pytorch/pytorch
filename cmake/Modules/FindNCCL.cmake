@@ -1,7 +1,7 @@
 # - Try to find NCCL
 #
 # The following variables are optionally searched for defaults
-#  NCCL_ROOT_DIR:            Base directory where all GLOG components are found
+#  NCCL_ROOT_DIR:            Base directory where all NCCL components are found
 #
 # The following are set after configuration is done:
 #  NCCL_FOUND
