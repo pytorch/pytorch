@@ -9,6 +9,8 @@
 
 #include "THP.h"
 
+#include "TensorDocstrings.h"
+
 #include "generic/Tensor.cpp"
 #include <TH/THGenerateAllTypes.h>
 

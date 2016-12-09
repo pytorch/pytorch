@@ -1,7 +1,7 @@
 from string import Template
 from copy import deepcopy
 from . import CWrapPlugin
-from itertools import product
+from itertools import product, chain
 from collections import OrderedDict
 
 class THPPlugin(CWrapPlugin):
@@ -144,6 +144,7 @@ ${cpu}
     def __init__(self):
         self.declarations = []
         self.stateless_declarations = []
+        self.docstrings = []
 
     def get_type_unpack(self, arg, option):
         return self.TYPE_UNPACK.get(arg['type'], None)
@@ -197,6 +198,20 @@ ${cpu}
         if 'allocate' in arg and arg['allocate']:
             return arg['name']
 
+    def process_docstrings(self):
+        for declaration in self.declarations:
+            docstr = declaration.get('docstring_method')
+            if docstr is None:
+                continue
+            declaration['docstring_content'] = docstr.replace('\n', '\\n')
+            declaration['docstring_var'] = 'docstr_' + declaration['python_name']
+        for declaration in self.stateless_declarations:
+            docstr = declaration.get('docstring_stateless')
+            if docstr is None:
+                continue
+            declaration['docstring_content'] = docstr.replace('\n', '\\n')
+            declaration['docstring_var'] = 'stateless_docstr_' + declaration['python_name']
+
     def process_declarations(self, declarations):
         new_declarations = []
         register_only = [d for d in declarations if d.get('only_register', False)]
@@ -248,6 +263,8 @@ ${cpu}
         self.declarations.extend(filter(lambda x: not x.get('only_stateless', False), register_only))
         self.stateless_declarations.extend(filter(lambda x: x.get('only_stateless', False), register_only))
 
+        self.process_docstrings()
+
         all_declarations = declarations + new_declarations
         return all_declarations
 
@@ -296,8 +313,9 @@ ${cpu}
                 flags += ' | METH_KEYWORDS'
             if declaration.get('override_method_flags'):
                 flags = declaration['override_method_flags']
-            entry = Template('  {"$python_name", (PyCFunction)$name, $flags, NULL},\n').substitute(
-                    python_name=declaration['python_name'], name=declaration['name'], flags=flags
+            entry = Template('  {"$python_name", (PyCFunction)$name, $flags, $docstring},\n').substitute(
+                    python_name=declaration['python_name'], name=declaration['name'], flags=flags,
+                    docstring=declaration.get('docstring_var', 'NULL')
                 )
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])
@@ -332,3 +350,17 @@ ${cpu}
                 new_args.append(self.ALLOCATE_TYPE[arg['type']].substitute(name=arg['name']))
         template = new_args + template
         return template
+
+    def generate_docstrings_cpp(self):
+        template = Template('char* $name = "$content";')
+        return '\n\n'.join(
+                template.substitute(name=decl['docstring_var'], content=decl['docstring_content'])
+                for decl in chain(self.declarations, self.stateless_declarations)
+                if 'docstring_var' in decl)
+
+    def generate_docstrings_h(self):
+        template = Template('extern char* $name;')
+        return '\n\n'.join(
+                template.substitute(name=decl['docstring_var'])
+                for decl in chain(self.declarations, self.stateless_declarations)
+                if 'docstring_var' in decl)
