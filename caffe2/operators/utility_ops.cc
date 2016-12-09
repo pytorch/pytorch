@@ -290,6 +290,24 @@ OPERATOR_SCHEMA(Copy)
     .Input(0, "input", "The input tensor.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
 
+OPERATOR_SCHEMA(CopyGPUToCPU)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Copy tensor for GPU to CPU context. Must be run under GPU device option.
+)DOC")
+    .Input(0, "input", "The input tensor.")
+    .Output(0, "output", "Tensor that will contain a copy of the input.");
+
+OPERATOR_SCHEMA(CopyCPUToGPU)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Copy tensor for CPU to GPU context. Must be run under GPU device option.
+)DOC")
+    .Input(0, "input", "The input tensor.")
+    .Output(0, "output", "Tensor that will contain a copy of the input.");
+
 OPERATOR_SCHEMA(EnsureCPUOutput)
     .NumInputs(1)
     .NumOutputs(1)
@@ -674,6 +692,24 @@ struct GetFlattenToVecGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(FlattenToVec, GetFlattenToVecGradient);
+
+struct GetGPUToCPUGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "CopyCPUToGPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(CopyGPUToCPU, GetGPUToCPUGradient);
+
+struct GetCPUToGPUGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "CopyGPUToCPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(CopyCPUToGPU, GetCPUToGPUGradient);
 
 SHOULD_NOT_DO_GRADIENT(Unique);
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
