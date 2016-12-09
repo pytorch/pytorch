@@ -15,6 +15,10 @@
 #include "vector/SSE.c"
 #endif
 
+#if defined(USE_AVX)
+#include "vector/AVX.c"
+#endif
+
 #include "generic/THVectorDefault.c"
 #include "THGenerateAllTypes.h"
 
