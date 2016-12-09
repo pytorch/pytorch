@@ -1,4 +1,4 @@
-# Excludes
+# ---[ Excludes
 set(Caffe2_DIR_EXCLUDES
         "/binaries"      # handled below
         "/contrib"       # To be handled
@@ -63,6 +63,9 @@ prepend(Caffe2_FILE_EXCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_FILE_EXCLUDES}
 prepend(Caffe2_CPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_CPU_TEST_SRCS})
 prepend(Caffe2_GPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_GPU_TEST_SRCS})
 
+# ---[ List of libraries to link with
+set(Caffe2_LINK_LIBS Caffe_PROTO)
+
 # Get all source directories.
 # TODO(bwasti): GLOB is not considered best practice.
 file(GLOB Caffe2_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/*)
@@ -101,26 +104,29 @@ exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_CPU_TEST_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
 
-# exclude GPU files
 # Compile protobufs.
 add_subdirectory(proto)
 include_directories(BEFORE ${CMAKE_BINARY_DIR})
+list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
 
 # Compile exposed libraries.
 LIST(APPEND CMAKE_CXX_FLAGS "-std=c++11 -fPIC")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
-target_link_libraries(Caffe2_CPU Caffe2_PROTO)
+target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS})
+list(APPEND Caffe2_LINK_LIBS Caffe2_CPU)
 
 # CUDA library
-# TODO(slayton): Move this somewhere sane
-CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
-target_link_libraries(Caffe2_GPU Caffe2_CPU Caffe2_PROTO glog gflags atlas cblas)
+if(HAVE_CUDA)
+  CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
+  target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} glog gflags atlas cblas)
+  list(APPEND Caffe2_LINK_LIBS Caffe2_GPU)
+endif()
 
 # Compile test binaries.
 foreach(test_src ${Caffe2_CPU_TEST_SRCS})
   get_filename_component(test_name ${test_src} NAME_WE)
-  add_executable(${test_name} "${CMAKE_CURRENT_SOURCE_DIR}/"${test_src})
-  target_link_libraries(${test_name} Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO glog atlas cblas gtest gtest_main ${Caffe2_LINKER_LIBS})
+  add_executable(${test_name} "${test_src}")
+  target_link_libraries(${test_name} ${Caffe2_LINK_LIBS} glog atlas cblas gtest gtest_main ${Caffe2_LINKER_LIBS})
   target_compile_features(${test_name} PRIVATE cxx_range_for)
 endforeach()
 
@@ -154,8 +160,8 @@ endif()
 
 foreach(binary_src ${Caffe2_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
-  add_executable(${bin_name} "${CMAKE_CURRENT_SOURCE_DIR}/"${binary_src})
-  target_link_libraries(${bin_name} -Wl,--whole-archive Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO glog atlas cblas cnmem ${Caffe2_LINKER_LIBS} -Wl,--no-whole-archive)
+  add_executable(${bin_name} ${binary_src})
+  target_link_libraries(${bin_name} -Wl,--whole-archive ${Caffe2_LINK_LIBS} glog atlas cblas cnmem ${Caffe2_LINKER_LIBS} -Wl,--no-whole-archive)
 endforeach()
 
 
