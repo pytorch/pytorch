@@ -89,6 +89,75 @@ THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
   return storage;
 }
 
+THDStorage* THDStorage_(newWithSize1)(real value) {
+  Type type = type_traits<real>::type;
+  THDStorage *storage = THDStorage_(_alloc)();
+  storage->size = 1;
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::storageConstructWithSize1,
+      type,
+      storage,
+      value
+    ),
+    THDState::s_current_worker
+  );
+  return storage;
+}
+
+THDStorage* THDStorage_(newWithSize2)(real value1, real value2) {
+  Type type = type_traits<real>::type;
+  THDStorage *storage = THDStorage_(_alloc)();
+  storage->size = 2;
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::storageConstructWithSize1,
+      type,
+      storage,
+      value1,
+      value2
+    ),
+    THDState::s_current_worker
+  );
+  return storage;
+}
+
+THDStorage* THDStorage_(newWithSize3)(real value1, real value2, real value3) {
+  Type type = type_traits<real>::type;
+  THDStorage *storage = THDStorage_(_alloc)();
+  storage->size = 3;
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::storageConstructWithSize1,
+      type,
+      storage,
+      value1,
+      value2,
+      value3
+    ),
+    THDState::s_current_worker
+  );
+  return storage;
+}
+
+THDStorage* THDStorage_(newWithSize4)(real value1, real value2, real value3, real value4) {
+  Type type = type_traits<real>::type;
+  THDStorage *storage = THDStorage_(_alloc)();
+  storage->size = 4;
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::storageConstructWithSize1,
+      type,
+      storage,
+      value1,
+      value2,
+      value3,
+      value4
+    ),
+    THDState::s_current_worker
+  );
+  return storage;
+}
 void THDStorage_(set)(THDStorage* storage, ptrdiff_t offset, real value) {
   masterCommandChannel->sendMessage(
     packMessage(

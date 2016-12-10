@@ -77,6 +77,11 @@ Type unpackType(RPCMessage& raw_message) {
   return static_cast<Type>(_type);
 }
 
+Type peekType(RPCMessage& raw_message) {
+  char _type = *raw_message.data();
+  return static_cast<Type>(_type);
+}
+
 function_id_type unpackFunctionId(RPCMessage& raw_message) {
   return unpackScalar<function_id_type>(raw_message);
 }

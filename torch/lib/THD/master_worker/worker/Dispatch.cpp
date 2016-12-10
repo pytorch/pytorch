@@ -44,33 +44,8 @@ static std::unique_ptr<Tensor> createTensor(Type type) {
     return std::unique_ptr<Tensor>(new THTensor<float>());
   else if (type == Type::DOUBLE)
     return std::unique_ptr<Tensor>(new THTensor<double>());
-  throw std::invalid_argument("passed characted doesn't represent a tensor type");
+  throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
-
-static std::unique_ptr<Storage> createStorage(Type type) {
-  if (type == Type::UCHAR)
-    return std::unique_ptr<Storage>(new THStorage<unsigned char>());
-  else if (type == Type::CHAR)
-    return std::unique_ptr<Storage>(new THStorage<char>());
-  else if (type == Type::SHORT)
-    return std::unique_ptr<Storage>(new THStorage<short>());
-  else if (type == Type::INT)
-    return std::unique_ptr<Storage>(new THStorage<int>());
-  else if (type == Type::LONG)
-    return std::unique_ptr<Storage>(new THStorage<long>());
-  else if (type == Type::FLOAT)
-    return std::unique_ptr<Storage>(new THStorage<float>());
-  else if (type == Type::DOUBLE)
-    return std::unique_ptr<Storage>(new THStorage<double>());
-  throw std::invalid_argument("passed characted doesn't represent a storage type");
-}
-
-static std::unique_ptr<Storage> createStorage(Type type, std::size_t size) {
-  std::unique_ptr<Storage> storage = createStorage(type);
-  storage->resize(size);
-  return storage;
-}
-
 
 static void finalize(rpc::RPCMessage& raw_message) {
   if (raw_message.remaining() > 0)
@@ -92,6 +67,10 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::free, free},
     {Functions::storageConstruct, storageConstruct},
     {Functions::storageConstructWithSize, storageConstructWithSize},
+    {Functions::storageConstructWithSize1, storageConstructWithSize1},
+    {Functions::storageConstructWithSize2, storageConstructWithSize2},
+    {Functions::storageConstructWithSize3, storageConstructWithSize3},
+    {Functions::storageConstructWithSize4, storageConstructWithSize4},
     {Functions::storageFree, storageFree},
     {Functions::sendTensor, sendTensor},
     {Functions::sendStorage, sendStorage}
