@@ -74,6 +74,22 @@ static void THDoubleVector_mul_AVX(double *y, const double *x, const double c, c
   }
 }
 
+static void THDoubleVector_cadd_AVX(double *z, const double *x, const double *y, const double c, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m256d YMM15 = _mm256_set_pd(c, c, c, c);
+  __m256d YMM0, YMM1, YMM2, YMM3, YMM4, YMM5;
+  for (i=0; i<=((n)-4); i+=4) {
+    YMM0 = _mm256_loadu_pd(y+i);
+    YMM1 = _mm256_loadu_pd(x+i);
+    YMM2 = _mm256_mul_pd(YMM0, YMM15);
+    YMM3 = _mm256_add_pd(YMM1, YMM2);
+    _mm256_storeu_pd(z+i, YMM3);
+  }
+  for (; i<(n); i++) {
+    z[i] = x[i] + y[i] * c;
+  }
+}
+
 static void THDoubleVector_add_AVX(double *y, const double *x, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256d YMM15 = _mm256_set_pd(c, c, c, c);
@@ -159,6 +175,22 @@ static void THFloatVector_mul_AVX(float *y, const float *x, const float c, const
   }
   for (; i<n; i++) {
     y[i] = x[i] * c;
+  }
+}
+
+static void THFloatVector_cadd_AVX(float *z, const float *x, const float *y, const float c, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m256 YMM15 = _mm256_set_ps(c, c, c, c, c, c, c, c);
+  __m256 YMM0, YMM1, YMM2, YMM3;
+  for (i=0; i<=((n)-8); i+=8) {
+    YMM0 = _mm256_loadu_ps(y+i);
+    YMM1 = _mm256_loadu_ps(x+i);
+    YMM2 = _mm256_mul_ps(YMM0, YMM15);
+    YMM3 = _mm256_add_ps(YMM1, YMM2);
+    _mm256_storeu_ps(z+i, YMM3);
+  }
+  for (; i<(n); i++) {
+    z[i] = x[i] + y[i] * c;
   }
 }
 
