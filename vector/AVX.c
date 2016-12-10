@@ -4,6 +4,22 @@
 #include <intrin.h>
 #endif
 
+static void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n) {
+  ptrdiff_t i;
+  ptrdiff_t off;
+  __m256d YMM0 = _mm256_set_pd(c, c, c, c);
+  for (i=0; i<=((n)-16); i+=16) {
+    _mm256_storeu_pd((x)+i  , YMM0);
+    _mm256_storeu_pd((x)+i+4, YMM0);
+    _mm256_storeu_pd((x)+i+8, YMM0);
+    _mm256_storeu_pd((x)+i+12, YMM0);
+  }
+  off = (n) - ((n)%16);
+  for (i=0; i<((n)%16); i++) {
+    x[off+i] = c;
+  }
+}
+
 static void THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256d YMM0, YMM1, YMM2, YMM3;
@@ -107,6 +123,21 @@ static void THDoubleVector_add_AVX(double *y, const double *x, const double c, c
   }
 }
 
+static void THFloatVector_fill_AVX(float *x, const float c, const ptrdiff_t n) {
+  ptrdiff_t i;
+  ptrdiff_t off;
+  __m256 YMM0 = _mm256_set_ps(c, c, c, c, c, c, c, c);
+  for (i=0; i<=((n)-32); i+=32) {
+    _mm256_storeu_ps((x)+i  , YMM0);
+    _mm256_storeu_ps((x)+i+8, YMM0);
+    _mm256_storeu_ps((x)+i+16, YMM0);
+    _mm256_storeu_ps((x)+i+24, YMM0);
+  }
+  off = (n) - ((n)%32);
+  for (i=0; i<((n)%32); i++) {
+    x[off+i] = c;
+  }
+}
 
 static void THFloatVector_cdiv_AVX(float *z, const float *x, const float *y, const ptrdiff_t n) {
   ptrdiff_t i;
