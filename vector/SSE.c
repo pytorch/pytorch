@@ -100,6 +100,41 @@ static void THDoubleVector_mul_SSE(double *y, const double *x, const double c, c
   }
 }
 
+static void THDoubleVector_cdiv_SSE(double *z, const double *x, const double *y, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m128d XMM0, XMM1, XMM2, XMM3;
+  for (i=0; i<=((n)-4); i+=4) {
+    XMM0 = _mm_loadu_pd(x+i);
+    XMM1 = _mm_loadu_pd(x+i+2);
+    XMM2 = _mm_loadu_pd(y+i);
+    XMM3 = _mm_loadu_pd(y+i+2);
+    XMM2 = _mm_div_pd(XMM0, XMM2);
+    XMM3 = _mm_div_pd(XMM1, XMM3);
+    _mm_storeu_pd(z+i, XMM2);
+    _mm_storeu_pd(z+i+2, XMM3);
+  }
+  for (; i<(n); i++) {
+    z[i] = x[i] / y[i];
+  }
+}
+
+static void THDoubleVector_div_SSE(double *y, const double *x, const double c, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m128d XMM7 = _mm_set1_pd(c);
+  __m128d XMM0, XMM1;
+  for (i=0; i<=((n)-4); i+=4) {
+    XMM0 = _mm_loadu_pd(x+i);
+    XMM1 = _mm_loadu_pd(x+i+2);
+    XMM0 = _mm_div_pd(XMM0, XMM7);
+    XMM1 = _mm_div_pd(XMM1, XMM7);
+    _mm_storeu_pd(y+i, XMM0);
+    _mm_storeu_pd(y+i+2, XMM1);
+  }
+  for (; i<(n); i++) {
+    y[i] = x[i] / c;
+  }
+}
+
 static void THFloatVector_fill_SSE(float *x, const float c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m128 XMM0 = _mm_set_ps1(c);
@@ -197,3 +232,37 @@ static void THFloatVector_mul_SSE(float *y, const float *x, const float c, const
   }
 }
 
+static void THFloatVector_cdiv_SSE(float *z, const float *x, const float *y, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m128 XMM0, XMM1, XMM2, XMM3;
+  for (i=0; i<=((n)-8); i+=8) {
+    XMM0 = _mm_loadu_ps(x+i);
+    XMM1 = _mm_loadu_ps(x+i+4);
+    XMM2 = _mm_loadu_ps(y+i);
+    XMM3 = _mm_loadu_ps(y+i+4);
+    XMM2 = _mm_div_ps(XMM0, XMM2);
+    XMM3 = _mm_div_ps(XMM1, XMM3);
+    _mm_storeu_ps(z+i, XMM2);
+    _mm_storeu_ps(z+i+4, XMM3);
+  }
+  for (; i<(n); i++) {
+    z[i] = x[i] / y[i];
+  }
+}
+
+static void THFloatVector_div_SSE(float *y, const float *x, const float c, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m128 XMM7 = _mm_set1_ps(c);
+  __m128 XMM0, XMM1;
+  for (i=0; i<=((n)-8); i+=8) {
+    XMM0 = _mm_loadu_ps(x+i);
+    XMM1 = _mm_loadu_ps(x+i+4);
+    XMM0 = _mm_div_ps(XMM0, XMM7);
+    XMM1 = _mm_div_ps(XMM1, XMM7);
+    _mm_storeu_ps(y+i, XMM0);
+    _mm_storeu_ps(y+i+4, XMM1);
+  }
+  for (; i<(n); i++) {
+    y[i] = x[i] / c;
+  }
+}
