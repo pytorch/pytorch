@@ -33,6 +33,8 @@ template<typename real>
 struct StorageScalarInterface : public Storage {
   using scalar_type = real;
   virtual StorageScalarInterface& fill(scalar_type value) = 0;
+  virtual StorageScalarInterface& set(std::size_t ind, scalar_type value) = 0;
+  virtual StorageScalarInterface& fast_set(std::size_t ind, scalar_type value) = 0;
 };
 
 using FloatStorage = StorageScalarInterface<double>;

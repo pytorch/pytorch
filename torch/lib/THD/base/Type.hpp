@@ -26,4 +26,20 @@ enum class Type : char {
   STORAGE = 'S',
 };
 
+inline bool isFloat(Type t) {
+  return (t == Type::FLOAT || t == Type::DOUBLE);
+}
+
+inline bool isObject(Type t) {
+  return (t == Type::TENSOR || t == Type::STORAGE);
+}
+
+inline bool isInteger(Type t) {
+  return (t == Type::CHAR || t == Type::UCHAR ||
+          t == Type::SHORT || t == Type:: USHORT ||
+          t == Type::INT || t == Type::UINT ||
+          t == Type::LONG || t == Type::ULONG ||
+          t == Type::LONG_LONG || t == Type::ULONG_LONG);
+}
+
 } // namespace thd

@@ -45,6 +45,7 @@ std::unique_ptr<RPCMessage> packMessage(
                         );
 
 Type unpackType(RPCMessage& raw_message);
+Type peekType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 std::uint16_t unpackFunctionId(RPCMessage& raw_message);
 long long unpackInteger(RPCMessage& raw_message);

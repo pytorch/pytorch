@@ -40,6 +40,9 @@ public:
 
   virtual THStorage& resize(long new_size) override;
   virtual THStorage& fill(scalar_type value) override;
+  virtual THStorage& set(std::size_t ind, scalar_type value);
+  // Doesn't do bound checking
+  virtual THStorage& fast_set(std::size_t ind, scalar_type value);
 
   virtual thd::Type type() const override;
 

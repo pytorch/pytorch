@@ -29,6 +29,10 @@ enum Functions: std::uint16_t {
   // storage functions
   storageConstruct,
   storageConstructWithSize,
+  storageConstructWithSize1,
+  storageConstructWithSize2,
+  storageConstructWithSize3,
+  storageConstructWithSize4,
   storageFree,
   storageResize,
   storageSet,

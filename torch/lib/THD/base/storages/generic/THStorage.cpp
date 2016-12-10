@@ -62,6 +62,18 @@ auto THStorage<real>::fill(scalar_type value) -> THStorage& {
 }
 
 template<>
+auto THStorage<real>::set(std::size_t ind, scalar_type value) -> THStorage& {
+  THStorage_(set)(storage, ind, value);
+  return *this;
+}
+
+template<>
+auto THStorage<real>::fast_set(std::size_t ind, scalar_type value) -> THStorage& {
+  storage->data[ind] = value;
+  return *this;
+}
+
+template<>
 thd::Type THStorage<real>::type() const {
   return thd::type_traits<real>::type;
 }
