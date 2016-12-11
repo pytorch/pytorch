@@ -46,9 +46,9 @@ static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(__PPC64__)
+  #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(add_VSX), SIMDExtension_VSX),
+      FUNCTION_IMPL(THVector_(cadd_AVX), SIMDExtension_AVX),
     #endif
   #endif
 
@@ -159,13 +159,13 @@ void THVector_(div)(real *y, const real *x, const real c, const ptrdiff_t n) {
 void THVector_(vectorDispatchInit)(void)
 {
   uint32_t hostSimdExts = detectHostSIMDExtensions();
-  INIT_VECTOR_DISPATCH_PTR(fill);
-  INIT_VECTOR_DISPATCH_PTR(cadd);
-  INIT_VECTOR_DISPATCH_PTR(add);
-  INIT_VECTOR_DISPATCH_PTR(cmul);
-  INIT_VECTOR_DISPATCH_PTR(mul);
-  INIT_VECTOR_DISPATCH_PTR(cdiv);
-  INIT_VECTOR_DISPATCH_PTR(div);
+  INIT_DISPATCH_PTR(fill);
+  INIT_DISPATCH_PTR(cadd);
+  INIT_DISPATCH_PTR(add);
+  INIT_DISPATCH_PTR(cmul);
+  INIT_DISPATCH_PTR(mul);
+  INIT_DISPATCH_PTR(cdiv);
+  INIT_DISPATCH_PTR(div);
 }
 
 #endif
