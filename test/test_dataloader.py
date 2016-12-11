@@ -5,6 +5,7 @@ import traceback
 import unittest
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from common import TestCase
+from common_nn import TEST_CUDA
 
 
 class TestTensorDataset(TestCase):
@@ -92,6 +93,7 @@ class TestDataLoader(TestCase):
     def test_sequential_batch(self):
         self._test_sequential(DataLoader(self.dataset, batch_size=2))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
@@ -116,6 +118,7 @@ class TestDataLoader(TestCase):
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for input, target in loader:
@@ -128,6 +131,7 @@ class TestDataLoader(TestCase):
     def test_error_workers(self):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_partial_workers(self):
         "check that workers exit even if the iterator is not exhausted"
         loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=True))
