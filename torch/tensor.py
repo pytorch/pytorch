@@ -73,13 +73,6 @@ class _TensorBase(object):
             storage = (self.storage_type())()
         return type(self)().set_(storage.pin_memory()).view_as(self)
 
-    def copy_(self, source, async=False):
-        if async:
-            torch._C._tensorCopyAsync(self, source)
-        else:
-            torch._C._tensorCopy(self, source)
-        return self
-
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:

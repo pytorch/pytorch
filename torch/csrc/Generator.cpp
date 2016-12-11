@@ -20,7 +20,6 @@ PyObject * THPGenerator_New()
   return result;
 }
 
-
 static void THPGenerator_dealloc(THPGenerator* self)
 {
   THGenerator_free(self->cdata);

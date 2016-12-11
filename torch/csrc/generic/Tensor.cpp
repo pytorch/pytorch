@@ -538,6 +538,54 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
 #undef INDEX_SCALAR
 #undef GET_OFFSET
 
+extern THPCopyList THTensor_(copy_functions);
+THPCopyList THTensor_(copy_functions);
+
+void THPTensor_(initCopyMethods)()
+{
+  auto& h = THTensor_(copy_functions);
+  // copy from CPU types
+  THPInsertCopyFunction(h, &THTensor_(copyByte));
+  THPInsertCopyFunction(h, &THTensor_(copyChar));
+  THPInsertCopyFunction(h, &THTensor_(copyShort));
+  THPInsertCopyFunction(h, &THTensor_(copyInt));
+  THPInsertCopyFunction(h, &THTensor_(copyLong));
+  THPInsertCopyFunction(h, &THTensor_(copyFloat));
+  THPInsertCopyFunction(h, &THTensor_(copyDouble));
+#ifdef THC_GENERIC_FILE
+  // copy from GPU types
+  THPInsertCopyFunction(h, &THTensor_(copyCudaByte));
+  THPInsertCopyFunction(h, &THTensor_(copyCudaChar));
+  THPInsertCopyFunction(h, &THTensor_(copyCudaShort));
+  THPInsertCopyFunction(h, &THTensor_(copyCudaInt));
+  THPInsertCopyFunction(h, &THTensor_(copyCudaLong));
+  THPInsertCopyFunction(h, &THTensor_(copyCudaFloat));
+  THPInsertCopyFunction(h, &THTensor_(copyCudaDouble));
+#ifdef CUDA_HALF_TENSOR
+  THPInsertCopyFunction(h, &THTensor_(copyCudaHalf));
+#endif
+#ifndef THC_REAL_IS_HALF
+  THPInsertCopyFunction(h, &THCTensor_(copyAsyncCPU), true);
+  // add CPU <- GPU copies to base type
+  #define THCpuTensor_(name) TH_CONCAT_4(TH, Real, Tensor_, name)
+  extern THPCopyList THCpuTensor_(copy_functions);
+  auto& b = THCpuTensor_(copy_functions);
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaByte));
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaChar));
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaShort));
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaInt));
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaLong));
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaFloat));
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaDouble));
+#ifdef CUDA_HALF_TENSOR
+  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaHalf));
+#endif
+  THPInsertCopyFunction(b, &THCpuTensor_(copyAsyncCuda), true);
+  #undef THCpuTensor_
+#endif
+#endif
+}
+
 template<bool force_tensor>
 static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 {
@@ -625,8 +673,9 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
       THPTensorPtr tmp = (THPTensor*)THPTensor_(New)(tresult.release());
       if (!tmp)
         return -1;
-      if (!THPModule_tensorCopy((PyObject*)tmp.get(), value))
+      if (!THPCopy(THTensor_(copy_functions), (PyObject*)tmp.get(), value, false)) {
         return -1;
+      }
     }
     return 0;
   }
@@ -756,7 +805,6 @@ bool THPTensor_(init)(PyObject *module)
 #ifndef THC_GENERIC_FILE
   THVector_(vectorDispatchInit)();
 #endif
-
   THPTensorType.tp_methods = THPTensor_(methods);
   THPTensorType.tp_members = THPTensor_(members);
   if (PyType_Ready(&THPTensorType) < 0)
@@ -766,6 +814,7 @@ bool THPTensor_(init)(PyObject *module)
     return false;
 
   PyModule_AddObject(module, THPTensorBaseStr, (PyObject *)&THPTensorType);
+  THPTensor_(initCopyMethods)();
   return true;
 }
 

@@ -16,6 +16,7 @@
 // By default, don't specify library state (TH doesn't use one)
 #define LIBRARY_STATE
 #define LIBRARY_STATE_NOARGS
+#define LIBRARY_STATE_TYPE
 
 #define THP_API extern "C"
 

@@ -16,6 +16,13 @@ static PyObject * THPStorage_(dataPtr)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPCopyMethod(THStorage_(copy_functions), self, args, kwargs);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPStorage_(isPinned)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
@@ -473,6 +480,7 @@ PyObject * THPStorage_(_rootStorage)(THPStorage *self)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
+  {"copy_", (PyCFunction)THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
   {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, NULL},
   {"free", (PyCFunction)THPStorage_(free), METH_NOARGS, NULL},

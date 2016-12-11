@@ -8,9 +8,7 @@
 #include <TH/THMath.h>
 
 #include "THP.h"
+#include "copy_utils.h"
 
 #include "generic/Tensor.cpp"
-#include <TH/THGenerateAllTypes.h>
-
-#include "generic/TensorCopy.cpp"
 #include <TH/THGenerateAllTypes.h>

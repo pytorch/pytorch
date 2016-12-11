@@ -4,6 +4,8 @@
 #include <Python.h>
 #include <cstddef>
 
+template <typename T> struct THPTypeInfo {};
+
 namespace torch {
 
 typedef struct THVoidStorage

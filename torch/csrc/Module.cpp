@@ -53,55 +53,6 @@ static bool THPModule_loadClasses(PyObject *self)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Copy handlers
-////////////////////////////////////////////////////////////////////////////////
-
-#include "ModuleCopy.h"
-
-std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> tensor_copy_handlers;
-std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> storage_copy_handlers;
-std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> tensor_async_copy_handlers;
-std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> storage_async_copy_handlers;
-
-#define COPY_METHODS(name) TH_CONCAT_2(name,_copy_handlers)
-#define IMPLEMENT_COPY_WITH_WRAPPER(name)                                      \
-bool TH_CONCAT_3(THPModule_,name,Copy)(PyObject *dst, PyObject *src)           \
-{                                                                              \
-  auto it = COPY_METHODS(name).find(std::make_pair((PyObject*)Py_TYPE(dst), (PyObject*)Py_TYPE(src))); \
-  if (it == COPY_METHODS(name).end()) {                                        \
-    THPUtils_setError("Copy function from %s to %s isn't implemented!", Py_TYPE(src)->tp_name, Py_TYPE(dst)->tp_name); \
-    return false;                                                              \
-  }                                                                            \
-  (it->second)(dst, src);                                                      \
-  return true;                                                                 \
-}                                                                              \
-                                                                               \
-static PyObject * TH_CONCAT_3(THPModule_,name,CopyWrapper)(PyObject *unused, PyObject *args)\
-{                                                                              \
-  HANDLE_TH_ERRORS                                                             \
-  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;                         \
-  THPUtils_assert(num_args == 2, #name "Copy expected exactly two arguments, " \
-          "but got %ld", (long)num_args);                                      \
-  PyObject *dst = PyTuple_GET_ITEM(args, 0);                                   \
-  PyObject *src = PyTuple_GET_ITEM(args, 1);                                   \
-  if (!TH_CONCAT_3(THPModule_,name,Copy)(dst, src)) {                          \
-    return NULL;                                                               \
-  }                                                                            \
-  Py_INCREF(dst);                                                              \
-  return dst;                                                                  \
-  END_HANDLE_TH_ERRORS                                                         \
-}
-
-IMPLEMENT_COPY_WITH_WRAPPER(tensor)
-IMPLEMENT_COPY_WITH_WRAPPER(storage)
-IMPLEMENT_COPY_WITH_WRAPPER(tensor_async)
-IMPLEMENT_COPY_WITH_WRAPPER(storage_async)
-#undef COPY_METHODS
-#undef IMPLEMENT_COPY_WITH_WRAPPER
-
-#include "ModuleCopy.cpp"
-
-////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
 static bool THPModule_assignStateless(PyObject *self)
@@ -139,7 +90,6 @@ static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_
   libshm_init(THPUtils_bytesAsString(shm_manager_path));
   if (!THPModule_loadClasses(self))         return NULL;
   if (!THPModule_assignStateless(self))     return NULL;
-  if (!THPModule_initCopy(self))            return NULL;
   return PyBool_FromLong(true);
 }
 
@@ -622,10 +572,6 @@ static PyMethodDef TorchMethods[] = {
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},
   {"_recvfd",         (PyCFunction)THPModule_recvfd,            METH_VARARGS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
-  {"_tensorCopy",     (PyCFunction)THPModule_tensorCopyWrapper, METH_VARARGS, NULL},
-  {"_storageCopy",    (PyCFunction)THPModule_storageCopyWrapper, METH_VARARGS, NULL},
-  {"_tensorCopyAsync", (PyCFunction)THPModule_tensor_asyncCopyWrapper, METH_VARARGS, NULL},
-  {"_storageCopyAsync", (PyCFunction)THPModule_storage_asyncCopyWrapper, METH_VARARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
@@ -890,8 +836,8 @@ PyMODINIT_FUNC PyInit__C()
 #endif
 
   THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
-  ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
+  ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
   updateErrorHandlers();
 

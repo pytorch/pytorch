@@ -5,9 +5,7 @@
 #include <TH/TH.h>
 #include <libshm.h>
 #include "THP.h"
+#include "copy_utils.h"
 
 #include "generic/Storage.cpp"
-#include <TH/THGenerateAllTypes.h>
-
-#include "generic/StorageCopy.cpp"
 #include <TH/THGenerateAllTypes.h>

@@ -5,4 +5,3 @@
 
 #include "generic/serialization.cpp"
 #include <TH/THGenerateAllTypes.h>
-
