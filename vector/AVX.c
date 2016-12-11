@@ -177,15 +177,15 @@ static void THFloatVector_div_AVX(float *y, const float *x, const float c, const
 static void THFloatVector_cmul_AVX(float *z, const float *x, const float *y, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256 YMM0, YMM1, YMM2, YMM3;
-  for (i=0; i<=((n)-8); i+=8) {
+  for (i=0; i<=((n)-16); i+=16) {
     YMM0 = _mm256_loadu_ps(x+i);
-    YMM1 = _mm256_loadu_ps(x+i+4);
+    YMM1 = _mm256_loadu_ps(x+i+8);
     YMM2 = _mm256_loadu_ps(y+i);
-    YMM3 = _mm256_loadu_ps(y+i+4);
+    YMM3 = _mm256_loadu_ps(y+i+8);
     YMM2 = _mm256_mul_ps(YMM0, YMM2);
     YMM3 = _mm256_mul_ps(YMM1, YMM3);
     _mm256_storeu_ps(z+i, YMM2);
-    _mm256_storeu_ps(z+i+4, YMM3);
+    _mm256_storeu_ps(z+i+8, YMM3);
   }
   for (; i<n; i++) {
     z[i] = x[i] * y[i];

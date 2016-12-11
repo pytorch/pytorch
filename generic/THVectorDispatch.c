@@ -67,9 +67,22 @@ void THVector_(cadd)(real *z, const real *x, const real *y, const real c, const 
 
 static void (*THVector_(add_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(add_DEFAULT);
 static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
+  #if defined(__NEON__)
+    #if defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(add_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(add_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
+          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(add_SSE), SIMDExtension_SSE),
     #endif
   #endif
 
@@ -94,6 +107,12 @@ static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(USE_AVX)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(cmul_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -109,9 +128,22 @@ void THVector_(cmul)(real *z, const real *x, const real *y, const ptrdiff_t n) {
 
 static void (*THVector_(mul_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(mul_DEFAULT);
 static FunctionDescription THVector_(mul_DISPATCHTABLE)[] = {
+  #if defined(__NEON__)
+    #if defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(mul_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(mul_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
+          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(mul_SSE), SIMDExtension_SSE),
     #endif
   #endif
 
@@ -123,9 +155,22 @@ void THVector_(mul)(real *y, const real *x, const real c, const ptrdiff_t n) {
 
 static void (*THVector_(cdiv_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(cdiv_DEFAULT);
 static FunctionDescription THVector_(cdiv_DISPATCHTABLE)[] = {
+  #if defined(__NEON__)
+    #if defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(cdiv_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cdiv_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
+          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(cdiv_SSE), SIMDExtension_SSE),
     #endif
   #endif
 
@@ -137,9 +182,22 @@ void THVector_(cdiv)(real *z, const real *x, const real *y, const ptrdiff_t n) {
 
 static void (*THVector_(div_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(div_DEFAULT);
 static FunctionDescription THVector_(div_DISPATCHTABLE)[] = {
+  #if defined(__NEON__)
+    #if defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(div_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(div_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
+          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(div_SSE), SIMDExtension_SSE),
     #endif
   #endif
 
