@@ -6,6 +6,12 @@ using namespace thd;
 using namespace rpc;
 using namespace master;
 
+real THDStorage_(receiveValueFromWorker)(int worker_id) {
+  std::unique_ptr<THTensor<real>> wrapped_value(new THTensor<real>);
+  dataChannel->receive(*wrapped_value, worker_id);
+  return *static_cast<real *>(wrapped_value->data());
+}
+
 static THDStorage* THDStorage_(_alloc)() {
   THDStorage* new_storage = new THDStorage();
   std::memset(reinterpret_cast<void*>(new_storage), 0, sizeof(new_storage));
@@ -14,6 +20,10 @@ static THDStorage* THDStorage_(_alloc)() {
   new_storage->node_id = THDState::s_current_worker;
   new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   return new_storage;
+}
+
+ptrdiff_t THDStorage_(size)(const THDStorage* storage) {
+  return storage->size;
 }
 
 THDStorage* THDStorage_(new)() {
@@ -30,47 +40,29 @@ THDStorage* THDStorage_(new)() {
   return storage;
 }
 
-void THDStorage_(resize)(THDStorage *storage, ptrdiff_t size)
-{
-  if(!(storage->flag & TH_STORAGE_RESIZABLE))
-    THError("Trying to resize storage that is not resizable");
-
-  storage->size = size;
+void THDStorage_(set)(THDStorage* storage, ptrdiff_t offset, real value) {
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageResize,
-      storage
+      Functions::storageSet,
+      storage,
+      offset,
+      value
     ),
     THDState::s_current_worker
   );
 }
 
-void THDStorage_(free)(THDStorage *storage)
-{
-  if(!storage || !(storage->flag & TH_STORAGE_REFCOUNTED)) return;
-
-  if (THAtomicDecrementRef(&storage->refcount)) {
-    masterCommandChannel->sendMessage(
-      packMessage(
-        Functions::storageFree,
-        storage
-      ),
-      THDState::s_current_worker
-    );
-
-    if(storage->flag & TH_STORAGE_VIEW)
-      THDStorage_(free)(storage->view);
-    delete storage;
-  }
-}
-
-void THDStorage_(retain)(THDStorage *storage) {
-  if(storage && (storage->flag & TH_STORAGE_REFCOUNTED))
-    THAtomicIncrementRef(&storage->refcount);
-}
-
-ptrdiff_t THDStorage_(size)(const THDStorage* storage) {
-  return storage->size;
+real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::storageGet,
+      storage,
+      offset,
+      thd::type_traits<real>::type
+    ),
+    THDState::s_current_worker
+  );
+  return THDStorage_(receiveValueFromWorker)(storage->node_id);
 }
 
 THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
@@ -158,21 +150,70 @@ THDStorage* THDStorage_(newWithSize4)(real value1, real value2, real value3, rea
   );
   return storage;
 }
-void THDStorage_(set)(THDStorage* storage, ptrdiff_t offset, real value) {
+
+void THDStorage_(setFlag)(THDStorage *storage, const char flag) {
+  storage->flag |= flag;
+}
+
+void THDStorage_(clearFlag)(THDStorage *storage, const char flag) {
+  storage->flag &= ~flag;
+}
+
+void THDStorage_(retain)(THDStorage *storage) {
+  if (storage && (storage->flag & TH_STORAGE_REFCOUNTED))
+    THAtomicIncrementRef(&storage->refcount);
+}
+
+void THDStorage_(swap)(THDStorage *storage1, THDStorage *storage2) {
+  THDStorage dummy = *storage1;
+  *storage1 = *storage2;
+  *storage2 = dummy;
+}
+
+void THDStorage_(free)(THDStorage *storage) {
+  if (!storage || !(storage->flag & TH_STORAGE_REFCOUNTED)) return;
+
+  if (THAtomicDecrementRef(&storage->refcount)) {
+    masterCommandChannel->sendMessage(
+      packMessage(
+        Functions::storageFree,
+        storage
+      ),
+      THDState::s_current_worker
+    );
+
+    if (storage->flag & TH_STORAGE_VIEW)
+      THDStorage_(free)(storage->view);
+    delete storage;
+  }
+}
+
+void THDStorage_(resize)(THDStorage *storage, ptrdiff_t size) {
+  if (!(storage->flag & TH_STORAGE_RESIZABLE))
+    THError("Trying to resize storage that is not resizable");
+  if (size < storage->size)
+    return;
+
+  storage->size = size;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageSet,
+      Functions::storageResize,
       storage,
-      offset,
-      value
+      size
     ),
     THDState::s_current_worker
   );
 }
 
-real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
-  THError("get not supported yet");
-  return 0;
+void THDStorage_(fill)(THDStorage *storage, real value) {
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::storageFill,
+      storage,
+      value
+    ),
+    THDState::s_current_worker
+  );
 }
 
 #endif

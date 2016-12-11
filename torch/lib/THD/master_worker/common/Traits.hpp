@@ -46,15 +46,18 @@ using THDStorageTypes = std::tuple<
     THDDoubleStorage
 >;
 
-template<typename T>
+template<template<typename> class Trait, typename U>
 struct map_to_ptr {};
 
-template<typename... Types>
-struct map_to_ptr<std::tuple<Types...>> {
-  using type = std::tuple<typename std::add_pointer<Types>::type...>;
+template<template <typename> class Trait, typename... Types>
+struct map_to_ptr<Trait, std::tuple<Types...>> {
+  using type = std::tuple<
+    typename std::add_pointer<Types>::type...,
+    typename std::add_pointer<typename Trait<Types>::type>::type...
+  >;
 };
 
-using THDTensorPtrTypes = map_to_ptr<THDTensorTypes>::type;
-using THDStoragePtrTypes = map_to_ptr<THDStorageTypes>::type;
+using THDTensorPtrTypes = map_to_ptr<std::add_const, THDTensorTypes>::type;
+using THDStoragePtrTypes = map_to_ptr<std::add_const, THDStorageTypes>::type;
 
 } // namespace thd

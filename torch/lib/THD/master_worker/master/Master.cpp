@@ -26,6 +26,7 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
 
   // TODO: initialize master
   thd::master::masterCommandChannel.reset(new MasterCommandChannel());
+
   return true;
 }
 

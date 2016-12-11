@@ -85,5 +85,7 @@ struct type_traits<unsigned long long> {
   static constexpr Type type = Type::ULONG_LONG;
 };
 
+template<typename T>
+struct type_traits<const T> : type_traits<T> {};
 
 } // namespace thd

@@ -74,8 +74,23 @@ auto THStorage<real>::fast_set(std::size_t ind, scalar_type value) -> THStorage&
 }
 
 template<>
+auto THStorage<real>::get(std::size_t ind) -> scalar_type {
+  return THStorage_(get)(storage, ind);
+}
+
+template<>
+auto THStorage<real>::fast_get(std::size_t ind) -> scalar_type {
+  return storage->data[ind];
+}
+
+template<>
 thd::Type THStorage<real>::type() const {
   return thd::type_traits<real>::type;
+}
+
+template<>
+std::unique_ptr<Tensor> THStorage<real>::newTensor() const {
+  return std::unique_ptr<Tensor>(new THTensor<real>());
 }
 
 #endif
