@@ -35,12 +35,15 @@ class ConcatTable(Container):
             del l1[i]
         return l1
 
-    def _backward(self, method, input, gradOutput, scale):
+    def _backward(self, method, input, gradOutput, scale=1):
         isTable = isinstance(input, list)
         wasTable = isinstance(self.gradInput, list)
         if isTable:
             for i, module in enumerate(self.modules):
-                currentGradInput = getattr(module, method)(input, gradOutput[i], scale)
+                if method == 'updateGradInput':
+                    currentGradInput = module.updateGradInput(input, gradOutput[i])
+                elif method == 'backward':
+                    currentGradInput = module.backward(input, gradOutput[i], scale)
                 if not isinstance(currentGradInput, list):
                     raise RuntimeError("currentGradInput is not a table!")
 
@@ -68,7 +71,10 @@ class ConcatTable(Container):
         else:
             self.gradInput = self.gradInput if not wasTable else input.clone()
             for i, module in enumerate(self.modules):
-                currentGradInput = getattr(module, method)(input, gradOutput[i], scale)
+                if method == 'updateGradInput':
+                    currentGradInput = module.updateGradInput(input, gradOutput[i])
+                elif method == 'backward':
+                    currentGradInput = module.backward(input, gradOutput[i], scale)
                 if i == 0:
                     self.gradInput.resize_as_(currentGradInput).copy_(currentGradInput)
                 else:
