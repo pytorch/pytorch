@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../common/CommandChannel.hpp"
+#include "../../base/DataChannel.hpp"
 #include "../../base/Storage.hpp"
 #include "../../base/Tensor.hpp"
 

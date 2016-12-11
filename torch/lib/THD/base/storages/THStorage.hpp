@@ -8,6 +8,7 @@
 
 #include "../Storage.hpp"
 #include "../Traits.hpp"
+#include "../tensors/THTensor.hpp"
 
 namespace thd {
 
@@ -40,11 +41,16 @@ public:
 
   virtual THStorage& resize(long new_size) override;
   virtual THStorage& fill(scalar_type value) override;
-  virtual THStorage& set(std::size_t ind, scalar_type value);
+  virtual THStorage& set(std::size_t ind, scalar_type value) override;
   // Doesn't do bound checking
-  virtual THStorage& fast_set(std::size_t ind, scalar_type value);
+  virtual THStorage& fast_set(std::size_t ind, scalar_type value) override;
+  virtual scalar_type get(std::size_t ind) override;
+  // Doesn't do bound checking
+  virtual scalar_type fast_get(std::size_t ind) override;
 
   virtual thd::Type type() const override;
+
+  virtual std::unique_ptr<Tensor> newTensor() const override;
 
 protected:
   storage_type *storage;

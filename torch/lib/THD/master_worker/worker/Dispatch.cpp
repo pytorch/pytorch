@@ -21,6 +21,20 @@ namespace worker {
 
 namespace detail {
 
+void sendValueToMaster(IntStorage *from, long long value) {
+  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
+  wrapped_value->resize({1});
+  dynamic_cast<IntTensor *>(wrapped_value.get())->fill(value);
+  dataChannel->send(*wrapped_value, 0);
+}
+
+void sendValueToMaster(FloatStorage *from, double value) {
+  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
+  wrapped_value->resize({1});
+  dynamic_cast<FloatTensor *>(wrapped_value.get())->fill(value);
+  dataChannel->send(*wrapped_value, 0);
+}
+
 Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {
   return workerTensors.at(unpackTensor(message)).get();
 }
@@ -65,6 +79,8 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::constructWithSize, constructWithSize},
     {Functions::add, add},
     {Functions::free, free},
+    {Functions::storageSet, storageSet},
+    {Functions::storageGet, storageGet},
     {Functions::storageConstruct, storageConstruct},
     {Functions::storageConstructWithSize, storageConstructWithSize},
     {Functions::storageConstructWithSize1, storageConstructWithSize1},
@@ -72,6 +88,8 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::storageConstructWithSize3, storageConstructWithSize3},
     {Functions::storageConstructWithSize4, storageConstructWithSize4},
     {Functions::storageFree, storageFree},
+    {Functions::storageFree, storageResize},
+    {Functions::storageFill, storageFill},
     {Functions::sendTensor, sendTensor},
     {Functions::sendStorage, sendStorage}
 };

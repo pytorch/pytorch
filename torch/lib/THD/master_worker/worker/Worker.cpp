@@ -6,6 +6,8 @@
 #include "Worker.h"
 #include "Worker.hpp"
 
+#include <stdexcept>
+
 namespace thd {
 namespace worker {
 
@@ -20,8 +22,6 @@ using namespace thd;
 
 void THDWorkerMain() {
   // TODO: initialize worker
-  worker::workerCommandChannel.reset(
-          new WorkerCommandChannel(dataChannel->getRank()));
   std::unique_ptr<thd::rpc::RPCMessage> command;
   for (;;) {
     command = worker::workerCommandChannel->recvMessage();

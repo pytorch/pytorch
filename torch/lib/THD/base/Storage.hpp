@@ -1,10 +1,12 @@
 #pragma once
 
+#include "Tensor.hpp"
 #include "Type.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <memory>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +29,8 @@ struct Storage {
   virtual Storage& resize(long new_size) = 0;
 
   virtual thd::Type type() const = 0;
+
+  virtual std::unique_ptr<Tensor> newTensor() const = 0;
 };
 
 template<typename real>
@@ -35,6 +39,8 @@ struct StorageScalarInterface : public Storage {
   virtual StorageScalarInterface& fill(scalar_type value) = 0;
   virtual StorageScalarInterface& set(std::size_t ind, scalar_type value) = 0;
   virtual StorageScalarInterface& fast_set(std::size_t ind, scalar_type value) = 0;
+  virtual scalar_type get(std::size_t ind) = 0;
+  virtual scalar_type fast_get(std::size_t ind) = 0;
 };
 
 using FloatStorage = StorageScalarInterface<double>;

@@ -27,15 +27,19 @@ enum Functions: std::uint16_t {
   fill,
 
   // storage functions
+  storageSet,
+  storageGet,
+
   storageConstruct,
   storageConstructWithSize,
   storageConstructWithSize1,
   storageConstructWithSize2,
   storageConstructWithSize3,
   storageConstructWithSize4,
+
   storageFree,
   storageResize,
-  storageSet,
+  storageFill,
 
   // communication requests
   sendTensor,
