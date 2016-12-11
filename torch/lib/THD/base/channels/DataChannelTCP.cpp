@@ -104,7 +104,7 @@ DataChannelTCP::DataChannelTCP()
 
 
 DataChannelTCP::DataChannelTCP(int timeout)
-  : _socket(0)
+  : _socket(-1)
   , _port(0)
   , _timeout(timeout)
 {
@@ -166,7 +166,8 @@ DataChannelTCP::DataChannelTCP(int timeout)
 
 DataChannelTCP::~DataChannelTCP()
 {
-  ::close(_socket);
+  if (_socket != -1)
+    ::close(_socket);
 
   for (const auto& process : _processes) {
     if ((process.rank != _rank) && (process.socket != -1))
@@ -276,16 +277,17 @@ std::tuple<int, std::string> DataChannelTCP::accept() const {
 bool DataChannelTCP::initWorker() {
   auto& master = _processes[MASTER_RANK];
   master.socket = connect(master.address, master.port);
+  int master_socket = master.socket;
 
   listen();
 
   std::uint32_t p_rank = (std::uint32_t)_rank;
   std::uint16_t p_port = (std::uint16_t)_port;
-  send_bytes<std::uint32_t>(master.socket, &p_rank, 1);
-  send_bytes<std::uint16_t>(master.socket, &p_port, 1); // send listening port to master
+  send_bytes<std::uint32_t>(master_socket, &p_rank, 1);
+  send_bytes<std::uint16_t>(master_socket, &p_port, 1); // send listening port to master
 
   std::uint32_t processes_number;
-  recv_bytes<std::uint32_t>(master.socket, &processes_number, 1);
+  recv_bytes<std::uint32_t>(master_socket, &processes_number, 1);
   _processes.resize(processes_number);
 
   // get all metadata of other processes in network
@@ -294,20 +296,20 @@ bool DataChannelTCP::initWorker() {
     std::uint32_t p_rank, p_address_len;
     std::uint16_t p_port;
 
-    recv_bytes<std::uint32_t>(master.socket, &p_rank, 1); // get process rank
-    recv_bytes<std::uint32_t>(master.socket, &p_address_len, 1); // get process address length
+    recv_bytes<std::uint32_t>(master_socket, &p_rank, 1); // get process rank
+    recv_bytes<std::uint32_t>(master_socket, &p_address_len, 1); // get process address length
 
     // get process address
     std::unique_ptr<char[]> tmp_address(new char[p_address_len + 1]);
-    recv_bytes<char>(master.socket, tmp_address.get(), p_address_len);
+    recv_bytes<char>(master_socket, tmp_address.get(), p_address_len);
 
-    recv_bytes<std::uint16_t>(master.socket, &p_port, 1); // get process port
+    recv_bytes<std::uint16_t>(master_socket, &p_port, 1); // get process port
 
     _processes[p_rank] = {
       .rank = p_rank,
       .address = std::string(tmp_address.get(), p_address_len),
       .port = p_port,
-      .socket = 0,
+      .socket = -1,
     };
 
     processes_number--;
@@ -325,6 +327,10 @@ bool DataChannelTCP::initWorker() {
       process.socket = std::get<0>(accept_state);
     }
   }
+
+  // close socket for listening, we will not use it anymore
+  ::close(_socket);
+  _socket = -1;
 
   return true;
 }
@@ -386,6 +392,10 @@ bool DataChannelTCP::initMaster() {
       send_bytes<std::uint16_t>(worker.socket, &(process.port), 1);
     }
   }
+
+  // close socket for listening, we will not use it anymore
+  ::close(_socket);
+  _socket = -1;
 
   return true;
 }

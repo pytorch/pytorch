@@ -1,15 +1,3 @@
-/*
- * This test is prone to race conditions on acquiring socket and port for listening.
- * To avoid this problem each worker waits some predefined time to let others
- * do their initial work. It is very unlikely such situation will ever occur
- * but this design does **NOT** prevent race conditions.
- *
- * Race conditions on ENV variables have been eliminated by using mutex and
- * reading all ENV variables in DataChannelTCP constructor instead of `init`
- * function where all blocking accept/connect logic is defined.
- */
-
-
 #include "../base/channels/DataChannelTCP.hpp"
 #include "../base/tensors/THTensor.hpp"
 
@@ -207,12 +195,6 @@ void worker(int id)
   setenv("RANK", std::to_string(id).data(), 1);
   setenv("MASTER_ADDR", std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
   auto workerChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
-
-  /*
-   * Wait for other processes to initialize.
-   * It is to avoid race in acquiring socket and port for listening (in init function).
-   */
-  std::this_thread::sleep_for(std::chrono::milliseconds(200 * workerChannel->getRank()));
   g_mutex.unlock();
 
   assert(workerChannel->init());
