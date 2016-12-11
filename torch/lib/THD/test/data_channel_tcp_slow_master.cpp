@@ -47,12 +47,6 @@ void worker(int id)
   setenv("RANK", std::to_string(id).data(), 1);
   setenv("MASTER_ADDR", std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
   auto workerChannel = std::make_shared<thd::DataChannelTCP>();  // reads all env variable
-
-  /*
-   * Wait for other processes to initialize.
-   * It is to avoid race in acquiring socket and port for listening (in init function).
-   */
-  std::this_thread::sleep_for(std::chrono::milliseconds(100 * workerChannel->getRank()));
   g_mutex.unlock();
   assert(workerChannel->init());
 
