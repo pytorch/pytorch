@@ -83,10 +83,15 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
         from tools.cwrap.plugins.NullableArguments import NullableArguments
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
+        thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
-            BoolOption(), THPPlugin(), AutoGPU(condition='IS_CUDA'),
-            ArgcountSortPlugin(), KwargsPlugin(),
+            BoolOption(), thp_plugin, AutoGPU(condition='IS_CUDA'),
+            ArgcountSortPlugin(), KwargsPlugin()
         ])
+        with open('torch/csrc/TensorDocstrings.cpp', 'w') as f:
+            f.write(thp_plugin.generate_docstrings_cpp())
+        with open('torch/csrc/TensorDocstrings.h', 'w') as f:
+            f.write(thp_plugin.generate_docstrings_h())
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
         ])
@@ -157,6 +162,7 @@ main_sources = [
     "torch/csrc/Size.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Tensor.cpp",
+    "torch/csrc/TensorDocstrings.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
