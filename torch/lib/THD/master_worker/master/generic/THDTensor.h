@@ -121,11 +121,6 @@ THD_API real THDTensor_(get2d)(const THDTensor *tensor, long x0, long x1);
 THD_API real THDTensor_(get3d)(const THDTensor *tensor, long x0, long x1, long x2);
 THD_API real THDTensor_(get4d)(const THDTensor *tensor, long x0, long x1, long x2, long x3);
 
-// TODO: move to THDTensorMath.h
-THD_API void THDTensor_(fill)(THDTensor *self, real value);
-THD_API void THDTensor_(zeros)(THDTensor *self, THLongStorage *size);
-THD_API void THDTensor_(ones)(THDTensor *self, THLongStorage *size);
-THD_API ptrdiff_t THDTensor_(numel)(THDTensor *self);
 THD_API void THDTensor_(gather)(THDTensor *self, THDTensor *src, int dim, THLongTensor *index);
 THD_API void THDTensor_(scatter)(THDTensor *self, int dim, THLongTensor *index, THDTensor *src);
 THD_API void THDTensor_(scatterFill)(THDTensor *self, int dim, THLongTensor *index, real val);
@@ -174,7 +169,5 @@ THD_API void THDTensor_(cmax)(THDTensor *self, THDTensor *src1, THDTensor *src2)
 THD_API void THDTensor_(cmin)(THDTensor *self, THDTensor *src1, THDTensor *src2);
 THD_API void THDTensor_(cmaxValue)(THDTensor *self, THDTensor *src, real value);
 THD_API void THDTensor_(cminValue)(THDTensor *self, THDTensor *src, real value);
-
-
 
 #endif

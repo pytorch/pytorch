@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Traits.hpp"
+#include <THPP/Traits.hpp>
 #include <cstddef>
 
 namespace thd {
@@ -14,7 +14,7 @@ struct Scalar {
   virtual std::size_t elementSize() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
-  virtual Type type() const = 0;
+  virtual thpp::Type type() const = 0;
 };
 
 template<typename real>
@@ -35,8 +35,8 @@ struct ScalarWrapper : Scalar {
     return &_value;
   }
 
-  virtual Type type() const override {
-    return type_traits<real>::type;
+  virtual thpp::Type type() const override {
+    return thpp::type_traits<real>::type;
   }
 
   real value() const {

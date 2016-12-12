@@ -18,7 +18,9 @@ cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
-BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
+BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
+  -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
+  -I$INSTALL_DIR/include/THPP "
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
