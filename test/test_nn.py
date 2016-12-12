@@ -609,6 +609,7 @@ class TestNN(NNTestCase):
         output = dp.data_parallel(Net(), input, gpus)
         self.assertEqual(output, fn(input))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_data_parallel_module(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda())
