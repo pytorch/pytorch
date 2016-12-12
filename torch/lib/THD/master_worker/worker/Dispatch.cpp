@@ -7,13 +7,14 @@
 #include <unordered_map>
 
 #include "../../process_group/General.hpp"
-#include "../../base/Tensor.hpp"
-#include "../../base/Traits.hpp"
-#include "../../base/storages/THStorage.hpp"
-#include "../../base/tensors/THTensor.hpp"
 #include "../common/Functions.hpp"
 #include "../common/RPC.hpp"
 #include "../master/Master.hpp"
+#include "THPP/Storage.hpp"
+#include "THPP/Tensor.hpp"
+#include "THPP/Traits.hpp"
+#include "THPP/storages/THStorage.hpp"
+#include "THPP/tensors/THTensor.hpp"
 #include "Worker.hpp"
 
 namespace thd {
@@ -29,11 +30,11 @@ void sendValueToMaster(double value) {
   dataChannel->send(FloatScalar(value), 0);
 }
 
-Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {
+thpp::Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {
   return workerTensors.at(unpackTensor(message)).get();
 }
 
-Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
+thpp::Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
   return workerStorages.at(unpackStorage(message)).get();
 }
 
@@ -44,6 +45,7 @@ static void finalize(rpc::RPCMessage& raw_message) {
 
 #include "dispatch/Storage.cpp"
 #include "dispatch/Tensor.cpp"
+#include "dispatch/TensorMath.cpp"
 #include "dispatch/Communication.cpp"
 
 using dispatch_fn = void (*)(rpc::RPCMessage&);
@@ -69,7 +71,10 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorSelect, tensorSelect},
     {Functions::tensorTranspose, tensorTranspose},
     {Functions::tensorUnfold, tensorUnfold},
+
     {Functions::tensorFree, tensorFree},
+    {Functions::tensorAdd, tensorAdd},
+
     {Functions::tensorGather, tensorGather},
     {Functions::tensorScatter, tensorScatter},
     {Functions::tensorScatterFill, tensorScatterFill},
@@ -118,6 +123,52 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorCmin, tensorCmin},
     {Functions::tensorCmaxValue, tensorCmaxValue},
     {Functions::tensorCminValue, tensorCminValue},
+
+    // Functions from the 3rd set
+    {Functions::tensorDiag, tensorDiag},
+    {Functions::tensorEye, tensorEye},
+    {Functions::tensorRange, tensorRange},
+    {Functions::tensorRandperm, tensorRandperm},
+    {Functions::tensorSort, tensorSort},
+    {Functions::tensorTopk, tensorTopk},
+    {Functions::tensorTril, tensorTril},
+    {Functions::tensorTriu, tensorTriu},
+    {Functions::tensorEqual, tensorEqual},
+    {Functions::tensorLtValue, tensorLtValue},
+    {Functions::tensorLeValue, tensorLeValue},
+    {Functions::tensorGtValue, tensorGtValue},
+    {Functions::tensorGeValue, tensorGeValue},
+    {Functions::tensorNeValue, tensorNeValue},
+    {Functions::tensorEqValue, tensorEqValue},
+    {Functions::tensorLtValueT, tensorLtValueT},
+    {Functions::tensorLeValueT, tensorLeValueT},
+    {Functions::tensorGtValueT, tensorGtValueT},
+    {Functions::tensorGeValueT, tensorGeValueT},
+    {Functions::tensorNeValueT, tensorNeValueT},
+    {Functions::tensorEqValueT, tensorEqValueT},
+    {Functions::tensorLtTensor, tensorLtTensor},
+    {Functions::tensorLeTensor, tensorLeTensor},
+    {Functions::tensorGtTensor, tensorGtTensor},
+    {Functions::tensorGeTensor, tensorGeTensor},
+    {Functions::tensorNeTensor, tensorNeTensor},
+    {Functions::tensorEqTensor, tensorEqTensor},
+    {Functions::tensorLtTensorT, tensorLtTensorT},
+    {Functions::tensorLeTensorT, tensorLeTensorT},
+    {Functions::tensorGtTensorT, tensorGtTensorT},
+    {Functions::tensorGeTensorT, tensorGeTensorT},
+    {Functions::tensorNeTensorT, tensorNeTensorT},
+    {Functions::tensorEqTensorT, tensorEqTensorT},
+    {Functions::tensorAbs, tensorAbs},
+    {Functions::tensorSigmoid, tensorSigmoid},
+    {Functions::tensorLog, tensorLog},
+    {Functions::tensorLog1p, tensorLog1p},
+    {Functions::tensorExp, tensorExp},
+    {Functions::tensorCos, tensorCos},
+    {Functions::tensorAcos, tensorAcos},
+    {Functions::tensorCosh, tensorCosh},
+    {Functions::tensorSin, tensorSin},
+    {Functions::tensorAsin, tensorAsin},
+    {Functions::tensorSinh, tensorSinh},
 
     {Functions::storageConstruct, storageConstruct},
     {Functions::storageConstructWithSize, storageConstructWithSize},

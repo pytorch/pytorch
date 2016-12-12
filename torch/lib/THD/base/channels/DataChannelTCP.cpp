@@ -488,7 +488,8 @@ int DataChannelTCP::getNumProcesses() {
 }
 
 
-void DataChannelTCP::allGather(std::vector<Tensor*>& output, Tensor& input, THDGroup group_id) {
+void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
+                               thpp::Tensor& input, THDGroup group_id) {
   /*
    * Since all-gather is semantically equivalent to gather followed by
    * broadcast we use those functions to implement all-gather function.
@@ -517,7 +518,8 @@ void DataChannelTCP::allGather(std::vector<Tensor*>& output, Tensor& input, THDG
 }
 
 
-void DataChannelTCP::gather(std::vector<Tensor*>& output, Tensor& input, int dst_rank, THDGroup group_id) {
+void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
+                            thpp::Tensor& input, int dst_rank, THDGroup group_id) {
   const auto& group = _groups.at(group_id);
   bool exists;
 
@@ -549,7 +551,9 @@ void DataChannelTCP::gather(std::vector<Tensor*>& output, Tensor& input, int dst
 }
 
 
-void DataChannelTCP::scatter(std::vector<Tensor*>& input, Tensor& output, int src_rank, THDGroup group_id) {
+void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
+                             thpp::Tensor& output, int src_rank,
+                             THDGroup group_id) {
   const auto& group = _groups.at(group_id);
   bool exists;
 
@@ -581,7 +585,8 @@ void DataChannelTCP::scatter(std::vector<Tensor*>& input, Tensor& output, int sr
 }
 
 
-void DataChannelTCP::allReduce(Tensor& data, THDReduceOp operation, THDGroup group_id) {
+void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
+                               THDGroup group_id) {
   /*
    * Since an all-reduce operation is semantically equivalent to an
    * all-to-one reduction followed by a one-to-all broadcast, the asymptotically
@@ -605,7 +610,8 @@ void DataChannelTCP::allReduce(Tensor& data, THDReduceOp operation, THDGroup gro
 }
 
 
-void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank, THDGroup group_id) {
+void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
+                            int dst_rank, THDGroup group_id) {
   /*
    * Idea of this algorithm is similar to broadcast but with reversed
    * order and direction of communication.
@@ -648,7 +654,8 @@ void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank, T
 }
 
 
-void DataChannelTCP::broadcast(Tensor& data, int src_rank, THDGroup group_id) {
+void DataChannelTCP::broadcast(thpp::Tensor& data, int src_rank,
+                               THDGroup group_id) {
   /*
    * General idea of this algorithm is to send data in `d` dimensional
    * hypercube where vertices are nodes (processes) and edges are
@@ -698,7 +705,7 @@ void DataChannelTCP::send(const Scalar& data, int dst_rank) {
 }
 
 
-void DataChannelTCP::send(Tensor& data, int dst_rank) {
+void DataChannelTCP::send(thpp::Tensor& data, int dst_rank) {
   auto request = _send_worker.push([this, &data, dst_rank]{
     this->_send(data, dst_rank);
   });
@@ -714,7 +721,7 @@ void DataChannelTCP::receive(Scalar& data, int src_rank) {
 }
 
 
-void DataChannelTCP::receive(Tensor& data) {
+void DataChannelTCP::receive(thpp::Tensor& data) {
   auto request = _receive_worker.push([this, &data]{
     if (!this->_poll_events) {
       // cache poll events array, it will be reused in another `receive` calls
@@ -749,7 +756,7 @@ void DataChannelTCP::receive(Tensor& data) {
 }
 
 
-void DataChannelTCP::receive(Tensor& data, int src_rank) {
+void DataChannelTCP::receive(thpp::Tensor& data, int src_rank) {
   auto request = _receive_worker.push([this, &data, src_rank]{
     this->_receive(data, src_rank);
   });
@@ -757,8 +764,9 @@ void DataChannelTCP::receive(Tensor& data, int src_rank) {
 }
 
 
-DataChannelTCP::RequestTCP* DataChannelTCP::isend(Tensor& data, int dst_rank) {
-  std::shared_ptr<Tensor> copy_tensor(data.clone_shallow());
+DataChannelTCP::RequestTCP* DataChannelTCP::isend(thpp::Tensor& data,
+                                                  int dst_rank) {
+  std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
   auto request = _send_worker.push([this, copy_tensor, dst_rank]{
     this->_send(*copy_tensor, dst_rank);
   });
@@ -766,8 +774,9 @@ DataChannelTCP::RequestTCP* DataChannelTCP::isend(Tensor& data, int dst_rank) {
 }
 
 
-DataChannelTCP::RequestTCP* DataChannelTCP::ireceive(Tensor& data, int src_rank) {
-  std::shared_ptr<Tensor> copy_tensor(data.clone_shallow());
+DataChannelTCP::RequestTCP* DataChannelTCP::ireceive(thpp::Tensor& data,
+                                                     int src_rank) {
+  std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
   auto request = _receive_worker.push([this, copy_tensor, src_rank]{
     this->_receive(*copy_tensor, src_rank);
   });
@@ -846,7 +855,7 @@ void DataChannelTCP::_send(const Scalar& data, int dst_rank) {
 }
 
 
-void DataChannelTCP::_send(Tensor& data, int dst_rank) {
+void DataChannelTCP::_send(thpp::Tensor& data, int dst_rank) {
   /*
    * We have to check if dst_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
@@ -904,7 +913,7 @@ void DataChannelTCP::_receive(Scalar& data, int src_rank) {
 }
 
 
-void DataChannelTCP::_receive(Tensor& data, int src_rank) {
+void DataChannelTCP::_receive(thpp::Tensor& data, int src_rank) {
   /*
    * We have to check if src_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
@@ -936,22 +945,23 @@ void DataChannelTCP::_receive(Tensor& data, int src_rank) {
 }
 
 
-void DataChannelTCP::_reduce(Tensor& result, Tensor& data, THDReduceOp operation) const {
+void DataChannelTCP::_reduce(thpp::Tensor& result, thpp::Tensor& data,
+                             THDReduceOp operation) const {
   assertTensorEqual(result, data, "reduce");
 
-  Type tensor_type = data.type();
+  thpp::Type tensor_type = data.type();
   switch(tensor_type) {
-    case Type::CHAR:   _reduce<char>(result, data, operation); break;
-    case Type::FLOAT:  _reduce<float>(result, data, operation); break;
-    case Type::DOUBLE: _reduce<double>(result, data, operation); break;
-    case Type::SHORT:  _reduce<short>(result, data, operation); break;
-    case Type::USHORT: _reduce<unsigned short>(result, data, operation); break;
-    case Type::INT:    _reduce<int>(result, data, operation); break;
-    case Type::UINT:   _reduce<unsigned int>(result, data, operation); break;
-    case Type::LONG:   _reduce<long>(result, data, operation); break;
-    case Type::ULONG:  _reduce<unsigned long>(result, data, operation); break;
-    case Type::LONG_LONG:  _reduce<long long>(result, data, operation); break;
-    case Type::ULONG_LONG: _reduce<unsigned long long>(result, data, operation); break;
+    case thpp::Type::CHAR:   _reduce<char>(result, data, operation); break;
+    case thpp::Type::FLOAT:  _reduce<float>(result, data, operation); break;
+    case thpp::Type::DOUBLE: _reduce<double>(result, data, operation); break;
+    case thpp::Type::SHORT:  _reduce<short>(result, data, operation); break;
+    case thpp::Type::USHORT: _reduce<unsigned short>(result, data, operation); break;
+    case thpp::Type::INT:    _reduce<int>(result, data, operation); break;
+    case thpp::Type::UINT:   _reduce<unsigned int>(result, data, operation); break;
+    case thpp::Type::LONG:   _reduce<long>(result, data, operation); break;
+    case thpp::Type::ULONG:  _reduce<unsigned long>(result, data, operation); break;
+    case thpp::Type::LONG_LONG:  _reduce<long long>(result, data, operation); break;
+    case thpp::Type::ULONG_LONG: _reduce<unsigned long long>(result, data, operation); break;
     default:
       throw std::logic_error("unsupported tensor type in reduce");
   }
@@ -959,7 +969,8 @@ void DataChannelTCP::_reduce(Tensor& result, Tensor& data, THDReduceOp operation
 
 
 template<typename T>
-void DataChannelTCP::_reduce(Tensor& result, Tensor& data, THDReduceOp operation) const {
+void DataChannelTCP::_reduce(thpp::Tensor& result, thpp::Tensor& data,
+                             THDReduceOp operation) const {
   assertTensorEqual(result, data, "reduce");
 
   auto result_data = reinterpret_cast<T*>(result.data());

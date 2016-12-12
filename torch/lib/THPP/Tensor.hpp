@@ -92,6 +92,41 @@ struct Tensor {
   virtual Tensor& cmin(const Tensor& src1, const Tensor& src2) = 0;
   virtual Tensor& zero() = 0;
 
+  virtual Tensor& diag(const Tensor& src, int k) = 0;
+  virtual Tensor& eye(long n, long m) = 0;
+  // virtual Tensor& randperm() = 0; TODO
+  virtual Tensor& sort(const Tensor& ri, const Tensor& src,
+                       int dimension, int desc) = 0;
+  virtual Tensor& topk(const Tensor& ri, const Tensor& src,
+                       long k, int dim, int dir, int sorted) = 0;
+  virtual Tensor& tril(const Tensor& src, long k) = 0;
+  virtual Tensor& triu(const Tensor& src, long k) = 0;
+  virtual Tensor& catArray(const std::vector<Tensor*>& inputs, int dimension) = 0;
+  virtual int equal(const Tensor& other) const = 0;
+  virtual Tensor& ltTensor(const Tensor& r, const Tensor& tb) = 0;
+  virtual Tensor& leTensor(const Tensor& r, const Tensor& tb) = 0;
+  virtual Tensor& gtTensor(const Tensor& r, const Tensor& tb) = 0;
+  virtual Tensor& geTensor(const Tensor& r, const Tensor& tb) = 0;
+  virtual Tensor& neTensor(const Tensor& r, const Tensor& tb) = 0;
+  virtual Tensor& eqTensor(const Tensor& r, const Tensor& tb) = 0;
+  virtual Tensor& ltTensorT(const Tensor& ta, const Tensor& tb) = 0;
+  virtual Tensor& leTensorT(const Tensor& ta, const Tensor& tb) = 0;
+  virtual Tensor& gtTensorT(const Tensor& ta, const Tensor& tb) = 0;
+  virtual Tensor& geTensorT(const Tensor& ta, const Tensor& tb) = 0;
+  virtual Tensor& neTensorT(const Tensor& ta, const Tensor& tb) = 0;
+  virtual Tensor& eqTensorT(const Tensor& ta, const Tensor& tb) = 0;
+  virtual Tensor& abs(const Tensor& src) = 0;
+  virtual Tensor& sigmoid(const Tensor& src) = 0;
+  virtual Tensor& log(const Tensor& src) = 0;
+  virtual Tensor& log1p(const Tensor& src) = 0;
+  virtual Tensor& exp(const Tensor& src) = 0;
+  virtual Tensor& cos(const Tensor& src) = 0;
+  virtual Tensor& acos(const Tensor& src) = 0;
+  virtual Tensor& cosh(const Tensor& src) = 0;
+  virtual Tensor& sin(const Tensor& src) = 0;
+  virtual Tensor& asin(const Tensor& src) = 0;
+  virtual Tensor& sinh(const Tensor& src) = 0;
+
   virtual thpp::Type type() const = 0;
   virtual bool isCuda() const = 0;
   virtual bool isSparse() const = 0;
@@ -117,20 +152,55 @@ struct TensorScalarInterface : public Tensor {
   virtual TensorScalarInterface& div(const Tensor& src, scalar_type value) = 0;
   virtual TensorScalarInterface& fmod(const Tensor& src, scalar_type value) = 0;
   virtual TensorScalarInterface& remainder(const Tensor& src, scalar_type value) = 0;
-  virtual TensorScalarInterface& clamp(const Tensor& src, scalar_type min_value, scalar_type max_value) = 0;
-  virtual TensorScalarInterface& cadd(const Tensor& src1, scalar_type value, const Tensor& src2) = 0;
-  virtual TensorScalarInterface& csub(const Tensor& src1, scalar_type value, const Tensor& src2) = 0;
-  virtual TensorScalarInterface& addcmul(const Tensor& src1, scalar_type value, const Tensor& src2, const Tensor& src3) = 0;
-  virtual TensorScalarInterface& addcdiv(const Tensor& src1, scalar_type value, const Tensor& src2, const Tensor& src3) = 0;
-  virtual TensorScalarInterface& addmv(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& mat, const Tensor& vec) = 0;
-  virtual TensorScalarInterface& addmm(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& mat1, const Tensor& mat2) = 0;
-  virtual TensorScalarInterface& addr(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& vec1, const Tensor& vec2) = 0;
-  virtual TensorScalarInterface& addbmm(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& batch1, const Tensor& batch2) = 0;
-  virtual TensorScalarInterface& baddbmm(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& batch1, const Tensor& batch2) = 0;
-  virtual TensorScalarInterface& match(const Tensor& m1, const Tensor& m2, scalar_type gain) = 0;
+  virtual TensorScalarInterface& clamp(const Tensor& src, scalar_type min_value,
+                                       scalar_type max_value) = 0;
+  virtual TensorScalarInterface& cadd(const Tensor& src1, scalar_type value,
+                                      const Tensor& src2) = 0;
+  virtual TensorScalarInterface& csub(const Tensor& src1, scalar_type value,
+                                      const Tensor& src2) = 0;
+  virtual TensorScalarInterface& addcmul(const Tensor& src1, scalar_type value,
+                                         const Tensor& src2,
+                                         const Tensor& src3) = 0;
+  virtual TensorScalarInterface& addcdiv(const Tensor& src1, scalar_type value,
+                                         const Tensor& src2,
+                                         const Tensor& src3) = 0;
+  virtual TensorScalarInterface& addmv(scalar_type beta, const Tensor& src,
+                                       scalar_type alpha, const Tensor& mat,
+                                       const Tensor& vec) = 0;
+  virtual TensorScalarInterface& addmm(scalar_type beta, const Tensor& src,
+                                       scalar_type alpha, const Tensor& mat1,
+                                       const Tensor& mat2) = 0;
+  virtual TensorScalarInterface& addr(scalar_type beta, const Tensor& src,
+                                      scalar_type alpha, const Tensor& vec1,
+                                      const Tensor& vec2) = 0;
+  virtual TensorScalarInterface& addbmm(scalar_type beta, const Tensor& src,
+                                        scalar_type alpha, const Tensor& batch1,
+                                        const Tensor& batch2) = 0;
+  virtual TensorScalarInterface& baddbmm(scalar_type beta, const Tensor& src,
+                                         scalar_type alpha, const Tensor& batch1,
+                                         const Tensor& batch2) = 0;
+  virtual TensorScalarInterface& match(const Tensor& m1, const Tensor& m2,
+                                       scalar_type gain) = 0;
   virtual scalar_type trace() = 0;
-  virtual TensorScalarInterface& cmaxValue(const Tensor& src, scalar_type value) = 0;
-  virtual TensorScalarInterface& cminValue(const Tensor& src, scalar_type value) = 0;
+  virtual TensorScalarInterface& cmaxValue(const Tensor& src,
+                                           scalar_type value) = 0;
+  virtual TensorScalarInterface& cminValue(const Tensor& src,
+                                           scalar_type value) = 0;
+
+  virtual TensorScalarInterface& range(scalar_type xmin, scalar_type xmax,
+                                       scalar_type step) = 0;
+  virtual TensorScalarInterface& ltValue(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& leValue(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& gtValue(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& geValue(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& neValue(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& eqValue(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& ltValueT(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& leValueT(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& gtValueT(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& geValueT(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& neValueT(const Tensor& t, scalar_type value) = 0;
+  virtual TensorScalarInterface& eqValueT(const Tensor& t, scalar_type value) = 0;
 };
 
 using FloatTensor = TensorScalarInterface<double>;
