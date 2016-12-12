@@ -345,7 +345,7 @@ the `ndarray` and vice versa.
 
 Returns True if the passed-in object is a `Tensor` (of any type). Returns `False` otherwise.
 
-### torch.is_storage
+### torch.is_storage(obj)
 
 Returns True if the passed-in object is a `Storage` (of any type). Returns `False` otherwise.
 
@@ -370,7 +370,8 @@ When you create a `torch.cuda.*Tensor`, it is allocated on the current GPU.
 However, you could allocate it on another GPU as well, using the `with torch.cuda.device(id)` context.
 All allocations within this context will be placed on the GPU `id`. 
 
-Once `Tensor`s are allocated, you can do operations on them from any GPU context, and the results will be placed on the same device as where the source `Tensor` is located.
+Once `Tensor`s are allocated, you can do operations on them from any GPU context, and the results
+will be placed on the same device as where the source `Tensor` is located.
 
 For example if Tensor `a` and `b` are on GPU-2, but the GPU-1 is the current device.
 If one does `c = a + b`, then `c` will be on GPU-2, regardless of what the current device is.
