@@ -428,6 +428,29 @@ class TestOperators(hu.HypothesisTestCase):
         for i in range(num_inputs):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
+    @given(X=hu.arrays(dims=[5, 2],
+                       elements=st.floats(min_value=0.0, max_value=10.0)),
+           **hu.gcs_cpu_only)
+    def test_last_n_windows(self, X, gc, dc):
+        workspace.FeedBlob('input', X)
+        collect_net = core.Net('collect_net')
+        collect_net.LastNWindowCollector(
+            ['input'],
+            ['output'],
+            num_to_collect=7,
+        )
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=2))
+        workspace.RunPlan(plan)
+        output = workspace.FetchBlob('output')
+        inputs = workspace.FetchBlob('input')
+        new_output = np.zeros([7, inputs.shape[1]])
+        for i in range(inputs.shape[0] * 2):
+            new_output[i % 7] = inputs[i % inputs.shape[0]]
+        import numpy.testing as npt
+        npt.assert_almost_equal(output, new_output, decimal=5)
+
     @given(batch_size=st.integers(1, 3),
            stride=st.integers(1, 3),
            pad=st.integers(0, 3),
