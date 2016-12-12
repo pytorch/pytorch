@@ -11,11 +11,11 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/googletest")
 if (USE_EXTERNAL_NCCL)
   externalproject_add(project_nccl
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/nccl
-    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/nccl
     BUILD_COMMAND make
     CONFIGURE_COMMAND ""
-    BUILD_IN_SOURCE 1
     INSTALL_COMMAND ""
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/nccl
+    INSTALL_DIR ${CMAKE_CURRNET_BINARY_DIR}/nccl
   )
   externalproject_get_property(project_nccl install_dir)
   add_library(nccl SHARED IMPORTED)
