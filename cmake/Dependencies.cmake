@@ -11,6 +11,7 @@ list(APPEND Caffe2_LINKER_LIBS ${CMAKE_THREAD_LIBS_INIT})
 # ---[ BLAS
 set(BLAS "Atlas" CACHE STRING "Selected BLAS library")
 set_property(CACHE BLAS PROPERTY STRINGS "Atlas;OpenBLAS;MKL")
+list(APPEND Caffe2_LINKER_LIBS cblas)
 
 if(BLAS STREQUAL "Atlas")
   find_package(Atlas REQUIRED)
@@ -109,10 +110,6 @@ endif()
 
 # ---[ CUDA
 include(cmake/Cuda.cmake)
-if(HAVE_CUDA)
-  LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
-  LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
-endif()
 
 # ---[ CUDNN
 if(HAVE_CUDA)
@@ -127,6 +124,7 @@ endif()
 if(HAVE_CUDA)
   include("cmake/External/nccl.cmake")
   include_directories(SYSTEM ${NCCL_INCLUDE_DIRS})
+  message(STATUS "NCCL: ${NCCL_LIBRARIES}")
   list(APPEND Caffe2_LINKER_LIBS ${NCCL_LIBRARIES})
 endif()
 
@@ -139,5 +137,7 @@ endif()
 if(HAVE_CUDA)
   add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/cnmem)
   include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cnmem/include)
-  list(APPEND ${Caffe2_LINKER_LIBS} ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so)
+  # message(STATUS "cnmem: ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so")
+  # message(STATUS "${CMAKE_CURRENT_BINARY_DIR}")
+  list(APPEND Caffe2_LINKER_LIBS "${CMAKE_CURRENT_BINARY_DIR}/third_party/cnmem/libcnmem.so")
 endif()

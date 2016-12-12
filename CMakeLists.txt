@@ -31,38 +31,36 @@ include(ExternalProject)
 include(cmake/Utils.cmake)
 
 # options
-option(USE_NERVANA_GPU
-       "Use Nervana GPU backend" OFF)
-option(USE_LMDB
-       "Use LMDB" ON)
-option(USE_LEVELDB
-       "Use LMDB" ON)
-option(USE_OPENCV
-       "Use openCV" ON)
-option(USE_ZMQ
-       "Use ZMQ" OFF)
-option(USE_ROCKSDB
-       "Use RocksDB" OFF)
-option(USE_MPI
-       "Use MPI" OFF)
+option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
+option(USE_LMDB "Use LMDB" ON)
+option(USE_LEVELDB "Use LMDB" ON)
+option(USE_OPENCV "Use openCV" ON)
+option(USE_ZMQ "Use ZMQ" OFF)
+option(USE_ROCKSDB "Use RocksDB" OFF)
+option(USE_MPI "Use MPI" OFF)
+option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
 
-# Third party builds.
+# ---[ Set link flag
+if(BUILD_SHARED_LIBS)
+  set(Caffe2_LINK Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO)
+else()
+    set(Caffe2_LINK -Wl,--whole-archive Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO -Wl,--no-whole-archive)
+endif()
+
+# ---[ Third party builds.
 include_directories(${CMAKE_SOURCE_DIR})
 
-# Old caffe protobuf.
+# ---[ Old caffe protobuf.
 add_subdirectory(caffe/proto)
 
+# ---[ Main build
 add_subdirectory(caffe2)
-target_link_libraries(Caffe2_CPU)
-target_compile_features(Caffe2_CPU PRIVATE cxx_range_for)
 
 # ---[ Copy all python files to build directory
-# ---[ Assemble list of python files to copy
 # Copy the files
-# file(COPY ${Caffe2_PYTHON_SRC} DESTINATION ${CMAKE_BINARY_DIR})
 install(DIRECTORY ${CMAKE_SOURCE_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}
         FILES_MATCHING PATTERN "*.py")
 
