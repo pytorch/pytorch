@@ -247,6 +247,7 @@ struct IndexToOffset {
   }
 };
 
+// For contiguous tensors, the offset = index
 template <typename T, typename IndexType>
 struct IndexToOffset<T, IndexType, -2> {
   static inline __host__ __device__ IndexType
