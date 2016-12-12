@@ -111,13 +111,13 @@ list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
 # Compile exposed libraries.
 LIST(APPEND CMAKE_CXX_FLAGS "-std=c++11 -fPIC")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
-target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS})
+target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS} glog gflags ${Caffe2_LINKER_LIBS})
 list(APPEND Caffe2_LINK_LIBS Caffe2_CPU)
 
 # ---[ CUDA library
 if(HAVE_CUDA)
   CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
-  target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} glog gflags atlas cblas)
+  target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} glog gflags ${Caffe2_LINKER_LIBS})
   list(APPEND Caffe2_LINK_LIBS Caffe2_GPU)
 endif()
 
@@ -125,7 +125,7 @@ endif()
 foreach(test_src ${Caffe2_CPU_TEST_SRCS})
   get_filename_component(test_name ${test_src} NAME_WE)
   add_executable(${test_name} "${test_src}")
-  target_link_libraries(${test_name} ${Caffe2_LINK_LIBS} glog atlas cblas gtest gtest_main ${Caffe2_LINKER_LIBS})
+  target_link_libraries(${test_name} ${Caffe2_LINK} gtest_main)
   target_compile_features(${test_name} PRIVATE cxx_range_for)
 endforeach()
 
@@ -160,7 +160,7 @@ endif()
 foreach(binary_src ${Caffe2_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} -Wl,--whole-archive ${Caffe2_LINK_LIBS} glog atlas cblas cnmem ${Caffe2_LINKER_LIBS} -Wl,--no-whole-archive)
+  target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem ${Caffe2_LINKER_LIBS})
 endforeach()
 
 
