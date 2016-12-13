@@ -17,11 +17,11 @@ This is the base class for all Modules defined in the nn package.
 ```
 
 ```python
-# .parameter_dict()
+# .state_dict()
 ```
 
 ```python
->>> pdict = model.parameter_dict()
+>>> pdict = model.state_dict()
 >>> print(pdict.keys())
 ['bias', 'weight']
 ```
@@ -102,14 +102,14 @@ Removes a registered backward hook with the given name
 returns a generator over all learnable parameters in the container instance. 
 This can typically be passed to the optimizer API
 
-**`[dict] parameter_dict()`**
+**`[dict] state_dict()`**
 
 returns a dictionary of learnable parameters of the Module.
 For example: ['weight' : Parameter(torch.FloatTensor(20x1x5x5)),
               'bias'   : Parameter(torch.FloatTensor(20)),
              ]
 
-**`load_parameter_dict(dict)`**
+**`load_state_dict(dict)`**
 
 Given a parameter dict, sets the parameters of self to be the given dict.
 
@@ -165,11 +165,11 @@ model.add_module('pool1', nn.MaxPool2d(2, 2))
 ```
 
 ```python
-# .parameter_dict()
+# .state_dict()
 ```
 
 ```python
->>> pdict = model.parameter_dict()
+>>> pdict = model.state_dict()
 >>> print(pdict.keys())
 ['conv1.bias', 'conv1.weight']
 ```
@@ -197,7 +197,7 @@ The container has some important additional methods:
 returns a generator over all learnable parameters in the container instance. 
 This can typically be passed to the optimizer API
 
-**`[dict] parameter_dict()`**
+**`[dict] state_dict()`**
 
 returns a dictionary of learnable parameters of the Container.
 For example: ['conv1.weight' : Parameter(torch.FloatTensor(20x1x5x5)),
@@ -205,7 +205,7 @@ For example: ['conv1.weight' : Parameter(torch.FloatTensor(20x1x5x5)),
              ]
 
 
-**`load_parameter_dict(dict)`**
+**`load_state_dict(dict)`**
 
 Given a parameter dict, sets the parameters of self to be the given dict.
 It loads loads the parameters recursively.
