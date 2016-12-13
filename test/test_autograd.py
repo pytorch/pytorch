@@ -398,21 +398,32 @@ class TestAutograd(TestCase):
                                     for arg in args)
             self.assertEqual(fn(*args).data, fn(*unpacked_args))
 
-        def test_blas(fn, x, y, z):
+        def test_blas_add(fn, x, y, z):
             # Checks all signatures
             compare(fn, x, y, z)
             compare(fn, 0.5, x, y, z)
             compare(fn, 0.5, x, 0.25, y, z)
 
-        test_blas(torch.addmm, Variable(torch.randn(2, 4)),
+        def test_blas(fn, x, y):
+            compare(fn, x, y)
+
+        test_blas(torch.mm, Variable(torch.randn(2, 10)),
+                Variable(torch.randn(10, 4)))
+        test_blas_add(torch.addmm, Variable(torch.randn(2, 4)),
                 Variable(torch.randn(2, 10)), Variable(torch.randn(10, 4)))
-        test_blas(torch.addbmm, Variable(torch.randn(2, 4)),
+        test_blas(torch.bmm, Variable(torch.randn(4, 2, 10)),
+                Variable(torch.randn(4, 10, 4)))
+        test_blas_add(torch.addbmm, Variable(torch.randn(2, 4)),
                 Variable(torch.randn(4, 2, 10)), Variable(torch.randn(4, 10, 4)))
-        test_blas(torch.baddbmm, Variable(torch.randn(4, 2, 4)),
+        test_blas_add(torch.baddbmm, Variable(torch.randn(4, 2, 4)),
                 Variable(torch.randn(4, 2, 10)), Variable(torch.randn(4, 10, 4)))
-        test_blas(torch.addmv, Variable(torch.randn(2)),
+        test_blas(torch.mv, Variable(torch.randn(2, 10)),
+                Variable(torch.randn(10)))
+        test_blas_add(torch.addmv, Variable(torch.randn(2)),
                 Variable(torch.randn(2, 10)), Variable(torch.randn(10)))
-        test_blas(torch.addr, Variable(torch.randn(5, 6)),
+        test_blas(torch.ger, Variable(torch.randn(5)),
+                Variable(torch.randn(6)))
+        test_blas_add(torch.addr, Variable(torch.randn(5, 6)),
                 Variable(torch.randn(5)), Variable(torch.randn(6)))
 
     def test_save_none_for_backward(self):
