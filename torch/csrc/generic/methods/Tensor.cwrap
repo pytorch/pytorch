@@ -383,6 +383,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   with_stateless: True
   cname: newTranspose
   return: THTensor*
+  before_call: |
+    long ndim = ((THPTensor*)${arg0})->cdata->nDimension;
+    THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
     - CONSTANT 0
@@ -393,6 +396,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: t_
   cname: transpose
   return: self
+  before_call: |
+    long ndim = ((THPTensor*)${arg0})->cdata->nDimension;
+    THPUtils_assert(ndim == 2, "t_() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
     - THTensor* self
