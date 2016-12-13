@@ -163,11 +163,11 @@ This magical behavior is internally obtained by good usage of the `stride()` and
 ```python
 >>> x = torch.Tensor(5).zero_()
 >>> print(x)
-0
-0
-0
-0
-0
+ 0
+ 0
+ 0
+ 0
+ 0
 [torch.FloatTensor of dimension 5]
 >>> x.narrow(0, 1, 2).fill_(1)
 >>> # narrow() returns a Tensor referencing the same Storage as x
@@ -175,7 +175,16 @@ This magical behavior is internally obtained by good usage of the `stride()` and
  0
  1
  1
- 1
+ 0
+ 0
+[torch.FloatTensor of dimension 5]
+>>> # same thing can be achieved with slice indexing
+>>> x[1:3] = 2
+>>> print(x)
+ 0
+ 2
+ 2
+ 0
  0
 [torch.FloatTensor of dimension 5]
 ```
@@ -241,7 +250,7 @@ The tensor size will be `sz1 x sz2 x sx3 x sz4 x sz5 x ...`.
 ### torch.Tensor(sizes) ###
 
 Create a tensor of any number of dimensions. `sizes` gives the size in each dimension of
-the tensor and is of type `torch.Size`. 
+the tensor and is of type `torch.Size`.
 
 ```python
 Example, create a 4D 4x4x3x2 tensor:
@@ -368,7 +377,7 @@ Returns True if the passed-in object is a `Storage` (of any type). Returns `Fals
 
 When you create a `torch.cuda.*Tensor`, it is allocated on the current GPU.
 However, you could allocate it on another GPU as well, using the `with torch.cuda.device(id)` context.
-All allocations within this context will be placed on the GPU `id`. 
+All allocations within this context will be placed on the GPU `id`.
 
 Once `Tensor`s are allocated, you can do operations on them from any GPU context, and the results
 will be placed on the same device as where the source `Tensor` is located.
@@ -403,6 +412,6 @@ with torch.cuda.device(1):
     # even within a context, you can give a GPU id to the .cuda call
     c = torch.randn(2).cuda(2)
 	# c.get_device() == 2
-	
+
 ```
 
