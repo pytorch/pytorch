@@ -182,6 +182,28 @@ register_torch_class('Storage', make_storage_reader)
 register_torch_class('Tensor', make_tensor_reader)
 
 ################################################################################
+# Reader function for tds.Vector and tds.Hash
+################################################################################
+
+def tds_Vec_reader(reader, version):
+    length = reader.read_long()
+    return [reader.read() for i in range(length)]
+
+
+def tds_Hash_reader(reader, version):
+    length = reader.read_long()
+    obj = {}
+    for i in range(length):
+        k = reader.read()
+        v = reader.read()
+        obj[k] = v
+    return obj
+
+
+reader_registry['tds.Vec'] = tds_Vec_reader
+reader_registry['tds.Hash'] = tds_Hash_reader
+
+################################################################################
 # Reader function for nn modules
 ################################################################################
 
