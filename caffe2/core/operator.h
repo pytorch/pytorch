@@ -62,12 +62,15 @@ class OperatorBase {
 
   template <typename T>
   inline T* Output(int idx) {
-    return OutputAt(idx).template GetMutable<T>();
+    return outputs_.at(idx)->template GetMutable<T>();
   }
 
-  inline Blob& OutputAt(int idx) {
-    DCHECK_LT(idx, outputs_.size());
-    return *outputs_.at(idx);
+  inline const Blob& InputBlob(int idx) {
+    return *inputs_.at(idx);
+  }
+
+  inline Blob* OutputBlob(int idx) {
+    return outputs_.at(idx);
   }
 
   template <typename T>
@@ -77,7 +80,7 @@ class OperatorBase {
 
   template <typename T>
   inline bool OutputIsType(int idx) {
-    return OutputAt(idx).template IsType<T>();
+    return outputs_.at(idx)->template IsType<T>();
   }
 
   inline int InputSize() { return inputs_.size(); }
