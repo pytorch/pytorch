@@ -80,7 +80,7 @@ For example: ['conv1.weight' : Parameter(torch.FloatTensor(20x1x5x5)),
              ]
 
 
-**`load_parameter_dict(dict)`**
+**`load_state_dict(dict)`**
 
 Given a parameter dict, sets the parameters of self to be the given dict.
 It loads loads the parameters recursively.
