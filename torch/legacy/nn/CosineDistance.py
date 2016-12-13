@@ -37,7 +37,7 @@ class CosineDistance(Module):
         input1, input2 = input[0], input[1]
         input1, input2 = self._makeContiguous(input1, input2)
 
-        if not self.buffer:
+        if self.buffer is None:
            self.buffer = input1.new()
            self.w1  = input1.new()
            self.w22 = input1.new()

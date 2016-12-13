@@ -389,8 +389,8 @@ class NNTestCase(TestCase):
         flat_d_out = d_out.view(-1)
 
         if jacobian_input:
-            jacobian_input = self._jacobian(input, d_out.nelement())
-            flat_jacobian_input = list(iter_tensors(jacobian_input))
+            jacobian_inp = self._jacobian(input, d_out.nelement())
+            flat_jacobian_input = list(iter_tensors(jacobian_inp))
 
         if jacobian_parameters:
             param, d_param = self._get_parameters(module)
@@ -416,7 +416,7 @@ class NNTestCase(TestCase):
 
         res = tuple()
         if jacobian_input:
-            res += jacobian_input,
+            res += jacobian_inp,
         if jacobian_parameters:
             res += jacobian_param,
 

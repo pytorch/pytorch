@@ -9,15 +9,7 @@ class ConcatTable(Container):
         self.output = []
 
     def updateOutput(self, input):
-        for i in range(len(self.modules)):
-            out = self.modules[i].updateOutput(input)
-            if i in self.output:
-                self.output[i] = out
-            else:
-                self.output.append(out)
-        for i in range(len(self.output)-1, len(self.modules)-1, -1):
-            del self.output[i]
-
+        self.output = [module.updateOutput(input) for module in self.modules]
         return self.output
 
     def _map_list(self, l1, l2, f):

@@ -38,7 +38,7 @@ class SelectTable(Module):
         # handle negative indices
         index = self.index if self.index >= 0 else input.size(self.dimension) + self.index
         # copy into gradInput[index] (necessary for variable sized inputs)
-        assert self.gradInput[index]
+        assert self.gradInput[index] is not None
         recursiveCopy(self.gradInput[index], gradOutput)
         return self.gradInput
 

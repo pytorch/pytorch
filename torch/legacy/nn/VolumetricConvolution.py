@@ -58,12 +58,12 @@ class VolumetricConvolution(Module):
     # function to re-view the weight layout in a way that would make the MM ops happy
     def _viewWeight(self):
         self.weight = self.weight.view(self.nOutputPlane, self.nInputPlane * self.kT * self.kH * self.kW)
-        if self.gradWeight and self.gradWeight.dim() > 0:
+        if self.gradWeight is not None and self.gradWeight.dim() > 0:
             self.gradWeight = self.gradWeight.view(self.nOutputPlane, self.nInputPlane * self.kT * self.kH * self.kW)
 
     def _unviewWeight(self):
         self.weight = self.weight.view(self.nOutputPlane, self.nInputPlane, self.kT, self.kH, self.kW)
-        if self.gradWeight and self.gradWeight.dim() > 0:
+        if self.gradWeight is not None and self.gradWeight.dim() > 0:
             self.gradWeight = self.gradWeight.view(self.nOutputPlane, self.nInputPlane, self.kT, self.kH, self.kW)
 
     def updateOutput(self, input):

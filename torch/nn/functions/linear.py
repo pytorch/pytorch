@@ -5,10 +5,7 @@ from torch.autograd import Function
 class Linear(Function):
 
     def forward(self, input, weight, bias=None):
-        if bias:
-            self.save_for_backward(input, weight, bias)
-        else:
-            self.save_for_backward(input, weight)
+        self.save_for_backward(input, weight, bias)
         output = input.new(input.size(0), weight.size(0))
         output.addmm_(0, 1, input, weight.t())
         if bias is not None:
@@ -18,12 +15,7 @@ class Linear(Function):
         return output
 
     def backward(self, grad_output):
-        tensors = self.saved_tensors
-        if len(tensors) == 2:
-            input, weight = tensors
-            bias = None
-        else:
-            input, weight, bias = tensors
+        input, weight, bias = self.saved_tensors
 
         grad_input = grad_weight = grad_bias = None
         if self.needs_input_grad[0]:

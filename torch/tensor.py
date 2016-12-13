@@ -102,6 +102,14 @@ class _TensorBase(object):
             else:
                 return _tensor_str._str(self).encode('UTF-8', 'replace')
 
+    def __bool__(self):
+        if self.numel() == 0:
+            return False
+        raise RuntimeError("bool value of non-empty " + torch.typename(self) +
+                " objects is ambiguous")
+
+    __nonzero__ = __bool__
+
     def __iter__(self):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
@@ -288,6 +296,64 @@ class _TensorBase(object):
 
     def __neg__(self):
         return self.neg()
+
+    def __eq__(self, other):
+        return self.eq(other)
+
+    def __ne__(self, other):
+        return self.ne(other)
+
+    def __lt__(self, other):
+        return self.lt(other)
+
+    def __le__(self, other):
+        return self.le(other)
+
+    def __gt__(self, other):
+        return self.gt(other)
+
+    def __ge__(self, other):
+        return self.ge(other)
+
+    # TODO: add native add or and xor in the libs
+    def __and__(self, other):
+        if (type(self).__name__ != 'ByteTensor' or
+                type(other).__name__ != 'ByteTensor'):
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return (self + other).eq(2)
+
+    def __or__(self, other):
+        if (type(self).__name__ != 'ByteTensor' or
+                type(other).__name__ != 'ByteTensor'):
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return (self + other).gt(0)
+
+    def __xor__(self, other):
+        if (type(self).__name__ != 'ByteTensor' or
+                type(other).__name__ != 'ByteTensor'):
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return (self + other).eq(1)
+
+    def __iand__(self, other):
+        if (type(self).__name__ != 'ByteTensor' or
+                type(other).__name__ != 'ByteTensor'):
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return self.mul_(other)
+
+    def __ior__(self, other):
+        if (type(self).__name__ != 'ByteTensor' or
+                type(other).__name__ != 'ByteTensor'):
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return self.copy_((self + other).gt(0))
+
+    def __ixor__(self, other):
+        if (type(self).__name__ != 'ByteTensor' or
+                type(other).__name__ != 'ByteTensor'):
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return self.copy_((self + other).eq(1))
+
+    def __hash__(self):
+        return id(self)
 
 
 _TensorBase.type = _type

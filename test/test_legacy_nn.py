@@ -911,7 +911,7 @@ class TestNN(NNTestCase):
         assert not noncontig.is_contiguous()
         output = module.forward(noncontig)
         self.assertEqual(output, noncontig)
-        self.assertTrue(output.contiguous())
+        self.assertTrue(output.is_contiguous())
 
         # Check that these don't raise errors
         module.__repr__()
@@ -1125,19 +1125,19 @@ class TestNN(NNTestCase):
         self.assertEqual(len(param), 6)
         self.assertEqual(len(grad), 6)
 
-        self.assertIn(concat.modules[0].weight, param)
-        self.assertIn(concat.modules[0].bias, param)
-        self.assertIn(concat.modules[1].weight, param)
-        self.assertIn(concat.modules[1].bias, param)
-        self.assertIn(net.modules[2].weight, param)
-        self.assertIn(net.modules[2].bias, param)
+        self.assertObjectIn(concat.modules[0].weight, param)
+        self.assertObjectIn(concat.modules[0].bias, param)
+        self.assertObjectIn(concat.modules[1].weight, param)
+        self.assertObjectIn(concat.modules[1].bias, param)
+        self.assertObjectIn(net.modules[2].weight, param)
+        self.assertObjectIn(net.modules[2].bias, param)
 
-        self.assertIn(concat.modules[0].gradWeight, grad)
-        self.assertIn(concat.modules[0].gradBias, grad)
-        self.assertIn(concat.modules[1].gradWeight, grad)
-        self.assertIn(concat.modules[1].gradBias, grad)
-        self.assertIn(net.modules[2].gradWeight, grad)
-        self.assertIn(net.modules[2].gradBias, grad)
+        self.assertObjectIn(concat.modules[0].gradWeight, grad)
+        self.assertObjectIn(concat.modules[0].gradBias, grad)
+        self.assertObjectIn(concat.modules[1].gradWeight, grad)
+        self.assertObjectIn(concat.modules[1].gradBias, grad)
+        self.assertObjectIn(net.modules[2].gradWeight, grad)
+        self.assertObjectIn(net.modules[2].gradBias, grad)
 
     def test_flattenParameters(self):
         net = self._build_net()
@@ -1152,14 +1152,14 @@ class TestNN(NNTestCase):
         modules, containers = net.findModules(nn.Linear)
         self.assertEqual(len(modules), 3)
         self.assertEqual(len(modules), len(containers))
-        self.assertIn(net.modules[0].modules[0], modules)
-        self.assertIn(net.modules[0].modules[1], modules)
-        self.assertIn(net.modules[2], modules)
-        self.assertIn(net.modules[0], containers)
+        self.assertObjectIn(net.modules[0].modules[0], modules)
+        self.assertObjectIn(net.modules[0].modules[1], modules)
+        self.assertObjectIn(net.modules[2], modules)
+        self.assertObjectIn(net.modules[0], containers)
         self.assertEqual(containers.count(net.modules[0]), 2)
-        self.assertIn(net, containers)
+        self.assertObjectIn(net, containers)
         for m, c in zip(modules, containers):
-            self.assertIn(m, c.modules)
+            self.assertObjectIn(m, c.modules)
 
     def test_apply(self):
         net = self._build_net()

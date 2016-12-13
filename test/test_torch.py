@@ -2674,6 +2674,71 @@ class TestTorch(TestCase):
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
 
+    def test_comparison_ops(self):
+        x = torch.randn(5, 5)
+        y = torch.randn(5, 5)
+
+        eq = x == y
+        for idx in iter_indices(x):
+            self.assertIs(x[idx] == y[idx], eq[idx] == 1)
+
+        ne = x != y
+        for idx in iter_indices(x):
+            self.assertIs(x[idx] != y[idx], ne[idx] == 1)
+
+        lt = x < y
+        for idx in iter_indices(x):
+            self.assertIs(x[idx] < y[idx], lt[idx] == 1)
+
+        le = x <= y
+        for idx in iter_indices(x):
+            self.assertIs(x[idx] <= y[idx], le[idx] == 1)
+
+        gt = x > y
+        for idx in iter_indices(x):
+            self.assertIs(x[idx] > y[idx], gt[idx] == 1)
+
+        ge = x >= y
+        for idx in iter_indices(x):
+            self.assertIs(x[idx] >= y[idx], ge[idx] == 1)
+
+    def test_logical_ops(self):
+        x = torch.randn(5, 5).gt(0)
+        y = torch.randn(5, 5).gt(0)
+
+        and_result = x & y
+        for idx in iter_indices(x):
+            if and_result[idx]:
+                self.assertTrue(x[idx] and y[idx])
+            else:
+                self.assertFalse(x[idx] and y[idx])
+
+        or_result = x | y
+        for idx in iter_indices(x):
+            if or_result[idx]:
+                self.assertTrue(x[idx] or y[idx])
+            else:
+                self.assertFalse(x[idx] or y[idx])
+
+        xor_result = x ^ y
+        for idx in iter_indices(x):
+            if xor_result[idx]:
+                self.assertTrue(x[idx] ^ y[idx])
+            else:
+                self.assertFalse(x[idx] ^ y[idx])
+
+        x_clone = x.clone()
+        x_clone &= y
+        self.assertEqual(x_clone, and_result)
+
+        x_clone = x.clone()
+        x_clone |= y
+        self.assertEqual(x_clone, or_result)
+
+        x_clone = x.clone()
+        x_clone ^= y
+        self.assertEqual(x_clone, xor_result)
+
 
 if __name__ == '__main__':
     unittest.main()
