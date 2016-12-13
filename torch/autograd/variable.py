@@ -402,7 +402,7 @@ class Variable(_C._VariableBase):
     def bmm(self, batch):
         output = Variable(self.data.new(self.data.size(0), self.data.size(1),
                 batch.data.size(2)))
-        return self._static_blas(Addbmm, (output, 0, 1, self, batch), False)
+        return self._static_blas(Baddbmm, (output, 0, 1, self, batch), False)
 
     def mv(self, vector):
         output = Variable(self.data.new(self.data.size(0)))
