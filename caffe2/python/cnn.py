@@ -180,10 +180,12 @@ class CNNModelHelper(ModelHelperBase):
                 kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
         if dim_in % group:
             raise ValueError("dim_in should be divisible by group.")
+        if dim_out % group:
+            raise ValueError("dim_out should be divisible by group.")
         splitted_blobs = self.net.DepthSplit(
             blob_in,
             ['_' + blob_out + '_gconv_split_' + str(i) for i in range(group)],
-            dimensions=[dim_in / group for i in range(group)],
+            dimensions=[int(dim_in / group) for i in range(group)],
             order=self.order
         )
         weight_shape = (
@@ -191,6 +193,9 @@ class CNNModelHelper(ModelHelperBase):
             if self.order == "NCHW" else
             [dim_out / group, kernel, kernel, dim_in / group]
         )
+        # Make sure that the shapes are of int format. Especially for py3 where
+        # int division gives float output.
+        weight_shape = [int(v) for v in weight_shape]
         conv_blobs = []
         for i in range(group):
             if self.init_params:
@@ -203,7 +208,7 @@ class CNNModelHelper(ModelHelperBase):
                 bias = self.param_init_net.__getattr__(bias_init[0])(
                     [],
                     blob_out + '_gconv_%d_b' % i,
-                    shape=[dim_out / group],
+                    shape=[int(dim_out / group)],
                     **bias_init[1]
                 )
             else:
