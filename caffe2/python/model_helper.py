@@ -278,6 +278,7 @@ class ModelHelperBase(object):
             "SparseAdagrad",
             "AveragedLoss",
             "Cast",
+            "Checkpoint",
             "ConstantFill",
             "CopyGPUToCPU",
             "CopyCPUToGPU",
@@ -297,7 +298,7 @@ class ModelHelperBase(object):
             "ScatterWeightedSum",
             "Sigmoid",
             "SortedSegmentSum",
-            "Snapshot",
+            "Snapshot", # Note: snapshot is deprecated, use Checkpoint
             "Softmax",
             "SoftmaxWithLoss",
             "SquaredL2Distance",
