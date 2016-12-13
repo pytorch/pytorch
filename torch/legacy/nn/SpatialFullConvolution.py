@@ -49,7 +49,7 @@ class SpatialFullConvolution(Module):
             stdv = 1/math.sqrt(kW*kH*nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
-        if self.bias:
+        if self.bias is not None:
             self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
@@ -189,8 +189,10 @@ class SpatialFullConvolution(Module):
         )
 
     def type(self, type=None, tensorCache=None):
-        self.finput = self.finput and torch.Tensor()
-        self.fgradInput = self.fgradInput and torch.Tensor()
+        if self.finput is not None:
+            self.finput = torch.Tensor()
+        if self.fgradInput is not None:
+            self.fgradInput = torch.Tensor()
         return super(SpatialFullConvolution, self).type(type, tensorCache)
 
     def __repr__(self):

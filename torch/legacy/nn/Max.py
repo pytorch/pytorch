@@ -51,13 +51,13 @@ class Max(Module):
         if type == 'torch.cuda.FloatTensor':
             indices, self._indices = self._indices, None
             super(Max, self).type(type, tensorCache)
-            self._indices = indices.type('torch.cuda.LongTensor') if indices else None
+            self._indices = indices.type('torch.cuda.LongTensor') if indices is not None else None
         else:
             # self._indices must be a LongTensor. Setting it to nil temporarily avoids
             # unnecessary memory allocations.
             indices, self._indices = self._indices, None
             super(Max, self).type(type, tensorCache)
-            self._indices = indices.long() if indices else None
+            self._indices = indices.long() if indices is not None else None
 
         return self
 

@@ -24,9 +24,9 @@ class Variable(_C._VariableBase):
 
     @property
     def grad(self):
-        if self.requires_grad:
+        if self.requires_grad and self._grad is None:
             # TODO: this won't have to be zeroed in the future
-            self._grad = self._grad or self.data.new(self.data.size()).zero_()
+            self._grad = self.data.new(self.data.size()).zero_()
         return self._grad
 
     @property

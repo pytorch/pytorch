@@ -21,7 +21,7 @@ class CosineEmbeddingCriterion(Criterion):
         input1, input2 = input[0], input[1]
 
         # keep backward compatibility
-        if not self.buffer:
+        if self.buffer is None:
             self.buffer = input1.new()
             self.w1  = input1.new()
             self.w22 = input1.new()

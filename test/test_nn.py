@@ -755,7 +755,7 @@ class TestNN(NNTestCase):
         new_param = Parameter(torch.randn(5, 5))
         l.param_name = new_param
         self.assertEqual(num_params(), 3)
-        self.assertIn(new_param, l.parameters())
+        self.assertObjectIn(new_param, l.parameters())
 
         var = Variable(torch.randn(5, 5))
         l.var_name = var

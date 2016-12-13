@@ -34,7 +34,7 @@ class FlattenTable(Module):
 
             return True
         else:
-            return output[input_map] == input
+            return output[input_map] is input
 
     # During BPROP we have to build a gradInput with the same shape as the
     # input.  This is a recursive function to build up a gradInput

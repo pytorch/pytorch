@@ -105,6 +105,39 @@ class TestCase(unittest.TestCase):
                 pass
             super(TestCase, self).assertEqual(x, y, message)
 
+    def assertNotEqual(self, x, y, prec=None, message=''):
+        if prec is None:
+            prec = self.precision
+
+        if isinstance(x, Variable) and isinstance(y, Variable):
+            x = x.data
+            y = y.data
+
+        if torch.is_tensor(x) and torch.is_tensor(y):
+            max_err = 0
+            if x.size() != y.size():
+                super(TestCase, self).assertNotEqual(x.size(), y.size())
+            for index in iter_indices(x):
+                max_err = max(max_err, abs(x[index] - y[index]))
+            self.assertGreaterEqual(max_err, prec, message)
+        elif type(x) == str and type(y) == str:
+            super(TestCase, self).assertNotEqual(x, y)
+        elif is_iterable(x) and is_iterable(y):
+            super(TestCase, self).assertNotEqual(x, y)
+        else:
+            try:
+                self.assertGreaterEqual(abs(x - y), prec, message)
+                return
+            except:
+                pass
+            super(TestCase, self).assertNotEqual(x, y, message)
+
+    def assertObjectIn(self, obj, iterable):
+        for elem in iterable:
+            if id(obj) == id(elem):
+                return
+        raise AssertionError("object not found in iterable")
+
 
 def make_jacobian(input, num_out):
     if isinstance(input, Variable) and not input.requires_grad:

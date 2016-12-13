@@ -49,7 +49,7 @@ class Bilinear(Module):
             stdv = 1. / math.sqrt(self.weight.size(1))
 
         self.weight.uniform_(-stdv, stdv)
-        if self.bias:
+        if self.bias is not None:
             self.bias.uniform_(-stdv, stdv)
         return self
 
@@ -69,7 +69,7 @@ class Bilinear(Module):
             self.buff2.mul_(input[1])
             torch.sum(self.output.narrow(1, k, 1), self.buff2, 1)
 
-        if self.bias:
+        if self.bias is not None:
             self.output.add_(self.bias.view(1, self.bias.nelement()).expand_as(self.output))
 
         return self.output
@@ -126,7 +126,7 @@ class Bilinear(Module):
             torch.mul(self.buff1, input[0], gradOutput.narrow(1, k, 1).expand_as(input[0]))
             self.gradWeight[k].addmm_(self.buff1.t(), input[1])
 
-        if self.bias:
+        if self.bias is not None:
             self.gradBias.add_(scale, gradOutput.sum(0))
 
 

@@ -63,10 +63,10 @@ class BatchNormalization(Module):
            self.gradBias = None
 
     def reset(self):
-        if self.weight:
+        if self.weight is not None:
            self.weight.uniform_()
 
-        if self.bias:
+        if self.bias is not None:
            self.bias.zero_()
 
         self.running_mean.zero_()
@@ -85,7 +85,7 @@ class BatchNormalization(Module):
             self._input.resize_as_(input).copy_(input)
             input = self._input
 
-        if gradOutput:
+        if gradOutput is not None:
             if not gradOutput.is_contiguous():
                 if self._gradOutput is None:
                       self._gradOutput = gradOutput.new()
