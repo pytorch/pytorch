@@ -57,6 +57,14 @@ static inline uint32_t detectHostSIMDExtensions()
 
 #else // x86
 
+#if defined(__arm__) //ARM without NEON
+
+static inline uint32_t detectHostSIMDExtensions()
+{
+  return SIMDExtension_DEFAULT;
+}
+  
+#else
 static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
 {
 #ifndef _MSC_VER
@@ -99,5 +107,6 @@ static inline uint32_t detectHostSIMDExtensions()
 }
 
 #endif // end x86 SIMD extension detection code
+#endif // end __arm__
 
 #endif
