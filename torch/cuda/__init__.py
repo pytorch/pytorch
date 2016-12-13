@@ -10,8 +10,15 @@ _cudart = None
 
 
 def is_available():
-    return (hasattr(torch._C, '_cuda_isDriverSufficient') and
-            torch._C._cuda_isDriverSufficient())
+    if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
+            not torch._C._cuda_isDriverSufficient()):
+        return False
+    try:
+        return torch._C._cuda_getDeviceCount() > 0
+    except RuntimeError as e:
+        if 'no CUDA-capable device is detected' in e.args[0]:
+            return False
+        raise
 
 
 def _sleep(cycles):
