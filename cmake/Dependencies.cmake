@@ -2,7 +2,8 @@
 set(Caffe2_LINKER_LIBS "")
 
 # ---[ Custom Protobuf
-include(cmake/ProtoBuf.cmake)
+# include(cmake/ProtoBuf.cmake)
+include("cmake/External/Protobuf.cmake")
 
 # ---[ Threads
 find_package(Threads REQUIRED)
