@@ -1,1 +1,1 @@
-from .generate_wrappers import generate_wrappers
+from .generate_wrappers import generate_wrappers, wrap_function, import_module
