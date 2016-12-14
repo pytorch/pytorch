@@ -206,9 +206,10 @@ class MultiLabelMarginLoss(_Loss):
 
 class SmoothL1Loss(_Loss):
     """Creates a criterion that uses a squared term if the absolute 
-    element-wise error falls below 1 and an L1 term otherwise. 
+    element-wise error falls below 1 and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases 
     prevents exploding gradients (e.g. see "Fast R-CNN" paper by Ross Girshick).
+    Also known as the Huber loss.
 
                               { 0.5 * (x_i - y_i)^2, if |x_i - y_i| < 1
         loss(x, y) = 1/n \sum {
