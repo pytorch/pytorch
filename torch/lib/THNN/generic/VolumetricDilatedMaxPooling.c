@@ -2,6 +2,101 @@
 #define TH_GENERIC_FILE "generic/VolumetricDilatedMaxPooling.c"
 #else
 
+static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
+                         THNNState *state,
+                         THTensor *input,
+                         THTensor *gradOutput,
+                         THIndexTensor *indices,
+                         int kT, int kW, int kH,
+                         int dT, int dW, int dH,
+                         int pT, int pW, int pH,
+                         int dilationT, int dilationW, int dilationH,
+                         bool ceilMode) {
+  int ndim = input->nDimension;
+  int dimN = 0;
+  int dimt = 1;
+  int dimh = 2;
+  int dimw = 3;
+  long nslices;
+  long itime;
+  long iheight;
+  long iwidth;
+  long otime;
+  long oheight;
+  long owidth;
+
+  THArgCheck(kT > 0 && kW > 0 && kH > 0, 5,
+             "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d",
+             kT, kH, kW);
+  THArgCheck(dT > 0 && dW > 0 && dH > 0, 8,
+             "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
+             dT, dH, dW);
+  THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 14,
+             "dilation should be greater than 0, but got dilationT: %d dilationH: %d dilationW: %d",
+             dilationT, dilationH, dilationW);
+
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+                "4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  if (input->nDimension == 5)
+  {
+    dimN++;
+    dimt++;
+    dimh++;
+    dimw++;
+  }
+
+  THArgCheck(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH, 2,
+             "pad should be smaller than half of kernel size, but got "
+             "kT: %d kW: %d, kH: %d, padT: %d, padW: %d, padH: %d",
+             kT, kW, kH, pT, pW, pH);
+
+  nslices = input->size[dimN];
+  itime   = input->size[dimt];
+  iheight = input->size[dimh];
+  iwidth  = input->size[dimw];
+  if (ceilMode)
+  {
+    otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
+    oheight = (int)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
+    owidth  = (int)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
+  }
+  else
+  {
+    otime = (int)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
+    oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
+    owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
+  }
+
+  if (pT || pW || pH)
+  {
+    // ensure that the last pooling starts inside the image
+    if ((otime - 1)*dT >= itime + pT)
+      --otime;
+    if ((oheight - 1)*dH >= iheight + pH)
+      --oheight;
+    if ((owidth  - 1)*dW >= iwidth  + pW)
+      --owidth;
+  }
+
+  if (otime < 1 || owidth < 1 || oheight < 1)
+    THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
+            nslices,itime,iheight,iwidth,nslices,otime,oheight,owidth);
+
+  if (gradOutput != NULL) {
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimN, nslices);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimt, otime);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, oheight);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, owidth);
+  }
+  if (indices != NULL) {
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimN, nslices);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimt, otime);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimh, oheight);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimw, owidth);
+  }
+}
+
 static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
@@ -133,8 +228,6 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   real *output_data;
   THIndex_t *indices_data;
 
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   int dimN = 0;
   int dimt = 1;
@@ -149,19 +242,11 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     dimw++;
   }
 
-  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
-	     && input->size[dimt] >= kT, 2,
-	     "input image (T: %d H: %d W: %d) smaller than "
-	     "kernel size (kT: %d kH: %d kW: %d)",
-	     input->size[dimt], input->size[dimh], input->size[dimw],
-	     kT, kH, kW);
-
-  THArgCheck(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH, 2,
-    "pad should be smaller than half of kernel size"
-  );
-
-  THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 14,
-      "dilation should be greater than 0");
+  THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
+        state, input, NULL, NULL,
+        kT,  kW,  kH, dT,  dW,  dH,
+        pT,  pW,  pH, dilationT,  dilationW,  dilationH,
+        ceilMode);
 
   /* sizes */
   nslices = input->size[dimN];
@@ -180,10 +265,6 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
     owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
   }
-
-  if (otime < 1 || owidth < 1 || oheight < 1)
-    THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
-            nslices,itime,iheight,iwidth,nslices,otime,oheight,owidth);
 
   if (pT || pW || pH)
   {
@@ -319,6 +400,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THIndexTensor *indices,
+          int kT,
+          int kW,
+          int kH,
           int dT,
           int dW,
           int dH,
@@ -327,7 +411,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
           int pH,
           int dilationT,
           int dilationW,
-          int dilationH)
+          int dilationH,
+          bool ceilMode)
 {
   int nslices;
   int itime;
@@ -344,6 +429,12 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   int dimt = 1;
   int dimh = 2;
   int dimw = 3;
+
+  THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
+        state, input, gradOutput, indices,
+        kT,  kW,  kH, dT,  dW,  dH,
+        pT,  pW,  pH, dilationT,  dilationW,  dilationH,
+        ceilMode);
 
   // TODO: gradOutput shape check
   /* get contiguous gradOutput */

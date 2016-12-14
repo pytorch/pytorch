@@ -66,6 +66,9 @@ static inline void THNN_(SpatialFullConvolution_shapeCheck)(
 	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
 	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THArgCheck(adjW < dW && adjH < dH, 15,
+        "output adjustment must be smaller than stride, but got adjH: %d adjW: %d dH: %d dW: %d",
+        adjH, adjW, dH, dW);
   THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
 		"2D or 4D weight tensor expected, but got: %s");
 

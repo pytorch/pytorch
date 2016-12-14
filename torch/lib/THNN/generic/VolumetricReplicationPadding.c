@@ -2,6 +2,66 @@
 #define TH_GENERIC_FILE "generic/VolumetricReplicationPadding.c"
 #else
 
+static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
+                         THNNState *state,
+                         THTensor *input,
+                         THTensor *gradOutput,
+                         int pleft, int pright,
+                         int ptop, int pbottom,
+                         int pfront, int pback) {
+  int dimw = 3;
+  int dimh = 2;
+  int dimd = 1;
+  int dimslices = 0;
+  long nslices;
+  long idepth;
+  long iheight;
+  long iwidth;
+  long odepth;
+  long oheight;
+  long owidth;
+
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  if (input->nDimension == 5)
+  {
+    dimw++;
+    dimh++;
+    dimd++;
+    dimslices++;
+  }
+
+  /* sizes */
+  nslices = input->size[dimslices];
+  idepth = input->size[dimd];
+  iheight = input->size[dimh];
+  iwidth = input->size[dimw];
+  odepth = idepth + pfront + pback;
+  oheight = iheight + ptop + pbottom;
+  owidth  = iwidth + pleft + pright;
+
+  THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1, 2,
+             "input (D: %d H: %d, W: %d)is too small."
+             " Calculated output D: %d H: %d W: %d",
+             idepth, iheight, iwidth, odepth, oheight, owidth);
+
+  if (gradOutput != NULL) {
+    THArgCheck(nslices == THTensor_(size)(gradOutput, dimslices), 3,
+               "gradOutput width unexpected. Expected: %d, Got: %d",
+               nslices, THTensor_(size)(gradOutput, dimslices));
+    THArgCheck(owidth == THTensor_(size)(gradOutput, dimw), 3,
+               "gradOutput width unexpected. Expected: %d, Got: %d",
+               owidth, THTensor_(size)(gradOutput, dimw));
+    THArgCheck(oheight == THTensor_(size)(gradOutput, dimh), 3,
+               "gradOutput height unexpected. Expected: %d, Got: %d",
+               oheight, THTensor_(size)(gradOutput, dimh));
+    THArgCheck(odepth == THTensor_(size)(gradOutput, dimd), 3,
+               "gradOutput depth unexpected. Expected: %d, Got: %d",
+               odepth, THTensor_(size)(gradOutput, dimd));
+  }
+}
+
 static void THNN_(VolumetricReplicationPadding_updateOutput_frame)(
   real *input_p, real *output_p,
   long nslices,
@@ -85,8 +145,9 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(THNNState *state,
   real *input_data;
   real *output_data;
 
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-		"4D or 5D (batch mode) tensor expected for input, but got: %s");
+THNN_(VolumetricReplicationPadding_shapeCheck)(
+      state, input, NULL, pleft, pright,
+      ptop, pbottom, pfront, pback);
 
   if (input->nDimension == 5)
   {
@@ -105,11 +166,6 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(THNNState *state,
   odepth = idepth + pfront + pback;
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;
-
-  THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1, 2,
-	     "input (D: %d H: %d, W: %d)is too small."
-	     " Calculated output D: %d H: %d W: %d",
-	     idepth, iheight, iwidth, odepth, oheight, owidth);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
@@ -255,16 +311,10 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(THNNState *state,
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;
 
-  THArgCheck(owidth == THTensor_(size)(gradOutput, dimw), 3,
-	     "gradOutput width unexpected. Expected: %d, Got: %d",
-	     owidth, THTensor_(size)(gradOutput, dimw));
-  THArgCheck(oheight == THTensor_(size)(gradOutput, dimh), 3,
-	     "gradOutput height unexpected. Expected: %d, Got: %d",
-	     oheight, THTensor_(size)(gradOutput, dimh));
-  THArgCheck(odepth == THTensor_(size)(gradOutput, dimd), 3,
-	     "gradOutput depth unexpected. Expected: %d, Got: %d",
-	     odepth, THTensor_(size)(gradOutput, dimd));
-  
+
+THNN_(VolumetricReplicationPadding_shapeCheck)(
+      state, input, NULL, pleft, pright,
+      ptop, pbottom, pfront, pback);
 
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
