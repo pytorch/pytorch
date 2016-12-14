@@ -533,7 +533,6 @@ static void _call_output_hooks(THPFunction *self, THPObjectPtr& grad_output)
         _ensure_correct_hook_result_single(old_grad, result, key);
 
         // Replace the old gradient
-        PyObject *old_grad = PyTuple_GET_ITEM(new_grad_output.get(), i);
         PyTuple_SET_ITEM(new_grad_output.get(), i, result.release());
         Py_XDECREF(old_grad);
         old_grad = PyTuple_GET_ITEM(new_grad_output.get(), i);
