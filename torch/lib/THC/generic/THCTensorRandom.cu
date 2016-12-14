@@ -302,6 +302,31 @@ THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+#define DEFINE_BERNOULLI_TENSOR(NAME, PROB_TYPE, PROB_DATA_TYPE)               \
+THC_API void THCTensor_(NAME)(THCState* state,                                 \
+        THCTensor *self_, PROB_TYPE *probs_)                                   \
+{                                                                              \
+  THAssert(THCTensor_(checkGPU)(state, 2, self_, probs_));                     \
+  Generator* gen = THCRandom_getGenerator(state);                              \
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);                   \
+  PROB_TYPE *probs = PROB_TYPE##_newContiguous(state, probs_);                 \
+  ptrdiff_t size = THCTensor_(nElement)(state, self);                          \
+  ptrdiff_t prob_size = PROB_TYPE##_nElement(state, probs);                    \
+  real *result_data = THCTensor_(data)(state, self);                           \
+  PROB_DATA_TYPE *probs_data = PROB_TYPE##_data(state, probs);                 \
+                                                                               \
+  THArgCheck(size == prob_size, 3, "inconsistent tensor size");                \
+                                                                               \
+  generate_bernoulli_tensor<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>( \
+      gen->gen_states, size, result_data, probs_data);                         \
+                                                                               \
+  PROB_TYPE##_free(state, probs);                                              \
+  THCTensor_(freeCopyTo)(state, self, self_);                                  \
+}
+
+DEFINE_BERNOULLI_TENSOR(bernoulli_FloatTensor, THCudaTensor, float)
+DEFINE_BERNOULLI_TENSOR(bernoulli_DoubleTensor, THCudaDoubleTensor, double)
+
 #if defined(THC_REAL_IS_DOUBLE)
 
 GENERATE_KERNEL1(generate_geometric, double, double p, double, curand_uniform_double, ceil(log(x) / log(1-p)))

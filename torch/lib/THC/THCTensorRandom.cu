@@ -77,32 +77,57 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
   memcpy(&gen->initial_seed, THByteTensor_data(rng_state) + states_size, seed_size);
 }
 
-#define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)               \
-__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)  \
+#define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
+__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)      \
 {                                                                              \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                     \
+  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                 \
+    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                              \
     if (i < size) {                                                            \
-      T y = TRANSFORM;                                                           \
+      T y = TRANSFORM;                                                         \
       result[i] = y;                                                           \
     }                                                                          \
   }                                                                            \
 }
 
-#define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)                \
-__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)  \
+#define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)      \
+__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)      \
 {                                                                                    \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                   \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                           \
+  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                      \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {            \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                       \
+    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                    \
     if (i < size) {                                                                  \
-      T y = TRANSFORM;                                                                 \
+      T y = TRANSFORM;                                                               \
       result[i] = y;                                                                 \
     }                                                                                \
   }                                                                                  \
+}
+
+template<typename T, typename U>
+struct is_same { static const bool value = false; };
+
+template<typename T>
+struct is_same<T, T> { static const bool value = true; };
+
+template<typename real, typename prob_type>
+__global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
+        real *result, prob_type *probs)
+{
+  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
+    if (is_same<prob_type, double>::value) {
+      double x = curand_uniform_double(&state[blockIdx.x]);
+      if (i < size)
+        result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
+    } else {
+      float x = curand_uniform(&state[blockIdx.x]);
+      if (i < size)
+        result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
+    }
+  }
 }
 
 GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, x * (b-a) + a)
