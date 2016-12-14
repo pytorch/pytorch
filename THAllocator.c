@@ -482,6 +482,7 @@ void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data)
 int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 {
   THError("refcounted file mapping not supported on your system");
+  return 0;
 }
 
 #endif
