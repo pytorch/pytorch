@@ -2,6 +2,62 @@
 #define THC_GENERIC_FILE "generic/VolumetricReplicationPadding.cu"
 #else
 
+static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input,
+                         THCTensor *gradOutput,
+                         int pleft, int pright,
+                         int ptop, int pbottom,
+                         int pfront, int pback) {
+  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+             "input tensor must fit into 32-bit index math");
+  int numInputDims = THCTensor_(nDimension)(state, input);
+
+  THCUNN_argCheck(state, numInputDims == 4 || numInputDims == 5, 2, input,
+    "4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  int planeDim = 0;
+  int dimd = 1;
+  int dimh = 2;
+  int dimw = 3;
+  if (numInputDims == 5) {
+    planeDim++;
+    dimd++;
+    dimh++;
+    dimw++;
+    }
+
+  int numPlanes = THCTensor_(size)(state, input, planeDim);
+  int idepth = input->size[dimd];
+  int iheight = input->size[dimh];
+  int iwidth = input->size[dimw];
+  int odepth = idepth + pfront + pback;
+  int oheight = iheight + ptop + pbottom;
+  int owidth  = iwidth + pleft + pright;
+  THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1, 2,
+             "input (D: %d H: %d, W: %d) is too small."
+             " Calculated output D: %d H: %d W: %d",
+             idepth, iheight, iwidth, odepth, oheight, owidth);
+
+  if (gradOutput != NULL) {
+    THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutput),
+               3, "output gradient tensor must fit into 32-bit index math");
+
+    THArgCheck(numPlanes == THCTensor_(size)(state, gradOutput, planeDim), 3,
+               "gradOutput width unexpected. Expected: %d, Got: %d",
+               numPlanes, THCTensor_(size)(state, gradOutput, planeDim));
+    THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
+               "gradOutput width unexpected. Expected: %d, Got: %d",
+               owidth, THCTensor_(size)(state, gradOutput, dimw));
+    THArgCheck(oheight == THCTensor_(size)(state, gradOutput, dimh), 3,
+               "gradOutput height unexpected. Expected: %d, Got: %d",
+               oheight, THCTensor_(size)(state, gradOutput, dimh));
+    THArgCheck(odepth == THCTensor_(size)(state, gradOutput, dimd), 3,
+               "gradOutput depth unexpected. Expected: %d, Got: %d",
+               odepth, THCTensor_(size)(state, gradOutput, dimd));
+  }
+}
+
 void THNN_(VolumetricReplicationPadding_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -9,8 +65,9 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
            int pleft, int pright,
            int ptop, int pbottom,
            int pfront, int pback) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
-             "input tensor must fit into 32-bit index math");
+  THNN_(VolumetricReplicationPadding_shapeCheck)(
+        state, input, NULL, pleft, pright, ptop,
+        pbottom, pfront, pback);
 
   int planeDim = 0;
   int dimd = 1;
@@ -19,8 +76,6 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
   int numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 4 || numInputDims == 5, 2, input,
-    "4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 5) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -29,18 +84,6 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
     dimh++;
     dimw++;
   }
-
-  int idepth = input->size[dimd];
-  int iheight = input->size[dimh];
-  int iwidth = input->size[dimw];
-  int odepth = idepth + pfront + pback;
-  int oheight = iheight + ptop + pbottom;
-  int owidth  = iwidth + pleft + pright;
-
-  THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1, 2,
-             "input (D: %d H: %d, W: %d)is too small."
-             " Calculated output D: %d H: %d W: %d",
-             idepth, iheight, iwidth, odepth, oheight, owidth);
 
   int numPlanes = THCTensor_(size)(state, input, planeDim);
   int inputD = THCTensor_(size)(state, input, dimd);
@@ -85,10 +128,9 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
            int pleft, int pright,
            int ptop, int pbottom,
            int pfront, int pback) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
-             "input tensor must fit into 32-bit index math");
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutput),
-             3, "output gradient tensor must fit into 32-bit index math");
+  THNN_(VolumetricReplicationPadding_shapeCheck)(
+        state, input, gradOutput, pleft, pright, ptop,
+        pbottom, pfront, pback);
 
   int planeDim = 0;
   int dimd = 1;
@@ -103,22 +145,6 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
     dimw++;
   }
 
-  int idepth = input->size[dimd];
-  int iheight = input->size[dimh];
-  int iwidth = input->size[dimw];
-  int odepth = idepth + pfront + pback;
-  int oheight = iheight + ptop + pbottom;
-  int owidth  = iwidth + pleft + pright;
-
-  THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
-             "gradOutput width unexpected. Expected: %d, Got: %d",
-             owidth, THCTensor_(size)(state, gradOutput, dimw));
-  THArgCheck(oheight == THCTensor_(size)(state, gradOutput, dimh), 3,
-             "gradOutput height unexpected. Expected: %d, Got: %d",
-             oheight, THCTensor_(size)(state, gradOutput, dimh));
-  THArgCheck(odepth == THCTensor_(size)(state, gradOutput, dimd), 3,
-             "gradOutput depth unexpected. Expected: %d, Got: %d",
-             odepth, THCTensor_(size)(state, gradOutput, dimd));
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 

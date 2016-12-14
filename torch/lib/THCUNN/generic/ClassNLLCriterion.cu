@@ -30,9 +30,14 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     );
   }
 
-  if (THCTensor_(nDimension)(state, input) > 2) {
-    THArgCheck(0, 2, "vector or matrix expected");
-  }
+  THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
+
+  long batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
+  long num_targets = THCudaLongTensor_size(state, target, 0);
+  THArgCheck(batch_size == num_targets,
+      2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
+      batch_size, num_targets);
+
   if (weights && THCTensor_(nElement)(state, weights) != n_classes) {
     THCDescBuff s1 = THCTensor_(sizeDesc)(state, weights);
     THError("weight tensor should be defined either for all %d classes or no classes"
@@ -112,9 +117,14 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     );
   }
 
-  if (THCTensor_(nDimension)(state, input) > 2) {
-    THArgCheck(0, 2, "vector or matrix expected");
-  }
+  THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
+
+  long batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
+  long num_targets = THCudaLongTensor_size(state, target, 0);
+  THArgCheck(batch_size == num_targets,
+      2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
+      batch_size, num_targets);
+
   if (weights && THCTensor_(nElement)(state, weights) != n_classes) {
     THError("weight tensor should be defined either for all or no classes");
   }
