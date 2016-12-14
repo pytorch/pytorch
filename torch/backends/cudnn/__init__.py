@@ -1,3 +1,4 @@
+import torch._C as _C
 import ctypes
 import warnings
 import torch.cuda
@@ -51,6 +52,12 @@ def is_acceptable(tensor):
                     'win32': 'PATH'
                 }.get(sys.platform, 'LD_LIBRARY_PATH')))
             return False
+    if not _C.has_cudnn:
+        warnings.warn("cuDNN library has been detected, but your pytorch "
+                "installation was compiled without support for it. You "
+                "might want to rebuild pytorch, making sure the library "
+                "is visible to the build system.")
+        return False
     return True
 
 __cudnn_version = []
