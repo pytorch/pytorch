@@ -18,7 +18,7 @@
 // Note that this allocator does not split larger allocations into smaller
 // blocks, unlike the caching device allocator.
 //
-extern THAllocator THCCachingHostAllocator;
+THC_API THAllocator THCCachingHostAllocator;
 
 // Records an event in the specified stream. The allocation 'ptr' will not be
 // re-used until the event has occured.
