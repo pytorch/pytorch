@@ -835,7 +835,12 @@ PyMODINIT_FUNC PyInit__C()
 
 #ifdef WITH_CUDNN
   ASSERT_TRUE(THCUDNNModule_initModule(module));
+  PyObject *has_cudnn = Py_True;
+#else
+  PyObject *has_cudnn = Py_False;
 #endif
+  Py_INCREF(has_cudnn);
+  ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
 
   THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
