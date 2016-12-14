@@ -290,16 +290,10 @@ class Module(object):
 
     def train(self):
         self.training = True
-        for p in self._parameters.values():
-            if p is not None:
-                p.requires_grad = True
         return self
 
     def eval(self):
         self.training = False
-        for p in self._parameters.values():
-            if p is not None:
-                p.requires_grad = False
         return self
 
     def zero_grad(self):
