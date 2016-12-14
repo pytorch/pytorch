@@ -47,10 +47,6 @@ if(USE_LMDB)
   find_package(LMDB REQUIRED)
   include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
   list(APPEND Caffe2_LINKER_LIBS ${LMDB_LIBRARIES})
-  add_definitions(-DUSE_LMDB)
-  if(ALLOW_LMDB_NOLOCK)
-    add_definitions(-DALLOW_LMDB_NOLOCK)
-  endif()
 endif()
 
 # ---[ LevelDB
@@ -58,7 +54,6 @@ if(USE_LEVELDB)
   find_package(LevelDB REQUIRED)
   include_directories(SYSTEM ${LevelDB_INCLUDE})
   list(APPEND Caffe2_LINKER_LIBS ${LevelDB_LIBRARIES})
-  add_definitions(-DUSE_LEVELDB)
 endif()
 
 # ---[ Snappy
@@ -70,11 +65,15 @@ endif()
 
 # ---[ OpenCV
 if(USE_OPENCV)
+  # OpenCV 3
   find_package(OpenCV QUIET COMPONENTS core highgui imgproc imgcodecs)
+  if(NOT OpenCV_FOUND)
+    # OpenCV 2
+    find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
+  endif()
   include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
   list(APPEND Caffe2_LINKER_LIBS ${OpenCV_LIBS})
   message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
-  add_definitions(-DUSE_OPENCV)
 endif()
 
 # ---[ EIGEN
