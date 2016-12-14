@@ -24,7 +24,6 @@ typedef struct THAllocator {
  */
 extern THAllocator THDefaultAllocator;
 
-#if defined(_WIN32) || defined(HAVE_MMAP)
 /* file map allocator
  */
 typedef struct THMapAllocatorContext_  THMapAllocatorContext;
@@ -40,6 +39,5 @@ TH_API int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *dat
 
 extern THAllocator THMapAllocator;
 extern THAllocator THRefcountedMapAllocator;
-#endif // defined(_WIN32) || defined(HAVE_MMAP)
 
 #endif
