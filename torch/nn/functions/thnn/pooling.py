@@ -59,7 +59,6 @@ class MaxPool3d(_MaxPoolingBase):
         self._backend.VolumetricDilatedMaxPooling_updateOutput(*args)
 
     def _bw_call(self, *args):
-        args = args[:5] + args[8:-1]
         self._backend.VolumetricDilatedMaxPooling_updateGradInput(*args)
 
 
@@ -203,4 +202,3 @@ _all_functions.append(MaxPool3d)
 _all_functions.append(MaxUnpool2d)
 _all_functions.append(MaxUnpool3d)
 _all_functions.append(FractionalMaxPool2d)
-

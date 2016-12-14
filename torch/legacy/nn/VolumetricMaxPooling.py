@@ -57,8 +57,10 @@ class VolumetricMaxPooling(Module):
             gradOutput,
             self.gradInput,
             self.indices,
+            self.kT, self.kW, self.kH,
             self.dT, self.dW, self.dH,
-            self.padT, self.padW, self.padH
+            self.padT, self.padW, self.padH,
+            self.ceil_mode
         )
         return self.gradInput
 
@@ -73,4 +75,3 @@ class VolumetricMaxPooling(Module):
             s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
         s += ')'
         return s
-

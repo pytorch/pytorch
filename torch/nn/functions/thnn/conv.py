@@ -65,9 +65,10 @@ class Conv3d(Function):
                 grad_bias, self.buffer1, self.buffer2,
                 *args)
         else:
+            args = self.additional_args + (1,)
             self._backend.VolumetricConvolutionMM_accGradParameters(
                 self._backend.library_state, input, grad_output, grad_weight,
-                grad_bias, self.buffer1, 1)
+                grad_bias, self.buffer1, *args)
         return grad_weight, grad_bias
 
     def backward(self, grad_output):

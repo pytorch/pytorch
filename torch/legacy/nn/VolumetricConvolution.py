@@ -158,6 +158,9 @@ class VolumetricConvolution(Module):
                 self.gradWeight,
                 self.gradBias,
                 self.finput,
+                self.kT, self.kW, self.kH,
+                self.dT, self.dW, self.dH,
+                self.padT, self.padW, self.padH,
                 scale
             )
             self._unviewWeight()
@@ -182,4 +185,3 @@ class VolumetricConvolution(Module):
 
         s += ')'
         return s
-
