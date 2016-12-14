@@ -74,6 +74,20 @@ class build_module(Command):
 
 class build_ext(setuptools.command.build_ext.build_ext):
     def run(self):
+        # Print build options
+        if WITH_NUMPY:
+            print('-- Building with NumPy bindings')
+        else:
+            print('-- NumPy not found')
+        if WITH_CUDNN:
+            print('-- Detected cuDNN at ' + CUDNN_LIB_DIR + ', ' + CUDNN_INCLUDE_DIR)
+        else:
+            print('-- Not using cuDNN')
+        if WITH_CUDA:
+            print('-- Detected CUDA at ' + CUDA_HOME)
+        else:
+            print('-- Not using CUDA')
+
         # cwrap depends on pyyaml, so we can't import it earlier
         from tools.cwrap import cwrap
         from tools.cwrap.plugins.THPPlugin import THPPlugin
@@ -178,8 +192,9 @@ try:
     import numpy as np
     include_dirs += [np.get_include()]
     extra_compile_args += ['-DWITH_NUMPY']
+    WITH_NUMPY = True
 except ImportError:
-    pass
+    WITH_NUMPY = False
 
 if WITH_CUDA:
     cuda_lib_dirs = ['lib64', 'lib']
