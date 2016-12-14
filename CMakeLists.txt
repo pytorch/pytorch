@@ -39,6 +39,7 @@ option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_MPI "Use MPI" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
+option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ON)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
@@ -64,3 +65,18 @@ add_subdirectory(caffe2)
 install(DIRECTORY ${CMAKE_SOURCE_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}
         FILES_MATCHING PATTERN "*.py")
 
+# ---[ Generate all needed __init__.py files
+set(Caffe2_INIT_PY
+        ${CMAKE_INSTALL_PREFIX}/caffe2/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/static/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/static/css/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/templates/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/proto/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe/proto/__init__.py
+)
+foreach(init ${Caffe2_INIT_PY})
+  file(WRITE ${init} "")
+endforeach()
