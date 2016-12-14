@@ -3,6 +3,7 @@ from torch.autograd import Variable
 
 from .module import Module
 from .utils import _pair, _triple
+from .. import functional
 
 
 class MaxPool1d(Module):
@@ -41,9 +42,9 @@ class MaxPool1d(Module):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        return self._backend.MaxPool1d(self.kernel_size, self.stride,
-                self.padding, self.dilation, self.return_indices,
-                self.ceil_mode)(input)
+        return functional.max_pool1d(input, self.kernel_size, self.stride,
+                self.padding, self.dilation, self.ceil_mode,
+                self.return_indices)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -91,9 +92,9 @@ class MaxPool2d(Module):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        return self._backend.MaxPool2d(self.kernel_size, self.stride,
+        return functional.max_pool2d(input, self.kernel_size, self.stride,
                 self.padding, self.dilation, self.return_indices,
-                self.ceil_mode)(input)
+                self.return_indices)
 
     def __repr__(self):
         kh, kw = _pair(self.kernel_size)

@@ -1,4 +1,5 @@
 from .module import Module
+from .. import functional
 
 class Dropout(Module):
     """Randomly zeroes some of the elements of the input tensor.
@@ -20,7 +21,7 @@ class Dropout(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.Dropout(self.p, self.training, self.inplace)(input)
+        return functional.dropout(input, self.p, self.training, self.inplace)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''

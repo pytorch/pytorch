@@ -2,6 +2,7 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 
+from .. import functional
 from .module import Module
 from .utils import _pair, _triple
 
@@ -139,19 +140,14 @@ class Conv2d(Module):
     def forward(self, input):
         if self.is_dilated:
             # TODO: merge this into the Conv2d function
-            func = self._backend.DilatedConv2d(
+            return self._backend.DilatedConv2d(
                 self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
                 self.dilh, self.dilw)
-        else:
-            func = self._backend.Conv(
-                ndim=2,
+                self.dilh, self.dilw)(input, self.weight, self.bias)
+        return functional.conv2d(input, self.weight, self.bias, 
                 stride=(self.dh, self.dw),
                 padding=(self.padh, self.padw),
                 groups=self.groups)
-        if self.bias is None:
-            return func(input, self.weight)
-        else:
-            return func(input, self.weight, self.bias)
 
     def __repr__(self):
         padding_str = ', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
@@ -234,17 +230,11 @@ class ConvTranspose2d(Conv2d):
                     "{}x{})").format(out_sizeh, out_sizew, sizeh, sizew,
                         sizeh+self.dh-1, sizew+self.dw-1,
                         input.size(2), input.size(3)))
-
-        func = self._backend.ConvTranspose(
-            ndim=2,
-            stride=(self.dh, self.dw),
-            padding=(self.padh, self.padw),
-            out_pad=(out_padh, out_padw),
-            groups=self.groups)
-        if self.bias is None:
-            return func(input, self.weight)
-        else:
-            return func(input, self.weight, self.bias)
+        return functional.conv2d_transpose(input, self.weight, self.bias, 
+                stride=(self.dh, self.dw),
+                pad=(self.padh, self.padw),
+                out_pad=(out_padh, out_padw),
+                groups=self.groups)
 
 
 class _Conv3dBase(Module):
