@@ -42,6 +42,7 @@ void THNN_(LookupTable_accGradParameters)(
       numel,
       stride,
       paddingValue);
+    THCTensor_(free)(state, gradOutput);
     THCudaCheck(cudaGetLastError());
     return;
   }
