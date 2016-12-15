@@ -122,9 +122,9 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
 }
 }  // namespace
 
-#define CAFFE2_SPECIALIZED_CUDA_SET(T)                                     \
+#define CAFFE2_SPECIALIZED_CUDA_SET(T)                                         \
   template <>                                                                  \
-  void Set<T, CUDAContext>(const int N, const T alpha, T *Y,       \
+  void Set<T, CUDAContext>(const TIndex N, const T alpha, T *Y,                \
                               CUDAContext* context) {                          \
     SetKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,                   \
                 0, context->cuda_stream()>>>(N, alpha, Y);                     \

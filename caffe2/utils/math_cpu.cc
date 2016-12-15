@@ -560,16 +560,16 @@ DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
 #undef DEFINE_BROADCAST_BINARY_FUNCTION
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
-#define CAFFE2_SPECIALIZED_SET(T)                               \
-template <>                                                     \
-void Set<T, CPUContext>(const int N, const T alpha, T *Y,       \
-                        CPUContext* context) {                  \
-  if (alpha == (T) 0) {                                         \
-    memset(Y, 0, N * sizeof(T));                                \
-  } else {                                                      \
-    EigenVectorMap<T>(Y, N).setConstant(alpha);                 \
-  }                                                             \
-}
+#define CAFFE2_SPECIALIZED_SET(T)                                 \
+  template <>                                                     \
+  void Set<T, CPUContext>(                                        \
+      const TIndex N, const T alpha, T* Y, CPUContext* context) { \
+    if (alpha == (T)0) {                                          \
+      memset(Y, 0, N * sizeof(T));                                \
+    } else {                                                      \
+      EigenVectorMap<T>(Y, N).setConstant(alpha);                 \
+    }                                                             \
+  }
 
 CAFFE2_SPECIALIZED_SET(float);
 CAFFE2_SPECIALIZED_SET(double);

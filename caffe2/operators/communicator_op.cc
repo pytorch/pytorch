@@ -4,13 +4,13 @@
 namespace caffe2 {
 
 OPERATOR_SCHEMA(CreateCommonWorld)
-    .NumInputs(1)
+    .NumInputs(0, 1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 Creates a common world for communication operators.
 )DOC")
     .Input(0, "kv_handler", "Key/value handler for rendezvous (optional).")
-    .Output(0, "comm_world", "A common world for distributed messaging.")
+    .Output(0, "comm_world", "A common world for collective operations.")
     .Arg("size", "(int) size of the common world.")
     .Arg("rank", "(int) rank of this node in the common world.");
 

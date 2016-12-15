@@ -49,6 +49,9 @@ void FileStoreHandler::set(const std::string& name, const std::string& data) {
 }
 
 std::string FileStoreHandler::get(const std::string& name) {
+  // Block until key is set
+  wait({name});
+
   std::string result;
   auto path = objectPath(name);
   ReadStringFromFile(path.c_str(), &result);

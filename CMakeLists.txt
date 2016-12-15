@@ -22,18 +22,61 @@ endforeach()
 set(${OUTPUT} ${OUT} PARENT_SCOPE)
 endfunction(prepend)
 
-# Third party builds.
+# ---[ CMake scripts + modules
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
+
+# External projects
+include(ExternalProject)
+
+include(cmake/Utils.cmake)
+
+# options
+option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
+option(USE_LMDB "Use LMDB" ON)
+option(USE_LEVELDB "Use LMDB" ON)
+option(USE_OPENCV "Use openCV" ON)
+option(USE_ZMQ "Use ZMQ" OFF)
+option(USE_ROCKSDB "Use RocksDB" OFF)
+option(USE_MPI "Use MPI" OFF)
+option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
+option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ON)
+
+# ---[ Dependencies
+include(cmake/Dependencies.cmake)
+
+# ---[ Set link flag
+if(BUILD_SHARED_LIBS)
+  set(Caffe2_LINK Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO)
+else()
+    set(Caffe2_LINK -Wl,--whole-archive Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO -Wl,--no-whole-archive)
+endif()
+
+# ---[ Third party builds.
 include_directories(${CMAKE_SOURCE_DIR})
-file(GLOB Caffe2_THIRD_PARTY "${CMAKE_SOURCE_DIR}/third_party/*")
-include_directories(${Caffe2_THIRD_PARTY})
 
-# googletest.
-add_subdirectory("${CMAKE_SOURCE_DIR}/third_party/googletest")
-include_directories("${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include")
-
-# Old caffe protobuf.
+# ---[ Old caffe protobuf.
 add_subdirectory(caffe/proto)
 
+# ---[ Main build
 add_subdirectory(caffe2)
-target_link_libraries(Caffe2_CPU)
-target_compile_features(Caffe2_CPU PRIVATE cxx_range_for)
+
+# ---[ Copy all python files to build directory
+# Copy the files
+install(DIRECTORY ${CMAKE_SOURCE_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}
+        FILES_MATCHING PATTERN "*.py")
+
+# ---[ Generate all needed __init__.py files
+set(Caffe2_INIT_PY
+        ${CMAKE_INSTALL_PREFIX}/caffe2/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/static/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/static/css/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/templates/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python/mint/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe2/proto/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe/__init__.py
+        ${CMAKE_INSTALL_PREFIX}/caffe/proto/__init__.py
+)
+foreach(init ${Caffe2_INIT_PY})
+  file(WRITE ${init} "")
+endforeach()

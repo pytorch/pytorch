@@ -207,8 +207,9 @@ def FeedBlob(name, arr, device_option=None):
         if arr.dtype == np.dtype('float64'):
             raise Exception(
                 "CUDA operators do not support 64-bit doubles, " +
-                "please use arr.astype(nd.float32). Blob:" + name +
-                " type: " + arr.dtype
+                "please use arr.astype(np.float32) or np.int32 for ints." +
+                " Blob: {}".format(name) +
+                " type: {}".format(str(arr.dtype))
             )
 
     name = StringifyBlobName(name)

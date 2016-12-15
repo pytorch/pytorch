@@ -148,7 +148,7 @@ void Gemv(const CBLAS_TRANSPOSE TransA, const int M, const int N,
     T* y, Context* context);
 
 template <typename T, class Context>
-void Set(const int N, const T alpha, T* X, Context* context);
+void Set(const TIndex N, const T alpha, T* X, Context* context);
 
 template <typename T, class Context>
 void RandUniform(const int n, const T a, const T b, T* r,
