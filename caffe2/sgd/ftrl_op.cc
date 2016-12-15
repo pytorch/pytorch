@@ -58,8 +58,8 @@ void ftrl_update(
 
 template <typename T, typename Context>
 bool FtrlOp<T, Context>::RunOnDevice() {
-  CHECK_EQ(Input(GRAD).size(), Input(VAR).size());
-  CHECK_EQ(Input(GRAD).size() * 2, Input(N_Z).size());
+  CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(VAR).size());
+  CAFFE_ENFORCE_EQ(Input(GRAD).size() * 2, Input(N_Z).size());
   Output(OUTPUT_VAR)->ResizeLike(Input(VAR));
   Output(OUTPUT_N_Z)->ResizeLike(Input(N_Z));
   ftrl_update<Context>(
@@ -81,8 +81,8 @@ void SparseFtrlOp<T>::DoRun() {
   auto* n_z = Output(OUTPUT_N_Z);
   auto& indices = Input(INDICES);
   auto& grad = Input(GRAD);
-  CHECK_EQ(&Input(VAR), var) << "In place operation is required";
-  CHECK_EQ(&Input(N_Z), n_z) << "In place operation is required";
+  CAFFE_ENFORCE_EQ(&Input(VAR), var, "In place operation is required");
+  CAFFE_ENFORCE_EQ(&Input(N_Z), n_z, "In place operation is required");
   TIndex M = var->size();
   TIndex N = var->dim(0);
   TIndex block_size = M / N;

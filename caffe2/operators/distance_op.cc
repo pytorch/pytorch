@@ -7,9 +7,9 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto* distance = Output(0);
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = X.size() / N;
@@ -35,12 +35,18 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto* result = Output(DOT_OUT);
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  int D = X.size() / N;
+  int N, D;
+  if (X.size() > 0) {
+    N = X.ndim() > 0 ? X.dim32(0) : 1;
+    D = X.size() / N;
+  } else {
+    N = 0;
+    D = 0;
+  }
   result->Resize(N);
   float* result_data = result->mutable_data<float>();
   const float* X_data = X.data<float>();
@@ -58,9 +64,9 @@ bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto* result = Output(COS_OUT);
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = X.size() / N;

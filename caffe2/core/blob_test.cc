@@ -401,14 +401,14 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
   TensorCPU tensor(vector<TIndex>{large_number});
   EXPECT_EQ(tensor.ndim(), 1);
   EXPECT_EQ(tensor.dim(0), large_number);
-  ASSERT_DEATH(tensor.dim32(0), "");
+  ASSERT_THROW(tensor.dim32(0), EnforceNotMet);
 }
 
 #define TEST_SERIALIZATION_WITH_TYPE(TypeParam, field_name)               \
   TEST(TensorTest, TensorSerialization_##TypeParam) {                     \
     Blob blob;                                                            \
     TensorCPU* tensor = blob.GetMutable<TensorCPU>();                     \
-    tensor->Resize(2, 3);                                                \
+    tensor->Resize(2, 3);                                                 \
     for (int i = 0; i < 6; ++i) {                                         \
       tensor->mutable_data<TypeParam>()[i] = static_cast<TypeParam>(i);   \
     }                                                                     \
@@ -437,6 +437,31 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
       EXPECT_EQ(                                                          \
           tensor->data<TypeParam>()[i], new_tensor.data<TypeParam>()[i]); \
     }                                                                     \
+  }                                                                       \
+                                                                          \
+  TEST(EmptyTensorTest, TensorSerialization_##TypeParam) {                \
+    Blob blob;                                                            \
+    TensorCPU* tensor = blob.GetMutable<TensorCPU>();                     \
+    tensor->Resize(0, 3);                                                 \
+    tensor->mutable_data<TypeParam>();                                    \
+    string serialized = blob.Serialize("test");                           \
+    BlobProto proto;                                                      \
+    CHECK(proto.ParseFromString(serialized));                             \
+    EXPECT_EQ(proto.name(), "test");                                      \
+    EXPECT_EQ(proto.type(), "Tensor");                                    \
+    EXPECT_TRUE(proto.has_tensor());                                      \
+    const TensorProto& tensor_proto = proto.tensor();                     \
+    EXPECT_EQ(                                                            \
+        tensor_proto.data_type(),                                         \
+        TypeMetaToDataType(TypeMeta::Make<TypeParam>()));                 \
+    EXPECT_EQ(tensor_proto.field_name##_size(), 0);                       \
+    Blob new_blob;                                                        \
+    EXPECT_TRUE(new_blob.Deserialize(serialized));                        \
+    EXPECT_TRUE(new_blob.IsType<TensorCPU>());                            \
+    const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
+    EXPECT_EQ(new_tensor.ndim(), 2);                                      \
+    EXPECT_EQ(new_tensor.dim(0), 0);                                      \
+    EXPECT_EQ(new_tensor.dim(1), 3);                                      \
   }
 
 TEST_SERIALIZATION_WITH_TYPE(bool, int32_data)

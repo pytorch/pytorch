@@ -332,16 +332,12 @@ class TestDatasetOps(TestCase):
         collect_net = core.Net('collect_net')
         num_to_collect = 1000
         max_example_to_cover = 100000
-        for i, b in enumerate(blobs):
-            if i == 0:
-                bvec_map[b], position = collect_net.CollectTensor(
-                    [bvec_map[b], b], [bvec_map[b], 'position'],
-                    num_to_collect=num_to_collect)
-            else:
-                # sample in the same way as the first blob
-                bvec_map[b], position = collect_net.CollectTensor(
-                    [bvec_map[b], b, position], [bvec_map[b], position],
-                    num_to_collect=num_to_collect)
+        bvec = [bvec_map[b] for b in blobs]
+        collect_net.CollectTensor(
+            bvec + blobs,
+            bvec,
+            num_to_collect=num_to_collect,
+        )
 
         print('Collect Net Proto: {}'.format(collect_net.Proto()))
 
@@ -374,3 +370,7 @@ class TestDatasetOps(TestCase):
         for i in range(1, len(blobs)):
             result = workspace.FetchBlob(bconcated_map[blobs[i]])
             self.assertEqual(reference_result.tolist(), result.tolist())
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

@@ -1,0 +1,64 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from caffe2.python import core, schema
+from caffe2.python.layers.layers import (
+    ModelLayer,
+    LayerParameter
+)
+import math
+import numpy as np
+
+
+class FC(ModelLayer):
+
+    def __init__(self, model, input_record, output_dims, weight_init=None,
+                 bias_init=None, weight_optim=None, bias_optim=None, name='fc',
+                 **kwargs):
+        super(FC, self).__init__(model, name, input_record, **kwargs)
+        assert isinstance(input_record, schema.Scalar), "Incorrect input type"
+        assert len(input_record.field_types()[0].shape) > 0,\
+            "FC expects limited dimensions of the input tensor"
+
+        input_dims = input_record.field_types()[0].shape[0]
+
+        self.output_schema = schema.Scalar(
+            (np.float32, output_dims),
+            core.ScopedBlobReference(model.net.NextName(self.name + '_output'))
+        )
+
+        scale = math.sqrt(1.0 / input_dims)
+        weight_init = weight_init if weight_init else (
+            'UniformFill', {'min': -scale, 'max': scale})
+        bias_init = bias_init if bias_init else (
+            'UniformFill', {'min': -scale, 'max': scale})
+
+        self.w = core.ScopedBlobReference(model.net.NextName(self.name + "_w"))
+        self.b = core.ScopedBlobReference(model.net.NextName(self.name + "_b"))
+
+        self.params.append(
+            LayerParameter(
+                parameter=self.w,
+                initializer=core.CreateOperator(weight_init[0],
+                                                [],
+                                                self.w,
+                                                shape=[output_dims, input_dims],
+                                                **weight_init[1]
+                                                ),
+                optimizer=weight_optim))
+        self.params.append(
+            LayerParameter(
+                parameter=self.b,
+                initializer=core.CreateOperator(bias_init[0],
+                                                [],
+                                                self.b,
+                                                shape=[output_dims, ],
+                                                **bias_init[1]
+                                                ),
+                optimizer=bias_optim))
+
+    def add_ops(self, net):
+        net.FC(self.input_record.field_blobs() + [self.w, self.b],
+               self.output_schema.field_blobs(), **self.kwargs)

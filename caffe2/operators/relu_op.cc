@@ -8,7 +8,6 @@ template <>
 bool ReluOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_GT(X.size(), 0);
   Y->ResizeLike(X);
 
 #ifdef CAFFE2_USE_ACCELERATE
@@ -33,7 +32,6 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_GT(Y.size(), 0);
   DCHECK_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
 

@@ -1,17 +1,26 @@
 #ifndef CAFFE2_CORE_WORKSPACE_H_
 #define CAFFE2_CORE_WORKSPACE_H_
 
+#include "caffe2/core/common.h"
+
+#ifndef CAFFE2_MOBILE
+#error "mobile build state not defined"
+#endif
+
 #include <climits>
 #include <cstddef>
+#include <mutex>
 #include <typeinfo>
 #include <vector>
 
 #include "caffe2/core/blob.h"
-#include "caffe2/core/common.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/signal_handler.h"
+#if CAFFE2_MOBILE
+#include "caffe2/utils/threadpool/ThreadPool.h"
+#endif // CAFFE2_MOBILE
 
 namespace caffe2 {
 
@@ -74,6 +83,12 @@ class Workspace {
   ~Workspace() {}
 
   /**
+   * Return list of blobs owned by this Workspace, not including blobs
+   * shared from parent workspace.
+   */
+  vector<string> LocalBlobs() const;
+
+  /**
    * Return a list of blob names. This may be a bit slow since it will involve
    * creation of multiple temp variables. For best performance, simply use
    * HasBlob() and GetBlob().
@@ -96,6 +111,12 @@ class Workspace {
    * already exists, the creation is skipped and the existing blob is returned.
    */
   Blob* CreateBlob(const string& name);
+  /**
+   * Remove the blob of the given name. Return true if removed and false if
+   * not exist.
+   * Will NOT remove from the shared workspace.
+   */
+  bool RemoveBlob(const string& name);
   /**
    * Gets the blob with the given name as a const pointer. If the blob does not
    * exist, a nullptr is returned.
@@ -149,6 +170,15 @@ class Workspace {
   bool RunPlan(const PlanDef& plan_def,
                ShouldContinue should_continue = StopOnSignal{});
 
+#if CAFFE2_MOBILE
+  /*
+   * Returns a CPU threadpool instace for parallel execution of
+   * work. The threadpool is created lazily; if no operators use it,
+   * then no threadpool will be created.
+   */
+  ThreadPool* GetThreadPool();
+#endif
+
   // RunOperatorOnce and RunNetOnce runs an operator or net once. The difference
   // between RunNet and RunNetOnce lies in the fact that RunNet allows you to
   // have a persistent net object, while RunNetOnce creates a net and discards
@@ -167,6 +197,10 @@ class Workspace {
   NetMap net_map_;
   string root_folder_ = ".";
   Workspace* shared_ = nullptr;
+#if CAFFE2_MOBILE
+  std::unique_ptr<ThreadPool> thread_pool_;
+  std::mutex thread_pool_creation_mutex_;
+#endif // CAFFE2_MOBILE
 
   DISABLE_COPY_AND_ASSIGN(Workspace);
 };

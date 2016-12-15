@@ -57,3 +57,7 @@ class TestEmptySampleOps(TestCase):
                 features2_exp[i],
                 workspace.FetchBlob('out_features2'),
                 atol=1e-4, rtol=1e-4, err_msg='Mismatch in features2')
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

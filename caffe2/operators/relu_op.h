@@ -2,8 +2,8 @@
 #define CAFFE2_OPERATORS_RELU_OP_H_
 
 #include "caffe2/core/context.h"
-#include "caffe2/core/operator.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -30,6 +30,6 @@ class ReluGradientOp final : public Operator<Context> {
   // Input: Y, dY; Output: dX
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_RELU_OP_H_
+#endif // CAFFE2_OPERATORS_RELU_OP_H_

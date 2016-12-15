@@ -59,7 +59,7 @@ class ReversePackedSegsOp final : public Operator<Context> {
     T* rev_data_ptr = output->template mutable_data<T>();
     for (TIndex i = 0; i < batch_size; i++) {
       const auto& seg_length = lengths_ptr[i];
-      CHECK_LE(seg_length, max_length);
+      CAFFE_ENFORCE_LE(seg_length, max_length);
       TIndex j = 0;
       for (; j < seg_length; j++) {
         const T* data_block_ptr = data_ptr + (j * batch_size + i) * block_size;

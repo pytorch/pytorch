@@ -26,10 +26,12 @@ class AccumulateOp final : public Operator<Context> {
           output->size(), 0, output->template mutable_data<T>(), &context_);
     }
     math::Axpby<T, Context>(
-        input.size(), static_cast<T>(1),
+        input.size(),
+        static_cast<T>(1),
         input.template data<T>(),
         gamma_,
-        output->template mutable_data<T>(), &context_);
+        output->template mutable_data<T>(),
+        &context_);
     return true;
   }
 
@@ -37,6 +39,6 @@ class AccumulateOp final : public Operator<Context> {
   T gamma_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_ACCUMULATE_OP_H_
+#endif // CAFFE2_OPERATORS_ACCUMULATE_OP_H_

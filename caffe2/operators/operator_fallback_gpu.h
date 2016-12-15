@@ -68,7 +68,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   GPUFallbackOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
-    CHECK_EQ(def.device_option().device_type(), CUDA);
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), CUDA);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     base_def_.clear_device_option();
@@ -110,7 +110,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
 
     if (!base_op_->Run()) {
       LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
-                      << ProtoDebugString(def());
+                 << ProtoDebugString(def());
       return false;
     }
     for (int i = 0; i < OutputSize(); ++i) {
@@ -135,6 +135,6 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   std::unique_ptr<CPUOp> base_op_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_OPERATOR_FALLBACK_H_
+#endif // CAFFE2_OPERATORS_OPERATOR_FALLBACK_H_

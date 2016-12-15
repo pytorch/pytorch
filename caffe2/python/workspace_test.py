@@ -2,11 +2,13 @@ import numpy as np
 import os
 import unittest
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace
 
 import caffe2.python.hypothesis_test_util as htu
 import hypothesis.strategies as st
 from hypothesis import given
+from caffe2.proto import caffe2_pb2
 
 
 class TestWorkspace(unittest.TestCase):
@@ -70,6 +72,49 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(workspace.ResetWorkspace(), True)
         self.assertEqual(workspace.HasBlob("testblob"), False)
 
+    def testTensorAccess(self):
+        ws = workspace.C.Workspace()
+
+        """ test in-place modification """
+        ws.create_blob("tensor").feed(np.array([1.1, 1.2, 1.3]))
+        tensor = ws.blobs["tensor"].tensor()
+        tensor.data[0] = 3.3
+        val = np.array([3.3, 1.2, 1.3])
+        np.testing.assert_array_equal(tensor.data, val)
+        np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
+
+        """ test in-place initialization """
+        tensor.init([2, 3], core.DataType.INT32)
+        tensor.data[1, 1] = 100
+        val = np.zeros([2, 3], dtype=np.int32)
+        val[1, 1] = 100
+        np.testing.assert_array_equal(tensor.data, val)
+        np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
+
+        """ strings cannot be initialized from python """
+        with self.assertRaises(RuntimeError):
+            tensor.init([3, 4], core.DataType.STRING)
+
+        """ feed (copy) data into tensor """
+        val = np.array([['abc', 'def'], ['ghi', 'jkl']], dtype=np.object)
+        tensor.feed(val)
+        self.assertEquals(tensor.data[0, 0], 'abc')
+        np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
+
+        val = np.array([1.1, 10.2])
+        tensor.feed(val)
+        val[0] = 5.2
+        self.assertEquals(tensor.data[0], 1.1)
+
+        """ fetch (copy) data from tensor """
+        val = np.array([1.1, 1.2])
+        tensor.feed(val)
+        val2 = tensor.fetch()
+        tensor.data[0] = 5.2
+        val3 = tensor.fetch()
+        np.testing.assert_array_equal(val, val2)
+        self.assertEquals(val3[0], 5.2)
+
     def testFetchFeedBlob(self):
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
@@ -110,6 +155,38 @@ class TestWorkspace(unittest.TestCase):
             self.assertEqual(fetched_back.shape, (2, 3, 4))
             self.assertEqual(fetched_back.dtype, dtype)
             np.testing.assert_array_equal(fetched_back, data)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    def testFetchFeedBlobTypeAsserts(self):
+        # This should pass as we are not using CUDA
+        data = np.random.rand(2, 3)
+        workspace.FeedBlob("a", data)
+
+        device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        with core.DeviceScope(device_opt):
+            threw = False
+            try:
+                workspace.FeedBlob("b", data)
+            except Exception as e:
+                print(e)
+                threw = True
+            self.assertTrue(threw, "Should reject float64 type for CUDA")
+
+            threw = False
+            try:
+                workspace.FeedBlob("c", data.astype(np.float32))
+            except Exception as e:
+                print(e)
+                threw = True
+            self.assertFalse(threw, "Should accept float32 type for CUDA")
+
+        threw = False
+        try:
+            workspace.FeedBlob("d", data, device_option=device_opt)
+        except Exception as e:
+            print(e)
+            threw = True
+        self.assertTrue(threw, "Should reject float64 type for CUDA")
 
     def testFetchFeedBlobBool(self):
         """Special case for bool to ensure coverage of both true and false."""
@@ -250,7 +327,18 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(pattern.shape[0], workspace.NumCudaDevices())
 
 
-class TestImmediate(test_util.TestCase):
+@unittest.skipIf(not workspace.C.has_mkldnn, "No MKLDNN support.")
+class TestWorkspaceMKLDNN(test_util.TestCase):
+
+    def testFeedFetchBlobMKLDNN(self):
+        arr = np.random.randn(2, 3).astype(np.float32)
+        workspace.FeedBlob(
+            "testblob_mkldnn", arr, core.DeviceOption(caffe2_pb2.MKLDNN))
+        fetched = workspace.FetchBlob("testblob_mkldnn")
+        np.testing.assert_array_equal(arr, fetched)
+
+
+class TestImmedibate(test_util.TestCase):
     def testImmediateEnterExit(self):
         workspace.StartImmediate(i_know=True)
         self.assertTrue(workspace.IsImmediate())

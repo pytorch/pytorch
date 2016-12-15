@@ -47,4 +47,10 @@ class TextFileReader(Reader):
             batch_size=self._batch_size)
         if type(blobs) is core.BlobReference:
             blobs = [blobs]
-        return (net.IsEmpty([blobs[0]], 'should_stop'), blobs)
+
+        is_empty = net.IsEmpty(
+            [blobs[0]],
+            core.ScopedBlobReference(net.NextName('should_stop'))
+        )
+
+        return (is_empty, blobs)

@@ -10,8 +10,7 @@
 namespace caffe2 {
 
 template <class Context>
-class TensorProtosDBInput final
-    : public PrefetchOperator<Context> {
+class TensorProtosDBInput final : public PrefetchOperator<Context> {
  public:
   using OperatorBase::OutputSize;
   using PrefetchOperator<Context>::prefetch_thread_;
@@ -34,12 +33,12 @@ class TensorProtosDBInput final
 
 template <class Context>
 TensorProtosDBInput<Context>::TensorProtosDBInput(
-      const OperatorDef& operator_def, Workspace* ws)
-      : PrefetchOperator<Context>(operator_def, ws),
-        prefetched_blobs_(operator_def.output_size()),
-        batch_size_(
-            OperatorBase::template GetSingleArgument<int>("batch_size", 0)) {
-}
+    const OperatorDef& operator_def,
+    Workspace* ws)
+    : PrefetchOperator<Context>(operator_def, ws),
+      prefetched_blobs_(operator_def.output_size()),
+      batch_size_(
+          OperatorBase::template GetSingleArgument<int>("batch_size", 0)) {}
 
 template <class Context>
 bool TensorProtosDBInput<Context>::Prefetch() {
@@ -100,12 +99,11 @@ template <class Context>
 bool TensorProtosDBInput<Context>::CopyPrefetched() {
   for (int i = 0; i < OutputSize(); ++i) {
     OperatorBase::Output<Tensor<Context>>(i)->CopyFrom(
-        prefetched_blobs_[i].template Get<TensorCPU>(),
-        &this->context_);
+        prefetched_blobs_[i].template Get<TensorCPU>(), &this->context_);
   }
   return true;
 }
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_TENSOR_PROTOS_DB_INPUT_H_
+#endif // CAFFE2_OPERATORS_TENSOR_PROTOS_DB_INPUT_H_

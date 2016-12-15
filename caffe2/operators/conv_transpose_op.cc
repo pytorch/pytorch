@@ -5,6 +5,7 @@ namespace caffe2 {
 namespace {
 
 REGISTER_CPU_OPERATOR(ConvTranspose, ConvTransposeOp<float, CPUContext>);
+
 REGISTER_CPU_OPERATOR(
     ConvTransposeGradient,
     ConvTransposeGradientOp<float, CPUContext>);

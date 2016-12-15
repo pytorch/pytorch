@@ -20,7 +20,7 @@ Matrix multiplication Y = A * B, where A has size (M x K), B has size (K x N).
 class GetMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 2);
+    CAFFE_ENFORCE_EQ(def_.input_size(), 2);
 
     bool trans_a = 0;
     bool trans_b = 0;

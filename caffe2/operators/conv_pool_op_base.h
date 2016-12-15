@@ -2,10 +2,10 @@
 #define CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 // This macro is here just to allow us to experiment with padding values that
 // determines, when we have an odd number of pads, which side gets the one
@@ -37,6 +37,8 @@ class ConvPoolOpBase : public Operator<Context> {
             static_cast<LegacyPadding>(OperatorBase::GetSingleArgument<int>(
                 "legacy_pad",
                 LegacyPadding::NOTSET))),
+        global_pooling_(
+            OperatorBase::GetSingleArgument<int>("global_pooling", 0)),
         kernel_h_(OperatorBase::GetSingleArgument<int>(
             "kernel_h",
             OperatorBase::GetSingleArgument<int>("kernel", 0))),
@@ -74,6 +76,12 @@ class ConvPoolOpBase : public Operator<Context> {
           "any specific padding values.");
     }
 
+    CAFFE_ENFORCE(
+        global_pooling_ == false ||
+            (dilation_h_ == 1 && dilation_w_ == 1 && pad_ == 0 && pad_t_ == 0 &&
+             pad_l_ == 0 && pad_b_ == 0 && pad_r_ == 0 && stride_h_ == 1 &&
+             stride_w_ == 1),
+        "If global_pooling is set, none of dilation/pad/stride should be set.");
     CAFFE_ENFORCE(dilation_h_ > 0);
     CAFFE_ENFORCE(dilation_w_ > 0);
     CAFFE_ENFORCE(pad_ >= 0);
@@ -89,35 +97,55 @@ class ConvPoolOpBase : public Operator<Context> {
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
   // sizes.
-  void SetOutputSize(const Tensor<Context>& input,
-                     Tensor<Context>* output,
-                     int output_channel) {
+  void SetOutputSize(
+      const Tensor<Context>& input,
+      Tensor<Context>* output,
+      int output_channel) {
     CAFFE_ENFORCE(4 == input.ndim());
     CAFFE_ENFORCE(input.size() > 0);
     int N = input.dim32(0);
-    bool channel_first = false;  // initialized to suppress compiler warning.
-    int H = 0, W = 0;  // initialized to suppress compiler warning.
+    bool channel_first = false; // initialized to suppress compiler warning.
+    int H = 0, W = 0; // initialized to suppress compiler warning.
     switch (order_) {
-    case StorageOrder::NHWC:
-      channel_first = false;
-      H = input.dim32(1);
-      W = input.dim32(2);
-      break;
-    case StorageOrder::NCHW:
-      // Old Caffe order.
-      channel_first = true;
-      H = input.dim32(2);
-      W = input.dim32(3);
-      break;
-    default:
-      LOG(FATAL) << "Unknown Storage order: " << order_;
+      case StorageOrder::NHWC:
+        channel_first = false;
+        H = input.dim32(1);
+        W = input.dim32(2);
+        break;
+      case StorageOrder::NCHW:
+        // Old Caffe order.
+        channel_first = true;
+        H = input.dim32(2);
+        W = input.dim32(3);
+        break;
+      default:
+        LOG(FATAL) << "Unknown Storage order: " << order_;
     }
 
     int output_height = 0, output_width = 0;
-    ComputeSizeAndPad(
-        H, stride_h_, kernel_h_, dilation_h_, &pad_t_, &pad_b_, &output_height);
-    ComputeSizeAndPad(
-        W, stride_w_, kernel_w_, dilation_w_, &pad_l_, &pad_r_, &output_width);
+    if (global_pooling_) {
+      kernel_h_ = H;
+      kernel_w_ = W;
+      output_height = 1;
+      output_width = 1;
+    } else {
+      ComputeSizeAndPad(
+          H,
+          stride_h_,
+          kernel_h_,
+          dilation_h_,
+          &pad_t_,
+          &pad_b_,
+          &output_height);
+      ComputeSizeAndPad(
+          W,
+          stride_w_,
+          kernel_w_,
+          dilation_w_,
+          &pad_l_,
+          &pad_r_,
+          &output_width);
+    }
     if (channel_first) {
       output->Resize(N, output_channel, output_height, output_width);
     } else {
@@ -128,7 +156,10 @@ class ConvPoolOpBase : public Operator<Context> {
   // ComputePads could be used in backward functions to figure out the padding
   // values for the given input.
   void ComputePads(const int height, const int width) {
-    if (legacy_pad_ != LegacyPadding::NOTSET) {
+    if (global_pooling_) {
+      kernel_h_ = height;
+      kernel_w_ = width;
+    } else if (legacy_pad_ != LegacyPadding::NOTSET) {
       int output_unused;
       ComputeSizeAndPad(
           height,
@@ -150,17 +181,17 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(kernel_h_ > 0);
-    CAFFE_ENFORCE(kernel_w_ > 0);
+    CAFFE_ENFORCE(kernel_h_ > 0 || global_pooling_);
+    CAFFE_ENFORCE(kernel_w_ > 0 || global_pooling_);
     switch (order_) {
-    case StorageOrder::NHWC:
-      //VLOG(2) << "Running NHWC";
-      return RunOnDeviceWithOrderNHWC();
-    case StorageOrder::NCHW:
-      //VLOG(2) << "Running NCHW";
-      return RunOnDeviceWithOrderNCHW();
-    default:
-      LOG(FATAL) << "Unknown storage order: " << order_;
+      case StorageOrder::NHWC:
+        // VLOG(2) << "Running NHWC";
+        return RunOnDeviceWithOrderNHWC();
+      case StorageOrder::NCHW:
+        // VLOG(2) << "Running NCHW";
+        return RunOnDeviceWithOrderNCHW();
+      default:
+        LOG(FATAL) << "Unknown storage order: " << order_;
     }
     // To suppress old compiler warnings
     return true;
@@ -192,6 +223,7 @@ class ConvPoolOpBase : public Operator<Context> {
   int pad_b_;
   int pad_r_;
   LegacyPadding legacy_pad_;
+  bool global_pooling_;
   int kernel_h_;
   int kernel_w_;
   int dilation_h_;
@@ -227,8 +259,7 @@ class ConvPoolOpBase : public Operator<Context> {
         *pad_tail = 0;
         *out_size = (in_size - dkernel) / stride + 1;
         break;
-      case LegacyPadding::SAME:
-      {
+      case LegacyPadding::SAME: {
         CAFFE_ENFORCE(
             1 == dilation, "Dilation not supported for legacy padding.");
         int legacy_target_size = (in_size + stride - 1) / stride;
@@ -247,7 +278,7 @@ class ConvPoolOpBase : public Operator<Context> {
         // we will only use pad_head and will compute pad_tail to match the
         // old caffe pooling strategy. Also see caffe2_legacy.proto for more
         // details.
-        CHECK_GE(*pad_head, 0);
+        CAFFE_ENFORCE_GE(*pad_head, 0);
         // Here, notice that caffe casts UP while caffe2 casts DOWN for the
         // output size computation.
         *out_size = std::ceil(
@@ -265,9 +296,11 @@ class ConvPoolOpBase : public Operator<Context> {
         // size of caffe.
         int standard_out_size = static_cast<int>(
             static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
-        CHECK_GE(*out_size, standard_out_size)
-            << "This should never happen. If this happens, double check the logic "
-            << "above.";
+        CAFFE_ENFORCE_GE(
+            *out_size,
+            standard_out_size,
+            "This should never happen. If this happens, double check the logic "
+            "above.");
         if (*out_size > standard_out_size) {
           LOG(WARNING)
               << "You are hitting a case where Caffe's legacy padding calculation "
@@ -285,23 +318,24 @@ class ConvPoolOpBase : public Operator<Context> {
  private:
 };
 
-#define USE_CONV_POOL_BASE_FUNCTIONS(Context)    \
-  USE_OPERATOR_FUNCTIONS(Context);               \
-  using ConvPoolOpBase<Context>::pad_t_;         \
-  using ConvPoolOpBase<Context>::pad_l_;         \
-  using ConvPoolOpBase<Context>::pad_b_;         \
-  using ConvPoolOpBase<Context>::pad_r_;         \
-  using ConvPoolOpBase<Context>::legacy_pad_;    \
-  using ConvPoolOpBase<Context>::kernel_h_;      \
-  using ConvPoolOpBase<Context>::kernel_w_;      \
-  using ConvPoolOpBase<Context>::dilation_h_;    \
-  using ConvPoolOpBase<Context>::dilation_w_;    \
-  using ConvPoolOpBase<Context>::stride_h_;      \
-  using ConvPoolOpBase<Context>::stride_w_;      \
-  using ConvPoolOpBase<Context>::order_;         \
-  using ConvPoolOpBase<Context>::shared_buffer_; \
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context)     \
+  USE_OPERATOR_FUNCTIONS(Context);                \
+  using ConvPoolOpBase<Context>::pad_t_;          \
+  using ConvPoolOpBase<Context>::pad_l_;          \
+  using ConvPoolOpBase<Context>::pad_b_;          \
+  using ConvPoolOpBase<Context>::pad_r_;          \
+  using ConvPoolOpBase<Context>::legacy_pad_;     \
+  using ConvPoolOpBase<Context>::global_pooling_; \
+  using ConvPoolOpBase<Context>::kernel_h_;       \
+  using ConvPoolOpBase<Context>::kernel_w_;       \
+  using ConvPoolOpBase<Context>::dilation_h_;     \
+  using ConvPoolOpBase<Context>::dilation_w_;     \
+  using ConvPoolOpBase<Context>::stride_h_;       \
+  using ConvPoolOpBase<Context>::stride_w_;       \
+  using ConvPoolOpBase<Context>::order_;          \
+  using ConvPoolOpBase<Context>::shared_buffer_;  \
   using ConvPoolOpBase<Context>::ws_
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
+#endif // CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_

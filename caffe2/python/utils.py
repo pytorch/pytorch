@@ -1,6 +1,7 @@
 from caffe2.proto import caffe2_pb2
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
+import collections
 import numpy as np
 import sys
 
@@ -39,6 +40,7 @@ def MakeArgument(key, value):
     """Makes an argument based on the value type."""
     argument = caffe2_pb2.Argument()
     argument.name = key
+    iterable = isinstance(value, collections.Iterable)
 
     if isinstance(value, np.ndarray):
         value = value.flatten().tolist()
@@ -57,14 +59,14 @@ def MakeArgument(key, value):
                       else value.encode('utf-8'))
     elif isinstance(value, Message):
         argument.s = value.SerializeToString()
-    elif all(type(v) in [float, np.float_] for v in value):
+    elif iterable and all(type(v) in [float, np.float_] for v in value):
         argument.floats.extend(value)
-    elif all(type(v) in [int, bool, long, np.int_] for v in value):
+    elif iterable and all(type(v) in [int, bool, long, np.int_] for v in value):
         argument.ints.extend(value)
-    elif all(isinstance(v, basestring) for v in value):
+    elif iterable and all(isinstance(v, basestring) for v in value):
         argument.strings.extend([
             (v if type(v) is bytes else v.encode('utf-8')) for v in value])
-    elif all(isinstance(v, Message) for v in value):
+    elif iterable and all(isinstance(v, Message) for v in value):
         argument.strings.extend([v.SerializeToString() for v in value])
     else:
         raise ValueError(

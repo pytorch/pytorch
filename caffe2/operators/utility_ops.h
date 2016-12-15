@@ -72,7 +72,8 @@ class PrintOp final : public Operator<Context> {
   bool RunOnDevice() override {
     if (!OperatorBase::InputIsType<Tensor<Context>>(0) &&
         !OperatorBase::InputIsType<TensorCPU>(0)) {
-      LOG(INFO) << "Non-tensor input.";
+      LOG(INFO) << "Blob of type: "
+                << OperatorBase::Inputs().at(0)->meta().name();
       return true;
     }
     // special-case empty tensors since they may have no meta()
@@ -409,7 +410,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
     auto& weight0 = Input(1);
     auto& indices = Input(2);
     auto* output = Output(0);
-    CHECK_EQ(&X0, output) << "In place operation is required";
+    CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
     DCHECK_GT(X0.size(), 0);
     DCHECK_GT(X0.ndim(), 0) << "X0 has to be at least the vector";
@@ -455,6 +456,83 @@ class ScatterWeightedSumOp : public Operator<Context> {
             &context_);
       }
     }
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class MaxOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(MaxOp);
+
+  bool RunOnDevice() override {
+    auto& input0 = Input(0);
+    auto* output = Output(0);
+
+    output->ResizeLike(input0);
+    output->CopyFrom(input0, &context_);
+
+    if (InputSize() == 1) {
+      return true;
+    }
+
+    // Dimension checking
+    for (int i = 1; i < InputSize(); ++i) {
+      CAFFE_ENFORCE_EQ(
+          output->dims(),
+          Input(i).dims(),
+          "Description: Input #",
+          i,
+          ", input dimension:",
+          Input(i).dims(),
+          " should match output dimension: ",
+          output->dims());
+    }
+
+    T* output_data = output->template mutable_data<T>();
+#pragma omp parallel for
+    for (int i = 1; i < InputSize(); i++) {
+      auto input_data = Input(i).template data<T>();
+      for (int j = 0; j < input0.size(); j++) {
+        output_data[j] = std::max(output_data[j], input_data[j]);
+      }
+    }
+
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class MaxGradientOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(MaxGradientOp);
+
+  bool RunOnDevice() override {
+    auto& output = Input(0);
+    auto& grad_output = Input(1);
+    const int kInputStartOffset = 2;
+
+    const T* data = output.template data<T>();
+    ConstEigenArrayMap<T> output_array(
+        output.template data<T>(), 1, output.size());
+    ConstEigenArrayMap<T> grad_out_array(
+        grad_output.template data<T>(), 1, grad_output.size());
+
+    for (int i = 0; i < OutputSize(); i++) {
+      auto& input = Input(i + kInputStartOffset);
+      ConstEigenArrayMap<T> input_array(
+          input.template data<T>(), 1, input.size());
+
+      auto* grad_input = Output(i);
+      grad_input->ResizeLike(input);
+      EigenArrayMap<T> grad_in_array(
+          grad_input->template mutable_data<T>(), 1, grad_input->size());
+      grad_in_array = grad_out_array *
+          input_array.cwiseEqual(output_array).template cast<T>();
+    }
+
     return true;
   }
 };
@@ -509,7 +587,7 @@ class ScatterAssignOp : public Operator<Context> {
     auto& indices = Input(INDICES);
     auto& slices = Input(SLICES);
     auto* output = Output(0);
-    CHECK_EQ(&input, output) << "In place operation is required";
+    CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
     DCHECK_GT(input.ndim(), 0) << "X0 has to be at least the vector";
     TIndex M = input.size();
@@ -629,6 +707,15 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
     auto* output = Output(0);
     // segment id starts from 0
     auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
+    if (InputSize() > 1) {
+      CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
+      CAFFE_ENFORCE_LE(
+          num_segments,
+          Input(1).dim(0),
+          "The number of segments inferred should *NOT* be larger "
+          "than the size of Input(1)'s first dimension");
+      num_segments = Input(1).dim(0);
+    }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments);
     auto* output_data = output->template mutable_data<int32_t>();
@@ -646,6 +733,60 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
           input_data[i]);
       prev = input_data[i];
       output_data[input_data[i]] += 1;
+    }
+
+    return true;
+  }
+};
+
+template <class Context>
+class SegmentIdsToRangesOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(SegmentIdsToRangesOp);
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
+  }
+
+  template <typename Index>
+  bool DoRunWithType() {
+    auto& input = Input(0);
+    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    auto* input_data = input.template data<Index>();
+    auto input_size = input.size();
+    auto* output = Output(0);
+    // segment id starts from 0
+    auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
+    if (InputSize() > 1) {
+      CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
+      CAFFE_ENFORCE_LE(
+          num_segments,
+          Input(1).dim(0),
+          "The number of segments inferred should *NOT* be larger "
+          "than the size of Input(1)'s first dimension");
+      num_segments = Input(1).dim(0);
+    }
+    CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
+    output->Resize(num_segments, 2);
+    auto* output_data = output->template mutable_data<int32_t>();
+    if (num_segments == 0) {
+      return true;
+    }
+    std::fill(output_data, output_data + num_segments * 2, 0);
+    Index prev = input_data[0];
+    for (int64_t i = 0; i < input_size; i++) {
+      CAFFE_ENFORCE(
+          prev <= input_data[i],
+          "Segment ids must be sorted: ",
+          prev,
+          " vs ",
+          input_data[i]);
+      while (prev != input_data[i]) {
+        ++prev;
+        output_data[prev * 2] = i;
+      }
+      output_data[input_data[i] * 2 + 1] += 1;
     }
 
     return true;
@@ -744,10 +885,10 @@ class SliceOp : public Operator<Context> {
     auto* starts_data = starts.template data<SIndex>();
     auto* ends_data = ends.template data<SIndex>();
 
-    CHECK_EQ(starts.ndim(), 1);
-    CHECK_EQ(ends.ndim(), 1);
-    CHECK_LE(data.ndim(), starts.size());
-    CHECK_EQ(starts.size(), ends.size());
+    CAFFE_ENFORCE_EQ(starts.ndim(), 1);
+    CAFFE_ENFORCE_EQ(ends.ndim(), 1);
+    CAFFE_ENFORCE_GE(data.ndim(), starts.size());
+    CAFFE_ENFORCE_EQ(starts.size(), ends.size());
 
     std::vector<SIndex> starts_idx(data.ndim());
     std::vector<SIndex> ends_idx(data.ndim());
@@ -759,28 +900,42 @@ class SliceOp : public Operator<Context> {
         ends_idx[i] = data.dims()[i];
         continue;
       }
-      auto start = starts_data[i];
-      auto end = ends_data[i];
-      if (start < 0) {
-        start = data.dims()[i] + 1 + start;
+      if (data.dims()[i] > 0) {
+        auto start = starts_data[i];
+        auto end = ends_data[i];
+        if (start < 0) {
+          start = data.dims()[i] + 1 + start;
+        }
+        if (end < 0) {
+          end = data.dims()[i] + 1 + end;
+        }
+        CAFFE_ENFORCE_GE(start, 0);
+        CAFFE_ENFORCE_GE(end, 0);
+        CAFFE_ENFORCE_LT(start, data.dims()[i]);
+        CAFFE_ENFORCE_LE(end, data.dims()[i]);
+        CAFFE_ENFORCE_GE(end, start);
+        starts_idx[i] = start;
+        ends_idx[i] = end;
+        dst_sizes[i] = end - start;
+      } else {
+        starts_idx[i] = 0;
+        ends_idx[i] = 0;
+        dst_sizes[i] = 0;
       }
-      if (end < 0) {
-        end = data.dims()[i] + 1 + end;
-      }
-      CHECK_GE(start, 0);
-      CHECK_GE(end, 0);
-      CHECK_LT(start, data.dims()[i]);
-      CHECK_LE(end, data.dims()[i]);
-      CHECK_GE(end, start);
-      starts_idx[i] = start;
-      ends_idx[i] = end;
-      dst_sizes[i] = end - start;
+    }
+
+    if (data.size() <= 0) {
+      // When the input is empty, we do not need to do copy.
+      output->Resize(dst_sizes);
+      output->raw_mutable_data(data.meta());
+      return true;
     }
     // for now only supports slicing in 1 dimension
     int dim = -1;
     for (int i = 0; i < data.ndim(); ++i) {
       if (starts_idx[i] > 0 || ends_idx[i] < data.dims()[i]) {
-        CHECK_EQ(dim, -1) << "Currently only possible to slice in 1 dimension.";
+        CAFFE_ENFORCE_EQ(
+            dim, -1, "Currently only possible to slice in 1 dimension.");
         dim = i;
       }
     }
@@ -911,6 +1066,7 @@ class ReshapeOp : public Operator<Context> {
     auto& input = Input(0);
     CAFFE_ENFORCE(input.ndim() >= 1, "DATA should be at least 1-D");
 
+    vector<int64_t> actual_new_shape = new_shape_;
     if (InputSize() == 2) {
       CAFFE_ENFORCE(
           !OperatorBase::HasArgument("shape"),
@@ -921,7 +1077,19 @@ class ReshapeOp : public Operator<Context> {
       CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
 
       const T* shape_data = shape.template data<T>();
-      new_shape_.assign(shape_data, shape_data + shape.size());
+
+      // Bit awkward, but needed so works on both CPU and CUDA contexts
+      std::vector<T> tmpv(shape.size());
+      context_.template CopyBytes<Context, CPUContext>(
+          shape.size() * sizeof(T), shape_data, &tmpv[0]);
+      actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
+    }
+
+    // Copy over the dimensions for those that are specified zero.
+    for (int i = 0; i < actual_new_shape.size(); ++i) {
+      if (actual_new_shape[i] == 0) {
+        actual_new_shape[i] = input.dim(i);
+      }
     }
 
     // Checks if the new shape is valid and fills in the missing dimension
@@ -930,8 +1098,8 @@ class ReshapeOp : public Operator<Context> {
     auto total_size = input.size_from_dim(0);
     T size = 1;
     int unknown_idx = -1;
-    for (int i = 0; i < new_shape_.size(); ++i) {
-      const auto dim = new_shape_[i];
+    for (int i = 0; i < actual_new_shape.size(); ++i) {
+      const auto dim = actual_new_shape[i];
       if (dim == -1) {
         CAFFE_ENFORCE(
             unknown_idx == -1,
@@ -951,7 +1119,7 @@ class ReshapeOp : public Operator<Context> {
           " vs ",
           size,
           ")");
-      new_shape_[unknown_idx] = total_size / size;
+      actual_new_shape[unknown_idx] = total_size / size;
     } else {
       CAFFE_ENFORCE_EQ(
           total_size,
@@ -969,11 +1137,11 @@ class ReshapeOp : public Operator<Context> {
     old_shape->Resize(input.ndim());
     T* old_shape_data = old_shape->template mutable_data<T>();
     for (int i = 0; i < input.ndim(); ++i) {
-      old_shape_data[i] = input.dim(i);
+      math::Set<T, Context>(1, input.dim(i), old_shape_data + i, &context_);
     }
 
     auto* output = Output(0);
-    output->Resize(new_shape_);
+    output->Resize(actual_new_shape);
     context_.template CopyBytes<Context, Context>(
         input.nbytes(),
         input.raw_data(),
@@ -1029,7 +1197,7 @@ class SqueezeOp : public Operator<Context> {
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
 
     std::sort(dims_.begin(), dims_.end());
-    std::unique(dims_.begin(), dims_.end());
+    dims_.erase(std::unique(dims_.begin(), dims_.end()), dims_.end());
     if (dims_.size() < originalSize) {
       LOG(WARNING) << "Parameter `dims` has repeated dimensions.";
     }
@@ -1051,8 +1219,13 @@ class SqueezeOp : public Operator<Context> {
     for (int i = 0; i < input.dims().size(); ++i) {
       if (j < dims_.size() && dims_[j] == i) {
         CAFFE_ENFORCE(
-            input.dims()[i] == 1, "Dimension ", i, " of input must be 1",
-            " instead of ", input.dims()[i], ".");
+            input.dims()[i] == 1,
+            "Dimension ",
+            i,
+            " of input must be 1",
+            " instead of ",
+            input.dims()[i],
+            ".");
         ++j;
         continue;
       }
@@ -1079,7 +1252,7 @@ class ExpandDimsOp : public Operator<Context> {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
     std::sort(dims_.begin(), dims_.end());
-    std::unique(dims_.begin(), dims_.end());
+    dims_.erase(std::unique(dims_.begin(), dims_.end()), dims_.end());
     if (dims_.size() < originalSize) {
       LOG(WARNING) << "Parameter `dims` has repeated dimensions.";
     }
@@ -1095,9 +1268,12 @@ class ExpandDimsOp : public Operator<Context> {
     }
 
     auto newDims = input.dims();
-    CHECK_GE(input.dims().size() + dims_.size(), dims_.back() + 1)
-        << "Input needs at least " << (1 + dims_.back() - dims_.size())
-        << " dimensions given `dims`.";
+    CAFFE_ENFORCE_GE(
+        input.dims().size() + dims_.size(),
+        dims_.back() + 1,
+        "Input needs at least ",
+        (1 + dims_.back() - dims_.size()),
+        " dimensions given `dims`.");
     for (const auto dim : dims_) {
       newDims.insert(newDims.begin() + dim, 1);
     }
@@ -1128,7 +1304,7 @@ class GatherOp : public Operator<Context> {
     auto& indices = Input(INDICES);
     auto* output = Output(0);
 
-    CHECK_GE(data.ndim(), 1) << "DATA should be at least 1-D";
+    CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
     auto shape = indices.dims();
     shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
     output->Resize(shape);
@@ -1176,9 +1352,9 @@ class GatherRangesOp : public Operator<Context> {
     auto batchSize = ranges.dim(0);
     CAFFE_ENFORCE(data.ndim() == 1, "Data has to be 1-D");
     CAFFE_ENFORCE(ranges.ndim() == 3, "Ranges must be 3-D");
-    CAFFE_ENFORCE(batchSize > 0, "Batch of examples can't be empty");
     CAFFE_ENFORCE(ranges.dim(1) > 0, "There has to be at least one range");
-    CAFFE_ENFORCE(ranges.dim(2), "Ranges last dimention should be of size 2");
+    CAFFE_ENFORCE_EQ(
+        ranges.dim(2), 2, "Ranges last dimention should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
@@ -1186,7 +1362,7 @@ class GatherRangesOp : public Operator<Context> {
     outputLengths->Resize(batchSize);
     auto* outputLengthsPtr = outputLengths->template mutable_data<int32_t>();
     size_t start = 0;
-    size_t blockSize = ranges.size() / batchSize;
+    size_t blockSize = ranges.size_from_dim(1);
     for (size_t i = 0; i < batchSize; ++i) {
       auto end = start + blockSize;
       outputLengthsPtr[i] = accumulate(rangesData, start, end);
@@ -1210,7 +1386,6 @@ class GatherRangesOp : public Operator<Context> {
       auto rangeSizeBytes = rangeLength * itemsize;
       CAFFE_ENFORCE(outputOffsetBytes < outputSize * itemsize);
       CAFFE_ENFORCE(rangeStart + rangeLength <= data.size());
-      VLOG(2) << "Performing copy for range i";
       context_.template CopyItems<Context, Context>(
           data.meta(),
           rangeLength,
@@ -1269,7 +1444,7 @@ class UniqueOp : public Operator<Context> {
     auto& inputTensor = Input(0);
     // use dim32 to enforce that it's fine to have remapping of type int
     int N = inputTensor.dim32(0);
-    CHECK_EQ(inputTensor.ndim(), 1) << "Input should be a vector";
+    CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
     auto* uniqueTensor = Output(UNIQUE);
 
     int* remapping = nullptr;

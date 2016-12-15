@@ -55,24 +55,84 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       }
       break;
     case PadMode::REFLECT:
-      for (int n = 0; n < X.dim32(0); ++n) {
-        for (int c = 0; c < channels; ++c) {
-          for (int ph = 0; ph < padded_height; ++ph) {
-            for (int pw = 0; pw < padded_width; ++pw) {
-              int h = ph - pad_t_;
-              int w = pw - pad_l_;
-              // max(h, -h) does reflection over 0
-              h = max(h, -h);
-              // min(h, 2 * height - h - 2) does reflection over height.
-              h = min(h, 2 * height - h - 2);
-              w = max(w, -w);
-              w = min(w, 2 * width - w - 2);
-              Ydata[ph * padded_width + pw] = Xdata[h * width + w];
+      if (pad_r_ >= 0 && pad_t_ >= 0 && pad_l_ >= 0 && pad_b_ >= 0) {
+        for (int n = 0; n < X.dim32(0); ++n) {
+          for (int c = 0; c < channels; ++c) {
+            // Handle the valid region:
+            // i.e. Y[n][c][pad_t:pad_t+h][pad_l:pad_l+w]
+            auto* Ystart = Ydata + pad_t_ * padded_width + pad_l_;
+            math::CopyMatrix<CPUContext>(
+                sizeof(float),
+                height,
+                width,
+                Xdata,
+                width,
+                Ystart,
+                padded_width,
+                &context_);
+
+// Fixup areas where we need to reflect
+#define X(ph, pw)                 \
+  int h = ph - pad_t_;            \
+  int w = pw - pad_l_;            \
+  h = max(h, -h);                 \
+  h = min(h, 2 * height - h - 2); \
+  w = max(w, -w);                 \
+  w = min(w, 2 * width - w - 2);  \
+  Ydata[ph * padded_width + pw] = Xdata[h * width + w]
+
+            // Top part
+            for (int ph = 0; ph < pad_t_; ++ph) {
+              for (int pw = 0; pw < padded_width; ++pw) {
+                X(ph, pw);
+              }
             }
+
+            // Bottom part
+            for (int ph = padded_height - pad_b_; ph < padded_height; ++ph) {
+              for (int pw = 0; pw < padded_width; ++pw) {
+                X(ph, pw);
+              }
+            }
+
+            // Interior
+            for (int ph = pad_t_; ph < padded_height - pad_b_; ++ph) {
+              // Left
+              for (int pw = 0; pw < pad_l_; ++pw) {
+                X(ph, pw);
+              }
+              // Right
+              for (int pw = padded_width - pad_r_; pw < padded_width; ++pw) {
+                X(ph, pw);
+              }
+            }
+#undef X
+
+            // Do offset.
+            Xdata += height * width;
+            Ydata += padded_height * padded_width;
           }
-          // Do offset.
-          Xdata += height * width;
-          Ydata += padded_height * padded_width;
+        }
+      } else {
+        for (int n = 0; n < X.dim32(0); ++n) {
+          for (int c = 0; c < channels; ++c) {
+            for (int ph = 0; ph < padded_height; ++ph) {
+              for (int pw = 0; pw < padded_width; ++pw) {
+                int h = ph - pad_t_;
+                int w = pw - pad_l_;
+                // max(h, -h) does reflection over 0
+                h = max(h, -h);
+                // min(h, 2 * height - h - 2) does reflection over height.
+                h = min(h, 2 * height - h - 2);
+                w = max(w, -w);
+                w = min(w, 2 * width - w - 2);
+                Ydata[ph * padded_width + pw] = Xdata[h * width + w];
+              }
+            }
+            // Do offset.
+            Xdata += height * width;
+            Ydata += padded_height * padded_width;
+          }
         }
       }
       break;

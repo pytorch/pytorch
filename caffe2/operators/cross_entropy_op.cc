@@ -18,10 +18,17 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto* Y = Output(0);
-  int N = X.ndim() > 1 ? X.dim32(0) : 1;
-  int D = X.size() / N;
-  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
-  DCHECK_EQ(label.dim32(0), N);
+  int N, D;
+  if (X.ndim() > 1) {
+    N = X.dim32(0);
+    D = X.size_from_dim(1);
+  } else {
+    N = 1;
+    D = X.dim32(0);
+  }
+  CAFFE_ENFORCE(
+      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
   Y->Resize(N);
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
@@ -89,7 +96,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
   auto in_idx = 0;
   for (int i = 0; i < outer_size; ++i) {
     auto g_factor = -g_ptr[i] / inner_size;
-    for (int i = 0; i < inner_size; ++i) {
+    for (int j = 0; j < inner_size; ++j) {
       out_ptr[in_idx] = g_factor *
           sigmoid_xent_backward(logits_ptr[in_idx], targets_ptr[in_idx]);
       ++in_idx;
@@ -104,12 +111,19 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  int N = X.ndim() > 1 ? X.dim32(0) : 1;
-  int D = X.size() / N;
-  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
-  DCHECK_EQ(label.dim32(0), N);
-  DCHECK_EQ(dY.ndim(), 1);
-  DCHECK_EQ(dY.dim32(0), N);
+  int N, D;
+  if (X.ndim() > 1) {
+    N = X.dim32(0);
+    D = X.size_from_dim(1);
+  } else {
+    N = 1;
+    D = X.dim32(0);
+  }
+  CAFFE_ENFORCE(
+      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(dX->size(), 0.f, dX->mutable_data<float>(),
                                &context_);
@@ -148,8 +162,8 @@ bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
   auto shape = dY.dims();
-  CHECK_GE(shape.size(), 1);
-  CHECK_EQ(shape.back(), 2);
+  CAFFE_ENFORCE_GE(shape.size(), 1);
+  CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();
   dX->Resize(shape);
   const float* dYdata = dY.data<float>();
@@ -167,10 +181,17 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto* Y = Output(0);
-  int N = X.ndim() > 1 ? X.dim32(0) : 1;
-  int D = X.size() / N;
-  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
-  DCHECK_EQ(label.dim32(0), N);
+  int N, D;
+  if (X.ndim() > 1) {
+    N = X.dim32(0);
+    D = X.size_from_dim(1);
+  } else {
+    N = 1;
+    D = X.dim32(0);
+  }
+  CAFFE_ENFORCE(
+      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
   Y->Resize(vector<TIndex>{N});
   const float* Xdata = X.data<float>();
   const float* labelData = label.data<float>();
@@ -198,12 +219,19 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  int N = X.ndim() > 1 ? X.dim32(0) : 1;
-  int D = X.size() / N;
-  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
-  DCHECK_EQ(label.dim32(0), N);
-  DCHECK_EQ(dY.ndim(), 1);
-  DCHECK_EQ(dY.dim32(0), N);
+  int N, D;
+  if (X.ndim() > 1) {
+    N = X.dim32(0);
+    D = X.size_from_dim(1);
+  } else {
+    N = 1;
+    D = X.dim32(0);
+  }
+  CAFFE_ENFORCE(
+      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
     dX->size(), 0.f, dX->mutable_data<float>(), &context_);

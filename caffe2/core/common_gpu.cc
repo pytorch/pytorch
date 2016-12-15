@@ -1,6 +1,8 @@
 #include "caffe2/core/common_gpu.h"
+#include "caffe2/core/asan.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <sstream>
 
 #include "caffe2/core/init.h"
@@ -9,6 +11,14 @@
 namespace caffe2 {
 
 int NumCudaDevices() {
+  if (getenv("CAFFE2_DEBUG_CUDA_INIT_ORDER")) {
+    static bool first = true;
+    if (first) {
+      first = false;
+      std::cerr << "DEBUG: caffe2::NumCudaDevices() invoked for the first time"
+                << std::endl;
+    }
+  }
   static int count = -1;
   if (count < 0) {
     auto err = cudaGetDeviceCount(&count);
@@ -28,10 +38,36 @@ int NumCudaDevices() {
                         "have a cuda gpu.";
         count = 0;
         break;
+      case cudaErrorUnknown:
+        LOG(ERROR) << "Found an unknown error - this may be due to an "
+                      "incorrectly set up environment, e.g. changing env "
+                      "variable CUDA_VISIBLE_DEVICES after program start. "
+                      "I will set the available devices to be zero.";
+        count = 0;
+        break;
+      case cudaErrorMemoryAllocation:
+#if CAFFE2_ASAN_ENABLED
+        // In ASAN mode, we know that a cudaErrorMemoryAllocation error will
+        // pop up.
+        LOG(ERROR) << "It is known that CUDA does not work well with ASAN. As "
+                      "a result we will simply shut down CUDA support. If you "
+                      "would like to use GPUs, turn off ASAN.";
+        count = 0;
+        break;
+#else // CAFFE2_ASAN_ENABLED
+        // If we are not in ASAN mode and we get cudaErrorMemoryAllocation,
+        // this means that something is wrong before NumCudaDevices() call.
+        LOG(FATAL) << "Unexpected error from cudaGetDeviceCount(). Did you run "
+                      "some cuda functions before calling NumCudaDevices() "
+                      "that might have already set an error? Error: "
+                   << err;
+        break;
+#endif // CAFFE2_ASAN_ENABLED
       default:
         LOG(FATAL) << "Unexpected error from cudaGetDeviceCount(). Did you run "
                       "some cuda functions before calling NumCudaDevices() "
-                      "that might have already set an error?";
+                      "that might have already set an error? Error: "
+                   << err;
     }
   }
   return count;
@@ -42,9 +78,14 @@ int gDefaultGPUID = 0;
 }  // namespace
 
 void SetDefaultGPUID(const int deviceid) {
-  CHECK_LT(deviceid, NumCudaDevices())
-      << "The default gpu id should be smaller than the number of gpus "
-         "on this machine: " << deviceid << " vs " << NumCudaDevices();
+  CAFFE_ENFORCE_LT(
+      deviceid,
+      NumCudaDevices(),
+      "The default gpu id should be smaller than the number of gpus "
+      "on this machine: ",
+      deviceid,
+      " vs ",
+      NumCudaDevices());
   gDefaultGPUID = deviceid;
 }
 int GetDefaultGPUID() { return gDefaultGPUID; }
@@ -63,9 +104,14 @@ int GetGPUIDForPointer(const void* ptr) {
 
 const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
   static vector<cudaDeviceProp> props;
-  CHECK_LT(deviceid, NumCudaDevices())
-      << "The gpu id should be smaller than the number of gpus "
-         "on this machine: " << deviceid << " vs " << NumCudaDevices();
+  CAFFE_ENFORCE_LT(
+      deviceid,
+      NumCudaDevices(),
+      "The gpu id should be smaller than the number of gpus ",
+      "on this machine: ",
+      deviceid,
+      " vs ",
+      NumCudaDevices());
   if (props.size() == 0) {
     props.resize(NumCudaDevices());
     for (int i = 0; i < NumCudaDevices(); ++i) {
@@ -193,60 +239,4 @@ const char* curandGetErrorString(curandStatus_t error) {
   // To suppress compiler warning.
   return "Unrecognized curand error string";
 }
-
-bool Caffe2InitializeCuda(int*, char***) {
-  static bool g_initialization_function_called = false;
-  if (g_initialization_function_called == true) {
-    VLOG(1) << "Initialization already called. Ignoring duplicated calls.";
-    return true;
-  }
-  g_initialization_function_called = true;
-  // If the current run does not have any cuda devices, do nothing.
-  if (!HasCudaGPU()) {
-    VLOG(1) << "No cuda gpu present. Skipping.";
-    return true;
-  }
-  // Check if the number of GPUs matches the expected compile-time max number
-  // of GPUs.
-  CHECK_LE(NumCudaDevices(), CAFFE2_COMPILE_TIME_MAX_GPUS)
-      << "Number of CUDA devices on the machine is larger than the compiled "
-         "max number of gpus expected ("
-      << CAFFE2_COMPILE_TIME_MAX_GPUS
-      << "). Increase that and recompile the caffe binary.";
-  // Save the current device so we can restore it after moving across
-  // different devices.
-  int init_device;
-  CUDA_CHECK(cudaGetDevice(&init_device));
-
-  for (int i = 0; i < NumCudaDevices(); ++i) {
-    auto err = cudaSetDevice(i);
-    if (err != cudaSuccess) {
-      LOG(WARNING)
-          << "Cannot use device " << i
-          << "due to the following error: " << cudaGetErrorString(err);
-      continue;
-    }
-    // Enable peer access.
-    for (int j = 0; j < NumCudaDevices(); ++j) {
-      if (i == j) continue;
-      int can_access;
-      CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, i, j));
-      if (can_access) {
-        VLOG(1) << "Enabling peer access from " << i << " to " << j;
-        // Note: just for future reference, the 0 here is not a gpu id, it is
-        // a reserved flag for cudaDeviceEnablePeerAccess that should always be
-        // zero currently.
-        CUDA_CHECK(cudaDeviceEnablePeerAccess(j, 0));
-      }
-    }
-  }
-  // Restore the current device.
-  CUDA_CHECK(cudaSetDevice(init_device));
-  return true;
-}
-
-REGISTER_CAFFE2_INIT_FUNCTION(Caffe2InitializeCuda,
-                              &Caffe2InitializeCuda,
-                              "Enable cuda for caffe2.");
-
 }  // namespace caffe2

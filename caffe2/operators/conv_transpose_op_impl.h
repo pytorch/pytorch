@@ -43,14 +43,17 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int input_image_size = H * W;
   const int output_image_size = Y->dim32(2) * Y->dim32(3);
 
+#ifndef __ARM_NEON__
   if (bias_multiplier_.size() != output_image_size) {
     bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
-        output_image_size,
-        static_cast<T>(1),
-        bias_multiplier_.template mutable_data<T>(),
-        &context_);
+      output_image_size,
+      static_cast<T>(1),
+      bias_multiplier_.template mutable_data<T>(),
+      &context_);
   }
+#endif // !__ARM_NEON__
+
   const T* Xdata = X.template data<T>();
   T* Ydata = Y->template mutable_data<T>();
 
@@ -71,6 +74,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           0,
           col_buffer_data,
           &context_);
+
       // Col2im
       math::Col2im<T, Context, StorageOrder::NCHW>(
           col_buffer_data,
@@ -89,7 +93,9 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           stride_w_,
           Ydata,
           &context_);
+
       // Bias term
+#ifndef __ARM_NEON__
       math::Gemm<T, Context>(
           CblasNoTrans,
           CblasNoTrans,
@@ -102,6 +108,15 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           1,
           Ydata,
           &context_);
+#else
+      math::BiasCHW<T, Context>(
+        bias.template data<T>(),
+        C,
+        output_image_size,
+        Ydata,
+        &context_);
+#endif // !__ARM_NEON__
+
       Xdata += M * H * W;
       Ydata += Y->size() / Y->dim32(0);
     }

@@ -12,9 +12,8 @@ class PerplexityOp final : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(PerplexityOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
-
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_PERPLEXITY_OP_H_
+#endif // CAFFE2_OPERATORS_PERPLEXITY_OP_H_

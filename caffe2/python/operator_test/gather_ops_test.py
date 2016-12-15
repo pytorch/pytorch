@@ -18,3 +18,7 @@ class TestGatherOps(TestCase):
             'Gather', ['data', 'ind'], ['word']))
         outdata = np.array(["hello", "world", "!"], dtype='|S')
         assert((workspace.FetchBlob('word') == outdata).all())
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()
