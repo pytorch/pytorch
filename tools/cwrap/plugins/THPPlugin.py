@@ -14,6 +14,15 @@ class THPPlugin(CWrapPlugin):
         'THTensor*':        Template('((THPTensor*)$arg)->cdata'),
         'THBoolTensor*':    Template('((THPBoolTensor*)$arg)->cdata'),
         'THIndexTensor*':   Template('((THPIndexTensor*)$arg)->cdata'),
+
+        'THSFloatTensor*':  Template('((THSPFloatTensor*)$arg)->cdata'),
+        'THSDoubleTensor*': Template('((THSPDoubleTensor*)$arg)->cdata'),
+        'THSLongTensor*':   Template('((THSPLongTensor*)$arg)->cdata'),
+        'THSIntTensor*':    Template('((THSPIntTensor*)$arg)->cdata'),
+        'THSTensor*':       Template('((THSPTensor*)$arg)->cdata'),
+        'THSBoolTensor*':   Template('((THSPBoolTensor*)$arg)->cdata'),
+        'THSIndexTensor*':  Template('((THSPIndexTensor*)$arg)->cdata'),
+
         'THLongStorage*':   Template('((THPLongStorage*)$arg)->cdata'),
         'THStorage*':       Template('((THPStorage*)$arg)->cdata'),
         'THGenerator*':     Template('((THPGenerator*)$arg)->cdata'),
@@ -38,6 +47,15 @@ class THPPlugin(CWrapPlugin):
         'THTensor*':        Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
         'THBoolTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
         'THIndexTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
+
+        'THSDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPDoubleTensorClass'),
+        'THSFloatTensor*':  Template('(PyObject*)Py_TYPE($arg) == THSPFloatTensorClass'),
+        'THSLongTensor*':   Template('(PyObject*)Py_TYPE($arg) == THSPLongTensorClass'),
+        'THSIntTensor*':    Template('(PyObject*)Py_TYPE($arg) == THSPIntTensorClass'),
+        'THSTensor*':       Template('(PyObject*)Py_TYPE($arg) == THSPTensorClass'),
+        'THSBoolTensor*':   Template('(PyObject*)Py_TYPE($arg) == THSPBoolTensorClass'),
+        'THSIndexTensor*':  Template('(PyObject*)Py_TYPE($arg) == THSPIndexTensorClass'),
+
         'THLongStorage*':   Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
         'THStorage*':       Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
         'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
@@ -57,6 +75,8 @@ class THPPlugin(CWrapPlugin):
 
     RETURN_WRAPPER = {
         'THTensor*':        Template('return THPTensor_(New)($result);'),
+        'THSTensor*':       Template('return THSPTensor_(New)($result);'),
+        'THLongTensor*':    Template('return THPLongTensor_New($result);'),
         'THLongStorage*':   Template('return THPLongStorage_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long':             Template('return PyInt_FromLong($result);'),
@@ -66,53 +86,56 @@ class THPPlugin(CWrapPlugin):
     }
 
     TENSOR_METHODS_DECLARATION = Template("""
-static PyMethodDef THPTensor_$stateless(methods)[] = {
-$methods
-  {NULL}
-};
-""")
+    static PyMethodDef TH${sparse}PTensor_$stateless(methods)[] = {
+    $methods
+    {NULL}
+    };
+    """)
 
     WRAPPER_TEMPLATE = Template("""\
-PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
-{
-    HANDLE_TH_ERRORS
-    int __tuplecount = args ? PyTuple_Size(args) : 0;
-    int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
-    int __argcount = __tuplecount + __dictcount;
-    $variables
-    $init
+                                PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
+                                {
+                                HANDLE_TH_ERRORS
+                                int __tuplecount = args ? PyTuple_Size(args) : 0;
+                                int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+                                int __argcount = __tuplecount + __dictcount;
+                                $variables
+                                $init
 
-    $options
+                                $options
     }
 
-    THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
-    return NULL;
-    END_HANDLE_TH_ERRORS
-}
-""")
+                                THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
+                                return NULL;
+                                END_HANDLE_TH_ERRORS
+                                }
+                                """)
 
     ALLOCATE_TMPL = Template("""\
-THP${type}TensorPtr _${name}_guard = (THP${type}Tensor*) THP${type}Tensor_NewEmpty();
-if (!_${name}_guard.get()) return NULL;
-THP${type}Tensor* $name = _${name}_guard.get();
-""")
+                             THP${type}TensorPtr _${name}_guard = (THP${type}Tensor*) THP${type}Tensor_NewEmpty();
+                             if (!_${name}_guard.get()) return NULL;
+                             THP${type}Tensor* $name = _${name}_guard.get();
+                             """)
 
     ALLOCATE_CUDA = Template("""\
-#if IS_CUDA
-${cuda}
-#else
-${cpu}
-#endif
-""")
+                             #if IS_CUDA
+                             ${cuda}
+                             #else
+                             ${cpu}
+                             #endif
+                             """)
 
-    def _allocate(typename, tmpl, cuda_tmpl=None):
+    def _allocate(typename, tmpl, cuda_tmpl=None, sparse=False):
         code = tmpl.safe_substitute(type=typename)
         if typename == '':
             code = code.replace('NewEmpty', '(NewEmpty)')
-        if cuda_tmpl:
-            cuda_code = code.replace('THP', 'THCP')
-            code = cuda_tmpl.substitute(cuda=cuda_code, cpu=code)
-        return Template(code)
+            if cuda_tmpl:
+                cuda_code = code.replace('THP', 'THCP')
+                code = cuda_tmpl.substitute(cuda=cuda_code, cpu=code)
+                if sparse:
+                    code = code.replace('THP', 'THSP')
+                    code = code.replace('THCP', 'THSCP')
+                    return Template(code)
 
     ALLOCATE_TYPE = {
         'THTensor*':        _allocate('', ALLOCATE_TMPL),
@@ -120,10 +143,13 @@ ${cpu}
         'THIntTensor*':     _allocate('Int', ALLOCATE_TMPL),
         'THBoolTensor*':    _allocate('Byte', ALLOCATE_TMPL, ALLOCATE_CUDA),
         'THIndexTensor*':   _allocate('Long', ALLOCATE_TMPL, ALLOCATE_CUDA),
+
+        'THSTensor*':       _allocate('', ALLOCATE_TMPL, sparse=True),
     }
 
     TYPE_NAMES = {
         'THTensor*': '" THPTensorStr "',
+        'THSTensor*': '" THSPTensorStr "',
         'THStorage*': '" THPStorageStr "',
         'THGenerator*': 'torch.Generator',
         'THLongStorage*': '" THPModuleStr "LongStorage',
@@ -190,11 +216,11 @@ ${cpu}
         init_str = '\n'.join(declaration.get('init', []))
         if 'stateless' in declaration['name']:
             readable_name = 'torch.' + declaration['python_name']
-        else:
-            readable_name = declaration['python_name']
-        return Template(self.WRAPPER_TEMPLATE.safe_substitute(
-            readable_name=readable_name, num_options=len(arg_desc),
-            expected_args=arg_str, variables=variables_str, init=init_str))
+            else:
+                readable_name = declaration['python_name']
+                return Template(self.WRAPPER_TEMPLATE.safe_substitute(
+                    readable_name=readable_name, num_options=len(arg_desc),
+                    expected_args=arg_str, variables=variables_str, init=init_str))
 
     def get_return_wrapper(self, option):
         return self.RETURN_WRAPPER.get(option['return'], None)
@@ -217,10 +243,10 @@ ${cpu}
                 continue
             declaration['docstring_content'] = docstr.replace('\n', '\\n')
             declaration['docstring_var'] = 'docstr_' + declaration['python_name']
-        for declaration in self.stateless_declarations:
-            docstr = declaration.get('docstring_stateless')
-            if docstr is None:
-                continue
+            for declaration in self.stateless_declarations:
+                docstr = declaration.get('docstring_stateless')
+                if docstr is None:
+                    continue
             declaration['docstring_content'] = docstr.replace('\n', '\\n')
             declaration['docstring_var'] = 'stateless_docstr_' + declaration['python_name']
 
@@ -233,11 +259,11 @@ ${cpu}
             for i, arg in enumerate(option['arguments']):
                 if arg.get('output'):
                     out_idx.append(i)
-            if not out_idx:
-                option['has_output'] = True
-                option['output_provided'] = False
-                new_options.append(option)
-                continue
+                    if not out_idx:
+                        option['has_output'] = True
+                        option['output_provided'] = False
+                        new_options.append(option)
+                        continue
             for output_provided in (True, False):
                 option_copy = deepcopy(option)
                 option_copy['has_output'] = True
@@ -248,12 +274,12 @@ ${cpu}
                     arg['output_idx'] = i
                     if not output_provided:
                         arg['ignore_check'] = True
-                    else:
-                        option_copy['argcount_offset'] =  -len(out_idx) + 1
-                        arg['no_kwargs'] = True
-                        arg['no_idx'] = True
-                new_options.append(option_copy)
-        declaration['options'] = self.filter_unique_options(new_options)
+                        else:
+                            option_copy['argcount_offset'] =  -len(out_idx) + 1
+                            arg['no_kwargs'] = True
+                            arg['no_idx'] = True
+                            new_options.append(option_copy)
+                            declaration['options'] = self.filter_unique_options(new_options)
 
     def process_declarations(self, declarations):
         new_declarations = []
@@ -282,25 +308,28 @@ ${cpu}
             declaration.setdefault('variables', [])
             if has_arg_type(declaration, 'THSize*'):
                 declaration['variables'] += ['THLongStoragePtr __size;']
-            if has_arg_type(declaration, 'THStride*'):
-                declaration['variables'] += ['THLongStoragePtr __stride;']
-            if has_output_args(declaration):
-                declaration['variables'] += ['PyObject *__out;']
-                self.generate_out_options(declaration)
-            if has_long_args(declaration):
-                declaration['no_kwargs'] = True
-            for option in declaration['options']:
-                option['cname'] = 'THTensor_({})'.format(option['cname'])
-            if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
-                stateless_declaration = self.make_stateless(declaration)
-                new_declarations.append(stateless_declaration)
-                self.stateless_declarations.append(stateless_declaration)
-            if declaration.get('only_stateless', False):
-                continue
+                if has_arg_type(declaration, 'THStride*'):
+                    declaration['variables'] += ['THLongStoragePtr __stride;']
+                    if has_output_args(declaration):
+                        declaration['variables'] += ['PyObject *__out;']
+                        self.generate_out_options(declaration)
+                        if has_long_args(declaration):
+                            declaration['no_kwargs'] = True
+                            for option in declaration['options']:
+                                option['cname'] = 'THTensor_({})'.format(option['cname'])
+                                if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
+                                    stateless_declaration = self.make_stateless(declaration)
+                                    new_declarations.append(stateless_declaration)
+                                    self.stateless_declarations.append(stateless_declaration)
+                                    if declaration.get('only_stateless', False):
+                                        continue
 
             self.declarations.append(declaration)
-            declaration['name'] = 'THPTensor_({})'.format(declaration['name'])
+            declaration['name'] = 'TH{}PTensor_({})'.format(
+                'S' if declaration['sparse'] else '', declaration['name'])
             for option in declaration['options']:
+                option['cname'] = 'TH{}Tensor_({})'.format(
+                    'S' if option['sparse'] else '', option['cname'])
                 for arg in option['arguments']:
                     if arg['name'] == 'self':
                         arg['ignore_check'] = True
@@ -320,7 +349,8 @@ ${cpu}
 
     def make_stateless(self, declaration):
         declaration = deepcopy(declaration)
-        declaration['name'] = 'THPTensor_stateless_({})'.format(declaration['name'])
+        declaration['name'] = 'TH{}PTensor_stateless_({})'.format(
+            'S' if declaration['sparse'] else '', declaration['name'])
         for option in declaration['options']:
             for arg in option['arguments']:
                 if arg['name'] == 'self':
@@ -342,9 +372,11 @@ ${cpu}
                 seen_signatures.add(sig)
         return unique
 
-    def declare_methods(self, stateless):
+    def declare_methods(self, stateless, sparse):
         tensor_methods = ''
         for declaration in (self.declarations if not stateless else self.stateless_declarations):
+            if declaration['sparse'] != sparse:
+                continue
             flags = 'METH_VARARGS'
             flags += ' | ' + declaration.get('method_flags') if 'method_flags' in declaration else ''
             if not declaration.get('only_register'):
@@ -358,12 +390,22 @@ ${cpu}
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])
             tensor_methods += entry
-        return self.TENSOR_METHODS_DECLARATION.substitute(methods=tensor_methods, stateless=('' if not stateless else 'stateless_'))
+        return self.TENSOR_METHODS_DECLARATION.substitute(
+            methods=tensor_methods,
+            stateless=('' if not stateless else 'stateless_'),
+            sparse=('' if not sparse else 'S'),
+        )
 
     def process_full_file(self, code):
         # We have to find a place before all undefs
         idx = code.find('// PUT DEFINITIONS IN HERE PLEASE')
-        return code[:idx] + self.declare_methods(False) + self.declare_methods(True) + code[idx:]
+        return (code[:idx]
+                + self.declare_methods(False, False)
+                + self.declare_methods(True, False)
+                + self.declare_methods(False, True)
+                + self.declare_methods(True, True)
+                + code[idx:]
+                )
 
     def preprocessor_guard(self, code, condition):
             return '#if ' + condition + '\n' + code + '#endif\n'

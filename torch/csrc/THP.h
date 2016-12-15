@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <TH/TH.h>
+#include <THS/THS.h>
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
 // define PyInt_* macros for Python 3.x

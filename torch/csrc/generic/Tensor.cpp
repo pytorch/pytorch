@@ -800,6 +800,8 @@ PyTypeObject THPTensorStatelessType = {
   0,                                     /* tp_weaklist */
 };
 
+#include "SparseTensor.cpp"
+
 bool THPTensor_(init)(PyObject *module)
 {
 #ifndef THC_GENERIC_FILE

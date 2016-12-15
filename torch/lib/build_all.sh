@@ -34,6 +34,7 @@ function build() {
               -DTHC_SO_VERSION=1 \
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1
+              -DCMAKE_BUILD_TYPE=Debug
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
@@ -63,6 +64,7 @@ function build_nccl() {
 
 mkdir -p tmp_install
 build TH
+build THS
 build THNN
 
 if [[ "$1" == "--with-cuda" ]]; then

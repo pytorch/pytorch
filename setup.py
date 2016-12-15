@@ -180,7 +180,7 @@ if platform.system() == 'Darwin':
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
 
 main_compile_args = ['-D_THP_CORE']
-main_libraries = ['shm']
+main_libraries = ['THS', 'shm']
 main_link_args = [TH_LIB]
 main_sources = [
     "torch/csrc/Module.cpp",

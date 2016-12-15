@@ -66,6 +66,8 @@ typedef THLongStorage THStride;
 !!inc methods/TensorRandom.cwrap
 !!inc methods/TensorCuda.cwrap
 
+!!inc methods/SparseTensor.cwrap
+
 // cwrap should put definitions before undefs, so let's mark this place
 // PUT DEFINITIONS IN HERE PLEASE
 

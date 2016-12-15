@@ -1,0 +1,179 @@
+[[
+  name: set
+  sparse: yes
+  cname: set
+  return: THSTensor*
+  arguments:
+  - THSTensor* self
+  - THLongTensor* indices
+  - THTensor* values
+]]
+
+[[
+  name: size
+  sparse: yes
+  options:
+  - return: long
+    cname: size
+    arguments:
+    - THSTensor* self
+    - long dim
+  - return: THLongStorage*
+    cname: newSizeOf
+    arguments:
+    - THSTensor* self
+]]
+
+[[
+  name: nDimension
+  sparse: yes
+  python_name: ndimension
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: nnz
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: isContiguous
+  sparse: yes
+  python_name: is_contiguous
+  return: bool
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: indices
+  sparse: yes
+  return: THLongTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: values
+  sparse: yes
+  return: THTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: contiguous
+  sparse: yes
+  return: argument 0
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: toDense
+  sparse: yes
+  python_name: to_dense
+  return: THTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: transpose
+  sparse: yes
+  cname: newTranspose
+  return: THSTensor*
+  arguments:
+  - THSTensor* self
+  - long dim0
+  - long dim1
+]]
+
+[[
+  name: transpose_
+  sparse: yes
+  cname: transpose
+  return: argument 0
+  arguments:
+  - THSTensor* self
+  - long dim0
+  - long dim1
+]]
+
+[[
+  name: mm
+  sparse: yes
+  only_stateless: True
+  cname: spaddmm
+  return: argument 0
+  before_call: |
+    long s1 = THSTensor_(size)(LIBRARY_STATE ((THSPTensor*)$arg4)->cdata, 0);
+    long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
+    THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - CONSTANT AS_REAL(0)
+    - argument 0
+    - CONSTANT AS_REAL(1)
+    - THSTensor* mat1
+    - THTensor* mat2
+]]
+
+[[
+  name: sspmm
+  only_stateless: True
+  sparse: yes
+  cname: sspaddmm
+  return: argument 0
+  before_call: |
+    long s1 = THSTensor_(size)(LIBRARY_STATE ((THSPTensor*)$arg4)->cdata, 0);
+    long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
+    THSTensor_(resize2d)(LIBRARY_STATE ((THSPTensor*)$arg0)->cdata, s1, s2);
+  arguments:
+    - arg: THSTensor* result
+      allocate: True
+    - CONSTANT AS_REAL(0)
+    - argument 0
+    - CONSTANT AS_REAL(1)
+    - THSTensor* mat1
+    - THTensor* mat2
+]]
+
+[[
+  name: sspaddmm
+  sparse: yes
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      allocate: True
+    - arg: real beta
+      default: AS_REAL(1)
+    - THSTensor* self
+    - arg: real alpha
+      default: AS_REAL(1)
+    - THSTensor* mat1
+    - THTensor* mat2
+]]
+
+[[
+  name: spadd
+  sparse: yes
+  cname: spcadd
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - THTensor* mat1
+    - arg: real value
+      default: AS_REAL(1)
+    - THSTensor* mat2
+]]
+

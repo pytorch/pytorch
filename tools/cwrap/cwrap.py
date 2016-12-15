@@ -97,6 +97,8 @@ class cwrap(object):
     def set_declaration_defaults(self, declaration):
         declaration.setdefault('arguments', [])
         declaration.setdefault('return', 'void')
+        if 'sparse' not in declaration:
+            declaration['sparse'] = False
         if not 'cname' in declaration:
             declaration['cname'] = declaration['name']
         # Simulate multiple dispatch, even if it's not necessary
