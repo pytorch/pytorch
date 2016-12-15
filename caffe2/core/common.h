@@ -15,6 +15,10 @@
 
 namespace caffe2 {
 
+// Data type for caffe2 Index/Size. We use size_t to be safe here as well as for
+// large matrices that are common in sparse math.
+typedef int64_t TIndex;
+
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
 // in some cases, but in most of the computation code we do not access map very
@@ -113,6 +117,35 @@ inline Dst dynamic_cast_if_rtti(Src ptr) {
   return reinterpret_cast<Dst>(ptr);
 #endif
 }
+
+// SkipIndices are used in operator_fallback_gpu.h and operator_fallback_mkl.h
+// as utilty functions that marks input / output indices to skip when we use a
+// CPU operator as the fallback of GPU/MKL operator option.
+template <int... values>
+class SkipIndices {
+ private:
+  template <int V>
+  static inline bool ContainsInternal(const int i) {
+    return (i == V);
+  }
+  template <int First, int Second, int... Rest>
+  static inline bool ContainsInternal(const int i) {
+    return (i == First) && ContainsInternal<Second, Rest...>(i);
+  }
+
+ public:
+  static inline bool Contains(const int i) {
+    return ContainsInternal<values...>(i);
+  }
+};
+
+template <>
+class SkipIndices<> {
+ public:
+  static inline bool Contains(const int i) {
+    return false;
+  }
+};
 
 }  // namespace caffe2
 

@@ -202,91 +202,36 @@ class TensorFeeder : public BlobFeederBase {
   }
 };
 
-// Python Op implementations.
-using FuncRegistery = std::unordered_map<std::string, py::object>;
-FuncRegistery& gRegistery();
-
-py::object& getOpFunc(const std::string& token);
-
-py::object& getGradientFunc(const std::string& token);
+namespace python_detail {
+class Func;
+}
 
 class PythonOpBase : public Operator<CPUContext> {
  public:
-  using Operator::Operator;
+  PythonOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws), ws_(ws) {}
 
-  bool RunOnDevice() final {
-    std::vector<TensorCPU*> inputs;
-    inputs.reserve(InputSize());
-    for (auto i = 0; i < InputSize(); ++i) {
-      inputs.push_back(const_cast<TensorCPU*>(&Input(i)));
-    }
-    std::vector<TensorCPU*> outputs;
-    outputs.reserve(OutputSize());
-    for (auto i = 0; i < OutputSize(); ++i) {
-      outputs.push_back(Output(i));
-    }
-    auto& pyFunc = getFunc();
-    {
-      // Acquire GIL for call to Python runtime.
-      py::gil_scoped_acquire g;
-      try {
-        pyFunc(inputs, outputs);
-      } catch (const py::error_already_set& e) {
-        LOG(ERROR) << "Exception encountered running PythonOp function: "
-                   << e.what() << "\nTraceback: ";
-        PyObject *type = nullptr, *value = nullptr, *trace = nullptr;
-        PyErr_Fetch(&type, &value, &trace);
-        PyTracebackObject* traceback =
-            reinterpret_cast<PyTracebackObject*>(trace);
-        vector<PyTracebackObject*> trace_vec;
-        while (traceback) {
-          trace_vec.push_back(traceback);
-          traceback = traceback->tb_next;
-        }
-        for (int i = trace_vec.size() - 1; i >= 0; --i) {
-          int line = trace_vec[i]->tb_lineno;
-          const char* filename =
-              PyString_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
-          const char* funcname =
-              PyString_AsString(trace_vec[i]->tb_frame->f_code->co_name);
-          LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
-                     << " (" << line << "): " << funcname;
-        }
-        Py_XDECREF(type);
-        Py_XDECREF(value);
-        Py_XDECREF(trace);
-        return false;
-      }
-    }
-    return true;
-  }
+  bool RunOnDevice() override final;
 
- private:
-  virtual py::object& getFunc() = 0;
+ protected:
+  virtual const python_detail::Func& getFunc() = 0;
+  Workspace* ws_;
 };
 
 class PythonOp final : public PythonOpBase {
  public:
   using PythonOpBase::PythonOpBase;
 
- private:
-  py::object& getFunc() override {
-    const std::string& token =
-        OperatorBase::GetSingleArgument<std::string>("token", "");
-    return getOpFunc(token);
-  }
+ protected:
+  const python_detail::Func& getFunc() override;
 };
 
 class PythonGradientOp final : public PythonOpBase {
  public:
   using PythonOpBase::PythonOpBase;
 
- private:
-  py::object& getFunc() override {
-    const std::string& token =
-        OperatorBase::GetSingleArgument<std::string>("token", "");
-    return getGradientFunc(token);
-  }
+ protected:
+  const python_detail::Func& getFunc() override;
 };
 
 } // namespace python

@@ -32,7 +32,7 @@ class LevelDBCursor : public Cursor {
 class LevelDBTransaction : public Transaction {
  public:
   explicit LevelDBTransaction(leveldb::DB* db) : db_(db) {
-    CHECK_NOTNULL(db_);
+    CAFFE_ENFORCE(db_);
     batch_.reset(new leveldb::WriteBatch());
   }
   ~LevelDBTransaction() { Commit(); }
