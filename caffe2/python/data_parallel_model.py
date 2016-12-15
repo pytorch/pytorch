@@ -54,7 +54,7 @@ def Parallelize_GPU(
     '''
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
-    model_helper_obj.net.Proto().num_workers = len(devices) * 2 + extra_workers
+    model_helper_obj.net.Proto().num_workers = len(devices) * 4 + extra_workers
     model_helper_obj.net.Proto().type = net_type
 
     # Store some information in the model -- a bit ugly
@@ -429,7 +429,7 @@ def _AllReduceGradientsSingleHost(devices, model):
             model.NCCLAllreduce(
                 grads_group,
                 grads_group,
-                control_input=last_out,
+            #    control_input=last_out,
             )
 
             # last_out is used to serialize the execution of nccls
