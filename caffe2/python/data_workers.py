@@ -108,6 +108,7 @@ class DataInputCoordinator(object):
         self._device_option = device_option
         self._namescope = namescope
         self._active = True
+        self._started = False
         self._workers = []
         self._input_source_name = input_source_name
         self._create_caffe2_queues_and_ops()
@@ -117,6 +118,8 @@ class DataInputCoordinator(object):
 
     def _start(self):
         self._active = True
+        self._started = True
+
         for w in self._workers:
             w.daemon = True
             w.start()
@@ -144,7 +147,7 @@ class DataInputCoordinator(object):
     def put(self, chunk):
         while self.is_active():
             try:
-                self._internal_queue.put(chunk, block=True, timeout=0.1)
+                self._internal_queue.put(chunk, block=True, timeout=5.0)
                 return
             except Queue.Full:
                 log.warn("Queue full: stalling fetchers...")
@@ -239,7 +242,8 @@ class GlobalCoordinator(object):
 
     def start(self):
         for c in self._coordinators:
-            c._start()
+            if not c._started:
+                c._start()
 
     def stop(self):
         for c in self._coordinators:
