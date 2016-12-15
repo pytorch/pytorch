@@ -76,11 +76,13 @@ def Parallelize_GPU(
                 log.info("Model for GPU: {}".format(device))
                 input_builder_fun(model_helper_obj)
                 losses = forward_pass_builder_fun(model_helper_obj)
-                assert isinstance(losses, list), \
-                    'Model builder function must return a list of loss blobs'
-                for loss in losses:
-                    assert isinstance(loss, core.BlobReference), \
-                        'Model builder func must return a list of loss blobs'
+                # Losses are not needed for test net
+                if param_update_builder_fun is not None:
+                    assert isinstance(losses, list), \
+                        'Model builder function must return list of loss blobs'
+                    for loss in losses:
+                        assert isinstance(loss, core.BlobReference), \
+                            'Model builder func must return list of loss blobs'
 
                 losses_by_gpu[device] = losses
 
