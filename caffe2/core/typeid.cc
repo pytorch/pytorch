@@ -24,6 +24,14 @@ string Demangle(const char* name) {
   return name;
 }
 
+string GetExceptionString(const std::exception& e) {
+#ifdef __GXX_RTTI
+  return Demangle(typeid(e).name()) + ": " + e.what();
+#else
+  return string("Exception (no RTTI available): ") + e.what();
+#endif // __GXX_RTTI
+}
+
 namespace {
 // This single registerer exists solely for us to be able to name a TypeMeta
 // for unintializied blob. You should not use this struct yourself - it is

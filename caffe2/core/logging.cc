@@ -43,6 +43,17 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
   FetchStackTrace = fetcher;
 }
 
+static std::function<void(const OperatorDef&)> OperatorLogger =
+    [](const OperatorDef&) { return; };
+
+void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
+  OperatorLogger = tracer;
+}
+
+std::function<void(const OperatorDef&)> GetOperatorLogger() {
+  return OperatorLogger;
+}
+
 EnforceNotMet::EnforceNotMet(
     const char* file,
     const int line,

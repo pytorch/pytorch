@@ -43,7 +43,7 @@ def has_avx2():
 
 @unittest.skipIf(not has_avx2(), "NNPACK requires AVX2")
 class NNPackOpsTest(hu.HypothesisTestCase):
-    @given(stride=st.integers(1, 1),
+    @given(stride=st.integers(1, 3),
            pad=st.integers(0, 2),
            kernel=st.integers(3, 5),
            size=st.integers(5, 10),
@@ -54,6 +54,9 @@ class NNPackOpsTest(hu.HypothesisTestCase):
                                      input_channels, output_channels,
                                      batch_size):
         assume(stride <= kernel)
+        if stride != 1:
+            assume(batch_size == 1)
+
         X = np.random.rand(
             batch_size, input_channels, size, size).astype(np.float32) - 0.5
         w = np.random.rand(

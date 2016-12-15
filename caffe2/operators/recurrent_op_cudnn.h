@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_RECURRENT_OP_CUDNN_H_
+#define CAFFE2_OPERATORS_RECURRENT_OP_CUDNN_H_
 
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context.h"
@@ -7,10 +8,9 @@
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
-
 namespace detail {
 
-template<typename T>
+template <typename T>
 class TensorDescriptors {
  public:
   TensorDescriptors(
@@ -18,12 +18,15 @@ class TensorDescriptors {
       const std::vector<int>& dim,
       const std::vector<int>& stride);
   ~TensorDescriptors();
-  const cudnnTensorDescriptor_t* descs() const { return descs_.data(); }
+  const cudnnTensorDescriptor_t* descs() const {
+    return descs_.data();
+  }
+
  private:
   std::vector<cudnnTensorDescriptor_t> descs_;
 };
 
-}
+} // namespace detail
 
 template <typename T>
 class RecurrentBaseOp : public Operator<CUDAContext> {
@@ -31,6 +34,7 @@ class RecurrentBaseOp : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   RecurrentBaseOp(const OperatorDef& operator_def, Workspace* ws);
   virtual ~RecurrentBaseOp();
+
  protected:
   void initialize(
       const Tensor<CUDAContext>& input,
@@ -61,7 +65,7 @@ class RecurrentBaseOp : public Operator<CUDAContext> {
 
 #define USE_RECURRENT_BASE_FUNCTIONS          \
   USE_OPERATOR_FUNCTIONS(CUDAContext);        \
-  using RecurrentBaseOp<T>::cudnn_wrapper_;    \
+  using RecurrentBaseOp<T>::cudnn_wrapper_;   \
   using RecurrentBaseOp<T>::dropoutDesc_;     \
   using RecurrentBaseOp<T>::rnnDesc_;         \
   using RecurrentBaseOp<T>::wDesc_;           \
@@ -84,6 +88,7 @@ class RecurrentOp : public RecurrentBaseOp<T> {
       : RecurrentBaseOp<T>(operator_def, ws) {}
 
   bool RunOnDevice() override;
+
  protected:
   INPUT_TAGS(INPUT, HIDDEN_INPUT, CELL_INPUT, WEIGHT);
   OUTPUT_TAGS(OUTPUT, HIDDEN_OUTPUT, CELL_OUTPUT, RNN_SCRATCH, DROPOUT_STATES);
@@ -97,6 +102,7 @@ class RecurrentGradientOp : public RecurrentBaseOp<T> {
       : RecurrentBaseOp<T>(operator_def, ws) {}
 
   bool RunOnDevice() override;
+
  protected:
   INPUT_TAGS(
       INPUT,
@@ -124,9 +130,12 @@ class RecurrentInitOp : public RecurrentBaseOp<T> {
       : RecurrentBaseOp<T>(operator_def, ws) {}
 
   virtual bool RunOnDevice() override;
+
  protected:
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(WEIGHT, DROPOUT_STATES);
 };
 
-}
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_RECURRENT_OP_CUDNN_H_

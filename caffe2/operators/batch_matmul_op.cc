@@ -21,7 +21,7 @@ size (C x K x N) where C is the batch size and i ranges from 0 to C-1.
 class GetBatchMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 2);
+    CAFFE_ENFORCE_EQ(def_.input_size(), 2);
 
     bool trans_a = 0;
     bool trans_b = 0;

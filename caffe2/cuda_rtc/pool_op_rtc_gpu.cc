@@ -186,8 +186,8 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   MaxPoolRTCOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws) {
-    CHECK_EQ(order_, StorageOrder::NCHW)
-        << "Currently only NCHW is supported.";
+    CAFFE_ENFORCE_EQ(
+        order_, StorageOrder::NCHW, "Currently only NCHW is supported.");
   }
   ~MaxPoolRTCOp() {}
 
@@ -199,7 +199,7 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
     if (input_dims_ != X.dims()) {
       // recompile
       VLOG(1) << "MaxPool RTC recompiling";
-      CHECK_LT(Y->size(), std::numeric_limits<int>::max());
+      CAFFE_ENFORCE_LT(Y->size(), std::numeric_limits<int>::max());
       func_.Compile(static_cast<int>(Y->size()), X.dim32(1), X.dim32(2),
                     X.dim32(3), Y->dim32(2), Y->dim32(3), kernel_h_, kernel_w_,
                     stride_h_, stride_w_, pad_t_, pad_l_);
@@ -226,8 +226,8 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   MaxPoolGradientRTCOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws) {
-    CHECK_EQ(order_, StorageOrder::NCHW)
-        << "Currently only NCHW is supported.";
+    CAFFE_ENFORCE_EQ(
+        order_, StorageOrder::NCHW, "Currently only NCHW is supported.");
   }
   ~MaxPoolGradientRTCOp() {}
 
@@ -235,13 +235,13 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
     auto& X = Input(0);
     auto& Y = Input(1);
     auto& dY = Input(2);
-    CHECK_EQ(dY.ndim(), 4);
+    CAFFE_ENFORCE_EQ(dY.ndim(), 4);
     auto* dX = Output(0);
     dX->ResizeLike(X);
     ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
     if (input_dims_ != X.dims()) {
       VLOG(1) << "MaxPoolGradient RTC recompiling";
-      CHECK_LT(X.size(), std::numeric_limits<int>::max());
+      CAFFE_ENFORCE_LT(X.size(), std::numeric_limits<int>::max());
       func_.Compile(static_cast<int>(X.size()), X.dim32(0), X.dim32(1),
                     X.dim32(2), X.dim32(3), dY.dim32(2), dY.dim32(3),
                     kernel_h_, kernel_w_, stride_h_, stride_w_, pad_t_, pad_l_);

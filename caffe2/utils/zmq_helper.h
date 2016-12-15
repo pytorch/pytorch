@@ -12,13 +12,13 @@ class ZmqContext {
   explicit ZmqContext(int io_threads) : ptr_(zmq_ctx_new()) {
     CAFFE_ENFORCE(ptr_ != nullptr, "Failed to create zmq context.");
     int rc = zmq_ctx_set(ptr_, ZMQ_IO_THREADS, io_threads);
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
     rc = zmq_ctx_set(ptr_, ZMQ_MAX_SOCKETS, ZMQ_MAX_SOCKETS_DFLT);
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
   ~ZmqContext() {
     int rc = zmq_ctx_destroy(ptr_);
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   void* ptr() { return ptr_; }
@@ -33,12 +33,12 @@ class ZmqMessage {
  public:
   ZmqMessage() {
     int rc = zmq_msg_init(&msg_);
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   ~ZmqMessage() {
     int rc = zmq_msg_close(&msg_);
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   zmq_msg_t* msg() { return &msg_; }
@@ -60,27 +60,27 @@ class ZmqSocket {
 
   ~ZmqSocket() {
     int rc = zmq_close(ptr_);
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   void Bind(const string& addr) {
     int rc = zmq_bind(ptr_, addr.c_str());
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   void Unbind(const string& addr) {
     int rc = zmq_unbind(ptr_, addr.c_str());
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   void Connect(const string& addr) {
     int rc = zmq_connect(ptr_, addr.c_str());
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   void Disconnect(const string& addr) {
     int rc = zmq_disconnect(ptr_, addr.c_str());
-    CHECK_EQ(rc, 0);
+    CAFFE_ENFORCE_EQ(rc, 0);
   }
 
   int Send(const string& msg, int flags) {

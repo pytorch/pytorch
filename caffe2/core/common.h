@@ -9,6 +9,10 @@
 #include <type_traits>
 #include <vector>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 namespace caffe2 {
 
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
@@ -43,6 +47,20 @@ private:                                                                       \
   classname(const classname&) = delete;                                        \
   classname& operator=(const classname&) = delete
 #endif
+
+// Define enabled when building for iOS or Android devices
+#if !defined(CAFFE2_MOBILE)
+#if defined(__ANDROID__)
+#define CAFFE2_ANDROID 1
+#define CAFFE2_MOBILE 1
+#elif (defined(__APPLE__) &&                                            \
+       (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+#define CAFFE2_IOS 1
+#define CAFFE2_MOBILE 1
+#else
+#define CAFFE2_MOBILE 0
+#endif // ANDROID / IOS
+#endif // CAFFE2_MOBILE
 
 // make_unique is a C++14 feature. If we don't have 14, we will emulate
 // its behavior. This is copied from folly/Memory.h

@@ -1,5 +1,5 @@
-#ifndef CAFFE2_OPERATORS_RELU_OP_H_
-#define CAFFE2_OPERATORS_RELU_OP_H_
+#ifndef CAFFE2_OPERATORS_SCALE_OP_H_
+#define CAFFE2_OPERATORS_SCALE_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -19,15 +19,18 @@ class ScaleOp final : public Operator<Context> {
     auto* Y = Output(0);
     Y->ResizeLike(X);
     math::Scale<T, Context>(
-        X.size(), scale_, X.template data<T>(),
-        Y->template mutable_data<T>(), &context_);
+        X.size(),
+        scale_,
+        X.template data<T>(),
+        Y->template mutable_data<T>(),
+        &context_);
     return true;
   }
 
  protected:
-   T scale_;
+  T scale_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_RELU_OP_H_
+#endif // CAFFE2_OPERATORS_SCALE_OP_H_

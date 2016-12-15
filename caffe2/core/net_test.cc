@@ -153,7 +153,7 @@ TEST(NetTest, ChainingForDifferentDevices) {
           output: "out"
           type: "NetTestDummy"
           device_option {
-            device_type: CUDA
+            device_type: 1
           }
         }
         op {
@@ -161,7 +161,7 @@ TEST(NetTest, ChainingForDifferentDevices) {
           output: "out2"
           type: "NetTestDummy"
           device_option {
-            device_type: CUDA
+            device_type: 1
           }
         }
         op {
@@ -169,7 +169,7 @@ TEST(NetTest, ChainingForDifferentDevices) {
           output: "out3"
           type: "NetTestDummy"
           device_option {
-            device_type: CUDA
+            device_type: 1
             cuda_gpu_id: 1
           }
         }

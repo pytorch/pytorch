@@ -1,0 +1,44 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from caffe2.python import core, schema
+from caffe2.python.layers.layers import (
+    ModelLayer,
+)
+from caffe2.python.layers.tags import (
+    Tags
+)
+import numpy as np
+
+
+class BatchLRLoss(ModelLayer):
+
+    def __init__(self, model, input_record, name='batch_lr_loss', **kwargs):
+        super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
+
+        schema.is_schema_subset(
+            schema.Struct(
+                ('label', schema.Scalar()),
+                ('prediction', schema.Scalar())
+            ),
+            input_record
+        )
+        self.tags.update({Tags.TRAIN_ONLY})
+
+        self.output_schema = schema.Scalar(
+            np.float32,
+            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
+
+    # This should be a bit more complicated than it is right now
+    def add_ops(self, net):
+        class_probabilities = net.MakeTwoClass(
+            self.input_record.prediction.field_blobs())
+        label = self.input_record.label.field_blobs()
+        if self.input_record.label.field_types()[0] != np.int32:
+            label = [net.Cast(label, to='int32')]
+
+        xent = net.LabelCrossEntropy(
+            [class_probabilities] + label)
+        net.AveragedLoss(xent, self.output_schema.field_blobs())

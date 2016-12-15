@@ -239,12 +239,50 @@ void Col2im(
     T* data_im,
     Context* context);
 
+// Applies a per-channel bias value to each channel of the input
+// image. image_size is H * W
+template <typename T, class Context>
+void BiasCHW(
+  const T* bias,
+  const int bias_channels,
+  const int image_size,
+  T* image,
+  Context* context);
+
 template <class Context>
 void CopyMatrix(const size_t item_size, const int M, const int N, const void* A,
                 const int lda, void* B, const int ldb, Context* context);
 
 
 uint32_t randomNumberSeed();
+
+// Function uses casting from int to unsigned to compare if value of
+// parameter a is greater or equal to zero and lower than value of
+// parameter b. The b parameter is of type signed and is always
+// positive,
+// therefore its value is always lower than 0x800... where casting
+// negative value of a parameter converts it to value higher than
+// 0x800...
+// The casting allows to use one condition instead of two.
+inline bool is_a_ge_zero_and_a_lt_b(int a, int b) {
+  return static_cast<unsigned>(a) < static_cast<unsigned>(b);
+}
+
+// Calculates ceil(a / b). User must be careful to ensure that there
+// is no overflow or underflow in the calculation.
+template <typename T>
+inline T divUp(T a, T b) {
+  return (a + b - (T) 1) / b;
+}
+
+// Rounds a up to the next highest multiple of b. User must be careful
+// to ensure that there is no overflow or underflow in the calculation
+// of divUp.
+template <typename T>
+inline T roundUp(T a, T b) {
+  return divUp<T>(a, b) * b;
+}
+
 
 }  // namespace math
 }  // namespace caffe2

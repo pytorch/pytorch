@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_STOP_GRADIENT_H_
+#define CAFFE2_OPERATORS_STOP_GRADIENT_H_
 
 #include "caffe2/core/operator.h"
 
@@ -19,4 +20,6 @@ class StopGradientOp : public Operator<Context> {
   }
 };
 
-}  // namespace caffe2
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_STOP_GRADIENT_H_

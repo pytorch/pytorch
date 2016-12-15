@@ -14,8 +14,7 @@ class TestDB(unittest.TestCase):
     def testPicklable(self):
         s = schema.Struct(
             ('field1', schema.Scalar(dtype=np.int32)),
-            ('field2', schema.List(
-                schema.Scalar(dtype=str)))
+            ('field2', schema.List(schema.Scalar(dtype=str)))
         )
         s2 = pickle.loads(pickle.dumps(s))
         for r in (s, s2):
@@ -60,10 +59,10 @@ class TestDB(unittest.TestCase):
     def testRawTuple(self):
         s = schema.RawTuple(2)
         self.assertEquals(
-            s,
-            schema.Struct(
-                ('field_0', schema.Scalar()),
-                ('field_1', schema.Scalar())))
+            s, schema.Struct(
+                ('field_0', schema.Scalar()), ('field_1', schema.Scalar())
+            )
+        )
         self.assertEquals(s[0], schema.Scalar())
         self.assertEquals(s[1], schema.Scalar())
 
@@ -81,3 +80,34 @@ class TestDB(unittest.TestCase):
                 ('field1', schema.Scalar(dtype=np.int32)),
             )
         )
+
+    def testPreservesMetadata(self):
+        s = schema.Struct(
+            ('a', schema.Scalar(np.float32)), (
+                'b', schema.Scalar(
+                    np.int32,
+                    metadata=schema.Metadata(categorical_limit=5)
+                )
+            )
+        )
+        self.assertEqual(None, s.a.metadata)
+        self.assertEqual(5, s.b.metadata.categorical_limit)
+        sc = s.clone()
+        self.assertEqual(None, sc.a.metadata)
+        self.assertEqual(5, sc.b.metadata.categorical_limit)
+        sv = schema.from_blob_list(s, [np.array([3.4]), np.array([2])])
+        self.assertEqual(None, sv.a.metadata)
+        self.assertEqual(5, sv.b.metadata.categorical_limit)
+
+    def testPreservesEmptyFields(self):
+        s = schema.Struct(
+            ('a', schema.Scalar(np.float32)),
+            ('b', schema.Struct()),
+        )
+        sc = s.clone()
+        self.assertIn("a", sc.fields)
+        self.assertIn("b", sc.fields)
+        sv = schema.from_blob_list(s, [np.array([3.4])])
+        self.assertIn("a", sv.fields)
+        self.assertIn("b", sv.fields)
+        self.assertEqual(0, len(sv.b.fields))

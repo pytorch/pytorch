@@ -8,7 +8,7 @@ class Config(object):
     ############################################################################
     # If you want to show a lot of the build details, set VERBOSE_BUILD to True.
     # This will show the detailed commands being run during the build process.
-    VERBOSE_BUILD = False
+    VERBOSE_BUILD = True
     # Specify your compiler.
     CC = "c++"
     # Specify your archiver.

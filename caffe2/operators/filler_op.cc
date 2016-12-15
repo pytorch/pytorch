@@ -29,6 +29,7 @@ REGISTER_CPU_OPERATOR(GaussianFill, GaussianFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(XavierFill, XavierFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(MSRAFill, MSRAFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(RangeFill, RangeFillOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(LengthsRangeFill, LengthsRangeFillOp<CPUContext>);
 
 OPERATOR_SCHEMA(ConstantFill)
     .NumInputs(0, 1)
@@ -99,6 +100,20 @@ NO_GRADIENT(GaussianFill);
 NO_GRADIENT(XavierFill);
 NO_GRADIENT(MSRAFill);
 NO_GRADIENT(RangeFill);
+
+OPERATOR_SCHEMA(LengthsRangeFill)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Convert a length vector to a range sequene. For example, input=[4,3,1], the
+output would be [0,1,2,3,0,1,2,0].
+)DOC")
+    .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
+    .Output(
+        0,
+        "range_sequence",
+        "1D tensor whose size is the sum of `lengths`");
+NO_GRADIENT(LengthsRangeFill);
 
 }  // namespace
 }  // namespace caffe2

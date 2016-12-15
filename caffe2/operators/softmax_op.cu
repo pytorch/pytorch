@@ -91,31 +91,29 @@ __global__ void softmax_gradient_kernel(
 }
 }  // namespace
 
-// Implementation for the CPU context.
+// Implementation for the CUDA context.
 template <>
 bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  const int N = X.size_to_dim(canonical_axis);
+  const int D = X.size_from_dim(canonical_axis);
   Y->ResizeLike(X);
   softmax_kernel<<<N, SOFTMAX_NUM_THREADS, 0, context_.cuda_stream()>>>(
       D, X.data<float>(), Y->mutable_data<float>());
   return true;
 }
 
-// Implementation for the CPU context.
+// Implementation for the CUDA context.
 template <>
 bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_EQ(Y.ndim(), 2);
-  int N = Y.dim32(0);
-  int D = Y.dim32(1);
-  DCHECK_EQ(dY.dim32(0), N);
-  DCHECK_EQ(dY.dim32(1), D);
+  const auto canonical_axis = Y.canonical_axis_index(axis_);
+  const int N = Y.size_to_dim(canonical_axis);
+  const int D = Y.size_from_dim(canonical_axis);
   dX->ResizeLike(Y);
   softmax_gradient_kernel<<<N, SOFTMAX_NUM_THREADS, 0,
                             context_.cuda_stream()>>>(

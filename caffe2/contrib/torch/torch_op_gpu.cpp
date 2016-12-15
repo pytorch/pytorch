@@ -44,10 +44,10 @@ void Torch<CUDAContext>::setContext(CUDAContext* context) {
 
 template <>
 void Torch<CUDAContext>::setTensor(typename Traits::Tensor* t, Blob* blob) {
-  CHECK_EQ(tensorTy(*blob), Traits::tensorTy);
+  CAFFE_ENFORCE_EQ(tensorTy(*blob), Traits::tensorTy);
   auto* cs = cudaState(this);
   auto* tc = blob->template GetMutable<Tensor<CUDAContext>>();
-  CHECK_EQ(THCudaTensor_nElement(cs, t), tc->size());
+  CAFFE_ENFORCE_EQ(THCudaTensor_nElement(cs, t), tc->size());
   THCudaStorage* storage = THCudaStorage_newWithData(
       cs, tc->template mutable_data<float>(), tc->size());
   THCudaStorage_clearFlag(cs, storage, TH_STORAGE_FREEMEM);
@@ -59,7 +59,7 @@ void Torch<CUDAContext>::setTensor(typename Traits::Tensor* t, Blob* blob) {
 template <>
 typename Torch<CUDAContext>::Traits::Tensor* Torch<CUDAContext>::blobToTensor(
     Blob* blob) {
-  CHECK_EQ(tensorTy(*blob), Traits::tensorTy);
+  CAFFE_ENFORCE_EQ(tensorTy(*blob), Traits::tensorTy);
   auto* cs = cudaState(this);
   auto* tc = blob->template GetMutable<Tensor<CUDAContext>>();
 
@@ -74,7 +74,7 @@ typename Torch<CUDAContext>::Traits::Tensor* Torch<CUDAContext>::blobToTensor(
   auto* th = THCudaTensor_newWithStorage(cs, storage, 0, thshape, nullptr);
   THCudaStorage_free(cs, storage);
   THLongStorage_free(thshape);
-  CHECK_EQ(
+  CAFFE_ENFORCE_EQ(
       THCudaTensor_storage(cs, th)->data, tc->template mutable_data<float>());
   return th;
 }

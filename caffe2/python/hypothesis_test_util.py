@@ -389,6 +389,7 @@ class HypothesisTestCase(test_util.TestCase):
         threshold=1e-4,
         output_to_grad=None,
         grad_reference=None,
+        atol=None
     ):
         """
         This runs the reference Python function implementation
@@ -435,8 +436,10 @@ class HypothesisTestCase(test_util.TestCase):
                 if output.dtype.kind in ('S', 'O'):
                     np.testing.assert_array_equal(output, ref)
                 else:
+                    if atol is None:
+                        atol = threshold
                     np.testing.assert_allclose(
-                        output, ref, atol=threshold, rtol=threshold)
+                        output, ref, atol=atol, rtol=threshold)
                 outs.append(output)
             if grad_reference and output_to_grad:
                 self._assertGradReferenceChecks(

@@ -218,12 +218,16 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         H_out,
         W_out));
     // Set the convolution descriptor
-    CHECK_EQ(pad_t_, pad_b_)
-        << "The current padding scheme leads to unequal padding on the top and "
-           "bottom, which is not supported by cudnn.";
-    CHECK_EQ(pad_l_, pad_r_)
-        << "The current padding scheme leads to unequal padding on the left "
-           "and right, which is not supported by cudnn.";
+    CAFFE_ENFORCE_EQ(
+        pad_t_,
+        pad_b_,
+        "The current padding scheme leads to unequal padding on the top and "
+        "bottom, which is not supported by cudnn.");
+    CAFFE_ENFORCE_EQ(
+        pad_l_,
+        pad_r_,
+        "The current padding scheme leads to unequal padding on the left "
+        "and right, which is not supported by cudnn.");
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t_,
@@ -420,12 +424,16 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         H_out,
         W_out));
     // Set the convolution descriptor
-    CHECK_EQ(pad_t_, pad_b_)
-        << "The current padding scheme leads to unequal padding on the top and "
-           "bottom, which is not supported by cudnn.";
-    CHECK_EQ(pad_l_, pad_r_)
-        << "The current padding scheme leads to unequal padding on the left "
-           "and right, which is not supported by cudnn.";
+    CAFFE_ENFORCE_EQ(
+        pad_t_,
+        pad_b_,
+        "The current padding scheme leads to unequal padding on the top and "
+        "bottom, which is not supported by cudnn.");
+    CAFFE_ENFORCE_EQ(
+        pad_l_,
+        pad_r_,
+        "The current padding scheme leads to unequal padding on the left "
+        "and right, which is not supported by cudnn.");
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t_,

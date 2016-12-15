@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_
+#define CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -7,7 +8,6 @@
 #include "google/protobuf/text_format.h"
 
 namespace caffe2 {
-
 namespace detail {
 
 struct Param {
@@ -113,7 +113,7 @@ void applyLink(const Link& link, size_t t, Workspace* ws) {
                              ->template GetMutable<Tensor<Context>>();
   auto* externalTensor = CHECK_NOTNULL(ws->GetBlob(link.external))
                              ->template GetMutable<Tensor<Context>>();
-  CHECK_GT(externalTensor->size(), 0);
+  CAFFE_ENFORCE_GT(externalTensor->size(), 0);
   const TIndex externalTimestepSize =
       externalTensor->size() / externalTensor->dim(0);
   auto* externalData = externalTensor->template mutable_data<T>() +
@@ -152,7 +152,7 @@ void extractLinks(
     links->push_back(l);
   }
 }
-}
+} // namespace detail
 
 template <typename T, class Context>
 class RecurrentNetworkOp final : public Operator<Context> {
@@ -393,7 +393,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto& param = OperatorBase::GetRepeatedArgument<std::string>("param");
     const auto& paramGradient =
         OperatorBase::GetRepeatedArgument<std::string>("param_gradient");
-    CHECK_EQ(param.size(), paramGradient.size());
+    CAFFE_ENFORCE_EQ(param.size(), paramGradient.size());
     for (auto i = 0; i < param.size(); ++i) {
       detail::Param p;
       p.param = param[i];
@@ -464,7 +464,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       auto* g = CHECK_NOTNULL(ws_.CreateBlob(rg.grad))
                     ->template GetMutable<Tensor<Context>>();
       g->ResizeLike(p);
-      CHECK_EQ(g->ndim(), 3);
+      CAFFE_ENFORCE_EQ(g->ndim(), 3);
       const auto timestep = g->size() / g->dim(0);
       // Fill the last timestep with zeros for the gradient
       math::Set<T, Context>(
@@ -509,9 +509,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
                              ->template Get<Tensor<Context>>();
 
         // g[T+offset] += og[T]
-        CHECK_EQ(g->size() / g->dim(0), og.size() / og.dim(0));
+        CAFFE_ENFORCE_EQ(g->size() / g->dim(0), og.size() / og.dim(0));
         const auto timestep = g->size() / g->dim(0);
-        CHECK_EQ(timestep, og.size() / og.dim(0));
+        CAFFE_ENFORCE_EQ(timestep, og.size() / og.dim(0));
         math::Add<T, Context>(
             timestep,
             og.template data<T>() + t * timestep,
@@ -561,4 +561,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   std::vector<int32_t> recurrentSizes_;
   std::string timestep_;
 };
-}
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_

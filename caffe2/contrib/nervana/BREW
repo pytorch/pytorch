@@ -1,0 +1,10 @@
+cc_library(
+  name = "nccl_ops",
+  srcs = Glob(["*_gpu.cc"]),
+  hdrs = Glob(["*.h"]),
+  deps = [
+    "//caffe2:core_gpu",
+    "//third_party:nervana_c_interface",
+  ],
+  whole_archive = True,
+)

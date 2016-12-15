@@ -108,51 +108,58 @@ const char* cublasGetErrorString(cublasStatus_t error);
  */
 const char* curandGetErrorString(curandStatus_t error);
 
-/**
- * Caffe2's CUDA initialization function.
- *
- * This is going to be run once when caffe2's GlobalInit() function is called.
- * If you have an initialization function that depends on CUDA's initialization
- * first, you can call this function inside your init function - this will
- * ensure that CUDA is initialized before any of your custom initialization is
- * carried out. This function is NOT thread safe.
- */
-bool Caffe2InitializeCuda();
-
 // CUDA: various checks for different function calls.
-#define CUDA_CHECK(condition)                                                  \
-  do {                                                                         \
-    cudaError_t error = condition;                                             \
-    CHECK_EQ(error, cudaSuccess)                                         \
-        << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
-        << cudaGetErrorString(error);                                          \
+#define CUDA_CHECK(condition)       \
+  do {                              \
+    cudaError_t error = condition;  \
+    CAFFE_ENFORCE_EQ(               \
+        error,                      \
+        cudaSuccess,                \
+        "Error at: ",               \
+        __FILE__,                   \
+        ":",                        \
+        __LINE__,                   \
+        ": ",                       \
+        cudaGetErrorString(error)); \
   } while (0)
 
-#define CUDA_DRIVERAPI_CHECK(condition)                                        \
-  do {                                                                         \
-    CUresult result = condition;                                               \
-    if (result != CUDA_SUCCESS) {                                              \
-      const char *msg;                                                         \
-      cuGetErrorName(result, &msg);                                            \
-      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "   \
-                      << msg;                                                  \
-    }                                                                          \
+#define CUDA_DRIVERAPI_CHECK(condition)                                 \
+  do {                                                                  \
+    CUresult result = condition;                                        \
+    if (result != CUDA_SUCCESS) {                                       \
+      const char* msg;                                                  \
+      cuGetErrorName(result, &msg);                                     \
+      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": " \
+                 << msg;                                                \
+    }                                                                   \
   } while (0)
 
-#define CUBLAS_CHECK(condition)                                                \
-  do {                                                                         \
-    cublasStatus_t status = condition;                                         \
-    CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                              \
-        << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
-        << ::caffe2::cublasGetErrorString(status);                             \
+#define CUBLAS_CHECK(condition)                  \
+  do {                                           \
+    cublasStatus_t status = condition;           \
+    CAFFE_ENFORCE_EQ(                            \
+        status,                                  \
+        CUBLAS_STATUS_SUCCESS,                   \
+        "Error at: ",                            \
+        __FILE__,                                \
+        ":",                                     \
+        __LINE__,                                \
+        ": ",                                    \
+        ::caffe2::cublasGetErrorString(status)); \
   } while (0)
 
-#define CURAND_CHECK(condition)                                                \
-  do {                                                                         \
-    curandStatus_t status = condition;                                         \
-    CHECK_EQ(status, CURAND_STATUS_SUCCESS)                              \
-        << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
-        << ::caffe2::curandGetErrorString(status);                             \
+#define CURAND_CHECK(condition)                  \
+  do {                                           \
+    curandStatus_t status = condition;           \
+    CAFFE_ENFORCE_EQ(                            \
+        status,                                  \
+        CURAND_STATUS_SUCCESS,                   \
+        "Error at: ",                            \
+        __FILE__,                                \
+        ":",                                     \
+        __LINE__,                                \
+        ": ",                                    \
+        ::caffe2::curandGetErrorString(status)); \
   } while (0)
 
 #define CUDA_1D_KERNEL_LOOP(i, n)                                              \

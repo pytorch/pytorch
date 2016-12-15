@@ -1,4 +1,5 @@
 #include "caffe2/operators/softmax_op.h"
+#include "caffe2/operators/softmax_shared.h"
 
 namespace caffe2 {
 
@@ -7,9 +8,9 @@ template <>
 bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  const int N = X.size_to_dim(canonical_axis);
+  const int D = X.size_from_dim(canonical_axis);
   Y->ResizeLike(X);
   float* Ydata = Y->mutable_data<float>();
   // First, get scales
@@ -21,29 +22,8 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }
-  math::RowwiseMax<float, CPUContext>(N, D, X.data<float>(), scale_.mutable_data<float>(),
-                                      &context_);
-  // Put the intermediate result X - max(X) into Y
-  context_.template Copy<float, CPUContext, CPUContext>(
-      X.size(), X.data<float>(), Ydata);
-  // Subtract the scale
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, N, D, 1,
-      -1, scale_.data<float>(), sum_multiplier_.data<float>(), 1,
-      Ydata, &context_);
-  // Exponentiation
-  math::Exp<float, CPUContext>(Y->size(), Ydata, Ydata,
-                               &context_);
-  math::Gemv<float, CPUContext>(CblasNoTrans, N, D, 1, Ydata,
-                                sum_multiplier_.data<float>(), 0,
-                                scale_.mutable_data<float>(), &context_);
-  // Do division
-  // TODO(Yangqing): maybe implement it more beautifully?
-  const float* scale = scale_.data<float>();
-  for (int i = 0; i < N; ++i) {
-    for (int j = 0; j < D; ++j) {
-      Ydata[i * D + j] /= scale[i];
-    }
-  }
+
+  SoftmaxCPU(context_, N, D, X, Ydata, scale_, sum_multiplier_);
   return true;
 }
 
@@ -53,11 +33,9 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_EQ(Y.ndim(), 2);
-  int N = Y.dim32(0);
-  int D = Y.dim32(1);
-  DCHECK_EQ(dY.dim32(0), N);
-  DCHECK_EQ(dY.dim32(1), D);
+  const auto canonical_axis = Y.canonical_axis_index(axis_);
+  const int N = Y.size_to_dim(canonical_axis);
+  const int D = Y.size_from_dim(canonical_axis);
   // First, get scales
   if (scale_.size() != N) {
     scale_.Resize(N);
@@ -67,7 +45,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }
-  dX->Resize(N, D);
+  dX->ResizeLike(Y);
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();

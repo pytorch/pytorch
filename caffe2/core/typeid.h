@@ -27,6 +27,10 @@ std::set<string>& gRegisteredTypeNames();
 // A utility function to demangle a function name.
 string Demangle(const char* name);
 
+// A utility function to return an exception string by prepending its exception
+// type before its what() content.
+string GetExceptionString(const std::exception& e);
+
 template <typename T>
 struct TypeNameRegisterer {
   explicit TypeNameRegisterer(CaffeTypeId id) {
@@ -166,7 +170,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static CaffeTypeId Id();
+  [[gnu::visibility("default")]] static CaffeTypeId Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -184,7 +188,7 @@ class TypeMeta {
   template <typename T>
   static const char* Name() {
 #ifdef __GXX_RTTI
-    static string name = Demangle(typeid(T).name());
+    static const string name = Demangle(typeid(T).name());
     return name.c_str();
 #else // __GXX_RTTI
     return "(RTTI disabled, cannot show name)";

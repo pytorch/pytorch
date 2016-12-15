@@ -2,6 +2,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
@@ -104,8 +105,8 @@ class TreeIterator {
       std::vector<TOffset>& limits,
       TOffset num) {
     std::vector<TOffset> newOffsets;
-    CHECK_EQ(lengths.size(), numLengthFields());
-    CHECK_EQ(offsets.size(), numOffsetFields());
+    CAFFE_ENFORCE_EQ(lengths.size(), numLengthFields());
+    CAFFE_ENFORCE_EQ(offsets.size(), numOffsetFields());
     sizes.resize(offsets.size());
     newOffsets.resize(offsets.size());
     // first index, top level
@@ -402,10 +403,8 @@ class SortAndShuffleOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
     CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 1);
-    CAFFE_ENFORCE(
-        -1 <= sort_by_field_idx_ &&
-        sort_by_field_idx_ < cursor->it.fields().size());
-
+    CAFFE_ENFORCE(-1 <= sort_by_field_idx_);
+    CAFFE_ENFORCE(cursor->it.fields().size() - sort_by_field_idx_ > 0);
     int size;
     if (sort_by_field_idx_ != -1) {
       size = Input(sort_by_field_idx_ + 1).dims()[0];
@@ -415,9 +414,13 @@ class SortAndShuffleOp : public Operator<CPUContext> {
 
     CAFFE_ENFORCE(
         batch_size_ > 0 && shuffle_size_ > 0 &&
-        0 < batch_size_ * shuffle_size_ && batch_size_ * shuffle_size_ <= size);
-    int num_batch = size / batch_size_;
+        0 < batch_size_ * shuffle_size_);
+    // adjust shuffle_size_ if it is too large
+    if (batch_size_ * shuffle_size_ > size) {
+      shuffle_size_ = size / batch_size_;
+    }
 
+    int num_batch = size / batch_size_;
     auto* out = Output(0);
     out->Resize(size);
     auto* out_data = out->mutable_data<int64_t>();
@@ -709,55 +712,51 @@ class CollectTensorOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
-    // TENSOR_VECTOR_IN is enforced inplace with TENSOR_VECTOR_OUT
-    TensorVectorPtr<Context>& tensorVector =
-        *OperatorBase::Output<TensorVectorPtr<Context>>(TENSOR_VECTOR_OUT);
-
-    auto* position_out = Output(POSITION_OUT);
-    const auto& tensor = Input(TENSOR_TO_COLLECT);
-
     int pos = -1;
-    if (InputSize() >= 3) {
-      CAFFE_ENFORCE(0 == Input(POSITION_IN).ndim());
-      pos = Input(POSITION_IN).template data<int>()[0];
+    if (numVisited_ < numToCollect_) {
+      // append
+      pos = numVisited_;
     } else {
-      if (numVisited_ < numToCollect_) {
-        // append
-        pos = tensorVector->size();
-      } else {
+      auto& gen = context_.RandGenerator();
+      // uniform between [0, numVisited_]
+      std::uniform_int_distribution<int> uniformDist(0, numVisited_);
+      pos = uniformDist(gen);
+      if (pos >= numToCollect_) {
+        // discard
+        pos = -1;
+      }
+    }
+
+    for (int i = 0; i < OutputSize(); ++i) {
+      // TENSOR_VECTOR_IN is enforced inplace with TENSOR_VECTOR_OUT
+      TensorVectorPtr<Context>& tensorVector =
+          *OperatorBase::Output<TensorVectorPtr<Context>>(i);
+
+      if (numVisited_ >= numToCollect_) {
         CAFFE_ENFORCE(
             tensorVector->size() == numToCollect_,
             "TensorVecotor size = ",
             tensorVector->size(),
             " is different from numToCollect = ",
             numToCollect_);
-        auto& gen = context_.RandGenerator();
-        // uniform between [0, numVisited_]
-        std::uniform_int_distribution<int> uniformDist(0, numVisited_);
-        pos = uniformDist(gen);
-        if (pos >= numToCollect_) {
-          // discard
-          pos = -1;
-        }
+      }
+
+      const auto& tensor = Input(OutputSize() + i);
+
+      if (pos < 0) {
+        // discard
+        CAFFE_ENFORCE(numVisited_ >= numToCollect_);
+      } else if (pos >= tensorVector->size()) {
+        // append
+        tensorVector->push_back(Tensor<Context>());
+        tensorVector->back().template CopyFrom<Context, Context>(
+            tensor, &context_);
+      } else {
+        // replace
+        tensorVector->at(pos).template CopyFrom<Context, Context>(
+            tensor, &context_);
       }
     }
-
-    if (pos < 0) {
-      // discard
-      CAFFE_ENFORCE(numVisited_ >= numToCollect_);
-    } else if (pos >= tensorVector->size()) {
-      // append
-      tensorVector->push_back(Tensor<Context>());
-      tensorVector->back().template CopyFrom<Context, Context>(
-          tensor, &context_);
-    } else {
-      // replace
-      tensorVector->at(pos).template CopyFrom<Context, Context>(
-          tensor, &context_);
-    }
-
-    position_out->Resize(vector<TIndex>());
-    position_out->template mutable_data<int>()[0] = pos;
 
     numVisited_++;
     return true;
@@ -768,8 +767,6 @@ class CollectTensorOp final : public Operator<Context> {
   int numToCollect_;
   // number of tensors visited
   int numVisited_;
-  INPUT_TAGS(TENSOR_VECTOR_IN, TENSOR_TO_COLLECT, POSITION_IN);
-  OUTPUT_TAGS(TENSOR_VECTOR_OUT, POSITION_OUT);
 };
 
 REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
@@ -1007,28 +1004,20 @@ along the first dimension.
     .Output(0, "tensor", "tensor after concatenating");
 
 OPERATOR_SCHEMA(CollectTensor)
-    .NumInputs(2, 3)
-    .NumOutputs(2)
-    .EnforceInplace({{0, 0}})
-    .AllowInplace({{2, 1}})
+    .NumInputs([](int n) { return n > 0 && n % 2 == 0; })
+    .NumOutputs(1, INT_MAX)
+    .NumInputsOutputs([](int in, int out) { return in == out * 2; })
+    .EnforceInplace([](int in, int out) { return in == out; })
     .SetDoc(R"DOC(
 Collect tensor into tensor vector by reservoir sampling,
 argument num_to_collect indicates the max number of tensors that will be
-collcted
-  )DOC")
-    .Arg("num_to_collect", "The max number of tensors to collect")
-    .Input(0, "input tensor vector", "tensor vector with collected tensors")
-    .Input(1, "tensor", "new tensor will be collected by reservoir sampling")
-    .Input(2, "input position", R"DOC(
-if provided, new tensor will be collected in the way indicated by position.
-e.g. if position < 0, discard the new tensor, if position == k and k < the size
-of input tensor vector, replace the tensor at position k with the new tensor.
-    )DOC")
-    .Output(0, "output tensor vector", "enforce inplace with input 0")
-    .Output(1, "output position", R"DOC(
-record the position at which the new tensor was collcted,
-position < 0 means it's discarded.
-    )DOC");
+collcted. The first half of the inputs are tensor vectors, which are also the
+outputs. The second half of the inputs are the tensors to be collected into each
+vector (in the same order). The input tensors are collected in all-or-none
+manner. If they are collected, they will be placed at the same index in the
+output vectors.
+)DOC")
+    .Arg("num_to_collect", "The max number of tensors to collect");
 
 SHOULD_NOT_DO_GRADIENT(CreateTreeCursor);
 SHOULD_NOT_DO_GRADIENT(ResetCursor);
@@ -1044,4 +1033,83 @@ SHOULD_NOT_DO_GRADIENT(CollectTensor);
 } // namespace
 CAFFE_KNOWN_TYPE(std::unique_ptr<TreeCursor>);
 CAFFE_KNOWN_TYPE(TensorVectorPtr<CPUContext>);
+
+namespace {
+
+class TreeCursorSerializer : public BlobSerializerBase {
+ public:
+  TreeCursorSerializer() {}
+  ~TreeCursorSerializer() {}
+
+  void Serialize(
+      const Blob& blob,
+      const string& name,
+      SerializationAcceptor acceptor) override {
+    auto& cursor = blob.template Get<std::unique_ptr<TreeCursor>>();
+    BlobProto blob_proto;
+
+    // serialize offsets as a tensor
+    if (cursor->offsets.size() > 0) {
+      Blob offsets_blob;
+      auto* offsets = offsets_blob.template GetMutable<Tensor<CPUContext>>();
+      offsets->Resize(cursor->offsets.size());
+      std::copy(
+          cursor->offsets.begin(),
+          cursor->offsets.end(),
+          offsets->mutable_data<TOffset>());
+      TensorSerializer<CPUContext> ser;
+      ser.Serialize(
+          *offsets, name, blob_proto.mutable_tensor(), 0, offsets->size());
+    }
+    blob_proto.set_name(name);
+    blob_proto.set_type("std::unique_ptr<TreeCursor>");
+
+    // serialize field names in the content
+    std::ostringstream os;
+    for (const auto& field : cursor->it.fields()) {
+      os << field.name << " ";
+    }
+    blob_proto.set_content(os.str());
+
+    acceptor(name, blob_proto.SerializeAsString());
+  }
+};
+
+class TreeCursorDeserializer : public BlobDeserializerBase {
+ public:
+  bool Deserialize(const BlobProto& proto, Blob* blob) override {
+    // deserialize the offsets
+    TensorDeserializer<CPUContext> deser;
+    Blob offset_blob;
+    deser.Deserialize(proto, &offset_blob);
+    auto& offsets = offset_blob.template Get<Tensor<CPUContext>>();
+    auto* offsets_ptr = offsets.data<TOffset>();
+
+    // deserialize the field names
+    std::vector<std::string> fieldNames;
+    std::istringstream is(proto.content());
+    std::string field;
+    while (true) {
+      is >> field;
+      if (is.eof()) {
+        break;
+      }
+      fieldNames.push_back(field);
+    }
+    TreeIterator it(fieldNames);
+
+    auto* base = blob->template GetMutable<std::unique_ptr<TreeCursor>>();
+    (*base).reset(new TreeCursor(it));
+    (*base)->offsets.assign(offsets_ptr, offsets_ptr + offsets.size());
+    return true;
+  }
+};
+
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<std::unique_ptr<TreeCursor>>()),
+    TreeCursorSerializer);
+REGISTER_BLOB_DESERIALIZER(std::unique_ptr<TreeCursor>, TreeCursorDeserializer);
+
+} // namespace
+
 } // caffe2

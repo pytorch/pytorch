@@ -4,9 +4,9 @@
 #include <limits>
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -19,12 +19,10 @@ class ClipOp final : public Operator<Context> {
         min_(std::numeric_limits<T>::min()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
-      min_ = static_cast<T>(
-          OperatorBase::GetSingleArgument<float>("min", 0));
+      min_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("min", 0));
     }
     if (HasArgument("max")) {
-      max_ = static_cast<T>(
-          OperatorBase::GetSingleArgument<float>("max", 0));
+      max_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("max", 0));
     }
   }
 
@@ -44,12 +42,10 @@ class ClipGradientOp final : public Operator<Context> {
         min_(std::numeric_limits<T>::min()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
-      min_ = static_cast<T>(
-          OperatorBase::GetSingleArgument<float>("min", 0));
+      min_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("min", 0));
     }
     if (HasArgument("max")) {
-      max_ = static_cast<T>(
-          OperatorBase::GetSingleArgument<float>("max", 0));
+      max_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("max", 0));
     }
   }
 
@@ -61,6 +57,6 @@ class ClipGradientOp final : public Operator<Context> {
   // Input: Y, dY; Output: dX
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_CLIP_OP_H_
+#endif // CAFFE2_OPERATORS_CLIP_OP_H_

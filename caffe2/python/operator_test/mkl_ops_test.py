@@ -19,6 +19,9 @@ class PackedFCTest(hu.HypothesisTestCase):
            K=st.integers(128, 1024),
            N=st.integers(128, 1024),
            **hu.gcs_cpu_only)
+    @unittest.skipIf(not core.C.builtin_cpu_supports_avx2(),
+                     "Intel MKL sgemm_pack has a known numerical issue with "
+                     "non-avx2 machines that will be fixed in a later build.")
     def test_packed_fc(self, seed, M, K, N, gc, dc):
         np.random.seed(seed)
         X = np.random.rand(M, K).astype(np.float32) - 0.5
@@ -41,6 +44,9 @@ class PackedFCTest(hu.HypothesisTestCase):
             )
             self.assertReferenceChecks(gc, op, [X, W, b], ref)
 
+    @unittest.skipIf(not core.C.builtin_cpu_supports_avx2(),
+                     "Intel MKL sgemm_pack has a known numerical issue with "
+                     "non-avx2 machines that will be fixed in a later build.")
     @given(axis=st.integers(min_value=1, max_value=4),
            num_output=st.integers(min_value=4, max_value=8),
            **hu.gcs_cpu_only)
@@ -59,6 +65,12 @@ class PackedFCTest(hu.HypothesisTestCase):
             axis=axis)
 
         def ref(X, W, b):
-            return (np.dot(X.reshape(X.size / K, K), W.T) + b,)
+            output_axes = list(X.shape[:axis]) + [N]
+            return (
+                np.dot(X.reshape(X.size / K, K), W.T).reshape(output_axes) + b,)
 
         self.assertReferenceChecks(gc, op, [X, W, b], ref)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

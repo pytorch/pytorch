@@ -67,3 +67,7 @@ class TestSquareRootDivide(hu.HypothesisTestCase):
             output_to_grad="output",
             grad_reference=grad,
         )
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

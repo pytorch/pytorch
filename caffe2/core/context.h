@@ -31,7 +31,7 @@ struct DefaultCPUAllocator final : CPUAllocator {
 #ifdef __ANDROID__
     data = memalign(gCaffe2Alignment, nbytes);
 #else
-    CHECK_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
+    CAFFE_ENFORCE_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
 #endif
     memset(data, 0, nbytes);
     return data;
@@ -85,7 +85,7 @@ class CPUContext final {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : math::randomNumberSeed()) {
-    CHECK_EQ(option.device_type(), CPU);
+    CAFFE_ENFORCE_EQ(option.device_type(), CPU);
   }
 
   ~CPUContext() {}
@@ -141,6 +141,11 @@ class CPUContext final {
 template<>
 inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
     size_t nbytes, const void* src, void* dst) {
+  if (nbytes == 0) {
+    return;
+  }
+  CHECK_NOTNULL(src);
+  CHECK_NOTNULL(dst);
   memcpy(dst, src, nbytes);
 }
 

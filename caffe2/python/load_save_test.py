@@ -26,6 +26,7 @@ else:
 # Inherit from this test instead. If you add a test here,
 # each derived class will inherit it as well and cause test duplication
 class TestLoadSaveBase(test_util.TestCase):
+
     def __init__(self, methodName, db_type='minidb'):
         super(TestLoadSaveBase, self).__init__(methodName)
         self._db_type = db_type
@@ -35,7 +36,7 @@ class TestLoadSaveBase(test_util.TestCase):
            dst_device_type=st.sampled_from(DEVICES),
            dst_gpu_id=st.integers(min_value=0, max_value=max_gpuid))
     def load_save(self, src_device_type, src_gpu_id,
-                     dst_device_type, dst_gpu_id):
+                  dst_device_type, dst_gpu_id):
         workspace.ResetWorkspace()
         dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
@@ -65,15 +66,16 @@ class TestLoadSaveBase(test_util.TestCase):
             workspace.ResetWorkspace()
             self.assertEqual(len(workspace.Blobs()), 0)
 
-            def _LoadTest(keep_device, device_type, gpu_id):
+            def _LoadTest(keep_device, device_type, gpu_id, blobs, loadAll):
                 """A helper subfunction to test keep and not keep."""
                 op = core.CreateOperator(
                     "Load",
-                    [], [str(i) for i in range(len(arrays))],
+                    [], blobs,
                     absolute_path=1,
                     db=os.path.join(tmp_folder, "db"), db_type=self._db_type,
                     device_option=dst_device_option,
-                    keep_device=keep_device)
+                    keep_device=keep_device,
+                    load_all=loadAll)
                 self.assertTrue(workspace.RunOperatorOnce(op))
                 for i, arr in enumerate(arrays):
                     self.assertTrue(workspace.HasBlob(str(i)))
@@ -90,17 +92,28 @@ class TestLoadSaveBase(test_util.TestCase):
                         self.assertEqual(proto.tensor.device_detail.cuda_gpu_id,
                                          gpu_id)
 
+            blobs = [str(i) for i in range(len(arrays))]
             # Load using device option stored in the proto, i.e.
             # src_device_option
-            _LoadTest(1, src_device_type, src_gpu_id)
+            _LoadTest(1, src_device_type, src_gpu_id, blobs, 0)
             # Load again, but this time load into dst_device_option.
-            _LoadTest(0, dst_device_type, dst_gpu_id)
+            _LoadTest(0, dst_device_type, dst_gpu_id, blobs, 0)
             # Load back to the src_device_option to see if both paths are able
             # to reallocate memory.
-            _LoadTest(1, src_device_type, src_gpu_id)
+            _LoadTest(1, src_device_type, src_gpu_id, blobs, 0)
             # Reset the workspace, and load directly into the dst_device_option.
             workspace.ResetWorkspace()
-            _LoadTest(0, dst_device_type, dst_gpu_id)
+            _LoadTest(0, dst_device_type, dst_gpu_id, blobs, 0)
+
+            # Test load all which loads all blobs in the db into the workspace.
+            workspace.ResetWorkspace()
+            _LoadTest(1, src_device_type, src_gpu_id, [], 1)
+            # Load again making sure that overwrite functionality works.
+            _LoadTest(1, src_device_type, src_gpu_id, [], 1)
+            # Load again with different device.
+            _LoadTest(0, dst_device_type, dst_gpu_id, [], 1)
+            workspace.ResetWorkspace()
+            _LoadTest(0, dst_device_type, dst_gpu_id, [], 1)
         finally:
             # clean up temp folder.
             try:
@@ -111,8 +124,29 @@ class TestLoadSaveBase(test_util.TestCase):
 
 
 class TestLoadSave(TestLoadSaveBase):
+
     def testLoadSave(self):
         self.load_save()
+
+    def testRepeatedArgs(self):
+        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
+                  np.int16, np.int32, np.int64, np.uint8, np.uint16]
+        arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
+                  for T in dtypes]
+
+        for i, arr in enumerate(arrays):
+            self.assertTrue(workspace.FeedBlob(str(i), arr))
+            self.assertTrue(workspace.HasBlob(str(i)))
+
+        # Saves the blobs to a local db.
+        tmp_folder = tempfile.mkdtemp()
+        op = core.CreateOperator(
+            "Save",
+            [str(i) for i in range(len(arrays))] * 2, [],
+            absolute_path=1,
+            db=os.path.join(tmp_folder, "db"), db_type=self._db_type)
+        with self.assertRaises(RuntimeError):
+            self.assertRaises(workspace.RunOperatorOnce(op))
 
 
 if __name__ == '__main__':

@@ -15,7 +15,10 @@ class TesterBase:
         segments = self.split(data, segment_ids, indices)
         output = np.zeros((len(segments), ) + data.shape[1:])
         for i, segment in enumerate(segments):
-            output[i] = reducer(segment)
+            if len(segment) > 0:
+                output[i] = reducer(segment)
+            else:
+                output[i] = 0.0
         return output
 
     def segment_reduce_grad_op(
@@ -218,7 +221,10 @@ def max_grad(grad_out, outputs, inputs):
     return np.resize(flat_grad_in, inputs[0].shape)
 
 
-REFERENCES_ALL = [('Sum', partial(np.sum, axis=0), sum_grad), ]
+REFERENCES_ALL = [
+    ('Sum', partial(np.sum, axis=0), sum_grad),
+    ('Mean', partial(np.mean, axis=0), mean_grad),
+]
 
 REFERENCES_SORTED = [
     ('RangeSum', partial(np.sum, axis=0), sum_grad),
@@ -298,3 +304,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
             ),
             REFERENCES_ALL
         )(self)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

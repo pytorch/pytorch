@@ -2,109 +2,144 @@
 #define CAFFE2_OPERATORS_H_SOFTMAX_OP_H_
 
 #include "caffe2/core/context.h"
-#include "caffe2/core/operator.h"
-#include "caffe2/utils/math.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/operator.h"
 #include "caffe2/proto/hsm.pb.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
-template <typename T, class Context>
-class HSoftmaxOp final : public Operator<Context> {
+template <typename T, typename Context>
+class HSoftmaxOpBase : public Operator<Context> {
  public:
-   USE_OPERATOR_CONTEXT_FUNCTIONS;
-   HSoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
-       : Operator<Context>(operator_def, ws) {
-         hierarchy_.ParseFromString(OperatorBase::GetSingleArgument<string>
-           ("hierarchy", ""));
-       }
-  bool RunOnDevice() override;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  HSoftmaxOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {
+    HierarchyProto hierarchy;
+    hierarchy.ParseFromString(
+        OperatorBase::GetSingleArgument<string>("hierarchy", ""));
+    for (const auto& path : hierarchy.paths()) {
+      hierarchy_all_map_.emplace(path.word_id(), path);
+    }
+  }
 
- private:
-  HierarchyProto hierarchy_;
+ protected:
+  std::unordered_map<int, PathProto> hierarchy_all_map_;
   Tensor<Context> scale_;
   Tensor<Context> sum_multiplier_;
   Tensor<Context> bias_multiplier_;
-  DISABLE_COPY_AND_ASSIGN(HSoftmaxOp);
-  float RunForwardSingle(const float* X, const float* W, const float* b,
-    int target, float* output, const float* bias_multiplier, int w_length,
-    int K, int& output_offset);
-  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
-  //TODO(Deepak): Make search more efficient, maybe?
-  static std::unordered_map<int, PathProto> getHierarchyForLabels(int M,
-    const int* labels, const HierarchyProto& hierarchy) {
+  static constexpr T kLOG_THRESHOLD() {
+    return 1e-20;
+  }
+  static std::unordered_map<int, PathProto> getHierarchyForLabels(
+      int M,
+      const int* labels,
+      const std::unordered_map<int, PathProto>& hierarchy_all_map) {
     std::unordered_map<int, PathProto> hierarchy_map;
     std::set<int> label_set = std::set<int>(labels, labels + M);
-    for (const PathProto& path : hierarchy.paths()) {
-      if (label_set.count(path.word_id()) > 0) {
-        hierarchy_map.emplace(path.word_id(), path);
-      }
+    for (const auto& label : label_set) {
+      auto search = hierarchy_all_map.find(label);
+      CAFFE_ENFORCE(search != hierarchy_all_map.end(), "incorrect label.");
+      hierarchy_map.emplace(search->first, search->second);
     }
     return hierarchy_map;
   }
-  int getIntermediateOutputSize(const int* labels, int M,
-    std::unordered_map<int, PathProto>& hierarchy) {
-      int size = 0;
-      for (int label = 0; label < M; ++label) {
-        int word_id = labels[label];
-        const auto& path = hierarchy[word_id];
-        size += std::accumulate(path.path_nodes().begin(),
-          path.path_nodes().end(), 0,
-          //Output of FC + Output of Softmax
-          [](int size, PathNodeProto node) { return size + 2*node.length();});
-      }
-      return size;
+  int getIntermediateOutputSize(
+      const int* labels,
+      int M,
+      std::unordered_map<int, PathProto>& hierarchy) const {
+    int size = 0;
+    for (int label = 0; label < M; ++label) {
+      int word_id = labels[label];
+      const auto& path = hierarchy[word_id];
+      size += std::accumulate(
+          path.path_nodes().begin(),
+          path.path_nodes().end(),
+          0,
+          // Output of FC + Output of Softmax
+          [](int sz, PathNodeProto node) {
+            return sz + 2 * node.length();
+          });
     }
+    return size;
+  }
 };
 
 template <typename T, class Context>
-class HSoftmaxGradientOp final : public Operator<Context> {
+class HSoftmaxOp : public HSoftmaxOpBase<T, Context> {
  public:
-   USE_OPERATOR_CONTEXT_FUNCTIONS;
-   HSoftmaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
-       : Operator<Context>(operator_def, ws) {
-         hierarchy_.ParseFromString(OperatorBase::GetSingleArgument<string>
-           ("hierarchy", ""));
-       }
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  using HSoftmaxOpBase<T, Context>::HSoftmaxOpBase;
+
+  bool RunOnDevice() override;
+
+ protected:
+  float RunForwardSingle(
+      const float* X,
+      const float* W,
+      const float* b,
+      int target,
+      float* output,
+      const float* bias_multiplier,
+      int w_length,
+      int K,
+      int& output_offset);
+};
+
+template <typename T, class Context>
+class HSoftmaxGradientOp final : public HSoftmaxOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  using HSoftmaxOpBase<T, Context>::HSoftmaxOpBase;
   bool RunOnDevice() override;
 
  private:
-  HierarchyProto hierarchy_;
-  Tensor<Context> scale_;
-  Tensor<Context> sum_multiplier_;
-  Tensor<Context> bias_multiplier_;
-  DISABLE_COPY_AND_ASSIGN(HSoftmaxGradientOp);
-  void RunBackwardSingle(const float* X, const float* dY, const float* W,
-    int target, const float* int_output, float* dX, float* dW,
-    float* db, float* dOutput, int dim_in, int w_length, int& output_offset);
-  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
-  //TODO(Deepak): Make search more efficient, maybe?
-  static std::unordered_map<int, PathProto> getHierarchyForLabels(int M,
-    const int* labels, const HierarchyProto& hierarchy) {
-    std::unordered_map<int, PathProto> hierarchy_map;
-    std::set<int> label_set = std::set<int>(labels, labels + M);
-    for (const PathProto& path : hierarchy.paths()) {
-      if (label_set.count(path.word_id()) > 0) {
-        hierarchy_map.emplace(path.word_id(), path);
-      }
-    }
-    return hierarchy_map;
-  }
-  int getIntermediateOutputSize(const int* labels, int M,
-    std::unordered_map<int, PathProto>& hierarchy) {
-      int size = 0;
-      for (int label = 0; label < M; ++label) {
-        int word_id = labels[label];
-        const auto& path = hierarchy[word_id];
-        size += std::accumulate(path.path_nodes().begin(),
-          path.path_nodes().end(), 0,
-          //Output of FC + Output of Softmax
-          [](int size, PathNodeProto node) { return size + 2*node.length();});
-      }
-      return size;
-    }
+  void RunBackwardSingle(
+      const float* X,
+      const float* dY,
+      const float* W,
+      int target,
+      const float* int_output,
+      float* dX,
+      float* dW,
+      float* db,
+      float* dOutput,
+      int dim_in,
+      int w_length,
+      int& output_offset);
 };
 
-}  // namespace caffe2
+template <typename T, class Context>
+class HSoftmaxSearchOp final : public HSoftmaxOp<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  HSoftmaxSearchOp(const OperatorDef& operator_def, Workspace* ws)
+      : HSoftmaxOp<T, Context>(operator_def, ws),
+        top_n_(OperatorBase::GetSingleArgument<int>("topN", 5)),
+        beam_(OperatorBase::GetSingleArgument<float>("beam", 0.01)) {
+    tree_.ParseFromString(OperatorBase::GetSingleArgument<string>("tree", ""));
+  }
+  bool RunOnDevice() override;
 
-#endif  // CAFFE2_OPERATORS_SOFTMAX_OP_H_
+ private:
+  int top_n_;
+  float beam_;
+  TreeProto tree_;
+  bool pruning(
+      const float* X,
+      int sample,
+      int K,
+      const float* W,
+      const float* b,
+      const NodeProto& src_node,
+      NodeProto& dst_node,
+      float parent_score,
+      float beam);
+  bool extractNodes(
+      const NodeProto& node,
+      std::vector<std::pair<string, float>>& info);
+};
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_SOFTMAX_OP_H_

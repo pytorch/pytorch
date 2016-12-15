@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_
+#define CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_
 
 #include <array>
 
@@ -360,6 +361,9 @@ class SumReducer<T, CPUContext> {
     math::Axpy<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
   }
 
+  template <int FixedSize>
+  void finish(const Meta& meta, CPUContext* context) {}
+
  private:
   T* out_;
 };
@@ -370,6 +374,10 @@ class SumReducerGradient {
   // which of the original inputs are required for gradient computation
   static constexpr std::array<int, 0> originalInputs() {
     return std::array<int, 0>();
+  }
+
+  static constexpr bool computeLength() {
+    return false;
   }
 
   using FixedDispatch = FixedValues<1>;
@@ -399,8 +407,12 @@ class SumReducerGradient {
       : s_grad_(s_grad) {}
 
   template <int FixedSize>
-  void
-  fillGrad(const Meta& meta, T* data_grad, TIndex offset, Context* context) {
+  void fillGrad(
+      const Meta& meta,
+      T* data_grad,
+      TIndex offset,
+      Context* context,
+      const int length) {
     if (FixedSize == 1) { // static if
       *data_grad = *s_grad_;
     } else {
@@ -446,8 +458,8 @@ class WeightedSumReducer<T, CPUContext> {
     void
     observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
       if (input == 1) {
-        CHECK_EQ(skip_dims, value.ndim())
-            << "SCALARS mustn't have extra dimensions";
+        CAFFE_ENFORCE_EQ(
+            skip_dims, value.ndim(), "SCALARS mustn't have extra dimensions");
         scalars = value.data<T>();
         return;
       }
@@ -475,6 +487,9 @@ class WeightedSumReducer<T, CPUContext> {
         meta.block_size, meta.scalars[offset], in, out_, context);
   }
 
+  template <int FixedSize>
+  void finish(const Meta& meta, CPUContext* context) {}
+
  private:
   T* out_;
 };
@@ -485,6 +500,10 @@ class WeightedSumReducerGradient {
   // which of the original inputs are required for gradient computation
   static constexpr std::array<int, 1> originalInputs() {
     return {1};
+  }
+
+  static constexpr bool computeLength() {
+    return false;
   }
 
   using FixedDispatch = FixedValues<1>;
@@ -504,7 +523,7 @@ class WeightedSumReducerGradient {
         int original_input,
         const Tensor<CPUContext>& value,
         int skip_dims) {
-      CHECK_EQ(1, original_input);
+      CAFFE_ENFORCE_EQ(1, original_input);
       scalars = value.data<T>();
     }
 
@@ -521,8 +540,12 @@ class WeightedSumReducerGradient {
       : s_grad_(s_grad) {}
 
   template <int FixedSize>
-  void
-  fillGrad(const Meta& meta, T* data_grad, TIndex offset, Context* context) {
+  void fillGrad(
+      const Meta& meta,
+      T* data_grad,
+      TIndex offset,
+      Context* context,
+      const int length) {
     math::Scale<T, CPUContext, FixedSize>(
         meta.block_size, meta.scalars[offset], s_grad_, data_grad, context);
   }
@@ -549,4 +572,127 @@ struct WeightedSumReducerDef {
         "length matching the first dimension of DATA");
   }
 };
-}
+
+template <typename T, class Context>
+class MeanReducer;
+template <typename T, class Context>
+class MeanReducerGradient;
+
+template <typename T>
+class MeanReducer<T, CPUContext> {
+ public:
+  static constexpr int kInputCount = 1;
+
+  using FixedDispatch = FixedValues<1>;
+
+  struct Meta {
+    TIndex block_size;
+    vector<TIndex> block_shape;
+
+    void
+    observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
+      DCHECK_EQ(0, input);
+      auto& dims = value.dims();
+      block_shape.assign(dims.begin() + skip_dims, dims.end());
+      block_size = value.size_from_dim(skip_dims);
+    }
+
+    void appendOutputShape(vector<TIndex>* output_shape) {
+      output_shape->insert(
+          output_shape->end(), block_shape.begin(), block_shape.end());
+    }
+  };
+
+  MeanReducer(const Meta& meta, T* out, CPUContext* context)
+      : out_(out), current_size_(0) {
+    memset(out, 0, sizeof(T) * meta.block_size);
+  }
+
+  template <int FixedSize>
+  void
+  process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
+    math::Axpy<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
+    current_size_++;
+  }
+
+  template <int FixedSize>
+  void finish(const Meta& meta, CPUContext* context) {
+    if (current_size_ > 0) {
+      math::Scale<T, CPUContext, FixedSize>(
+          meta.block_size, 1.0 / current_size_, out_, out_, context);
+    }
+  }
+
+ private:
+  T* out_;
+  int current_size_;
+};
+
+template <typename T, class Context>
+class MeanReducerGradient {
+ public:
+  static constexpr std::array<int, 0> originalInputs() {
+    return std::array<int, 0>();
+  }
+
+  static constexpr bool computeLength() {
+    return true;
+  }
+
+  using FixedDispatch = FixedValues<1>;
+
+  struct Meta {
+    TIndex block_size;
+    vector<TIndex> block_shape;
+
+    Meta(const Tensor<CPUContext>& out_grad, int skip_dims) {
+      auto& dims = out_grad.dims();
+      block_shape.assign(dims.begin() + skip_dims, dims.end());
+      block_size = out_grad.size_from_dim(skip_dims);
+    }
+
+    void observeOriginalInput(
+        int original_input,
+        const Tensor<CPUContext>& value,
+        int skip_dims) {}
+
+    void appendGradShape(vector<TIndex>* output_shape) {
+      output_shape->insert(
+          output_shape->end(), block_shape.begin(), block_shape.end());
+    }
+  };
+
+  MeanReducerGradient(const Meta& meta, const T* s_grad, CPUContext* context)
+      : s_grad_(s_grad) {}
+
+  template <int FixedSize>
+  void fillGrad(
+      const Meta& meta,
+      T* data_grad,
+      TIndex offset,
+      Context* context,
+      const int length) {
+    CAFFE_ENFORCE_GT(length, 0, "Segment length must be > 0");
+    math::Scale<T, CPUContext, FixedSize>(
+        meta.block_size, 1.0 / length, s_grad_, data_grad, context);
+  }
+
+ private:
+  const T* s_grad_;
+};
+
+struct MeanReducerDef {
+  template <typename T, class Context>
+  using Reducer = MeanReducer<T, Context>;
+  template <typename T, class Context>
+  using ReducerGradient = MeanReducerGradient<T, Context>;
+  static constexpr const char* name = "Mean";
+  static constexpr const char* doc =
+      "Mean computes the element-wise mean of the input slices. "
+      "Operation doesn't change the shape of the individual blocks.";
+  static void PopulateSchema(OpSchema& schema) {}
+};
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_

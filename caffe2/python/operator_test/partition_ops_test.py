@@ -159,3 +159,7 @@ class TestPartitionOps(TestCase):
                 np.testing.assert_array_equal(
                     expected, workspace.FetchBlob(name)
                 )
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

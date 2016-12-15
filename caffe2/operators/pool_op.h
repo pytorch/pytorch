@@ -2,10 +2,10 @@
 #define CAFFE2_OPERATORS_POOL_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -18,6 +18,12 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     CAFFE_ENFORCE(
         dilation_h_ == 1 && dilation_w_ == 1,
         "Pooling op does not support dilation right now.");
+    if (!global_pooling_) {
+      CAFFE_ENFORCE(
+          pad_t_ < kernel_h_ && pad_b_ < kernel_h_ && pad_l_ < kernel_w_ &&
+              pad_r_ < kernel_w_,
+          "Pad should be smaller than kernel.");
+    }
   }
   ~PoolOp() {}
 
@@ -36,7 +42,6 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
       : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~PoolGradientOp() {}
 
-
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
@@ -44,6 +49,6 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
   // Output: dX
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_POOL_OP_H_
+#endif // CAFFE2_OPERATORS_POOL_OP_H_

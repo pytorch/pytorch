@@ -4,63 +4,75 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, dataio
+from caffe2.python.task import TaskGroup
 
 
-class QueueReader(dataio.Reader):
-    def __init__(self, queue, num_blobs=None, schema=None):
-        dataio.Reader.__init__(self, schema)
-        assert schema is not None or num_blobs is not None, (
-            'Either schema or num_blobs must be provided.')
-
-        self.queue = queue
-        self.num_blobs = num_blobs
-
-        if schema is not None:
-            schema_num_blobs = len(schema.field_names())
-            assert num_blobs is None or num_blobs == schema_num_blobs
-            self.num_blobs = schema_num_blobs
+class _QueueReader(dataio.Reader):
+    def __init__(self, wrapper):
+        assert wrapper.schema is not None, (
+            'Queue needs a schema in order to be read from.')
+        dataio.Reader.__init__(self, wrapper.schema())
+        self._wrapper = wrapper
 
     def setup_ex(self, init_net, exit_net):
-        exit_net.CloseBlobsQueue([self.queue], 0)
+        exit_net.CloseBlobsQueue([self._wrapper.queue()], 0)
 
     def read_ex(self, local_init_net, local_finish_net):
+        self._wrapper._new_reader(local_init_net)
         dequeue_net = core.Net('dequeue_net')
-        fields, status_blob = dequeue(dequeue_net, self.queue, self.num_blobs)
+        fields, status_blob = dequeue(
+            dequeue_net,
+            self._wrapper.queue(),
+            len(self.schema().field_names()))
         return [dequeue_net], status_blob, fields
 
 
-class QueueWriter(dataio.Writer):
-    def __init__(self, queue):
-        self.queue = queue
+class _QueueWriter(dataio.Writer):
+    def __init__(self, wrapper):
+        self._wrapper = wrapper
 
     def setup_ex(self, init_net, exit_net):
-        exit_net.CloseBlobsQueue([self.queue], 0)
+        exit_net.CloseBlobsQueue([self._wrapper.queue()], 0)
 
     def write_ex(self, fields, local_init_net, local_finish_net, status):
+        self._wrapper._new_writer(self.schema(), local_init_net)
         enqueue_net = core.Net('enqueue_net')
-        enqueue(enqueue_net, self.queue, fields, status)
+        enqueue(enqueue_net, self._wrapper.queue(), fields, status)
         return [enqueue_net]
 
 
-class QueueWrapper(object):
-    def __init__(self, init_net, capacity, schema):
-        self._queue = init_net.CreateBlobsQueue(
-            [],
-            capacity=capacity,
-            num_blobs=len(schema.field_names()))
-        self._schema = schema
+class QueueWrapper(dataio.Pipe):
+    def __init__(self, handler, schema=None):
+        dataio.Pipe.__init__(self, schema, TaskGroup.LOCAL_SETUP)
+        self._queue = handler
 
     def reader(self):
-        return QueueReader(self._queue, schema=self._schema)
+        return _QueueReader(self)
 
     def writer(self):
-        return QueueWriter(self._queue)
+        return _QueueWriter(self)
 
     def queue(self):
         return self._queue
 
-    def schema(self):
-        return self._schema
+
+class Queue(QueueWrapper):
+    def __init__(self, capacity, schema=None, name='queue'):
+        # find a unique blob name for the queue
+        net = core.Net(name)
+        queue_blob = net.AddExternalInput(net.NextName('handler'))
+        QueueWrapper.__init__(self, queue_blob, schema)
+        self.capacity = capacity
+        self._setup_done = False
+
+    def setup(self, global_init_net):
+        assert self._schema, 'This queue does not have a schema.'
+        self._setup_done = True
+        global_init_net.CreateBlobsQueue(
+            [],
+            [self._queue],
+            capacity=self.capacity,
+            num_blobs=len(self._schema.field_names()))
 
 
 def enqueue(net, queue, data_blobs, status=None):

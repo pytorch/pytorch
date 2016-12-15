@@ -76,3 +76,7 @@ class TestScatterOps(TestCase):
                 workspace.RunOperatorOnce(op)
                 out = workspace.FetchBlob('data')
                 np.testing.assert_allclose(out, r, rtol=1e-3)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

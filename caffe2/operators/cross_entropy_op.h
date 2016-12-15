@@ -2,9 +2,9 @@
 #define CAFFE2_OPERATORS_CROSS_ENTROPY_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -16,14 +16,15 @@ class LabelCrossEntropyOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
+  static constexpr T kLOG_THRESHOLD() {
+    return 1e-20;
+  }
   // Input: X, label
   // Output: Y
 };
 
 template <typename T, class Context>
-class LabelCrossEntropyGradientOp final
-    : public Operator<Context> {
+class LabelCrossEntropyGradientOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(LabelCrossEntropyGradientOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -32,7 +33,9 @@ class LabelCrossEntropyGradientOp final
  protected:
   // Input: X, label, dY
   // Ouptut: dX. There is no gradient with respect to the label.
-  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
+  static constexpr T kLOG_THRESHOLD() {
+    return 1e-20;
+  }
 };
 
 // Hacky: turns a vector of probabilities into a 2-column matrix with
@@ -50,8 +53,7 @@ class MakeTwoClassOp final : public Operator<Context> {
 };
 
 template <typename T, class Context>
-class MakeTwoClassGradientOp final
-    : public Operator<Context> {
+class MakeTwoClassGradientOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(MakeTwoClassGradientOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -88,12 +90,13 @@ class CrossEntropyOp final : public Operator<Context> {
  protected:
   // Input: X, label
   // Output: Y
-  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
+  static constexpr T kLOG_THRESHOLD() {
+    return 1e-20;
+  }
 };
 
 template <typename T, class Context>
-class CrossEntropyGradientOp final
-    : public Operator<Context> {
+class CrossEntropyGradientOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(CrossEntropyGradientOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -102,9 +105,11 @@ class CrossEntropyGradientOp final
  protected:
   // Input: X, label, dY
   // Ouptut: dX. There is no gradient with respect to the label.
-  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
+  static constexpr T kLOG_THRESHOLD() {
+    return 1e-20;
+  }
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_CROSS_ENTROPY_OP_H_
+#endif // CAFFE2_OPERATORS_CROSS_ENTROPY_OP_H_

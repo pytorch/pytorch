@@ -12,7 +12,7 @@ class GatherPaddingOp final : public Operator<CPUContext> {
             OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
             OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
-    CHECK_GE(startPaddingWidth_, 0);
+    CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
     }
@@ -33,7 +33,7 @@ class GatherPaddingOp final : public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CHECK_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
     const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
@@ -68,7 +68,7 @@ class GatherPaddingOp final : public Operator<CPUContext> {
       // check total length consistency
       const auto length = lengths_ptr[i];
       total_length += length;
-      CHECK_LE(total_length, outer_size);
+      CAFFE_ENFORCE_LE(total_length, outer_size);
 
       // accumulate start paddings
       for (int j = 0; j < startPaddingWidth_; ++j) {
@@ -102,7 +102,7 @@ class RemovePaddingOp final : public Operator<CPUContext> {
             OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
             OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
-    CHECK_GE(startPaddingWidth_, 0);
+    CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
     }
@@ -123,7 +123,7 @@ class RemovePaddingOp final : public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CHECK_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
     const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
@@ -151,7 +151,7 @@ class RemovePaddingOp final : public Operator<CPUContext> {
       // check that total length is consistent
       const auto length = lengths_ptr[i];
       total_length += length;
-      CHECK_LE(total_length, outer_size);
+      CAFFE_ENFORCE_LE(total_length, outer_size);
       std::copy(
           in_ptr + block_size * startPaddingWidth_,
           in_ptr + block_size * (length - endPaddingWidth_),
@@ -185,7 +185,7 @@ class AddPaddingOp final : public Operator<CPUContext> {
             OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
             OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
-    CHECK_GE(startPaddingWidth_, 0);
+    CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
     }
@@ -206,7 +206,7 @@ class AddPaddingOp final : public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CHECK_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
     const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
@@ -228,12 +228,12 @@ class AddPaddingOp final : public Operator<CPUContext> {
     const T* padding_end_ptr = nullptr;
     if (InputSize() >= 3) {
       auto& padding_start = Input(2);
-      CHECK_EQ(block_size, padding_start.size());
+      CAFFE_ENFORCE_EQ(block_size, padding_start.size());
       padding_start_ptr = padding_start.data<T>();
     }
     if (InputSize() == 4) {
       auto& padding_end = Input(3);
-      CHECK_EQ(block_size, padding_end.size());
+      CAFFE_ENFORCE_EQ(block_size, padding_end.size());
       padding_end_ptr = padding_end.data<T>();
     } else {
       padding_end_ptr = padding_start_ptr;
@@ -252,7 +252,7 @@ class AddPaddingOp final : public Operator<CPUContext> {
       // check that total length is consistent
       const auto length = lengths_ptr[i];
       total_length += length;
-      CHECK_LE(total_length, outer_size);
+      CAFFE_ENFORCE_LE(total_length, outer_size);
       // copy padding before
       if (!padding_start_ptr) {
         memset(out_ptr, 0, block_size * startPaddingWidth_ * sizeof(T));

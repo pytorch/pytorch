@@ -73,18 +73,18 @@ ImageInputOp<Context>::ImageInputOp(
                        "that takes in a DBReader blob instead.";
     string db_name =
         OperatorBase::template GetSingleArgument<string>("db", "");
-    CHECK_GT(db_name.size(), 0) << "Must specify a db name.";
+    CAFFE_ENFORCE_GT(db_name.size(), 0, "Must specify a db name.");
     owned_reader_.reset(new db::DBReader(
         OperatorBase::template GetSingleArgument<string>(
             "db_type", "leveldb"),
         db_name));
     reader_ = owned_reader_.get();
   }
-  CHECK_GT(batch_size_, 0) << "Batch size should be nonnegative.";
-  CHECK_GT(scale_, 0) << "Must provide the scaling factor.";
-  CHECK_GT(crop_, 0) << "Must provide the cropping value.";
-  CHECK_GE(scale_, crop_)
-      << "The scale value must be no smaller than the crop value.";
+  CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be nonnegative.");
+  CAFFE_ENFORCE_GT(scale_, 0, "Must provide the scaling factor.");
+  CAFFE_ENFORCE_GT(crop_, 0, "Must provide the cropping value.");
+  CAFFE_ENFORCE_GE(
+      scale_, crop_, "The scale value must be no smaller than the crop value.");
 
   LOG(INFO) << "Creating an image input op with the following setting: ";
   LOG(INFO) << "    Outputting in batches of " << batch_size_ << " images;";
@@ -161,11 +161,11 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
           color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
     } else if (image_proto.data_type() == TensorProto::BYTE) {
       // raw image content.
-      CHECK_EQ(image_proto.dims_size(), (color_ ? 3 : 2));
-      CHECK_GE(image_proto.dims(0), crop_)
-          << "Image height must be bigger than crop.";
-      CHECK_GE(image_proto.dims(1), crop_)
-          << "Image width must be bigger than crop.";
+      CAFFE_ENFORCE_EQ(image_proto.dims_size(), (color_ ? 3 : 2));
+      CAFFE_ENFORCE_GE(
+          image_proto.dims(0), crop_, "Image height must be bigger than crop.");
+      CAFFE_ENFORCE_GE(
+          image_proto.dims(1), crop_, "Image width must be bigger than crop.");
       CAFFE_ENFORCE(!color_ || image_proto.dims(2) == 3);
       *img = cv::Mat(
           image_proto.dims(0), image_proto.dims(1), color_ ? CV_8UC3 : CV_8UC1);
