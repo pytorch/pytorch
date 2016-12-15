@@ -11,3 +11,8 @@ install:
 
 script:
   - mkdir build && cd build && cmake .. && make
+
+# safelist
+branches:
+  only:
+    - master
