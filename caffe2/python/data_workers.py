@@ -13,13 +13,18 @@ Basic usage is as follows:
       net,
       ["data", "label"],
       my_fetch_fun,
-      32
+      32,
+      "train"
    )
    ...
    coordinator.start()
 
 First argument is the Caffe2 net (or model helper), and second argument
 is list of input blobs that are to be fed.
+
+Last argument is used to distinguish different sources of data, such as train
+or test data. This is to ensure the data does not get mixed up, although the
+nets would share blobs.
 
 To do the actual data loading, one defines a "fetcher function"
 that has call signature
@@ -58,7 +63,8 @@ def init_data_input_workers(
     input_blob_names,
     fetch_fun,
     batch_size,
-    num_worker_threads=2
+    num_worker_threads=2,
+    input_source_name="train",
 ):
     global global_coordinator
     device_option = scope.CurrentDeviceScope()
@@ -72,6 +78,7 @@ def init_data_input_workers(
         batch_size,
         device_option,
         scope.CurrentNameScope(),
+        input_source_name,
     )
 
     # Launch fetch worker threads
@@ -92,7 +99,7 @@ def init_data_input_workers(
 
 class DataInputCoordinator(object):
     def __init__(self, net, input_blob_names, batch_size,
-                 device_option, namescope):
+                 device_option, namescope, input_source_name):
         self._net = net
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
@@ -102,7 +109,7 @@ class DataInputCoordinator(object):
         self._namescope = namescope
         self._active = True
         self._workers = []
-
+        self._input_source_name = input_source_name
         self._create_caffe2_queues_and_ops()
 
     def is_active(self):
@@ -181,7 +188,8 @@ class DataInputCoordinator(object):
         '''
         Enqueue the correctly sized batch arrays to Caffe2's queue.
         '''
-        scratch_name = self._namescope + blob_name + "_scratch"
+        scratch_name = self._namescope + blob_name + \
+            "_scratch_" + self._input_source_name
         blob = core.BlobReference(scratch_name)
         workspace.FeedBlob(
             blob,
@@ -212,8 +220,8 @@ class DataInputCoordinator(object):
             return core.ScopedBlobReference(queue_name)
 
         for blob_name in self._input_blob_names:
-            qname = blob_name + "_c2queue"
-            q = create_queue(qname, num_blobs=1, capacity=self._batch_size * 2)
+            qname = blob_name + "_c2queue" + "_" + self._input_source_name
+            q = create_queue(qname, num_blobs=1, capacity=4)
             self._queues.append(q)
             log.info("Created queue: {}".format(q))
 
