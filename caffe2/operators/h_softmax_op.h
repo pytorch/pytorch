@@ -140,6 +140,42 @@ class HSoftmaxSearchOp final : public HSoftmaxOp<T, Context> {
       std::vector<std::pair<string, float>>& info);
 };
 
+template <typename T, class Context>
+class HuffmanTreeHierarchyOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  HuffmanTreeHierarchyOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        num_classes_(OperatorBase::GetSingleArgument<int>("num_classes", -1)) {}
+  bool RunOnDevice() override;
+
+ private:
+  // Internal huffman tree data.
+  struct Node {
+    Node(int l, int count)
+        : label(l),
+          count(count),
+          index(-1),
+          parent_index(-1),
+          left_ch_index(-1),
+          right_ch_index(-1) {}
+    T label;
+    int count;
+    int index;
+    int parent_index;
+    int left_ch_index;
+    int right_ch_index;
+  };
+
+  struct NodeComparator {
+    bool operator()(const Node& node_a, const Node& node_b) {
+      return node_a.count > node_b.count;
+    }
+  };
+
+  int num_classes_;
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_SOFTMAX_OP_H_
