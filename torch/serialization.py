@@ -141,7 +141,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
             try:
                 source_file = inspect.getsourcefile(obj)
                 source = inspect.getsource(obj)
-            except TypeError:
+            except (TypeError, IOError):
                 warnings.warn("Couldn't retrieve source code for container of "
                         "type " + obj.__name__ + ". It won't be checked "
                         "for correctness upon loading.")
