@@ -239,15 +239,6 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(X=hu.tensor(), **hu.gcs)
-    def test_relu(self, X, gc, dc):
-        op = core.CreateOperator("Relu", ["X"], ["Y"])
-        # go away from the origin point to avoid kink problems
-        X += 0.02 * np.sign(X)
-        X[X == 0.0] += 0.02
-        self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
-
-    @given(X=hu.tensor(), **hu.gcs)
     def test_averaged_loss(self, X, gc, dc):
         op = core.CreateOperator("AveragedLoss", ["X"], ["loss"])
         self.assertDeviceChecks(dc, op, [X], [0])
