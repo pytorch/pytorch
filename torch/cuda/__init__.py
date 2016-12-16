@@ -262,6 +262,7 @@ torch._storage_classes.add(IntStorage)
 torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
+torch._storage_classes.add(HalfStorage)
 
 torch._tensor_classes.add(DoubleTensor)
 torch._tensor_classes.add(FloatTensor)
@@ -270,5 +271,6 @@ torch._tensor_classes.add(IntTensor)
 torch._tensor_classes.add(ShortTensor)
 torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
+torch._tensor_classes.add(HalfTensor)
 
 from .streams import Stream, Event
