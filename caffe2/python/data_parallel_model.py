@@ -22,6 +22,7 @@ def Parallelize_GPU(
     devices=range(0, workspace.NumCudaDevices()),
     rendezvous=None,
     net_type='dag',
+    broadcast_computed_params=True,
 ):
     '''
     Function to create a model that can run on many GPUs.
@@ -118,7 +119,8 @@ def Parallelize_GPU(
     model_helper_obj._grad_names = gradients_grouped.keys()
 
     log.info("Add gradient all-reduces for SyncSGD")
-    _AllReduceComputedParams(devices, model_helper_obj, rendezvous)
+    if broadcast_computed_params:
+        _BroadcastComputedParams(devices, model_helper_obj, rendezvous)
     _AllReduceGradients(
         devices, model_helper_obj, rendezvous
     )
@@ -431,28 +433,27 @@ def _AllReduceGradientsSingleHost(devices, model):
                 grads_group,
                 control_input=last_out,
             )
-
             # last_out is used to serialize the execution of nccls
             last_out = grads_group[0]
 
 
-def _AllReduceComputedParams(devices, model, rendezvous):
+def _BroadcastComputedParams(devices, model, rendezvous):
     if rendezvous is None:
-        _AllReduceComputedParamsSingleHost(devices, model)
+        _BroadcastComputedParamsSingleHost(devices, model)
     else:
-        _AllReduceComputedParamsDistributed(devices, model, rendezvous)
+        _BroadcastComputedParamsDistributed(devices, model, rendezvous)
 
 
-def _AllReduceComputedParamsDistributed(
+def _BroadcastComputedParamsDistributed(
     devices,
     model,
     rendezvous,
 ):
-    _AllReduceComputedParamsSingleHost(devices, model)
+    _BroadcastComputedParamsSingleHost(devices, model)
     log.warn("Distribetud computed params all-reduce not implemented yet")
 
 
-def _AllReduceComputedParamsSingleHost(devices, model):
+def _BroadcastComputedParamsSingleHost(devices, model):
     '''
     Average computed params over all devices
     '''
