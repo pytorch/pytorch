@@ -33,6 +33,7 @@
 
 
 #undef THSPTensor_
+#undef THSPTensor_stateless_
 #undef THSPTensor
 #undef THSPTensorStr
 #undef THSPTensorBaseStr

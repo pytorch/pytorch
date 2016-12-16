@@ -25,6 +25,9 @@
 #define THPTensorClass THCPTensorClass
 #define THPTensorType THCPTensorType
 
+#define THPTensorStatelessType THCPTensorStatelessType
+#define THPTensorStateless THCPTensorStateless
+
 
 #define THSTensorPtr THCSTensorPtr
 #define THSPTensorPtr THCSPTensorPtr
@@ -39,9 +42,9 @@
 #define THSPTensorClass THCSPTensorClass
 #define THSPTensorType THCSPTensorType
 
+#define THSPTensorStatelessType THCSPTensorStatelessType
+#define THSPTensorStateless THCSPTensorStateless
 
-#define THPTensorStatelessType THCPTensorStatelessType
-#define THPTensorStateless THCPTensorStateless
 
 #define LIBRARY_STATE_NOARGS state
 #define LIBRARY_STATE state,

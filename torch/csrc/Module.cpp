@@ -585,6 +585,8 @@ extern PyObject * THCPModule_cudaHostAllocator(PyObject *_unused);
 extern PyObject * THCPModule_cudaSynchronize(PyObject *_unused);
 extern PyObject * THCPModule_getLibPath(PyObject *_unused);
 extern PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles);
+
+extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
 
 static PyMethodDef TorchMethods[] = {
@@ -609,9 +611,10 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_seedAll",     (PyCFunction)THCPModule_seedAll,          METH_NOARGS,  NULL},
   {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  NULL},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
-  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize,  METH_NOARGS,  NULL},
-  {"_cuda_getLibPath",  (PyCFunction)THCPModule_getLibPath,       METH_NOARGS,  NULL},
-  {"_cuda_sleep",       (PyCFunction)THCPModule_cudaSleep,        METH_O,       NULL},
+  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
+  {"_cuda_getLibPath", (PyCFunction)THCPModule_getLibPath, METH_NOARGS, NULL},
+  {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
+  {"_cuda_sparse_init",  (PyCFunction)THCSPModule_initExtension,    METH_NOARGS,  NULL},
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
@@ -785,6 +788,15 @@ bool THCPByteTensor_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
 
+bool THCSPDoubleTensor_init(PyObject *module);
+bool THCSPFloatTensor_init(PyObject *module);
+bool THCSPHalfTensor_init(PyObject *module);
+bool THCSPLongTensor_init(PyObject *module);
+bool THCSPIntTensor_init(PyObject *module);
+bool THCSPShortTensor_init(PyObject *module);
+bool THCSPCharTensor_init(PyObject *module);
+bool THCSPByteTensor_init(PyObject *module);
+
 static std::vector<PyMethodDef> methods;
 
 #if PY_MAJOR_VERSION == 2
@@ -872,6 +884,15 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THCPByteTensor_init(module));
 
   ASSERT_TRUE(THCPStream_init(module));
+
+  ASSERT_TRUE(THCSPDoubleTensor_init(module));
+  ASSERT_TRUE(THCSPFloatTensor_init(module));
+  ASSERT_TRUE(THCSPHalfTensor_init(module));
+  ASSERT_TRUE(THCSPLongTensor_init(module));
+  ASSERT_TRUE(THCSPIntTensor_init(module));
+  ASSERT_TRUE(THCSPShortTensor_init(module));
+  ASSERT_TRUE(THCSPCharTensor_init(module));
+  ASSERT_TRUE(THCSPByteTensor_init(module));
 #endif
 
 #ifdef WITH_CUDNN

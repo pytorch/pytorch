@@ -129,13 +129,13 @@ class THPPlugin(CWrapPlugin):
         code = tmpl.safe_substitute(type=typename)
         if typename == '':
             code = code.replace('NewEmpty', '(NewEmpty)')
-            if cuda_tmpl:
-                cuda_code = code.replace('THP', 'THCP')
-                code = cuda_tmpl.substitute(cuda=cuda_code, cpu=code)
-                if sparse:
-                    code = code.replace('THP', 'THSP')
-                    code = code.replace('THCP', 'THSCP')
-                    return Template(code)
+        if cuda_tmpl:
+            cuda_code = code.replace('THP', 'THCP')
+            code = cuda_tmpl.substitute(cuda=cuda_code, cpu=code)
+        if sparse:
+            code = code.replace('THP', 'THSP')
+            code = code.replace('THCP', 'THCSP')
+        return Template(code)
 
     ALLOCATE_TYPE = {
         'THTensor*':        _allocate('', ALLOCATE_TMPL),

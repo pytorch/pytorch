@@ -221,6 +221,7 @@ if WITH_CUDA:
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_link_args += [THC_LIB]
+    main_libraries += ['THCS']
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -294,6 +295,10 @@ extensions.append(THNN)
 
 if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
+<<<<<<< e4810bbd603ae3220c776ce63cf3ee2ec9a5318d
+=======
+        libraries=['TH', 'THC', 'THCS', 'THCUNN'],
+>>>>>>> Adding THCS module so it compiles correctly. Currently stubbed out
         sources=['torch/csrc/nn/THCUNN.cpp'],
         language='c++',
         extra_compile_args=extra_compile_args,

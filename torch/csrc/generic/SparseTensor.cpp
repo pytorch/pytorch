@@ -29,6 +29,10 @@ static void THSPTensor_(dealloc)(THSPTensor* self)
 
 static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
+#ifdef THC_GENERIC_FILE
+  printf("Sparse CUDA Tensors not supported!\n");
+  return NULL;
+#else
   HANDLE_TH_ERRORS
     Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
 
@@ -110,6 +114,7 @@ invalid_arguments:
       "(" THSPTensorStr " view_source, int offset, int size)");
   return NULL;
   END_HANDLE_TH_ERRORS
+#endif
 }
 
 // TODO: implement equality
