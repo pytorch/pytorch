@@ -151,7 +151,7 @@ def Train(args):
         order="NCHW",
         name="resnet50",
         use_cudnn=True,
-        cudnn_exhaustive_search=False
+        cudnn_exhaustive_search=True
     )
 
     # Model building functions
@@ -213,7 +213,7 @@ def Train(args):
             order="NCHW",
             name="resnet50_test",
             use_cudnn=True,
-            cudnn_exhaustive_search=False
+            cudnn_exhaustive_search=True
         )
 
         test_reader = test_model.CreateDB(
