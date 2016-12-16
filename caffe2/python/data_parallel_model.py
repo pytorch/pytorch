@@ -429,7 +429,7 @@ def _AllReduceGradientsSingleHost(devices, model):
             model.NCCLAllreduce(
                 grads_group,
                 grads_group,
-            #    control_input=last_out,
+                control_input=last_out,
             )
 
             # last_out is used to serialize the execution of nccls
