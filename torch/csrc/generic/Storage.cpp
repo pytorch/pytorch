@@ -6,45 +6,19 @@ PyObject *THPStorageClass = NULL;
 
 PyObject * THPStorage_(New)(THStorage *ptr)
 {
-  THPObjectPtr args = PyTuple_New(0);
-  THPObjectPtr kwargs;
-  THPUtils_assert(args, "Could not create a new storage object - failed to"
-          "allocate argument tuple");
-  if (ptr) {
-    kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
-    THPUtils_assert(kwargs, "Could not create a new storage object - "
-          "failed to allocate keyword argument dictionary");
+  PyTypeObject *type = (PyTypeObject *)THPStorageClass;
+  PyObject *obj = type->tp_alloc(type, 0);
+  if (obj) {
+    ((THPStorage *)obj)->cdata = ptr;
+  } else {
+    THStorage_(free)(LIBRARY_STATE ptr);
   }
-  PyObject *result = PyObject_Call(THPStorageClass, args, kwargs);
-  return result;
-}
-
-PyObject * THPStorage_(newWeakObject)(THStorage *storage) {
-#ifdef THC_GENERIC_FILE
-  return PyErr_Format(PyExc_TypeError, "newWeakObject not supported on CUDA storages");
-#else
-  if (storage->allocator == &THStorageWeakRefAllocator) {
-    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
-    Py_INCREF(allocator_obj->object.get());
-    return allocator_obj->object.get();
-  }
-  std::unique_ptr<StorageWeakRefAllocator> new_ctx(new StorageWeakRefAllocator(
-        nullptr, storage->allocator, storage->allocatorContext));
-  PyObject *weak_result = THPStorage_(New)(storage);
-  if (!weak_result)
-    return NULL;
-  Py_INCREF(weak_result); // THPObjectPtr steals the reference
-  new_ctx->object = weak_result;
-  storage->allocatorContext = (void*)new_ctx.release();
-  storage->allocator = &THStorageWeakRefAllocator;
-  return weak_result;
-#endif
+  return obj;
 }
 
 static void THPStorage_(dealloc)(THPStorage* self)
 {
-  if (self->cdata)
-    THStorage_(free)(LIBRARY_STATE self->cdata);
+  THStorage_(free)(LIBRARY_STATE self->cdata);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -365,10 +339,15 @@ void THPStorage_(initCopyMethods)()
 }
 
 #include "StorageMethods.cpp"
+#include "StorageSharing.cpp"
 
 bool THPStorage_(init)(PyObject *module)
 {
-  THPStorageType.tp_methods = THPStorage_(methods);
+  static std::vector<PyMethodDef> methods;
+  THPUtils_addPyMethodDefs(methods, THPStorage_(methods));
+  THPUtils_addPyMethodDefs(methods, THPStorage_(sharingMethods));
+
+  THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_(members);
   if (PyType_Ready(&THPStorageType) < 0)
     return false;

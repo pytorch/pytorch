@@ -1,6 +1,4 @@
-import contextlib
 import gc
-import multiprocessing
 import os
 import sys
 import time
@@ -8,11 +6,13 @@ import unittest
 from sys import platform
 
 import torch
+import torch.cuda
 import torch.multiprocessing as mp
 from common import TestCase
 
 
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
+TEST_CUDA_IPC = torch.cuda.is_available() and sys.version_info[0] == 3
 
 
 def simple_fill(queue, event):
@@ -26,14 +26,16 @@ def simple_pool_fill(tensor):
     return tensor.add(1)
 
 
-@contextlib.contextmanager
-def fs_sharing():
-    prev_strategy = mp.get_sharing_strategy()
-    mp.set_sharing_strategy('file_system')
-    try:
-        yield
-    finally:
-        mp.set_sharing_strategy(prev_strategy)
+# Multiply by two in a separate stream
+def cuda_multiply_two(queue, ready, done):
+    ready.set()
+    with torch.cuda.stream(torch.cuda.Stream()):
+        cuda_event, tensor = queue.get()
+        cuda_event.wait()
+        tensor.mul_(2)
+        cuda_event.record()
+        done.set()
+        del cuda_event
 
 
 class leak_checker(object):
@@ -86,14 +88,14 @@ class TestMultiprocessing(TestCase):
     def __init__(self, *args, **kwargs):
         super(TestMultiprocessing, self).__init__(*args, **kwargs)
 
-    def _test_sharing(self):
+    def _test_sharing(self, ctx=mp, type=torch.FloatTensor):
         def do_test():
-            x = torch.zeros(5, 5)
-            q = mp.Queue()
-            e = mp.Event()
+            x = torch.zeros(5, 5).type(type)
+            q = ctx.Queue()
+            e = ctx.Event()
             data = [x, x[:, 1]]
             q.put(data)
-            p = mp.Process(target=simple_fill, args=(q, e))
+            p = ctx.Process(target=simple_fill, args=(q, e))
             lc.check_pid(p.pid)
             p.start()
             e.wait()
@@ -105,11 +107,11 @@ class TestMultiprocessing(TestCase):
         with leak_checker(self) as lc:
             do_test()
 
-    def _test_preserve_sharing(self):
+    def _test_preserve_sharing(self, ctx=mp):
         def do_test():
             x = torch.randn(5, 5)
             data = [x.storage(), x.storage()[1:4], x, x[2], x[:,1]]
-            q = mp.Queue()
+            q = ctx.Queue()
             q.put(data)
             new_data = q.get()
             self.assertEqual(new_data, data, 0)
@@ -124,9 +126,9 @@ class TestMultiprocessing(TestCase):
         with leak_checker(self):
             do_test()
 
-    def _test_pool(self):
+    def _test_pool(self, ctx=mp):
         def do_test():
-            p = mp.Pool(2)
+            p = ctx.Pool(2)
             for proc in p._pool:
                 lc.check_pid(proc.pid)
 
@@ -155,22 +157,20 @@ class TestMultiprocessing(TestCase):
         self._test_pool()
 
     def test_fs_sharing(self):
-        with fs_sharing():
-            self._test_sharing()
+        self._test_sharing(ctx=mp.get_context(sharing_strategy='file_system'))
 
     def test_fs_preserve_sharing(self):
-        with fs_sharing():
-            self._test_preserve_sharing()
+        self._test_preserve_sharing(ctx=mp.get_context(sharing_strategy='file_system'))
 
     def test_fs_pool(self):
-        with fs_sharing():
-            self._test_pool()
+        self._test_pool(ctx=mp.get_context(sharing_strategy='file_system'))
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
     def test_fs(self):
-        with fs_sharing(), leak_checker(self) as lc:
+        ctx = mp.get_context(sharing_strategy='file_system')
+        with leak_checker(self) as lc:
             x = torch.DoubleStorage(4)
-            q = mp.Queue()
+            q = ctx.Queue()
             self.assertFalse(lc.has_shm_files())
             q.put(x)
             self.assertTrue(lc.has_shm_files(wait=False))
@@ -178,14 +178,35 @@ class TestMultiprocessing(TestCase):
             del x
             del q  # We have to clean up fds for leak_checker
 
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda(self):
+        torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
+        self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
+
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_event(self):
+        ctx = mp.get_context('spawn')
+        queue = ctx.Queue()
+        ready = ctx.Event()
+        done = ctx.Event()
+        p = ctx.Process(target=cuda_multiply_two, args=(queue, ready, done))
+        p.start()
+
+        ready.wait()
+        with torch.cuda.stream(torch.cuda.Stream()):
+            tensor = torch.cuda.FloatTensor([1, 1, 1, 1])
+            # Use a sleep kernel to test events. Without the event, the
+            # multiply happens before the add.
+            event = torch.cuda.Event(interprocess=True)
+            torch.cuda._sleep(20000000)  # about 30 ms
+            tensor.add_(1)
+            event.record()
+            queue.put((event, tensor))
+            done.wait()  # must wait until subprocess records event
+            event.synchronize()
+            self.assertEqual(list(tensor), [4, 4, 4, 4])
+        p.join()
+
 
 if __name__ == '__main__':
-    start_method = os.environ.get('MULTIPROCESSING_METHOD')
-    if start_method:
-        if sys.version_info < (3, 4):
-            print("Python <3.4 does not support 'multiprocessing.set_start_method'")
-            sys.exit(0)
-        else:
-            print("INFO: Using multiprocessing start method '{}'".format(start_method))
-            multiprocessing.set_start_method(start_method)
     unittest.main()

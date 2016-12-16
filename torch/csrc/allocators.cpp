@@ -12,20 +12,17 @@ void* ObjectPtrAllocator::realloc(void* ptr, long size) {
   return allocator->realloc(allocatorContext, ptr, size);
 }
 
-
 void ObjectPtrAllocator::free(void* ptr) {
-  object.release();
+  object = nullptr;
   allocator->free(allocatorContext, ptr);
   delete this;
 }
 
 void StorageWeakRefAllocator::free(void* ptr) {
-  // All storage structs have the same structure and we just want to clear
-  // the cdata field. Setting cdata to NULL will prevent the object from
-  // calling free once more.
-  THPFloatStorage *storage = (THPFloatStorage*)object.get();
-  storage->cdata = nullptr;
+  PyGILState_STATE gstate = PyGILState_Ensure();
+  PyObject_SetAttrString(object.get(), "cdata", Py_None);
   object = nullptr;
+  PyGILState_Release(gstate);
   allocator->free(allocatorContext, ptr);
   delete this;
 }
@@ -88,5 +85,37 @@ THAllocator THNumpyArrayAllocator = {
   malloc_wrapper<NumpyArrayAllocator>,
   realloc_wrapper<NumpyArrayAllocator>,
   free_wrapper<NumpyArrayAllocator>,
+};
+#endif
+
+#ifdef WITH_CUDA
+cudaError_t CudaStorageWeakRefAllocator::malloc(void** ptr, size_t size, cudaStream_t stream) {
+  THError("CudaStorageWeakRefAllocator: malloc not supported");
+  return cudaSuccess;
+}
+
+cudaError_t CudaStorageWeakRefAllocator::free(void* ptr) {
+  PyGILState_STATE gstate = PyGILState_Ensure();
+  PyObject_SetAttrString(object.get(), "cdata", Py_None);
+  object = nullptr;
+  PyGILState_Release(gstate);
+  cudaError_t err = allocator->free(allocatorContext, ptr);
+  delete this;
+  return err;
+}
+
+static cudaError_t cuda_malloc_wrapper(void *ctx, void** ptr, size_t size, cudaStream_t stream) {
+  return ((CudaStorageWeakRefAllocator*)ctx)->malloc(ptr, size, stream);
+}
+
+static cudaError_t cuda_free_wrapper(void *ctx, void *ptr) {
+  return ((CudaStorageWeakRefAllocator*)ctx)->free(ptr);
+}
+
+THCDeviceAllocator THCStorageWeakRefAllocator = {
+  cuda_malloc_wrapper,
+  NULL,
+  cuda_free_wrapper,
+  NULL,
 };
 #endif
