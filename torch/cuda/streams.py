@@ -1,6 +1,5 @@
 import ctypes
 import torch
-import os
 from . import cudart
 
 

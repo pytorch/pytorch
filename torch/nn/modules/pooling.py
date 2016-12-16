@@ -31,7 +31,7 @@ class MaxPool1d(Module):
         >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
-            return_indices=False, ceil_mode=False):
+                 return_indices=False, ceil_mode=False):
         super(MaxPool1d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
@@ -81,7 +81,7 @@ class MaxPool2d(Module):
         >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
-            return_indices=False, ceil_mode=False):
+                 return_indices=False, ceil_mode=False):
         super(MaxPool2d, self).__init__()
         self.kh, self.kw = _pair(kernel_size)
         self.dh, self.dw = _pair(stride or kernel_size)
@@ -395,4 +395,3 @@ class LPPool2d(Module):
 
 
 # TODO: AdaptiveMaxPool2d
-

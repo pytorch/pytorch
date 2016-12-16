@@ -1,5 +1,5 @@
 import torch
-from torch.autograd import Variable
+from torch.nn.parameter import Parameter
 
 from .module import Module
 
@@ -382,9 +382,8 @@ class PReLU(Module):
     """
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters
-        super(PReLU, self).__init__(
-            weight=torch.Tensor(num_parameters).fill_(init)
-        )
+        super(PReLU, self).__init__()
+        self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
     def forward(self, input):
         return self._backend.PReLU()(input, self.weight)

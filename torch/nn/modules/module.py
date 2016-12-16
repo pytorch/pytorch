@@ -14,11 +14,7 @@ class Module(object):
     An nn.Module has the following interface:
 
     **Constructor:**
-       nn.Module(**parameters)
-
-    All arguments passed in to the constructor need to be of type
-    nn.Parameter or a Tensor.
-
+       nn.Module()
 
     **forward(...)**
 
@@ -29,6 +25,11 @@ class Module(object):
     **__call__(...)**
 
     This calls the forward function, as well as the hooks
+
+    **register_parameter(name, param)**
+
+    Adds a parameter to the module. The parameter can be accessed as an
+    attribute of the module by its name.
 
     **register_buffer(name, tensor)**
 
@@ -121,10 +122,10 @@ class Module(object):
     Zeroes the gradients of each Parameter of the module
 
     """
-    def __init__(self, **parameters):
+    def __init__(self):
         self._backend = thnn_backend
-        self._parameters = OrderedDict(parameters)
-        self._buffers = {}
+        self._parameters = OrderedDict()
+        self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self.training = True
@@ -142,6 +143,25 @@ class Module(object):
 
     def register_buffer(self, name, tensor):
         self._buffers[name] = tensor
+
+    def register_parameter(self, name, param):
+        if '_parameters' not in self.__dict__:
+            raise AttributeError(
+                "cannot assign parameter before Module.__init__() call")
+        if param is None:
+            self._parameters[name] = None
+        elif not isinstance(param, Parameter):
+            raise TypeError("cannot assign '{}' object to parameter '{}' "
+                            "(torch.nn.Parameter or None required)"
+                            .format(torch.typename(param), name))
+        elif param.creator:
+            raise ValueError(
+                "Cannot assign non-leaf Variable to parameter '{0}'. Model "
+                "parameters must be created explicitly. To express '{0}' "
+                "as a function of another variable, compute the value in "
+                "the forward() method.".format(name))
+        else:
+            self._parameters[name] = param
 
     def _apply(self, fn):
         for param in self._parameters.values():
@@ -223,24 +243,9 @@ class Module(object):
         return object.__getattribute__(self, name)
 
     def __setattr__(self, name, value):
-        _parameters = self.__dict__.get('_parameters')
-        if isinstance(value, Parameter):
-            if _parameters is None:
-                raise AttributeError(
-                    "cannot assign parameter before Module.__init__() call")
-            if value.creator:
-                raise ValueError(
-                    "Cannot assign non-leaf Variable to parameter '{0}'. Model "
-                    "parameters must be created explicitly. To express '{0}' "
-                    "as a function of another variable, compute the value in "
-                    "the forward() method.".format(name))
-            _parameters[name] = value
-        elif _parameters and name in _parameters:
-            if value is not None:
-                raise TypeError("cannot assign '{}' object to parameter '{}' "
-                                "(torch.nn.Parameter or None required)"
-                                .format(torch.typename(value), name))
-            _parameters[name] = value
+        params = self.__dict__.get('_parameters')
+        if isinstance(value, Parameter) or (params and name in params):
+            self.register_parameter(name, value)
         else:
             object.__setattr__(self, name, value)
 

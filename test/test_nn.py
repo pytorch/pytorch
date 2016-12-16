@@ -678,7 +678,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
-    def test_parameter_dict(self):
+    def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Container(
             conv=nn.Conv2d(3, 3, 3, bias=False)
@@ -716,7 +716,7 @@ class TestNN(NNTestCase):
         self.assertIs(state_dict['weight'], l.weight)
         self.assertIs(state_dict['bias'], l.bias)
 
-    def test_load_parameter_dict(self):
+    def test_load_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Container(
             conv1=nn.Conv2d(3, 3, 3, bias=False),

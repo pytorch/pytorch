@@ -10,6 +10,7 @@ class RNNBase(Module):
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0, bidirectional=False):
+        super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -21,7 +22,6 @@ class RNNBase(Module):
         num_directions = 2 if bidirectional else 1
 
         self.all_weights = []
-        super_weights = {}
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -38,18 +38,14 @@ class RNNBase(Module):
                 b_hh = Parameter(torch.Tensor(gate_size))
 
                 suffix = '_reverse' if direction == 1 else ''
-                super_weights['weight_ih_l{}{}'.format(layer, suffix)] = w_ih
-                super_weights['weight_hh_l{}{}'.format(layer, suffix)] = w_hh
+                setattr(self, 'weight_ih_l{}{}'.format(layer, suffix), w_ih)
+                setattr(self, 'weight_hh_l{}{}'.format(layer, suffix), w_hh)
                 if bias:
-                    super_weights['bias_ih_l{}{}'.format(layer, suffix)] = b_ih
-                    super_weights['bias_hh_l{}{}'.format(layer, suffix)] = b_hh
+                    setattr(self, 'bias_ih_l{}{}'.format(layer, suffix), b_ih)
+                    setattr(self, 'bias_hh_l{}{}'.format(layer, suffix), b_hh)
                     self.all_weights += [(w_ih, w_hh, b_ih, b_hh)]
                 else:
                     self.all_weights += [(w_ih, w_hh)]
-
-        super(RNNBase, self).__init__(
-            **super_weights
-        )
 
         self.reset_parameters()
 
@@ -57,7 +53,6 @@ class RNNBase(Module):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
-
 
     def forward(self, input, hx):
         func = self._backend.RNN(
@@ -70,7 +65,6 @@ class RNNBase(Module):
             self.training,
             self.bidirectional
         )
-
         return func(input, self.all_weights, hx)
 
 
@@ -121,9 +115,8 @@ class RNN(RNNBase):
             elif kwargs['nonlinearity'] == 'relu':
                 mode = 'RNN_RELU'
             else:
-                raise Exception("Unknown nonlinearity: {}".format(
-                    kwargs['nonlinearity']
-                ))
+                raise ValueError("Unknown nonlinearity '{}'".format(
+                    kwargs['nonlinearity']))
             del kwargs['nonlinearity']
         else:
             mode = 'RNN_TANH'
@@ -260,25 +253,25 @@ class RNNCell(Module):
     """
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
+        super(RNNCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
         self.nonlinearity = nonlinearity
-
-        super(RNNCell, self).__init__(
-            weight_ih = torch.Tensor(hidden_size, input_size),
-            weight_hh = torch.Tensor(hidden_size, hidden_size),
-            bias_ih = torch.Tensor(hidden_size) if bias else None,
-            bias_hh = torch.Tensor(hidden_size) if bias else None,
-        )
-
+        self.weight_ih = Parameter(torch.Tensor(hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(hidden_size, hidden_size))
+        if bias:
+            self.bias_ih = Parameter(torch.Tensor(hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(hidden_size))
+        else:
+            self.register_parameter('bias_ih', None)
+            self.register_parameter('bias_hh', None)
         self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
-
 
     def forward(self, input, hx):
         if self.nonlinearity == "tanh":
@@ -334,24 +327,24 @@ class LSTMCell(Module):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
+        super(LSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
-
-        super(LSTMCell, self).__init__(
-            weight_ih = torch.Tensor(4*hidden_size, input_size),
-            weight_hh = torch.Tensor(4*hidden_size, hidden_size),
-            bias_ih = torch.Tensor(4*hidden_size) if bias else None,
-            bias_hh = torch.Tensor(4*hidden_size) if bias else None,
-        )
-
+        self.weight_ih = Parameter(torch.Tensor(4*hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(4*hidden_size, hidden_size))
+        if bias:
+            self.bias_ih = Parameter(torch.Tensor(4*hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(4*hidden_size))
+        else:
+            self.register_parameter('bias_ih', None)
+            self.register_parameter('bias_hh', None)
         self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
-
 
     def forward(self, input, hx):
         return self._backend.LSTMCell(
@@ -395,24 +388,24 @@ class GRUCell(Module):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
+        super(GRUCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
-
-        super(GRUCell, self).__init__(
-            weight_ih = torch.Tensor(3*hidden_size, input_size),
-            weight_hh = torch.Tensor(3*hidden_size, hidden_size),
-            bias_ih = torch.Tensor(3*hidden_size) if bias else None,
-            bias_hh = torch.Tensor(3*hidden_size) if bias else None,
-        )
-
+        self.weight_ih = Parameter(torch.Tensor(3*hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(3*hidden_size, hidden_size))
+        if bias:
+            self.bias_ih = Parameter(torch.Tensor(3*hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(3*hidden_size))
+        else:
+            self.register_parameter('bias_ih', None)
+            self.register_parameter('bias_hh', None)
         self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
-
 
     def forward(self, input, hx):
         return self._backend.GRUCell(
