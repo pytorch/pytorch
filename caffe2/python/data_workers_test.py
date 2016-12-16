@@ -34,6 +34,7 @@ class DataWorkersTest(unittest.TestCase):
             32,
             2,
         )
+        self.assertEqual(coordinator._fetcher_id_seq, 2)
         coordinator.start()
 
         workspace.RunNetOnce(model.param_init_net)

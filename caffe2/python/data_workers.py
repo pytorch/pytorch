@@ -85,9 +85,12 @@ def init_data_input_workers(
     workers = [
         threading.Thread(
             target=fetcher,
-            args=[coordinator, i, fetch_fun, batch_size, input_blob_names],
+            args=[coordinator, global_coordinator._fetcher_id_seq + i,
+                  fetch_fun, batch_size, input_blob_names],
         ) for i in range(num_worker_threads)
     ]
+    global_coordinator._fetcher_id_seq += num_worker_threads
+
     workers.append(threading.Thread(
         target=enqueuer,
         args=[coordinator]))
@@ -117,6 +120,8 @@ class DataInputCoordinator(object):
         return self._active
 
     def _start(self):
+        if self._started:
+            return
         self._active = True
         self._started = True
 
@@ -128,12 +133,13 @@ class DataInputCoordinator(object):
         self._active = False
         if reason is not None:
             log.error("Data input failed due to an error: {}".format(reason))
+        self._started = False
 
     def _wait_finish(self):
         log.info("Wait for workers to die")
         for w in self._workers:
             if w != threading.current_thread():
-                w.join()
+                w.join(1.0)  # don't wait forever, thread may be blocked in i/o
         log.info("...finished")
 
     def _get(self):
@@ -147,10 +153,10 @@ class DataInputCoordinator(object):
     def put(self, chunk):
         while self.is_active():
             try:
-                self._internal_queue.put(chunk, block=True, timeout=5.0)
+                self._internal_queue.put(chunk, block=True, timeout=0.5)
                 return
             except Queue.Full:
-                log.warn("Queue full: stalling fetchers...")
+                log.debug("Queue full: stalling fetchers...")
                 continue
 
     def _enqueue_batch(self):
@@ -235,6 +241,7 @@ class DataInputCoordinator(object):
 class GlobalCoordinator(object):
     def __init__(self):
         self._coordinators = []
+        self._fetcher_id_seq = 0
         self.register_shutdown_handler()
 
     def add(self, coordinator):
@@ -242,8 +249,7 @@ class GlobalCoordinator(object):
 
     def start(self):
         for c in self._coordinators:
-            if not c._started:
-                c._start()
+            c._start()
 
     def stop(self):
         for c in self._coordinators:
