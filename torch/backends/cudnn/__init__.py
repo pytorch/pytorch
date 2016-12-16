@@ -12,7 +12,7 @@ lib = None
 thisdir = path.dirname(__file__)
 libpaths = ['', path.join(thisdir, '../../lib')]
 if sys.platform.startswith('linux'):
-    libnames = ['libcudnn.so.5.1.5', 'libcudnn.so.5.1.3']
+    libnames = ['libcudnn.so.5.0.5', 'libcudnn.so.5.1.5', 'libcudnn.so.5.1.3']
 elif sys.platform == 'darwin':
     libnames = ['libcudnn.5.dylib']
 else:
