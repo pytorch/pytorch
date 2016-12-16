@@ -3,8 +3,8 @@ import torch
 from . import functions
 from .modules import utils
 
-def conv2d(input, weight, bias=None, *args, **kwargs):
-    state = functions.conv.Conv2d(*args, **kwargs)
+def conv2d(input, weight, bias=None, stride=1, pad=0, groups=1):
+    state = functions.conv.Conv2d(stride, pad, groups)
     return bias and state(input, weight, bias) or state(input, weight)
 
 def conv2d_transpose(input, weight, bias=None, *args, **kwargs):
