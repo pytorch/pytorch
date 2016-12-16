@@ -1,5 +1,5 @@
 import torch
-from torch.autograd import Variable
+from torch.nn.parameter import Parameter
 
 from .module import Module
 
@@ -30,17 +30,15 @@ class Embedding(Module):
         >>> print(embedding(input))
     """
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
-            max_norm=None, norm_type=2, scale_grad_by_freq=False):
+                 max_norm=None, norm_type=2, scale_grad_by_freq=False):
+        super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.padding_idx = padding_idx
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
-
-        super(Embedding, self).__init__(
-            weight=torch.Tensor(num_embeddings, embedding_dim)
-        )
+        self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -57,4 +55,3 @@ class Embedding(Module):
 
 
 # TODO: SparseLinear
-

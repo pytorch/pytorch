@@ -1,22 +1,23 @@
 import torch
-from torch.autograd import Variable
-
 from .module import Module
+from torch.nn.parameter import Parameter
+
 
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
 class _BatchNorm(Module):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True):
+        super(_BatchNorm, self).__init__()
         self.affine = affine
         self.eps = eps
         self.momentum = momentum
-
-        weight = bias = None
         if self.affine:
-            weight = torch.Tensor(num_features)
-            bias = torch.Tensor(num_features)
-        super(_BatchNorm, self).__init__(weight=weight, bias=bias)
+            self.weight = Parameter(torch.Tensor(num_features))
+            self.bias = Parameter(torch.Tensor(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
         self.register_buffer('running_mean', torch.zeros(num_features))
         self.register_buffer('running_var', torch.ones(num_features))
         self.reset_parameters()
@@ -158,4 +159,3 @@ class BatchNorm3d(_BatchNorm):
         >>> output = m(input)
     """
     expected_dim = 5
-

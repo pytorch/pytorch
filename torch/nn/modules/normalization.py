@@ -12,7 +12,7 @@ class CrossMapLRN2d(Module):
 
     def forward(self, input):
         return self._backend.CrossMapLRN2d(self.size, self.alpha, self.beta,
-                self.k)(input)
+                                           self.k)(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -26,4 +26,3 @@ class CrossMapLRN2d(Module):
 # TODO: ContrastiveNorm2d
 # TODO: DivisiveNorm2d
 # TODO: SubtractiveNorm2d
-

@@ -1,6 +1,6 @@
 import math
 import torch
-from torch.autograd import Variable
+from torch.nn.parameter import Parameter
 
 from .module import Module
 from .utils import _pair, _triple
@@ -39,16 +39,13 @@ class Conv1d(Module):
     """
 
     def __init__(self, in_features, out_features, kernel_size, stride=1):
+        super(Conv1d, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.kernel_size = kernel_size
         self.stride = stride
-
-        kernel_elements = self.in_features * self.kernel_size
-        super(Conv1d, self).__init__(
-            weight = torch.Tensor(out_features, in_features, kernel_size),
-            bias = torch.Tensor(out_features)
-        )
+        self.weight = Parameter(torch.Tensor(out_features, in_features, kernel_size))
+        self.bias = Parameter(torch.Tensor(out_features))
 
         self.reset_parameters()
 
@@ -68,7 +65,6 @@ class Conv1d(Module):
         return func(input, weight, self.bias)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + str(self.in_features) + ' -> ' + str(self.out_features) \
             + ', size=' + str(self.kernel_size) \
@@ -114,7 +110,8 @@ class Conv2d(Module):
         >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                padding=0, dilation=None, groups=1, bias=True):
+                 padding=0, dilation=None, groups=1, bias=True):
+        super(Conv2d, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kh, self.kw = _pair(kernel_size)
@@ -124,15 +121,12 @@ class Conv2d(Module):
         if self.is_dilated:
             self.dilh, self.dilw = _pair(dilation)
         self.groups = groups
-
-        weight = torch.Tensor(self.out_channels, self.in_channels, self.kh,
-                self.kw)
-        bias = torch.Tensor(self.out_channels) if bias else None
-        super(Conv2d, self).__init__(
-            weight=weight,
-            bias=bias,
-        )
-
+        self.weight = Parameter(torch.Tensor(
+            self.out_channels, self.in_channels, self.kh, self.kw))
+        if bias:
+            self.bias = Parameter(torch.Tensor(self.out_channels))
+        else:
+            self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -158,12 +152,12 @@ class Conv2d(Module):
             return func(input, self.weight, self.bias)
 
     def __repr__(self):
-        padding_str=', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
+        padding_str = ', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
                       if self.padh != 0 and self.padw !=0 else ''
-        dilation_str=(', dilation=(' + str(self.dilh) + ', ' \
+        dilation_str = (', dilation=(' + str(self.dilh) + ', ' \
                         + str(self.dilw) + ')' if self.is_dilated else '')
-        groups_str=(', groups=' + str(self.groups) if self.groups != 1 else '')
-        bias_str=(', bias=False' if self.bias == None else '')
+        groups_str = (', groups=' + str(self.groups) if self.groups != 1 else '')
+        bias_str= (', bias=False' if self.bias == None else '')
         return  self.__class__.__name__ + ' (' + str(self.in_channels) \
             + ' -> ' + str(self.out_channels) \
             + ', size=(' + str(self.kh) + ', ' + str(self.kw) + ')' \
@@ -250,7 +244,8 @@ class ConvTranspose2d(Conv2d):
 class _Conv3dBase(Module):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-            padding=0):
+                 padding=0):
+        super(_Conv3dBase, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kt, self.kh, self.kw = _triple(kernel_size)
@@ -264,7 +259,7 @@ class _Conv3dBase(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def __repr__(self):
-        padding_str=', padding=(' + str(self.padt) \
+        padding_str = ', padding=(' + str(self.padt) \
                       + ', ' + str(self.padh) + ', ' + str(self.padw) + ')' \
                       if self.padt != 0 and self.padh != 0 and self.padw !=0 else ''
         return  self.__class__.__name__ + ' (' + str(self.in_channels) \
@@ -302,13 +297,12 @@ class Conv3d(_Conv3dBase):
         >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                padding=0):
+                 padding=0):
         super(Conv3d, self).__init__(in_channels, out_channels, kernel_size,
-                stride, padding)
-        weight = torch.Tensor(self.out_channels, self.in_channels, self.kt,
-                self.kh, self.kw)
-        bias = torch.Tensor(self.out_channels)
-        Module.__init__(self, weight=weight, bias=bias)
+                                     stride, padding)
+        self.weight = Parameter(torch.Tensor(
+            self.out_channels, self.in_channels, self.kt, self.kh, self.kw))
+        self.bias = Parameter(torch.Tensor(self.out_channels))
         self.reset_parameters()
 
     def forward(self, input):
@@ -349,13 +343,12 @@ class ConvTranspose3d(_Conv3dBase):
         >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                padding=0):
-        super(ConvTranspose3d, self).__init__(in_channels, out_channels, kernel_size,
-                stride, padding)
-        weight = torch.Tensor(self.in_channels, self.out_channels, self.kt,
-                self.kh, self.kw)
-        bias = torch.Tensor(self.out_channels)
-        Module.__init__(self, weight=weight, bias=bias)
+                 padding=0):
+        super(ConvTranspose3d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding)
+        self.weight = Parameter(torch.Tensor(
+            self.in_channels, self.out_channels, self.kt, self.kh, self.kw))
+        self.bias = Parameter(torch.Tensor(self.out_channels))
         self.reset_parameters()
 
     def forward(self, input):

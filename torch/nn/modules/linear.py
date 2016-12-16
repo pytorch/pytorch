@@ -1,7 +1,7 @@
 import math
 
 import torch
-from torch.autograd import Variable
+from torch.nn.parameter import Parameter
 
 from .module import Module
 
@@ -27,13 +27,14 @@ class Linear(Module):
         >>> print(output.size())
     """
     def __init__(self, in_features, out_features, bias=True):
+        super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-
-        super(Linear, self).__init__(
-            weight=torch.Tensor(out_features, in_features),
-            bias=torch.Tensor(out_features) if bias else None
-        )
+        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_features))
+        else:
+            self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self):
