@@ -351,7 +351,7 @@ def ensure_type(obj, type_map):
         setattr(obj, attr, getattr(value, converter)())
 
 
-ensure_attr('Linear', 'bias')
+ensure_attr('Linear', 'bias', 'gradWeight', 'gradBias')
 ensure_attr('CAddTable', 'inplace')
 ensure_attr('SpatialFractionalMaxPooling', 'outW', 'outH', 'ratioW', 'ratioH')
 ensure_attr('BatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias')
