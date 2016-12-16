@@ -12,10 +12,13 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
 
   THPVariableClass      = PyMapping_GetItemString(autograd_dict,(char*)"Variable");
   THPFunctionClass      = PyMapping_GetItemString(autograd_dict,(char*)"Function");
+  THPStochasticFunctionClass = PyMapping_GetItemString(autograd_dict,(char*)"StochasticFunction");
   THPUtils_assert(THPVariableClass, "couldn't find Variable class in "
           "torch.autograd module");
   THPUtils_assert(THPFunctionClass, "couldn't find Function class in "
           "torch.autograd module");
+  THPUtils_assert(THPStochasticFunctionClass, "couldn't find "
+          "StochasticFunction class in torch.autograd module");
 
   Py_RETURN_TRUE;
 }

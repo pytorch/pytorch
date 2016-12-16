@@ -2403,6 +2403,47 @@ class TestTorch(TestCase):
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
+        q = torch.rand(5, 5)
+        self.assertTrue(isBinary(q.bernoulli()))
+
+    def test_normal(self):
+        q = torch.Tensor(50, 50)
+        q.normal_()
+        self.assertEqual(q.mean(), 0, 0.1)
+        self.assertEqual(q.std(), 1, 0.1)
+
+        q.normal_(2, 3)
+        self.assertEqual(q.mean(), 2, 0.1)
+        self.assertEqual(q.std(), 3, 0.1)
+
+        mean = torch.Tensor(100, 100)
+        std = torch.Tensor(100, 100)
+        mean[:50] = 0
+        mean[50:] = 1
+        std[:,:50] = 4
+        std[:,50:] = 1
+
+        r = torch.normal(mean)
+        self.assertEqual(r[:50].mean(), 0, 0.2)
+        self.assertEqual(r[50:].mean(), 1, 0.2)
+        self.assertEqual(r.std(), 1, 0.2)
+
+        r = torch.normal(mean, 3)
+        self.assertEqual(r[:50].mean(), 0, 0.2)
+        self.assertEqual(r[50:].mean(), 1, 0.2)
+        self.assertEqual(r.std(), 3, 0.2)
+
+        r = torch.normal(2, std)
+        self.assertEqual(r.mean(), 2, 0.2)
+        self.assertEqual(r[:,:50].std(), 4, 0.2)
+        self.assertEqual(r[:,50:].std(), 1, 0.2)
+
+        r = torch.normal(mean, std)
+        self.assertEqual(r[:50].mean(), 0, 0.2)
+        self.assertEqual(r[50:].mean(), 1, 0.2)
+        self.assertEqual(r[:,:50].std(), 4, 0.2)
+        self.assertEqual(r[:,50:].std(), 1, 0.2)
+
     def test_serialization(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]

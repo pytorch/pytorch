@@ -457,6 +457,54 @@ class TestAutograd(TestCase):
         y.sum().backward()
         self.assertEqual(x.grad, x.data.clone().fill_(1))
 
+    def test_stochastic(self):
+        x = Variable(torch.rand(10), requires_grad=True)
+        stddevs = Variable(torch.rand(10) * 5, requires_grad=True)
+        y = (x * 2).clamp(0, 1)
+        y = y / y.sum().expand_as(y)
+        samples_multi = y.multinomial(5)
+        samples_bernoulli = y.bernoulli()
+        samples_norm = torch.normal(y)
+        samples_norm_std = torch.normal(y, stddevs)
+        z = samples_multi * 2 + 4
+        z = torch.cat([z, z])
+        z = z.double()
+        z = z + samples_bernoulli + samples_norm + samples_norm_std
+        last_sample = torch.normal(z, 4)
+        z = last_sample + 2
+        self.assertFalse(z.requires_grad)
+
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        samples_multi.reinforce(torch.randn(5))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        samples_bernoulli.reinforce(torch.randn(10))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        samples_norm.reinforce(torch.randn(10))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        samples_norm_std.reinforce(torch.randn(10))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        last_sample.reinforce(torch.randn(10))
+
+        last_sample.backward(retain_variables=True)
+        z.backward()
+
+        self.assertGreater(x.grad.abs().sum(), 0)
+
+    def test_stochastic_sequence(self):
+        x = Variable(torch.rand(10), requires_grad=True)
+        b = x.bernoulli()
+        n1 = torch.normal(b, x)
+        n2 = torch.normal(n1, 2)
+
+        b.reinforce(torch.randn(10))
+        n1.reinforce(torch.randn(10))
+        n2.reinforce(torch.randn(10))
+
+        n2.backward()
+
+        self.assertGreater(x.grad.abs().sum(), 0)
+
+
 
 def index_variable(num_indices, max_indices):
     index = torch.randperm(max_indices)[:num_indices].long()
