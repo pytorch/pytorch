@@ -19,7 +19,7 @@ find_path(CUDNN_INCLUDE_DIR cudnn.h
 
 find_library(CUDNN_LIBRARY cudnn
     PATHS ${CUDNN_ROOT_DIR}
-    PATH_SUFFIXES lib cuda/lib)
+    PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64)
 
 find_package_handle_standard_args(CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
 
