@@ -103,7 +103,7 @@ class View(Function):
 
 
 class Expand(Function):
-    def __init__(self, *sizes):
+    def __init__(self, sizes):
         super(Expand, self).__init__()
         self.sizes = sizes
         self.expanded_dims = []
@@ -164,7 +164,7 @@ class CudaTransfer(Function):
 
 class Permute(Function):
 
-    def __init__(self, *dim_indices):
+    def __init__(self, dim_indices):
         super(Permute, self).__init__()
         self.dim_indices = dim_indices
         self.rev_dim_indices = [None for _ in range(len(dim_indices))]

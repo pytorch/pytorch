@@ -517,7 +517,7 @@ class Variable(_C._VariableBase):
                 raise ValueError("expand expects a several ints or a single "
                         "torch.Size argument")
             sizes = sizes[0]
-        return Expand(*sizes)(self)
+        return Expand(sizes)(self)
 
     def expand_as(self, tensor):
         return Expand(tensor.size())(self)
@@ -548,7 +548,7 @@ class Variable(_C._VariableBase):
         return Unsqueeze(dim)(self)
 
     def permute(self, *permutation):
-        return Permute(*permutation)(self)
+        return Permute(permutation)(self)
 
     def diag(self, diagonal_idx=0):
         return Diag(diagonal_idx)(self)
