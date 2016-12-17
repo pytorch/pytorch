@@ -26,6 +26,12 @@ static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(USE_AVX)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(fill_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
