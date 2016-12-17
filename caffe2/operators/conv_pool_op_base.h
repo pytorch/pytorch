@@ -198,8 +198,6 @@ class ConvPoolOpBase : public Operator<Context> {
       default:
         CAFFE_THROW("Unknown Storage order: ", order_);
     }
-    // To suppress old compiler warnings
-    return true;
   }
 
   // The actual function that does the computation, if the different
