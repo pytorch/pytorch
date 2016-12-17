@@ -559,8 +559,8 @@ class Variable(_C._VariableBase):
     def triu(self, diagonal_idx=0):
         return Triu(diagonal_idx)(self)
 
-    def multinomial(self, num_samples=1):
-        return Multinomial(num_samples)(self)
+    def multinomial(self, num_samples=1, with_replacement=False):
+        return Multinomial(num_samples, with_replacement)(self)
 
     def bernoulli(self):
         return Bernoulli()(self)

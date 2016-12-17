@@ -7,23 +7,29 @@ from ..stochastic_function import StochasticFunction
 
 class Multinomial(StochasticFunction):
 
-    def __init__(self, num_samples):
+    def __init__(self, num_samples, with_replacement):
         super(Multinomial, self).__init__()
         self.num_samples = num_samples
+        self.with_replacement = with_replacement
 
     def forward(self, probs):
-        samples = probs.multinomial(self.num_samples)
+        samples = probs.multinomial(self.num_samples, self.with_replacement)
         self.save_for_backward(probs, samples)
         self.mark_non_differentiable(samples)
         return samples
 
     def backward(self, reward):
         probs, samples = self.saved_tensors
+        if probs.dim() == 1:
+            probs = probs.unsqueeze(0)
+            samples = samples.unsqueeze(0)
         grad_probs = probs.new().resize_as_(probs).zero_()
-        output_probs = probs.index_select(0, samples)
+        output_probs = probs.gather(1, samples)
         output_probs.add_(1e-6).cinv_()
         output_probs.neg_().mul_(reward)
-        grad_probs.index_add_(0, samples, output_probs)
+        # TODO: add batched index_add
+        for i in range(probs.size(0)):
+            grad_probs[i].index_add_(0, samples[i], output_probs[i])
         return grad_probs
 
 
