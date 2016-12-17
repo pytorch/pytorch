@@ -52,6 +52,12 @@ static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(USE_AVX2)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(cadd_AVX2), SIMDExtension_AVX2),
+    #endif
+  #endif
+
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cadd_AVX), SIMDExtension_AVX),

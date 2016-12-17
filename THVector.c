@@ -15,7 +15,7 @@
 #include "vector/SSE.c"
 #endif
 
-#if defined(USE_AVX)
+#if defined(USE_AVX) || defined(USE_AVX2)
 #include "vector/AVX.c"
 #endif
 
