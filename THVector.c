@@ -19,6 +19,10 @@
 #include "vector/AVX.c"
 #endif
 
+#if defined(USE_AVX2)
+#include "vector/AVX2.c"
+#endif
+
 #include "generic/THVectorDefault.c"
 #include "THGenerateAllTypes.h"
 
