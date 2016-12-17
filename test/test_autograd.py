@@ -458,16 +458,18 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, x.data.clone().fill_(1))
 
     def test_stochastic(self):
-        x = Variable(torch.rand(10), requires_grad=True)
-        stddevs = Variable(torch.rand(10) * 5, requires_grad=True)
+        x = Variable(torch.rand(2, 10), requires_grad=True)
+        stddevs = Variable(torch.rand(2, 10) * 5, requires_grad=True)
         y = (x * 2).clamp(0, 1)
-        y = y / y.sum().expand_as(y)
+        y = y / y.sum(1).expand_as(y)
         samples_multi = y.multinomial(5)
+        samples_multi_flat = y[0].multinomial(5)
         samples_bernoulli = y.bernoulli()
         samples_norm = torch.normal(y)
         samples_norm_std = torch.normal(y, stddevs)
         z = samples_multi * 2 + 4
-        z = torch.cat([z, z])
+        z = z + samples_multi_flat.unsqueeze(0).expand_as(samples_multi)
+        z = torch.cat([z, z], 1)
         z = z.double()
         z = z + samples_bernoulli + samples_norm + samples_norm_std
         last_sample = torch.normal(z, 4)
@@ -475,15 +477,17 @@ class TestAutograd(TestCase):
         self.assertFalse(z.requires_grad)
 
         self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
-        samples_multi.reinforce(torch.randn(5))
+        samples_multi.reinforce(torch.randn(2, 5))
         self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
-        samples_bernoulli.reinforce(torch.randn(10))
+        samples_multi_flat.reinforce(torch.randn(5))
         self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
-        samples_norm.reinforce(torch.randn(10))
+        samples_bernoulli.reinforce(torch.randn(2, 10))
         self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
-        samples_norm_std.reinforce(torch.randn(10))
+        samples_norm.reinforce(torch.randn(2, 10))
         self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
-        last_sample.reinforce(torch.randn(10))
+        samples_norm_std.reinforce(torch.randn(2, 10))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        last_sample.reinforce(torch.randn(2, 10))
 
         last_sample.backward(retain_variables=True)
         z.backward()
@@ -528,12 +532,12 @@ function_tests = [
     (PowConstant,   (3.14,),            (torch.rand(L, L),)                         ),
     (Transpose,     (0, 1),             (torch.rand(L, L),)                         ),
     (Transpose,     (2, 0),             (torch.rand(S, S, S),),     '3d'            ),
-    (Permute,       (0, 4, 3, 5, 1, 2), ((1, 2, 3, 4, 5, 6),)                       ),
+    (Permute,       ((0, 4, 3, 5, 1, 2),), ((1, 2, 3, 4, 5, 6),)                       ),
     (Index,         ((1, 2),),          (torch.rand(S, S, S),)                      ),
     (Index,         (slice(0, 3),),     (torch.rand(S, S, S),),     'slice'         ),
     (Index,         ((slice(0, 3), 1),),(torch.rand(S, S, S),),     'slice_index'   ),
     (View,          (S*S, S),           (torch.rand(S, S, S),)                      ),
-    (Expand,        (S, 5, S, 5),       ((S, 1, S, 1),)                             ),
+    (Expand,        ((S, 5, S, 5),),    ((S, 1, S, 1),)                             ),
     (Exp,           (),                 (torch.rand(S, S, S),)                      ),
     (Log,           (),                 (torch.rand(S, S, S) + 1e-2,)               ),
     (Log1p,         (),                 (torch.rand(S, S, S),)                      ),
