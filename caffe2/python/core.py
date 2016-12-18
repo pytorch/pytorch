@@ -521,6 +521,7 @@ class IR(object):
                     return remove_suffix(op_i.output[idx_i], '_indices')
                 if op_v:
                     return remove_suffix(op_v.output[idx_v], '_values')
+
         return input_name + '_grad'
 
     def _SetSumOpsDeviceOption(self, sum_ops, generators):
@@ -536,8 +537,8 @@ class IR(object):
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
-        grad_op.output[idx] = ('_' + grad_op.output[idx] +
-                               '_autosplit_{}'.format(cnt))
+        grad_op.output[idx] = (
+            '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
         return grad_op.output[idx], cnt + 1
 
     def _CheckSumOpsConflict(self, out_base_name, g):
@@ -562,7 +563,10 @@ class IR(object):
                 self._CheckSumOpsConflict(out_base_name, g)
                 sum_op_input.append(str(g))
 
-        sum_ops = [CreateOperator("Sum", sum_op_input, out_base_name)]
+        sum_ops = [CreateOperator(
+            "Sum",
+            map(BlobReference, sum_op_input),
+            BlobReference(out_base_name))]
         return sum_ops, out_base_name
 
     def _MakeSparseSumOps(self, generators, out_base_name):
@@ -598,14 +602,15 @@ class IR(object):
         sum_ops = [
             CreateOperator(
                 "Concat",
-                indices_concat_input,
-                [indices_concat_output, indices_concat_split],
+                map(BlobReference, indices_concat_input),
+                map(BlobReference,
+                    [indices_concat_output, indices_concat_split]),
                 axis=0
             ),
             CreateOperator(
                 "Concat",
-                values_concat_input,
-                [values_concat_output, values_concat_split],
+                map(BlobReference, values_concat_input),
+                map(BlobReference, [values_concat_output, values_concat_split]),
                 axis=0
             ),
         ]
