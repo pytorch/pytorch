@@ -2,8 +2,6 @@
 // clients connect to it. It uses the Caffe2 db as the backend, thus allowing
 // one to convert any db-compliant storage to a zeromq service.
 
-#include <atomic>
-
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"

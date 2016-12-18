@@ -1,7 +1,6 @@
 #include "caffe2/core/operator.h"
 
 #include <algorithm>
-#include <ctime>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"

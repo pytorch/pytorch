@@ -2,7 +2,6 @@
 #include "caffe2/core/logging.h"
 
 #include <atomic>
-#include <csignal>
 #include <signal.h>
 #include <unordered_set>
 
