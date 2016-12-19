@@ -60,3 +60,7 @@ class TestTextFileReader(TestCase):
                         np.testing.assert_array_equal(col_batch, results[i])
 
         os.remove(txt_file.name)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

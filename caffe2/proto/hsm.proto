@@ -25,6 +25,9 @@ message NodeProto {
   repeated NodeProto children = 1;
   // Links to terminal (leaf) nodes
   repeated int32 word_ids = 2;
+  optional int32 offset = 3;
+  optional string name = 4;
+  repeated float scores = 5;
 }
 
 // Protobuf format to accept hierarchy for hierarchical softmax operator.

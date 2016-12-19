@@ -38,11 +38,21 @@ struct THCudaTensorDeleter {
 using UniqueTHCudaTensor = std::unique_ptr<THCudaTensor, THCudaTensorDeleter>;
 
 THCState* thnnState(CUDAContext* context) {
-  auto* state = getTHCState();
+  THCState* state = getTHCState();
+  THCStream* stream = THCState_getStream(state);
   // TODO - swap these back after we're done before we handle
   // deletion.
-  state->currentStream = context->cuda_stream();
-  state->currentBlasHandle = context->cublas_handle();
+  // TODO - handle proper destroy of existing handle
+  // (if not already caffe2 set handle)
+  stream->stream = context->cuda_stream();
+
+  // TODO - destroy the current handle
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  int blasHandleIndex = THCState_getCurrentBlasHandleIndex(state);
+  THCState_getDeviceBlasHandle(state, device, blasHandleIndex); // to reserve
+  THCCudaResourcesPerDevice* res = &(state->resourcesPerDevice[device]);
+  res->blasHandles[blasHandleIndex - 1] = context->cublas_handle();
   return state;
 }
 
@@ -65,7 +75,7 @@ UniqueTHCudaTensor aliasFromTensorCUDA(
       THCudaTensor_newWithStorage(state, storage, 0, thshape, nullptr);
   THCudaStorage_free(state, storage);
   THLongStorage_free(thshape);
-  CHECK_EQ(
+  CAFFE_ENFORCE_EQ(
       THCudaTensor_storage(state, th)->data,
       tensor->mutable_data<float>());
   return UniqueTHCudaTensor(th, THCudaTensorDeleter(state));

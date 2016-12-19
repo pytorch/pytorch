@@ -43,6 +43,18 @@ class JustTestAndDoesConstruct : public JustTest {
   }
 };
 
+class JustTestWithSomeOutput : public JustTest {
+ public:
+  using JustTest::JustTest;
+  bool Run() override {
+    *OperatorBase::Output<int>(0) = 5;
+    return true;
+  }
+  string type() override {
+    return "SETTING_SOME_OUTPUT";
+  }
+};
+
 class ThrowException : public Operator<CPUContext> {
  public:
   explicit ThrowException(const OperatorDef& op_def, Workspace* ws)
@@ -60,6 +72,11 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, FOO, JustTestAndNeverConstructs);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAR, JustTestAndDoesConstruct);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
 REGISTER_CPU_OPERATOR(ThrowException, ThrowException);
+REGISTER_CPU_OPERATOR(JustTestWithSomeOutput, JustTestWithSomeOutput);
+
+TEST(OperatorTest, DeviceTypeRegistryWorks) {
+  EXPECT_EQ(gDeviceTypeRegistry()->count(DeviceType::CPU), 1);
+}
 
 TEST(OperatorTest, RegistryWorks) {
   OperatorDef op_def;
@@ -132,22 +149,9 @@ TEST(OperatorTest, TestParameterAccess) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
-  {
-    Argument* arg = op_def.add_arg();
-    arg->set_name("arg0");
-    arg->set_f(0.1);
-  }
-  {
-    Argument* arg = op_def.add_arg();
-    arg->set_name("arg1");
-    arg->add_ints(1);
-    arg->add_ints(2);
-  }
-  {
-    Argument* arg = op_def.add_arg();
-    arg->set_name("arg2");
-    arg->set_s("argstring");
-  }
+  AddArgument<float>("arg0", 0.1, &op_def);
+  AddArgument<vector<int>>("arg1", vector<int>{1, 2}, &op_def);
+  AddArgument<string>("arg2", "argstring", &op_def);
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
@@ -165,17 +169,14 @@ TEST(OperatorTest, CannotAccessParameterWithWrongType) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
-  {
-    Argument* arg = op_def.add_arg();
-    arg->set_name("arg0");
-    arg->set_f(0.1);
-  }
+  AddArgument<float>("arg0", 0.1, &op_def);
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
   ASSERT_THROW(op.GetSingleArgument<int>("arg0", 0), EnforceNotMet);
 }
 
+#if GTEST_HAS_DEATH_TEST
 TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   OperatorDef op_def;
   Workspace ws;
@@ -183,11 +184,7 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
-  {
-    Argument* arg = op_def.add_arg();
-    arg->set_name("arg0");
-    arg->add_floats(0.1);
-  }
+  AddArgument<vector<float>>("arg0", vector<float>{0.1}, &op_def);
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   auto args = op.GetRepeatedArgument<float>("arg0");
@@ -196,6 +193,7 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   EXPECT_DEATH(op.GetRepeatedArgument<int>("arg0"),
                "Argument does not have the right field: expected ints");
 }
+#endif
 
 TEST(OperatorTest, TestDefaultValue) {
   OperatorDef op_def;
@@ -236,6 +234,22 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   op_def.add_output("output2");
   // JustTest will only produce one single output.
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
+}
+
+TEST(OperatorTest, TestOutputValues) {
+  NetDef net_def;
+  net_def.set_name("NetForTest");
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_name("JustTest1");
+  op_def.set_type("JustTestWithSomeOutput");
+  op_def.add_output("output");
+  // JustTest will only produce one single output.
+  net_def.add_op()->CopyFrom(op_def);
+  unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+  EXPECT_TRUE(net->Run());
+  EXPECT_TRUE(ws.HasBlob("output"));
+  EXPECT_EQ(ws.GetBlob("output")->Get<int>(), 5);
 }
 
 NetDef GetNetDefForTest() {

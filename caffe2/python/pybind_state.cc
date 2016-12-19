@@ -3,10 +3,13 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "caffe2/core/asan.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/utils/mkl_utils.h"
 
 namespace caffe2 {
+namespace python {
 
 namespace py = pybind11;
 
@@ -102,6 +105,130 @@ void switchWorkspaceInternal(const std::string& name, bool create_if_missing) {
   gCurrentWorkspaceName = name;
 }
 
+namespace python_detail {
+
+// Python Op implementations.
+struct Func {
+  py::object py_func;
+  bool needs_workspace;
+};
+using FuncRegistery = std::unordered_map<std::string, Func>;
+
+FuncRegistery& gRegistery() {
+  // Always leak the objects registered here.
+  static FuncRegistery* r = new FuncRegistery();
+  return *r;
+}
+
+const Func& getOpFunc(const std::string& token) {
+  CAFFE_ENFORCE(
+      gRegistery().count(token),
+      "Python operator for ",
+      token,
+      " is not available. If you use distributed training it probably means "
+      "that python implementation has to be registered in each of the workers");
+  return gRegistery()[token];
+}
+
+const Func& getGradientFunc(const std::string& token) {
+  return getOpFunc(token + "_gradient");
+}
+}
+
+bool PythonOpBase::RunOnDevice() {
+  std::vector<TensorCPU*> inputs;
+  inputs.reserve(InputSize());
+  for (auto i = 0; i < InputSize(); ++i) {
+    inputs.push_back(const_cast<TensorCPU*>(&Input(i)));
+  }
+  std::vector<TensorCPU*> outputs;
+  outputs.reserve(OutputSize());
+  for (auto i = 0; i < OutputSize(); ++i) {
+    outputs.push_back(Output(i));
+  }
+  auto& pyFunc = getFunc();
+  {
+    // Acquire GIL for call to Python runtime.
+    py::gil_scoped_acquire g;
+    try {
+      if (pyFunc.needs_workspace) {
+        pyFunc.py_func(inputs, outputs, ws_);
+      } else {
+        pyFunc.py_func(inputs, outputs);
+      }
+    } catch (const py::error_already_set& e) {
+      LOG(ERROR) << "Exception encountered running PythonOp function: "
+                 << e.what() << "\nTraceback: ";
+      PyObject *type = nullptr, *value = nullptr, *trace = nullptr;
+      PyErr_Fetch(&type, &value, &trace);
+      PyTracebackObject* traceback =
+          reinterpret_cast<PyTracebackObject*>(trace);
+      vector<PyTracebackObject*> trace_vec;
+      while (traceback) {
+        trace_vec.push_back(traceback);
+        traceback = traceback->tb_next;
+      }
+      for (int i = trace_vec.size() - 1; i >= 0; --i) {
+        int line = trace_vec[i]->tb_lineno;
+        const char* filename =
+            PyString_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
+        const char* funcname =
+            PyString_AsString(trace_vec[i]->tb_frame->f_code->co_name);
+        LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
+                   << " (" << line << "): " << funcname;
+      }
+      Py_XDECREF(type);
+      Py_XDECREF(value);
+      Py_XDECREF(trace);
+      return false;
+    }
+  }
+  return true;
+}
+
+const python_detail::Func& PythonOp::getFunc() {
+  const std::string& token =
+      OperatorBase::GetSingleArgument<std::string>("token", "");
+  return python_detail::getOpFunc(token);
+}
+
+const python_detail::Func& PythonGradientOp::getFunc() {
+  const std::string& token =
+      OperatorBase::GetSingleArgument<std::string>("token", "");
+  return python_detail::getGradientFunc(token);
+}
+
+struct GetPythonGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  std::vector<OperatorDef> GetGradientDefs() override {
+    std::vector<std::string> gradientInputs;
+    for (int i = 0; i < def_.input_size(); ++i) {
+      gradientInputs.push_back(I(i));
+    }
+    for (int i = 0; i < def_.output_size(); ++i) {
+      gradientInputs.push_back(O(i));
+    }
+    for (int i = 0; i < def_.output_size(); ++i) {
+      gradientInputs.push_back(GO(i));
+    }
+    std::vector<std::string> gradientOutputs;
+    for (int i = 0; i < def_.input_size(); ++i) {
+      gradientOutputs.push_back(GI(i));
+    }
+
+    return SingleGradientDef(
+        "PythonGradient", "", gradientInputs, gradientOutputs);
+  }
+};
+
+REGISTER_CPU_OPERATOR(Python, PythonOp);
+REGISTER_CPU_OPERATOR(PythonGradient, PythonGradientOp);
+// Always allow running in-place
+OPERATOR_SCHEMA(Python).AllowInplace([](int, int) { return true; });
+OPERATOR_SCHEMA(PythonGradient).AllowInplace([](int, int) { return true; });
+
+REGISTER_GRADIENT(Python, GetPythonGradient);
+
 void addObjectMethods(py::module& m) {
   py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
     py::gil_scoped_release g;
@@ -128,6 +255,12 @@ void addObjectMethods(py::module& m) {
                 "Could not fetch for blob of type: ",
                 blob.meta().name());
             return fetcher->Fetch(blob);
+          })
+      .def(
+          "tensor",
+          [](Blob* blob) {
+            auto t = blob->GetMutable<TensorCPU>();
+            return py::cast(t, py::return_value_policy::reference_internal);
           })
       .def(
           "_feed",
@@ -162,8 +295,59 @@ void addObjectMethods(py::module& m) {
           py::arg("arg"),
           py::arg("device_option") = py::none());
 
+  py::class_<TensorCPU>(m, "TensorCPU")
+      .def_property_readonly(
+          "data",
+          [](TensorCPU* t) -> py::object {
+            if (t->meta() == TypeMeta{}) {
+              // keep this behavior for backward compatibility
+              t->mutable_data<float>();
+            }
+            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, false);
+            return res.obj;
+          },
+          "Return numpy array pointing to this tensor's data if possible. "
+          "Otherwise (e.g. for strings) copies the data (same as fetch).")
+      .def(
+          "feed",
+          [](TensorCPU* t, py::object obj) {
+            if (!PyArray_Check(obj.ptr())) {
+              CAFFE_THROW(
+                  "Unexpected type of argument -- expected numpy array");
+            }
+            TensorFeeder<CPUContext>().FeedTensor(
+                DeviceOption{}, reinterpret_cast<PyArrayObject*>(obj.ptr()), t);
+          },
+          "Copy data from given numpy array into this tensor.")
+      .def(
+          "fetch",
+          [](TensorCPU* t) {
+            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, true);
+            return res.obj;
+          },
+          "Copy data from this tensor into a new numpy array.")
+      .def(
+          "init",
+          [](TensorCPU* t, std::vector<TIndex> dims, int caffe_type) {
+            const auto& meta =
+                DataTypeToTypeMeta((TensorProto::DataType)caffe_type);
+            CAFFE_ENFORCE(
+                !TensorFetcher<CPUContext>().NeedsCopy(meta),
+                "Cannot init tensor of this type. Use `feed` instead.");
+            t->Resize(dims);
+            t->raw_mutable_data(meta);
+          },
+          "Initialize this tensor to given shape and data type. "
+          "Fail if the given data type cannot be accessed from python.")
+      .def_property_readonly(
+          "_shape", [](const TensorCPU& t) { return t.dims(); })
+      .def("_reshape", [](TensorCPU* t, std::vector<TIndex> dims) {
+        t->Resize(dims);
+      });
+
   py::class_<Workspace>(m, "Workspace")
       .def(py::init<>())
+      .def(py::init<Workspace*>())
       .def_property_readonly(
           "nets",
           [](Workspace* self) {
@@ -266,11 +450,11 @@ void addObjectMethods(py::module& m) {
       .def("put", &db::Transaction::Put)
       .def("commit", &db::Transaction::Commit);
   py::class_<db::Cursor>(m, "Cursor")
-      .def("supports_seak", &db::Cursor::SupportsSeek)
+      .def("supports_seek", &db::Cursor::SupportsSeek)
       .def("seek_to_first", &db::Cursor::SeekToFirst)
       .def("next", &db::Cursor::Next)
-      .def("key", &db::Cursor::key)
-      .def("value", &db::Cursor::value)
+      .def("key", [](db::Cursor* self) -> py::bytes { return self->key(); })
+      .def("value", [](db::Cursor* self) -> py::bytes { return self->value(); })
       .def("valid", &db::Cursor::Valid);
   py::enum_<db::Mode>(m, "Mode")
       .value("read", db::Mode::READ)
@@ -322,6 +506,16 @@ void addObjectMethods(py::module& m) {
 }
 
 void addGlobalMethods(py::module& m) {
+  m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
+
+  m.attr("has_mkldnn") = py::bool_(
+#ifdef CAFFE2_HAS_MKL_DNN
+      true
+#else // CAFFE2_HAS_MKL_DNN
+      false
+#endif // CAFFE2_HAS_MKL_DNN
+      );
+
   m.def("global_init", [](std::vector<std::string> args) -> void {
     int argc = args.size();
     std::vector<char*> argv;
@@ -351,9 +545,14 @@ void addGlobalMethods(py::module& m) {
     return keys;
   });
   m.def("on_module_exit", []() { gWorkspaces.clear(); });
+  // create_if_missing not used by necessary for pybind to do
+  // properly do function overloading.
+  m.def("switch_workspace", [](Workspace* ws, py::object create_if_missing) {
+    gWorkspace = ws;
+  });
   m.def(
       "switch_workspace",
-      [](const std::string& name, py::object create_if_missing) {
+      [](const std::string& name, const py::object create_if_missing) {
         if (create_if_missing == py::none()) {
           return switchWorkspaceInternal(name, false);
         }
@@ -390,6 +589,10 @@ void addGlobalMethods(py::module& m) {
     }
     return names;
   });
+  m.def("local_blobs", []() {
+    CAFFE_ENFORCE(gWorkspace);
+    return gWorkspace->LocalBlobs();
+  });
   m.def("blobs", []() {
     CAFFE_ENFORCE(gWorkspace);
     return gWorkspace->Blobs();
@@ -400,15 +603,21 @@ void addGlobalMethods(py::module& m) {
   });
   m.def("create_net", [](py::bytes net_def) {
     caffe2::NetDef proto;
-    CAFFE_ENFORCE(proto.ParseFromString(net_def));
-    CAFFE_ENFORCE(gWorkspace->CreateNet(proto));
+    CAFFE_ENFORCE(
+        proto.ParseFromString(net_def),
+        "Can't parse net proto: ",
+        std::string(net_def));
+    CAFFE_ENFORCE(
+        gWorkspace->CreateNet(proto),
+        "Error creating net with proto: ",
+        std::string(net_def));
     return true;
   });
   m.def("run_net", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
-    CAFFE_ENFORCE(gWorkspace->GetNet(name));
+    CAFFE_ENFORCE(gWorkspace->GetNet(name), "Can't find net ", name);
     py::gil_scoped_release g;
-    CAFFE_ENFORCE(gWorkspace->RunNet(name));
+    CAFFE_ENFORCE(gWorkspace->RunNet(name), "Error running net ", name);
     return true;
   });
   m.def(
@@ -521,6 +730,38 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob->Deserialize(serialized.cast<std::string>()));
       });
 
+  // we support 2 possible signatures of python op: (inputs, outputs) or
+  // (inputs, outputs, workspace)
+  m.def("register_python_op", [](py::object func, bool pass_workspace) {
+    using namespace python_detail;
+    CAFFE_ENFORCE(func != py::none());
+    const std::string name = func.attr("__name__").cast<std::string>();
+    // Unique name since registry is never cleared.
+    const std::string token = name + to_string(gRegistery().size());
+    CAFFE_ENFORCE(gRegistery().find(name) == gRegistery().end());
+    gRegistery()[token] = Func{func, pass_workspace};
+    return token;
+  });
+
+  m.def(
+      "register_python_gradient_op",
+      [](const std::string& token, py::object func) {
+        using namespace python_detail;
+        CAFFE_ENFORCE(func != py::none());
+        CAFFE_ENFORCE(gRegistery().find(token) != gRegistery().end());
+        // For global sanity gradient ops shouldn't access workspace
+        gRegistery()[token + "_gradient"] = Func{func, false};
+      });
+
+#define CAFFE2_CPU_FEATURE_SUPPORT(feature)      \
+  m.def("builtin_cpu_supports_" #feature, []() { \
+    return __builtin_cpu_supports(#feature);     \
+  })
+
+  CAFFE2_CPU_FEATURE_SUPPORT(avx2);
+
+#undef CAFFE2_CPU_FEATURE_SUPPORT
+
   auto initialize = [&]() {
     // Initialization of the module
     ([]() {
@@ -552,4 +793,6 @@ PYBIND11_PLUGIN(caffe2_pybind11_state) {
   addObjectMethods(m);
   return m.ptr();
 }
-}
+
+} // namespace python
+} // namespace caffe2

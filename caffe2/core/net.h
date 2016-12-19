@@ -63,6 +63,7 @@ class NetBase {
  protected:
   vector<string> external_input_;
   vector<string> external_output_;
+  string name_;
 
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
@@ -112,7 +113,7 @@ class DAGNetBase : public NetBase {
   // It checks out one ready-to-run operator from the job queue, runs it,
   // notifies all its children, and for any children that is ready, enqueues
   // it to the job queue.
-  virtual void WorkerFunction();
+  void WorkerFunction();
   vector<float> TEST_Benchmark(
       const int warmup_runs,
       const int main_runs,

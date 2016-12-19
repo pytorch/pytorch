@@ -10,7 +10,7 @@ namespace caffe2 {
 template <typename T, class Context>
 class ConvTransposeOp final : public ConvTransposeUnpoolBase<Context> {
  public:
-  USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS;
+  USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
   ConvTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<Context>(operator_def, ws) {}
 
@@ -28,7 +28,7 @@ class ConvTransposeOp final : public ConvTransposeUnpoolBase<Context> {
 template <typename T, class Context>
 class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
  public:
-  USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS;
+  USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
   ConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<Context>(operator_def, ws) {}
 

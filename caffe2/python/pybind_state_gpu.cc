@@ -10,8 +10,13 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/operator_fallback_gpu.h"
 
 namespace caffe2 {
+namespace python {
+
+REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp<PythonOp>);
+REGISTER_CUDA_OPERATOR(PythonGradient, GPUFallbackOp<PythonGradientOp>);
 
 REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorCUDA>()), TensorFetcher<CUDAContext>);
 REGISTER_BLOB_FEEDER(CUDA, TensorFeeder<CUDAContext>);
@@ -39,4 +44,5 @@ PYBIND11_PLUGIN(caffe2_pybind11_state_gpu) {
   addObjectMethods(m);
   return m.ptr();
 }
-}
+} // namespace python
+} // namespace caffe2

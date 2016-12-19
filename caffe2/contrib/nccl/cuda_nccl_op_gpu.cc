@@ -9,7 +9,7 @@ nccl::NCCLExecution getNCCLElements(
     OperatorBase* op,
     const CUDAContext& context) {
   // We either do an N-N op, or an N-1 op.
-  CHECK(
+  CAFFE_ENFORCE(
       op->def().input_size() == op->def().output_size() ||
       op->def().output_size() == 1);
   nccl::NCCLExecution ex;
@@ -70,8 +70,8 @@ class NCCLReduceOp final : public Operator<CUDAContext> {
     if (InputSize() == 1)
       return true;
     const auto& ex = getNCCLElements(this, context_);
-    CHECK_EQ(ex.root, 0)
-        << "NCCLReduce has spurious deadlocks for non-zero root";
+    CAFFE_ENFORCE_EQ(
+        ex.root, 0, "NCCLReduce has spurious deadlocks for non-zero root");
     nccl::NCCL<T>::Reduce(ex);
     return true;
   }

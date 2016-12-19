@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_SPACE_BATCH_OP_H_
+#define CAFFE2_OPERATORS_SPACE_BATCH_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -203,3 +204,5 @@ class BatchToSpaceOp final : public SpaceBatchOpBase<Context> {
 };
 
 } // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_SPACE_BATCH_OP_H_

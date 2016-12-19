@@ -5,12 +5,16 @@ import os
 import shutil
 import socket
 import tempfile
+import logging
 
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils
 
 import caffe2.python._import_c_extension as C
+
+logging.basicConfig()
+logger = logging.getLogger(__name__)
 
 Blobs = C.blobs
 CreateBlob = C.create_blob
@@ -25,6 +29,7 @@ RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 
+is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
 if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
@@ -198,11 +203,22 @@ def FeedBlob(name, arr, device_option=None):
     if type(arr) is np.ndarray and arr.dtype.kind == 'S':
         # Plain NumPy strings are weird, let's use objects instead
         arr = arr.astype(np.object)
+
+    if device_option is None:
+        device_option = scope.CurrentDeviceScope()
+
+    if device_option and device_option.device_type == caffe2_pb2.CUDA:
+        if arr.dtype == np.dtype('float64'):
+            logger.warning(
+                "CUDA operators do not support 64-bit doubles, " +
+                "please use arr.astype(np.float32) or np.int32 for ints." +
+                " Blob: {}".format(name) +
+                " type: {}".format(str(arr.dtype))
+            )
+
     name = StringifyBlobName(name)
     if device_option is not None:
         return C.feed_blob(name, arr, StringfyProto(device_option))
-    elif scope.DEVICESCOPE is not None:
-        return C.feed_blob(name, arr, StringfyProto(scope.DEVICESCOPE))
     else:
         return C.feed_blob(name, arr)
 
@@ -231,7 +247,7 @@ def FetchBlob(name):
 
 def GetNameScope():
     """Return the current namescope string. To be used to fetch blobs"""
-    return scope.NAMESCOPE
+    return scope.CurrentNameScope()
 
 
 class _BlobDict(object):
@@ -439,6 +455,8 @@ def _Workspace_run(ws, obj):
         return ws._run_net(obj.SerializeToString())
     if isinstance(obj, caffe2_pb2.OperatorDef):
         return ws._run_operator(obj.SerializeToString())
+    raise ValueError(
+        "Don't know how to do Workspace.run() on {}".format(type(obj)))
 
 C.Workspace.run = _Workspace_run
 

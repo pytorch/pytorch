@@ -152,7 +152,7 @@ inline void CopyFromProtoAsIs(
       sizeof(SrcType) == sizeof(DstType),
       "The source type and dest type cannot be copied as-is. Did "
       "you mean CopyFromProtoWithCast?");
-  CHECK_EQ(size, field.size()) << "Incorrect proto field size.";
+  CAFFE_ENFORCE_EQ(size, field.size(), "Incorrect proto field size.");
   context->template Copy<DstType, CPUContext, Context>(
       size, reinterpret_cast<const DstType*>(field.data()), dst);
 }
@@ -163,7 +163,7 @@ inline void CopyFromProtoWithCast(
     const google::protobuf::RepeatedField<SrcType>& field,
     DstType* dst,
     Context* context) {
-  CHECK_EQ(size, field.size()) << "Incorrect proto field size.";
+  CAFFE_ENFORCE_EQ(size, field.size(), "Incorrect proto field size.");
   // TODO: we are having one unnecessary copy here if the context is already
   // CPUContext. Remove it if it is performance critical.
   unique_ptr<DstType[]> buffer(new DstType[size]);
@@ -199,16 +199,19 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
   std::vector<std::future<void>> futures;
 #endif
 
-  for (size_t chunkBegin = 0; chunkBegin < tensor.size();
+  // Serialize whole vector. If vector is empty, it's shape still needs to be
+  // serialized in empty proto
+  for (size_t chunkBegin = 0;
+       chunkBegin < std::max(tensor.size(), static_cast<TIndex>(1));
        chunkBegin += chunk_size) {
-    auto task = [&](size_t chunkBegin) {
+    auto task = [&](size_t chunkStart) {
       BlobProto blob_proto;
       blob_proto.set_name(name);
       blob_proto.set_type(kTensorBlobType);
       TensorProto& proto = *blob_proto.mutable_tensor();
       proto.set_name(name);
       this->Serialize(
-          tensor, name, blob_proto.mutable_tensor(), chunkBegin, chunk_size);
+          tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
       acceptor(name, blob_proto.SerializeAsString());
     };
 #ifndef __ANDROID__
@@ -237,20 +240,21 @@ void TensorSerializer<Context>::Serialize(
     const Tensor<Context>& input, const string& name,
     TensorProto* proto_ptr, size_t chunkBegin, int32_t chunkSize) {
   CAFFE_ENFORCE(
-      chunkBegin < input.size(),
+      chunkBegin <= input.size(),
       "Chunk begin is out of tensor: ",
       chunkBegin,
       ' ',
       input.size());
+  if (chunkBegin + chunkSize > input.size()) {
+    chunkSize = input.size() - chunkBegin;
+  }
+
   CAFFE_ENFORCE(
-      input.raw_data(),
+      input.raw_data() || chunkSize == 0,
       "The input does not have data input yet. This is probably because you "
       "created a tensor of non-zero shape but never filled its data via "
       "mutable_data() calls. This means that it makes no sense to serialize "
       "the tensor content.");
-  if (chunkBegin + chunkSize > input.size()) {
-    chunkSize = input.size() - chunkBegin;
-  }
 
   TensorProto& proto = *proto_ptr;
   proto.mutable_segment()->set_begin(chunkBegin);
@@ -261,6 +265,8 @@ void TensorSerializer<Context>::Serialize(
   }
   const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
   proto.set_data_type(data_type);
+  StoreDeviceDetail(input, &proto);
+
   // A lot of copypaste is error prone. Should we create a macro for this?
   switch (data_type) {
   case TensorProto_DataType_FLOAT:
@@ -354,7 +360,6 @@ void TensorSerializer<Context>::Serialize(
     // Note: we intentially do not provide "default:" so if any new data types
     // are added, the compiler should warn the user to add the case here.
   }
-  StoreDeviceDetail(input, &proto);
 }
 
 template <class Context>
@@ -378,11 +383,6 @@ bool TensorDeserializer<Context>::Deserialize(
   }
   tensor->Resize(dims);
 
-  // Safety check for zero-sized tensors: no copy needed.
-  if (tensor->size() == 0) {
-    return true;
-  }
-
   int64_t chunkBegin = 0;
   auto chunkEnd = tensor->size();
   if (proto.has_segment()) {
@@ -390,7 +390,7 @@ bool TensorDeserializer<Context>::Deserialize(
     chunkEnd = proto.segment().end();
   }
   CAFFE_ENFORCE(
-      0 <= chunkBegin && chunkBegin < chunkEnd && chunkEnd <= tensor->size(),
+      0 <= chunkBegin && chunkBegin <= chunkEnd && chunkEnd <= tensor->size(),
       "Invalid chunk ",
       chunkBegin,
       ' ',

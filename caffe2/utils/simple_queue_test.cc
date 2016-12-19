@@ -63,8 +63,7 @@ TEST(SimpleQueueDeathTest, CannotAddAfterQueueFinished) {
   gQueue.reset(new SimpleQueue<int>());
   gQueue->Push(0);
   gQueue->NoMoreJobs();
-  EXPECT_DEATH(gQueue->Push(0),
-               "Check failed: !no_more_jobs_ Cannot push to a closed queue.");
+  ASSERT_THROW(gQueue->Push(0), EnforceNotMet);
 }
 
 

@@ -27,7 +27,7 @@ UniqueTHFloatTensor aliasFromTensorCPU(TensorCPU* tensor) {
   auto* th = THFloatTensor_newWithStorage(storage, 0, thshape, nullptr);
   THFloatStorage_free(storage);
   THLongStorage_free(thshape);
-  CHECK_EQ(
+  CAFFE_ENFORCE_EQ(
       THFloatTensor_storage(th)->data, tensor->template mutable_data<float>());
   return UniqueTHFloatTensor(th, THFloatTensor_free);
 }

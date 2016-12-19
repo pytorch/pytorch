@@ -187,6 +187,9 @@ class TestCloneNet(test_util.TestCase):
         self.assertEqual(str(e22), 'f7/e')
         self.assertEqual(str(f22), 'f7/f')
 
+        params._CheckLookupTables()
+        n._CheckLookupTables()
+
 
 class TestCreateOperator(test_util.TestCase):
     def testCreate(self):
@@ -217,6 +220,10 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(op.arg[1].s, "2")
         self.assertEqual(list(op.arg[2].ints), [1, 2, 3])
 
+    def testCreateWithNoneKwarg(self):
+        with self.assertRaises(ValueError):
+            core.CreateOperator("Ludicrous", "x", "y", arg1=None)
+
 
 class TestAutoNaming(test_util.TestCase):
     """
@@ -246,6 +253,10 @@ class TestAutoNaming(test_util.TestCase):
         add_ops()
         with core.NameScope('n1'):
             add_ops()
+
+        # Force reset of lookup tables
+        dummy = a.Proto().name
+
         with core.NameScope('n2'):
             add_ops()
 
@@ -260,6 +271,9 @@ class TestAutoNaming(test_util.TestCase):
             for j, o2 in enumerate(all_outputs):
                 if i != j:
                     self.assertNotEqual(str(o1), str(o2))
+
+        a._CheckLookupTables()
+        b._CheckLookupTables()
 
 
 if __name__ == '__main__':

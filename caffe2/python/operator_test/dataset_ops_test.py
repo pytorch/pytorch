@@ -315,6 +315,46 @@ class TestDatasetOps(TestCase):
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
 
+    def test_last_n_window_ops(self):
+        collect_net = core.Net('collect_net')
+        collect_net.GivenTensorFill(
+            [],
+            'input',
+            shape=[3, 2],
+            values=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        )
+        collect_net.LastNWindowCollector(
+            ['input'],
+            ['output'],
+            num_to_collect=7,
+        )
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=1))
+        workspace.RunPlan(plan)
+        reference_result = workspace.FetchBlob('output')
+        self.assertSequenceEqual(
+            [item for sublist in reference_result for item in sublist],
+            [1, 2, 3, 4, 5, 6])
+
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=2))
+        workspace.RunPlan(plan)
+        reference_result = workspace.FetchBlob('output')
+        self.assertSequenceEqual(
+            [item for sublist in reference_result for item in sublist],
+            [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6])
+
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=3))
+        workspace.RunPlan(plan)
+        reference_result = workspace.FetchBlob('output')
+        self.assertSequenceEqual(
+            [item for sublist in reference_result for item in sublist],
+            [3, 4, 5, 6, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2])
+
     def test_collect_tensor_ops(self):
         init_net = core.Net('init_net')
         blobs = ['blob_1', 'blob_2', 'blob_3']
@@ -332,16 +372,12 @@ class TestDatasetOps(TestCase):
         collect_net = core.Net('collect_net')
         num_to_collect = 1000
         max_example_to_cover = 100000
-        for i, b in enumerate(blobs):
-            if i == 0:
-                bvec_map[b], position = collect_net.CollectTensor(
-                    [bvec_map[b], b], [bvec_map[b], 'position'],
-                    num_to_collect=num_to_collect)
-            else:
-                # sample in the same way as the first blob
-                bvec_map[b], position = collect_net.CollectTensor(
-                    [bvec_map[b], b, position], [bvec_map[b], position],
-                    num_to_collect=num_to_collect)
+        bvec = [bvec_map[b] for b in blobs]
+        collect_net.CollectTensor(
+            bvec + blobs,
+            bvec,
+            num_to_collect=num_to_collect,
+        )
 
         print('Collect Net Proto: {}'.format(collect_net.Proto()))
 
@@ -374,3 +410,7 @@ class TestDatasetOps(TestCase):
         for i in range(1, len(blobs)):
             result = workspace.FetchBlob(bconcated_map[blobs[i]])
             self.assertEqual(reference_result.tolist(), result.tolist())
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

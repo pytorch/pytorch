@@ -421,6 +421,29 @@ cc_library(
 )
 
 ###############################################################################
+# Nervana
+##############################################################################
+
+shell_script(
+  name = "nervana_header",
+  srcs = ["nervanagpu/nervanagpu/kernels/C_interface/nervana_c_api.h"],
+  commands=[
+    "DST=$CAFFE2_GENDIR/third_party/include/",
+    "mkdir -p $DST",
+    "cp $CAFFE2_SRCDIR/$CAFFE2_CWD/nervanagpu/nervanagpu/kernels/C_interface/nervana_c_api.h $DST/",
+  ],
+)
+
+cuda_library(
+  name = "nervana_c_interface",
+  srcs = ["nervanagpu/nervanagpu/kernels/C_interface/nervana_c_api.cu"],
+  deps = [
+      ":nervana_header",
+      ":cuda",
+  ],
+)
+
+###############################################################################
 # Other libraries
 # This section includes all other libraries in alphabet order.
 ##############################################################################
@@ -495,3 +518,4 @@ shell_script(
     "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/pybind11/include/pybind11 $DST/",
   ],
 )
+

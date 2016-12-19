@@ -29,3 +29,15 @@ with extension_loader.DlopenGuard():
 # libcaffe2_python contains a global Workspace that we need to properly delete
 # when exiting. Otherwise, cudart will cause segfaults sometimes.
 atexit.register(on_module_exit)  # noqa
+
+
+# Add functionalities for the TensorCPU interface.
+def _TensorCPU_shape(self):
+    return tuple(self._shape)
+
+
+def _TensorCPU_reshape(self, shape):
+    return self._reshape(list(shape))
+
+TensorCPU.shape = property(_TensorCPU_shape)  # noqa
+TensorCPU.reshape = _TensorCPU_reshape  # noqa

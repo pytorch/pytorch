@@ -30,6 +30,18 @@ PYBIND11_PLUGIN(mpi) {
     // with `-quiet` and skipping the finalize call.
     MPI_Finalize();
   });
+  m.def("Broadcast", [](py::bytes in) -> py::bytes {
+    std::string str = in;
+    auto comm = GlobalMPIComm();
+    auto length = str.length();
+    MPI_Bcast(&length, sizeof(length), MPI_CHAR, 0, comm);
+    auto ptr = caffe2::make_unique<char[]>(length);
+    if (MPICommRank(comm) == 0) {
+      memcpy(ptr.get(), str.data(), str.length());
+    }
+    MPI_Bcast(ptr.get(), length, MPI_CHAR, 0, comm);
+    return std::string(ptr.get(), length);
+  });
   return m.ptr();
 }
 

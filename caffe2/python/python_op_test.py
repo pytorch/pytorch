@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python import core, workspace
-from caffe2.python.op.python import CreatePythonOperator
+from caffe2.python.core import CreatePythonOperator
 import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given
 import hypothesis.strategies as st
@@ -74,6 +74,21 @@ class PythonOpTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(x, y)
 
     @given(x=hu.tensor())
+    def test_workspace_manipulation(self, x):
+        """
+        Verify that python op can manipulate workspace directly
+        """
+        def f(inputs, outputs, ws):
+            fetched = ws.blobs['internal'].fetch()
+            np.testing.assert_almost_equal(fetched, x)
+
+        ws = workspace.C.Workspace()
+        net = core.Net("test")
+        net.GivenTensorFill([], ['internal'], values=x, shape=x.shape)
+        net.Python(f, pass_workspace=True)([], [])
+        ws.run(net)
+
+    @given(x=hu.tensor())
     def test_caught_exception_doesnt_terminate(self, x):
         def f(inputs, outputs):
             try:
@@ -106,8 +121,8 @@ class PythonOpTest(hu.HypothesisTestCase):
             y = workspace.FetchBlob(str(i))
             np.testing.assert_almost_equal(x, y)
 
-    @given(x=hu.tensor(), in_place=st.booleans())
-    def test_gradient(self, x, in_place):
+    @given(x=hu.tensor(), in_place=st.booleans(), **hu.gcs)
+    def test_gradient(self, x, in_place, gc, dc):
         def f(inputs, outputs):
             outputs[0].reshape(inputs[0].shape)
             outputs[0].data[...] = inputs[0].data * 2
@@ -122,10 +137,11 @@ class PythonOpTest(hu.HypothesisTestCase):
 
         op = CreatePythonOperator(
             f, ["x"], ["x" if in_place else "y"], grad_f=grad_f)
-        self.assertGradientChecks(hu.cpu_do, op, [x], 0, [0])
+        self.assertGradientChecks(gc, op, [x], 0, [0])
+        self.assertDeviceChecks(dc, op, [x], [0])
 
-    @given(inputs=hu.tensors(n=2))
-    def test_gradient_multiple(self, inputs):
+    @given(inputs=hu.tensors(n=2), **hu.gcs)
+    def test_gradient_multiple(self, inputs, gc, dc):
         (x1, x2) = inputs
 
         def f(inputs, outputs):
@@ -147,4 +163,5 @@ class PythonOpTest(hu.HypothesisTestCase):
         op = CreatePythonOperator(f, ["x1", "x2"], ["y1", "y2"], grad_f=grad_f)
 
         for idx in [0, 1]:
-            self.assertGradientChecks(hu.cpu_do, op, [x1, x2], idx, [0, 1])
+            self.assertGradientChecks(gc, op, [x1, x2], idx, [0, 1])
+        self.assertDeviceChecks(dc, op, [x1, x2], [0, 1])

@@ -2,9 +2,9 @@
 #define CAFFE2_OPERATORS_DROPOUT_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -48,6 +48,6 @@ class DropoutGradientOp final : public Operator<Context> {
   // Input: dY, mask; Output: dX
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_DROPOUT_OP_H_
+#endif // CAFFE2_OPERATORS_DROPOUT_OP_H_

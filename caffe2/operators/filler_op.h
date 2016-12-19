@@ -2,12 +2,11 @@
 #define CAFFE2_OPERATORS_FILLER_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
-
 
 // FillerOp takes in either zero or one input.
 //
@@ -25,15 +24,22 @@ class FillerOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         shape_(ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))),
         extra_shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("extra_shape"))) {
+            OperatorBase::GetRepeatedArgument<int>("extra_shape"))),
+        input_as_shape_(
+            OperatorBase::GetSingleArgument<bool>("input_as_shape", false)) {
     if (InputSize()) {
       if (shape_.size() != 0) {
         CAFFE_THROW(
             "Cannot set the shape argument and pass in an input at "
             "the same time");
       }
-    } else if (!extra_shape_.empty()) {
-      CAFFE_THROW("Cannot set extra_shape when there is no input");
+    } else {
+      if (!extra_shape_.empty()) {
+        CAFFE_THROW("Cannot set extra_shape when there is no input");
+      }
+      if (input_as_shape_) {
+        CAFFE_THROW("An input must be given if input_as_shape is true");
+      }
     }
   }
 
@@ -43,7 +49,19 @@ class FillerOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto* output = Operator<Context>::Output(0);
     if (InputSize()) {
-      auto shape = Input(0).dims();
+      auto& input = Input(0);
+      auto shape = vector<TIndex>{};
+      if (input_as_shape_) {
+        CAFFE_ENFORCE_EQ(
+            input.ndim(),
+            1,
+            "When input_as_shape is true, the input must be a 1D tensor of "
+            "data type TIndex");
+        auto* shape_data = input.template data<TIndex>();
+        shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+      } else {
+        shape.insert(shape.end(), input.dims().begin(), input.dims().end());
+      }
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
     } else {
@@ -57,6 +75,7 @@ class FillerOp : public Operator<Context> {
  protected:
   vector<TIndex> shape_;
   vector<TIndex> extra_shape_;
+  bool input_as_shape_;
 };
 
 template <typename T, class Context>
@@ -72,8 +91,11 @@ class UniformFillOp final : public FillerOp<Context> {
 
   bool Fill(Tensor<Context>* output) override {
     math::RandUniform<T, Context>(
-        output->size(), min_, max_,
-        output->template mutable_data<T>(), &context_);
+        output->size(),
+        min_,
+        max_,
+        output->template mutable_data<T>(),
+        &context_);
     return true;
   }
 
@@ -135,8 +157,10 @@ class ConstantFillOp final : public FillerOp<Context> {
   template <typename T>
   bool FillWithType(Tensor<Context>* output) {
     T value = OperatorBase::GetSingleArgument<T>("value", 0);
-    math::Set<T, Context>(
-        output->size(), value, output->template mutable_data<T>(), &context_);
+    auto* data = output->template mutable_data<T>();
+    if (output->size()) {
+      math::Set<T, Context>(output->size(), value, data, &context_);
+    }
     return true;
   }
 
@@ -150,8 +174,8 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
-    auto source_values = OperatorBase::template GetRepeatedArgument<T>(
-        "values");
+    auto source_values =
+        OperatorBase::template GetRepeatedArgument<T>("values");
     for (T f : source_values) {
       values_.push_back(static_cast<T>(f));
     }
@@ -159,10 +183,13 @@ class GivenTensorFillOp final : public FillerOp<Context> {
 
   bool Fill(Tensor<Context>* output) override {
     DCHECK_EQ(output->size(), values_.size())
-        << "output size: " << output->size() << " given size: "
-        << values_.size();
-    context_.template Copy<T, CPUContext, Context>(
-        output->size(), values_.data(), output->template mutable_data<T>());
+        << "output size: " << output->size()
+        << " given size: " << values_.size();
+    auto* data = output->template mutable_data<T>();
+    if (output->size()) {
+      context_.template Copy<T, CPUContext, Context>(
+          output->size(), values_.data(), data);
+    }
     return true;
   }
 
@@ -178,13 +205,15 @@ class GaussianFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws),
         mean_(OperatorBase::template GetSingleArgument<float>("mean", 0)),
         std_(OperatorBase::template GetSingleArgument<float>("std", 1)) {
-    DCHECK_GT(std_, 0)
-        << "Standard deviation should be nonnegative.";
+    DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
   }
 
   bool Fill(Tensor<Context>* output) override {
     math::RandGaussian<T, Context>(
-        output->size(), mean_, std_, output->template mutable_data<T>(),
+        output->size(),
+        mean_,
+        std_,
+        output->template mutable_data<T>(),
         &context_);
     return true;
   }
@@ -205,11 +234,13 @@ class XavierFillOp final : public FillerOp<Context> {
     const int fan_in = output->size() / output->dim32(0);
     T scale = std::sqrt(T(3) / fan_in);
     math::RandUniform<T, Context>(
-        output->size(), -scale, scale,
-        output->template mutable_data<T>(), &context_);
+        output->size(),
+        -scale,
+        scale,
+        output->template mutable_data<T>(),
+        &context_);
     return true;
   }
-
 };
 
 template <typename T, class Context>
@@ -223,11 +254,13 @@ class MSRAFillOp final : public FillerOp<Context> {
     const int fan_in = output->size() / output->dim32(0);
     T scale = std::sqrt(T(2) / fan_in);
     math::RandUniform<T, Context>(
-        output->size(), -scale, scale,
-        output->template mutable_data<T>(), &context_);
+        output->size(),
+        -scale,
+        scale,
+        output->template mutable_data<T>(),
+        &context_);
     return true;
   }
-
 };
 
 // This is mostly used just as a debugging purpose stuff: it fills a tensor
@@ -243,6 +276,38 @@ class RangeFillOp final : public FillerOp<Context> {
   bool Fill(Tensor<Context>* output) override;
 };
 
-}  // namespace caffe2
+template <class Context>
+class LengthsRangeFillOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(LengthsRangeFillOp);
 
-#endif  // CAFFE2_OPERATORS_FILLER_OP_H_
+  bool RunOnDevice() override {
+    auto& input = Input(0);
+    auto* output = Output(0);
+    auto* input_data = input.template data<int32_t>();
+
+    CAFFE_ENFORCE_EQ(input.ndim(), 1, "Input must be a vector.");
+
+    auto len_sum = std::accumulate(input_data, input_data + input.size(), 0);
+
+    output->Resize(len_sum);
+    auto* output_data = output->template mutable_data<int32_t>();
+
+    int32_t offset = 0;
+    for (int i = 0; i < input.size(); ++i) {
+      auto len = input_data[i];
+      auto start = output_data + offset;
+      std::iota(
+          start,
+          start + len,
+          0); // make the third argument the arg of this operator
+      offset += len;
+    }
+    return true;
+  }
+};
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_FILLER_OP_H_

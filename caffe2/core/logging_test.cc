@@ -64,11 +64,13 @@ TEST(LoggingTest, EnforceShowcase) {
   WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(Equals(one * two + three, three * two)));
 }
 
+#if GTEST_HAS_DEATH_TEST
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
   EXPECT_DEATH(CAFFE_ENFORCE(false, "This goes fatal."), "");
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
+#endif
 
 } // namespace caffe2

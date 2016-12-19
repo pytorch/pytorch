@@ -12,15 +12,17 @@ from caffe2.proto import hsm_pb2
 '''
 
 
-def create_node_with_words(words):
+def create_node_with_words(words, name='node'):
     node = hsm_pb2.NodeProto()
+    node.name = name
     for word in words:
         node.word_ids.append(word)
     return node
 
 
-def create_node_with_nodes(nodes):
+def create_node_with_nodes(nodes, name='node'):
     node = hsm_pb2.NodeProto()
+    node.name = name
     for child_node in nodes:
         new_child_node = node.children.add()
         new_child_node.MergeFrom(child_node)
@@ -41,6 +43,7 @@ def create_hierarchy(tree_proto):
         return path_proto
 
     def recursive_path_builder(node_proto, path, hierarchy_proto, max_index):
+        node_proto.offset = max_index
         path.append([max_index,
                     len(node_proto.word_ids) + len(node_proto.children), 0])
         max_index += len(node_proto.word_ids) + len(node_proto.children)

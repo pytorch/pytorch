@@ -67,7 +67,10 @@ class MatMulOp final : public Operator<Context> {
     math::Gemm<T, Context, Engine>(
         trans_a_ ? CblasTrans : CblasNoTrans,
         trans_b_ ? CblasTrans : CblasNoTrans,
-        a_dim0, b_dim1, a_dim1, 1,
+        a_dim0,
+        b_dim1,
+        a_dim1,
+        1,
         A.template data<T>(),
         B.template data<T>(),
         0,

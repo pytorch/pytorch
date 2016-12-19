@@ -1,9 +1,67 @@
 #include "counter_ops.h"
 
+#include "caffe2/core/blob_serialization.h"
+
 namespace caffe2 {
 namespace {
+namespace {
+/**
+ *  @brief CounterSerializer is the serializer for Counter type.
+ *
+ * CounterSerializer takes in a blob that contains a Counter, and serializes
+ * it into a BlobProto protocol buffer. At the moment only int64_t counters are
+ * supported (since it's the only once that is really used).
+ *
+ */
+class CounterSerializer : public BlobSerializerBase {
+ public:
+  CounterSerializer() {}
+  ~CounterSerializer() {}
 
-// TODO(jiayq): deprecate these ops & consolidate them with IterOp/AtomicIterOp
+  void Serialize(
+      const Blob& blob,
+      const string& name,
+      SerializationAcceptor acceptor) override {
+    CAFFE_ENFORCE(blob.IsType<std::unique_ptr<Counter<int64_t>>>());
+
+    BlobProto blob_proto;
+    blob_proto.set_name(name);
+    blob_proto.set_type("std::unique_ptr<Counter<int64_t>>");
+    TensorProto& proto = *blob_proto.mutable_tensor();
+    proto.set_name(name);
+    proto.set_data_type(TensorProto_DataType_INT64);
+    proto.add_dims(1);
+    proto.add_int64_data(
+        blob.template Get<std::unique_ptr<Counter<int64_t>>>()->retrieve());
+    acceptor(name, blob_proto.SerializeAsString());
+  }
+};
+
+/**
+ * @brief CounterDeserializer is the deserializer for Counters.
+ *
+ */
+class CounterDeserializer : public BlobDeserializerBase {
+ public:
+  bool Deserialize(const BlobProto& proto, Blob* blob) override {
+    auto tensorProto = proto.tensor();
+    CAFFE_ENFORCE_EQ(tensorProto.dims_size(), 1, "Unexpected size of dims");
+    CAFFE_ENFORCE_EQ(tensorProto.dims(0), 1, "Unexpected value of dims");
+    CAFFE_ENFORCE_EQ(
+        tensorProto.data_type(),
+        TensorProto_DataType_INT64,
+        "Only int64_t counters supported");
+    CAFFE_ENFORCE_EQ(
+        tensorProto.int64_data_size(), 1, "Unexpected size of data");
+    *blob->GetMutable<std::unique_ptr<Counter<int64_t>>>() =
+        caffe2::make_unique<Counter<int64_t>>(tensorProto.int64_data(0));
+    return true;
+  }
+};
+}
+
+// TODO(jiayq): deprecate these ops & consolidate them with
+// IterOp/AtomicIterOp
 
 REGISTER_CPU_OPERATOR(CreateCounter, CreateCounterOp<int64_t, CPUContext>);
 REGISTER_CPU_OPERATOR(ResetCounter, ResetCounterOp<int64_t, CPUContext>);
@@ -80,5 +138,11 @@ SHOULD_NOT_DO_GRADIENT(RetrieveCount);
 } // namespace
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<Counter<int64_t>>);
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<std::unique_ptr<Counter<int64_t>>>()),
+    CounterSerializer);
+REGISTER_BLOB_DESERIALIZER(
+    std::unique_ptr<Counter<int64_t>>,
+    CounterDeserializer);
 
 } // namespace caffe2

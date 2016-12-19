@@ -42,7 +42,7 @@ const char kBcastNet[] = R"NET(
     }
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -52,7 +52,7 @@ TEST(MPITest, TestMPIBroadcast) {
       string(kBcastNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -106,7 +106,7 @@ const char kReduceNet[] = R"NET(
     }
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -116,7 +116,7 @@ TEST(MPITest, TestMPIReduce) {
       string(kReduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -174,7 +174,7 @@ const char kMPIAllgatherNet[] = R"NET(
     type: "Allgather"
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -184,7 +184,7 @@ TEST(MPITest, TestMPIAllgather) {
       string(kMPIAllgatherNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -239,7 +239,7 @@ const char kMPIAllreduceNet[] = R"NET(
     engine: "MPI"
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -249,7 +249,7 @@ TEST(MPITest, TestMPIAllreduce) {
       string(kMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -303,7 +303,7 @@ const char kInPlaceMPIAllreduceNet[] = R"NET(
     engine: "MPI"
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -313,7 +313,7 @@ TEST(MPITest, TestInPlaceMPIAllreduce) {
       string(kInPlaceMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);

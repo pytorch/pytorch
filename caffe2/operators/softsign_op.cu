@@ -12,6 +12,14 @@ __global__ void SoftsignKernel(const int N, const T* X, T* Y) {
   }
 }
 
+template <typename T>
+__global__ void SoftsignGradientKernel(const int N, const T* x, const T* dy,
+                              T* dx) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    dx[i] = dy[i] / pow(1 + abs(x[i]), 2);
+  }
+}
+
 struct SoftsignCUDAFunctor {
   template <typename T>
   inline void
@@ -23,8 +31,18 @@ struct SoftsignCUDAFunctor {
         device_context->cuda_stream()>>>(n, x, y);
     return;
   }
-  inline bool InplaceAllowed() {
-    return true;
+};
+
+struct SoftsignGradientCUDAFunctor {
+  template <typename T>
+  inline void
+  Run(const int n, const T* x, const T* dy, T* dx, CUDAContext* device_context) {
+    SoftsignGradientKernel<T><<<
+        CAFFE_GET_BLOCKS(n),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        device_context->cuda_stream()>>>(n, x, dy, dx);
+    return;
   }
 };
 
@@ -32,5 +50,8 @@ namespace {
 REGISTER_CUDA_OPERATOR(
     Softsign,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SoftsignCUDAFunctor>);
+REGISTER_CUDA_OPERATOR(
+    SoftsignGradient,
+    BinaryElementwiseOp<TensorTypes<float>, CUDAContext, WithoutBroadcast<SoftsignGradientCUDAFunctor>>);
 } // namespace
 } // namespace caffe2

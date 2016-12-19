@@ -1,8 +1,11 @@
-from caffe2.python import core
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from caffe2.python import core, scope
 from caffe2.python.model_helper import ModelHelperBase
 from caffe2.proto import caffe2_pb2
-
-import logging
 
 
 class CNNModelHelper(ModelHelperBase):
@@ -12,9 +15,11 @@ class CNNModelHelper(ModelHelperBase):
 
     def __init__(self, order="NCHW", name=None,
                  use_cudnn=True, cudnn_exhaustive_search=False,
-                 ws_nbytes_limit=None, init_params=True):
+                 ws_nbytes_limit=None, init_params=True,
+                 skip_sparse_optim=False):
         super(CNNModelHelper, self).__init__(
-            name="CNN" if name is None else name, init_params=init_params)
+            name="CNN" if name is None else name, init_params=init_params,
+            skip_sparse_optim=skip_sparse_optim)
 
         self.weights = []
         self.biases = []
@@ -26,6 +31,24 @@ class CNNModelHelper(ModelHelperBase):
             raise ValueError(
                 "Cannot understand the CNN storage order %s." % self.order
             )
+
+    def GetWeights(self, namescope=None):
+        if namescope is None:
+            namescope = scope.CurrentNameScope()
+
+        if namescope == '':
+            return self.weights[:]
+        else:
+            return [w for w in self.weights if w.GetNameScope() == namescope]
+
+    def GetBiases(self, namescope=None):
+        if namescope is None:
+            namescope = scope.CurrentNameScope()
+
+        if namescope == '':
+            return self.biases[:]
+        else:
+            return [b for b in self.biases if b.GetNameScope() == namescope]
 
     def ImageInput(
             self, blob_in, blob_out, **kwargs
@@ -157,10 +180,12 @@ class CNNModelHelper(ModelHelperBase):
                 kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
         if dim_in % group:
             raise ValueError("dim_in should be divisible by group.")
+        if dim_out % group:
+            raise ValueError("dim_out should be divisible by group.")
         splitted_blobs = self.net.DepthSplit(
             blob_in,
             ['_' + blob_out + '_gconv_split_' + str(i) for i in range(group)],
-            dimensions=[dim_in / group for i in range(group)],
+            dimensions=[int(dim_in / group) for i in range(group)],
             order=self.order
         )
         weight_shape = (
@@ -168,6 +193,9 @@ class CNNModelHelper(ModelHelperBase):
             if self.order == "NCHW" else
             [dim_out / group, kernel, kernel, dim_in / group]
         )
+        # Make sure that the shapes are of int format. Especially for py3 where
+        # int division gives float output.
+        weight_shape = [int(v) for v in weight_shape]
         conv_blobs = []
         for i in range(group):
             if self.init_params:
@@ -180,7 +208,7 @@ class CNNModelHelper(ModelHelperBase):
                 bias = self.param_init_net.__getattr__(bias_init[0])(
                     [],
                     blob_out + '_gconv_%d_b' % i,
-                    shape=[dim_out / group],
+                    shape=[int(dim_out / group)],
                     **bias_init[1]
                 )
             else:
@@ -233,7 +261,12 @@ class CNNModelHelper(ModelHelperBase):
                 blob_out + '_w', self.param_init_net)
             bias = core.ScopedBlobReference(
                 blob_out + '_b', self.param_init_net)
-        self.params.extend([weight, bias])
+
+        if 'freeze_bias' in kwargs:
+            self.params.extend([weight])
+        else:
+            self.params.extend([weight, bias])
+
         self.weights.append(weight)
         self.biases.append(bias)
         return op_call([blob_in, weight, bias], blob_out, **kwargs)
@@ -419,6 +452,26 @@ class CNNModelHelper(ModelHelperBase):
         print("DepthConcat is deprecated. use Concat instead.")
         return self.Concat(blobs_in, blob_out, **kwargs)
 
+    def PRelu(self, blob_in, blob_out, num_channels=1, slope_init=None,
+              **kwargs):
+        """PRelu"""
+        slope_init = (
+            slope_init if slope_init else ('ConstantFill', {'value': 0.25}))
+        if self.init_params:
+            slope = self.param_init_net.__getattr__(slope_init[0])(
+                [],
+                blob_out + '_slope',
+                shape=[num_channels],
+                **slope_init[1]
+            )
+        else:
+            slope = core.ScopedBlobReference(
+                blob_out + '_slope', self.param_init_net)
+
+        self.params.extend([slope])
+
+        return self.net.PRelu([blob_in, slope], [blob_out])
+
     def Relu(self, blob_in, blob_out, **kwargs):
         """Relu."""
         if self.use_cudnn:
@@ -449,21 +502,24 @@ class CNNModelHelper(ModelHelperBase):
         scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
         running_mean = init_blob(0.0, "rm")
         running_inv_var = init_blob(1.0, "riv")
+
         self.params.extend([scale, bias])
+        self.computed_params.extend([running_mean, running_inv_var])
         self.weights.append(scale)
         self.biases.append(bias)
         blob_outs = [blob_out, running_mean, running_inv_var,
                      blob_out + "_sm", blob_out + "_siv"]
-        if kwargs['is_test']:
+        if 'is_test' in kwargs and kwargs['is_test']:
             blob_outputs = self.net.SpatialBN(
                 [blob_in, scale, bias, blob_outs[1], blob_outs[2]], [blob_out],
                 order=self.order, **kwargs)
+            return blob_outputs
         else:
             blob_outputs = self.net.SpatialBN(
                 [blob_in, scale, bias, blob_outs[1], blob_outs[2]], blob_outs,
                 order=self.order, **kwargs)
-        # Return the output
-        return blob_outputs[0]
+            # Return the output
+            return blob_outputs[0]
 
     def Iter(self, blob_out, **kwargs):
         if 'device_option' in kwargs:
@@ -502,9 +558,13 @@ class CNNModelHelper(ModelHelperBase):
         wd = self.param_init_net.ConstantFill([], 'wd', shape=[1],
                                               value=weight_decay)
         ONE = self.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
-        for param in self.weights:
+        for param in self.GetWeights():
             #  Equivalent to: grad += wd * param
-            self.net.WeightedSum([self.param_to_grad[param], ONE, param, wd])
+            grad = self.param_to_grad[param]
+            self.net.WeightedSum(
+                [grad, ONE, param, wd],
+                grad,
+            )
 
     @property
     def CPU(self):

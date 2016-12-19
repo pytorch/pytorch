@@ -10,8 +10,10 @@
 namespace caffe2 {
 
 inline void IncrementIter(TensorCPU* output) {
-  CHECK_EQ(output->size(), 1)
-      << "The output of IterOp exists, but not of the right size.";
+  CAFFE_ENFORCE_EQ(
+      output->size(),
+      1,
+      "The output of IterOp exists, but not of the right size.");
   int64_t* iter = output->template mutable_data<int64_t>();
   CAFFE_ENFORCE(*iter >= 0, "Previous iteration number is negative.");
   CAFFE_ENFORCE(

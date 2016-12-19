@@ -1,4 +1,3 @@
-#include <ctime>
 #include <cstdio>
 #include <thread>
 #include <vector>

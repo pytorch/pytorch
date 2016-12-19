@@ -39,6 +39,13 @@ TEST(WorkspaceTest, BlobAccess) {
   EXPECT_FALSE(blob->IsType<WorkspaceTestFoo>());
   // When not null, we should only call with the right type.
   EXPECT_NE(&blob->Get<int>(), nullptr);
+
+  // test removing blob
+  EXPECT_FALSE(ws.HasBlob("nonexisting"));
+  EXPECT_FALSE(ws.RemoveBlob("nonexisting"));
+  EXPECT_TRUE(ws.HasBlob("newblob"));
+  EXPECT_TRUE(ws.RemoveBlob("newblob"));
+  EXPECT_FALSE(ws.HasBlob("newblob"));
 }
 
 TEST(WorkspaceTest, RunEmptyPlan) {

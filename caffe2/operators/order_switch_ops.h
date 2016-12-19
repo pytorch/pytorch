@@ -29,6 +29,6 @@ class NCHW2NHWCOp final : public Operator<Context> {
  protected:
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_ORDER_SWITCH_OPS_H_
+#endif // CAFFE2_OPERATORS_ORDER_SWITCH_OPS_H_

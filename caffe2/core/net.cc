@@ -181,15 +181,19 @@ DAGNetBase::ExecutionChains computeChains(
 CAFFE_DEFINE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
 
 NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
-    : external_input_(def.external_input().begin(),
-                      def.external_input().end()),
-      external_output_(def.external_output().begin(),
-                       def.external_output().end()) {
+    : external_input_(def.external_input().begin(), def.external_input().end()),
+      external_output_(
+          def.external_output().begin(),
+          def.external_output().end()),
+      name_(def.name()) {
   // Go through the operators and make sure that blobs are correctly made.
   std::set<string> known_blobs(
       external_input_.begin(), external_input_.end());
   std::set<string> remaining_output(
       external_output_.begin(), external_output_.end());
+  for (const auto& blob : known_blobs) {
+    remaining_output.erase(blob);
+  }
   for (const OperatorDef& op : def.op()) {
     for (const string& in : op.input()) {
       if (!known_blobs.count(in)) {
@@ -249,22 +253,14 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
       OperatorDef temp_def(operator_def);
       temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
       operators_.emplace_back(CreateOperator(temp_def, ws));
-      CAFFE_ENFORCE(
-          operators_.back() != nullptr,
-          "Cannot create operator for def: ",
-          ProtoDebugString(temp_def));
     } else {
       operators_.emplace_back(CreateOperator(operator_def, ws));
-      CAFFE_ENFORCE(
-          operators_.back() != nullptr,
-          "Cannot create operator for def: ",
-          ProtoDebugString(operator_def));
     }
   }
 }
 
 bool SimpleNet::Run() {
-  VLOG(1) << "Running net.";
+  VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
     VLOG(1) << "Running operator " << op->def().name()
             << "(" << op->def().type() << ").";
@@ -278,7 +274,7 @@ bool SimpleNet::Run() {
 }
 
 bool SimpleNet::RunAsync() {
-  VLOG(1) << "Running net.";
+  VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
     VLOG(1) << "Running operator " << op->def().name()
             << "(" << op->def().type() << ").";
@@ -385,16 +381,8 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
       OperatorDef temp_def(op_def);
       temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
       operator_nodes_[idx].operator_ = CreateOperator(temp_def, ws);
-      CAFFE_ENFORCE(
-          operator_nodes_[idx].operator_ != nullptr,
-          "Cannot create operator for def: ",
-          ProtoDebugString(temp_def));
     } else {
       operator_nodes_[idx].operator_ = CreateOperator(op_def, ws);
-      CAFFE_ENFORCE(
-          operator_nodes_[idx].operator_ != nullptr,
-          "Cannot create operator for def: ",
-          ProtoDebugString(op_def));
     }
     // Check the inputs, and set up parents if necessary. This addressese the
     // read after write case.

@@ -32,7 +32,7 @@ class RocksDBCursor : public Cursor {
 class RocksDBTransaction : public Transaction {
  public:
   explicit RocksDBTransaction(rocksdb::DB* db) : db_(db) {
-    CHECK_NOTNULL(db_);
+    CAFFE_ENFORCE(db_);
     batch_.reset(new rocksdb::WriteBatch());
   }
   ~RocksDBTransaction() { Commit(); }

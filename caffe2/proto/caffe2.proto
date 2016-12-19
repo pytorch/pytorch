@@ -82,9 +82,13 @@ message Argument {
 }
 
 // DeviceType that Caffe2 currently supports.
+// Note: if you add a device type, make sure you add the corresponding device
+// line in core/blob_serialization.cc.
 enum DeviceType {
-  CPU = 0;     // In default, we will use CPU.
-  CUDA = 1;    // CUDA, with custom kernels.
+  CPU = 0;                    // In default, we will use CPU.
+  CUDA = 1;                   // CUDA.
+  MKLDNN = 2;                 // Reserved for explicit MKLDNN
+  ONLY_FOR_TEST = 20901701;   // This device type is only for test.
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for
@@ -93,7 +97,8 @@ enum DeviceType {
 // not match.
 message DeviceOption {
   // [general] Options that need to be carried out before running the execution.
-  optional DeviceType device_type = 1 [ default = CPU ];
+  // optional DeviceType device_type = 1 [ default = CPU ];
+  optional int32 device_type = 1 [ default = 0 ]; // 0 is CPU.
   // [CUDA specific] the cuda gpu id.
   optional int32 cuda_gpu_id = 2;
   // [general] The random seed to start the device random number generator with.
@@ -224,6 +229,10 @@ message ExecutionStep {
   // ** It is the user's responsibility to not to put this blob in race conditions.
   // ** For example when setting this blob in concurrent substeps
   optional string should_stop_blob = 9;
+
+  // if only_once is true, this step will only be executed once. this ONLY takes
+  // effect when using should_stop_blob
+  optional bool only_once = 10;
 }
 
 message PlanDef {

@@ -22,6 +22,7 @@
 #endif  // CAFFE2_USE_MKL
 
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/cpu_neon.h"
 #include "caffe2/core/context.h"
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -102,9 +103,78 @@ void Gemm<float, CPUContext>(
 }
 
 template <>
+void Gemm<float, CPUContext>(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const float* A,
+    const int lda,
+    const float* B,
+    const float beta,
+    const int ldb,
+    float* C,
+    const int ldc,
+    CPUContext*) {
+  using OuterStride = Eigen::OuterStride<Eigen::Dynamic>;
+  using StridedMap = Eigen::Map<Eigen::MatrixXf, 0, OuterStride>;
+  using ConstStridedMap = Eigen::Map<const Eigen::MatrixXf, 0, OuterStride>;
+  auto C_mat = StridedMap(C, N, M, OuterStride(ldc));
+  if (beta == 0) {
+    C_mat.setZero();
+  } else {
+    C_mat *= beta;
+  }
+  switch (TransA) {
+    case CblasNoTrans: {
+      switch (TransB) {
+        case CblasNoTrans:
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, N, K, OuterStride(ldb)) *
+                       ConstStridedMap(A, K, M, OuterStride(lda)));
+          return;
+        case CblasTrans:
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
+                       ConstStridedMap(A, K, M, OuterStride(lda)));
+          return;
+        default:
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      }
+    }
+    case CblasTrans: {
+      switch (TransB) {
+        case CblasNoTrans:
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, N, K, OuterStride(ldb)) *
+                       ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+          return;
+        case CblasTrans:
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
+                       ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+          return;
+        default:
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      }
+    }
+    default:
+      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
+  }
+}
+
+template <>
 void Gemv<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA, const int M, const int N, const float alpha,
-    const float* A, const float* x, const float beta, float* y,
+    const CBLAS_TRANSPOSE TransA,
+    const int M,
+    const int N,
+    const float alpha,
+    const float* A,
+    const float* x,
+    const float beta,
+    float* y,
     CPUContext* context) {
   EigenVectorMap<float> y_vec(y, TransA == CblasNoTrans ? M : N);
   if (beta == 0) {
@@ -319,15 +389,22 @@ CAFFE2_SPECIALIZED_AXPBY(double, d)
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef CAFFE2_USE_MKL
 
-#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc)              \
-template <>                                                                    \
-void Funcname<T, CPUContext>(                                                  \
-    const int N, const T* x, T* y,                                             \
-    CPUContext* context) {                                                     \
-  OriginalFunc(N, x, y);                                                       \
-}
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, vsExp)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, vdExp)
+#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc, ...) \
+  template <>                                                          \
+  void Funcname<T, CPUContext>(                                        \
+      const int N, const T* x, T* y, CPUContext* context) {            \
+    OriginalFunc(N, x, y, ##__VA_ARGS__);                              \
+  }
+DELEGATE_SIMPLE_UNARY_FUNCTION(
+    float,
+    Exp,
+    vmsExp,
+    VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE)
+DELEGATE_SIMPLE_UNARY_FUNCTION(
+    double,
+    Exp,
+    vmdExp,
+    VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, vsLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, vdLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
@@ -490,12 +567,16 @@ DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
 #undef DEFINE_BROADCAST_BINARY_FUNCTION
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
-#define CAFFE2_SPECIALIZED_SET(T)                                              \
-template <>                                                                    \
-void Set<T, CPUContext>(const int N, const T alpha, T *Y,                      \
-                           CPUContext* context) {                              \
-  EigenVectorMap<T>(Y, N).setConstant(alpha);                                  \
-}
+#define CAFFE2_SPECIALIZED_SET(T)                                 \
+  template <>                                                     \
+  void Set<T, CPUContext>(                                        \
+      const TIndex N, const T alpha, T* Y, CPUContext* context) { \
+    if (alpha == (T)0) {                                          \
+      memset(Y, 0, N * sizeof(T));                                \
+    } else {                                                      \
+      EigenVectorMap<T>(Y, N).setConstant(alpha);                 \
+    }                                                             \
+  }
 
 CAFFE2_SPECIALIZED_SET(float);
 CAFFE2_SPECIALIZED_SET(double);
@@ -608,18 +689,6 @@ void Select<float, CPUContext>(
     DCHECK_LT(idx[i], D);
     y[i] = x[i * D + idx[i]];
   }
-}
-
-// Function uses casting from int to unsigned to compare if value of
-// parameter a is greater or equal to zero and lower than value of
-// parameter b. The b parameter is of type signed and is always
-// positive,
-// therefore its value is always lower than 0x800... where casting
-// negative value of a parameter converts it to value higher than
-// 0x800...
-// The casting allows to use one condition instead of two.
-inline bool is_a_ge_zero_and_a_lt_b(int a, int b) {
-  return static_cast<unsigned>(a) < static_cast<unsigned>(b);
 }
 
 template <>
@@ -947,9 +1016,100 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
 }
 
 template <>
+void BiasCHW<float, CPUContext>(
+  const float* bias,
+  const int bias_channels,
+  const int image_size,
+  float* image,
+  CPUContext* context) {
+  // Sum the per-channel bias into every image plane
+  for (int c = 0; c < bias_channels; ++c) {
+    float b = bias[c];
+
+#ifdef __ARM_NEON__
+    float32x4_t vBias = vdupq_n_f32(b);
+
+    // We give alignment hints for additional speed, so handle the
+    // non-vectorizable prologue separately
+    constexpr int kVecSizeInFloat = sizeof(float32x4_t) / sizeof(float);
+
+    // FIXME: if input < kVecSizeInFloat, can't vectorize at all
+
+    int prologue =
+      kVecSizeInFloat -
+      // remainder in floats
+      (((uintptr_t) image) % (sizeof(float32x4_t))) / sizeof(float);
+
+    int i = 0;
+    // Prologue loop
+    for (; i < prologue; ++i) {
+      image[i] += b;
+    }
+
+    // The loop is manually unrolled by 8
+    constexpr int kUnroll = 8;
+    constexpr int kFloatsPerLoop = kUnroll * kVecSizeInFloat;
+
+    int remainder = image_size - prologue;
+    int vectorizable = prologue + (remainder / kFloatsPerLoop) * kFloatsPerLoop;
+
+    // Vectorizable body
+    for (; i < vectorizable; i += kFloatsPerLoop) {
+      // Manually unrolled
+      float32x4_t v0 = vld1q_f32_aligned(image + i + 0);
+      float32x4_t v1 = vld1q_f32_aligned(image + i + 4);
+      float32x4_t v2 = vld1q_f32_aligned(image + i + 8);
+      float32x4_t v3 = vld1q_f32_aligned(image + i + 12);
+      float32x4_t v4 = vld1q_f32_aligned(image + i + 16);
+      float32x4_t v5 = vld1q_f32_aligned(image + i + 20);
+      float32x4_t v6 = vld1q_f32_aligned(image + i + 24);
+      float32x4_t v7 = vld1q_f32_aligned(image + i + 28);
+
+      v0 = vaddq_f32(v0, vBias);
+      v1 = vaddq_f32(v1, vBias);
+      v2 = vaddq_f32(v2, vBias);
+      v3 = vaddq_f32(v3, vBias);
+      v4 = vaddq_f32(v4, vBias);
+      v5 = vaddq_f32(v5, vBias);
+      v6 = vaddq_f32(v6, vBias);
+      v7 = vaddq_f32(v7, vBias);
+
+      vst1q_f32_aligned(image + i + 0, v0);
+      vst1q_f32_aligned(image + i + 4, v1);
+      vst1q_f32_aligned(image + i + 8, v2);
+      vst1q_f32_aligned(image + i + 12, v3);
+      vst1q_f32_aligned(image + i + 16, v4);
+      vst1q_f32_aligned(image + i + 20, v5);
+      vst1q_f32_aligned(image + i + 24, v6);
+      vst1q_f32_aligned(image + i + 28, v7);
+    }
+
+    // Non-vectorizable epilogue
+    for (; i < image_size; ++i) {
+      image[i] += b;
+    }
+#else
+    // Non-NEON CPU implementation
+    for (int i = 0; i < image_size; ++i) {
+      image[i] += b;
+    }
+#endif // __ARM_NEON__
+
+    image += image_size;
+  }
+}
+
+template <>
 void CopyMatrix<CPUContext>(
     const size_t itemsize, const int M, const int N, const void* A,
     const int lda, void* B, const int ldb, CPUContext* context) {
+  if (lda == N && ldb == N) {
+    // can coalese to a single memcpy of size M * N
+    memcpy(
+        static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
+    return;
+  }
+
   for (int i = 0; i < M; ++i) {
     memcpy(static_cast<char*>(B) + ldb * i * itemsize,
            static_cast<const char*>(A) + lda * i * itemsize,

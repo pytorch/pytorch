@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "caffe2/core/flags.h"
+#include "caffe2/proto/caffe2.pb.h"
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
 // logging at compile time so no logging message below that level is produced
@@ -78,6 +79,9 @@ string StripBasename(const std::string& full_path);
 size_t ReplaceAll(string& s, const char* from, const char* to);
 
 void SetStackTraceFetcher(std::function<string(void)> fetcher);
+
+void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
+std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 class EnforceNotMet : public std::exception {
  public:
