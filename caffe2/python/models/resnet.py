@@ -37,7 +37,7 @@ class ResNetBuilder():
     def add_relu(self):
         self.prev_blob = self.model.Relu(
             self.prev_blob,
-            'comp_%d_relu_%d' % (self.comp_count, self.comp_idx)
+            self.prev_blob,  # in-place
         )
         return self.prev_blob
 
@@ -190,9 +190,9 @@ def create_resnet50(model, data, num_input_channels,
     num_labels, label=None, is_test=False):
     # conv1 + maxpool
     model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}), kernel=7, stride=2, pad=3)
-    model.SpatialBN('conv1', 'conv1_spatbn', 64, epsilon=1e-3, is_test=is_test)
-    model.Relu('conv1_spatbn', 'relu1')
-    model.MaxPool('relu1', 'pool1', kernel=3, stride=2)
+    model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3, is_test=is_test)
+    model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
+    model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
 
     # Residual blocks...
     builder = ResNetBuilder(model, 'pool1', is_test=is_test)
