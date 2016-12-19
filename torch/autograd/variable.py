@@ -74,11 +74,13 @@ class Variable(_C._VariableBase):
         return iter(map(lambda i: self[i], range(self.size(0))))
 
     def __deepcopy__(self, memo):
-        if self.creator is None:
-            return Variable(self.data.clone(), requires_grad=self.requires_grad,
-                    volatile=self.volatile)
-        raise RuntimeError("Only Variables created explicitly by the user "
-                "(graph leaves) support the deepcopy protocol at the moment")
+        if self.creator is not None:
+            raise RuntimeError("Only Variables created explicitly by the user "
+                    "(graph leaves) support the deepcopy protocol at the moment")
+        result = type(self)(self.data.clone(), requires_grad=self.requires_grad,
+                volatile=self.volatile)
+        memo[id(self)] = result
+        return result
 
     def backward(self, gradient=None, retain_variables=False):
         if self.volatile:
