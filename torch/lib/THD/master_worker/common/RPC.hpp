@@ -20,6 +20,7 @@ using function_id_type = std::uint16_t;
 
 class RPCMessage {
 public:
+  using size_type = ByteArray::size_type;
   RPCMessage();
   RPCMessage(char* str, std::size_t size);
   RPCMessage(const ByteArray& str);
@@ -28,12 +29,10 @@ public:
   ByteArray& bytes(); // Raw data.
   const char* data() const; // Offset data.
   bool isEmpty() const;
-  std::size_t remaining() const; // Length of msg left to read.
+  size_type remaining() const; // Length of the msg left to read.
   const char* read(std::size_t num_bytes);
 
-  static void freeMessage(void *data, void *hint);
 private:
-
   ByteArray _msg;
   std::size_t _offset;
 };

@@ -4,184 +4,271 @@
 #include "ByteArray.hpp"
 #include "RPC.hpp"
 
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <memory>
 #include <string>
+#include <stdexcept>
 #include <utility>
 
-#include <zmq.hpp>
+#include <asio.hpp>
 
 namespace thd {
 
 namespace {
 ////////////////////////////////////////////////////////////////////////////////
 
-constexpr int MAX_ADDR_SIZE = 1024;
+std::unique_ptr<rpc::ByteArray> packInitMessage(
+    const std::string& rank,
+    const std::string& port
+) {
+  std::unique_ptr<rpc::ByteArray> arr_ptr(new rpc::ByteArray);
 
-void sendMessage(std::unique_ptr<rpc::RPCMessage> msg, zmq::socket_t& socket) {
-  socket.send(zmq::message_t(msg.get()->bytes().data(),
-                             msg.get()->bytes().length(),
-                             rpc::RPCMessage::freeMessage,
-                             msg.release()));
+  arr_ptr.get()->append(std::string(rank + ";" + port).c_str(),
+          rank.size() + 1 + port.size());
+
+  return std::move(arr_ptr);
 }
 
-std::unique_ptr<rpc::RPCMessage> recvMessage(zmq::socket_t& socket, bool block = true) {
-  zmq::message_t zmsg;
-  if (socket.recv(&zmsg, block ? 0 : ZMQ_DONTWAIT) == false) {
-    return nullptr;
-  } else {
-    // XXX: Excesive copying here! I'm not sure how to avoid it.
-    return std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(
-        rpc::ByteArray::fromData(zmsg.data<char>(), zmsg.size())));
+void unpackInitMessage(
+    const char* msg,
+    size_t length,
+    int& rank,
+    std::string& port
+) {
+  std::string data(msg, length);
+  std::size_t separator = data.find(';');
+  rank = std::stoi(data.substr(0, separator));
+  port = data.substr(separator + 1, length);
+}
+
+void acceptInitConnection(
+    asio::ip::tcp::acceptor& acceptor,
+    asio::ip::tcp::socket& socket,
+    asio::ip::tcp::endpoint& endpoint
+) {
+  asio::error_code ec;
+  acceptor.accept(socket, endpoint, ec);
+  asio::detail::throw_error(ec, "master failed to accept an initial "
+      "connection");
+}
+
+asio::ip::basic_resolver_iterator<asio::ip::tcp> receiveInitMessage(
+    asio::ip::tcp::resolver& resolver,
+    asio::ip::tcp::socket& socket,
+    const asio::ip::tcp::endpoint& endpoint,
+    int& worker_rank
+) {
+  rpc::RPCMessage::size_type length;
+  // Read the length of the incoming message.
+  asio::read(socket, asio::buffer(&length, sizeof(length)));
+
+  char* data = new char[length];
+  // Read the incoming message.
+  asio::read(socket, asio::buffer(data, length));
+
+  std::string port;
+  // Unpack the rank and the port to connec to from the message.
+  unpackInitMessage(data, length, worker_rank, port);
+
+  // Return an iterator to a list of endpoints to connect to.
+  return resolver.resolve({endpoint.address().to_string(), port});
+}
+
+void sendMessage(
+    std::unique_ptr<rpc::RPCMessage> msg,
+    asio::ip::tcp::socket& socket
+) {
+  size_t length = msg.get()->bytes().length();
+  asio::write(socket, asio::buffer(&length, sizeof(length)));
+  asio::write(socket, asio::buffer(msg.get()->bytes().data(), length));
+}
+
+std::unique_ptr<rpc::RPCMessage> recvMessage(
+    asio::ip::tcp::socket& socket
+) {
+  rpc::RPCMessage::size_type length;
+  asio::read(socket, asio::buffer(&length, sizeof(length)));
+  char* data = new char[length];
+  asio::read(socket, asio::buffer(data, length));
+
+  return std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(data, length));
+}
+
+const char* get_env(const char* env) {
+  const char* value = std::getenv(env);
+  if (value == nullptr) {
+    throw std::logic_error(std::string("") + "failed to read the " + env +
+        " environmental variable; maybe you forgot to set it properly?");
   }
-}
-
-void connectWorker(zmq::socket_t& socket,
-                   zmq::context_t& context,
-                   zmq::socket_type type,
-                   const std::string& endpoint) {
-  socket = zmq::socket_t(context, type);
-  socket.connect(endpoint);
-}
-
-void composeEndpoint(std::string& endpoint,
-                     const std::string& peer_addr,
-                     const std::string& port) {
-  endpoint = std::string("tcp://" + peer_addr + ":" + port);
-}
-
-// Instead of specifying a port, let the opertating system assign a free port.
-std::string bindPort(zmq::socket_t& socket, std::string& endpoint) {
-  rpc::ByteArray addr(MAX_ADDR_SIZE);
-  std::size_t size = addr.length() - 1;
-  socket.bind("tcp://*:*");
-  socket.getsockopt(ZMQ_LAST_ENDPOINT, addr.data(), &size);
-  addr.data()[size] = '\0';
-  endpoint = std::string(addr.data());
-  return endpoint.substr(endpoint.rfind(':') + 1);
-}
-
-void unpackInitMessage(const zmq::message_t& msg,
-                       int& rank,
-                       std::string& pull_port,
-                       std::string& push_port) {
-    std::string data(msg.data<char>(), msg.size());
-    std::size_t first_separator = data.find(';');
-    std::size_t second_separator = data.find(';', first_separator + 1);
-    rank = std::stoi(data.substr(0, first_separator));
-    std::size_t length = second_separator - (first_separator + 1);
-    pull_port = data.substr(first_separator + 1, length);
-    push_port = data.substr(second_separator + 1);
+  return value;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
-// TODO: Validate this environmental variable.
 MasterCommandChannel::MasterCommandChannel()
-  : _context()
+  : _io()
   , _rank(0)
-  , _world_size(std::stoi(std::getenv(WORLD_SIZE_ENV)))
-  , _pull_sockets()
-  , _push_sockets()
-  , _pull_endpoints(_world_size)
-  , _push_endpoints(_world_size)
 {
-  for (int i = 0; i < _world_size; ++i) {
-    _pull_sockets.emplace_back(_context, zmq::socket_type::pull);
-    _push_sockets.emplace_back(_context, zmq::socket_type::push);
-  }
-  const std::string initendpoint(std::string("tcp://0.0.0.0:") +
-                                 std::getenv(MASTER_PORT_ENV));
-  zmq::socket_t initsocket(_context, zmq::socket_type::pull);
-  initsocket.bind(initendpoint);
+  unsigned short init_port;
+  _load_env(init_port, _world_size);
 
-  for (int wi = 1; wi < _world_size; ++wi) {
-    zmq::message_t msg;
-    initsocket.recv(&msg); // Blocking.
+  _sockets.reserve(_world_size);
+  for (int i = 0; i < _world_size; ++i)
+    _sockets.emplace_back(_io);
+
+  asio::ip::tcp::acceptor init_acceptor(_io,
+      asio::ip::tcp::endpoint(asio::ip::tcp::v6(), init_port));
+  asio::ip::tcp::resolver init_resolver(_io);
+  asio::ip::tcp::socket init_socket(_io);
+
+  for (int i = 1; i < _world_size; ++i) {
+    asio::ip::tcp::endpoint worker_endpoint;
+    acceptInitConnection(init_acceptor, init_socket, worker_endpoint);
 
     int worker_rank;
-    std::string pull_port;
-    std::string push_port;
-    unpackInitMessage(msg, worker_rank, pull_port, push_port);
-
-    composeEndpoint(_pull_endpoints.at(worker_rank),
-                    msg.gets("Peer-Address"),
-                    pull_port);
-    connectWorker(_pull_sockets.at(worker_rank),
-                  _context,
-                  zmq::socket_type::pull,
-                  _pull_endpoints[worker_rank]);
-    composeEndpoint(_push_endpoints.at(worker_rank),
-                    msg.gets("Peer-Address"),
-                    push_port);
-    connectWorker(_push_sockets.at(worker_rank),
-                  _context,
-                  zmq::socket_type::push,
-                  _push_endpoints[worker_rank]);
-  }
-
-  initsocket.unbind(initendpoint);
-}
-
-MasterCommandChannel::~MasterCommandChannel() {
-  for (int wi = 1; wi < _world_size; ++wi) {
-    _pull_sockets.at(wi).disconnect(_pull_endpoints.at(wi));
-    _push_sockets.at(wi).disconnect(_push_endpoints.at(wi));
+    auto final_endpoint = receiveInitMessage(init_resolver, init_socket,
+        worker_endpoint, worker_rank);
+    try {
+      asio::connect(_sockets.at(worker_rank), final_endpoint);
+    } catch (const asio::system_error& e) {
+      throw std::runtime_error(std::string("") + "master failed to " +
+          "establish the connection with worker " +
+          std::to_string(worker_rank) + "; specifically: " + e.what());
+    }
+    init_socket.close();
   }
 }
 
-void MasterCommandChannel::sendMessage(std::unique_ptr<rpc::RPCMessage> msg,
-                                       int rank) {
-  thd::sendMessage(std::move(msg), _push_sockets.at(rank));
+MasterCommandChannel::~MasterCommandChannel() {}
+
+void MasterCommandChannel::sendMessage(
+    std::unique_ptr<rpc::RPCMessage> msg,
+    int rank
+) {
+  thd::sendMessage(std::move(msg), _sockets.at(rank));
 }
 
 std::unique_ptr<rpc::RPCMessage> MasterCommandChannel::recvMessage(int rank) {
-  return thd::recvMessage(_pull_sockets.at(rank), false);
+  return thd::recvMessage(_sockets.at(rank));
 }
 
-// TODO: Validate this environmental variable.
+void MasterCommandChannel::_load_env(unsigned short& port, int& world_size) {
+  try {
+    unsigned long value = std::stoul(get_env(MASTER_PORT_ENV));
+    if (value > USHRT_MAX) {
+      throw std::logic_error("the number representing the port is out of"
+          "range");
+    }
+    port = value;
+  } catch (const std::exception& e) {
+    throw std::logic_error(std::string("") + "failed to convert the " +
+        MASTER_PORT_ENV + " environmental variable to unsigned short (port "
+        "number); specifically: " + e.what());
+  }
+
+  try {
+    world_size = std::stoi(get_env(WORLD_SIZE_ENV));
+  } catch (const std::exception& e) {
+    throw std::logic_error(std::string("") + "failed to convert the " +
+        WORLD_SIZE_ENV + " environmental variable to int: " + e.what());
+  }
+}
+
+// XXX: asio::ip::address::from_string has been deprecated in favour of
+//      asio::ip::address::make_address in v1.11.0. The version downloadable
+//      with brew on macOS is v1.10.8.
 WorkerCommandChannel::WorkerCommandChannel(int rank)
-  : _context()
-  , _pull_socket(_context, zmq::socket_type::pull)
-  , _push_socket(_context, zmq::socket_type::push)
-  , _rank(rank)
+  : _rank(rank)
+  , _io()
+  , _socket(_io)
 {
-  const std::string initendpoint(std::string("tcp://") +
-                                 std::getenv(MASTER_ADDR_ENV));
-  zmq::socket_t initsocket(_context, zmq::socket_type::push);
-  initsocket.connect(initendpoint);
+  asio::error_code ec;
+  std::string master_ip_addr;
+  unsigned short master_port;
 
-  std::string pull_port = bindPort(_pull_socket, _pull_endpoint);
-  std::string push_port = bindPort(_push_socket, _push_endpoint);
+  _load_env(master_ip_addr, master_port);
 
-  rpc::ByteArray arr;
-  std::string str_rank = std::to_string(_rank);
-  arr.append(str_rank.c_str(), str_rank.size());
-  arr.append(";", 1);
-  arr.append(push_port.c_str(), push_port.size());
-  arr.append(";", 1);
-  arr.append(pull_port.c_str(), pull_port.size());
+  asio::ip::tcp::acceptor init_acceptor(_io, asio::ip::tcp::endpoint(
+        asio::ip::tcp::v6(), 0));
 
-  thd::sendMessage(std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(arr)),
-                   initsocket);
+  asio::ip::tcp::resolver init_resolver(_io);
+  asio::ip::tcp::resolver::query init_query(master_ip_addr,
+      std::to_string(master_port),
+      asio::ip::resolver_query_base::flags::v4_mapped |
+      asio::ip::resolver_query_base::flags::numeric_service);
+  auto init_endpoint = init_resolver.resolve(init_query);
 
-  initsocket.disconnect(initendpoint);
+  // Connect to the master.
+  asio::ip::tcp::socket init_socket(_io);
+  do {
+    asio::connect(init_socket, init_endpoint, ec);
+  } while (ec == asio::error::basic_errors::connection_refused);
+	asio::detail::throw_error(ec, "failed to connect to master");
+
+  // Get a local port.
+  auto local_port = init_acceptor.local_endpoint(ec).port();
+  asio::detail::throw_error(ec, "worker failed to get a local port");
+
+  // Prepare the init message.
+  auto arr = packInitMessage(std::to_string(_rank), std::to_string(local_port));
+
+  // Send the init message.
+  try {
+    auto msg_length = arr.get()->length();
+    asio::write(init_socket, asio::buffer(&msg_length, sizeof(msg_length)));
+    asio::write(init_socket, asio::buffer(arr.get()->data(), msg_length));
+
+    asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v6(), local_port);
+    init_acceptor.accept(_socket, endpoint, ec);
+    asio::detail::throw_error(ec, "worker failed to accept the connection from "
+        "master");
+  } catch (const std::exception& e) {
+    throw std::runtime_error(std::string() + "unable to establish the " +
+        "connection with master: " + e.what());
+  }
 }
 
-WorkerCommandChannel::~WorkerCommandChannel() {
-  _pull_socket.unbind(_pull_endpoint);
-  _push_socket.unbind(_push_endpoint);
-}
+WorkerCommandChannel::~WorkerCommandChannel() {}
 
 void WorkerCommandChannel::sendMessage(std::unique_ptr<rpc::RPCMessage> msg) {
-  thd::sendMessage(std::move(msg), _push_socket);
+  thd::sendMessage(std::move(msg), _socket);
 }
 
 std::unique_ptr<rpc::RPCMessage> WorkerCommandChannel::recvMessage() {
-  return thd::recvMessage(_pull_socket);
+  return thd::recvMessage(_socket);
+}
+
+void WorkerCommandChannel::_load_env(
+    std::string& ip_addr,
+    unsigned short& port
+) {
+  const std::string addr(get_env(MASTER_ADDR_ENV));
+  auto separator_pos = addr.rfind(':');
+  if (separator_pos == std::string::npos) {
+    throw std::logic_error(std::string() + "failed to find the colon " +
+        "separator (:) in the " + MASTER_ADDR_ENV + "environmental variable; " +
+        "maybe you forgot to provide the port at all? " + MASTER_ADDR_ENV +
+        "should be set to something like '127.0.0.1:12345'");
+  }
+
+  ip_addr = addr.substr(0, separator_pos);
+
+  try {
+    unsigned long value = std::stoul(addr.substr(separator_pos + 1));
+    if (value > USHRT_MAX) {
+      throw std::logic_error("the number representing the port is out of"
+          "range");
+    }
+    port = value;
+  } catch (const std::exception& e) {
+    throw std::logic_error(std::string("") + "failed to convert the " +
+        MASTER_PORT_ENV + " environmental variable to unsigned short (port "
+        "number); specifically: " + e.what());
+  }
 }
 
 } // namespace thd
