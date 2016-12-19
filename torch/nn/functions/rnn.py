@@ -105,7 +105,7 @@ def Recurrent(inner, reverse=False):
     return forward
 
 
-def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False):
+def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False, dropout_state=None):
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -144,8 +144,10 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, 
 
 
 class CudnnRNN(NestedIOFunction):
-    def __init__(self, mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False):
+    def __init__(self, mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0,  train=True, bidirectional=False, dropout_state=None):
         super(CudnnRNN, self).__init__()
+        if dropout_state is None:
+            dropout_state = {}
         self.mode = cudnn.rnn.get_cudnn_mode(mode)
         self.input_mode = cudnn.CUDNN_LINEAR_INPUT
         self.input_size = input_size
@@ -156,7 +158,8 @@ class CudnnRNN(NestedIOFunction):
         self.train = train
         self.bidirectional = 1 if bidirectional else 0
         self.num_directions = 2 if bidirectional else 1
-        self.seed = torch.IntTensor(1).random_()[0]
+        self.dropout_seed = torch.IntTensor(1).random_()[0]
+        self.dropout_state = dropout_state
 
     def forward_extended(self, input, weight, hx):
 

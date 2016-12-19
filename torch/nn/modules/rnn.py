@@ -18,6 +18,7 @@ class RNNBase(Module):
         self.bias = bias
         self.batch_first = batch_first
         self.dropout = dropout
+        self.dropout_state = {}
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
 
@@ -59,11 +60,12 @@ class RNNBase(Module):
             self.mode,
             self.input_size,
             self.hidden_size,
-            self.num_layers,
-            self.batch_first,
-            self.dropout,
-            self.training,
-            self.bidirectional
+            num_layers=self.num_layers,
+            batch_first=self.batch_first,
+            dropout=self.dropout,
+            train=self.training,
+            bidirectional=self.bidirectional,
+            dropout_state=self.dropout_state
         )
         return func(input, self.all_weights, hx)
 
@@ -304,12 +306,13 @@ class LSTMCell(Module):
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-    Inputs: input, hidden
+    Inputs: input, (h_0, c_0)
         input: A (batch x input_size) tensor containing input features
-        hidden: A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-    Outputs: h', c'
-        h': A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
-        c': A (batch x hidden_size) tensor containing the next cell state for each element in the batch
+        h_0: A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        c_0: A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+    Outputs: h_1, c_1
+        h_1: A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
+        c_1: A (batch x hidden_size) tensor containing the next cell state for each element in the batch
     Members:
         weight_ih: the learnable input-hidden weights, of shape (input_size x hidden_size)
         weight_hh: the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
@@ -317,7 +320,7 @@ class LSTMCell(Module):
         bias_hh: the learnable hidden-hidden bias, of shape (hidden_size)
     Examples:
         >>> rnn = nn.LSTMCell(10, 20)
-        >>> input = Variable(torch.randn(6, 3, 10))
+        >>> input = Variable(torch.randn(3, 10))
         >>> hx = Variable(torch.randn(3, 20))
         >>> cx = Variable(torch.randn(3, 20))
         >>> output = []
