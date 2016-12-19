@@ -69,6 +69,10 @@ std::size_t ByteArray::length() const {
   return _length;
 }
 
+std::string ByteArray::to_string() {
+  return std::string(_data, _length);
+}
+
 ByteArray ByteArray::fromData(const char* arr, std::size_t size) {
   char* new_arr = static_cast<char*>(std::malloc(size));
   if (new_arr == nullptr) {

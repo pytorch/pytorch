@@ -41,7 +41,7 @@ bool RPCMessage::isEmpty() const {
   return _offset >= _msg.length();
 }
 
-std::size_t RPCMessage::remaining() const {
+RPCMessage::size_type RPCMessage::remaining() const {
   return _msg.length() - _offset;
 }
 
@@ -51,10 +51,6 @@ const char* RPCMessage::read(std::size_t num_bytes) {
   const char* ret_val = _msg.data() + _offset;
   _offset += num_bytes;
   return ret_val;
-}
-
-void RPCMessage::freeMessage(void *data, void *hint) {
-  delete static_cast<RPCMessage*>(hint);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

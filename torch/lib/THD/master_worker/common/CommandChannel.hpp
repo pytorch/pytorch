@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <zmq.hpp>
+#include <asio.hpp>
 
 namespace thd {
 
@@ -18,13 +18,12 @@ struct MasterCommandChannel {
   void sendMessage(std::unique_ptr<rpc::RPCMessage> msg, int rank);
 
 private:
-  zmq::context_t _context;
-  const int _rank;
-  int _world_size; // MUST be declared before sockets.
-  std::vector<zmq::socket_t> _pull_sockets;
-  std::vector<zmq::socket_t> _push_sockets;
-  std::vector<std::string> _pull_endpoints;
-  std::vector<std::string> _push_endpoints;
+  int _rank;
+  asio::io_service _io;
+  int _world_size;
+  std::vector<asio::ip::tcp::socket> _sockets;
+
+  void _load_env(unsigned short& port, int& world_size);
 };
 
 struct WorkerCommandChannel {
@@ -35,12 +34,11 @@ struct WorkerCommandChannel {
   void sendMessage(std::unique_ptr<rpc::RPCMessage> msg);
 
 private:
-  zmq::context_t _context; // MUST be declared before sockets.
-  zmq::socket_t _pull_socket;
-  zmq::socket_t _push_socket;
-  std::string _pull_endpoint;
-  std::string _push_endpoint;
   int _rank;
+  asio::io_service _io;
+  asio::ip::tcp::socket _socket;
+
+  void _load_env(std::string& ip_addr, unsigned short& port);
 };
 
 } // namespace thd
