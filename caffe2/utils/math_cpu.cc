@@ -103,7 +103,7 @@ void Gemm<float, CPUContext>(
 }
 
 template <>
-void Gemm<float, CPUContext>(
+void GemmEx<float, CPUContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
     const int M,
@@ -113,8 +113,8 @@ void Gemm<float, CPUContext>(
     const float* A,
     const int lda,
     const float* B,
-    const float beta,
     const int ldb,
+    const float beta,
     float* C,
     const int ldc,
     CPUContext*) {
@@ -280,11 +280,21 @@ void Gemm<float, CPUContext>(
 }
 
 template <>
-void Gemm<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K, const float alpha, const float* A,
-    const int lda, const float* B, const float beta, const int ldb, float* C,
-    const int ldc, CPUContext* context) {
+void GemmEx<float, CPUContext>(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const float* A,
+    const int lda,
+    const float* B,
+    const int ldb,
+    const float beta,
+    float* C,
+    const int ldc,
+    CPUContext* context) {
   cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
               beta, C, ldc);
 }

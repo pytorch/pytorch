@@ -86,10 +86,10 @@ void Gemm<float, CUDAContext>(
 }
 
 template <>
-void Gemm<float, CUDAContext>(
+void GemmEx<float, CUDAContext>(
     const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
     const int M, const int N, const int K, const float alpha, const float* A,
-    const int lda, const float* B, const float beta, const int ldb, float* C,
+    const int lda, const float* B, const int ldb, const float beta, float* C,
     const int ldc, CUDAContext* context) {
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
