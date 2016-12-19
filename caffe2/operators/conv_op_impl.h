@@ -229,7 +229,6 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             col_buffer_data,
             &context_);
         // Weight term
-        // Wait, is this right....?
         math::Gemm<T, Context>(
             CblasNoTrans,
             CblasTrans,
