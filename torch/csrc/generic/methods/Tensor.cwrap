@@ -581,18 +581,17 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: gather
-  defined_if: "!IS_CUDA"
   with_stateless: True
   return: argument 0
   before_call: |
-    THLongStoragePtr _size = THLongTensor_newSizeOf(LIBRARY_STATE ((THPLongTensor*)$arg3)->cdata);
+    THLongStoragePtr _size = THIndexTensor_(newSizeOf)(LIBRARY_STATE ((THPIndexTensor*)$arg3)->cdata);
     THTensor_(resize)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, _size, NULL);
   arguments:
     - arg: THTensor* result
       allocate: True
     - THTensor* self
     - long dim
-    - THLongTensor* index
+    - THIndexTensor* index
 ]]
 
 [[
@@ -665,7 +664,6 @@ invalid_arguments:
 
 [[
   name: equal
-  defined_if: "!IS_CUDA"
   with_stateless: True
   return: bool
   arguments:

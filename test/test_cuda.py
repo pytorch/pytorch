@@ -139,7 +139,7 @@ tests = [
     ('eq',            small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
     ('ne',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
     ('ne',            small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
-    ('equal',         small_3d_ones,      lambda t: [small_3d_ones(t)],                                     ),
+    ('equal',         small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
     ('equal',         small_3d_ones,      lambda t: [small_3d(t)],                                          ),
     ('expand',        new_t(M, 1, M),     lambda t: [M, 4, M],                                              ),
     ('expand_as',     new_t(M, 1, M),     lambda t: [new_t(M, 4, M)(t)],                                    ),
