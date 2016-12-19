@@ -819,7 +819,6 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THCPShortStorage_init(module));
   ASSERT_TRUE(THCPCharStorage_init(module));
   ASSERT_TRUE(THCPByteStorage_init(module));
-  ASSERT_TRUE(THCPHalfStorage_init(module));
 
   ASSERT_TRUE(THCPDoubleTensor_init(module));
   ASSERT_TRUE(THCPFloatTensor_init(module));
