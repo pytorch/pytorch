@@ -262,15 +262,15 @@ bool THCPModule_initCuda(PyObject *module_dict) {
 
 #ifdef USE_MAGMA
   THCMagma_init(state);
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasMagma", PyBool_FromLong(true)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_magma", PyBool_FromLong(true)) != -1);
 #else
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasMagma", PyBool_FromLong(false)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_magma", PyBool_FromLong(false)) != -1);
 #endif
 
 #ifdef CUDA_HALF_TENSOR
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasHalf", PyBool_FromLong(true)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_half", PyBool_FromLong(true)) != -1);
 #else
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasHalf", PyBool_FromLong(false)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_half", PyBool_FromLong(false)) != -1);
 #endif
 
   ASSERT_TRUE(THCPModule_loadClasses(module_dict));
