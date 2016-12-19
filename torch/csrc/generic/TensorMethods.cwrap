@@ -28,9 +28,13 @@
 #endif
 
 #if IS_CUDA
+#define THIndexTensor THCudaLongTensor
+#define THIndexTensor_(NAME) TH_CONCAT_2(THCudaLongTensor_,NAME)
 #define THPIndexTensor THCPLongTensor
 #define THPIndexTensorClass THCPLongTensorClass
 #else
+#define THIndexTensor THLongTensor
+#define THIndexTensor_(NAME) TH_CONCAT_2(THLongTensor_,NAME)
 #define THPIndexTensor THPLongTensor
 #define THPIndexTensorClass THPLongTensorClass
 #endif
@@ -74,6 +78,8 @@ typedef THLongStorage THStride;
 #undef CUDA_FLOAT
 #undef CUDA_DOUBLE
 #undef CUDA_HALF
+#undef THIndexTensor
+#undef THIndexTensor_
 #undef THPIndexTensor
 #undef THPIndexTensorClass
 #undef THPBoolTensor
