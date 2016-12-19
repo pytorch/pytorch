@@ -1,7 +1,6 @@
 # pytorch [alpha-5]
 
-- [What is PyTorch?](#what-is-pytorch)
-- [Reasons to consider PyTorch](#reasons-to-consider-pytorch)
+- [About PyTorch?](#about-pytorch)
 - [Installation](#installation)
   - [Binaries](#binaries)
   - [From source](#from-source)
@@ -24,9 +23,13 @@ We will be announcing API changes and important developments via a newsletter, g
 Please remember that at this stage, this is an invite-only closed alpha, and please don't distribute code further.
 This is done so that we can control development tightly and rapidly during the initial phases with feedback from you.
 
-## What is PyTorch?
+## About PyTorch?
 
-PyTorch is a library that consists of the following components:
+PyTorch is a python package with the goal of providing GPU-optimized Tensor computation and deep learning.
+You can reuse your favorite python packages such as numpy, scipy and Cython to extend PyTorch to your own needs,
+or use the simple extension API that we provide.
+
+At a granular level, PyTorch is a library that consists of the following components:
 
 | \_                       | \_ |
 | ------------------------ | --- |
@@ -43,38 +46,63 @@ Usually one uses PyTorch either as:
 - A replacement for numpy to use the power of GPUs.
 - a deep learning research platform that provides maximum flexibility and speed
 
-## Reasons to consider PyTorch
+Elaborating further:
+
+### A GPU-ready Tensor library
+
+If you use numpy, then you have used Tensors (a.k.a ndarray).
+
+![tensor_illustration](docs/image/tensor_illustration.png)
+
+PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
+compute by a huge amount.
+
+We provide 300+ tensor routines to accelerate and fit your scientific computation needs.  
+And they are fast!
+
+### Dynamic Neural Networks: Tape based Autograd
+
+PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
+
+Most frameworks such as `TensorFlow`, `Theano`, `Caffe` and `CNTK` have a static view of the world.
+One has to build a neural network, and reuse the same structure again and again.
+Changing the way the network behaves means that one has to start from scratch.
+
+With PyTorch, we use a technique called Reverse-mode auto-differentiation, which allows you to
+change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
+from several research papers on this topic, as well as current and past work such as [autograd](https://github.com/twitter/torch-autograd), [autograd](https://github.com/HIPS/autograd), [Chainer](http://chainer.org), etc.
+
+While this technique is not unique to PyTorch, it's definitely the fastest implementation of it.  
+You get the best of speed and flexibility for your crazy research.
 
 ### Python first
 
 PyTorch is not a Python binding into a monolothic C++ framework.  
 It is built to be deeply integrated into Python.  
 You can use it naturally like you would use numpy / scipy / scikit-learn etc.  
-You can write your new neural network layers in Python itself, using your favorite libraries.
+You can write your new neural network layers in Python itself, using your favorite libraries
+and use packages such as Cython and Numba.  
+We dont want to reinvent the wheel, we want to reuse all the wheels that have been built.
 
-### Imperativeness first. What you see is what you get!
+### Imperative experiences
 
-PyTorch is designed to be intuitive and easy to use.  
-When you are debugging your program, or receive error messages / stack traces, you are always guaranteed to get
-error messages that are easy to understand and a stack-trace that points to exactly where your code was defined.
-Never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
+PyTorch is designed to be intuitive, linear in thought and easy to use.
+When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
+When you drop into a debugger, or receive error messages and stack traces, understanding them is straight-forward, as and easy to understand.
+The stack-trace points to exactly where your code was defined.
+We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
 
-### Performance and Memory usage
+### Fast and Lean
 
-PyTorch is as fast as the fastest deep learning framework out there. We integrate acceleration frameworks such as Intel MKL and NVIDIA CuDNN for maximum speed.
+PyTorch is as fast as the fastest deep learning framework out there. We integrate acceleration frameworks such as Intel MKL and NVIDIA (CuDNN, NCCL) for maximum speed. You can use multiple GPUs and machines with maximum efficiency.
 
-The memory usage in PyTorch is extremely efficient, and we've written custom memory allocators for the GPU to make sure that your
-deep learning models are maximally memory efficient. This enables you to train bigger deep learning models than before.
+The memory usage in PyTorch is extremely efficient. We've written custom memory allocators for the GPU to make sure that your deep learning models are maximally memory efficient. This enables you to train bigger deep learning models than before.
 
-### Multi-GPU ready
-
-PyTorch is fully powered to efficiently use Multiple GPUs for accelerated deep learning.  
-We integrate efficient multi-gpu collectives such as NVIDIA NCCL to make sure that you get the maximal Multi-GPU performance.
-
-### Simple Extension API to interface with C
+### Extensions without pain
 
 Writing new neural network modules, or interfacing with PyTorch's Tensor API is a breeze, thanks to an easy to use
-extension API that is efficient and easy to use.
+extension API that is efficient and easy to use. Writing C or Cython functions to add new neural network modules
+is straight-forward and painless. At the core, all the value of PyTorch -- it's CPU and GPU Tensor and NeuralNet backends -- are written in simple libraries with a C99 API. They are mature and have been tested for years.
 
 ## Installation
 
@@ -228,30 +256,3 @@ tensors = [torch.Tensor(2, 2) for i in range(100)]
 pool = Pool(10)
 pool.map(fill_pool, tensors)
 ```
-
-#### Some notes on new nn implementation
-
-As shown above, structure of the networks is fully defined by control-flow embedded in the code. There are no rigid containers known from Lua. You can put an `if` in the middle of your model and freely branch depending on any condition you can come up with. All operations are registered in the computational graph history.
-
-There are two main objects that make this possible - variables and functions. They will be denoted as squares and circles respectively.
-
-![Variable and function symbols](http://students.mimuw.edu.pl/~ap360585/__torch_img/variable_function.png)
-
-Variables are the objects that hold a reference to a tensor (and optionally to gradient w.r.t. that tensor), and to the function in the computational graph that created it. Variables created explicitly by the user (`Variable(tensor)`) have a Leaf function node associated with them.
-
-![Variable and leaf function](http://students.mimuw.edu.pl/~ap360585/__torch_img/variable_leaf.png)
-
-Functions are simple classes that define a function from a tuple of inputs to a tuple of outputs, and a formula for computing gradient w.r.t. it's inputs. Function objects are instantiated to hold references to other functions, and these references allow to reconstruct the history of a computation. An example graph for a linear layer (`Wx + b`) is shown below.
-
-![Linear layer](http://students.mimuw.edu.pl/~ap360585/__torch_img/linear.png)
-
-Please note that function objects never hold references to Variable objects, except for when they're necessary in the backward pass. This allows to free all the unnecessary intermediate values. A good example for this is addition when computing e.g. (`y = Wx + My`):
-
-![Freeing intermediate values](http://students.mimuw.edu.pl/~ap360585/__torch_img/intermediate_free.png)
-
-Matrix multiplication operation keeps references to it's inputs because it will need them, but addition doesn't need `Wx` and `My` after it computes the result, so as soon as they go out of scope they are freed. To access intermediate values in the forward pass you can either copy them when you still have a reference, or you can use a system of hooks that can be attached to any function. Hooks also allow to access and inspect gradients inside the graph.
-
-Another nice thing about this is that a single layer doesn't hold any state other than it's parameters (all intermediate values are alive as long as the graph references them), so it can be used multiple times before calling backward. This is especially convenient when training RNNs. You can use the same network for all timesteps and the gradients will sum up automatically.
-
-To compute backward pass you can call `.backward()` on a variable if it's a scalar (a 1-element Variable), or you can provide a gradient tensor of matching shape if it's not. This creates an execution engine object that manages the whole backward pass. It's been introduced, so that the code for analyzing the graph and scheduling node processing order is decoupled from other parts, and can be easily replaced. Right now it's simply processing the nodes in topological order, without any prioritization, but in the future we can implement algorithms and heuristics for scheduling independent nodes on different GPU streams, deciding which branches to compute first, etc.
-
