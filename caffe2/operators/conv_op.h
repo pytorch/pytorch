@@ -43,7 +43,7 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
-  OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
+  OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
 } // namespace caffe2

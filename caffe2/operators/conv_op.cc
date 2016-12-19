@@ -7,7 +7,7 @@ REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ConvGradient, ConvGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Conv)
-  .NumInputs(3)
+  .NumInputs(2,3)
   .NumOutputs(1)
   .SetDoc(R"DOC(
 The convolution operator consumes an input vector, the filter blob and the bias
@@ -35,16 +35,32 @@ why they are separate files.
   "stride size, and pad lengths."
   "");
 
-OPERATOR_SCHEMA(ConvGradient).NumInputs(3).NumOutputs(2, 3);
+OPERATOR_SCHEMA(ConvGradient).NumInputs(2,3).NumOutputs(2, 3);
 
 class GetConvGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CAFFE_ENFORCE(3 == def_.input_size());
+    // todo(slayton) don't do this.
+    // CAFFE_ENFORCE(3 == def_.input_size());
+
+    vector<string> inputs, outputs;
+
+    ArgumentHelper helper(def_);
+    bool no_bias = static_cast<bool>(helper.GetSingleArgument<int>("no_bias", 0));
+
+    if (no_bias) {
+      // no bias - same inputs, only output dW, dY
+      inputs = vector<string>{I(0), I(1), GO(0)};
+      outputs = vector<string>{GI(1), GI(0)};
+    } else {
+      inputs = vector<string>{I(0), I(1), GO(0)};
+      outputs = vector<string>{GI(1), GI(2), GI(0)};
+    }
+
     return SingleGradientDef(
         "ConvGradient", "",
-        vector<string>{I(0), I(1), GO(0)},
-        vector<string>{GI(1), GI(2), GI(0)});
+        inputs,
+        outputs);
   }
 };
 REGISTER_GRADIENT(Conv, GetConvGradient);

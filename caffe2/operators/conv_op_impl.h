@@ -274,7 +274,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
-  auto* dbias = Output(BIAS_GRAD);
+  auto* dbias = Output(BIAS_OR_INPUT_GRAD);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   ConvPoolOpBase<Context>::ComputePads(H, W);
   CAFFE_ENFORCE(4 == filter.ndim());
@@ -407,7 +407,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
-  auto* dbias = Output(BIAS_GRAD);
+  auto* dbias = Output(BIAS_OR_INPUT_GRAD);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   ConvPoolOpBase<Context>::ComputePads(H, W);
   CAFFE_ENFORCE(4 == filter.ndim());
