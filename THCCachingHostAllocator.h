@@ -25,6 +25,6 @@ THC_API THAllocator THCCachingHostAllocator;
 THC_API cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, cudaStream_t stream);
 
 // Releases cached pinned memory allocations via cudaHostFree
-THC_API void THCCachingHostAllocator_emptyCache();
+THC_API void THCCachingHostAllocator_emptyCache(void);
 
 #endif
