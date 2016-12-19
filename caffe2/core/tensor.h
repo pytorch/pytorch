@@ -304,7 +304,7 @@ class Tensor {
    *
    * To share data between two tensors, the sizes of the two tensors must be
    * equal already. The reason we do not implicitly do a Resize to make the two
-   * tensors have the same shape is that, we want to allow tensors of different
+   * tensors have the same shape is that we want to allow tensors of different
    * shapes but the same number of items to still be able to share data. This
    * allows one to e.g. have a n-dimensional Tensor and a flattened version
    * sharing the same underlying storage.
@@ -329,7 +329,7 @@ class Tensor {
   /**
    * @brief Shares the data with an externally managed pointer.
    *
-   * This is similar to SharData() but the tensor does not take over ownership
+   * This is similar to ShareData() but the tensor does not take over ownership
    * of the pointer, so the caller can explicitly manage the memory storage.
    * One needs to make sure that the external memory is deallocated only after
    * the tensor finishes using it.
