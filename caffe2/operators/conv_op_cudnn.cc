@@ -1,5 +1,6 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_op_cache_cudnn.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
@@ -44,8 +45,10 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
             OperatorBase::GetSingleArgument<int>("exhaustive_search", 0)),
         deterministic_(
             OperatorBase::GetSingleArgument<int>("deterministic", 0)),
-        cudnn_state_(OperatorBase::GetSingleArgument<int>("cudnn_state", 0)) {
-    CAFFE_ENFORCE(!deterministic_ || !exhaustive_search_);
+        cudnn_state_(OperatorBase::GetSingleArgument<int>("cudnn_state", 0)),
+        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+    bias_ = (!no_bias_) ? true : false;
+    CHECK(!deterministic_ || !exhaustive_search_);
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bias_desc_));
@@ -76,6 +79,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   bool exhaustive_search_;
   bool deterministic_;
   size_t cudnn_state_;
+  int no_bias_;
+  bool bias_;
 };
 
 template <typename T>
@@ -114,7 +119,7 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
-  OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
+  OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -125,7 +130,6 @@ template <typename T>
 bool CudnnConvOp<T>::RunOnDevice() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto& bias = Input(BIAS);
   auto* Y = Output(0);
 
   // Figure out the output shape
@@ -152,8 +156,6 @@ bool CudnnConvOp<T>::RunOnDevice() {
   default:
     LOG(FATAL) << "Unknown storage order: " << order_;
   }
-  DCHECK_EQ(bias.ndim(), 1);
-  DCHECK_EQ(bias.dim32(0), M);
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.dims() != cudnn_input_dims_);
@@ -176,9 +178,11 @@ bool CudnnConvOp<T>::RunOnDevice() {
           C,
           kernel_h_,
           kernel_w_));
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          bias_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
-          1, M, 1, 1));
+      if (bias_) {
+        CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+              bias_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
+              1, M, 1, 1));
+      }
     }
     // Set the output
     CUDNN_CHECK(cudnnSetTensor4dDescriptor(
@@ -267,14 +271,21 @@ bool CudnnConvOp<T>::RunOnDevice() {
         Y->template mutable_data<T>()));
   });
   // Bias
-  CUDNN_CHECK(cudnnAddTensor(
-      cudnn_wrapper_.inline_cudnn_handle(),
-      cudnnTypeWrapper<T>::kOne(),
-      bias_desc_,
-      bias.template data<T>(),
-      cudnnTypeWrapper<T>::kOne(),
-      top_desc_,
-      Y->template mutable_data<T>()));
+  if (bias_) {
+    auto& bias = Input(BIAS);
+
+    DCHECK_EQ(bias.ndim(), 1);
+    DCHECK_EQ(bias.dim32(0), M);
+
+    CUDNN_CHECK(cudnnAddTensor(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        cudnnTypeWrapper<T>::kOne(),
+        bias_desc_,
+        bias.template data<T>(),
+        cudnnTypeWrapper<T>::kOne(),
+        top_desc_,
+        Y->template mutable_data<T>()));
+  }
   // Done.
   return true;
 }
@@ -287,7 +298,6 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
-  auto* dbias = Output(BIAS_GRAD);
 
   DCHECK_EQ(X.ndim(), 4);
   DCHECK_EQ(filter.ndim(), 4);
@@ -313,7 +323,6 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
   }
   ConvPoolOpBase<CUDAContext>::ComputePads(H, W);
   dfilter->ResizeLike(filter);
-  dbias->Resize(TIndex(M));
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.dims() != cudnn_input_dims_);
@@ -336,9 +345,11 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
           C,
           kernel_h_,
           kernel_w_));
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          bias_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
-          1, M, 1, 1));
+      if (bias_) {
+        CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+            bias_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
+            1, M, 1, 1));
+      }
     }
     // Set the output
     CUDNN_CHECK(cudnnSetTensor4dDescriptor(
@@ -404,7 +415,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
             return filter_perf_stat[0].algo;
           });
 
-      if (OutputSize() == 3) {
+      if (OutputSize() == 3 || (!bias_ && (OutputSize() == 2))) {
         bwd_data_algo_ =
             data_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
               VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive search.";
@@ -416,7 +427,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
                   data_perf_stat;
               cudnn_wrapper_.with_cudnn_state(
                   cudnn_state_, [&](CuDNNState* state) {
-                    auto* dX = Output(INPUT_GRAD);
+                    auto* dX = Output(bias_ ? INPUT_GRAD : BIAS_OR_INPUT_GRAD);
                     dX->ResizeLike(X);
                     CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
                         state->cudnn_handle(),
@@ -470,10 +481,14 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
   }
 
   // Now, actually run the computation.
-  CUDNN_CHECK(cudnnConvolutionBackwardBias(
-      cudnn_wrapper_.inline_cudnn_handle(), cudnnTypeWrapper<T>::kOne(), top_desc_,
-      dY.template data<T>(), cudnnTypeWrapper<T>::kZero(), bias_desc_,
-      dbias->template mutable_data<T>()));
+  if (bias_) {
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
+    dbias->Resize(TIndex(M));
+    CUDNN_CHECK(cudnnConvolutionBackwardBias(
+        cudnn_wrapper_.inline_cudnn_handle(), cudnnTypeWrapper<T>::kOne(), top_desc_,
+        dY.template data<T>(), cudnnTypeWrapper<T>::kZero(), bias_desc_,
+        dbias->template mutable_data<T>()));
+  }
 
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
     CUDNN_CHECK(cudnnConvolutionBackwardFilter(
@@ -490,9 +505,9 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         cudnnTypeWrapper<T>::kZero(),
         filter_desc_,
         dfilter->template mutable_data<T>()));
-    if (OutputSize() == 3) {
+    if (OutputSize() == 3 || (!bias_ && (OutputSize() == 2))) {
       // Compute the gradient w.r.t. the input.
-      auto* dX = Output(INPUT_GRAD);
+      auto* dX = Output(bias_ ? INPUT_GRAD : BIAS_OR_INPUT_GRAD);
       dX->ResizeLike(X);
       CUDNN_CHECK(cudnnConvolutionBackwardData(
           state->cudnn_handle(),
