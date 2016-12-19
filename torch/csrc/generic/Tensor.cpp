@@ -419,8 +419,8 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     return false;                                                              \
   }                                                                            \
   if (idx < 0 || idx >= dimsize) {                                             \
-    PyErr_Format(PyExc_IndexError, "index %ld is out of range for dimension "  \
-        "%ld (of size %ld)", idx, DIM, dimsize);                               \
+    PyErr_Format(PyExc_IndexError, "index %lld is out of range for dimension "  \
+        "%lld (of size %lld)", (long long)idx, (long long)DIM, (long long)dimsize); \
     return false;                                                              \
   }                                                                            \
                                                                                \
