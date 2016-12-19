@@ -17,7 +17,7 @@ class LearningRateOp final : public Operator<Context> {
         base_lr_(
             OperatorBase::template GetSingleArgument<float>(
                 "base_lr", FLT_MAX)) {
-    CHECK_NE(base_lr_, FLT_MAX) << "Base learning rate must be set.";
+    CAFFE_ENFORCE_NE(base_lr_, FLT_MAX, "Base learning rate must be set.");
     const string policy = OperatorBase::GetSingleArgument<string>("policy", "");
     CAFFE_ENFORCE(policy.size(), "Must specify a learning rate policy.");
     if (policy == "fixed") {

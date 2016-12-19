@@ -44,7 +44,20 @@ struct PinnedCPUAllocator final : CPUAllocator {
     return data;
   }
   void Delete(void* data) override {
-    CUDA_CHECK(cudaFreeHost(data));
+    // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs
+    // or not. If a CUDAContext::New() call is made, inside the CUDAContext
+    // function we will switch the cpu side allocator to a PinnedCPUAllocator.
+    // But, if one calls CPUContext::New() before any cuda allocations,
+    // PinnedCPUAllocator can still delete the corresponding memory.
+    cudaError_t err = cudaFreeHost(data);
+    if (err == cudaErrorInvalidValue) {
+      free(data);
+      // Calling cudaGetLastError will reset the cuda error.
+      cudaGetLastError();
+    } else {
+      // For all other errors, still do a cuda check.
+      CUDA_CHECK(err);
+    }
   }
 };
 
@@ -89,24 +102,14 @@ class ThreadLocalCUDAObjects {
 class CUDAContext final {
  public:
   // The default cuda context constructor.
-  explicit CUDAContext(const int gpu_id = -1)
-      : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id)
-      , random_seed_(math::randomNumberSeed()) {
-  }
-
-  explicit CUDAContext(const DeviceOption& option)
-      : gpu_id_(option.has_cuda_gpu_id() ?
-                option.cuda_gpu_id() : GetDefaultGPUID()),
-        random_seed_(option.has_random_seed() ?
-                     option.random_seed() : math::randomNumberSeed()) {
-    DCHECK_EQ(option.device_type(), CUDA);
-  }
+  explicit CUDAContext(const int gpu_id = -1);
+  explicit CUDAContext(const DeviceOption& option);
 
   ~CUDAContext() {
     if (curand_generator_) {
       CURAND_CHECK(curandDestroyGenerator(curand_generator_));
     }
-    CHECK(FinishDeviceComputation());
+    CAFFE_ENFORCE(FinishDeviceComputation());
   }
 
   inline void SwitchToDevice() {

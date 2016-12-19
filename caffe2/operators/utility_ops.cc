@@ -7,6 +7,7 @@ REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Flatten, FlattenOp<CPUContext>);
 REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
+
 REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Sum, SumOp<float, CPUContext>);
@@ -15,6 +16,8 @@ REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(MaxGradient, MaxGradientOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<float, CPUContext>);
 // From whatever the current context, ensure the output is TensorCPU
 REGISTER_CPU_OPERATOR(
@@ -36,6 +39,7 @@ REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SegmentIdsToRanges, SegmentIdsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
@@ -74,7 +78,9 @@ When the second input is absent, an extra argument `shape` must be specified.
 It outputs the reshaped tensor as well as the original shape.
 
 At most one dimension of the new shape can be -1. In this case, the value is
-inferred from the size of the tensor and the remaining dimensions.
+inferred from the size of the tensor and the remaining dimensions. A dimension
+could also be 0, in which case the actual dimension value is going to be copied
+from the input tensor.
 )DOC")
     .Arg("shape", "New shape")
     .Input(0, "data", "An input tensor.")
@@ -232,6 +238,21 @@ Currently only works on CPU because of access to INDICES.
     .Output(0, "X_0", "Has to be exactly the same tensor as the input 0")
     .EnforceInplace({{0, 0}});
 
+OPERATOR_SCHEMA(Max)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Element-wise max of each of the input tensors. The first input tensor can be
+used in-place as the output tensor, in which case the max will be done in
+place and results will be accumulated in input0. All inputs and outputs must
+have the same shape and data type.
+)DOC")
+    .Input(0, "data_0", "First of the input tensors. Can be inplace.")
+    .Output(0, "max", "Output tensor. Same dimension as inputs.");
+
+OPERATOR_SCHEMA(MaxGradient).NumInputs(3, INT_MAX).NumOutputs(1, INT_MAX);
+
 OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
     .NumOutputs(1)
@@ -266,6 +287,24 @@ OPERATOR_SCHEMA(Copy)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc("Copy input tensor into output, potentially across devices.")
+    .Input(0, "input", "The input tensor.")
+    .Output(0, "output", "Tensor that will contain a copy of the input.");
+
+OPERATOR_SCHEMA(CopyGPUToCPU)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Copy tensor for GPU to CPU context. Must be run under GPU device option.
+)DOC")
+    .Input(0, "input", "The input tensor.")
+    .Output(0, "output", "Tensor that will contain a copy of the input.");
+
+OPERATOR_SCHEMA(CopyCPUToGPU)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Copy tensor for CPU to GPU context. Must be run under GPU device option.
+)DOC")
     .Input(0, "input", "The input tensor.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
 
@@ -428,18 +467,41 @@ For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
         "2D tensor of shape len(lengths) X 2 and the same type as `lengths`");
 
 OPERATOR_SCHEMA(SegmentIdsToLengths)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 Transfers a vector of segment ids to a vector of segment lengths. This operation
 supports non-consecutive segment ids. Segments not appearing in the input vector
-will have length 0. The range of segments of interest has ids [0, last id in the
-input vector].
+will have length 0. If the second input is provided, the number of segments =
+the size of its first dimension. Otherwise, the number of segments
+= the last index in the first input vector + 1.
+
 In general, for consecutive, zero-based segment IDs, this is the inverse
 operation of LengthsToSegmentIds, except that a vector of segment IDs
-cannot represent empty segments at the end.
+cannot represent empty segments at the end (if the second input is absent).
 )DOC")
     .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
+    .Input(
+        1,
+        "data (optional)",
+        "if provided, number of segments = the size of its first dimension")
+    .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
+
+OPERATOR_SCHEMA(SegmentIdsToRanges)
+    .NumInputs(1, 2)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Transfers a vector of segment ids to a vector of segment ranges. This operation
+supports non-consecutive segment ids. Segments not appearing in the input vector
+will have length 0. If the second input is provided, the number of segments =
+the size of its first dimension. Otherwise, the number of segments
+= the last index in the first input vector + 1.
+)DOC")
+    .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
+    .Input(
+        1,
+        "data (optional)",
+        "if provided, number of segments = the size of its first dimension")
     .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
 
 OPERATOR_SCHEMA(SegmentIdsToLengthWeights)
@@ -588,6 +650,20 @@ SHOULD_NOT_DO_GRADIENT(WeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
 
+class GetMaxGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    auto gradInputs = vector<string>();
+    auto inputs = vector<string>{O(0), GO(0)};
+    for (int i = 0; i < def_.input_size(); i++) {
+      gradInputs.push_back(GI(i));
+      inputs.push_back(I(i));
+    }
+    return SingleGradientDef("MaxGradient", "", inputs, gradInputs);
+  }
+};
+REGISTER_GRADIENT(Max, GetMaxGradient);
+
 // TODO(jiayq): Copy is a bit tricky because one need to figure out correctly
 // where the input lies (e.g. for muji, which gpu). Right now I am marking it
 // as not gradient ready.
@@ -607,9 +683,38 @@ class GetGatherGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Gather, GetGatherGradient);
+
+struct GetFlattenToVecGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "ResizeLike", "", vector<string>{GO(0), I(0)}, vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(FlattenToVec, GetFlattenToVecGradient);
+
+struct GetGPUToCPUGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "CopyCPUToGPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(CopyGPUToCPU, GetGPUToCPUGradient);
+
+struct GetCPUToGPUGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "CopyGPUToCPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(CopyCPUToGPU, GetCPUToGPUGradient);
+
 SHOULD_NOT_DO_GRADIENT(Unique);
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
+SHOULD_NOT_DO_GRADIENT(SegmentIdsToRanges);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
 // TODO(azzolini): Add support for slice gradient
 SHOULD_NOT_DO_GRADIENT(Slice);

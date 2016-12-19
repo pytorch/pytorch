@@ -5,6 +5,7 @@
 #include <vector>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -44,8 +45,8 @@ class PackSegmentsOp final : public Operator<Context> {
 
     // Find the length of the longest sequence.
     const T* l = lengths.template data<T>();
-    T max_length = l[0];
-    for (T i = 1; i < lengths.dim(0); ++i) {
+    T max_length = 0;
+    for (T i = 0; i < lengths.dim(0); ++i) {
       max_length = std::max(max_length, l[i]);
     }
 
@@ -53,15 +54,26 @@ class PackSegmentsOp final : public Operator<Context> {
     shape[0] = max_length;
     shape.insert(shape.begin(), lengths.size());
     output->Resize(shape);
+    // create output tensor
+    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
-    // Do zero padding
-    float* data_ptr = output->template mutable_data<float>();
-    memset(data_ptr, padding_, sizeof(float) * output->size());
+    if (!data.dim(0)) {
+      // Return empty output (with the proper shape)
+      return true;
+    }
+
+    // Do padding
+    if (output->template IsType<float>()) {
+      math::Set<float, Context>(
+          output->size(),
+          padding_,
+          output->template mutable_data<float>(),
+          &context_);
+    }
 
     int block_size = data.size() / data.dim(0);
     int block_bytesize = data.nbytes() / data.dim(0);
     const auto* d = static_cast<const char*>(data.raw_data());
-    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
     int start = 0;
     for (int i = 0; i < lengths.dim(0); ++i) {
       context_.template CopyItems<Context, Context>(
@@ -103,8 +115,8 @@ class UnpackSegmentsOp final : public Operator<Context> {
 
     const T* l = lengths.template data<T>();
 
-    T max_length = l[0];
-    for (T i = 1; i < lengths.dim(0); ++i) {
+    T max_length = 0;
+    for (T i = 0; i < lengths.dim(0); ++i) {
       max_length = std::max(max_length, l[i]);
     }
     T total_l = std::accumulate(l, l + lengths.dim(0), 0);
@@ -115,10 +127,14 @@ class UnpackSegmentsOp final : public Operator<Context> {
     shape.erase(shape.begin());
     shape[0] = total_l;
     output->Resize(shape);
+    // create output tensor
+    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+    if (!(data.dim(0) * data.dim(1))) {
+      return true;
+    }
     int block_size = data.size() / (data.dim(0) * data.dim(1));
     int block_bytesize = data.nbytes() / (data.dim(0) * data.dim(1));
     const auto* d = static_cast<const char*>(data.raw_data());
-    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
     int start = 0;
     for (int i = 0; i < lengths.dim(0); ++i) {
       context_.template CopyItems<Context, Context>(

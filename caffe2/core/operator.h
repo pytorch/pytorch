@@ -25,23 +25,24 @@ class OperatorBase {
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   virtual ~OperatorBase() {}
 
-  // Parameter getters. You can use these to get the arguments that you want.
-  inline bool HasArgument(const string& name) {
+  /** @brief Checks if the operator has an argument of the given name.
+   */
+  inline bool HasArgument(const string& name) const {
     return arg_helper_.HasArgument(name);
   }
 
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
-  inline T GetSingleArgument(const string& name, const T& default_value) {
+  inline T GetSingleArgument(const string& name, const T& default_value) const {
     return arg_helper_.GetSingleArgument<T>(name, default_value);
   }
   template <typename T>
-  inline bool HasSingleArgumentOfType(const string& name) {
+  inline bool HasSingleArgumentOfType(const string& name) const {
     return arg_helper_.HasSingleArgumentOfType<T>(name);
   }
   template <typename T>
-  inline vector<T> GetRepeatedArgument(const string& name) {
+  inline vector<T> GetRepeatedArgument(const string& name) const {
     return arg_helper_.GetRepeatedArgument<T>(name);
   }
 
@@ -49,13 +50,27 @@ class OperatorBase {
   template <typename T>
   inline const T& Input(int idx) {
     DCHECK_LT(idx, inputs_.size());
-    return inputs_.at(idx)->template Get<T>();
+    try {
+      return inputs_.at(idx)->template Get<T>();
+    } catch (::caffe2::EnforceNotMet& enf) {
+      enf.AppendMessage(".\nOffending Blob name: ");
+      enf.AppendMessage(operator_def_.input(idx));
+      enf.AppendMessage(".\n");
+      throw enf;
+    }
   }
 
   template <typename T>
   inline T* Output(int idx) {
-    DCHECK_LT(idx, outputs_.size());
     return outputs_.at(idx)->template GetMutable<T>();
+  }
+
+  inline const Blob& InputBlob(int idx) {
+    return *inputs_.at(idx);
+  }
+
+  inline Blob* OutputBlob(int idx) {
+    return outputs_.at(idx);
   }
 
   template <typename T>
@@ -128,9 +143,6 @@ class OperatorBase {
 template <class Context>
 class Operator : public OperatorBase {
  public:
-  // The constructor of the operator. Note that you should not do any
-  // custom initializations in the constructor; instead, do those in the
-  // SetUp() function.
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws),
         context_(operator_def.device_option()) {
@@ -298,6 +310,36 @@ struct DispatchHelper<TensorTypes<>, ExtraArgs...> {
   }
 };
 
+// The device type registry. This works in two phases:
+// (1) gDeviceTypeRegistry() maps the device types values to the actual operator
+//     registry function.
+// (2) Then, one can call the operator registry function to further create the
+//     operators.
+typedef Registry<std::string, OperatorBase, const OperatorDef&, Workspace*>
+    OperatorRegistry;
+typedef Registry<std::string, OperatorBase, const OperatorDef&, Workspace*>* (
+    *RegistryFunction)();
+std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
+
+struct DeviceTypeRegisterer {
+  explicit DeviceTypeRegisterer(int32_t type, RegistryFunction func) {
+    if (gDeviceTypeRegistry()->count(type)) {
+      std::cerr << "Device type " << type
+                << "registered twice. This should not happen. Did you have "
+                   "duplicated numbers assigned to different devices?";
+      std::exit(1);
+    }
+    // Calling the registry function to get the actual registry pointer.
+    gDeviceTypeRegistry()->emplace(type, func());
+  }
+};
+
+#define CAFFE_REGISTER_DEVICE_TYPE(type, registry_function) \
+  namespace {                                               \
+  static DeviceTypeRegisterer CAFFE_ANONYMOUS_VARIABLE(     \
+      DeviceType)(type, &registry_function);                \
+  }
+
 // The operator registry. Since we are not expecting a great number of devices,
 // we will simply have an if-then type command and allocate the actual
 // generation to device-specific registerers.
@@ -365,6 +407,7 @@ class UnsupportedOperatorFeature : public std::exception {
   }
 
 // Creates an operator with the given operator definition.
+// Throws on error and never returns nullptr
 unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def, Workspace* ws);
 

@@ -184,3 +184,7 @@ class TestMPI(hu.HypothesisTestCase):
                 # simply wait for the guys to finish
                 COMM.barrier()
         workspace.ResetWorkspace()
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

@@ -2,58 +2,50 @@
 #define CAFFE2_UTILS_MKL_UTILS_H_
 #ifdef CAFFE2_USE_MKL
 
-#include <mkl.h>
+#include "caffe2/utils/mkl/mkl_version_check.h"
 
-#include "caffe2/core/logging.h"
+// MKLDNN_CHECK should be used in places where exceptions should not be thrown,
+// such as in destructors.
+#define MKLDNN_CHECK(condition)   \
+  do {                            \
+    dnnError_t error = condition; \
+    CAFFE_ENFORCE_EQ(             \
+        error,                    \
+        E_SUCCESS,                \
+        "Error at : ",            \
+        __FILE__,                 \
+        ":",                      \
+        __LINE__,                 \
+        ", error number: ",       \
+        error);                   \
+  } while (0)
 
-#if INTEL_MKL_VERSION >= 20170000
-#define CAFFE2_HAS_MKL_SGEMM_PACK
-#define CAFFE2_HAS_MKL_DNN
+#define MKLDNN_SAFE_CALL(condition) \
+  do {                              \
+    dnnError_t error = condition;   \
+    CAFFE_ENFORCE_EQ(               \
+        error,                      \
+        E_SUCCESS,                  \
+        "Error at : ",              \
+        __FILE__,                   \
+        ":",                        \
+        __LINE__,                   \
+        ", error number: ",         \
+        error);                     \
+  } while (0)
 
-namespace caffe2 {
-namespace mkl {
+// All caffe2 mkl related headers
 
-struct MKLPackedMatrix {
-  char identifier_;
-  char trans_;
-  int m_;
-  int n_;
-  int k_;
-  float alpha_;
-  int ld_;
-  float* data_ = nullptr;
+#ifdef CAFFE2_HAS_MKL_DNN
+#include "caffe2/utils/mkl/mkl_context.h"
+#include "caffe2/utils/mkl/mkl_dnn_cppwrapper.h"
+#include "caffe2/utils/mkl/mkl_memory.h"
+#include "caffe2/utils/mkl/mkl_operator.h"
+#endif // CAFFE2_HAS_MKL_DNN
 
-  MKLPackedMatrix(
-      const char identifier,
-      const char trans,
-      const int m,
-      const int n,
-      const int k,
-      const float alpha,
-      const float* src,
-      const int ld)
-      : identifier_(identifier),
-        trans_(trans),
-        m_(m),
-        n_(n),
-        k_(k),
-        alpha_(alpha),
-        ld_(ld) {
-    data_ = sgemm_alloc(&identifier, &m, &n, &k);
-    CAFFE_ENFORCE(data_, "MKL runtime error: cannot allocate sgemm memory.");
-    sgemm_pack(&identifier, &trans, &m, &n, &k, &alpha, src, &ld, data_);
-  }
+#ifdef CAFFE2_HAS_MKL_SGEMM_PACK
+#include "caffe2/utils/mkl/sgemm_pack.h"
+#endif // CAFFE2_HAS_MKL_SGEMM_PACK
 
-  ~MKLPackedMatrix() {
-    if (data_) {
-      sgemm_free(data_);
-    }
-  }
-};
-
-} // namespace mkl
-} // namespace caffe2
-
-#endif // INTEL_MKL_VERSION >= 20170000
 #endif // CAFFE2_USE_MKL
 #endif // CAFFE2_UTILS_MKL_UTILS_H_

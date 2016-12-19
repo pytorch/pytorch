@@ -187,8 +187,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   }
 };
 
-#define USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS          \
-  USE_OPERATOR_CONTEXT_FUNCTIONS;                         \
+#define USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context) \
+  USE_OPERATOR_FUNCTIONS(Context);                        \
   using ConvTransposeUnpoolBase<Context>::pad_t_;         \
   using ConvTransposeUnpoolBase<Context>::pad_b_;         \
   using ConvTransposeUnpoolBase<Context>::pad_l_;         \

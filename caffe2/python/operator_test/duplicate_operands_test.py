@@ -22,3 +22,7 @@ class TestDuplicateOperands(TestCase):
         workspace.RunNetOnce(net)
         self.assertTrue(np.allclose(workspace.FetchBlob('X_grad'),
                                     4 * x_in**3))
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

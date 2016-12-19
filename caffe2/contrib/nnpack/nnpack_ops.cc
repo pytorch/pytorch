@@ -76,6 +76,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
         this->order_ == StorageOrder::NCHW,
         "NNPack only supports NCHW order. Please consider adding "
         "TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
+    OPERATOR_NEEDS_FEATURE(
+        __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
   }
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -101,8 +103,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.dim32(1) == C, "");
   CAFFE_ENFORCE(filter.dim32(2) == this->kernel_h_, "");
   CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w_, "");
-  CAFFE_ENFORCE(bias.ndim() == 1, "");
-  CAFFE_ENFORCE(bias.dim32(0) == M, "");
+  CAFFE_ENFORCE(bias.size() == M, "");
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
   if (N > 1) {
     // NNPack only supports stride = 1 when doing batch feedforward
@@ -200,6 +201,8 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
     OPERATOR_NEEDS_FEATURE(
         this->pad_b_ == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
+    OPERATOR_NEEDS_FEATURE(
+        __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
   }
   bool RunOnDeviceWithOrderNCHW() override;
 
@@ -215,12 +218,6 @@ bool NNPACKMaxPoolOp::RunOnDeviceWithOrderNCHW() {
   auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 4, "");
   const int H = X.dim32(2), W = X.dim32(3);
-  CAFFE_ENFORCE(
-      H % 2 == 0,
-      "NNPack MaxPool differs from Caffe2 when Input Size is not even!");
-  CAFFE_ENFORCE(
-      W % 2 == 0,
-      "NNPack MaxPool differs from Caffe2 when Input Size is not even!");
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
   std::vector<int> pads(
       {this->pad_t_, this->pad_b_, this->pad_l_, this->pad_r_});

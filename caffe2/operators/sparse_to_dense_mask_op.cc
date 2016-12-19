@@ -55,7 +55,7 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
     size_t block_nbytes = default_value.nbytes();
 
     int cols = featuresCount_;
-    int rows = 0;
+    int rows = -1;
     int32_t default_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
     auto* output = Output(0);
@@ -66,8 +66,8 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
       lengths_vec = lengths.data<int32_t>();
       rows = lengths.dim32(0);
     }
-    if (rows == 0) {
-      // if the LENGTHS is not set or it is empty, the output will be a vector
+    if (rows == -1) {
+      // if the LENGTHS is not set, the output will be a vector
       rows = 1;
       lengths_vec = &default_length;
     } else {

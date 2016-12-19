@@ -12,7 +12,7 @@ class GatherPaddingOp final : public Operator<CPUContext> {
             OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
             OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
-    CHECK_GE(startPaddingWidth_, 0);
+    CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
     }
@@ -33,7 +33,7 @@ class GatherPaddingOp final : public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CHECK_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
     const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
@@ -68,7 +68,7 @@ class GatherPaddingOp final : public Operator<CPUContext> {
       // check total length consistency
       const auto length = lengths_ptr[i];
       total_length += length;
-      CHECK_LE(total_length, outer_size);
+      CAFFE_ENFORCE_LE(total_length, outer_size);
 
       // accumulate start paddings
       for (int j = 0; j < startPaddingWidth_; ++j) {
@@ -102,7 +102,7 @@ class RemovePaddingOp final : public Operator<CPUContext> {
             OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
             OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
-    CHECK_GE(startPaddingWidth_, 0);
+    CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
     }
@@ -123,7 +123,7 @@ class RemovePaddingOp final : public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CHECK_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
     const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
@@ -151,7 +151,7 @@ class RemovePaddingOp final : public Operator<CPUContext> {
       // check that total length is consistent
       const auto length = lengths_ptr[i];
       total_length += length;
-      CHECK_LE(total_length, outer_size);
+      CAFFE_ENFORCE_LE(total_length, outer_size);
       std::copy(
           in_ptr + block_size * startPaddingWidth_,
           in_ptr + block_size * (length - endPaddingWidth_),
@@ -185,7 +185,7 @@ class AddPaddingOp final : public Operator<CPUContext> {
             OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
             OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
-    CHECK_GE(startPaddingWidth_, 0);
+    CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
     }
@@ -206,7 +206,7 @@ class AddPaddingOp final : public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CHECK_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
     const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
@@ -228,12 +228,12 @@ class AddPaddingOp final : public Operator<CPUContext> {
     const T* padding_end_ptr = nullptr;
     if (InputSize() >= 3) {
       auto& padding_start = Input(2);
-      CHECK_EQ(block_size, padding_start.size());
+      CAFFE_ENFORCE_EQ(block_size, padding_start.size());
       padding_start_ptr = padding_start.data<T>();
     }
     if (InputSize() == 4) {
       auto& padding_end = Input(3);
-      CHECK_EQ(block_size, padding_end.size());
+      CAFFE_ENFORCE_EQ(block_size, padding_end.size());
       padding_end_ptr = padding_end.data<T>();
     } else {
       padding_end_ptr = padding_start_ptr;
@@ -252,7 +252,7 @@ class AddPaddingOp final : public Operator<CPUContext> {
       // check that total length is consistent
       const auto length = lengths_ptr[i];
       total_length += length;
-      CHECK_LE(total_length, outer_size);
+      CAFFE_ENFORCE_LE(total_length, outer_size);
       // copy padding before
       if (!padding_start_ptr) {
         memset(out_ptr, 0, block_size * startPaddingWidth_ * sizeof(T));
@@ -432,7 +432,7 @@ OPERATOR_SCHEMA(AddPadding)
     .SetDoc(R"DOC(
 Given a partitioned tensor T<N, D1..., Dn>, where the partitions are
 defined as ranges on its outer-most (slowest varying) dimension N,
-with given range lengths, return a tensor T<N + 2*pad_width, D1 ..., Dn>
+with given range lengths, return a tensor T<N + 2*padding_width, D1 ..., Dn>
 with paddings added to the start and end of each range.
 Optionally, different paddings can be provided for beginning and end. Paddings
 provided must be a tensor T<D1..., Dn>.
@@ -441,8 +441,12 @@ If no padding is provided, add zero padding.
 If no lengths vector is provided, add padding only once,
 at the start and end of data.
 )DOC")
-    .Arg("pad_width", "Number of copies of padding to add around each range.")
-    .Arg("end_pad_width", "(Optional) Specifies a different end-padding width.")
+    .Arg(
+        "padding_width",
+        "Number of copies of padding to add around each range.")
+    .Arg(
+        "end_padding_width",
+        "(Optional) Specifies a different end-padding width.")
     .Input(0, "data_in", "(T<N, D1..., Dn>) Input data")
     .Input(
         1,
@@ -454,7 +458,7 @@ at the start and end of data.
         "end_padding",
         "T<D1..., Dn> (optional) Padding for range end. "
         "If not provided, start_padding is used as end_padding as well.")
-    .Output(0, "data_out", "(T<N + 2*pad_width, D1..., Dn>) Padded data.")
+    .Output(0, "data_out", "(T<N + 2*padding_width, D1..., Dn>) Padded data.")
     .Output(1, "lengths_out", "(i64, optional) Lengths for each padded range.");
 
 OPERATOR_SCHEMA(RemovePadding)
@@ -465,15 +469,17 @@ Remove padding around the edges of each segment of the input data. This is
 the reverse opration of AddPadding, and uses the same arguments and conventions
 for input and output data format.
 )DOC")
-    .Arg("pad_width", "Outer-size of padding to remove around each range.")
-    .Arg("end_pad_width", "(Optional) Specifies a different end-padding width.")
+    .Arg("padding_width", "Outer-size of padding to remove around each range.")
+    .Arg(
+        "end_padding_width",
+        "(Optional) Specifies a different end-padding width.")
     .Input(0, "data_in", "T<N, D1..., Dn> Input data")
     .Input(
         1,
         "lengths",
         "(i64) Num of elements in each range. sum(lengths) = N. "
         "If not provided, considers all data as a single segment.")
-    .Output(0, "data_out", "(T<N - 2*pad_width, D1..., Dn>) Unpadded data.")
+    .Output(0, "data_out", "(T<N - 2*padding_width, D1..., Dn>) Unpadded data.")
     .Output(
         1,
         "lengths_out",
@@ -486,8 +492,10 @@ OPERATOR_SCHEMA(GatherPadding)
 Gather the sum of start and end paddings in a padded input sequence. Used in
 order to compute the gradients of AddPadding w.r.t the padding tensors.
 )DOC")
-    .Arg("pad_width", "Outer-size of padding present around each range.")
-    .Arg("end_pad_width", "(Optional) Specifies a different end-padding width.")
+    .Arg("padding_width", "Outer-size of padding present around each range.")
+    .Arg(
+        "end_padding_width",
+        "(Optional) Specifies a different end-padding width.")
     .Input(0, "data_in", "T<N, D1..., Dn> Padded input data")
     .Input(
         1,

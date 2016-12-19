@@ -7,13 +7,18 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/core/common_cudnn.h"
 
-#define CTC_CHECK(condition)                                   \
-  do {                                                         \
-    ctcStatus_t status = condition;                            \
-    CHECK_EQ(status, CTC_STATUS_SUCCESS)                 \
-        << " "                                                 \
-        << "Error at: " << __FILE__ << ":" << __LINE__ << ": " \
-        << ::ctcGetStatusString(status);                       \
+#define CTC_CHECK(condition)           \
+  do {                                 \
+    ctcStatus_t status = condition;    \
+    CAFFE_ENFORCE_EQ(                  \
+        status,                        \
+        CTC_STATUS_SUCCESS,            \
+        " Error at: ",                 \
+        __FILE__,                      \
+        ":",                           \
+        __LINE__,                      \
+        ": ",                          \
+        ::ctcGetStatusString(status)); \
   } while (0)
 
 namespace caffe2 {

@@ -17,6 +17,6 @@ class AccuracyOp final : public Operator<Context> {
   INPUT_TAGS(PREDICTION, LABEL);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_ACCURACY_OP_H_
+#endif // CAFFE2_OPERATORS_ACCURACY_OP_H_

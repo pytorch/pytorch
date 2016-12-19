@@ -50,7 +50,7 @@ OPERATOR_SCHEMA(NormalizeGradient).NumInputs(2).NumOutputs(1);
 class GetNormalizeGradient final : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 1);
+    CAFFE_ENFORCE_EQ(def_.input_size(), 1);
     return SingleGradientDef("NormalizeGradient",
                              "",
                              vector<string>{I(0), GO(0)},

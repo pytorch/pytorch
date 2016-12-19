@@ -88,7 +88,7 @@ bool MakeTwoClassOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0);
   auto shape = X.dims();
   shape.push_back(2);
-  CHECK_LT(X.size(), std::numeric_limits<int>::max() / 2);
+  CAFFE_ENFORCE_LT(X.size(), std::numeric_limits<int>::max() / 2);
   Y->Resize(shape);
   int N = X.size();
   MakeTwoClassKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
@@ -102,10 +102,10 @@ bool MakeTwoClassGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
   auto shape = dY.dims();
-  CHECK_GE(shape.size(), 1);
-  CHECK_EQ(shape.back(), 2);
+  CAFFE_ENFORCE_GE(shape.size(), 1);
+  CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();
-  CHECK_LT(dY.size(), std::numeric_limits<int>::max());
+  CAFFE_ENFORCE_LT(dY.size(), std::numeric_limits<int>::max());
   dX->Resize(shape);
   int N = dX->size();
   MakeTwoClassGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,

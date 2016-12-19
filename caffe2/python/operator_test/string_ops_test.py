@@ -104,3 +104,7 @@ class TestStringOps(hu.HypothesisTestCase):
             op,
             [strings],
             string_ends_with_ref)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

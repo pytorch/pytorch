@@ -2,9 +2,9 @@
 #define CAFFE2_OPERATORS_LOCAL_RESPONSE_NORMALIZATION_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -29,12 +29,12 @@ class LRNOpBase : public Operator<Context> {
 
   bool RunOnDevice() override {
     switch (order_) {
-    case StorageOrder::NHWC:
-      return RunOnDeviceWithOrderNHWC();
-    case StorageOrder::NCHW:
-      return RunOnDeviceWithOrderNCHW();
-    default:
-      LOG(FATAL) << "Unknown storage order: " << order_;
+      case StorageOrder::NHWC:
+        return RunOnDeviceWithOrderNHWC();
+      case StorageOrder::NCHW:
+        return RunOnDeviceWithOrderNCHW();
+      default:
+        LOG(FATAL) << "Unknown storage order: " << order_;
     }
     // To suppress old compiler warnings
     return true;
@@ -83,6 +83,6 @@ class LRNGradientOp final : public LRNOpBase<T, Context> {
   INPUT_TAGS(INPUT, OUTPUT, SCALE, OUTPUT_GRAD);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_LOCAL_RESPONSE_NORMALIZATION_OP_H_
+#endif // CAFFE2_OPERATORS_LOCAL_RESPONSE_NORMALIZATION_OP_H_

@@ -21,10 +21,6 @@ CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 
 namespace caffe2 {
 
-// Data type for Tensor Index. We use size_t to be safe here as well as for
-// large matrices that are common in sparse math.
-typedef int64_t TIndex;
-
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
  */
@@ -92,7 +88,7 @@ class Tensor {
   Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
       : meta_(TypeMeta::Make<T>()) {
     Resize(dims);
-    CHECK_EQ(values.size(), size_);
+    CAFFE_ENFORCE_EQ(values.size(), size_);
     T* data = mutable_data<T>();
     for (TIndex i = 0; i < size_; ++i) {
       data[i] = values[i];
@@ -158,9 +154,8 @@ class Tensor {
    * complexity.
    */
   template <class ContextForCopy>
-  void Extend(TIndex num, int growthPct, ContextForCopy* context) {
-    CHECK_GE(dims_.size(), 1);
-    auto oldSize = size_;
+  void Extend(TIndex num, float growthPct, ContextForCopy* context) {
+    CAFFE_ENFORCE_GE(dims_.size(), 1);
     auto newDims = dims_;
     newDims[0] += num;
     if (!data_) {
@@ -168,18 +163,42 @@ class Tensor {
       return;
     }
     auto newSize = std::accumulate(
-        newDims.begin(), newDims.end(), 1, std::multiplies<TIndex>());
-    if (newSize * meta_.itemsize() > capacity_) {
-      auto newCapacity = dims_;
-      newCapacity[0] = std::max(newDims[0], dims_[0] * (growthPct + 100) / 100);
-      auto oldData = std::move(data_);
-      Resize(newCapacity);
-      auto* newData = raw_mutable_data(meta_);
-      context->template CopyItems<ContextForCopy, ContextForCopy>(
-          meta_, oldSize, oldData.get(), newData);
+        newDims.begin(),
+        newDims.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
+    if (newSize * meta_.itemsize() <= capacity_) {
+      dims_ = newDims;
+      size_ = newSize;
+      return;
     }
+    auto newCapacity = dims_;
+    newCapacity[0] = std::max<size_t>(
+        newDims[0], std::ceil(dims_[0] * (growthPct + 100) / 100));
+    Reserve(newCapacity, context);
     dims_ = newDims;
     size_ = newSize;
+  }
+
+  template <class T, class ContextForCopy>
+  void Reserve(const std::vector<T>& newCapacity, ContextForCopy* context) {
+    auto newSize = std::accumulate(
+        newCapacity.begin(),
+        newCapacity.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
+    if (newSize * meta_.itemsize() <= capacity_) {
+      return;
+    }
+    auto oldData = std::move(data_);
+    auto oldSize = size_;
+    auto oldDims = dims_;
+    Resize(newCapacity);
+    auto* newData = raw_mutable_data(meta_);
+    context->template CopyItems<ContextForCopy, ContextForCopy>(
+        meta_, oldSize, oldData.get(), newData);
+    dims_ = oldDims;
+    size_ = oldSize;
   }
 
   /**
@@ -195,7 +214,10 @@ class Tensor {
         "New outer dimension must be smaller than current.");
     dims_[0] = outer_dim;
     size_ = std::accumulate(
-        dims_.begin(), dims_.end(), 1, std::multiplies<TIndex>());
+        dims_.begin(),
+        dims_.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
   }
 
   /**
@@ -242,7 +264,7 @@ class Tensor {
   inline void Reshape(const vector<TIndex>& dims) {
     TIndex new_size = 1;
     for (auto d : dims) {
-      CHECK_GE(d, 0);
+      CAFFE_ENFORCE_GE(d, 0);
       new_size *= d;
     }
     CAFFE_ENFORCE(
@@ -291,8 +313,10 @@ class Tensor {
    */
   void ShareData(const Tensor& src) {
     meta_ = src.meta();
-    CHECK_EQ(src.size_, size_)
-        << "Size mismatch - did you call reshape before sharing the data?";
+    CAFFE_ENFORCE_EQ(
+        src.size_,
+        size_,
+        "Size mismatch - did you call reshape before sharing the data?");
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
@@ -374,9 +398,11 @@ class Tensor {
       return data_.get();
     } else {
       meta_ = meta;
-      CHECK_GE(size_, 0)
-          << "Tensor is not initialized. You probably need to call Resize() "
-          << "before calling mutable_data()";
+      CAFFE_ENFORCE_GE(
+          size_,
+          0,
+          "Tensor is not initialized. You probably need to call Resize() "
+          "before calling mutable_data()");
       if (size_ == 0) {
         return data_.get();
       }
@@ -413,9 +439,11 @@ class Tensor {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data() {
-    CHECK_NE(meta_.id(), 0)
-        << "Calling raw_mutable_data() without meta, but the current meta is "
-           "of unknown type.";
+    CAFFE_ENFORCE_NE(
+        meta_.id(),
+        0,
+        "Calling raw_mutable_data() without meta, but the current meta is "
+        "of unknown type.");
     return raw_mutable_data(meta_);
   }
 
@@ -489,8 +517,8 @@ class Tensor {
   *        Dies on out of range index.
   */
   inline int canonical_axis_index(int axis_index) const {
-    CHECK_GE(axis_index, -ndim());
-    CHECK_LT(axis_index, ndim());
+    CAFFE_ENFORCE_GE(axis_index, -ndim());
+    CAFFE_ENFORCE_LT(axis_index, ndim());
     if (axis_index < 0) {
       return axis_index + ndim();
     }
@@ -516,7 +544,7 @@ class Tensor {
   inline int dim32(const int i) const {
     DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
     DCHECK_GE(i, 0) << "Cannot have negative index";
-    CHECK_LT(dims_[i], std::numeric_limits<int>::max());
+    CAFFE_ENFORCE_LT(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
   }
 

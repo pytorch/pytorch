@@ -8,7 +8,8 @@ from collections import OrderedDict
 
 from caffe2.proto import caffe2_pb2
 from collections import defaultdict
-from caffe2.python import scope, utils, workspace, extension_loader
+from caffe2.python import scope, utils, workspace
+import numpy as np
 
 import caffe2.python._import_c_extension as C
 
@@ -122,6 +123,9 @@ class BlobReference(object):
     def Net(self):
         return self._from_net
 
+    def GetNameScope(self):
+        return self._name[:self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1]
+
     def _CreateAndAddToNet(self, op_type, inputs=None, *args, **kwargs):
         """Internal function that routes the operator generation to the
         network's __getattr__ function.
@@ -156,9 +160,14 @@ class BlobReference(object):
             op_type, *args, **kwargs)
 
 
+def ScopedName(name):
+    """prefix the name with the current scope."""
+    return scope.CurrentNameScope() + name
+
+
 def ScopedBlobReference(name, *args, **kwargs):
     """Returns a blob reference with scope prefixed."""
-    return BlobReference(scope.NAMESCOPE + name, *args, **kwargs)
+    return BlobReference(ScopedName(name), *args, **kwargs)
 
 
 def _RectifyInputOutput(blobs, net=None):
@@ -166,8 +175,8 @@ def _RectifyInputOutput(blobs, net=None):
     interface.
     """
     if isinstance(blobs, basestring):
-        # If blobs is a single string, prepend scope.NAMESCOPE and put it as a
-        # list.
+        # If blobs is a single string, prepend scope.CurrentNameScope()
+        # and put it as a list.
         # TODO(jiayq): enforce using BlobReference instead of raw strings.
         return [ScopedBlobReference(blobs, net=net)]
     elif type(blobs) is BlobReference:
@@ -221,12 +230,13 @@ def CreateOperator(
         operator.control_input.extend([str(i) for i in control_input])
     # Set device option:
     # (1) If device_option is explicitly set, use device_option.
-    # (2) If not, but scope.DEVICESCOPE is set, then we use scope.DEVICESCOPE.
+    # (2) If not, but scope.CurrentDeviceScope() is set,
+    #     then we use scope.CurrentDeviceScope().
     # (3) Otherwise, do not set device option.
     if device_option is not None:
         operator.device_option.CopyFrom(device_option)
-    elif scope.DEVICESCOPE is not None:
-        operator.device_option.CopyFrom(scope.DEVICESCOPE)
+    elif scope.CurrentDeviceScope() is not None:
+        operator.device_option.CopyFrom(scope.CurrentDeviceScope())
     if engine is not None:
         operator.engine = engine
     # random seed is defined in the device option, so we need to do special
@@ -246,6 +256,35 @@ def CreateOperator(
     return operator
 
 
+def _RegisterPythonImpl(f, grad_f=None, pass_workspace=False):
+    token = C.register_python_op(f, pass_workspace)
+    if grad_f:
+        C.register_python_gradient_op(token, grad_f)
+    return token
+
+
+def CreatePythonOperator(
+    f, inputs,
+    outputs,
+    grad_f=None,
+    pass_workspace=False,
+    *args,
+    **kwargs
+):
+    """
+    `f` should have a signature (inputs, outputs)
+
+    If `pass_workspace` is True, the signature is changed to
+    (inputs, outputs, workspace) where `workspace` is the workspace the op
+    is going to run on. This is potentially dangerous (as the op can manipulate
+    the workspace directly), use on your own risk.
+    """
+    kwargs["token"] = _RegisterPythonImpl(
+        f, grad_f, pass_workspace=pass_workspace
+    )
+    return CreateOperator("Python", inputs, outputs, *args, **kwargs)
+
+
 def GetIndexFromGradientList(g_list, name):
     """A helper function to get the index from a gradient list, None if not
     matching."""
@@ -260,6 +299,11 @@ def GetIndexFromGradientList(g_list, name):
 
 OpSSA = namedtuple('OpSSA', ['op', 'in_versions', 'out_versions'])
 GradGenMeta = namedtuple('GradGenMeta', ['grad_op', 'idx', 'gradient'])
+SparseGradGenMeta = namedtuple('SparseGradGenMeta', [
+    'grad_op_indices', 'idx_indices',
+    'grad_op_values', 'idx_values',
+    'gradient',
+])
 
 
 class IR(object):
@@ -313,84 +357,142 @@ class IR(object):
         # Add to SSA for bookkeeping.
         self.ssa.append(OpSSA(op, in_versions, out_versions))
 
-    def CheckGradientOperators(  # NOQA
-            self, fwd_op_idx, gradient_ops, g_output, g_input):
+    def CheckGradientOperatorInput(
+            self, grad_op_input, g_output, fwd_op_idx, locally_generated_blobs):
         """Checks if the gradient operators can be correctly carried out."""
         forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
+        original_index = GetIndexFromGradientList(g_output, grad_op_input)
+        # If it is a dense or sparse gradient name, it should match the
+        # version of the corresponding output.
+        if original_index is not None:
+            original_name = forward_op.output[original_index]
+            if (out_versions[original_name] !=
+                    self.gradient_frontier[original_name]):
+                raise RuntimeError(
+                    'Gradient name "%s" is expected to correspond '
+                    'to version %d of "%s", but currently we have '
+                    'version %d.' % (
+                        grad_op_input, out_versions[original_name],
+                        original_name,
+                        self.gradient_frontier[original_name]))
+        # If it is an output name, the current version should match the
+        # version when the operator was run.
+        elif grad_op_input in out_versions:
+            if self.frontier[grad_op_input] != out_versions[grad_op_input]:
+                raise RuntimeError(
+                    'Gradient operator needs output "%s" at version'
+                    ' %d, but currently we have version %d.' % (
+                        grad_op_input, out_versions[grad_op_input],
+                        self.frontier[grad_op_input]
+                    )
+                )
+        # If it is an input name, the current version should match the
+        # version when the operator was run.
+        elif grad_op_input in in_versions:
+            if (self.frontier[grad_op_input] != in_versions[grad_op_input]):
+                raise RuntimeError(
+                    'Gradient operator needs input "%s" at version '
+                    '%d, but currently we have version %d.' % (
+                        grad_op_input, in_versions[grad_op_input],
+                        self.frontier[grad_op_input]
+                    )
+                )
+        # If it is none of the above, it should be a blob that is
+        # generated locally by one of the previous gradient operators.
+        else:
+            if grad_op_input not in locally_generated_blobs:
+                raise RuntimeError(
+                    'Blob name "%s" not in the scope of operator: '
+                    '%s\nand is not generated by any of the local '
+                    'gradient operators.' % (grad_op_input, str(forward_op))
+                )
+
+    def AppendSparseGenerators(self, sparse_generators):
+        # merge indices and values generators for sparse gradients
+        for name, input_generators in sparse_generators.items():
+            for version, generators in input_generators.items():
+                if len(generators) == 1:
+                    # either indices or values are generated (but not both)
+                    generator = generators[0]
+                else:
+                    # both indices and values are generated
+                    assert(len(generators) == 2)
+                    op1_i, idx1_i, op1_v, idx1_v, g1 = generators[0]
+                    op2_i, idx2_i, op2_v, idx2_v, g2 = generators[1]
+                    assert(g1 == g2)
+                    assert(op1_i is None or op2_i is None)
+                    assert(op1_v is None or op2_v is None)
+                    assert(idx1_i == 0 or idx2_i == 0)
+                    assert(idx1_v == 0 or idx2_v == 0)
+                    generator = SparseGradGenMeta(
+                        op1_i or op2_i, idx1_i + idx2_i,
+                        op1_v or op2_v, idx1_v + idx2_v,
+                        g1)
+                self.gradient_generators[name][version].append(generator)
+
+    def BuildGradientGenerators(  # NOQA
+            self, fwd_op_idx, gradient_ops, g_output, g_input):
+        """Updates gradient_generators and gradient_frontier"""
+        forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
         locally_generated_blobs = []
+        sparse_generators = defaultdict(lambda: defaultdict(list))
 
         for grad_op in gradient_ops:
-            # (1) for inputs:
-            # (1a) If it is a dense or sparse gradient name, it should match the
-            #      version of the corresponding output.
-            # (1b) If it is an output name, the current version should match the
-            #      version when the operator was run.
-            # (1c) If it is an input name, the current version should match the
-            #      version when the operator was run.
-            # (1d) If it is none of the above, it should be a blob that is
-            #      generated locally by one of the previous gradient operators.
-            for s in grad_op.input:  # (1)
-                original_index = GetIndexFromGradientList(g_output, s)
-                if original_index is not None:  # (1a)
-                    original_name = forward_op.output[original_index]
-                    if (out_versions[original_name] !=
-                            self.gradient_frontier[original_name]):
-                        raise RuntimeError(
-                            'Gradient name "%s" is expected to correspond '
-                            'to version %d of "%s", but currently we have '
-                            'version %d.' % (
-                                s, out_versions[original_name],
-                                original_name,
-                                self.gradient_frontier[original_name]))
-                elif s in out_versions:  # (1b)
-                    if self.frontier[s] != out_versions[s]:
-                        raise RuntimeError(
-                            'Gradient operator needs output "%s" at version'
-                            ' %d, but currently we have version %d.' % (
-                                s, out_versions[s],
-                                self.frontier[s]
-                            )
-                        )
-                elif s in in_versions:  # (1c)
-                    if (self.frontier[s] != in_versions[s]):
-                        raise RuntimeError(
-                            'Gradient operator needs input "%s" at version '
-                            '%d, but currently we have version %d.' % (
-                                s, in_versions[s],
-                                self.frontier[s]
-                            )
-                        )
-                else:  # (1d)
-                    if s not in locally_generated_blobs:
-                        raise RuntimeError(
-                            'Blob name "%s" not in the scope of operator: '
-                            '%s\nand is not generated by any of the local '
-                            'gradient operators.' % (s, str(forward_op))
-                        )
-            # (2) for outputs: we will simply add them to locally generated
-            # blobs. We will also record the output to gradient_generators for
-            # bookkeeping, if the output corresponds to the input of a gradient.
-            for i, s in enumerate(grad_op.output):  # (1)
-                locally_generated_blobs.extend(grad_op.output)
-                input_index = GetIndexFromGradientList(g_input, s)
+            # (1) check that inputs are valid
+            for s in grad_op.input:
+                self.CheckGradientOperatorInput(
+                    s, g_output, fwd_op_idx, locally_generated_blobs)
+
+            # (2) add outputs to the locally generated blobs
+            # If an output corresponds to the gradient of an input, we also
+            # record it to gradient_generators
+            locally_generated_blobs.extend([str(s) for s in grad_op.output])
+            for i, output in enumerate(grad_op.output):
+                input_index = GetIndexFromGradientList(g_input, output)
                 if input_index is not None:
                     input_name = forward_op.input[input_index]
                     input_version = in_versions[input_name]
-                    self.gradient_generators[input_name][input_version].append(
-                        GradGenMeta(grad_op, i, g_input[input_index]))
+                    g = g_input[input_index]
+                    if type(g) is GradientSlice:
+                        # the output corresponds either to the indices or the
+                        # values of the sparse gradient. In either case we
+                        # create a (partial) SparseGradGenMeta. If necessary,
+                        # we'll merge indices and values generators
+                        # corresponding to the same gradient in step (3)
+                        if g.indices == output:
+                            m = SparseGradGenMeta(grad_op, i, None, 0, g)
+                        else:
+                            assert(g.values == output)
+                            m = SparseGradGenMeta(None, 0, grad_op, i, g)
+                        sparse_generators[input_name][input_version].append(m)
+                    else:
+                        self.gradient_generators[input_name][input_version] \
+                            .append(GradGenMeta(
+                                grad_op, i, g))
 
-        # (3) for ops (e.g., Add, Sum, Sub) which have grdient outputs directly
+        # (3) merge indices and values generators for sparse gradients, and
+        # add them to gradient_generators
+        self.AppendSparseGenerators(sparse_generators)
+
+        # (4) for ops (e.g., Add, Sum, Sub) which have gradient outputs directly
         # passed from inputs (not computed from gradient ops), we create an
         # GradGenMeta with None grad_op and idx so that the gradient_generators
         # knows where the gradients are coming from. This is needed for creating
         # Sum op to accumulate the gradients from multiple parents.
         for input_index, g in enumerate(g_input):
-            if not g or str(g) in [str(b) for b in locally_generated_blobs]:
-                continue
             input_name = forward_op.input[input_index]
             input_version = in_versions[input_name]
-            self.gradient_generators[input_name][input_version].append(
-                GradGenMeta(None, 0, g))
+            if not g:
+                continue
+            if type(g) is GradientSlice:
+                if str(g.indices) not in locally_generated_blobs and \
+                        str(g.values) not in locally_generated_blobs:
+                    self.gradient_generators[input_name][input_version].append(
+                        SparseGradGenMeta(None, 0, None, 0, g))
+            else:
+                if str(g) not in locally_generated_blobs:
+                    self.gradient_generators[input_name][input_version].append(
+                        GradGenMeta(None, 0, g))
 
         # Finally, for the gradients specified in g_input, we update the
         # gradient frontier to reflect the input versions that the gradients
@@ -402,47 +504,142 @@ class IR(object):
                 self.gradient_frontier[input_name] = input_version
 
     def _GetSumOpOutputName(self, generator, input_name):
-        sum_op_output = None
-        for grad_op, idx, _ in generator:
-            if grad_op and not sum_op_output:
-                sum_op_output = grad_op.output[idx]
-        return sum_op_output or input_name + '_grad'
+        def remove_suffix(s, suffix):
+            if s.endswith(suffix):
+                return s[:-len(suffix)]
+            return s
 
-    def _MakeSumOp(self, input_name, input_version):
-        generator = self.gradient_generators[input_name][input_version]
-        sum_op_input = []
-        sum_op_output = self._GetSumOpOutputName(generator, input_name)
-        current = 0
-        for grad_op, idx, g in generator:
-            if grad_op:
-                grad_op.output[idx] = ('_' + grad_op.output[idx] +
-                                       '_autosplit_{}'.format(current))
-                sum_op_input.append(grad_op.output[idx])
-                current += 1
-            else:
-                if str(sum_op_output) == str(g):
-                    raise RuntimeError(
-                        'The gradient output of empty gradient op can not '
-                        'be the same as the normal name of the current '
-                        'input gradient.')
-                sum_op_input.append(g)
-
-        sum_op = CreateOperator("Sum", sum_op_input, sum_op_output)
         for g in generator:
-            if g.grad_op:
-                if g.grad_op.HasField('device_option'):
-                    sum_op.device_option.CopyFrom(g.grad_op.device_option)
+            if type(g) is GradGenMeta:
+                grad_op, idx, _ = g
+                if grad_op:
+                    return grad_op.output[idx]
+            else:
+                assert(type(g) is SparseGradGenMeta)
+                op_i, idx_i, op_v, idx_v, _ = g
+                if op_i:
+                    return remove_suffix(op_i.output[idx_i], '_indices')
+                if op_v:
+                    return remove_suffix(op_v.output[idx_v], '_values')
+
+        return input_name + '_grad'
+
+    def _SetSumOpsDeviceOption(self, sum_ops, generators):
+        # we already checked that device options are consistent so we can just
+        # use the first one we find
+        for generator in generators:
+            grad_op = generator.grad_op if type(generator) is GradGenMeta \
+                else generator.grad_op_values or generator.grad_op_indices
+            if grad_op:
+                if grad_op.HasField('device_option'):
+                    for op in sum_ops:
+                        op.device_option.CopyFrom(grad_op.device_option)
                 break
 
-        return sum_op
+    def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
+        grad_op.output[idx] = (
+            '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
+        return grad_op.output[idx], cnt + 1
+
+    def _CheckSumOpsConflict(self, out_base_name, g):
+        if str(out_base_name) == str(g):
+            # TODO not sure what this message really means
+            raise RuntimeError(
+                'The gradient output of empty gradient op can not '
+                'be the same as the normal name of the current '
+                'input gradient.')
+
+    def _MakeDenseSumOps(self, generators, out_base_name):
+        sum_op_input = []
+        cnt = 0
+
+        for generator in generators:
+            grad_op, idx, g = generator
+            assert(type(g) is not GradientSlice)
+            if grad_op:
+                out, cnt = self._DisambiguateGradOpOutput(grad_op, idx, cnt)
+                sum_op_input.append(out)
+            else:
+                self._CheckSumOpsConflict(out_base_name, g)
+                sum_op_input.append(str(g))
+
+        sum_ops = [CreateOperator(
+            "Sum",
+            map(BlobReference, sum_op_input),
+            BlobReference(out_base_name))]
+        return sum_ops, out_base_name
+
+    def _MakeSparseSumOps(self, generators, out_base_name):
+        indices_concat_input = []
+        values_concat_input = []
+        cnt_i = 0
+        cnt_v = 0
+
+        for generator in generators:
+            assert(type(generator) is SparseGradGenMeta)
+            op_i, idx_i, op_v, idx_v, g = generator
+            if op_i:
+                out, cnt_i = self._DisambiguateGradOpOutput(op_i, idx_i, cnt_i)
+                indices_concat_input.append(out)
+            else:
+                self._CheckSumOpsConflict(out_base_name, g.indices)
+                indices_concat_input.append(g.indices)
+            if op_v:
+                out, cnt_v = self._DisambiguateGradOpOutput(op_v, idx_v, cnt_v)
+                values_concat_input.append(out)
+            else:
+                self._CheckSumOpsConflict(out_base_name, g.values)
+                values_concat_input.append(g.values)
+
+        indices_concat_output = out_base_name + '_indices_concat'
+        indices_concat_split = out_base_name + '_indices_concat_split'
+        values_concat_output = out_base_name + '_values_concat'
+        values_concat_split = out_base_name + '_values_concat_split'
+        # Sum the given sparse representations by simply concatenating the
+        # indices (resp. values) tensors together. We don't do any deduplication
+        # of indices at this point. This will be done as needed before the
+        # optimizer is called
+        sum_ops = [
+            CreateOperator(
+                "Concat",
+                map(BlobReference, indices_concat_input),
+                map(BlobReference,
+                    [indices_concat_output, indices_concat_split]),
+                axis=0
+            ),
+            CreateOperator(
+                "Concat",
+                map(BlobReference, values_concat_input),
+                map(BlobReference, [values_concat_output, values_concat_split]),
+                axis=0
+            ),
+        ]
+        sum_op_output = GradientSlice(
+            indices=indices_concat_output,
+            values=values_concat_output,
+        )
+        return sum_ops, sum_op_output
+
+    def _MakeSumOps(self, input_name, input_version):
+        generators = self.gradient_generators[input_name][input_version]
+        out_base_name = self._GetSumOpOutputName(generators, input_name)
+        types = list(set(type(x) for x in generators))
+        assert(len(types) == 1)
+        if types[0] is GradGenMeta:
+            sum_ops, g = self._MakeDenseSumOps(generators, out_base_name)
+        else:
+            assert(types[0] is SparseGradGenMeta)
+            sum_ops, g = self._MakeSparseSumOps(generators, out_base_name)
+        self._SetSumOpsDeviceOption(sum_ops, generators)
+        return sum_ops, g
 
     def _VerifyGradientGenerators(self, generator):
-        # (1) check if we are dealing with dense gradients. Sparse gradients
-        # do not support automatic aggregation yet.
-        if any(type(g[2]) is GradientSlice for g in generator):
+        # (1) check if all gradients are of the same type. Aggregating a mix of
+        # sparse and dense gradients is not supported yet
+        if len({type(g) for g in generator}) > 1:
             raise RuntimeError(
-                'Automatic gradient aggregation does not work with sparse '
-                'gradients yet.')
+                'Automatic aggregation of a mix of sparse and dense gradients '
+                'is not supported yet')
 
         # If for all the operators that used the operator, none or only one
         # produced the gradient, then no additional sum needs to be carried
@@ -453,9 +650,18 @@ class IR(object):
         all_gradient_names = []
         all_device_options = []
         for g in generator:
-            if g.grad_op:
-                all_gradient_names.append(g.grad_op.output[g.idx])
-                all_device_options.append(g.grad_op.device_option)
+            if type(g) is GradGenMeta:
+                if g.grad_op:
+                    all_gradient_names.append(g.gradient)
+                    all_device_options.append(g.grad_op.device_option)
+            else:
+                assert(type(g) is SparseGradGenMeta)
+                if g.grad_op_indices:
+                    all_device_options.append(g.grad_op_indices.device_option)
+                if g.grad_op_values:
+                    all_device_options.append(g.grad_op_values.device_option)
+                    all_gradient_names.append(g.gradient.values)
+
         # Check if all grad names are the same.
         if len(set(all_gradient_names)) > 1:
             raise RuntimeError('Unexpected behavior: not all grad output '
@@ -501,16 +707,16 @@ class IR(object):
                     continue
             except RuntimeError as err:
                 raise RuntimeError(
-                    "Gradients for param ''{}'' failed to verity: {}".format(
+                    "Gradients for param ''{}'' failed to verify: {}".format(
                         input_name,
                         err
                     )
                 )
 
             # Finally, let's create the sum operator.
-            sum_op = self._MakeSumOp(input_name, input_version)
-            additional_sum_ops.append(sum_op)
-            grad_map[input_name] = sum_op.output[0]
+            sum_ops, g = self._MakeSumOps(input_name, input_version)
+            additional_sum_ops.extend(sum_ops)
+            grad_map[input_name] = g
         return additional_sum_ops, grad_map
 
     def _GetInitGradients(self, ys):
@@ -541,8 +747,9 @@ class IR(object):
         if not all(g is None for g in g_output):
             gradient_ops, g_input = GradientRegistry.GetGradientForOp(
                 forward_op, g_output)
-            # Checks if the gradient operators are legal
-            self.CheckGradientOperators(
+            # Check if the gradient operators are legal, and update
+            # gradient_generators and gradient_frontier
+            self.BuildGradientGenerators(
                 forward_op_idx, gradient_ops, g_output, g_input)
             # Record the gradient map to all_input_to_grad.
             for name, grad in zip(forward_op.input, g_input):
@@ -665,13 +872,17 @@ class GradientRegistry(object):
     def GetGradientForOp(cls, op, g_output):
         try:
             gradient_ops, g_input = cls._GetGradientForOpCC(op, g_output)
-        except Exception:
+        except Exception as e:
             # Not supported in C++; will try python registration next.
+
             try:
                 gradient_ops, g_input = cls.gradient_registry_[op.type](
                     op, g_output)
             except KeyError:
-                raise KeyError('No gradient registered for op: %s' % op.type)
+                raise Exception(
+                    "No gradient registered for {}. ".format(op.type) +
+                    "Exception from creating the gradient op: {}.".format(e))
+
         if gradient_ops is None:
             return [], g_input
         if type(gradient_ops) is not list:
@@ -785,6 +996,62 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
     return sorted(used_op_ids)
 
 
+def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None):
+    """
+    Clone the given Net, binding its input schema to the given `inputs` record.
+    Blob names defined by the net are prepended with the given `prefix`.
+
+    Args:
+        net:        the net to clone
+        name:       the name of the new net
+        prefix:     the prefix to append to local blobs
+        blob_remap: (optional) dict with additional blob name remapping.
+        inputs:     (optional) input record that will provide actual input
+                    values for the cloned net. Must be compatible with the
+                    net's input schema or be a strict superset of it
+    Returns:
+        Tuple (cloned_net, blob_remap)
+        clone_net:  the cloned Net
+        blob_remap: a map from original blob names into remapped blob names
+    """
+    from caffe2.python import schema
+    assert isinstance(net, Net)
+    if blob_remap is None:
+        blob_remap = {}
+    if inputs is not None:
+        assert isinstance(inputs, schema.Field)
+        original = net.input_record()
+        assert original is not None
+        # TODO(azzolini): improve schema type checking
+        diff = set(original.field_names()) - set(inputs.field_names())
+        assert len(diff) == 0, \
+            'Schemas do not match, extra fields found in the net'.format(diff)
+        original_mapping = dict(zip(original.field_names(),
+                                    original.field_blobs()))
+        for fn, fb in zip(inputs.field_names(), inputs.field_blobs()):
+            if fn in original_mapping:
+                blob_remap[str(original_mapping[fn])] = str(fb)
+    proto = net.Proto()
+    ssa, blob_versions = get_ssa(proto)
+    undef_blobs = get_undefined_blobs(ssa)
+
+    for blob in blob_versions.keys():
+        if blob in blob_remap:
+            continue
+        elif blob in undef_blobs:
+            blob_remap[blob] = blob
+        else:
+            blob_remap[blob] = prefix + blob
+    return net.Clone(name, blob_remap), blob_remap
+
+
+def _get_blob_ref(blob_name_or_ref):
+    return (
+        blob_name_or_ref if isinstance(input, BlobReference)
+        else BlobReference(blob_name_or_ref)
+    )
+
+
 class Net(object):
     _net_names_used = set()
     operator_registry_ = {}
@@ -806,20 +1073,34 @@ class Net(object):
             name_or_proto:  If a NetDef is provided, clone it. Otherwise,
                             create an empty net with the given name.
         """
+        self._input_record = None
+        self._output_record = None
+        self._recreate_lookup_tables = False
+        self._op_outputs = set()
+        self._external_input_map = set()
+        self._attr_dict = defaultdict(list)
         if type(name_or_proto) is caffe2_pb2.NetDef:
             proto = name_or_proto
             # We rae initializing a network by a NetDef. In this case, we will
             # initialize our network with the given netdef.
             self._net = caffe2_pb2.NetDef()
             self._net.CopyFrom(proto)
+
+            existing_outputs = [list(op.output) for op in self._net.op]
+
+            self._external_input_map.update(list(self._net.external_input))
+
             # Set the next name index properly.
             existing_names = set(
                 sum(
                     [list(op.input) for op in self._net.op], []
                 ) + sum(
-                    [list(op.output) for op in self._net.op], []
+                    existing_outputs, []
                 )
             )
+            for outs in existing_outputs:
+                self._op_outputs.update(outs)
+
             prefix_len = len(self._net.name + '_blob_')
             autogen_indices = []
             for s in existing_names:
@@ -840,23 +1121,85 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(self._net.name)
 
-    def __str__(self):
+    def AppendNet(self, net):
+        assert isinstance(net, Net)
+        self._ExtendOps(net.Proto().op)
+        self.Proto().external_input.extend(
+            [i for i in net.Proto().external_input
+                if i not in self.Proto().external_input])
+        self.Proto().external_output.extend(
+            [o for o in net.Proto().external_output
+                if o not in self.Proto().external_output])
+        return self
+
+    def LogInfo(self, *msg_or_blobs):
+        for msg_or_blob in msg_or_blobs:
+            if not isinstance(msg_or_blob, BlobReference):
+                blob = self.GivenTensorStringFill(
+                    [], self.NextName('log'),
+                    shape=[], values=[msg_or_blob])
+            else:
+                blob = msg_or_blob
+            self.Print(blob, [])
+
+    def add_attribute(self, name, obj):
+        """
+        Add `obj` to the list of attributes in this net under the given `name`.
+        Attributes are user-defined objects and have no pre-defined semantics.
+        """
+        self._attr_dict[name].append(obj)
+
+    def get_attributes(self, name):
+        """
+        Returns the list of attributes in this net for a given `name`.
+        Attributes are user-defined objects added with `add_attribute'.
+        """
+        return self._attr_dict.get(name, [])
+
+    def Name(self):
         return self._net.name
+
+    def __str__(self):
+        return self.Name()
+
+    def Const(self, array, blob_out=None, dtype=None):
+        if isinstance(array, bool):
+            return self.ConstantFill(
+                [],
+                blob_out or 1,
+                dtype=DataType.BOOL,
+                value=array)
+
+        if dtype is None:
+            array = np.array(array)
+        else:
+            array = np.array(array, dtype=dtype)
+
+        def do_set(operator):
+            return operator(
+                [],
+                blob_out or 1,
+                shape=array.shape,
+                values=array.flatten().tolist())
+
+        if array.dtype == np.int32:
+            return do_set(self.GivenTensorIntFill)
+        elif array.dtype == np.int64:
+            return do_set(self.GivenTensorInt64Fill)
+        elif array.dtype == np.str:
+            return do_set(self.GivenTensorStringFill)
+        else:
+            return do_set(self.GivenTensorFill)
 
     def BlobIsDefined(self, blob):
         """
         Returns true if the given BlobReference is produced as output of
         an operator in this net, or if it is provided as an external input.
         """
-        blob_name = str(blob)
-        for input in self._net.external_input:
-            if input == blob_name:
-                return True
-        for op in self._net.op:
-            for output in op.output:
-                if output == blob_name:
-                    return True
-        return False
+        if self._recreate_lookup_tables:
+            self._RecreateLookupTables()
+        name = str(blob)
+        return (name in self._op_outputs) or (name in self._external_input_map)
 
     def UsesBlob(self, blob):
         """
@@ -868,10 +1211,7 @@ class Net(object):
             for input in op.input:
                 if input == blob_name:
                     return True
-        for input in self._net.external_input:
-            if input == blob_name:
-                return True
-        return False
+        return blob_name in self._external_input_map
 
     def GetBlobRef(self, blob_name):
         """
@@ -884,7 +1224,14 @@ class Net(object):
             raise KeyError('Net does not define blob %s' % blob_name)
         return BlobReference(blob_name, self)
 
-    def Clone(self, name, blob_remap=None, op_id_mask=None, remap_funcs=None):
+    def Clone(
+        self,
+        name,
+        blob_remap=None,
+        op_id_mask=None,
+        remap_funcs=None,
+        keep_schema=True
+    ):
         """
         Clone this net.
         Args:
@@ -900,6 +1247,7 @@ class Net(object):
         new_proto.CopyFrom(proto)
         new_proto.name = name
         if blob_remap is None and op_id_mask is None:
+            # TODO(azzolini): should we also clone input_record here
             return Net(new_proto)
 
         if blob_remap is None:
@@ -925,7 +1273,28 @@ class Net(object):
         new_proto.op.extend(remap_op(proto.op[op_id]) for op_id in op_id_mask)
         remap_list(new_proto.external_input)
         remap_list(new_proto.external_output)
-        return Net(new_proto)
+        new_net = Net(new_proto)
+
+        if keep_schema:
+            from caffe2.python import schema
+            if self._input_record:
+                new_net._input_record = schema.from_blob_list(
+                    self._input_record,
+                    [
+                        BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                        for blob in self._input_record.field_blobs()
+                    ],
+                )
+            if self._output_record:
+                new_net._output_record = schema.from_blob_list(
+                    self._output_record,
+                    [
+                        BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                        for blob in self._output_record.field_blobs()
+                    ],
+                )
+        new_net._attr_dict.update(self._attr_dict)
+        return new_net
 
     def ClonePartial(self, name, inputs, outputs, remap_funcs=None):
         """
@@ -986,11 +1355,13 @@ class Net(object):
         new_out = [blob_mapping[o] for o in output_names]
         del new_net.Proto().external_input[:]
         new_net.Proto().external_input.extend(new_in)
+        new_net._external_input_map = set(list(new_in))
         del new_net.Proto().external_output[:]
         new_net.Proto().external_output.extend(new_out)
         return new_net, [new_net.GetBlobRef(o) for o in new_out]
 
     def Proto(self):
+        self._InvalidateLookupTables()
         return self._net
 
     def NextName(self, prefix=None, output_id=None):
@@ -1011,6 +1382,44 @@ class Net(object):
             output_name = self._net.name + '_blob_' + str(self._next_name_index)
             self._next_name_index += 1
         return str(output_name)
+
+    def _ExtendOps(self, new_ops):
+        self._net.op.extend(new_ops)
+        for op in new_ops:
+            self._op_outputs.update([str(o) for o in op.output])
+
+    def _CheckLookupTables(self):
+        '''
+        Called from unit tests to validate the internal lookup tables
+        match the protobuf contents.
+        '''
+        test_op_outputs = set()
+        for op in self._net.op:
+            for o in op.output:
+                test_op_outputs.add(o)
+
+        test_external_inp = set()
+        for inp in self._net.external_input:
+            test_external_inp.add(inp)
+
+        assert test_op_outputs.difference(self._op_outputs) == set()
+        assert test_external_inp.difference(self._external_input_map) == set()
+
+    def _InvalidateLookupTables(self):
+        self._recreate_lookup_tables = True
+
+    def _RecreateLookupTables(self):
+        self._op_outputs = set()
+        for op in self._net.op:
+            for o in op.output:
+                self._op_outputs.add(o)
+
+        self._external_input_map = set()
+        for inp in self._net.external_input:
+            self._external_input_map.add(inp)
+
+        self._recreate_lookup_tables = False
+
 
     def AddGradientOperators(self, ys, skip=0):
         """Add the gradient for operators in the net.
@@ -1043,7 +1452,7 @@ class Net(object):
         if workspace.IsImmediate():
             for op in grad_ops:
                 workspace.RunOperatorImmediate(op)
-        self._net.op.extend(grad_ops)
+        self._ExtendOps(grad_ops)
         return input_to_grad
 
     def AddExternalInput(self, input):
@@ -1051,18 +1460,54 @@ class Net(object):
         assert input_name not in self._net.external_input, (
             'Net already contains an input named %s' % input_name)
         self._net.external_input.extend([input_name])
-        return (
-            input if isinstance(input, BlobReference)
-            else BlobReference(input_name))
+        self._external_input_map.update([input_name])
+        return _get_blob_ref(input_name)
 
     def AddExternalOutput(self, output):
         assert isinstance(output, BlobReference)
         assert self.BlobIsDefined(output)
         self.Proto().external_output.extend([str(output)])
+        return output
+
+    @property
+    def external_inputs(self):
+        return map(_get_blob_ref, self._net.external_input)
+
+    @property
+    def external_outputs(self):
+        return map(_get_blob_ref, self._net.external_output)
+
+    def set_input_record(self, input_record):
+        from caffe2.python import schema
+        assert self._input_record is None, (
+            'Input schema cannot be reset')
+        if not input_record.has_blobs():
+            self._input_record = schema.NewRecord(self, input_record)
+        else:
+            self._input_record = input_record
+            for blob in input_record.field_blobs():
+                if blob not in self.external_inputs:
+                    self.AddExternalInput(blob)
+        return self._input_record
+
+    def set_output_record(self, record):
+        assert self._output_record is None, (
+            'Output record cannot be reset')
+        for blob in record.field_blobs():
+            assert self.BlobIsDefined(blob)
+        for blob in record.field_blobs():
+            self.AddExternalOutput(blob)
+        self._output_record = record
+
+    def input_record(self):
+        return self._input_record
+
+    def output_record(self):
+        return self._output_record
 
     def DeduplicateGradientSlices(self, g):
         assert isinstance(g, GradientSlice)
-        unique, remapping = self.Unique([g.indices], 2)
+        unique, remapping = self.Unique([g.indices], 2, engine='SparseHash')
         sum_g = self.UnsortedSegmentSum([g.values, remapping], 1)
         return GradientSlice(indices=unique, values=sum_g)
 
@@ -1096,7 +1541,7 @@ class Net(object):
                 for i in range(outputs)]
         outputs = _RectifyInputOutput(outputs, net=self)
         op = CreateOperator(op_type, inputs, outputs, **kwargs)
-        self._net.op.extend([op])
+        self._ExtendOps([op])
         if len(op.output) == 0:
             return
         elif len(op.output) == 1:
@@ -1114,14 +1559,17 @@ class Net(object):
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             op_type, *args, **kwargs)
 
-    def Python(self, f, grad_f=None):
-        with extension_loader.DlopenGuard():
-            import caffe2.python.op.python_ops_python as ops_python
-        RefreshRegisteredOperators()
+    def Python(self, f, grad_f=None, pass_workspace=False):
+        """
+        `f` should have a signature (inputs, outputs)
+
+        If `pass_workspace` is True, the signature is changed to
+        (inputs, outputs, workspace) where `workspace` is the workspace the op
+        is going to run on. This is potentially dangerous (as the op can
+        manipulate the workspace directly), use on your own risk.
+        """
         assert(IsOperator('Python'))
-        token = ops_python.register(f)
-        if grad_f:
-            ops_python.register_gradient(token, grad_f)
+        token = _RegisterPythonImpl(f, grad_f, pass_workspace=pass_workspace)
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             'Python', token=token, *args, **kwargs)
 
@@ -1165,9 +1613,21 @@ def _add_net_to_dict(net_dict, net):
 
 
 class ExecutionStep(object):
+    _step_names_used = set()
+
+    @staticmethod
+    def _get_next_step_name(basename):
+        name = basename
+        next_idx = 1
+        while name in ExecutionStep._step_names_used:
+            name = basename + '_' + str(next_idx)
+            next_idx += 1
+        ExecutionStep._step_names_used |= set([name])
+        return name
+
     def __init__(self, name, nets=None, num_iter=None):
         self._step = caffe2_pb2.ExecutionStep()
-        self._step.name = name
+        self._step.name = name or ExecutionStep._get_next_step_name('step')
         self._net_dict = OrderedDict()
         self._is_used = False
         self._substeps = []
@@ -1180,6 +1640,9 @@ class ExecutionStep(object):
         if num_iter is not None:
             self._step.num_iter = num_iter
 
+    def get_net(self, name):
+        return self._net_dict[name]
+
     def Name(self):
         return self._step.name
 
@@ -1191,7 +1654,6 @@ class ExecutionStep(object):
             'Cannot mutate a step that has already been added to a plan/step.')
 
     def _notify_is_used(self):
-        self._assert_can_mutate()
         self._is_used = True
 
     def Proto(self):
@@ -1214,6 +1676,10 @@ class ExecutionStep(object):
     def SetIter(self, num_iter):
         self._assert_can_mutate()
         self._step.num_iter = num_iter
+
+    def SetOnlyOnce(self, only_once):
+        self._assert_can_mutate()
+        self._step.only_once = only_once
 
     def SetShouldStopBlob(self, should_stop_blob):
         assert isinstance(should_stop_blob, BlobReference), (
@@ -1256,6 +1722,30 @@ class ExecutionStep(object):
         self._step.network.extend([get_net_name(net)])
         return self
 
+    def get_all_attributes(self, name):
+        """
+        Return the list of all attributes under the given `name`, present in
+        all of the nets used in this execution step and its children.
+        """
+        objs = []
+        for net in self._net_dict.values():
+            objs += net.get_attributes(name)
+        return objs
+
+
+def add_nets_in_order(step, net_list):
+    proto = step.Proto()
+    for substep in step.Substeps():
+        add_nets_in_order(substep, net_list)
+    for net in proto.network:
+        if net not in net_list:
+            net_list.append(net)
+    # FIXME(azzolini): This is actually wrong. Report nets should be
+    # instantiated first since they may run before any substep is run.
+    # However, curerntly, Reporter depends on this behavior.
+    if proto.report_net and proto.report_net not in net_list:
+        net_list.append(proto.report_net)
+
 
 class Plan(object):
     def __init__(self, name_or_step):
@@ -1290,7 +1780,33 @@ class Plan(object):
         if not step.HasNets() and not step.HasSubsteps():
             return
         self._plan.execution_step.add().CopyFrom(step.Proto())
-        self.AddNets(step.Nets())
+        # nets need to be added to the plan in order of usage
+        net_list = []
+        add_nets_in_order(step, net_list)
+        self.AddNets([step.get_net(n) for n in net_list])
+
+    def get_all_attributes(self, name):
+        """
+        Return the list of all attributes under the given `name`, present in
+        all of the nets used in this plan.
+        """
+        objs = []
+        for net in self._net_dict.values():
+            objs += net.get_attributes(name)
+        return objs
+
+
+def to_execution_step(step_or_nets, default_name=None):
+    from caffe2.python.net_builder import NetBuilder
+    if isinstance(step_or_nets, ExecutionStep):
+        return step_or_nets
+
+    stop_blob = None
+    if isinstance(step_or_nets, NetBuilder):
+        stop_blob = step_or_nets._stop_blob
+        step_or_nets = step_or_nets.get()
+    return execution_step(
+        default_name, step_or_nets, should_stop_blob=stop_blob)
 
 
 def execution_step(default_name,
@@ -1299,7 +1815,8 @@ def execution_step(default_name,
                    report_net=None,
                    report_interval=None,
                    concurrent_substeps=None,
-                   should_stop_blob=None):
+                   should_stop_blob=None,
+                   only_once=None):
     """
     Helper for creating an ExecutionStep.
     - steps_or_nets can be:
@@ -1319,38 +1836,29 @@ def execution_step(default_name,
     if should_stop_blob is None and num_iter is None:
         num_iter = 1
 
-    def set_step_attr(step):
-        if should_stop_blob is not None:
-            step.SetShouldStopBlob(should_stop_blob)
-        else:
-            step.SetIter(num_iter)
-        if concurrent_substeps is not None:
-            step.SetConcurrentSubsteps(concurrent_substeps)
-        if report_net is not None:
-            assert report_interval is not None
-            step.SetReportNet(report_net, report_interval)
-        return step
+    step = ExecutionStep(default_name)
+    if should_stop_blob is not None:
+        step.SetShouldStopBlob(should_stop_blob)
+    if num_iter is not None:
+        step.SetIter(num_iter)
+    if only_once is not None:
+        step.SetOnlyOnce(only_once)
+    if concurrent_substeps is not None:
+        step.SetConcurrentSubsteps(concurrent_substeps)
+    if report_net is not None:
+        assert report_interval is not None
+        step.SetReportNet(report_net, report_interval)
 
-    if not steps_or_nets:
-        return ExecutionStep(default_name)
     if isinstance(steps_or_nets, ExecutionStep):
-        step = set_step_attr(ExecutionStep(default_name))
         step.AddSubstep(steps_or_nets)
-        return step
     elif isinstance(steps_or_nets, Net):
-        step = set_step_attr(ExecutionStep(default_name))
         step.AddNet(steps_or_nets)
-        return step
     elif isinstance(steps_or_nets, list):
-        step = set_step_attr(ExecutionStep(default_name))
-        for step_or_net in steps_or_nets:
-            if isinstance(step_or_net, Net):
-                step.AddNet(step_or_net)
-            elif isinstance(step_or_net, ExecutionStep):
-                step.AddSubstep(step_or_net)
-            else:
-                raise ValueError('unsupported type {}'.format(step_or_net))
-        return step
-    else:
+        if all(isinstance(x, Net) for x in steps_or_nets):
+            map(step.AddNet, steps_or_nets)
+        else:
+            map(step.AddSubstep, map(to_execution_step, steps_or_nets))
+    elif steps_or_nets:
         raise ValueError(
             'steps_or_nets must be a step, a net, or a list of nets or steps.')
+    return step

@@ -46,6 +46,6 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_CONV_OP_H_
+#endif // CAFFE2_OPERATORS_CONV_OP_H_

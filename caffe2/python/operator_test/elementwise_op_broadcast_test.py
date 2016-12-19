@@ -100,3 +100,7 @@ class TestElementwiseBroadcast(hu.HypothesisTestCase):
         out = workspace.FetchBlob("out")
         np.testing.assert_array_almost_equal(out, X + Y)
         self.assertDeviceChecks(dc, op, [X, Y], [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

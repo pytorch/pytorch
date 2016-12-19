@@ -152,8 +152,10 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     // If the helper bias multiplier is not M, reshape and fill it with one.
     bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
-        output_image_size, static_cast<T>(1),
-        bias_multiplier_.template mutable_data<T>(), &context_);
+        output_image_size,
+        static_cast<T>(1),
+        bias_multiplier_.template mutable_data<T>(),
+        &context_);
   }
   // Specialized path for 1 by 1 convolution with stride 1, pad 0 - we
   // can skip im2col.
@@ -164,23 +166,44 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<TIndex>(1, N * H * W));
       math::Set<T, Context>(
-          N * H * W, static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(), &context_);
+          N * H * W,
+          static_cast<T>(1),
+          bias_multiplier_.template mutable_data<T>(),
+          &context_);
     }
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasTrans, N * H * W, M, C, 1, Xdata,
-        filter.template data<T>(), 0, Ydata, &context_);
+        CblasNoTrans,
+        CblasTrans,
+        N * H * W,
+        M,
+        C,
+        1,
+        Xdata,
+        filter.template data<T>(),
+        0,
+        Ydata,
+        &context_);
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasNoTrans, N * H * W, M, 1, 1,
-        bias_multiplier_.template data<T>(), bias.template data<T>(), 1, Ydata,
+        CblasNoTrans,
+        CblasNoTrans,
+        N * H * W,
+        M,
+        1,
+        1,
+        bias_multiplier_.template data<T>(),
+        bias.template data<T>(),
+        1,
+        Ydata,
         &context_);
   } else {
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
       math::Set<T, Context>(
-          output_image_size, static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(), &context_);
+          output_image_size,
+          static_cast<T>(1),
+          bias_multiplier_.template mutable_data<T>(),
+          &context_);
     }
     auto f = [&](Tensor<Context>* col_buffer) {
       col_buffer->Resize(
@@ -276,8 +299,10 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     // If the helper bias multiplier is not M, reshape and fill it with one.
     bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
-        output_image_size, static_cast<T>(1),
-        bias_multiplier_.template mutable_data<T>(), &context_);
+        output_image_size,
+        static_cast<T>(1),
+        bias_multiplier_.template mutable_data<T>(),
+        &context_);
   }
   const T* Xdata = X.template data<T>();
   const T* filter_data = filter.template data<T>();
@@ -286,10 +311,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* dfilter_data = dfilter->template mutable_data<T>();
   T* dbias_data = dbias->template mutable_data<T>();
   // Pre-setting the gradients to zero.
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data,
-                                  &context_);
-  math::Set<T, Context>(dbias->size(), 0, dbias_data,
-                                  &context_);
+  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
   for (int image_id = 0; image_id < N; ++image_id) {
     // When we compute the gradient with respect to the filters, we need to do
     // im2col to allow gemm-type computation.
@@ -312,27 +335,49 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         &context_);
     // Gradient with respect to filter.
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasTrans, M, kernel_dim, output_image_size,
-        1, dYdata + output_offset * image_id, col_buffer_data,
-        1, dfilter_data, &context_);
+        CblasNoTrans,
+        CblasTrans,
+        M,
+        kernel_dim,
+        output_image_size,
+        1,
+        dYdata + output_offset * image_id,
+        col_buffer_data,
+        1,
+        dfilter_data,
+        &context_);
     // Gradient with respect to bias
     math::Gemv<T, Context>(
-        CblasNoTrans, M, output_image_size, 1,
-        dYdata + output_offset * image_id, bias_multiplier_.template data<T>(),
-        1, dbias_data, &context_);
+        CblasNoTrans,
+        M,
+        output_image_size,
+        1,
+        dYdata + output_offset * image_id,
+        bias_multiplier_.template data<T>(),
+        1,
+        dbias_data,
+        &context_);
     Xdata += input_offset;
   }
   if (OutputSize() == 3) {
     // Compute the gradient w.r.t. the input.
-    auto *dX = Output(INPUT_GRAD);
+    auto* dX = Output(INPUT_GRAD);
     dX->ResizeLike(X);
     T* dXdata = dX->template mutable_data<T>();
     for (int image_id = 0; image_id < N; ++image_id) {
       // Compute gradient into col_buffer.
       math::Gemm<T, Context>(
-          CblasTrans, CblasNoTrans, kernel_dim, output_image_size, M,
-          1, filter_data, dYdata + output_offset * image_id,
-          0, col_buffer_data, &context_);
+          CblasTrans,
+          CblasNoTrans,
+          kernel_dim,
+          output_image_size,
+          M,
+          1,
+          filter_data,
+          dYdata + output_offset * image_id,
+          0,
+          col_buffer_data,
+          &context_);
       math::Col2im<T, Context, StorageOrder::NCHW>(
           col_buffer_data,
           C,
@@ -387,8 +432,10 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     // If the helper bias multiplier is not M, reshape and fill it with one.
     bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
-        output_image_size, static_cast<T>(1),
-        bias_multiplier_.template mutable_data<T>(), &context_);
+        output_image_size,
+        static_cast<T>(1),
+        bias_multiplier_.template mutable_data<T>(),
+        &context_);
   }
   const T* Xdata = X.template data<T>();
   const T* const filter_data = filter.template data<T>();
@@ -397,10 +444,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* dfilter_data = dfilter->template mutable_data<T>();
   T* dbias_data = dbias->template mutable_data<T>();
   // Pre-setting the gradients to zero.
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data,
-                                  &context_);
-  math::Set<T, Context>(dbias->size(), 0, dbias_data,
-                                  &context_);
+  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
   for (int image_id = 0; image_id < N; ++image_id) {
     // When we compute the gradient with respect to the filters, we need to do
     // im2col to allow gemm-type computation.
@@ -423,27 +468,49 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         &context_);
     // Gradient with respect to filter.
     math::Gemm<T, Context>(
-        CblasTrans, CblasNoTrans, M, kernel_dim, output_image_size,
-        1, dYdata + output_offset * image_id, col_buffer_data,
-        1, dfilter_data, &context_);
+        CblasTrans,
+        CblasNoTrans,
+        M,
+        kernel_dim,
+        output_image_size,
+        1,
+        dYdata + output_offset * image_id,
+        col_buffer_data,
+        1,
+        dfilter_data,
+        &context_);
     // Gradient with respect to bias
     math::Gemv<T, Context>(
-        CblasTrans, output_image_size, M, 1,
-        dYdata + output_offset * image_id, bias_multiplier_.template data<T>(),
-        1, dbias_data, &context_);
+        CblasTrans,
+        output_image_size,
+        M,
+        1,
+        dYdata + output_offset * image_id,
+        bias_multiplier_.template data<T>(),
+        1,
+        dbias_data,
+        &context_);
     Xdata += input_offset;
   }
   if (OutputSize() == 3) {
     // Compute the gradient w.r.t. the input.
-    auto *dX = Output(INPUT_GRAD);
+    auto* dX = Output(INPUT_GRAD);
     dX->ResizeLike(X);
     T* dXdata = dX->template mutable_data<T>();
     for (int image_id = 0; image_id < N; ++image_id) {
       // Compute gradient into col_buffer.
       math::Gemm<T, Context>(
-          CblasNoTrans, CblasNoTrans, output_image_size, kernel_dim, M,
-          1, dYdata + output_offset * image_id, filter_data,
-          0, col_buffer_data, &context_);
+          CblasNoTrans,
+          CblasNoTrans,
+          output_image_size,
+          kernel_dim,
+          M,
+          1,
+          dYdata + output_offset * image_id,
+          filter_data,
+          0,
+          col_buffer_data,
+          &context_);
       math::Col2im<T, Context, StorageOrder::NHWC>(
           col_buffer_data,
           C,
@@ -466,6 +533,6 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   return true;
 }
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_CONV_OP_IMPL_H_
+#endif // CAFFE2_OPERATORS_CONV_OP_IMPL_H_

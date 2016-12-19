@@ -27,7 +27,11 @@ class NCCLContext {
     events_.resize(devices_.size());
     for (auto i = 0; i < devices_.size(); ++i) {
       DeviceGuard g(devices_[i]);
-      CUDA_CHECK(cudaStreamCreate(&streams_[i]));
+      // get stream priorities
+      int lo_pri, hi_pri;
+      CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
+      CUDA_CHECK(cudaStreamCreateWithPriority(
+          &streams_[i], cudaStreamNonBlocking, hi_pri));
       CUDA_CHECK(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));
     }
@@ -128,6 +132,7 @@ void runNCCL(const NCCLExecution& ex, F&& f) {
     auto& comm = comms[i];
     auto& stream = streams[i];
     auto& event = events[i];
+
     DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
     CUDA_CHECK(cudaStreamWaitEvent(stream, context->master_event_, 0));
     f(ctx, comm, stream);
@@ -203,7 +208,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
   const auto n = ex.elements.size();
   return runNCCL<T>(
       ex, [n](const NCCLElement& ctx, ncclComm_t comm, cudaStream_t stream) {
-        CHECK_NE(ctx.src, ctx.dst);
+        CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
         std::vector<TIndex> dims;
         dims.reserve(ctx.src->ndim() + 1);
         dims.push_back(n);

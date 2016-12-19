@@ -1,10 +1,10 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_LSTM_UNIT_OP_H_
+#define CAFFE2_OPERATORS_LSTM_UNIT_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
-
 namespace detail {
 
 template <typename T>
@@ -108,7 +108,7 @@ void LSTMUnitGradient(
     C_prev_diff += D;
   }
 }
-}
+} // namespace detail
 
 template <typename T, typename Context>
 class LSTMUnitOp : public Operator<Context> {
@@ -122,7 +122,7 @@ class LSTMUnitOp : public Operator<Context> {
     // Gates: 1xNxG
     const auto G = Input(GATES).dim(2);
     const auto D = Input(CELL_T_M_1).dim(2);
-    CHECK_EQ(4 * D, G);
+    CAFFE_ENFORCE_EQ(4 * D, G);
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();
     const auto* X = Input(GATES).template data<T>();
     const auto* seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
@@ -154,7 +154,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
     // Gates: 1xNxG
     const auto G = Input(GATES).dim(2);
     const auto D = Input(CELL_T_M_1).dim(2);
-    CHECK_EQ(4 * D, G);
+    CAFFE_ENFORCE_EQ(4 * D, G);
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();
     const auto* X = Input(GATES).template data<T>();
     const auto t = OperatorBase::Input<Tensor<CPUContext>>(TIMESTEP)
@@ -195,8 +195,10 @@ class LSTMUnitGradientOp : public Operator<Context> {
       HIDDEN_T,
       CELL_T,
       HIDDEN_T_GRAD,
-      CELL_T_GRAD,
-      );
+      CELL_T_GRAD, );
   OUTPUT_TAGS(CELL_T_M_1_GRAD, GATES_GRAD);
 };
-}
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_LSTM_UNIT_OP_H_

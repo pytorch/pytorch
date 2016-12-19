@@ -37,7 +37,7 @@ class Torch final {
     luaL_openlibs(L_);
     luaL_loadstring(L_, Traits::prelude);
     int err = lua_pcall(L_, 0, 0, 0);
-    CHECK_EQ(err, 0) << lua_tostring(L_, -1);
+    CAFFE_ENFORCE_EQ(err, 0, lua_tostring(L_, -1));
   };
 
   ~Torch() {
@@ -59,9 +59,9 @@ class Torch final {
   void setContext(Context* context) {}
 
   void setTensor(typename Traits::Tensor* t, Blob* blob) {
-    CHECK_EQ(tensorTy(*blob), Traits::tensorTy);
+    CAFFE_ENFORCE_EQ(tensorTy(*blob), Traits::tensorTy);
     auto* tc = blob->template GetMutable<Tensor<Context>>();
-    CHECK_EQ(THFloatTensor_nElement(t), tc->size());
+    CAFFE_ENFORCE_EQ(THFloatTensor_nElement(t), tc->size());
     THFloatStorage* storage = THFloatStorage_newWithData(
         tc->template mutable_data<float>(), tc->size());
     THFloatStorage_clearFlag(storage, TH_STORAGE_FREEMEM);
@@ -86,7 +86,7 @@ class Torch final {
   }
 
   typename Traits::Tensor* blobToTensor(Blob* blob) {
-    CHECK_EQ(tensorTy(*blob), Traits::tensorTy);
+    CAFFE_ENFORCE_EQ(tensorTy(*blob), Traits::tensorTy);
     auto* tc = blob->template GetMutable<Tensor<Context>>();
 
     size_t size = tc->size();
@@ -100,7 +100,7 @@ class Torch final {
     auto* th = THFloatTensor_newWithStorage(storage, 0, thshape, nullptr);
     THFloatStorage_free(storage);
     THLongStorage_free(thshape);
-    CHECK_EQ(
+    CAFFE_ENFORCE_EQ(
         THFloatTensor_storage(th)->data, tc->template mutable_data<float>());
     return th;
   }
@@ -141,18 +141,18 @@ class Torch final {
         luaT_toudata(L(), -1, Traits::tensorTy));
     auto* thDst = static_cast<typename Traits::Tensor*>(torchDst);
     auto* tcDst = dst->template GetMutable<Tensor<Context>>();
-    CHECK_NOTNULL(src->storage->data);
+    CAFFE_ENFORCE(src->storage->data);
     CAFFE_ENFORCE(src->storage->size);
-    CHECK_EQ(src->storage->data, thDst->storage->data);
-    CHECK_EQ(src->storage->data, tcDst->template data<float>());
-    CHECK_EQ(src->storage->size, thDst->storage->size);
-    CHECK_EQ(src->storage->size, tcDst->size());
+    CAFFE_ENFORCE_EQ(src->storage->data, thDst->storage->data);
+    CAFFE_ENFORCE_EQ(src->storage->data, tcDst->template data<float>());
+    CAFFE_ENFORCE_EQ(src->storage->size, thDst->storage->size);
+    CAFFE_ENFORCE_EQ(src->storage->size, tcDst->size());
   }
 
   void verifyOutputs(
       const std::vector<Blob*>& blobs,
       const std::vector<typename Traits::Tensor*>& tensors) {
-    CHECK_EQ(tensors.size(), blobs.size());
+    CAFFE_ENFORCE_EQ(tensors.size(), blobs.size());
 
     if (blobs.empty()) {
       return;
@@ -187,26 +187,27 @@ class TorchOpBase : public Operator<Context> {
   TorchOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     lua_State* L = state_.L();
-    CHECK_EQ(lua_gettop(L), 0);
+    CAFFE_ENFORCE_EQ(lua_gettop(L), 0);
     const auto initString = "return " +
         OperatorBase::GetSingleArgument<std::string>("init", "") + ":" +
         torch::Torch<Context>::Traits::moduleTy + "()";
-    CHECK_EQ(luaL_loadstring(L, initString.c_str()), 0);
+    CAFFE_ENFORCE_EQ(luaL_loadstring(L, initString.c_str()), 0);
     int err = lua_pcall(L, 0, 1, 0);
-    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    CAFFE_ENFORCE_EQ(err, 0, lua_tostring(L, -1));
     // Get number of parameters
     uint32_t numParams = 0;
     lua_getfield(L, -1, "parameters");
     lua_pushvalue(L, -2);
-    CHECK_EQ(lua_pcall(L, 1, LUA_MULTRET, 0), 0);
+    CAFFE_ENFORCE_EQ(lua_pcall(L, 1, LUA_MULTRET, 0), 0);
     if (lua_gettop(L) == 1) {
       numParams = 0;
     } else {
-      CHECK_EQ(lua_gettop(L), 3);
+      CAFFE_ENFORCE_EQ(lua_gettop(L), 3);
       numParams = lua_objlen(L, -2);
       lua_pop(L, 2);
     }
-    CHECK_EQ(numParams, OperatorBase::GetSingleArgument<int>("num_params", 0));
+    CAFFE_ENFORCE_EQ(
+        numParams, OperatorBase::GetSingleArgument<int>("num_params", 0));
     // TODO: free parameters?
     self_ = luaL_ref(L, LUA_REGISTRYINDEX);
   }
@@ -236,7 +237,7 @@ class TorchOpBase : public Operator<Context> {
     }
     LOG(INFO) << "Cached blobs not equal, running :updateOutput to reshape";
     lua_State* L = state_.L();
-    CHECK_EQ(lua_gettop(L), 0);
+    CAFFE_ENFORCE_EQ(lua_gettop(L), 0);
     lua_rawgeti(L, LUA_REGISTRYINDEX, self_);
     lua_getfield(L, -1, "updateOutput");
     lua_pushvalue(L, -2); // self
@@ -255,13 +256,13 @@ class TorchOpBase : public Operator<Context> {
       }
     }
     int err = lua_pcall(L, 2, 0, 0);
-    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    CAFFE_ENFORCE_EQ(err, 0, lua_tostring(L, -1));
     if (paramBlobs.size() != 0) {
       lua_getfield(L, -1, "parameters");
       lua_pushvalue(L, -2);
       int err = lua_pcall(L, 1, LUA_MULTRET, 0);
-      CHECK_EQ(err, 0);
-      CHECK_EQ(lua_gettop(L), 3);
+      CAFFE_ENFORCE_EQ(err, 0);
+      CAFFE_ENFORCE_EQ(lua_gettop(L), 3);
       lua_pushnil(L);
       int i = 0;
       while (lua_next(L, -3) && i < paramBlobs.size()) {
@@ -282,7 +283,7 @@ class TorchOpBase : public Operator<Context> {
         lua_pop(L, 1);
         i++;
       }
-      CHECK_EQ(i, paramBlobs.size());
+      CAFFE_ENFORCE_EQ(i, paramBlobs.size());
       lua_pop(L, 2);
     }
     lua_getfield(L, -1, "output");
@@ -318,10 +319,10 @@ class TorchOpBase : public Operator<Context> {
         }
         ++i;
       }
-      CHECK_EQ(i, outputBlobs.size());
+      CAFFE_ENFORCE_EQ(i, outputBlobs.size());
     }
     lua_pop(L, 2);
-    CHECK_EQ(lua_gettop(L), 0);
+    CAFFE_ENFORCE_EQ(lua_gettop(L), 0);
 
     cachedInputSizes_.clear();
     for (const auto* blob : inputBlobs) {
@@ -354,8 +355,8 @@ class TorchOp : public TorchOpBase<Context> {
         OperatorBase::GetSingleArgument<int>("num_params", 0);
     const auto numOutputs =
         OperatorBase::GetSingleArgument<int>("num_outputs", 1);
-    CHECK_EQ(InputSize(), numInputs + numParams);
-    CHECK_EQ(OutputSize(), numOutputs);
+    CAFFE_ENFORCE_EQ(InputSize(), numInputs + numParams);
+    CAFFE_ENFORCE_EQ(OutputSize(), numOutputs);
 
     std::vector<Blob*> inputBlobs;
     for (auto i = 0; i < numInputs; ++i) {
@@ -369,7 +370,7 @@ class TorchOp : public TorchOpBase<Context> {
     this->reshapeBlobs(inputBlobs, paramBlobs, Outputs());
 
     lua_State* L = state_.L();
-    CHECK_EQ(lua_gettop(L), 0);
+    CAFFE_ENFORCE_EQ(lua_gettop(L), 0);
     state_.setContext(&context_);
 
     // Deserialize self table
@@ -384,7 +385,7 @@ class TorchOp : public TorchOpBase<Context> {
       lua_getfield(L, -1, "parameters");
       lua_pushvalue(L, -2);
       int err = lua_pcall(L, 1, 1, 0);
-      CHECK_EQ(err, 0);
+      CAFFE_ENFORCE_EQ(err, 0);
       // iterate the parameters table to put tblobs inside
       lua_pushnil(L);
       auto i = 0;
@@ -399,7 +400,7 @@ class TorchOp : public TorchOpBase<Context> {
         i++;
         lua_pop(L, 1);
       }
-      CHECK_EQ(i, numParams);
+      CAFFE_ENFORCE_EQ(i, numParams);
       lua_pop(L, 1); // pop the parameter table
     }
     // call updateOutput
@@ -411,10 +412,10 @@ class TorchOp : public TorchOpBase<Context> {
     auto torchInputs = state_.pushTable(inputBlobs);
     // | self | updateOutput | self | inputs
     int err = lua_pcall(L, 2, 1, 0); // doesn't need the output
-    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    CAFFE_ENFORCE_EQ(err, 0, lua_tostring(L, -1));
     state_.verifyOutputs(Outputs(), torchOutputs);
     lua_pop(L, 2);
-    CHECK_EQ(lua_gettop(L), 0);
+    CAFFE_ENFORCE_EQ(lua_gettop(L), 0);
     return true;
   }
 };
@@ -465,11 +466,11 @@ class TorchGradientOp : public TorchOpBase<Context> {
     const auto numOutputs =
         OperatorBase::GetSingleArgument<int>("num_outputs", 1);
     lua_State* L = state_.L();
-    CHECK_EQ(lua_gettop(L), 0);
+    CAFFE_ENFORCE_EQ(lua_gettop(L), 0);
     // inputs, params, outputs, grad outputs
-    CHECK_EQ(InputSize(), numInputs + numParams + 2 * numOutputs);
+    CAFFE_ENFORCE_EQ(InputSize(), numInputs + numParams + 2 * numOutputs);
     // grad inputs, grad params
-    CHECK_EQ(OutputSize(), numInputs + numParams);
+    CAFFE_ENFORCE_EQ(OutputSize(), numInputs + numParams);
     state_.setContext(&context_);
 
     std::vector<Blob*> outputBlobs;
@@ -517,7 +518,7 @@ class TorchGradientOp : public TorchOpBase<Context> {
       lua_getfield(L, -1, "parameters");
       lua_pushvalue(L, -2);
       int err = lua_pcall(L, 1, LUA_MULTRET, 0);
-      CHECK_EQ(err, 0) << lua_tostring(L, -1);
+      CAFFE_ENFORCE_EQ(err, 0, lua_tostring(L, -1));
       // iterate the parameters table to put tblobs inside
       lua_pushnil(L);
       auto i = 0;
@@ -530,7 +531,7 @@ class TorchGradientOp : public TorchOpBase<Context> {
         i++;
         lua_pop(L, 1);
       }
-      CHECK_EQ(i, numParams);
+      CAFFE_ENFORCE_EQ(i, numParams);
       // iterate the grad of params
       lua_pushnil(L);
       i = 0;
@@ -543,12 +544,12 @@ class TorchGradientOp : public TorchOpBase<Context> {
         i++;
         lua_pop(L, 1);
       }
-      CHECK_EQ(i, numParams);
+      CAFFE_ENFORCE_EQ(i, numParams);
       lua_pop(L, 2); // pop the parameters
     }
     lua_getfield(L, -1, "zeroGradParameters");
     lua_pushvalue(L, -2);
-    CHECK_EQ(lua_pcall(L, 1, 0, 0), 0);
+    CAFFE_ENFORCE_EQ(lua_pcall(L, 1, 0, 0), 0);
     state_.pushTable(inputBlobs);
     state_.pushTable(gradOutputBlobs);
     // call
@@ -558,16 +559,16 @@ class TorchGradientOp : public TorchOpBase<Context> {
     lua_pushvalue(L, -4);
     lua_pushnumber(L, 1);
     int err = lua_pcall(L, 4, 0, 0); // doesn't need the output
-    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    CAFFE_ENFORCE_EQ(err, 0, lua_tostring(L, -1));
     lua_getfield(L, -3, "updateGradInput");
     lua_pushvalue(L, -4);
     lua_pushvalue(L, -4);
     lua_pushvalue(L, -4);
     err = lua_pcall(L, 3, 1, 0); // doesn't need the output
-    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    CAFFE_ENFORCE_EQ(err, 0, lua_tostring(L, -1));
     state_.verifyOutputs(gradInputBlobs, torchGradInputs);
     lua_pop(L, 4);
-    CHECK_EQ(lua_gettop(L), 0);
+    CAFFE_ENFORCE_EQ(lua_gettop(L), 0);
     return true;
   }
 };

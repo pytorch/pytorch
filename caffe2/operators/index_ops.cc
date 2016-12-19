@@ -200,7 +200,7 @@ class IndexStoreOp: public Operator<CPUContext> {
   bool DoRunWithType() {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
-    CHECK(dict);
+    CAFFE_ENFORCE(dict);
     return dict->Store(Output(0));
   }
 };

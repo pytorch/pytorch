@@ -38,7 +38,7 @@ class TransposeOp final : public Operator<Context> {
       }
       new_dims_.assign(X.dims().rbegin(), X.dims().rend());
     } else {
-      CHECK_EQ(X.ndim(), axes_.size());
+      CAFFE_ENFORCE_EQ(X.ndim(), axes_.size());
       for (int i = 0; i < new_dims_.size(); ++i) {
         new_dims_[i] = X.dim(axes_[i]);
       }

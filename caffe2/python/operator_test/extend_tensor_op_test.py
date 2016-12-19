@@ -63,3 +63,7 @@ class TestExtendTensorOp(TestCase):
         new_tensor_observed = workspace.FetchBlob('counts')
 
         np.testing.assert_array_equal(new_tensor_expected, new_tensor_observed)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

@@ -1,23 +1,23 @@
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <string>
 
 #include "cub/util_allocator.cuh"
 #include "cnmem.h"
 
+#include "caffe2/core/asan.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
 
-
-#define CNMEM_CHECK(condition) \
-  do { \
-    cnmemStatus_t error = condition; \
-    CHECK_EQ(error, CNMEM_STATUS_SUCCESS) << cnmemGetErrorString(error); \
+#define CNMEM_CHECK(condition)                                                 \
+  do {                                                                         \
+    cnmemStatus_t error = condition;                                           \
+    CAFFE_ENFORCE_EQ(error, CNMEM_STATUS_SUCCESS, cnmemGetErrorString(error)); \
   } while (0)
-
 
 DEFINE_string(caffe2_cuda_memory_pool, "",
               "Sets the memory pool used by caffe2. Possible values are "
@@ -48,66 +48,78 @@ CAFFE_KNOWN_TYPE(Tensor<CUDAContext>);
 
 thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
 
+// TODO(jiayq): these variables shouldn't be currently accessed during static
+// initialization. We should consider moving them to a Mayer's singleton to
+// be totally safe against SIOF.
+
 // Static global variables for setting up the memory pool.
 CudaMemoryPoolType g_cuda_memory_pool_type;
-bool g_memory_allocation_already_called = false;
 // For cnmem allocator
-vector<bool> g_cnmem_available_for_device(NumCudaDevices(), false);
+vector<bool> g_cnmem_available_for_device;
 // For cub allocator
 unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
-
 
 CudaMemoryPoolType GetCudaMemoryPoolType() {
   return g_cuda_memory_pool_type;
 }
 
-void* CUDAContext::New(size_t nbytes) {
-  g_memory_allocation_already_called = true;
-  void* ptr = nullptr;
-  switch (g_cuda_memory_pool_type) {
-  case CudaMemoryPoolType::NONE:
-    CUDA_CHECK(cudaMalloc(&ptr, nbytes));
-    return ptr;
-  case CudaMemoryPoolType::CNMEM:
-    CAFFE_ENFORCE(
-        g_cnmem_available_for_device[GetCurrentGPUID()],
-        "Trying to allocate on device ", GetCurrentGPUID(),
-        " but cnmem pool is not set up for it.");
-    CNMEM_CHECK(cnmemMalloc(&ptr, nbytes, nullptr));
-    return ptr;
-  case CudaMemoryPoolType::CUB:
-    CUDA_CHECK(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
-    return ptr;
-  }
-  return nullptr;
-}
+///////////////////////////////////////////////////////////////////////////////
+// A wrapper to allow us to lazily initialize all cuda environments that Caffe
+// uses. This gets done the first time a caffe2::CUDAContext::New() gets called
+// which is probably the decisive indication that this caffe2 run is going to
+// use GPUs. We avoid cuda initialization with core/init.h functionalities so
+// that we have minimal resource impact in case we will need to run multiple
+// caffe2 instances on a GPU machine.
+///////////////////////////////////////////////////////////////////////////////
 
-void CUDAContext::Delete(void* ptr) {
-  switch (g_cuda_memory_pool_type) {
-  case CudaMemoryPoolType::NONE: {
-    // If memory pool is not set up, use simple cudaFree.
-    cudaError_t error = cudaFree(ptr);
-    // For some reason, in Python runtime we sometimes delete a data pointer
-    // after the cuda runtime exits - this is odd but is probably caused by
-    // a static workspace that pycaffe2 uses, and the destruction got
-    // entangled in some race condition. Anyway, since cuda runtime is exiting
-    // anyway, we will not need to worry about memory leak, so we basically
-    // ignore it. This is definitely not ideal but works for now.
-    if (error != cudaSuccess && error != cudaErrorCudartUnloading) {
-      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
-                 << cudaGetErrorString(error);
-		}
-    break; }
-  case CudaMemoryPoolType::CNMEM:
-  	CNMEM_CHECK(cnmemFree(ptr, nullptr));
-    break;
-  case CudaMemoryPoolType::CUB:
-    CUDA_CHECK(g_cub_allocator->DeviceFree(ptr));
-    break;
+static void Caffe2InitializeCuda() {
+  // If the current run does not have any cuda devices, do nothing.
+  if (!HasCudaGPU()) {
+    VLOG(1) << "No cuda gpu present. Skipping.";
+    return;
   }
+  // Check if the number of GPUs matches the expected compile-time max number
+  // of GPUs.
+  CAFFE_ENFORCE_LE(
+      NumCudaDevices(),
+      CAFFE2_COMPILE_TIME_MAX_GPUS,
+      "Number of CUDA devices on the machine is larger than the compiled "
+      "max number of gpus expected (",
+      CAFFE2_COMPILE_TIME_MAX_GPUS,
+      "). Increase that and recompile the caffe binary.");
+  // Save the current device so we can restore it after moving across
+  // different devices.
+  int init_device;
+  CUDA_CHECK(cudaGetDevice(&init_device));
+
+  for (int i = 0; i < NumCudaDevices(); ++i) {
+    auto err = cudaSetDevice(i);
+    if (err != cudaSuccess) {
+      LOG(WARNING)
+          << "Cannot use device " << i
+          << "due to the following error: " << cudaGetErrorString(err);
+      continue;
+    }
+    // Enable peer access.
+    for (int j = 0; j < NumCudaDevices(); ++j) {
+      if (i == j) continue;
+      int can_access;
+      CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, i, j));
+      if (can_access) {
+        VLOG(1) << "Enabling peer access from " << i << " to " << j;
+        // Note: just for future reference, the 0 here is not a gpu id, it is
+        // a reserved flag for cudaDeviceEnablePeerAccess that should always be
+        // zero currently.
+        CUDA_CHECK(cudaDeviceEnablePeerAccess(j, 0));
+      }
+    }
+  }
+  // Restore the current device.
+  CUDA_CHECK(cudaSetDevice(init_device));
 }
 
 static void SetUpCNMEM() {
+  g_cnmem_available_for_device.assign(NumCudaDevices(), false);
   VLOG(1) << "Setting up cnmem memory pool.";
   vector<int> device_ids;
   // If the cnmem gpus are not set, set up all gpus.
@@ -184,42 +196,28 @@ static void SetUpCub() {
   VLOG(1) << "Done setting up cub memory pool.";
 }
 
-// Global initializtion function to set up the cuda memory pool during
-// construction time.
-bool Caffe2SetCUDAMemoryPool(int*, char***) {
-  if (!HasCudaGPU()) {
-    VLOG(1) << "No GPU present. I won't set up cuda memory pool";
-    return true;
-  }
-  if (g_memory_allocation_already_called) {
-    LOG(ERROR) << "Caffe2SetCUDAMemoryPool should always be called before "
-                  "any CUDAContext::New() calls are made.";
-    return false;
-  }
+static void Caffe2SetCUDAMemoryPool() {
   if (FLAGS_caffe2_cuda_memory_pool == "" ||
       FLAGS_caffe2_cuda_memory_pool == "none") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::NONE;
-    return true;
   } else if (FLAGS_caffe2_cuda_memory_pool == "cnmem") {
     // sets up cnmem.
     g_cuda_memory_pool_type = CudaMemoryPoolType::CNMEM;
     SetUpCNMEM();
-    return true;
   } else if (FLAGS_caffe2_cuda_memory_pool == "cub") {
     // Sets up cub.
     g_cuda_memory_pool_type = CudaMemoryPoolType::CUB;
     SetUpCub();
-    return true;
+  } else {
+    CAFFE_THROW("Unrecognized cuda memory pool type: ",
+                FLAGS_caffe2_cuda_memory_pool);
   }
-  LOG(ERROR) << "Unrecognized cuda memory pool type: "
-             << FLAGS_caffe2_cuda_memory_pool;
-  return false;
 }
 
 // An initialization function that sets the CPU side to use pinned cpu
 // allocator.
-bool Caffe2UsePinnedCPUAllocator(int*, char***) {
-#ifdef __SANITIZE_ADDRESS__
+void Caffe2UsePinnedCPUAllocator() {
+#if CAFFE2_ASAN_ENABLED
   // Note(jiayq): for more details, see
   //     https://github.com/google/sanitizers/issues/629
   LOG(WARNING) << "There are known issues between address sanitizer and "
@@ -227,22 +225,99 @@ bool Caffe2UsePinnedCPUAllocator(int*, char***) {
                   "memory allocation in asan mode. If you are expecting any "
                   "behavior that depends on asan, be advised that it is not "
                   "turned on.";
-  return true;
 #else
   if (!HasCudaGPU()) {
     VLOG(1) << "No GPU present. I won't use pinned allocator then.";
-    return true;
   }
   VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
   SetCPUAllocator(new PinnedCPUAllocator());
-  return true;
 #endif
 }
 
-REGISTER_CAFFE2_INIT_FUNCTION(Caffe2SetCUDAMemoryPool,
-                              &Caffe2SetCUDAMemoryPool,
-                              "Sets up the cuda memory pool.");
-REGISTER_CAFFE2_INIT_FUNCTION(Caffe2UsePinnedCPUAllocator,
-                              &Caffe2UsePinnedCPUAllocator,
-                              "Make the CPU side use pinned memory.");
+// Caffe2CudaInitializerHelper is a minimal struct whose sole purpose is to
+// detect the first hint that this Caffe2 run is going to use GPU: either
+// CUDAContext is initialized or CUDAContext::New is called. It then runs
+// all the related cuda initialization functions.
+namespace {
+struct Caffe2CudaInitializerHelper {
+  Caffe2CudaInitializerHelper() {
+    // We cannot use bool because nvcc changes bool to __nv_bool which does
+    // not have a std::atomic instantiation.
+    static std::atomic<char> first_call(1);
+    if (first_call.fetch_and((char)0)) {
+      Caffe2InitializeCuda();
+      Caffe2SetCUDAMemoryPool();
+      Caffe2UsePinnedCPUAllocator();
+    }
+  }
+};
+}  // namespace
+
+CUDAContext::CUDAContext(const int gpu_id)
+    : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id)
+    , random_seed_(math::randomNumberSeed()) {
+  static Caffe2CudaInitializerHelper g_cuda_initializer_;
+}
+
+CUDAContext::CUDAContext(const DeviceOption& option)
+    : gpu_id_(option.has_cuda_gpu_id() ?
+              option.cuda_gpu_id() : GetDefaultGPUID()),
+      random_seed_(option.has_random_seed() ?
+                   option.random_seed() : math::randomNumberSeed()) {
+  static Caffe2CudaInitializerHelper g_cuda_initializer_;
+  DCHECK_EQ(option.device_type(), CUDA);
+}
+
+
+void* CUDAContext::New(size_t nbytes) {
+  // A one-time caffe2 cuda initializer.
+  static Caffe2CudaInitializerHelper g_cuda_initializer_;
+  void* ptr = nullptr;
+  switch (g_cuda_memory_pool_type) {
+  case CudaMemoryPoolType::NONE:
+    CUDA_CHECK(cudaMalloc(&ptr, nbytes));
+    return ptr;
+  case CudaMemoryPoolType::CNMEM: {
+    auto gpuId = GetCurrentGPUID();
+    CAFFE_ENFORCE(
+        gpuId < g_cnmem_available_for_device.size() &&
+            g_cnmem_available_for_device[gpuId],
+        "Trying to allocate on device ",
+        gpuId,
+        " but cnmem pool is not set up for it.");
+    CNMEM_CHECK(cnmemMalloc(&ptr, nbytes, nullptr));
+    return ptr;
+  }
+  case CudaMemoryPoolType::CUB:
+    CUDA_CHECK(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+    return ptr;
+  }
+  return nullptr;
+}
+
+void CUDAContext::Delete(void* ptr) {
+  switch (g_cuda_memory_pool_type) {
+  case CudaMemoryPoolType::NONE: {
+    // If memory pool is not set up, use simple cudaFree.
+    cudaError_t error = cudaFree(ptr);
+    // For some reason, in Python runtime we sometimes delete a data pointer
+    // after the cuda runtime exits - this is odd but is probably caused by
+    // a static workspace that pycaffe2 uses, and the destruction got
+    // entangled in some race condition. Anyway, since cuda runtime is exiting
+    // anyway, we will not need to worry about memory leak, so we basically
+    // ignore it. This is definitely not ideal but works for now.
+    if (error != cudaSuccess && error != cudaErrorCudartUnloading) {
+      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
+                 << cudaGetErrorString(error);
+		}
+    break; }
+  case CudaMemoryPoolType::CNMEM:
+  	CNMEM_CHECK(cnmemFree(ptr, nullptr));
+    break;
+  case CudaMemoryPoolType::CUB:
+    CUDA_CHECK(g_cub_allocator->DeviceFree(ptr));
+    break;
+  }
+}
+
 }  // namespace caffe2

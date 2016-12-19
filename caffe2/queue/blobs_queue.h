@@ -55,7 +55,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     auto keeper = this->shared_from_this();
     std::unique_lock<std::mutex> g(mutex_);
     auto canRead = [this]() {
-      CHECK_LE(reader_, writer_);
+      CAFFE_ENFORCE_LE(reader_, writer_);
       return reader_ != writer_;
     };
     cv_.wait(g, [this, canRead]() { return closing_ || canRead(); });
@@ -112,8 +112,8 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
   bool canWrite() {
     // writer is always within [reader, reader + size)
     // we can write if reader is within [reader, reader + size)
-    CHECK_LE(reader_, writer_);
-    CHECK_LE(writer_, reader_ + queue_.size());
+    CAFFE_ENFORCE_LE(reader_, writer_);
+    CAFFE_ENFORCE_LE(writer_, reader_ + queue_.size());
     return writer_ != reader_ + queue_.size();
   }
 

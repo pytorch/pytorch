@@ -1,23 +1,37 @@
 #pragma once
 
+#include <unordered_map>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL caffe2_python_ARRAY_API
 #include <numpy/arrayobject.h>
 
+// Temporary solution for numpy < 1.7 versions: old macro, no promises.
+// You're strongly advised to upgrade to >= 1.7.
+#ifndef NPY_ARRAY_C_CONTIGUOUS
+#define NPY_ARRAY_C_CONTIGUOUS NPY_C_CONTIGUOUS
+#define PyArray_SetBaseObject(arr, x) (PyArray_BASE(arr) = (x))
+#endif
+
 namespace caffe2 {
+namespace python {
+
+namespace py = pybind11;
 
 // Add methods common to both CPU and GPU mode.
 void addGlobalMethods(pybind11::module& m);
@@ -26,6 +40,10 @@ void addObjectMethods(pybind11::module& m);
 
 class BlobFetcherBase {
  public:
+  struct FetchedBlob {
+    pybind11::object obj;
+    bool copied;
+  };
   virtual ~BlobFetcherBase();
   virtual pybind11::object Fetch(const Blob& blob) = 0;
 };
@@ -63,23 +81,42 @@ template <class Context>
 class TensorFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    const Tensor<Context>& tensor = blob.Get<Tensor<Context>>();
-    Context context;
+    return FetchTensor(blob.Get<Tensor<Context>>(), true).obj;
+  }
+
+  bool NeedsCopy(const TypeMeta& meta) const {
+    return !std::is_same<Context, CPUContext>::value ||
+        CaffeToNumpyType(meta) == NPY_OBJECT;
+  }
+
+  FetchedBlob FetchTensor(const Tensor<Context>& tensor, bool force_copy) {
+    FetchedBlob result;
     CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch unitilized tensor");
-    std::vector<npy_intp> npy_dims;
-    for (const auto dim : tensor.dims()) {
-      npy_dims.push_back(dim);
-    }
-    int numpy_type = CaffeToNumpyType(tensor.meta());
+    const int numpy_type = CaffeToNumpyType(tensor.meta());
     CAFFE_ENFORCE(
         numpy_type != -1,
         "This tensor's data type is not supported: ",
         tensor.meta().name(),
         ".");
-    PyObject* array =
-        PyArray_SimpleNew(tensor.ndim(), npy_dims.data(), numpy_type);
-    void* outPtr = static_cast<void*>(
-        PyArray_DATA(reinterpret_cast<PyArrayObject*>(array)));
+    std::vector<npy_intp> npy_dims;
+    for (const auto dim : tensor.dims()) {
+      npy_dims.push_back(dim);
+    }
+    result.copied = force_copy || NeedsCopy(tensor.meta());
+    void* outPtr;
+    if (result.copied) {
+      result.obj = pybind11::object(
+          PyArray_SimpleNew(tensor.ndim(), npy_dims.data(), numpy_type),
+          /* borrowed */ false);
+      outPtr = static_cast<void*>(
+          PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.obj.ptr())));
+    } else {
+      outPtr = const_cast<Tensor<Context>&>(tensor).raw_mutable_data();
+      result.obj = pybind11::object(
+          PyArray_SimpleNewFromData(
+              tensor.ndim(), npy_dims.data(), numpy_type, outPtr),
+          /* borrowed */ false);
+    }
 
     if (numpy_type == NPY_OBJECT) {
       PyObject** outObj = reinterpret_cast<PyObject**>(outPtr);
@@ -92,30 +129,29 @@ class TensorFetcher : public BlobFetcherBase {
           for (int j = 0; j < i; ++j) {
             Py_DECREF(outObj[j]);
           }
-          Py_DECREF(array);
           CAFFE_THROW("Failed to allocate string for ndarray of strings.");
         }
       }
-      // TODO - is this refcounted correctly?
-      return pybind11::object(array, /* borrowed= */ false);
+      return result;
     }
 
-    // Now, copy the data to the tensor.
-    // TODO(Yangqing): Right now, to make things consistent between CPU and
-    // GPU, we always do a data copy. This is not necessary for CPU and
-    // read-only cases, so we may want to make it a non-copy.
-    context.template CopyBytes<Context, CPUContext>(
-        tensor.nbytes(), tensor.raw_data(), outPtr);
-    context.FinishDeviceComputation();
-    return pybind11::object(array, /* borrowed= */ false);
+    if (result.copied) {
+      Context context;
+      context.template CopyBytes<Context, CPUContext>(
+          tensor.nbytes(), tensor.raw_data(), outPtr);
+      context.FinishDeviceComputation();
+    }
+    return result;
   }
 };
 
 template <class Context>
 class TensorFeeder : public BlobFeederBase {
  public:
-  virtual void
-  Feed(const DeviceOption& option, PyArrayObject* original_array, Blob* blob) {
+  void FeedTensor(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Tensor<Context>* tensor) {
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
@@ -128,7 +164,6 @@ class TensorFeeder : public BlobFeederBase {
         ".");
     Context context(option);
     context.SwitchToDevice();
-    Tensor<Context>* tensor = blob->GetMutable<Tensor<Context>>();
     // numpy requires long int as its dims.
     int ndim = PyArray_NDIM(array);
     npy_intp* npy_dims = PyArray_DIMS(array);
@@ -160,5 +195,44 @@ class TensorFeeder : public BlobFeederBase {
     }
     context.FinishDeviceComputation();
   }
+
+  virtual void
+  Feed(const DeviceOption& option, PyArrayObject* original_array, Blob* blob) {
+    FeedTensor(option, original_array, blob->GetMutable<Tensor<Context>>());
+  }
 };
+
+namespace python_detail {
+class Func;
 }
+
+class PythonOpBase : public Operator<CPUContext> {
+ public:
+  PythonOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws), ws_(ws) {}
+
+  bool RunOnDevice() override final;
+
+ protected:
+  virtual const python_detail::Func& getFunc() = 0;
+  Workspace* ws_;
+};
+
+class PythonOp final : public PythonOpBase {
+ public:
+  using PythonOpBase::PythonOpBase;
+
+ protected:
+  const python_detail::Func& getFunc() override;
+};
+
+class PythonGradientOp final : public PythonOpBase {
+ public:
+  using PythonOpBase::PythonOpBase;
+
+ protected:
+  const python_detail::Func& getFunc() override;
+};
+
+} // namespace python
+} // namespace caffe2

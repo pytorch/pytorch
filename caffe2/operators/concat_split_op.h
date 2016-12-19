@@ -11,17 +11,17 @@ namespace caffe2 {
 namespace {
 inline int GetDimFromOrderString(const string& str) {
   auto order = StringToStorageOrder(str);
-  switch(order) {
-  case StorageOrder::NHWC:
-    return 3;
-  case StorageOrder::NCHW:
-    return 1;
-  default:
-    LOG(FATAL) << "Unsupported storage order: " << str;
-    return -1;
+  switch (order) {
+    case StorageOrder::NHWC:
+      return 3;
+    case StorageOrder::NCHW:
+      return 1;
+    default:
+      CAFFE_THROW("Unsupported storage order: ", str);
+      return -1;
   }
 }
-}  // namespace
+} // namespace
 
 template <class Context>
 class SplitOp final : public Operator<Context> {
@@ -39,8 +39,8 @@ class SplitOp final : public Operator<Context> {
     } else {
       axis_ = GetDimFromOrderString(
           OperatorBase::GetSingleArgument<string>("order", ""));
-   }
-    CHECK_GE(axis_, 0);
+    }
+    CAFFE_ENFORCE_GE(axis_, 0);
   }
 
   bool RunOnDevice() override;
@@ -68,9 +68,8 @@ class ConcatOp final : public Operator<Context> {
       axis_ = GetDimFromOrderString(
           OperatorBase::GetSingleArgument<string>("order", ""));
     }
-    CHECK_GE(axis_, 0);
+    CAFFE_ENFORCE_GE(axis_, 0);
   }
-
 
   bool RunOnDevice() override;
 
@@ -80,40 +79,47 @@ class ConcatOp final : public Operator<Context> {
   // The split are stored in CPU.
 };
 
-
 // Implementations
 template <class Context>
 bool SplitOp<Context>::RunOnDevice() {
   auto& input = Input(0);
-  CAFFE_ENFORCE(axis_ < input.ndim(), "Axis not in input ndim range.");
+  CAFFE_ENFORCE_LT(axis_, input.ndim(), "Axis not in input ndim range.");
   const int input_channels = input.dim32(axis_);
   const int* axis_data;
   vector<int> equal_split;
   if (InputSize() == 2) {
     // We obtain split from the input tensor.
-    CHECK_EQ(split_.size(), 0)
-        << "If you set split with an input blob, do not pass in "
-        << "split in the argument.";
+    CAFFE_ENFORCE_EQ(
+        split_.size(),
+        0,
+        "If you set split with an input blob, do not pass in "
+        "split in the argument.");
     auto& split_tensor = OperatorBase::Input<TensorCPU>(1);
-    CHECK_EQ(split_tensor.size(), OutputSize());
+    CAFFE_ENFORCE_EQ(split_tensor.size(), OutputSize());
     axis_data = split_tensor.template data<int>();
   } else if (split_.size() == 0) {
-    CAFFE_ENFORCE(input_channels % OutputSize() == 0,
-                  "If you did not specify split explicitly, the number of "
-                  "input channels should be divisible by the output size.");
+    CAFFE_ENFORCE_EQ(
+        input_channels % OutputSize(),
+        0,
+        "If you did not specify split explicitly, the number of "
+        "input channels should be divisible by the output size.");
     equal_split.resize(OutputSize(), input_channels / OutputSize());
     axis_data = equal_split.data();
   } else {
     // We obtain split from the parameters.
-    CAFFE_ENFORCE(split_.size() == OutputSize(),
-                  "The number of splits specified should be equal to the "
-                  "number of outputs.");
+    CAFFE_ENFORCE_EQ(
+        split_.size(),
+        OutputSize(),
+        "The number of splits specified should be equal to the "
+        "number of outputs.");
     axis_data = split_.data();
   }
 
-  CHECK_EQ(std::accumulate(axis_data, axis_data + OutputSize(), 0),
-           input_channels)
-      << "Sum of split dimensions do not match: should be " << input_channels;
+  CAFFE_ENFORCE_EQ(
+      std::accumulate(axis_data, axis_data + OutputSize(), 0),
+      input_channels,
+      "Sum of split dimensions do not match: should be ",
+      input_channels);
   int input_offset = 0;
   vector<TIndex> output_dims(input.dims());
   int before = 1, after = 1;
@@ -128,10 +134,14 @@ bool SplitOp<Context>::RunOnDevice() {
     output_dims[axis_] = axis_data[i];
     output->Resize(output_dims);
     math::CopyMatrix<Context>(
-        input.itemsize(), before, axis_data[i] * after,
+        input.itemsize(),
+        before,
+        axis_data[i] * after,
         static_cast<const char*>(input.raw_data()) + input_offset,
-        input.dim32(axis_) * after, output->raw_mutable_data(input.meta()),
-        axis_data[i] * after, &context_);
+        input.dim32(axis_) * after,
+        output->raw_mutable_data(input.meta()),
+        axis_data[i] * after,
+        &context_);
     input_offset += axis_data[i] * after * input.itemsize();
   }
   return true;
@@ -144,7 +154,17 @@ bool ConcatOp<Context>::RunOnDevice() {
   split->Resize(vector<TIndex>(1, InputSize()));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
-  CAFFE_ENFORCE(axis_ < input_zero.ndim(), "Axis not in input ndim range.");
+  CAFFE_ENFORCE_LT(axis_, input_zero.ndim(), "Axis not in input ndim range.");
+  for (int i = 1; i < InputSize(); ++i) {
+    CAFFE_ENFORCE(
+        Input(i).meta() == input_zero.meta(),
+        "All inputs must have the same type, expected: ",
+        input_zero.meta().name(),
+        " but got: ",
+        Input(i).meta().name(),
+        " for input: ",
+        i);
+  }
 
   int before = 1, after = 1;
   vector<TIndex> output_dims(input_zero.dims());
@@ -174,9 +194,11 @@ bool ConcatOp<Context>::RunOnDevice() {
           ". The input tensors can only have different dimensions "
           "along the axis = ",
           axis_,
+          " <",
           Input(0).dims(),
-          " vs ",
-          Input(j).dims());
+          "> vs <",
+          Input(j).dims(),
+          ">.");
     }
   }
 
@@ -191,16 +213,20 @@ bool ConcatOp<Context>::RunOnDevice() {
   for (int i = 0; i < InputSize(); ++i) {
     auto& input = Input(i);
     math::CopyMatrix<Context>(
-        input.itemsize(), before, input.dim32(axis_) * after, input.raw_data(),
+        input.itemsize(),
+        before,
         input.dim32(axis_) * after,
-        static_cast<char*>(output->raw_mutable_data(input.meta()))
-            + output_offset,
-        output_channels * after, &context_);
+        input.raw_data(),
+        input.dim32(axis_) * after,
+        static_cast<char*>(output->raw_mutable_data(input_zero.meta())) +
+            output_offset,
+        output_channels * after,
+        &context_);
     output_offset += input.dim32(axis_) * after * input.itemsize();
   }
   return true;
 }
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_CONCAT_SPLIT_OP_H_
+#endif // CAFFE2_OPERATORS_CONCAT_SPLIT_OP_H_

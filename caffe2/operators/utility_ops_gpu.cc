@@ -7,8 +7,11 @@ namespace {
 REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Flatten, FlattenOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(FlattenToVec, FlattenToVecOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Squeeze, SqueezeOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(ExpandDims, ExpandDimsOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Reshape, ReshapeOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<float, CUDAContext>);
 // From whatever the current context, ensure the output is TensorCPU

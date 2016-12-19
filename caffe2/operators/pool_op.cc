@@ -1,5 +1,6 @@
 // TODO: reduce the apparent redundancy of all the code below.
 #include "caffe2/operators/pool_op.h"
+#include "caffe2/utils/cpu_neon.h"
 
 namespace caffe2 {
 
@@ -11,6 +12,154 @@ namespace {
 // template to instantiate the different algorithms.
 class AveragePool {};
 class MaxPool {};
+
+#ifdef __ARM_NEON__
+
+bool isNeonEligible(int inputH, int inputW,
+                    int outputH, int outputW,
+                    int kH, int kW,
+                    int strideH, int strideW,
+                    int padT, int padL, int padB, int padR,
+                    int dilationH, int dilationW,
+                    const float* input,
+                    float* output) {
+  // Use this kernel only if:
+  // Kernel width is 4x4
+  // Kernel stride is 4x4
+  // Padding is 0
+  // Dilation is 1
+  // Output width and height are even divisors of input width
+  // Input width and height are divisible by 4 (should be implied by
+  // all of the above, but just check again)
+  // Input and output pointers are aligned by float32x4_t
+
+  bool kernelOk = (kH == 4) && (kW == 4);
+  bool strideOk = (strideH == 4) && (strideW == 4);
+  bool padOk = (padT == 0) && (padL == 0) && (padB == 0) && (padR == 0);
+  bool dilationOk = (dilationH == 1) && (dilationW == 1);
+
+  bool outputOk = ((inputH % outputH) == 0) && ((inputW % outputW) == 0);
+  bool inputOk = (inputW % 4 == 0) && (inputH % 4 == 0);
+  bool alignOk = isPointerAligned(input, sizeof(float32x4_t)) &&
+    isPointerAligned(output, sizeof(float32x4_t));
+
+  return kernelOk && strideOk && padOk && dilationOk &&
+    outputOk && inputOk && alignOk;
+}
+
+// Vectorizes 4x4p0s0 averge pooling for ARM NEON
+void avgPoolNeon4x4p0s0Plane(int inputH, int inputW,
+                             const float* input,
+                             float* output) {
+  constexpr int kKernelHeight = 4;
+  constexpr int kKernelWidth = 4;
+  constexpr float kDiv =
+    (1.0f / ((float) kKernelHeight * (float) kKernelWidth));
+
+  // Handle portion that can be unrolled by 4
+  constexpr int kUnroll = 4;
+  constexpr int kLoadSizeFloat = (sizeof(float32x4_t) / sizeof(float));
+  constexpr int kLoadCols = kUnroll * kLoadSizeFloat;
+
+  if (inputW % kLoadCols == 0) {
+    //
+    // Manually unroll by 4 (kUnroll)
+    //
+
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+      const float* curInput = input + h * inputW;
+
+      for (int w = 0; w < inputW; w += kLoadCols) {
+        float32x4_t out = {};
+
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 0);
+        }
+        curInput += kLoadSizeFloat;
+
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 1);
+        }
+        curInput += kLoadSizeFloat;
+
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 2);
+        }
+        curInput += kLoadSizeFloat;
+
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 3);
+        }
+        curInput += kLoadSizeFloat;
+
+        out = vmulq_f32(out, vdupq_n_f32(kDiv));
+        vst1q_f32_aligned(&outputRow[w / kKernelWidth], out);
+      }
+    }
+  } else {
+    //
+    // Not unrolled
+    //
+
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      const float* inputRow = input + h * inputW;
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+
+      for (int w = 0; w < inputW; w += kKernelWidth) {
+        const float* curInput = inputRow + w;
+
+        float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+        float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+        float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+        float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+        float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3) * kDiv;
+        outputRow[w / kKernelWidth] = v0;
+      }
+    }
+  }
+}
+
+void
+runNeonAveragePool4x4p0s0NCHW(int N, int C, int inputH, int inputW,
+                              const float* input,
+                              float* output) {
+  // We only have the 4x4p0s0 implementation at present, which is
+  // checked at a higher level
+  int outputH = inputH / 4;
+  int outputW = inputW / 4;
+
+  for (int n = 0; n < N; ++n) {
+    for (int c = 0; c < C; ++c) {
+      const float* curInput = input + (n * C + c) * inputH * inputW;
+      float* curOutput = output + (n * C + c) * outputH * outputW;
+
+      avgPoolNeon4x4p0s0Plane(inputH, inputW, curInput, curOutput);
+    }
+  }
+}
+#endif // __ARM_NEON__
+
 }  // namespace
 
 template <>
@@ -29,6 +178,23 @@ bool PoolOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNCHW() {
   int width = X.dim32(3);
   int pooled_height = Y->dim32(2);
   int pooled_width = Y->dim32(3);
+
+#ifdef __ARM_NEON__
+  // We specialize certain variants on ARM for vectorization
+  if (isNeonEligible(X.dim32(2), X.dim32(3),
+                     Y->dim32(2), Y->dim32(3),
+                     kernel_h_, kernel_w_,
+                     stride_h_, stride_w_,
+                     pad_t_, pad_l_, pad_b_, pad_r_,
+                     dilation_h_, dilation_w_,
+                     Xdata, Ydata)) {
+    runNeonAveragePool4x4p0s0NCHW(X.dim32(0), X.dim32(1),
+                                  X.dim32(2), X.dim32(3),
+                                  Xdata, Ydata);
+    return true;
+  }
+#endif // __ARM_NEON__
+
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int c = 0; c < channels; ++c) {
       for (int ph = 0; ph < pooled_height; ++ph) {
@@ -115,7 +281,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNCHW() 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   int channels = X.dim32(1);
-  CHECK_EQ(channels, dY.dim32(1));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
   ConvPoolOpBase<CPUContext>::ComputePads(height, width);
@@ -154,7 +320,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNHWC() 
   auto& X = Input(0);
   // Note that Input(1) is not needed in average pooling.
   auto& dY = Input(2);
-  CHECK_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
@@ -169,7 +335,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNHWC() 
   int pooled_height = dY.dim32(1);
   int pooled_width = dY.dim32(2);
   int channels = X.dim32(3);
-  CHECK_EQ(channels, dY.dim32(3));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(3));
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {
@@ -299,7 +465,7 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   int channels = X.dim32(1);
-  CHECK_EQ(channels, dY.dim32(1));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
   ConvPoolOpBase<CPUContext>::ComputePads(height, width);
@@ -348,7 +514,7 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   dX->ResizeLike(X);
 
   int channels = X.dim32(3);
-  CHECK_EQ(channels, dY.dim32(3));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(3));
   ConstEigenArrayMap<float> Ymat(
       Y.data<float>(), channels, Y.size() / channels);
   ConstEigenArrayMap<float> dYmat(

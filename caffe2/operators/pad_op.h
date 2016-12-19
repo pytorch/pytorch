@@ -2,10 +2,10 @@
 #define CAFFE2_OPERATORS_PAD_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -83,6 +83,6 @@ class PadImageGradientOp final : public ConvPoolOpBase<Context> {
   // Output: dX
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_PAD_OP_H_

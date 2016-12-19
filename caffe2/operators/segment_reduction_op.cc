@@ -31,10 +31,12 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     auto N = segment_ids.dim(0);
-    CHECK_EQ(N, data.dim(0))
-        << "SEGMENT_IDS must have the same length as outer dimension of DATA";
+    CAFFE_ENFORCE_EQ(
+        N,
+        data.dim(0),
+        "SEGMENT_IDS must have the same length as outer dimension of DATA");
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
     const T* d = data.template data<T>();
@@ -53,7 +55,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
     TIndex block_size = data.size() / N;
 
     // Assume the segments are sorted and there are no gaps
-    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CAFFE_ENFORCE_EQ(0, s_ids[0], "Indices must be sorted and not have gaps");
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
       for (++i; i < N && s_ids[start] == s_ids[i]; ++i)
@@ -68,8 +70,10 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
 
       // check correctness of the next segment
       if (i < N) {
-        CHECK_EQ(s_ids[start] + 1, s_ids[i])
-            << "Indices must be sorted and not have gaps";
+        CAFFE_ENFORCE_EQ(
+            s_ids[start] + 1,
+            s_ids[i],
+            "Indices must be sorted and not have gaps");
       }
     }
     return true;
@@ -97,7 +101,7 @@ class AbstractSortedSegmentRangeGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     TIndex N = segment_ids.dim(0);
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
@@ -119,9 +123,10 @@ class AbstractSortedSegmentRangeGradientOp : public Operator<Context> {
     TIndex block_size = segment_grads.size_from_dim(1);
 
     // Assume the segments are sorted and there are no gaps
-    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CAFFE_ENFORCE_EQ(0, s_ids[0], "Indices must be sorted and not have gaps");
     // repeat the check from forward op
-    CHECK_EQ(K - 1, s_ids[N - 1]) << "Indices must be sorted and not have gaps";
+    CAFFE_ENFORCE_EQ(
+        K - 1, s_ids[N - 1], "Indices must be sorted and not have gaps");
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
       for (++i; i < N && s_ids[start] == s_ids[i]; ++i)
@@ -140,8 +145,10 @@ class AbstractSortedSegmentRangeGradientOp : public Operator<Context> {
 
       // check correctness of the next segment
       if (i < N) {
-        CHECK_EQ(s_ids[start] + 1, s_ids[i])
-            << "Indices must be sorted and not have gaps";
+        CAFFE_ENFORCE_EQ(
+            s_ids[start] + 1,
+            s_ids[i],
+            "Indices must be sorted and not have gaps");
       }
     }
     return true;
@@ -257,7 +264,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
     auto& data = Input(0);
     auto* output = Output(0);
 
-    CHECK_LE(num_reduce_dims_, data.ndim());
+    CAFFE_ENFORCE_LE(num_reduce_dims_, data.ndim());
 
     typename Reducer::Meta ctx;
     ctx.observeInput(0, data, num_reduce_dims_);
@@ -280,6 +287,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
     for (TIndex i = 0; i < block_num; ++i) {
       r.template process<FixedSize>(ctx, d + in_block_size * i, i, &context_);
     }
+    r.template finish<FixedSize>(ctx, &context_);
     return true;
   }
 
@@ -322,7 +330,7 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
 
     const T* r_grad = reduction_grad.template data<T>();
 
-    CHECK_LE(num_reduce_dims_, source_shape.size());
+    CAFFE_ENFORCE_LE(num_reduce_dims_, source_shape.size());
     vector<TIndex> shape(
         source_shape.template data<TIndex>(),
         source_shape.template data<TIndex>() + num_reduce_dims_);
@@ -335,7 +343,8 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
 
     ReducerGradient r(ctx, r_grad, &context_);
     for (TIndex i = 0; i < block_num; ++i) {
-      r.template fillGrad<FixedSize>(ctx, out + block_size * i, i, &context_);
+      r.template fillGrad<FixedSize>(
+          ctx, out + block_size * i, i, &context_, block_num);
     }
     return true;
   }
@@ -453,20 +462,22 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     TIndex N = segment_ids.dim(0);
     const TIndex M = data.dim(0);
 
     const TIndex* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
-      CHECK_EQ(1, indices.ndim()) << "INDICES must be a vector";
-      CHECK_EQ(N, indices.dim(0))
-          << "SEGMENT_IDS must have the same length as INDICES";
+      CAFFE_ENFORCE_EQ(1, indices.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(
+          N,
+          indices.dim(0),
+          "SEGMENT_IDS must have the same length as INDICES");
       idxs = indices.template data<TIndex>();
     } else {
-      CHECK_EQ(N, M)
-          << "DATA must have the same first dimension as SEGMENT_IDS";
+      CAFFE_ENFORCE_EQ(
+          N, M, "DATA must have the same first dimension as SEGMENT_IDS");
     }
 
     // It would probably look nicer with varargs templates but it's too much
@@ -475,9 +486,12 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     ctx.observeInput(0, data, 1);
     for (int i = 1; i < Reducer::kInputCount; ++i) {
       auto& aux_in = Input(i);
-      CHECK_EQ(N, aux_in.dim(0))
-          << "Input " << i
-          << " must have have the same first dim as SEGMENT_IDS";
+      CAFFE_ENFORCE_EQ(
+          N,
+          aux_in.dim(0),
+          "Input ",
+          i,
+          " must have have the same first dim as SEGMENT_IDS");
       ctx.observeInput(i, aux_in, 1);
     }
 
@@ -498,7 +512,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     TIndex out_block_size = output->size_from_dim(1);
 
     // Assume the segments are sorted and there are no gaps
-    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CAFFE_ENFORCE_EQ(0, s_ids[0], "Indices must be sorted and not have gaps");
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
 
@@ -520,10 +534,13 @@ class AbstractSortedSegmentOp : public Operator<Context> {
             ctx, d + in_block_size * idx, i, &context_);
       }
 
+      r.template finish<FixedSize>(ctx, &context_);
       // check correctness of the next segment
       if (i < N) {
-        CHECK_EQ(s_ids[start] + 1, s_ids[i])
-            << "Indices must be sorted and not have gaps";
+        CAFFE_ENFORCE_EQ(
+            s_ids[start] + 1,
+            s_ids[i],
+            "Indices must be sorted and not have gaps");
       }
     }
     return true;
@@ -558,15 +575,18 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     TIndex N = segment_ids.dim(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
-      CHECK_EQ(N, aux_in.dim(0))
-          << "Input " << i
-          << " must have have the same first dim as SEGMENT_IDS";
+      CAFFE_ENFORCE_EQ(
+          N,
+          aux_in.dim(0),
+          "Input ",
+          i,
+          " must have have the same first dim as SEGMENT_IDS");
       ctx.observeOriginalInput(ReducerGradient::originalInputs()[i], aux_in, 1);
     }
 
@@ -588,22 +608,31 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     }
 
     // Assume the segments are sorted and there are no gaps
-    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CAFFE_ENFORCE_EQ(0, s_ids[0], "Indices must be sorted and not have gaps");
     // repeat the check from forward op
-    CHECK_EQ(K - 1, s_ids[N - 1]) << "Indices must be sorted and not have gaps";
+    CAFFE_ENFORCE_EQ(
+        K - 1, s_ids[N - 1], "Indices must be sorted and not have gaps");
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
+      TIndex end = start;
+
+      if (ReducerGradient::computeLength()) {
+        for (; end < N && s_ids[start] == s_ids[end]; ++end) {
+        }
+      }
 
       ReducerGradient r(ctx, s_grads + s_block_size * s_ids[start], &context_);
       for (; i < N && s_ids[start] == s_ids[i]; ++i) {
         r.template fillGrad<FixedSize>(
-            ctx, out + d_block_size * i, i, &context_);
+            ctx, out + d_block_size * i, i, &context_, end - start);
       }
 
       // check correctness of the next segment
       if (i < N) {
-        CHECK_EQ(s_ids[start] + 1, s_ids[i])
-            << "Indices must be sorted and not have gaps";
+        CAFFE_ENFORCE_EQ(
+            s_ids[start] + 1,
+            s_ids[i],
+            "Indices must be sorted and not have gaps");
       }
     }
     return true;
@@ -813,20 +842,22 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     TIndex N = segment_ids.dim(0);
     const TIndex M = data.dim(0);
 
     const TIndex* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
-      CHECK_EQ(1, indices.ndim()) << "INDICES must be a vector";
-      CHECK_EQ(N, indices.dim(0))
-          << "SEGMENT_IDS must have the same length as INDICES";
+      CAFFE_ENFORCE_EQ(1, indices.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(
+          N,
+          indices.dim(0),
+          "SEGMENT_IDS must have the same length as INDICES");
       idxs = indices.template data<TIndex>();
     } else {
-      CHECK_EQ(N, M)
-          << "DATA must have the same first dimension as SEGMENT_IDS";
+      CAFFE_ENFORCE_EQ(
+          N, M, "DATA must have the same first dimension as SEGMENT_IDS");
     }
 
     // It would probably look nicer with varargs templates but it's too much
@@ -835,9 +866,12 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     ctx.observeInput(0, data, 1);
     for (int i = 1; i < Reducer::kInputCount; ++i) {
       auto& aux_in = Input(i);
-      CHECK_EQ(N, aux_in.dim(0))
-          << "Input " << i
-          << " must have have the same first dim as SEGMENT_IDS";
+      CAFFE_ENFORCE_EQ(
+          N,
+          aux_in.dim(0),
+          "Input ",
+          i,
+          " must have have the same first dim as SEGMENT_IDS");
       ctx.observeInput(i, aux_in, 1);
     }
 
@@ -893,6 +927,10 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
       reducers_[s_id].template process<FixedSize>(
           ctx, d + in_block_size * idx, i, &context_);
     }
+
+    for (TIndex i = 0; i < K; ++i) {
+      reducers_[i].template finish<FixedSize>(ctx, &context_);
+    }
     // call reducers destructors (if there is any)
     reducers_.clear();
     return true;
@@ -932,15 +970,18 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     TIndex N = segment_ids.dim(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
-      CHECK_EQ(N, aux_in.dim(0))
-          << "Input " << i
-          << " must have have the same first dim as SEGMENT_IDS";
+      CAFFE_ENFORCE_EQ(
+          N,
+          aux_in.dim(0),
+          "Input ",
+          i,
+          " must have have the same first dim as SEGMENT_IDS");
       ctx.observeOriginalInput(ReducerGradient::originalInputs()[i], aux_in, 1);
     }
 
@@ -957,6 +998,20 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     TIndex s_block_size = segment_grads.size_from_dim(1);
     T* out = data_grads->template mutable_data<T>();
 
+    if (ReducerGradient::computeLength()) {
+      segment_length_.resize(K, 0);
+      for (int i = 0; i < N; ++i) {
+        auto s_id = s_ids[i];
+        CAFFE_ENFORCE(
+            0 <= s_id && s_id < K,
+            "Segment id out of range: ",
+            s_id,
+            ", range 0 to ",
+            K);
+        segment_length_[s_ids[i]]++;
+      }
+    }
+
     reducers_.clear();
     reducers_.reserve(K);
     for (SIndex i = 0; i < K; ++i) {
@@ -965,14 +1020,13 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
 
     for (TIndex i = 0; i < N; ++i) {
       auto s_id = s_ids[i];
-      CAFFE_ENFORCE(
-          0 <= s_id && s_id < K,
-          "Segment id out of range: ",
-          s_id,
-          ", range 0 to ",
-          K);
-      reducers_[s_id].template fillGrad<FixedSize>(
-          ctx, out + d_block_size * i, i, &context_);
+      if (ReducerGradient::computeLength()) {
+        reducers_[s_id].template fillGrad<FixedSize>(
+            ctx, out + d_block_size * i, i, &context_, segment_length_[s_id]);
+      } else {
+        reducers_[s_id].template fillGrad<FixedSize>(
+            ctx, out + d_block_size * i, i, &context_, 0);
+      }
     }
     // call reducers destructors (if there is any)
     reducers_.clear();
@@ -993,6 +1047,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
  private:
   // member field to reuse memory
   vector<ReducerGradient> reducers_;
+  vector<int> segment_length_;
 };
 
 template <typename T, typename SIndex, typename Context, typename ReducerDef>
@@ -1162,7 +1217,7 @@ class AbstractLengthsOp : public Operator<Context> {
     auto& lengthsInput = Input(LENGTHS);
     auto* output = Output(0);
 
-    CHECK_EQ(1, lengthsInput.ndim()) << "LENGTHS must be a vector";
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     const TIndex dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
     TIndex dataToReduceSize;
@@ -1171,7 +1226,7 @@ class AbstractLengthsOp : public Operator<Context> {
     const TIndex* indicies;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CHECK_EQ(1, indicesInput.ndim()) << "INDICES must be a vector";
+      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
       indicies = indicesInput.template data<TIndex>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
@@ -1231,6 +1286,7 @@ class AbstractLengthsOp : public Operator<Context> {
         reducer.template process<FixedSize>(
             ctx, data + in_block_size * idx, dataIndex, &context_);
       }
+      reducer.template finish<FixedSize>(ctx, &context_);
     }
     CAFFE_ENFORCE(
         dataIndex == dataToReduceSize, dataIndex, " != ", dataToReduceSize);
@@ -1309,7 +1365,8 @@ class AbstractLengthsGradientOp : public Operator<Context> {
             ctx,
             dataGrads + dataGradsBlockSize * dataIndex,
             dataIndex,
-            &context_);
+            &context_,
+            lengths[rangeIndex]);
       }
     }
     CAFFE_ENFORCE(
@@ -1523,5 +1580,6 @@ REGISTER_SEGMENT_DEF(
 
 REGISTER_REDUCER_WITH_ALL_OPS(SumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(WeightedSumReducerDef);
+REGISTER_REDUCER_WITH_ALL_OPS(MeanReducerDef);
 }
 }

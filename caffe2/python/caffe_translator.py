@@ -322,6 +322,8 @@ def TranslatePool(layer, pretrained_blobs, is_test):
     AddArgument(caffe_op, "order", "NCHW")
     AddArgument(caffe_op, "legacy_pad",
                 caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
+    if param.global_pooling:
+        AddArgument(caffe_op, "global_pooling", 1)
     return caffe_op, []
 
 
@@ -421,3 +423,45 @@ def TranslateInstanceNorm(layer, pretrained_blobs, is_test):
     caffe_op.input.extend([output + '_w', output + '_b'])
     AddArgument(caffe_op, "order", "NCHW")
     return caffe_op, [weight, bias]
+
+
+@TranslatorRegistry.Register("Eltwise")
+def TranslateElementWise(layer, pretrained_blobs, is_test):
+    param = layer.eltwise_param
+    # TODO(jiayq): if we have a protobuf that uses this, lift this constraint
+    # and verify that we can correctly translate.
+    if len(param.coeff) or param.operation != 1:
+        raise RuntimeError("This eltwise layer is not yet supported.")
+    caffe_op = BaseTranslate(layer, "Sum")
+    return caffe_op, []
+
+
+@TranslatorRegistry.Register("Scale")
+def TranslateScale(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "Mul")
+    scale_param = layer.scale_param
+    AddArgument(caffe_op, "axis", scale_param.axis)
+    AddArgument(caffe_op, "broadcast", True)
+    if len(caffe_op.input) == 1:
+        # the scale parameter is in pretrained blobs
+        if scale_param.num_axes != 1:
+            raise RuntimeError("This path has not been verified yet.")
+        output = caffe_op.output[0]
+        caffe_op.input.append(output + '_w')
+        weight = utils.NumpyArrayToCaffe2Tensor(
+            pretrained_blobs[0].flatten(), output + '_w')
+        return caffe_op, [weight]
+    elif len(caffe_op.input) == 2:
+        # TODO(jiayq): find a protobuf that uses this and verify.
+        raise RuntimeError("This path has not been verified yet.")
+    else:
+        raise RuntimeError("Unexpected number of inputs.")
+
+
+@TranslatorRegistry.Register("Reshape")
+def TranslateReshape(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "Reshape")
+    caffe_op.output.append("_" + caffe_op.input[0] + "_dims")
+    reshape_param = layer.reshape_param
+    AddArgument(caffe_op, 'shape', reshape_param.shape.dim)
+    return caffe_op, []

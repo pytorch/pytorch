@@ -76,13 +76,12 @@ class TestSparseToDenseMask(TestCase):
     def test_sparse_to_dense_mask_empty_lengths(self):
         op = core.CreateOperator(
             'SparseToDenseMask',
-            ['indices', 'values', 'default', 'lengths'],
+            ['indices', 'values', 'default'],
             ['output'],
             mask=[1, 2, 6])
         workspace.FeedBlob('indices', np.array([2, 4, 6], dtype=np.int32))
         workspace.FeedBlob('values', np.array([1, 2, 3], dtype=np.float))
         workspace.FeedBlob('default', np.array(-1, dtype=np.float))
-        workspace.FeedBlob('lengths', np.array([], dtype=np.int32))
         workspace.RunOperatorOnce(op)
         output = workspace.FetchBlob('output')
         expected = np.array([-1, 1, 3], dtype=np.float)

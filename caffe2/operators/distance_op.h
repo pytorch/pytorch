@@ -21,8 +21,7 @@ class SquaredL2DistanceOp : public Operator<Context> {
 };
 
 template <typename T, class Context>
-class SquaredL2DistanceGradientOp final
-    : public Operator<Context> {
+class SquaredL2DistanceGradientOp final : public Operator<Context> {
  public:
   SquaredL2DistanceGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws) {}
@@ -45,16 +44,24 @@ class SquaredL2DistanceGradientOp final
     dX->ResizeLike(X);
     dY->ResizeLike(Y);
     math::Sub<T, Context>(
-        X.size(), X.template data<T>(), Y.template data<T>(),
-        dX->template mutable_data<T>(), &context_);
+        X.size(),
+        X.template data<T>(),
+        Y.template data<T>(),
+        dX->template mutable_data<T>(),
+        &context_);
     for (int i = 0; i < N; ++i) {
       math::Scale<T, Context>(
-          D, dDistance.template data<T>() + i, dX->template data<T>() + i * D,
-          dX->template mutable_data<T>() + i * D, &context_);
+          D,
+          dDistance.template data<T>() + i,
+          dX->template data<T>() + i * D,
+          dX->template mutable_data<T>() + i * D,
+          &context_);
     }
     // The gradient of the other side is basically the negative.
     math::Scale<T, Context>(
-        X.size(), -1, dX->template data<T>(),
+        X.size(),
+        -1,
+        dX->template data<T>(),
         dY->template mutable_data<T>(),
         &context_);
     return true;
@@ -91,8 +98,14 @@ class DotProductGradientOp final : public Operator<Context> {
     auto& dDot = Input(DER_DOT_IN);
     auto* dX = Output(DER_X_OUT);
     auto* dY = Output(DER_Y_OUT);
-    int N = X.ndim() > 0 ? X.dim32(0) : 1;
-    int D = X.size() / N;
+    int N, D;
+    if (X.size() > 0) {
+      N = X.ndim() > 0 ? X.dim32(0) : 1;
+      D = X.size() / N;
+    } else {
+      N = 0;
+      D = 0;
+    }
     CAFFE_ENFORCE(X.ndim() == Y.ndim());
     for (int i = 0; i < X.ndim(); ++i) {
       CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
@@ -213,6 +226,6 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
   OUTPUT_TAGS(DER_X_OUT, DER_Y_OUT);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_DISTANCE_OP_H_
