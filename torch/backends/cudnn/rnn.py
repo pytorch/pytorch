@@ -16,18 +16,34 @@ def get_cudnn_mode(mode):
         raise Exception("Unknown mode: {}".format(mode))
 
 
+class Unserializable(object):
+    def __init__(self, inner):
+        self.inner = inner
+    
+    def get(self):
+        return self.inner
+
+    def __getstate__(self):
+        # Note: can't return {}, because python2 won't call __setstate__
+        # if the value evaluates to False
+        return "<unserializable>"
+
+    def __setstate__(self, state):
+        self.inner = None
+
+
 def init_dropout_descriptor(fn, handle):
     return cudnn.DropoutDescriptor(
         handle,
         fn.dropout,
-        fn.seed
+        fn.dropout_seed
     )
 
 def init_rnn_descriptor(fn):
     return cudnn.RNNDescriptor(
         fn.hidden_size,
         fn.num_layers,
-        fn.dropout_desc,
+        fn.dropout_state['desc'].get(),
         fn.input_mode,
         fn.bidirectional,
         fn.mode,
@@ -194,7 +210,10 @@ def forward(fn, input, hx, weight, output, hy):
         y = output
 
         # init descriptors
-        fn.dropout_desc = init_dropout_descriptor(fn, handle)
+        if ('desc' not in fn.dropout_state) or (fn.dropout_state['desc'].get() is None):
+            fn.dropout_state['desc'] = Unserializable(
+                init_dropout_descriptor(fn, handle)
+            )
         fn.rnn_desc = init_rnn_descriptor(fn)
         fn.x_descs = cudnn.descriptor(x[0], fn.seq_length)
         fn.y_descs = cudnn.descriptor(y[0], fn.seq_length)
