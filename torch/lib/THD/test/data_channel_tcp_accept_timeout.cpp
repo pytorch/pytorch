@@ -1,4 +1,5 @@
 #include "../base/channels/DataChannelTCP.hpp"
+#include "TestUtils.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -15,13 +16,7 @@ void master()
   setenv("MASTER_PORT", std::to_string(MASTER_PORT).data(), 1);
   auto masterChannel = std::make_shared<thd::DataChannelTCP>(2000); // timeout after 2s
 
-  bool thrown = false;
-  try {
-    masterChannel->init();
-  } catch (const std::exception& e) {
-    thrown = true;
-  }
-  assert(thrown);
+  ASSERT_THROWS(std::exception, masterChannel->init())
 }
 
 

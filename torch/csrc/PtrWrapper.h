@@ -1,5 +1,5 @@
-#ifndef THP_CUDNN_CPP_WRAPPER_INC
-#define THP_CUDNN_CPP_WRAPPER_INC
+#ifndef THP_PTR_WRAPPER_H
+#define THP_PTR_WRAPPER_H
 
 #include <functional>
 

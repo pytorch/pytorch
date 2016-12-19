@@ -32,6 +32,7 @@ public:
   virtual ~THTensor();
 
   virtual THTensor* clone() const override;
+  virtual THTensor* clone_shallow() override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;

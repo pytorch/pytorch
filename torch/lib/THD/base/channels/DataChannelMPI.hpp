@@ -1,8 +1,10 @@
 #pragma once
 
 #include "../DataChannel.hpp"
+#include "DataChannelUtils.hpp"
 
 #include <mpi.h>
+#include <memory>
 #include <utility>
 #include <unordered_map>
 #include <vector>
@@ -10,7 +12,24 @@
 namespace thd {
 
 struct DataChannelMPI : DataChannel {
-public:
+  struct RequestMPI : DataChannel::Request {
+    friend class DataChannelMPI; // allows `DataChannelMPI` to access private members
+
+    RequestMPI();
+    virtual ~RequestMPI();
+
+    virtual bool isCompleted() override;
+    virtual void wait() override;
+
+  private:
+    template<typename T>
+    void steal_buffer(std::shared_ptr<T> ptr);
+    MPI_Request& new_request();
+
+    std::vector<std::shared_ptr<void>> _buffers;
+    std::vector<MPI_Request> _requests;
+  };
+
   DataChannelMPI();
   virtual ~DataChannelMPI();
 
@@ -29,15 +48,15 @@ public:
   void broadcast(Tensor& data, int src_rank, THDGroup group_id = THDGroupWORLD) override;
   void send(Tensor& data, int dst_rank) override;
   void receive(Tensor& data, int src_rank) override;
+  RequestMPI* isend(Tensor& data, int dst_rank) override;
+  RequestMPI* ireceive(Tensor& data, int src_rank) override;
 
   void barrier(THDGroup group_id = THDGroupWORLD) override;
-
   THDGroup newGroup(const std::vector<int>& ranks) override;
 
 private:
-  void broadcastPack(Tensor& data, int src_rank, MPI_Comm comm) const;
-  void broadcastUnpack(Tensor& data, int src_rank, MPI_Comm comm) const;
-
+  void _broadcastPack(Tensor& data, int src_rank, MPI_Comm comm) const;
+  void _broadcastUnpack(Tensor& data, int src_rank, MPI_Comm comm) const;
 
   int _rank; // Current process' rank
   int _num_processes; // Number of processes in network

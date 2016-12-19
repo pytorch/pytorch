@@ -24,6 +24,12 @@ auto THTensor<real>::clone() const -> THTensor* {
 }
 
 template<>
+auto THTensor<real>::clone_shallow() -> THTensor* {
+  THTensor_(retain)(tensor);
+  return new THTensor(tensor);
+}
+
+template<>
 int THTensor<real>::nDim() const {
   return tensor->nDimension;
 }

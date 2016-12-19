@@ -12,12 +12,31 @@ class group(object):
     WORLD = object()
 
 
+class _DistributedRequest(object):
+    def __init__(self, request):
+        self.request = request
+
+    def is_completed(self):
+        return torch._C._dist_request_is_completed(self.request)
+
+    def wait(self):
+        torch._C._dist_request_wait(self.request)
+
+
 def get_rank():
     return torch._C._dist_get_rank()
 
 
 def get_num_processes():
     return torch._C._dist_get_num_processes()
+
+
+def isend(tensor, dst_rank):
+    return _DistributedRequest(torch._C._dist_isend(tensor, dst_rank))
+
+
+def irecv(tensor, src_rank):
+    return _DistributedRequest(torch._C._dist_irecv(tensor, src_rank))
 
 
 def send(tensor, dst_rank):

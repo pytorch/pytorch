@@ -26,11 +26,19 @@ void THDBroadcast(THDTensorDescriptor* desc, int src_rank, THDGroup group) {
   dataChannel->broadcast(*desc, src_rank, group);
 }
 
+THDRequest* THDIsend(THDTensorDescriptor* desc, int dst_rank) {
+  return dataChannel->isend(*desc, dst_rank);
+}
+
+THDRequest* THDIrecv(THDTensorDescriptor* desc, int src_rank) {
+  return dataChannel->ireceive(*desc, src_rank);
+}
+
 void THDSend(THDTensorDescriptor* desc, int dst_rank) {
   dataChannel->send(*desc, dst_rank);
 }
 
-void THDReceive(THDTensorDescriptor* desc, int src_rank) {
+void THDRecv(THDTensorDescriptor* desc, int src_rank) {
   dataChannel->receive(*desc, src_rank);
 }
 
@@ -69,4 +77,12 @@ void THDBarrier(THDGroup group) {
 THDGroup THDNewGroup(const int *ranks, size_t len) {
   std::vector<int> v_ranks(ranks, ranks + len);
   return dataChannel->newGroup(v_ranks);
+}
+
+bool THDRequest_isCompleted(THDRequest* request) {
+  return request->isCompleted();
+}
+
+void THDRequest_wait(THDRequest* request) {
+  request->wait();
 }

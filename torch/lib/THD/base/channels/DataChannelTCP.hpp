@@ -2,10 +2,10 @@
 
 #include "../DataChannel.hpp"
 #include "../ChannelEnvVars.hpp"
+#include "DataChannelUtils.hpp"
 
 #include <cstdint>
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 #include <utility>
@@ -13,6 +13,17 @@
 namespace thd {
 
 struct DataChannelTCP : DataChannel {
+  struct RequestTCP : DataChannel::Request {
+    RequestTCP(QueueWorker::Request&& request);
+    virtual ~RequestTCP();
+
+    virtual bool isCompleted() override;
+    virtual void wait() override;
+
+  private:
+    QueueWorker::Request _request;
+  };
+
   DataChannelTCP();
   DataChannelTCP(int timeout);
   virtual ~DataChannelTCP();
@@ -34,6 +45,8 @@ struct DataChannelTCP : DataChannel {
   void broadcast(Tensor& data, int src_id, THDGroup group_id = THDGroupWORLD) override;
   void send(Tensor& data, int dst_id) override;
   void receive(Tensor& data, int src_id) override;
+  RequestTCP* isend(Tensor& data, int dst_rank) override;
+  RequestTCP* ireceive(Tensor& data, int src_rank) override;
 
   void barrier(THDGroup group_id = THDGroupWORLD) override;
 
@@ -56,9 +69,11 @@ private:
   bool initMaster();
   bool initWorker();
 
-  void reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const;
+  void _send(Tensor& data, int dst_id);
+  void _receive(Tensor& data, int dst_id);
+  void _reduce(Tensor& result, Tensor& data, THDReduceOp operation) const;
   template<typename T>
-  void reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const;
+  void _reduce(Tensor& result, Tensor& data, THDReduceOp operation) const;
 
 
   int _rank; // Rank of current process, range: [0.._processes.size()-1]
@@ -70,6 +85,9 @@ private:
 
   // Existing groups of processes and corresponding group ids
   std::unordered_map<THDGroup, DataChannel::Group> _groups;
+
+  // Workers
+  QueueWorker _send_worker, _receive_worker;
 };
 
 } // namespace thd

@@ -754,6 +754,7 @@ PyMODINIT_FUNC PyInit__C()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
 #endif
+  ASSERT_TRUE(THPWrapper_init(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   ASSERT_TRUE(THPSize_init(module));

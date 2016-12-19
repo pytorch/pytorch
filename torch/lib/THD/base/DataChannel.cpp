@@ -1,5 +1,7 @@
 #include "DataChannel.hpp"
+#ifdef WITH_MPI
 #include "channels/DataChannelMPI.hpp"
+#endif // WITH_MPI
 #include "channels/DataChannelTCP.hpp"
 
 #include <algorithm>
@@ -11,8 +13,10 @@ namespace thd {
 DataChannel* DataChannel::newChannel(THDChannelType type) {
   if (type == THDChannelTCP)
     return new DataChannelTCP();
+#ifdef WITH_MPI
   else if (type == THDChannelMPI)
     return new DataChannelMPI();
+#endif // WITH_MPI
   throw std::runtime_error("unsupported data channel type");
 }
 
