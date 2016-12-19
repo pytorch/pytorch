@@ -52,7 +52,7 @@ static void THPWrapper_dealloc(THPWrapper* self)
 
 PyTypeObject THPWrapperType = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._CppWrapper",                /* tp_name */
+  "torch._C._PtrWrapper",                /* tp_name */
   sizeof(THPWrapper),                    /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THPWrapper_dealloc,        /* tp_dealloc */

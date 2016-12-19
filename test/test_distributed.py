@@ -4,7 +4,7 @@ import os
 import sys
 import time
 import unittest
-from functools import wraps
+from functools import wraps, reduce
 from contextlib import contextmanager
 
 import torch
@@ -77,30 +77,22 @@ class _DistTestBase(object):
     def _barrier(self, *args, **kwargs):
         Barrier.sync(*args, **kwargs)
 
-    def _reduce(self, reduce_op, expected_tensor, dest, special=None,
-                common=None, broadcast=False):
+    def _init_group_test(self):
+        group = [1, 2]
+        group_id = dist.new_group(group)
         rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        if rank == dest:
-            tensor = _build_tensor(rank + 1)
-            dist.reduce(tensor, dest, reduce_op)
-            self.assertEqual(tensor, expected_tensor)
-        elif rank == (dest + 1) % world_size:
-            tensor = _build_tensor(dest + 1, value=special)
-            dist.reduce(tensor, dest, reduce_op)
-        else:
-            tensor = _build_tensor(dest + 1, value=common)
-            dist.reduce(tensor, dest, reduce_op)
-        self._barrier()
-        if broadcast:
-            if rank == dest:
-                dist.broadcast(tensor, dest)
-            else:
-                tensor.fill_(-1)
-                dist.broadcast(tensor, dest)
-                self.assertEqual(tensor, expected_tensor)
-            self._barrier()
+        if rank not in group:
+            return ([], None, rank)
 
+        return (group, group_id, rank)
+
+    def _init_global_test(self):
+        group = [i for i in range(0, dist.get_num_processes())]
+        group_id = dist.group.WORLD
+        rank = dist.get_rank()
+        return (group, group_id, rank)
+
+    # GET RANK
     def test_get_rank(self):
         test_dir = os.path.join(TEMP_DIR, 'test_dir')
         pid = str(os.getpid())
@@ -124,6 +116,7 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    # SEND RECV
     def test_send_recv(self):
         rank = dist.get_rank()
         tensor = _build_tensor(rank + 1)
@@ -142,140 +135,287 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    def test_broadcast(self):
+    # ISEND
+    def test_isend(self):
         rank = dist.get_rank()
-        for src in range(0, dist.get_num_processes()):
-            tensor = _build_tensor(src + 1)
+        world_size = dist.get_num_processes()
+
+        if rank == 0:
+            requests = [
+                dist.isend(_build_tensor(dest, 10), dest) for dest in range(1, world_size)
+            ]
+            for request in requests:
+                request.wait()
+                self.assertTrue(request.is_completed())
+        else:
+            tensor = _build_tensor(rank, -1)
+            dist.recv(tensor, 0)
+            self.assertEqual(tensor, _build_tensor(rank, 10))
+
+        self._barrier()
+
+    # IRECV
+    def test_irecv(self):
+        rank = dist.get_rank()
+        world_size = dist.get_num_processes()
+
+        if rank == 0:
+            expected_tensors = [_build_tensor(src, -1) for src in range(1, world_size)]
+            requests = [
+                dist.irecv(expected_tensors[src - 1], src) for src in range(1, world_size)
+            ]
+
+            for src in range(1, world_size):
+                requests[src - 1].wait()
+                self.assertTrue(requests[src - 1].is_completed())
+                self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10))
+        else:
+            tensor = _build_tensor(rank, 10)
+            dist.send(tensor, 0)
+
+        self._barrier()
+
+    # BROADCAST
+    def _test_broadcast_helper(self, group, group_id, rank):
+        for src in group:
+            expected_tensor = _build_tensor(src + 1)
             if rank == src:
-                dist.broadcast(tensor, src)
-
-            if rank != src:
-                tensor.fill_(-1)
-                expected_tensor = _build_tensor(src + 1)
-                dist.broadcast(tensor, src)
+                dist.broadcast(expected_tensor, src, group_id)
+            else:
+                tensor = _build_tensor(src + 1, -1)
+                dist.broadcast(tensor, src, group_id)
                 self.assertEqual(tensor, expected_tensor)
-            self._barrier()
 
-    def test_reduce_max(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(rank + 1, value=world_size+1)
-            self._reduce(dist.reduce_op.MAX, tensor, dest,
-                         special=world_size+1)
+        self._barrier()
 
-    def test_reduce_min(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(rank + 1, value=-1)
-            self._reduce(dist.reduce_op.MIN, tensor, dest, special=-1)
+    def test_broadcast(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_broadcast_helper(group, group_id, rank)
 
-    def test_reduce_product(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(rank + 1).mul_(2)
-            self._reduce(dist.reduce_op.PRODUCT, tensor, dest, special=2,
-                         common=1)
+    def test_broadcast_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_broadcast_helper(group, group_id, rank)
+
+    # REDUCE
+    def _test_reduce_helper(self, group, group_id, rank, op, master_value, worker_value, expected_value):
+        for src in group:
+            if rank == src:
+                tensor = _build_tensor(src + 1).fill_(master_value)
+                dist.reduce(tensor, src, op, group_id)
+                self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
+            else:
+                tensor = _build_tensor(src + 1).fill_(worker_value)
+                dist.reduce(tensor, src, op, group_id)
+
+        self._barrier()
 
     def test_reduce_sum(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(rank + 1).mul_(world_size)
-            self._reduce(dist.reduce_op.SUM, tensor, dest)
+        group, group_id, rank = self._init_global_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
+        )
 
-    def test_all_reduce_max(self):
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(dest + 1, value=world_size+1)
-            self._reduce(dist.reduce_op.MAX, tensor, dest,
-                         special=world_size+1, broadcast=True)
+    def test_reduce_product(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.PRODUCT,
+            2, 10, reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2)
+        )
 
-    def test_all_reduce_min(self):
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(dest + 1, value=-1)
-            self._reduce(dist.reduce_op.MIN, tensor, dest, special=-1,
-                         broadcast=True)
+    def test_reduce_min(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
+        )
 
-    def test_all_reduce_product(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(dest + 1).mul_(2)
-            self._reduce(dist.reduce_op.PRODUCT, tensor, dest, special=2,
-                         common=1, broadcast=True)
+    def test_reduce_max(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
+        )
+
+    def test_reduce_group_sum(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
+        )
+
+    def test_reduce_group_product(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.PRODUCT,
+            2, 10, reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2)
+        )
+
+    def test_reduce_group_min(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
+        )
+
+    def test_reduce_group_max(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
+        )
+
+    # ALL REDUCE
+    def _test_all_reduce_helper(self, group, group_id, rank, op, master_value, worker_value, expected_value):
+        for src in group:
+            if rank == src:
+                tensor = _build_tensor(src + 1).fill_(master_value)
+                dist.all_reduce(tensor, op, group_id)
+                self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
+            else:
+                tensor = _build_tensor(src + 1).fill_(worker_value)
+                dist.all_reduce(tensor, op, group_id)
+                self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
+
+        self._barrier()
 
     def test_all_reduce_sum(self):
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
-            tensor = _build_tensor(dest + 1).mul_(world_size)
-            self._reduce(dist.reduce_op.SUM, tensor, dest, broadcast=True)
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
+        )
 
-    def test_scatter(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
+    def test_all_reduce_product(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.PRODUCT,
+            2, 10, reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2)
+        )
+
+    def test_all_reduce_min(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
+        )
+
+    def test_all_reduce_max(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
+        )
+
+    def test_all_reduce_group_sum(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
+        )
+
+    def test_all_reduce_group_product(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.PRODUCT,
+            2, 10, reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2)
+        )
+
+    def test_all_reduce_group_min(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
+        )
+
+    def test_all_reduce_group_max(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
+        )
+
+    # SCATTER
+    def _test_scatter_helper(self, group, group_id, rank):
+        for dest in group:
             tensor = _build_tensor(dest + 1, -1)
             expected_tensor = _build_tensor(dest + 1, rank)
             if rank == dest:
-                tensors = [_build_tensor(dest + 1, i) for i in range(0, world_size)]
-                dist.scatter_send(tensors, tensor)
+                tensors = [_build_tensor(dest + 1, i) for i in group]
+                dist.scatter_send(tensors, tensor, group_id)
                 self.assertEqual(tensor, expected_tensor)
             else:
-                dist.scatter_recv(tensor, dest)
+                dist.scatter_recv(tensor, dest, group_id)
                 self.assertEqual(tensor, expected_tensor)
 
-            self._barrier()
+        self._barrier()
 
-    def test_gather(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
+    def test_scatter(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_scatter_helper(group, group_id, rank)
+
+    def test_scatter_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_scatter_helper(group, group_id, rank)
+
+    # GATHER
+    def _test_gather_helper(self, group, group_id, rank):
+        for dest in group:
             tensor = _build_tensor(dest + 1, rank)
             if rank == dest:
-                tensors = [_build_tensor(dest + 1, -1) for i in range(0, world_size)]
-                dist.gather_recv(tensors, tensor)
+                tensors = [_build_tensor(dest + 1, -1) for i in group]
+                dist.gather_recv(tensors, tensor, group_id)
 
-                expected_tensors = [_build_tensor(dest + 1, i) for i in range(0, world_size)]
+                expected_tensors = [_build_tensor(dest + 1, i) for i in group]
                 for t1, t2 in zip(tensors, expected_tensors):
                     self.assertEqual(t1, t2)
             else:
-                dist.gather_send(tensor, dest)
+                dist.gather_send(tensor, dest, group_id)
 
-            self._barrier()
+        self._barrier()
 
-    def test_all_gather(self):
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
+    def test_gather(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_gather_helper(group, group_id, rank)
+
+    def test_gather_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_gather_helper(group, group_id, rank)
+
+    # ALL GATHER
+    def _test_all_gather_helper(self, group, group_id, rank):
+        for dest in group:
             tensor = _build_tensor(dest + 1, rank)
-            tensors = [_build_tensor(dest + 1, -1) for i in range(0, world_size)]
-            dist.all_gather(tensors, tensor)
+            tensors = [_build_tensor(dest + 1, -1) for i in group]
+            dist.all_gather(tensors, tensor, group_id)
 
-            expected_tensors = [_build_tensor(dest + 1, i) for i in range(0, world_size)]
+            expected_tensors = [_build_tensor(dest + 1, i) for i in group]
             for t1, t2 in zip(tensors, expected_tensors):
                 self.assertEqual(t1, t2)
 
-            self._barrier()
+        self._barrier()
 
-    def test_barrier(self):
+    def test_all_gather(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_gather_helper(group, group_id, rank)
+
+    def test_all_gather_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_gather_helper(group, group_id, rank)
+
+    # BARRIER
+    def _test_barrier_helper(self, group, group_id, rank):
         WAIT_TIME = 0.3 # seconds
 
-        rank = dist.get_rank()
-        world_size = dist.get_num_processes()
-        for dest in range(0, world_size):
+        for dest in group:
             expected_time = torch.DoubleTensor(1).fill_(0.0)
             if dest == rank:
-                dist.broadcast(expected_time.fill_(time.time() + WAIT_TIME), dest)
+                expected_time.fill_(time.time() + WAIT_TIME)
+                dist.broadcast(expected_time, dest, group_id)
                 time.sleep(WAIT_TIME + 0.1) # sleep a little bit longer
-                dist.barrier()
+                dist.barrier(group_id)
             else:
-                dist.broadcast(expected_time, dest)
-                dist.barrier()
+                dist.broadcast(expected_time, dest, group_id)
+                dist.barrier(group_id)
                 self.assertGreaterEqual(time.time(), expected_time[0])
+
+        self._barrier()
+
+    def test_barrier(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_barrier_helper(group, group_id, rank)
+
+    def test_barrier_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_barrier_helper(group, group_id, rank)
 
 if BACKEND == 'tcp':
     WORLD_SIZE = os.environ['WORLD_SIZE']

@@ -11,7 +11,16 @@
 namespace thd {
 
 struct DataChannel {
-public:
+  struct Request {
+    Request() {};
+    virtual ~Request() {};
+
+    // Checks if request has completed. Non-blocking operation.
+    virtual bool isCompleted() = 0;
+    // Waits until request completes. Blocking operation.
+    virtual void wait() = 0;
+  };
+
   DataChannel() {};
   virtual ~DataChannel() {};
 
@@ -31,6 +40,8 @@ public:
   virtual void broadcast(Tensor& data, int src_rank, THDGroup group_id = THDGroupWORLD) = 0;
   virtual void send(Tensor& data, int dst_rank) = 0;
   virtual void receive(Tensor& data, int src_rank) = 0;
+  virtual Request* isend(Tensor& data, int dst_rank) = 0;
+  virtual Request* ireceive(Tensor& data, int src_rank) = 0;
 
   virtual void barrier(THDGroup group_id = THDGroupWORLD) = 0;
 
@@ -78,6 +89,5 @@ protected:
     std::unordered_map<rank_type, rank_type> _old2new;
   };
 };
-
 
 } // namespace thd

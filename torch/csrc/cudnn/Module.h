@@ -4,6 +4,5 @@
 #include <Python.h>
 
 PyMethodDef* THCUDNN_methods();
-bool THCUDNNModule_initModule(PyObject *self);
 
 #endif

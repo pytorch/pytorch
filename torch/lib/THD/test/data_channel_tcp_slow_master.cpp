@@ -1,5 +1,6 @@
 #include "../base/channels/DataChannelTCP.hpp"
 #include "../base/tensors/THTensor.hpp"
+#include "TestUtils.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -22,23 +23,18 @@ void master()
   auto masterChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
   g_mutex.unlock();
 
+  // wait a long time before init
   std::this_thread::sleep_for(std::chrono::seconds(4));
 
   assert(masterChannel->init());
 
-  thd::FloatTensor *float_tensor = new thd::THTensor<float>();
-  float_tensor->resize({1, 2, 3});
-  float_tensor->fill(4);
-
-  // send good tensor
-  masterChannel->broadcast(*float_tensor, 0);
+  auto float_tensor = buildTensor<float>({1, 2, 3}, 4);
+  masterChannel->broadcast(*float_tensor, 0); // send good tensor
 
   // wait for all workers to finish
   for (auto& worker : g_all_workers) {
     worker.join();
   }
-
-  delete float_tensor;
 }
 
 void worker(int id)
@@ -48,17 +44,12 @@ void worker(int id)
   setenv("MASTER_ADDR", std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
   auto workerChannel = std::make_shared<thd::DataChannelTCP>();  // reads all env variable
   g_mutex.unlock();
+
   assert(workerChannel->init());
 
-  thd::FloatTensor *float_tensor = new thd::THTensor<float>();
-  float_tensor->resize({1, 2, 3});
-
+  auto float_tensor = buildTensor<float>({1, 2, 3}, -1);
   workerChannel->broadcast(*float_tensor, 0);
-  for (int i = 0; i < float_tensor->numel(); i++) {
-    assert(reinterpret_cast<float*>(float_tensor->data())[i] == 4);
-  }
-
-  delete float_tensor;
+  ASSERT_TENSOR_VALUE(float, *float_tensor, 4)
 }
 
 

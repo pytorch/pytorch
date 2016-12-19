@@ -20,6 +20,7 @@ struct Tensor {
   virtual ~Tensor() {};
 
   virtual Tensor* clone() const = 0;
+  virtual Tensor* clone_shallow() = 0;
 
   virtual int nDim() const = 0;
   virtual long_range sizes() const = 0;
