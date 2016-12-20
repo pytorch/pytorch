@@ -188,6 +188,9 @@ __device__ int binarySearchForMultinomial(T* dist,
     start = 0;
   }
 
+  T curVal = dist[start];
+  while(start >= 1 && THCNumerics<T>::eq(dist[start - 1], curVal)) start--;
+
   return start;
 }
 
