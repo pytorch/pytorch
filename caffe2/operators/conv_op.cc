@@ -40,27 +40,21 @@ OPERATOR_SCHEMA(ConvGradient).NumInputs(2,3).NumOutputs(2, 3);
 class GetConvGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    // todo(slayton) don't do this.
-    // CAFFE_ENFORCE(3 == def_.input_size());
-
-    vector<string> inputs, outputs;
-
-    ArgumentHelper helper(def_);
-    bool no_bias = static_cast<bool>(helper.GetSingleArgument<int>("no_bias", 0));
-
-    if (no_bias) {
-      // no bias - same inputs, only output dW, dY
-      inputs = vector<string>{I(0), I(1), GO(0)};
-      outputs = vector<string>{GI(1), GI(0)};
+    CAFFE_ENFORCE(def_.input_size() == 3 || def_.input_size() == 2);
+    if (def_.input_size() == 3) {
+      return SingleGradientDef(
+          "ConvGradient",
+          "",
+          vector<string>{I(0), I(1), GO(0)},
+          vector<string>{GI(1), GI(2), GI(0)});
     } else {
-      inputs = vector<string>{I(0), I(1), GO(0)};
-      outputs = vector<string>{GI(1), GI(2), GI(0)};
+      return SingleGradientDef(
+          "ConvGradient",
+          "",
+          vector<string>{I(0), I(1), GO(0)},
+          vector<string>{GI(1), GI(0)},
+          vector<Argument>{MakeArgument<int>("no_bias", 1)});
     }
-
-    return SingleGradientDef(
-        "ConvGradient", "",
-        inputs,
-        outputs);
   }
 };
 REGISTER_GRADIENT(Conv, GetConvGradient);
