@@ -315,10 +315,10 @@ class MKLMemory {
       // MKLMemory is not having the right layout. In this case we will reset
       // the target and then do another copy.
       other->Reset(dims_, primitive, type);
-      PrimitiveWrapper<T> convert(
+      PrimitiveWrapper<T> convert2(
           dnnConversionCreate<T>, layout_, other->layout_);
       MKLDNN_SAFE_CALL(
-          dnnConversionExecute<T>(convert, buffer_.get(), other->buffer()));
+          dnnConversionExecute<T>(convert2, buffer_.get(), other->buffer()));
     }
   }
 
