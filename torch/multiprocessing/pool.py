@@ -2,7 +2,6 @@ import multiprocessing
 import multiprocessing.pool
 import multiprocessing.util as util
 
-import torch
 from . import Queue
 
 
@@ -67,4 +66,3 @@ class Pool(multiprocessing.pool.Pool):
             w.daemon = True
             w.start()
             util.debug('added worker')
-

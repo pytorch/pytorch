@@ -1,21 +1,26 @@
 import os
 import socket
-import multiprocessing
-from itertools import chain
 from io import BytesIO
 
 import torch
+import torch.cuda
 from .common import CustomizablePicklingQueue, ExtendedInitPickler, \
     ExtendedInitUnpickler
 from ._storage import reduce_storage
 from ._tensor import reduce_tensor
 
 
+def _deserialize_event(handle):
+    return torch.cuda.Event(_handle=handle)
+
+
+def reduce_event(self, event):
+    return (_deserialize_event, (event.ipc_handle(),))
+
+
 class Queue(CustomizablePicklingQueue):
 
-    def __init__(self, context=None, reducers=None):
-        if context is None:
-            context = multiprocessing
+    def __init__(self, context, reducers=None):
         if reducers is None:
             reducers = {}
 
@@ -23,6 +28,7 @@ class Queue(CustomizablePicklingQueue):
             reducers.setdefault(t, reduce_tensor)
         for t in torch._storage_classes:
             reducers.setdefault(t, reduce_storage)
+        reducers.setdefault(torch.cuda.Event, reduce_event)
 
         super(Queue, self).__init__(context, reducers)
 
@@ -38,6 +44,7 @@ class FdQueue(Queue):
         self._fd_writer.close()
 
     def __getstate__(self):
+        # add the socketpair to the state (self.__dict__ isn't serialized)
         state = super(FdQueue, self).__getstate__()
         return (state, self._fd_reader, self._fd_writer)
 

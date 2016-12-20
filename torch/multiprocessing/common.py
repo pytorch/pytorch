@@ -5,7 +5,6 @@ if sys.version_info[0] >= 3:
     import copyreg
 
 import torch
-from . import _sharing_strategy
 
 # The code below was copied from joblib (https://github.com/joblib/joblib)
 #
@@ -125,7 +124,7 @@ class CustomizablePicklingQueue(object):
     See the standard library documentation on pickling for more details.
     """
 
-    def __init__(self, context=None, reducers=None):
+    def __init__(self, context, reducers=None):
         self._reducers = reducers
         self._reader, self._writer = context.Pipe(duplex=False)
         self._rlock = context.Lock()
@@ -147,7 +146,6 @@ class CustomizablePicklingQueue(object):
 
     def empty(self):
         return not self._reader.poll()
-
 
     def _load(self):
         return self._reader.recv()
@@ -179,4 +177,3 @@ class CustomizablePicklingQueue(object):
         if self._wlock is None:
             # writes to a message oriented win32 pipe are atomic
             self.put = self.send
-
