@@ -4,20 +4,12 @@ language: cpp
 
 compiler: gcc
 
-addons:
-  apt:
-    sources:
-    # add PPAs with more up-to-date toolchains
-    - ubuntu-toolchain-r-test
-    - llvm-toolchain-precise-3.6
-    packages:
-    # install toolchains
-    - gcc-5
-    - g++-5
-
 install:
   - sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev nvidia-cuda-toolkit libpthread-stubs0-dev cmake
   - pip install numpy
+  - sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+  - sudo apt-get update
+  - sudo apt-get install gcc-5 g++-5
   - wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_8.0.44-1_amd64.deb
   - sudo dpkg -i cuda-repo-ubuntu1604_8.0.44-1_amd64.deb
   - sudo apt-get update
