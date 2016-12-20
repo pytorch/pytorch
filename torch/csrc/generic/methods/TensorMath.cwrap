@@ -998,6 +998,14 @@
         - arg: real value
           default: AS_REAL(1)
         - THTensor* other
+    - sparse: True
+      cname: spcadd
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THSTensor* other
 ]]
 
 
