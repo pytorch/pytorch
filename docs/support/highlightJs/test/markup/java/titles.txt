@@ -1,0 +1,10 @@
+public class Greet {
+    public int f(int val) {
+        new Type();
+        if (val) {
+            return getType();
+        } else if (!val) {
+            throw getError();
+        }
+    }
+}

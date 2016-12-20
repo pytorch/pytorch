@@ -1,0 +1,19 @@
+namespace Foo // namespace
+{
+    public class Greet : Base // class
+    {
+        public Greet(string who) // function
+        {
+            Who = who;
+        }
+
+        int f(int val = 0)
+        {
+            new Type();
+            return getType();
+            throw getError();
+            await Stuff();
+        }
+    }
+
+}

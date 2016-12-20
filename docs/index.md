@@ -1,6 +1,6 @@
----
-title: Installation
----
+# Caffe2
+
+Caffe2 is a deep learning framework made with expression, speed, and modularity in mind. It is an experimental refactoring of Caffe, and allows a more flexible way to organize computation.
 
 # Installation
 
@@ -63,3 +63,8 @@ For ubuntu 14.04 users, the Docker script may be a good example on the steps of 
 ## OSX
 
 Detailed instruction for OSX is to be written. For now, check [Caffe's OSX guide](http://caffe.berkeleyvision.org/install_osx.html) for details.
+
+# License and Citation
+
+Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/caffe2/blob/master/LICENSE).
+

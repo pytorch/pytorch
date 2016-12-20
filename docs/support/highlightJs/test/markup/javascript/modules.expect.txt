@@ -1,0 +1,8 @@
+<span class="hljs-comment">//------ underscore.js ------</span>
+<span class="hljs-keyword">export</span> <span class="hljs-keyword">default</span> <span class="hljs-function"><span class="hljs-keyword">function</span> (<span class="hljs-params">obj</span>) </span>{};
+<span class="hljs-keyword">export</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">each</span>(<span class="hljs-params">obj, iterator, context</span>) </span>{};
+<span class="hljs-keyword">export</span> { each <span class="hljs-keyword">as</span> forEach };
+<span class="hljs-keyword">export</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">something</span>(<span class="hljs-params"></span>) </span>{};
+
+<span class="hljs-comment">//------ main.js ------</span>
+<span class="hljs-keyword">import</span> _, { each, something <span class="hljs-keyword">as</span> otherthing } <span class="hljs-keyword">from</span> <span class="hljs-string">'underscore'</span>;

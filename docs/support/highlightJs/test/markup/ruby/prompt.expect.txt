@@ -1,0 +1,23 @@
+<span class="hljs-prompt">2.0.0p0 :001 &gt;</span> [<span class="hljs-string">'some'</span>]
+<span class="hljs-status"> =&gt;</span> [<span class="hljs-string">"some"</span>]
+<span class="hljs-prompt">2.0.0p0 :002 &gt;</span> if true
+<span class="hljs-prompt">2.0.0p0 :003?&gt;</span>   <span class="hljs-string">"yop"</span>
+<span class="hljs-prompt">2.0.0p0 :004?&gt;</span>   end
+<span class="hljs-status"> =&gt;</span> <span class="hljs-string">"yop"</span>
+
+<span class="hljs-prompt">jruby-1.7.16 :001 &gt;</span> <span class="hljs-string">"RVM-Format"</span>
+
+<span class="hljs-prompt">&gt;&gt;</span> obj = <span class="hljs-constant">OpenStruct</span>.new <span class="hljs-symbol">:integer</span> =&gt; <span class="hljs-number">987</span>, <span class="hljs-symbol">:symbol</span> =&gt; <span class="hljs-symbol">:so_great</span>
+<span class="hljs-status">=&gt;</span> <span class="hljs-value">#&lt;OpenStruct integer=987, symbol=:so_great&gt;</span>
+<span class="hljs-prompt">&gt;&gt;</span> [obj,obj,obj]
+<span class="hljs-status">=&gt;</span> [<span class="hljs-value">#&lt;OpenStruct integer=987, symbol=:so_great&gt;</span>, <span class="hljs-value">#&lt;OpenStruct integer=987, symbol=:so_great&gt;</span>, <span class="hljs-value">#&lt;OpenStruct integer=987, symbol=:so_great&gt;</span>]
+<span class="hljs-prompt">&gt;&gt;</span> {<span class="hljs-number">1</span> =&gt; obj, <span class="hljs-number">2</span> =&gt; obj}
+<span class="hljs-status">=&gt;</span> {<span class="hljs-number">1</span>=&gt;<span class="hljs-value">#&lt;OpenStruct integer=987, symbol=:so_great&gt;</span>, <span class="hljs-number">2</span>=&gt;<span class="hljs-value">#&lt;OpenStruct integer=987, symbol=:so_great&gt;</span>}
+<span class="hljs-prompt">&gt;&gt;</span> if <span class="hljs-number">10</span> &gt; <span class="hljs-number">20</span>
+<span class="hljs-prompt">&gt;&gt;</span> <span class="hljs-string">"YEAH"</span>
+<span class="hljs-prompt">&gt;&gt;</span> else
+<span class="hljs-prompt">?&gt;</span> <span class="hljs-string">"NO"</span>
+<span class="hljs-prompt">&gt;&gt;</span> end
+<span class="hljs-status">=&gt;</span> <span class="hljs-string">"NO"</span>
+
+<span class="hljs-prompt">irb(main):002:0&gt;</span> test = <span class="hljs-number">1</span>

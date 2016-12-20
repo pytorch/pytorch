@@ -1,0 +1,7 @@
+<h3>Hours</h3>
+
+<ul>
+  {#users}
+  <li {hello}}>{firstName}</li>{~n}
+  {/users}
+</ul>

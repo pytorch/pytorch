@@ -1,0 +1,8 @@
+# Divisions
+x = 6/foo/i
+x = 6 /foo
+x = 6 / foo
+x = 6 /foo * 2/gm
+x = f /foo
+x = f / foo / gm
+x = f /foo * 2/6

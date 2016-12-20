@@ -1,0 +1,10 @@
+protocol Protocol {
+  func f1()
+  func f2()
+}
+
+class MyClass {
+  func f() {
+    return true
+  }
+}

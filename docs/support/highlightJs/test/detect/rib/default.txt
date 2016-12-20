@@ -1,0 +1,25 @@
+FrameBegin 0
+Display "Scene" "framebuffer" "rgb"
+Option "searchpath" "shader" "+&:/home/kew"
+Option "trace" "int maxdepth" [4]
+Attribute "visibility" "trace" [1]
+Attribute "irradiance" "maxerror" [0.1]
+Attribute "visibility" "transmission" "opaque"
+Format 640 480 1.0
+ShadingRate 2
+PixelFilter "catmull-rom" 1 1
+PixelSamples 4 4
+Projection "perspective" "fov" 49.5502811377
+Scale 1 1 -1
+
+WorldBegin
+
+ReadArchive "Lamp.002_Light/instance.rib"
+Surface "plastic"
+ReadArchive "Cube.004_Mesh/instance.rib"
+# ReadArchive "Sphere.010_Mesh/instance.rib"
+# ReadArchive "Sphere.009_Mesh/instance.rib"
+ReadArchive "Sphere.006_Mesh/instance.rib"
+
+WorldEnd
+FrameEnd

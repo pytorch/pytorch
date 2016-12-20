@@ -1,0 +1,38 @@
+# take the first n objects from a list
+take = (n, [x, ...xs]:list) -->
+  | n <= 0     => []
+  | empty list => []
+  | otherwise  => [x] ++ take n - 1, xs
+
+take 2, [1, 2, 3, 4, 5]
+
+# Curried functions
+take-three = take 3
+take-three [6, 7, 8, 9, 10]
+
+# Function composition
+last-three = reverse >> take-three >> reverse
+last-three [1 to 8]
+
+# List comprehensions and piping
+t1 =
+  * id: 1
+    name: 'george'
+  * id: 2
+    name: 'mike'
+  * id: 3
+    name: 'donald'
+
+t2 =
+  * id: 2
+    age: 21
+  * id: 1
+    age: 20
+  * id: 3
+    age: 26
+[{id:id1, name, age}
+  for {id:id1, name} in t1
+  for {id:id2, age} in t2
+  where id1 is id2]
+  |> sort-by \id
+  |> JSON.stringify

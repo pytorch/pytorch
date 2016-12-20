@@ -1,0 +1,17 @@
+\documentclass{article}
+\usepackage[koi8-r]{inputenc}
+\hoffset=0pt
+\voffset=.3em
+\tolerance=400
+\newcommand{\eTiX}{\TeX}
+\begin{document}
+\section*{Highlight.js}
+\begin{table}[c|c]
+$\frac 12\, + \, \frac 1{x^3}\text{Hello \! world}$ & \textbf{Goodbye\~ world} \\\eTiX $ \pi=400 $
+\end{table}
+Ch\'erie, \c{c}a ne me pla\^\i t pas! % comment \b
+G\"otterd\"ammerung~45\%=34.
+$$
+    \int\limits_{0}^{\pi}\frac{4}{x-7}=3
+$$
+\end{document}

@@ -1,0 +1,16 @@
+class A {
+}
+
+class B()
+
+class C() {}
+
+public class D
+
+class E1<T>
+class E2<T, R>
+class E3<T,R>
+
+class F1 : A
+class F2 : A, B
+class F3 : A<T>

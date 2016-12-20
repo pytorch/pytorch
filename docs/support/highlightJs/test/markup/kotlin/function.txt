@@ -1,0 +1,6 @@
+fun a() = 1
+fun b(a : Int) = a
+
+
+fun <T> c() = 1
+inline fun <reified T> d() = 1
