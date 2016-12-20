@@ -85,50 +85,51 @@ def generate_chrome_trace(root_list):
                 "pid": root_idx
             }
 
-            if "children" not in v:
+            if "run-scope" in v["desc"]:
                 c["tid"] = root_idx
             else:
                 m = re.search("(?<=worker-scope-)\d+", v["desc"])
                 wid = m.group(0)
                 c["tid"] = wid
-                for k_op, v_op in v["children"].items():
-                    if "children" in v_op:
-                        for idx, (k_gpu_op, v_gpu_op) in \
-                                enumerate(sorted(v_op["children"].items(),
-                                                 key=lambda e: e[1]["begin"])):
-                            if idx == 0:
+                if "children" in v:
+                    for k_op, v_op in v["children"].items():
+                        if "children" in v_op:
+                            for idx, (k_gpu_op, v_gpu_op) in \
+                                    enumerate(sorted(v_op["children"].items(),
+                                                     key=lambda e: e[1]["begin"])):
+                                if idx == 0:
+                                    ct.append({
+                                        "name": v_op["desc"] + "-GPU",
+                                        "ph": "X",
+                                        "ts": v_gpu_op["begin"],
+                                        "dur": v_gpu_op["end"] - v_gpu_op["begin"],
+                                        "pid": root_idx,
+                                        "tid": wid,
+                                        "args": {
+                                            "desc": "NEW OPERATOR"
+                                        }
+                                    })
+
                                 ct.append({
                                     "name": v_op["desc"] + "-GPU",
-                                    "ph": "X",
+                                    "ph": "i",
                                     "ts": v_gpu_op["begin"],
-                                    "dur": v_gpu_op["end"] - v_gpu_op["begin"],
                                     "pid": root_idx,
                                     "tid": wid,
                                     "args": {
-                                        "desc": "NEW OPERATOR"
+                                        "desc": v_gpu_op["desc"]
                                     }
                                 })
 
-                            ct.append({
-                                "name": v_op["desc"] + "-GPU",
-                                "ph": "i",
-                                "ts": v_gpu_op["begin"],
-                                "pid": root_idx,
-                                "tid": wid,
-                                "args": {
-                                    "desc": v_gpu_op["desc"]
-                                }
-                            })
-
-                    cc = {
-                        "name": v_op["desc"],
-                        "ph": "X",
-                        "ts": v_op["begin"],
-                        "dur": v_op["end"] - v_op["begin"],
-                        "pid": root_idx,
-                        "tid": wid
-                    }
-                    ct.append(cc)
+                        cc = {
+                            "name": v_op["desc"],
+                            "ph": "X",
+                            "ts": v_op["begin"],
+                            "dur": v_op["end"] - v_op["begin"],
+                            "pid": root_idx,
+                            "tid": wid
+                        }
+                        ct.append(cc)
 
             ct.append(c)
 

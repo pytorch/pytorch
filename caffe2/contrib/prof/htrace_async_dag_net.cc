@@ -1,16 +1,17 @@
 #include <htrace.hpp>
 
 #include "caffe2/contrib/prof/htrace_conf.h"
-#include "caffe2/core/net.h"
+#include "caffe2/core/net_gpu.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
 namespace {
 
-class HTraceDAGNet : public DAGNetBase {
+class HTraceAsyncDAGNet : public AsyncDAGNet {
  public:
-  HTraceDAGNet(const NetDef& net_def, Workspace* ws) : DAGNetBase(net_def, ws) {
-    VLOG(1) << "Constructing HTrace DAG Net " << net_def.name();
+  HTraceAsyncDAGNet(const NetDef& net_def, Workspace* ws)
+      : AsyncDAGNet(net_def, ws) {
+    VLOG(1) << "Constructing HTraceAsyncDAGNet " << net_def.name();
 
     for (auto& worker : workers_) {
       std::thread::id worker_id = worker.get_id();
@@ -26,10 +27,10 @@ class HTraceDAGNet : public DAGNetBase {
         htrace_tracer_,
         htrace_root_scope_.GetSpanId(),
         "run-scope-" + caffe2::to_string(run_count_++));
-    return DAGNetBase::Run();
+    return AsyncDAGNet::Run();
   }
 
-  ~HTraceDAGNet() {
+  ~HTraceAsyncDAGNet() {
     VLOG(1) << "Closing all htrace scopes for workers";
 
     // Due to the implementation of htrace,
@@ -42,28 +43,6 @@ class HTraceDAGNet : public DAGNetBase {
   }
 
  protected:
-  bool RunAt(const std::vector<int>& chain) override {
-    std::thread::id thread_id = std::this_thread::get_id();
-    auto worker_scope = htrace_worker_scope_map_[thread_id];
-
-    bool success = true;
-    for (const auto idx : chain) {
-      auto def = operator_nodes_[idx].operator_->def();
-      const string& print_name =
-          (def.name().size() ? def.name() : (def.output_size() ? def.output(0)
-                                                               : "NO_OUTPUT"));
-      const string& op_type = def.type();
-
-      htrace::Scope operator_scope(
-          htrace_tracer_,
-          worker_scope->GetSpanId(),
-          "#" + caffe2::to_string(idx) + " (" + print_name + ", " + op_type +
-              ")");
-      success &= operator_nodes_[idx].operator_->Run();
-    }
-    return success;
-  }
-
   htrace::Conf htrace_conf_{FLAGS_caffe2_htrace_conf.empty()
                                 ? defaultHTraceConf(name_)
                                 : FLAGS_caffe2_htrace_conf};
@@ -77,7 +56,7 @@ class HTraceDAGNet : public DAGNetBase {
   int run_count_ = 0;
 };
 
-REGISTER_NET(htrace_dag, HTraceDAGNet);
+REGISTER_NET(htrace_async_dag, HTraceAsyncDAGNet);
 
 } // namespace
 } // namespace caffe2
