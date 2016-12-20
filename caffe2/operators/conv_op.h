@@ -12,7 +12,13 @@ class ConvOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {
+    // Since this is the default convolution implementation, we will
+    // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.
+    CAFFE_ENFORCE(
+        group_ == 1 || order_ == StorageOrder::NCHW,
+        "Group convolution only supports NCHW order right now.");
+  }
   ~ConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -31,7 +37,11 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {
+    CAFFE_ENFORCE(
+        group_ == 1 || order_ == StorageOrder::NCHW,
+        "Group convolution only supports NCHW order right now.");
+  }
   ~ConvGradientOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
