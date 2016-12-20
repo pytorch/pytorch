@@ -5,7 +5,7 @@ language: cpp
 compiler: gcc
 
 install:
-  - sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev nvidia-cuda-toolkit libpthread-stubs0-dev cmake
+  - sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev nvidia-cuda-toolkit libpthread-stubs0-dev cmake g++-4.9
   - pip install numpy
   - wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_8.0.44-1_amd64.deb
   - sudo dpkg -i cuda-repo-ubuntu1604_8.0.44-1_amd64.deb
