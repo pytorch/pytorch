@@ -1,0 +1,29 @@
+
+// quicksort example from http://haxe.org/doc/snip/quicksort
+class Quicksort {
+
+    static var arr = [4,8,0,3,9,1,5,2,6,7];
+
+    static function quicksort( lo : Int, hi : Int ) : Void {
+        var i = lo;
+        var j = hi;
+        var buf = arr;
+        var p = buf[(lo+hi)>>1];
+        while( i <= j ) {
+            while( arr[i] > p ) i++;
+            while( arr[j] < p ) j--;
+            if( i <= j ) {
+                var t = buf[i];
+                buf[i++] = buf[j];
+                buf[j--] = t;
+            }
+        }
+        if( lo < j ) quicksort( lo, j );
+        if( i < hi ) quicksort( i, hi );
+    }
+
+    static function main() {
+        quicksort( 0, arr.length-1 );
+        trace(arr);
+    }
+}

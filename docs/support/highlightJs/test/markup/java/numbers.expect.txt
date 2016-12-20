@@ -1,0 +1,9 @@
+<span class="hljs-keyword">long</span> creditCardNumber = <span class="hljs-number">1234_5678_9012_3456L</span>;
+<span class="hljs-keyword">long</span> socialSecurityNumber = <span class="hljs-number">999_99_9999L</span>;
+<span class="hljs-keyword">float</span> pi = <span class="hljs-number">3.14_15F</span>;
+<span class="hljs-keyword">long</span> hexBytes = <span class="hljs-number">0xFF_EC_DE_5E</span>;
+<span class="hljs-keyword">long</span> hexWords = <span class="hljs-number">0xCAFE_BABE</span>;
+<span class="hljs-keyword">long</span> maxLong = <span class="hljs-number">0x7fff_ffff_ffff_ffffL</span>;
+<span class="hljs-keyword">byte</span> nybbles = <span class="hljs-number">0b0010_0101</span>;
+<span class="hljs-keyword">long</span> bytes = <span class="hljs-number">0b11010010_01101001_10010100_10010010</span>;
+<span class="hljs-keyword">int</span> n = <span class="hljs-number">1234</span> + Contacts._ID;

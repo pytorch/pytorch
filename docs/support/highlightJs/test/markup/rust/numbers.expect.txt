@@ -1,0 +1,13 @@
+<span class="hljs-number">123</span>;
+<span class="hljs-number">123usize</span>;
+<span class="hljs-number">123_usize</span>;
+<span class="hljs-number">0xff00</span>;
+<span class="hljs-number">0xff_u8</span>;
+<span class="hljs-number">0b1111111110010000</span>;
+<span class="hljs-number">0b1111_1111_1001_0000_i32</span>;
+<span class="hljs-number">0o764317</span>;
+<span class="hljs-number">0o764317_u16</span>;
+<span class="hljs-number">123.0</span>;
+<span class="hljs-number">0.1</span>;
+<span class="hljs-number">0.1f32</span>;
+<span class="hljs-number">12E+99_f64</span>;

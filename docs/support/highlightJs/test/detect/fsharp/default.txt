@@ -1,0 +1,48 @@
+open System
+
+// Single line comment...
+(*
+  This is a
+  multiline comment.
+*)
+let checkList alist =
+    match alist with
+    | [] -> 0
+    | [a] -> 1
+    | [a; b] -> 2
+    | [a; b; c] -> 3
+    | _ -> failwith "List is too big!"
+
+
+let text = "Some text..."
+let text2 = @"A ""verbatim"" string..."
+let catalog = """
+Some "long" string...
+"""
+
+let rec fib x = if x <= 2 then 1 else fib(x-1) + fib(x-2)
+
+let fibs =
+    Async.Parallel [ for i in 0..40 -> async { return fib(i) } ]
+    |> Async.RunSynchronously
+
+type Sprocket(gears) =
+  member this.Gears : int = gears
+
+[<AbstractClass>]
+type Animal =
+  abstract Speak : unit -> unit
+
+type Widget =
+  | RedWidget
+  | GreenWidget
+
+type Point = {X: float; Y: float;}
+
+[<Measure>]
+type s
+let minutte = 60<s>
+
+type DefaultMailbox<'a>() =
+    let mutable inbox = ConcurrentQueue<'a>()
+    let awaitMsg = new AutoResetEvent(false)

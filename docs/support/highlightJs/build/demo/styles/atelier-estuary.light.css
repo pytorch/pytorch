@@ -1,0 +1,113 @@
+/* Base16 Atelier Estuary Light - Theme */
+/* by Bram de Haan (http://atelierbram.github.io/syntax-highlighting/atelier-schemes/estuary) */
+/* Original Base16 color scheme by Chris Kempson (https://github.com/chriskempson/base16) */
+
+/* Atelier-Estuary Comment */
+.hljs-comment {
+  color: #6c6b5a;
+}
+
+/* Atelier-Estuary Red */
+.hljs-variable,
+.hljs-attribute,
+.hljs-tag,
+.hljs-regexp,
+.hljs-name,
+.ruby .hljs-constant,
+.xml .hljs-tag .hljs-title,
+.xml .hljs-pi,
+.xml .hljs-doctype,
+.html .hljs-doctype,
+.css .hljs-id,
+.css .hljs-class,
+.css .hljs-pseudo {
+  color: #ba6236;
+}
+
+/* Atelier-Estuary Orange */
+.hljs-number,
+.hljs-preprocessor,
+.hljs-built_in,
+.hljs-literal,
+.hljs-params,
+.hljs-constant {
+  color: #ae7313;
+}
+
+/* Atelier-Estuary Yellow */
+.ruby .hljs-class .hljs-title,
+.css .hljs-rule .hljs-attribute {
+  color: #a5980d;
+}
+
+/* Atelier-Estuary Green */
+.hljs-string,
+.hljs-value,
+.hljs-inheritance,
+.hljs-header,
+.ruby .hljs-symbol,
+.xml .hljs-cdata {
+  color: #7d9726;
+}
+
+/* Atelier-Estuary Aqua */
+.hljs-title,
+.css .hljs-hexcolor {
+  color: #5b9d48;
+}
+
+/* Atelier-Estuary Blue */
+.hljs-function,
+.python .hljs-decorator,
+.python .hljs-title,
+.ruby .hljs-function .hljs-title,
+.ruby .hljs-title .hljs-keyword,
+.perl .hljs-sub,
+.javascript .hljs-title,
+.coffeescript .hljs-title {
+  color: #36a166;
+}
+
+/* Atelier-Estuary Purple */
+.hljs-keyword,
+.javascript .hljs-function {
+  color: #5f9182;
+}
+
+.diff .hljs-deletion,
+.diff .hljs-addition {
+  color: #22221b;
+  display: inline-block;
+  width: 100%;
+}
+
+.diff .hljs-deletion {
+  background-color: #ba6236;
+}
+
+.diff .hljs-addition {
+  background-color: #7d9726;
+}
+
+.diff .hljs-change {
+  color: #36a166;
+}
+
+.hljs {
+  display: block;
+  overflow-x: auto;
+  background: #f4f3ec;
+  color: #5f5e4e;
+  padding: 0.5em;
+  -webkit-text-size-adjust: none;
+}
+
+.coffeescript .javascript,
+.javascript .xml,
+.tex .hljs-formula,
+.xml .javascript,
+.xml .vbscript,
+.xml .css,
+.xml .hljs-cdata {
+  opacity: 0.5;
+}

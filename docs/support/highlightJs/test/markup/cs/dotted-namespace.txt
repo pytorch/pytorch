@@ -1,0 +1,6 @@
+namespace Dotted.Namespace
+{
+    class MyClass
+    {
+    }
+}

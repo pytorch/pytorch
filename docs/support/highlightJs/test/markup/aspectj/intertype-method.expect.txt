@@ -1,0 +1,6 @@
+<span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">void</span> MyClass.<span class="hljs-title">doSomething</span><span class="hljs-params">()</span> <span class="hljs-keyword">throws</span> Exception</span>{
+  <span class="hljs-comment">// intertype method body</span>
+}
+<span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">void</span> A.<span class="hljs-title">doSomething</span><span class="hljs-params">(<span class="hljs-keyword">int</span> param1)</span></span>{
+  <span class="hljs-comment">// intertype method body</span>
+}

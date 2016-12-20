@@ -1,0 +1,5 @@
+int f(
+    int a = 1,
+    char* b = "2", // Line comment
+    double c = 3.0 /* Block comment */
+);
