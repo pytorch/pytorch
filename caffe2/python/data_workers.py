@@ -13,8 +13,8 @@ Basic usage is as follows:
       net,
       ["data", "label"],
       my_fetch_fun,
-      32,
-      "train"
+      batch_size=32,
+      input_source_name="train"
    )
    ...
    coordinator.start()
@@ -22,9 +22,9 @@ Basic usage is as follows:
 First argument is the Caffe2 net (or model helper), and second argument
 is list of input blobs that are to be fed.
 
-Last argument is used to distinguish different sources of data, such as train
-or test data. This is to ensure the data does not get mixed up, although the
-nets would share blobs.
+Argument 'input_source_name' is used to distinguish different sources of data,
+such as train or test data. This is to ensure the data does not get mixed up,
+although two nets would share blobs.
 
 To do the actual data loading, one defines a "fetcher function"
 that has call signature
