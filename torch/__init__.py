@@ -235,6 +235,13 @@ del SparseIntTensorBase
 del SparseShortTensorBase
 del SparseCharTensorBase
 del SparseByteTensorBase
+del CudaSparseDoubleTensorBase
+del CudaSparseFloatTensorBase
+del CudaSparseLongTensorBase
+del CudaSparseIntTensorBase
+del CudaSparseShortTensorBase
+del CudaSparseCharTensorBase
+del CudaSparseByteTensorBase
 
 ################################################################################
 # Import most common subpackages

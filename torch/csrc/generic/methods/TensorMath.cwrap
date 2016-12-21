@@ -1332,7 +1332,6 @@
       - THTensor* mat2
     - cname: spaddmm
       sparse: yes
-      with_stateless: True
       arguments:
         - arg: THTensor* result
           allocate: True

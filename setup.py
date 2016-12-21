@@ -295,10 +295,7 @@ extensions.append(THNN)
 
 if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
-<<<<<<< e4810bbd603ae3220c776ce63cf3ee2ec9a5318d
-=======
-        libraries=['TH', 'THC', 'THCS', 'THCUNN'],
->>>>>>> Adding THCS module so it compiles correctly. Currently stubbed out
+        libraries=['THCS'],
         sources=['torch/csrc/nn/THCUNN.cpp'],
         language='c++',
         extra_compile_args=extra_compile_args,

@@ -5,19 +5,15 @@ PyObject * THSPTensor_(NewEmpty)()
   return THSPTensor_(New)(THSTensor_(new)(LIBRARY_STATE_NOARGS));
 }
 
-PyObject * THSPTensor_(New)(THSTensor *ptr)
+PyObject * THSPTensor_(New)(THSTensor *tensor)
 {
-  THPObjectPtr args = PyTuple_New(0);
-  THPObjectPtr kwargs;
-  THPUtils_assert(args, "Could not create a new sparse tensor object - "
-      "failed to allocate argument tuple");
-  if (ptr) {
-    kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
-    THPUtils_assert(kwargs, "Could not create a new sparse tensor object - "
-        "failed to allocate keyword argument dictionary");
+  THSTensorPtr ptr(tensor);
+  PyTypeObject *type = (PyTypeObject *)THSPTensorClass;
+  PyObject *obj = type->tp_alloc(type, 0);
+  if (obj) {
+    ((THSPTensor *)obj)->cdata = ptr.release();
   }
-  PyObject *result = PyObject_Call(THSPTensorClass, args, kwargs);
-  return result;
+  return obj;
 }
 
 static void THSPTensor_(dealloc)(THSPTensor* self)
@@ -69,10 +65,10 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     long size = THPUtils_unpackLong(first_arg);
     self->cdata = THSTensor_(newWithSize1d)(LIBRARY_STATE size);
   }
-  // torch.SparseTensor(torch.LongStorage sizes)
-  else if (num_args == 1 && THPLongStorage_Check(first_arg)) {
-    THLongStorage *sizes = ((THPLongStorage*)first_arg)->cdata;
-    self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes);
+  // torch.SparseTensor(torch.Size sizes)
+  else if (num_args == 1 && THPSize_Check(first_arg)) {
+    THLongStoragePtr sizes = THPUtils_unpackSize(first_arg);
+    self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
   }
   // torch.SparseTensor(torch.LongTensor indices, torch.LongTensor values)
   else if (num_args == 2 && THPLongTensor_Check(first_arg)) {
@@ -84,20 +80,21 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     self->cdata = THSTensor_(newWithTensor)(LIBRARY_STATE indices, values);
   }
   // torch.SparseTensor(torch.LongTensor indices,
-  //                    torch.LongTensor values, torch.LongTensor sizes)
+  //                    torch.Tensor values,
+  //                    torch.Size sizes)
   else if (num_args > 2 && THPLongTensor_Check(first_arg)) {
     PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
     PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
     if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
-    if (!THPLongTensor_Check(third_arg)) goto invalid_arguments;
+    if (!THPSize_Check(third_arg)) goto invalid_arguments;
 
     THLongTensor *indices = ((THPLongTensor*)first_arg)->cdata;
     THTensor *values = ((THPTensor*)second_arg)->cdata;
-    THLongTensor *sizes = ((THPLongTensor*)third_arg)->cdata;
+    THLongStoragePtr sizes = THPUtils_unpackSize(third_arg);
     self->cdata = THSTensor_(newWithTensorAndSize)(
         LIBRARY_STATE indices, values, sizes);
   }
-  // torch.Tensor(int ...)
+  // torch.SparseTensor(int ...)
   else if (THPUtils_tryUnpackLongVarArgs(args, 0, sizes)) {
     self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
   }
@@ -106,12 +103,13 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   return (PyObject*)self.release();
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, THSPTensorStr " constructor", 5,
+  THPUtils_invalidArguments(args, THSPTensorStr " constructor", 6,
       "no arguments",
       "(int size)",
-      "(" THSPTensorStr " view_source)",
-      "(" THSPTensorStr " view_source, int offset)",
-      "(" THSPTensorStr " view_source, int offset, int size)");
+      "(torch.Size sizes)",
+      "(torch.LongTensor indices, " THPTensorStr " values)",
+      "(torch.LongTensor indices, " THPTensorStr " values, torch.Size sizes)",
+      "(int ...)");
   return NULL;
   END_HANDLE_TH_ERRORS
 #endif

@@ -35,7 +35,7 @@ TH_API THCSTensor *THCSTensor_(set)(THCState *state, THCSTensor *self, THCIndexT
 /**** creation methods ****/
 TH_API THCSTensor *THCSTensor_(new)(THCState *state);
 TH_API THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices, THCTensor *values);
-TH_API THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THCudaLongTensor *sizes);
+TH_API THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes);
 
 TH_API THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size_);
 TH_API THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, long size0_);

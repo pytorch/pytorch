@@ -46,8 +46,8 @@ THCSTensor *THCSTensor_(set)(THCState *state, THCSTensor *self, THCIndexTensor *
   THArgCheck(THCTensor_(nDimension)(state, values) == 1, 2, "values must nnz vector");
   THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 1,
       "indices and values must have same nnz");
-  THFree(self->indices);
-  THFree(self->values);
+  THCIndexTensor_(free)(state, self->indices);
+  THCTensor_(free)(state, self->values);
   self->indices = THCIndexTensor_(newClone)(state, indices);
   self->values = THCTensor_(newClone)(state, values);
   self->nnz = THCTensor_(size)(state, values, 0);
@@ -101,7 +101,7 @@ THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices,
   return THCSTensor_(newWithTensorAndSize)(state, indices, values, NULL);
 }
 
-THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THCudaLongTensor *sizes)
+THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes)
 {  // If sizes are not given, it is inferred as max index of each dim.
   long nDim;
 
@@ -112,6 +112,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   nDim = THCIndexTensor_(size)(state, indices, 0);
   if (!sizes) {
     THCudaLongTensor *ignore, *s;
+    THLongTensor *computed_sizes;
     ignore = THCudaLongTensor_new(state);
     s = THCudaLongTensor_new(state);
     THCudaLongTensor_max(state, s, ignore, indices, 1);
@@ -119,14 +120,17 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
 
     // TODO make sure this doesn't sync the hell out of everything
     //      Should be fine according to sam's memory manager.
-    sizes = THCudaLongTensor_newWithSize(state, THCudaLongTensor_newSizeOf(state, s), NULL);
-    THCudaLongTensor_copyCuda(state, sizes, s);
-    THCSTensor_(rawResize)(state, self, nDim, THCudaLongTensor_data(state, sizes));
+    computed_sizes = THLongTensor_newWithSize(THCudaLongTensor_newSizeOf(state, s), NULL);
+    THLongTensor_copyCudaLong(state, computed_sizes, s);
+    THCSTensor_(rawResize)(state, self, nDim, THLongTensor_data(computed_sizes));
 
     THCudaFree(state, s);
     THCudaFree(state, ignore);
-    THFree(sizes);
-  } else THCSTensor_(rawResize)(state, self, nDim, THCudaLongTensor_data(state, sizes));
+    THLongTensor_free(computed_sizes);
+  }
+  else {
+    THCSTensor_(rawResize)(state, self, nDim, THLongStorage_data(sizes));
+  }
 
   return self;
 }

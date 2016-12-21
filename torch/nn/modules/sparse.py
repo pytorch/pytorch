@@ -55,7 +55,7 @@ class Embedding(Module):
             padding_idx = -1
         return self._backend.Embedding(
             padding_idx, self.max_norm, self.norm_type,
-            self.scale_grad_by_freq, sparse=self.sparse
+            self.scale_grad_by_freq, self.sparse
             )(input, self.weight)
 
 

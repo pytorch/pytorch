@@ -22,8 +22,8 @@ THLongTensor *THSTensor_(toCSR)(long const *indices, long dim, long nnz) {
   return csr;
 }
 
-void THSTensor_(spaddmm)(THTensor *r_, 
-    real beta, THTensor *t, 
+void THSTensor_(spaddmm)(THTensor *r_,
+    real beta, THTensor *t,
     real alpha, THSTensor *sparse, THTensor *dense) {
   long h, i;
   long dim_i, dim_j, dim_k; // ixj * jxk = ixk
@@ -77,13 +77,13 @@ void THSTensor_(spaddmm)(THTensor *r_,
     }
   }
 
-  THFree(csr);
-  THFree(indices);
-  THFree(values);
+  THLongTensor_free(csr);
+  THLongTensor_free(indices);
+  THTensor_(free)(values);
 }
 
-void THSTensor_(sspaddmm)(THSTensor *r_, 
-    real beta, THSTensor *t, 
+void THSTensor_(sspaddmm)(THSTensor *r_,
+    real beta, THSTensor *t,
     real alpha, THSTensor *sparse, THTensor *dense) {
   long h, i, p;
   long dim_i, dim_j, dim_k; // ixj * jxk = ixk
@@ -129,8 +129,8 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
     THTensor_(copy)(narrowv, THSTensor_(values)(t));
     THTensor_(mul)(newv, newv, beta);
 
-    THFree(narrowi);
-    THFree(narrowv);
+    THLongTensor_free(narrowi);
+    THTensor_(free)(narrowv);
   }
 
   // sparse = sparse * dense
@@ -170,9 +170,9 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   r_->    nnz = p;
   THSTensor_(contiguous)(r_);
 
-  THFree(csr);
-  THFree(indices);
-  THFree(values);
+  THLongTensor_free(csr);
+  THLongTensor_free(indices);
+  THTensor_(free)(values);
 }
 
 void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse) {
@@ -195,8 +195,8 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
     r_->storage->data[index]  += value * THTensor_fastGet1d(values, k);
   }
 
-  THFree(indices);
-  THFree(values);
+  THLongTensor_free(indices);
+  THTensor_(free)(values);
   THLongStorage_free(storage);
 }
 

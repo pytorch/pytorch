@@ -42,7 +42,7 @@ static bool THCSPModule_loadClasses(PyObject *module_dict)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
   ASSERT_NOT_NULL(THCSPDoubleTensorClass  = PyMapping_GetItemString(module_dict, (char*)"DoubleTensor"));
-  //ASSERT_NOT_NULL(THCSPHalfTensorClass    = PyMapping_GetItemString(module_dict, (char*)"HalfTensor"));
+  ASSERT_NOT_NULL(THCSPHalfTensorClass    = PyMapping_GetItemString(module_dict, (char*)"HalfTensor"));
   ASSERT_NOT_NULL(THCSPFloatTensorClass   = PyMapping_GetItemString(module_dict, (char*)"FloatTensor"));
   ASSERT_NOT_NULL(THCSPLongTensorClass    = PyMapping_GetItemString(module_dict, (char*)"LongTensor"));
   ASSERT_NOT_NULL(THCSPIntTensorClass     = PyMapping_GetItemString(module_dict, (char*)"IntTensor"));
@@ -100,7 +100,7 @@ static bool THCSPModule_assignStateless()
   PyObject *stateless;
   INIT_STATELESS(Double);
   INIT_STATELESS(Float);
-  //INIT_STATELESS(Half);
+  INIT_STATELESS(Half);
   INIT_STATELESS(Long);
   INIT_STATELESS(Int);
   INIT_STATELESS(Short);

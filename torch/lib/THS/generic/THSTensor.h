@@ -14,12 +14,6 @@ typedef struct THSTensor
     THTensor *values;
     // Math operations can only be performed on ordered sparse tensors
     int contiguous;
-    /*
-    long storageOffset;
-    int refcount;
-
-    char flag;
-    */
 
 } THSTensor;
 
@@ -35,7 +29,7 @@ TH_API THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indices, THTens
 /**** creation methods ****/
 TH_API THSTensor *THSTensor_(new)(void);
 TH_API THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values);
-TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongTensor *sizes);
+TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes);
 
 TH_API THSTensor *THSTensor_(newWithSize)(THLongStorage *size_);
 TH_API THSTensor *THSTensor_(newWithSize1d)(long size0_);

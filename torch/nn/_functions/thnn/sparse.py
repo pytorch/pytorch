@@ -35,9 +35,8 @@ class Embedding(Function):
         v = torch.ones(indices.numel())
         i[1].copy_(torch.range(0, indices.numel()-1))
         i[0].copy_(indices)
-        return sparse.FloatTensor(i, v, torch.LongTensor(
+        return sparse.FloatTensor(i, v, torch.Size(
             [self._weight_size[0], indices.numel()])).contiguous()
-
 
     def forward(self, indices, weight):
         assert indices.dim() <= 2

@@ -95,18 +95,6 @@ SET(src-cuda
   THCSTensor.cu
   )
 
-# # loop over all types
-# foreach(THCS_TYPE Byte Char Short Int Long Half Float Double)
-#    # loop over files which need to be split between types (because of long compile times)
-#    foreach(THCS_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
-#       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCS${THCS_FILE}${THCS_TYPE}.cu")
-#          FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCS${THCS_FILE}${THCS_TYPE}.cu"
-#               "#include \"../THCS${THCS_FILE}.cuh\"\n#include \"../generic/THCS${THCS_FILE}.cu\"\n#include \"../THCSGenerate${THCS_TYPE}Type.h\"\n")
-#       endif()
-#       LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCS${THCS_FILE}${THCS_TYPE}.cu")
-#    endforeach()
-# endforeach()
-
 MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
 
 IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
