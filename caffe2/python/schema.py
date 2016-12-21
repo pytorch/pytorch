@@ -47,14 +47,19 @@ def _normalize_field(field_or_type_or_blob, keep_blobs=True):
     else:
         return Scalar(blob=field_or_type_or_blob)
 
+
 FeatureSpec = namedtuple(
     'FeatureSpec',
-    ['feature_type', 'feature_names', 'feature_ids', 'feature_is_request_only'])
+    ['feature_type', 'feature_names', 'feature_ids', 'feature_is_request_only']
+)
 FeatureSpec.__new__.__defaults__ = (None, None, None, None)
 
 
-class Metadata(namedtuple('Metadata', ['categorical_limit', 'expected_value',
-                                       'feature_specs'])):
+class Metadata(
+    namedtuple(
+        'Metadata', ['categorical_limit', 'expected_value', 'feature_specs']
+    )
+):
     """Represents additional information associated with a scalar in schema.
 
     `categorical_limit` - for fields of integral type that are guaranteed to be
@@ -68,6 +73,8 @@ class Metadata(namedtuple('Metadata', ['categorical_limit', 'expected_value',
     field. For example if field have more then 1 feature it can have list of
     feature names contained in this field."""
     __slots__ = ()
+
+
 Metadata.__new__.__defaults__ = (None, None, None)
 
 
@@ -155,9 +162,11 @@ class Field(object):
 
     def __eq__(self, other):
         """Equivalance of two schemas"""
-        return ((self.field_names() == other.field_names()) and
-                (self.field_types() == other.field_types()) and
-                (self.field_metadata() == other.field_metadata()))
+        return (
+            (self.field_names() == other.field_names()) and
+            (self.field_types() == other.field_types()) and
+            (self.field_metadata() == other.field_metadata())
+        )
 
 
 class List(Field):
@@ -170,7 +179,11 @@ class List(Field):
     """
 
     def __init__(self, values, lengths_blob=None):
-        self.lengths = Scalar(np.int32, lengths_blob)
+        if isinstance(lengths_blob, Field):
+            assert isinstance(lengths_blob, Scalar)
+            self.lengths = _normalize_field(lengths_blob)
+        else:
+            self.lengths = Scalar(np.int32, lengths_blob)
         self._items = _normalize_field(values)
         self.lengths._set_parent(self, 0)
         self._items._set_parent(self, 1)
@@ -179,8 +192,8 @@ class List(Field):
     def field_names(self):
         value_fields = self._items.field_names()
         return (
-            ['lengths'] +
-            [_join_field_name('values', v) for v in value_fields])
+            ['lengths'] + [_join_field_name('values', v) for v in value_fields]
+        )
 
     def field_types(self):
         return self.lengths.field_types() + self._items.field_types()
@@ -198,7 +211,10 @@ class List(Field):
         return self.lengths.has_blobs() and self._items.has_blobs()
 
     def clone(self, keep_blobs=True):
-        return List(self._items, self.lengths._blob if keep_blobs else None)
+        return List(
+            _normalize_field(self._items, keep_blobs=keep_blobs),
+            _normalize_field(self.lengths, keep_blobs=keep_blobs)
+        )
 
     def __getattr__(self, item):
         """If the value of this list is a struct,
@@ -222,7 +238,8 @@ class Struct(Field):
             assert len(field) == 2
             assert field[0], 'Field names cannot be empty'
             assert field[0] != 'lengths', (
-                'Struct cannot contain a field named `lengths`.')
+                'Struct cannot contain a field named `lengths`.'
+            )
         fields = [(name, _normalize_field(field)) for name, field in fields]
         for id, (name, field) in enumerate(fields):
             field._set_parent(self, id)
@@ -277,9 +294,14 @@ class Struct(Field):
 
     def __getitem__(self, item):
         if isinstance(item, list) or isinstance(item, tuple):
-            return Struct(*[(
-                self.fields.keys()[k] if isinstance(k, int) else k, self[k])
-                for k in item])
+            return Struct(
+                * [
+                    (
+                        self.fields.keys()[k]
+                        if isinstance(k, int) else k, self[k]
+                    ) for k in item
+                ]
+            )
         elif isinstance(item, int):
             return self.fields.values()[item]
         else:
@@ -370,7 +392,8 @@ class Scalar(Field):
         return Scalar(
             dtype=self._original_dtype,
             blob=self._blob if keep_blobs else None,
-            metadata=self._metadata)
+            metadata=self._metadata
+        )
 
     def get(self):
         """Gets the current blob of this Scalar field."""
@@ -423,7 +446,8 @@ class Scalar(Field):
             raise ValueError(
                 'Passing str blob to Scalar.set() is ambiguous. '
                 'Do either set(blob=np.array(blob)) or '
-                'set(blob=BlobReference(blob))')
+                'set(blob=BlobReference(blob))'
+            )
 
         self._original_dtype = dtype
         if dtype is not None:
@@ -435,15 +459,15 @@ class Scalar(Field):
                 blob = np.array(blob, dtype=dtype.base)
                 # if array is empty we may need to reshape a little
                 if blob.size == 0:
-                    blob = blob.reshape((0,) + dtype.shape)
+                    blob = blob.reshape((0, ) + dtype.shape)
             else:
-                assert isinstance(blob, np.ndarray), (
-                    'Invalid blob type: %s' % str(type(blob)))
+                assert isinstance(blob, np.ndarray
+                                 ), ('Invalid blob type: %s' % str(type(blob)))
 
             # reshape scalars into 1D arrays
             # TODO(azzolini): figure out better way of representing this
             if len(blob.shape) == 0:
-                blob = blob.reshape((1,))
+                blob = blob.reshape((1, ))
 
             # infer inner shape from the blob given
             # TODO(dzhulgakov): tweak this to make it work with PackedStruct
@@ -455,7 +479,8 @@ class Scalar(Field):
             dtype = np.dtype(np.void)
         assert not dtype.fields, (
             'Cannot create Scalar with a structured dtype. ' +
-            'Use from_dtype instead.')
+            'Use from_dtype instead.'
+        )
         self.dtype = dtype
         self._blob = blob
         if metadata is not None:
@@ -476,22 +501,27 @@ class Scalar(Field):
         return self._child_base_id()
 
 
-def Map(keys, values, keys_name='keys', values_name='values',
-        lengths_blob=None):
+def Map(
+    keys,
+    values,
+    keys_name='keys',
+    values_name='values',
+    lengths_blob=None
+):
     """A map is a List of Struct containing keys and values fields.
     Optionally, you can provide custom name for the key and value fields.
     """
     return List(
         Struct((keys_name, keys), (values_name, values)),
-        lengths_blob=lengths_blob)
+        lengths_blob=lengths_blob
+    )
 
 
 def Tuple(*fields):
     """
     Creates a Struct with default, sequential, field names of given types.
     """
-    return Struct(*[
-        ('field_%d' % i, field) for i, field in enumerate(fields)])
+    return Struct(* [('field_%d' % i, field) for i, field in enumerate(fields)])
 
 
 def RawTuple(num_fields):
@@ -568,7 +598,8 @@ class _SchemaNode(object):
                 if child.name == 'values':
                     self.field = List(
                         child.get_field(),
-                        lengths_blob=self.children[0].col_blob)
+                        lengths_blob=self.children[0].col_blob
+                    )
                     self.type_str = "List"
                     return self.field
         elif (set(child_names) == set(map_names)):
@@ -580,7 +611,8 @@ class _SchemaNode(object):
             self.field = Map(
                 key_field,
                 values_field,
-                lengths_blob=self.children[0].col_blob)
+                lengths_blob=self.children[0].col_blob
+            )
             self.type_str = "Map"
             return self.field
 
@@ -604,8 +636,10 @@ class _SchemaNode(object):
         logger.info(self.type_str)
 
 
-def from_column_list(col_names, col_types=None, col_blobs=None,
-                     col_metadata=None):
+def from_column_list(
+    col_names, col_types=None,
+    col_blobs=None, col_metadata=None
+):
     """
     Given a list of names, types, and optionally values, construct a Schema.
     """
@@ -616,14 +650,18 @@ def from_column_list(col_names, col_types=None, col_blobs=None,
     if col_blobs is None:
         col_blobs = [None] * len(col_names)
     assert len(col_names) == len(col_types), (
-        'col_names and col_types must have the same length.')
+        'col_names and col_types must have the same length.'
+    )
     assert len(col_names) == len(col_metadata), (
-        'col_names and col_metadata must have the same length.')
+        'col_names and col_metadata must have the same length.'
+    )
     assert len(col_names) == len(col_blobs), (
-        'col_names and col_blobs must have the same length.')
+        'col_names and col_blobs must have the same length.'
+    )
     root = _SchemaNode('root', 'Struct')
     for col_name, col_type, col_blob, col_metadata in zip(
-            col_names, col_types, col_blobs, col_metadata):
+        col_names, col_types, col_blobs, col_metadata
+    ):
         columns = col_name.split(':')
         current = root
         for i in range(len(columns)):
@@ -632,8 +670,11 @@ def from_column_list(col_names, col_types=None, col_blobs=None,
             field = None
             if i == len(columns) - 1:
                 type_str = col_type
-                field = Scalar(dtype=col_type, blob=col_blob,
-                               metadata=col_metadata)
+                field = Scalar(
+                    dtype=col_type,
+                    blob=col_blob,
+                    metadata=col_metadata
+                )
             next = current.add_child(name, type_str)
             if field is not None:
                 next.field = field
@@ -654,7 +695,8 @@ def from_blob_list(schema, values):
     record = schema.clone_schema()
     scalars = record.all_scalars()
     assert len(scalars) == len(values), (
-        'Values must have %d elements, got %d.' % (len(scalars), len(values)))
+        'Values must have %d elements, got %d.' % (len(scalars), len(values))
+    )
     for scalar, value in zip(scalars, values):
         scalar.set_value(value)
     return record
@@ -666,13 +708,14 @@ def as_record(value):
     elif isinstance(value, list) or isinstance(value, tuple):
         is_field_list = all(
             f is tuple and len(f) == 2 and isinstance(f[0], core.basestring)
-            for f in value)
+            for f in value
+        )
         if is_field_list:
-            return Struct(*[(k, as_record(v)) for k, v in value])
+            return Struct(* [(k, as_record(v)) for k, v in value])
         else:
-            return Tuple(*[as_record(f) for f in value])
+            return Tuple(* [as_record(f) for f in value])
     elif isinstance(value, dict):
-        return Struct(*[(k, as_record(v)) for k, v in value.items()])
+        return Struct(* [(k, as_record(v)) for k, v in value.items()])
     else:
         return _normalize_field(value)
 
@@ -682,6 +725,7 @@ def FetchRecord(blob_record, ws=None):
     Given a record containing BlobReferences, return a new record with same
     schema, containing numpy arrays, fetched from the current active workspace.
     """
+
     def fetch(v):
         if ws is None:
             return workspace.FetchBlob(str(v))
@@ -701,6 +745,7 @@ def FeedRecord(blob_record, arrays, ws=None):
     a list of numpy arrays or a Record containing numpy arrays, feeds the
     record to the current workspace.
     """
+
     def feed(b, v):
         if ws is None:
             workspace.FeedBlob(str(b), v)
@@ -715,7 +760,8 @@ def FeedRecord(blob_record, arrays, ws=None):
         # TODO: check schema
         arrays = arrays.field_blobs()
     assert len(arrays) == len(field_blobs), (
-        'Values must contain exactly %d ndarrays.' % len(field_blobs))
+        'Values must contain exactly %d ndarrays.' % len(field_blobs)
+    )
     for blob, array in zip(field_blobs, arrays):
         feed(blob, array)
 
@@ -729,13 +775,15 @@ def NewRecord(net, schema):
     if isinstance(schema, Scalar):
         result = schema.clone()
         result.set_value(
-            blob=ScopedBlobReference(net.NextName('unnamed_scalar')))
+            blob=ScopedBlobReference(net.NextName('unnamed_scalar'))
+        )
         return result
 
     assert isinstance(schema, Field), 'Record must be a schema.Field instance.'
     blob_refs = [
         net.AddExternalInput(net.NextName(prefix=name))
-        for name in schema.field_names()]
+        for name in schema.field_names()
+    ]
     return from_blob_list(schema, blob_refs)
 
 
@@ -746,8 +794,8 @@ def ConstRecord(net, array_record):
     """
     blob_record = NewRecord(net, array_record)
     for blob, array in zip(
-            blob_record.field_blobs(),
-            array_record.field_blobs()):
+        blob_record.field_blobs(), array_record.field_blobs()
+    ):
         net.Const(array, blob)
     return blob_record
 
@@ -778,8 +826,8 @@ _DATA_TYPE_FOR_DTYPE = [
 
 def is_schema_subset(schema, original_schema):
     # TODO add more checks
-    return set(schema.field_names()).issubset(
-        set(original_schema.field_names()))
+    return set(schema.field_names()
+              ).issubset(set(original_schema.field_names()))
 
 
 def equal_schemas(schema, original_schema):
