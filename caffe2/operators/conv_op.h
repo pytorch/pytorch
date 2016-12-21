@@ -37,7 +37,11 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {
+      : ConvPoolOpBase<Context>(operator_def, ws),
+        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+    CAFFE_ENFORCE(
+        !(no_bias_ && OutputSize() == 3),
+        "If bias is not present, you should not have 3 grad output.");
     CAFFE_ENFORCE(
         group_ == 1 || order_ == StorageOrder::NCHW,
         "Group convolution only supports NCHW order right now.");
@@ -50,6 +54,7 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  private:
   Tensor<Context> col_buffer_;
   Tensor<Context> bias_multiplier_;
+  bool no_bias_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);

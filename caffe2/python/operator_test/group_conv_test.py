@@ -6,7 +6,7 @@ import numpy as np
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
-from caffe2.python import core, workspace
+from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 
 import unittest
@@ -24,21 +24,23 @@ class TestGroupConvolution(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            # TODO(jiayq): if needed, add NHWC support.
            order=st.sampled_from(["NCHW"]),
-           # TODO(jiayq): enable other engines and add reference check.
-           engine=st.sampled_from(["", "CUDNN"]),
+           # Note: Eigen does not support group convolution, but it should
+           # fall back to the default engine without failing.
+           engine=st.sampled_from(["", "CUDNN", "EIGEN"]),
+           use_bias=st.booleans(),
            **hu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_group_convolution(
             self, stride, pad, kernel, size, group,
             input_channels_per_group, output_channels_per_group, batch_size,
-            order, engine, gc, dc):
+            order, engine, use_bias, gc, dc):
         assume(size >= kernel)
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 
         op = core.CreateOperator(
             "Conv",
-            ["X", "w", "b"],
+            ["X", "w", "b"] if use_bias else ["X", "w"],
             ["Y"],
             stride=stride,
             kernel=kernel,
@@ -58,9 +60,11 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             X = X.transpose((0, 3, 1, 2))
             w = w.transpose((0, 3, 1, 2))
 
-        self.assertDeviceChecks(dc, op, [X, w, b], [0])
-        for i in range(3):
-            self.assertGradientChecks(gc, op, [X, w, b], i, [0])
+        inputs = [X, w, b] if use_bias else [X, w]
+
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0])
 
 
 if __name__ == "__main__":
