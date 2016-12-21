@@ -798,7 +798,7 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
     }
   }
   if(n >= L) {
-    snprintf(str+L-4+n, 4, "...");
+    snprintf(str+L-4, 4, "...");
   }
   return buf;
 }
