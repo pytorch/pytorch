@@ -89,9 +89,9 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
       }
       // only use sigmoid loss function at the moment
       auto sign = labelData[i] > labelData[j] ? 1 : -1;
-      auto grad = -sign * dYdata[0] / (1 + exp(sign * (Xdata[i] - Xdata[j])));
-      dXdata[i] += grad;
-      dXdata[j] -= grad;
+      auto grad = sign * dYdata[0] / (1 + exp(sign * (Xdata[j] - Xdata[i])));
+      dXdata[i] -= grad;
+      dXdata[j] += grad;
     }
   }
   return true;

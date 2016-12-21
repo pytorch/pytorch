@@ -78,7 +78,7 @@ class TestPairWiseLossOps(hu.HypothesisTestCase):
         self.assertAlmostEqual(
             np.asscalar(dx[0]),
             np.asscalar(-dY[0] * sign / (1 + np.exp(sign * (X[0] - X[1])))),
-            delta=1e-4)
+            delta=1e-2 * abs(np.asscalar(dx[0])))
 
         self.assertEqual(np.asscalar(dx[0]), np.asscalar(-dx[1]))
         delta = 1e-3
