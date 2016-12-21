@@ -265,7 +265,7 @@ def Do(name, *nets_or_steps):
             nets_or_steps[0], core.ExecutionStep)):
         return nets_or_steps[0]
     else:
-        return core.execution_step(
+        return core.scoped_execution_step(
             _get_next_step_name('Do', name), nets_or_steps)
 
 
@@ -284,7 +284,7 @@ def DoParallel(name, *nets_or_steps):
             nets_or_steps[0], core.ExecutionStep)):
         return nets_or_steps[0]
     else:
-        return core.execution_step(
+        return core.scoped_execution_step(
             _get_next_step_name('DoParallel', name),
             nets_or_steps,
             concurrent_substeps=True)
@@ -306,7 +306,7 @@ def _RunOnceIf(name, condition_blob_or_net, nets_or_steps):
         nets_or_steps = _PrependNets(nets_or_steps, condition_not_net)
 
     def if_step(control_name):
-        return core.execution_step(
+        return core.scoped_execution_step(
             _get_next_step_name(control_name, name),
             nets_or_steps,
             should_stop_blob=stop_blob,
@@ -333,7 +333,7 @@ def _RunOnceIfNot(name, condition_blob_or_net, nets_or_steps):
         copy_net, condition_blob = _CopyConditionBlobNet(condition_blob_or_net)
         nets_or_steps = _PrependNets(nets_or_steps, copy_net)
 
-    return core.execution_step(
+    return core.scoped_execution_step(
         _get_next_step_name('_RunOnceIfNot', name),
         nets_or_steps,
         should_stop_blob=condition_blob,
@@ -358,7 +358,7 @@ def For(name, nets_or_steps, iter_num):
     iter_net = core.Net('For-iter')
     iter_done = iter_net.CountDown([iter_cnt])
 
-    for_step = core.execution_step(
+    for_step = core.scoped_execution_step(
         _get_next_step_name('For-inner', name),
         _PrependNets(nets_or_steps, iter_net),
         should_stop_blob=iter_done)
@@ -388,7 +388,7 @@ def While(name, condition_blob_or_net, nets_or_steps):
         nets_or_steps = _PrependNets(nets_or_steps, condition_not_net)
 
     def while_step(control_name):
-        return core.execution_step(
+        return core.scoped_execution_step(
             _get_next_step_name(control_name, name),
             nets_or_steps,
             should_stop_blob=stop_blob,
@@ -418,7 +418,7 @@ def Until(name, condition_blob_or_net, nets_or_steps):
     else:
         stop_blob = core.BlobReference(str(condition_blob_or_net))
 
-    return core.execution_step(
+    return core.scoped_execution_step(
         _get_next_step_name('Until', name),
         nets_or_steps,
         should_stop_blob=stop_blob)
@@ -450,7 +450,7 @@ def DoWhile(name, condition_blob_or_net, nets_or_steps):
     # in nets_or_steps. This is not what we want. So we use BootNet to
     # set stop_blob to False.
     bool_net = BoolNet((stop_blob, False))
-    return Do(name + '/DoWhile', bool_net, core.execution_step(
+    return Do(name + '/DoWhile', bool_net, core.scoped_execution_step(
         _get_next_step_name('DoWhile-inner', name),
         nets_or_steps,
         should_stop_blob=stop_blob,
@@ -470,7 +470,7 @@ def DoUntil(name, condition_blob_or_net, nets_or_steps):
     """
     if not isinstance(condition_blob_or_net, core.Net):
         stop_blob = core.BlobReference(condition_blob_or_net)
-        return core.execution_step(
+        return core.scoped_execution_step(
             _get_next_step_name('DoUntil', name),
             nets_or_steps,
             should_stop_blob=stop_blob)
@@ -483,7 +483,7 @@ def DoUntil(name, condition_blob_or_net, nets_or_steps):
     # in nets_or_steps. This is not what we want. So we use BootNet to
     # set stop_blob to False.
     bool_net = BoolNet((stop_blob, False))
-    return Do(name + '/DoUntil', bool_net, core.execution_step(
+    return Do(name + '/DoUntil', bool_net, core.scoped_execution_step(
         _get_next_step_name('DoUntil-inner', name),
         nets_or_steps,
         should_stop_blob=stop_blob,
@@ -505,7 +505,7 @@ def Switch(name, *conditions):
     - Switch('name', (cond_1, net_1))
     """
     conditions = _MakeList(conditions)
-    return core.execution_step(
+    return core.scoped_execution_step(
         _get_next_step_name('Switch', name),
         [_RunOnceIf(name + '/Switch', cond, step) for cond, step in conditions])
 
@@ -515,7 +515,7 @@ def SwitchNot(name, *conditions):
     Similar to Switch() but execute the steps for which the condition is False.
     """
     conditions = _MakeList(conditions)
-    return core.execution_step(
+    return core.scoped_execution_step(
         _get_next_step_name('SwitchNot', name),
         [_RunOnceIfNot(name + '/SwitchNot', cond, step)
          for cond, step in conditions])
