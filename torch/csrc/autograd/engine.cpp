@@ -37,11 +37,10 @@ struct grad_buffer_type: public grad_list_type {
 using ready_queue_type = std::deque<std::pair<THPFunction *, grad_buffer_type>>;
 
 // Computes graph dependencies (using a super simple topological sort)
-void THPEngine_compute_dependencies(THPFunction *function,
+void THPEngine_compute_dependencies(std::vector<THPFunction*> queue,
     dependencies_type& dependencies, ready_queue_type& ready)
 {
   std::set<THPFunction *> seen;
-  std::vector<THPFunction *> queue = {function};
   while (queue.size() > 0) {
     THPFunction *fn = queue.back(); queue.pop_back();
     for (int i = 0; i < fn->num_inputs; i++) {
@@ -52,6 +51,7 @@ void THPEngine_compute_dependencies(THPFunction *function,
       if (THPVariable_Check((PyObject*)prev_fn))
         continue;
       if (PyObject_IsInstance((PyObject*)prev_fn, THPStochasticFunctionClass) &&
+          prev_fn->requires_grad &&
           seen.count(prev_fn) == 0) {
         ready.emplace_back(prev_fn, grad_buffer_type(0));
       } else {
@@ -106,42 +106,65 @@ bool THPEngine_add_grad(buffer_set_type &need_copy, grad_buffer_type &prev_grad,
 // Main backward function
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
-  THPVariable *variable = NULL;
-  PyObject *grad_variable = NULL;
+  PyObject *variables = NULL;
+  PyObject *grad_variables = NULL;
   unsigned char retain_variables = 0;
   size_t next_buf_id = 0;
-  const char *accepted_kwargs[] = {"variable", "grad_variable",
+  const char *accepted_kwargs[] = {"variables", "grad_variables",
       "retain_variables", NULL};
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb", (char**)accepted_kwargs,
-        &variable, &grad_variable, &retain_variables))
+        &variables, &grad_variables, &retain_variables))
     return NULL;
   PyObject *retain_variables_obj = retain_variables ? Py_True : Py_False;
 
-  // If someone calls .backward() on a leaf, it's simple...
-  if (variable->creator == NULL) {
-    THPObjectPtr result = PyObject_CallMethod((PyObject*)variable,
-            "_do_backward", "(O)O", grad_variable, retain_variables_obj);
-    Py_RETURN_NONE;
-  }
+  THPUtils_assert(retain_variables_obj == Py_True || retain_variables_obj == Py_False,
+      "retain_variables argument is expected to be a bool, but got %s",
+      THPUtils_typename(retain_variables_obj));
+  THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
+      "be a tuple, but got %s", THPUtils_typename(variables));
+  THPUtils_assert(PyTuple_Check(grad_variables), "variables argument is "
+      "expected to be a tuple, but got %s", THPUtils_typename(grad_variables));
+
+  Py_ssize_t num_variables = PyTuple_GET_SIZE(variables);
+  Py_ssize_t num_gradients = PyTuple_GET_SIZE(grad_variables);
+  THPUtils_assert(num_variables == num_gradients, "got %ld variables and %ld "
+      "gradients", num_variables, num_gradients);
 
   ready_queue_type ready;
   std::unordered_map<THPFunction *, grad_buffer_type> not_ready;
   dependencies_type dependencies;
   buffer_set_type need_copy;
 
-  // Initialize the queue
-  if (variable->requires_grad ||
-      PyObject_IsInstance(variable->creator, THPStochasticFunctionClass)) {
-    grad_buffer_type buf(next_buf_id++, ((THPFunction*)variable->creator)->num_outputs);
-    Py_INCREF(grad_variable);
-    buf[variable->output_nr] = grad_variable;
-    ready.emplace_front((THPFunction*)variable->creator, std::move(buf));
+  bool did_leaf_backward = false;
+  std::vector<THPFunction*> creators;
+  for (int i = 0; i < num_variables; i++) {
+    THPVariable *variable = (THPVariable*)PyTuple_GET_ITEM(variables, i);
+    PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
+    THPUtils_assert(THPVariable_Check((PyObject*)variable), "element %d of variables "
+        "tuple is not a Variable", i);
+    // If someone calls .backward() on a leaf, it's simple...
+    if (variable->creator == NULL && variable->requires_grad) {
+      THPObjectPtr result = PyObject_CallMethod((PyObject*)variable,
+              "_do_backward", "(O)O", grad, retain_variables_obj);
+      if (!result) return NULL;
+      did_leaf_backward = true;
+      continue;
+    }
+    THPFunction *creator = (THPFunction*)variable->creator;
+    creators.push_back(creator);
+    // Initialize the queue
+    if (creator->requires_grad) {
+      grad_buffer_type buf(next_buf_id++, creator->num_outputs);
+      Py_INCREF(grad);
+      buf[variable->output_nr] = grad;
+      ready.emplace_front(creator, std::move(buf));
+    }
   }
 
-  THPEngine_compute_dependencies((THPFunction*)variable->creator, dependencies, ready);
+  THPEngine_compute_dependencies(std::move(creators), dependencies, ready);
 
-  THPUtils_assert(ready.size() > 0, "there are no graph nodes that require "
-          "computing gradients");
+  THPUtils_assert(did_leaf_backward || ready.size() > 0, "there are no graph "
+      "nodes that require computing gradients");
 
   while (ready.size() > 0) {
     std::pair<THPFunction *, grad_buffer_type> ready_pair =

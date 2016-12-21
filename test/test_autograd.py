@@ -118,9 +118,52 @@ class TestAutograd(TestCase):
     def test_backward(self):
         self._test_backward()
 
+    @unittest.skip("BasicEngine is out of date")
     def test_backward_basic_engine(self):
         with backward_engine(torch.autograd.engine.BasicEngine):
             self._test_backward()
+
+    def test_multi_backward(self):
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        q = Variable(torch.randn(5, 5), requires_grad=True)
+
+        a = Variable(torch.randn(5, 5), requires_grad=True)
+        b = Variable(torch.randn(5, 5), requires_grad=True)
+
+        q2 = q * 2
+        z = x + y + q2
+        c = a * b + q2
+        grad_z = torch.randn(5, 5)
+        grad_c = torch.randn(5, 5)
+        torch.autograd.backward([z, c], [grad_z, grad_c])
+
+        self.assertEqual(x.grad, grad_z)
+        self.assertEqual(y.grad, grad_z)
+        self.assertEqual(a.grad, grad_c * b.data)
+        self.assertEqual(b.grad, grad_c * a.data)
+        self.assertEqual(q.grad, (grad_c + grad_z) * 2)
+
+    def test_multi_backward_stochastic(self):
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        z = x + y
+        q = torch.normal(x)
+        q.reinforce(torch.randn(5, 5))
+
+        torch.autograd.backward([z, q], [torch.ones(5, 5), None])
+
+    def test_multi_backward_no_grad(self):
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=False)
+
+        z = x + y
+        q = y * 2
+
+        torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
+        self.assertEqual(x.grad, torch.ones(5, 5))
 
     def test_volatile(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
@@ -486,8 +529,8 @@ class TestAutograd(TestCase):
         samples_norm.reinforce(torch.randn(2, 10))
         self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
         samples_norm_std.reinforce(torch.randn(2, 10))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
-        last_sample.reinforce(torch.randn(2, 10))
+        # We don't have to specify rewards w.r.t. last_sample - it doesn't
+        # require gradient
 
         last_sample.backward(retain_variables=True)
         z.backward()
@@ -495,7 +538,7 @@ class TestAutograd(TestCase):
         self.assertGreater(x.grad.abs().sum(), 0)
 
     def test_stochastic_sequence(self):
-        x = Variable(torch.rand(10), requires_grad=True)
+        x = Variable(torch.rand(10).clamp_(0, 1), requires_grad=True)
         b = x.bernoulli()
         n1 = torch.normal(b, x)
         n2 = torch.normal(n1, 2)
@@ -508,7 +551,12 @@ class TestAutograd(TestCase):
 
         self.assertGreater(x.grad.abs().sum(), 0)
 
-
+    def test_stochastic_output(self):
+        x = Variable(torch.rand(10), requires_grad=True)
+        b = x.clone().clamp(0, 1).bernoulli()
+        b.reinforce(torch.randn(10))
+        b.backward()
+        self.assertGreater(x.grad.abs().sum(), 0)
 
 def index_variable(num_indices, max_indices):
     index = torch.randperm(max_indices)[:num_indices].long()
