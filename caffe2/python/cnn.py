@@ -14,7 +14,7 @@ class CNNModelHelper(ModelHelperBase):
     """
 
     def __init__(self, order="NCHW", name=None,
-                 use_cudnn=True, cudnn_exhaustive_search=False,
+                 use_cudnn=True, cudnn_exhaustive_search=True,
                  ws_nbytes_limit=None, init_params=True,
                  skip_sparse_optim=False,
                  param_model=None):
