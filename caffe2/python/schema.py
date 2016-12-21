@@ -272,6 +272,9 @@ class Struct(Field):
         ]
         return Struct(*normalized_fields)
 
+    def __len__(self):
+        return len(self.fields)
+
     def __getitem__(self, item):
         if isinstance(item, list) or isinstance(item, tuple):
             return Struct(*[(
