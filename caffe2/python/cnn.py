@@ -70,6 +70,7 @@ class CNNModelHelper(ModelHelperBase):
         """Convolution. We intentionally do not provide odd kernel/stride/pad
         settings in order to discourage the use of odd cases.
         """
+        use_bias = False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
         weight_init = weight_init if weight_init else ('XavierFill', {})
         bias_init = bias_init if bias_init else ('ConstantFill', {})
         blob_out = blob_out or self.net.NextName()
@@ -84,27 +85,43 @@ class CNNModelHelper(ModelHelperBase):
                 shape=weight_shape,
                 **weight_init[1]
             )
-            bias = self.param_init_net.__getattr__(bias_init[0])(
-                [],
-                blob_out + '_b',
-                shape=[dim_out, ],
-                **bias_init[1]
-            )
+            if use_bias:
+                bias = self.param_init_net.__getattr__(bias_init[0])(
+                    [],
+                    blob_out + '_b',
+                    shape=[dim_out, ],
+                    **bias_init[1]
+                )
         else:
             weight = core.ScopedBlobReference(
                 blob_out + '_w', self.param_init_net)
-            bias = core.ScopedBlobReference(
-                blob_out + '_b', self.param_init_net)
-        self.params.extend([weight, bias])
+            if use_bias:
+                bias = core.ScopedBlobReference(
+                    blob_out + '_b', self.param_init_net)
+        if use_bias:
+            self.params.extend([weight, bias])
+        else:
+            self.params.extend([weight])
+
         self.weights.append(weight)
-        self.biases.append(bias)
+
+        if use_bias:
+            self.biases.append(bias)
+
         if self.use_cudnn:
             kwargs['engine'] = 'CUDNN'
             kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
             if self.ws_nbytes_limit:
                 kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
+
+        inputs = []
+        if use_bias:
+            inputs = [blob_in, weight, bias]
+        else:
+            inputs = [blob_in, weight]
+
         return self.net.Conv(
-            [blob_in, weight, bias],
+            inputs,
             blob_out,
             kernel=kernel,
             order=self.order,
