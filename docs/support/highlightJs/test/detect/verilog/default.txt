@@ -1,0 +1,37 @@
+`timescale 1ns / 1ps
+
+/**
+ * counter: a generic clearable up-counter
+ */
+
+module counter
+    #(parameter WIDTH=64)
+    (
+        input clk,
+        input ce,
+        input arst_n,
+        output reg [WIDTH-1:0] q
+    );
+
+    // some child
+    clock_buffer #(WIDTH) buffer_inst (
+      .clk(clk),
+      .ce(ce),
+      .reset(arst_n)
+    );
+
+    // Simple gated up-counter with async clear
+
+    always @(posedge clk or negedge arst_n) begin
+        if (arst_n == 1'b0) begin
+            q <= {WIDTH {1'b0}};
+            end
+        else begin
+            q <= q;
+            if (ce == 1'b1) begin
+                q <= q + 1;
+            end
+        end
+    end
+
+endmodule

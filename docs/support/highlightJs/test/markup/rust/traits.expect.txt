@@ -1,0 +1,3 @@
+<span class="hljs-function"><span class="hljs-keyword">fn</span> <span class="hljs-title">sqr</span></span>(i: <span class="hljs-keyword">i32</span>) { i * i }
+<span class="hljs-keyword">trait</span> <span class="hljs-title">Minimum</span> : Copy {}
+<span class="hljs-keyword">pub</span> <span class="hljs-keyword">trait</span> <span class="hljs-title">Builder</span> <span class="hljs-keyword">where</span> <span class="hljs-keyword">Self</span>: Sized + Iterator&lt;Item=Event&gt; {}

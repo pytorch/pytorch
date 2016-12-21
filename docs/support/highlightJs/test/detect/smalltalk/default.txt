@@ -1,0 +1,39 @@
+Object>>method: num
+    "comment 123"
+    | var1 var2 |
+    (1 to: num) do: [:i | |var| ^i].
+    Klass with: var1.
+    Klass new.
+    arr := #('123' 123.345 #hello Transcript var $@).
+    arr := #().
+    var2 = arr at: 3.
+    ^ self abc
+
+heapExample
+    "HeapTest new heapExample"
+    "Multiline
+    decription"
+    | n rnd array time sorted |
+    n := 5000.
+    "# of elements to sort"
+    rnd := Random new.
+    array := (1 to: n)
+                collect: [:i | rnd next].
+    "First, the heap version"
+    time := Time
+                millisecondsToRun: [sorted := Heap withAll: array.
+    1
+        to: n
+        do: [:i |
+            sorted removeFirst.
+            sorted add: rnd next]].
+    Transcript cr; show: 'Time for Heap: ' , time printString , ' msecs'.
+    "The quicksort version"
+    time := Time
+                millisecondsToRun: [sorted := SortedCollection withAll: array.
+    1
+        to: n
+        do: [:i |
+            sorted removeFirst.
+            sorted add: rnd next]].
+    Transcript cr; show: 'Time for SortedCollection: ' , time printString , ' msecs'

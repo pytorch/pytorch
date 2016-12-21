@@ -1,0 +1,5 @@
+<span class="php"><span class="hljs-preprocessor">&lt;?</span> <span class="hljs-keyword">echo</span> <span class="hljs-string">'php'</span>; <span class="hljs-comment">/* <span class="hljs-preprocessor">?&gt;</span></span></span>
+<span class="hljs-tag">&lt;<span class="hljs-title">body</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">script</span>&gt;</span><span class="actionscript"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">tf</span> <span class="hljs-params">(x)</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-keyword">typeof</span> x; }</span><span class="hljs-tag">&lt;/<span class="hljs-title">script</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">body</span>&gt;</span>
+<span class="php"><span class="hljs-comment"><span class="hljs-preprocessor">&lt;?</span> end of comment */</span> <span class="hljs-preprocessor">?&gt;</span></span>

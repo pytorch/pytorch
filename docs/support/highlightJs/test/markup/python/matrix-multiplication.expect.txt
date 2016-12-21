@@ -1,0 +1,7 @@
+<span class="hljs-decorator">@meta</span>
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">C</span>:</span>
+
+<span class="hljs-decorator">    @decorator</span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">f</span><span class="hljs-params">(self, H, V, beta, r)</span>:</span>
+        S = (H @ beta - r).T @ inv(H @ V @ H.T) @ (H @ beta - r)
+        <span class="hljs-keyword">return</span> S
