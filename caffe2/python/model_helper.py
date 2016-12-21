@@ -57,14 +57,21 @@ class ModelHelperBase(object):
     """
 
     def __init__(self, name=None, init_params=True, allow_not_known_ops=True,
-                 skip_sparse_optim=False):
+                 skip_sparse_optim=False, param_model=None):
         self.name = name or "model"
         self.net = core.Net(self.name)
-        self.param_init_net = core.Net(self.name + '_init')
 
-        self.param_to_grad = {}
-        self.params = []
-        self.computed_params = []
+        if param_model is not None:
+            self.param_init_net = param_model.param_init_net
+            self.param_to_grad = param_model.param_to_grad
+            self.params = param_model.params
+            self.computed_params = param_model.computed_params
+        else:
+            self.param_init_net = core.Net(name + '_init')
+            self.param_to_grad = {}
+            self.params = []
+            self.computed_params = []
+
         self._param_info = []
         self._devices = []
         self.gradient_ops_added = False

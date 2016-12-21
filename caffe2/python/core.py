@@ -1455,19 +1455,27 @@ class Net(object):
         self._ExtendOps(grad_ops)
         return input_to_grad
 
-    def AddExternalInput(self, input):
-        input_name = str(input)
-        assert input_name not in self._net.external_input, (
-            'Net already contains an input named %s' % input_name)
-        self._net.external_input.extend([input_name])
-        self._external_input_map.update([input_name])
-        return _get_blob_ref(input_name)
+    def AddExternalInput(self, *inputs):
+        assert len(inputs) > 0
+        refs = []
+        for input in inputs:
+            input_name = str(input)
+            assert str(input) not in self._net.external_input, (
+                'Net already contains an input named %s' % input_name)
+        for input in inputs:
+            input_name = str(input)
+            self._net.external_input.extend([input_name])
+            self._external_input_map.update([input_name])
+            refs.append(_get_blob_ref(input_name))
 
-    def AddExternalOutput(self, output):
-        assert isinstance(output, BlobReference)
-        assert self.BlobIsDefined(output)
-        self.Proto().external_output.extend([str(output)])
-        return output
+        return refs[0] if len(refs) == 1 else refs
+
+    def AddExternalOutput(self, *outputs):
+        for output in outputs:
+            assert isinstance(output, BlobReference)
+            assert self.BlobIsDefined(output)
+        for output in outputs:
+            self.Proto().external_output.extend([str(output)])
 
     @property
     def external_inputs(self):
@@ -1504,6 +1512,12 @@ class Net(object):
 
     def output_record(self):
         return self._output_record
+
+    def AddExternalInputs(self, *inputs):
+        return self.AddExternalInput(*inputs)
+
+    def AddExternalOutputs(self, *outputs):
+        self.AddExternalOutput(*outputs)
 
     def DeduplicateGradientSlices(self, g):
         assert isinstance(g, GradientSlice)
