@@ -1,0 +1,110 @@
+/*
+
+FAR Style (c) MajestiC <majestic2k@gmail.com>
+
+*/
+
+.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 0.5em;
+  background: #000080;
+  -webkit-text-size-adjust: none;
+}
+
+.hljs,
+.hljs-subst {
+  color: #0ff;
+}
+
+.hljs-string,
+.ruby .hljs-string,
+.haskell .hljs-type,
+.hljs-tag .hljs-value,
+.hljs-rule .hljs-value,
+.hljs-rule .hljs-value .hljs-number,
+.hljs-preprocessor,
+.hljs-pragma,
+.ruby .hljs-symbol,
+.ruby .hljs-symbol .hljs-string,
+.hljs-built_in,
+.django .hljs-template_tag,
+.django .hljs-variable,
+.smalltalk .hljs-class,
+.hljs-addition,
+.apache .hljs-tag,
+.apache .hljs-cbracket,
+.tex .hljs-command,
+.coffeescript .hljs-attribute {
+  color: #ff0;
+}
+
+.hljs-keyword,
+.css .hljs-id,
+.hljs-title,
+.hljs-type,
+.vbscript .hljs-built_in,
+.rsl .hljs-built_in,
+.smalltalk .hljs-class,
+.xml .hljs-tag .hljs-title,
+.hljs-winutils,
+.hljs-flow,
+.hljs-change,
+.hljs-envvar,
+.bash .hljs-variable,
+.tex .hljs-special,
+.hljs-name {
+  color: #fff;
+}
+
+.hljs-comment,
+.hljs-doctag,
+.hljs-annotation,
+.hljs-deletion,
+.apache .hljs-sqbracket,
+.tex .hljs-formula {
+  color: #888;
+}
+
+.hljs-number,
+.hljs-date,
+.hljs-regexp,
+.hljs-literal,
+.smalltalk .hljs-symbol,
+.smalltalk .hljs-char,
+.clojure .hljs-attribute {
+  color: #0f0;
+}
+
+.hljs-decorator,
+.django .hljs-filter .hljs-argument,
+.smalltalk .hljs-localvars,
+.smalltalk .hljs-array,
+.hljs-attr_selector,
+.hljs-pseudo,
+.xml .hljs-pi,
+.diff .hljs-header,
+.hljs-chunk,
+.hljs-shebang,
+.nginx .hljs-built_in,
+.hljs-prompt {
+  color: #008080;
+}
+
+.hljs-keyword,
+.css .hljs-id,
+.hljs-title,
+.hljs-type,
+.vbscript .hljs-built_in,
+.rsl .hljs-built_in,
+.smalltalk .hljs-class,
+.hljs-winutils,
+.hljs-flow,
+.apache .hljs-tag,
+.nginx .hljs-built_in,
+.tex .hljs-command,
+.tex .hljs-special,
+.hljs-request,
+.hljs-status {
+  font-weight: bold;
+}

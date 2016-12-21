@@ -1,0 +1,43 @@
+# from the PF FAQ: http://www.openbsd.org/faq/pf/example1.html
+
+# macros
+
+int_if="xl0"
+
+tcp_services="{ 22, 113 }"
+icmp_types="echoreq"
+
+comp3="192.168.0.3"
+
+# options
+
+set block-policy return
+set loginterface egress
+set skip on lo
+
+# FTP Proxy rules
+
+anchor "ftp-proxy/*"
+
+pass in quick on $int_if inet proto tcp to any port ftp \
+    divert-to 127.0.0.1 port 8021
+
+# match rules
+
+match out on egress inet from !(egress:network) to any nat-to (egress:0)
+
+# filter rules
+
+block in log
+pass out quick
+
+antispoof quick for { lo $int_if }
+
+pass in on egress inet proto tcp from any to (egress) \
+    port $tcp_services
+
+pass in on egress inet proto tcp to (egress) port 80 rdr-to $comp3
+
+pass in inet proto icmp all icmp-type $icmp_types
+
+pass in on $int_if

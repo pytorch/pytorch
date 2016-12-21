@@ -1,0 +1,15 @@
+if foo > 2 || has("gui_running")
+  syntax on
+  set hlsearch
+endif
+
+set autoindent
+
+" switch on highlighting
+function UnComment(fl, ll)
+  while idx >= a:ll
+    let srclines=getline(idx)
+    let dstlines=substitute(srclines, b:comment, "", "")
+    call setline(idx, dstlines)
+  endwhile
+endfunction

@@ -1,0 +1,14 @@
+returnNull = -> null
+returnTrue = () -> true
+square = (x) -> x * x
+
+npmWishlist.sha256 = (str) ->
+    throw new Error()
+
+str.split(" ").map((m) -> m.charCodeAt(0))
+
+fs.readFile("package.json", "utf-8", (err, content) ->
+  data = JSON.parse(content)
+
+  data.version
+)

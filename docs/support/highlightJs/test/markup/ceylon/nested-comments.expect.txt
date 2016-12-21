@@ -1,0 +1,5 @@
+<span class="hljs-comment">/*
+ <span class="hljs-comment">/*
+  Ceylon has nested comments.
+  */</span>
+ */</span>

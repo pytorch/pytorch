@@ -1,0 +1,8 @@
+<span class="hljs-comment"># Divisions</span>
+x = <span class="hljs-number">6</span>/foo/i
+x = <span class="hljs-number">6</span> /foo
+x = <span class="hljs-number">6</span> / foo
+x = <span class="hljs-number">6</span> /foo * <span class="hljs-number">2</span>/gm
+x = f /foo
+x = f / foo / gm
+x = f /foo * <span class="hljs-number">2</span>/<span class="hljs-number">6</span>

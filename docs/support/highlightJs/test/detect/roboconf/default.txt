@@ -1,0 +1,54 @@
+# This is a comment
+import toto.graph;
+
+##
+# Facet
+##
+facet VM {
+	installer: iaas;
+}
+
+# Components
+VM_ec2 {
+	facets: VM;
+	children: cluster-node, mysql;
+}
+
+VM_openstack {
+	facets: VM;
+	children: cluster-node, mysql;
+}
+
+cluster-node {
+	alias: a cluster node;
+	installer: puppet;
+	exports: ip, port, optional-property1, optional_property2;
+	imports: cluster-node.ip (optional), cluster-node.port (optional), mysql.ip, mysql.port;
+}
+
+mysql {
+	alias: a MySQL database;
+	installer: puppet;
+	exports: ip, port;
+}
+
+##
+# Normally, instances are defined in another file...
+##
+instance of VM_ec2 {
+	name: VM_;
+	count: 3;
+	my-instance-property: whatever;
+	
+	instance of cluster-node {
+		name: cluster node;		# An in-line comment
+	}
+}
+
+instance of VM_openstack {
+	name: VM_database;
+	
+	instance of mysql {
+		name: mysql;
+	}
+}
