@@ -148,10 +148,21 @@ void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
 
 ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   for (auto& arg : def.arg()) {
-    CAFFE_ENFORCE(
-        arg_map_.count(arg.name()) == 0,
-        "Duplicated argument name found in operator def: ",
-        ProtoDebugString(def));
+    if (arg_map_.count(arg.name())) {
+      if (arg.SerializeAsString() !=
+          arg_map_[arg.name()]->SerializeAsString()) {
+        // If there are two arguments of the same name but different contents,
+        // we will throw an error.
+        CAFFE_THROW(
+            "Found argument of the same name ",
+            arg.name(),
+            "but with different contents.",
+            ProtoDebugString(def));
+      } else {
+        LOG(WARNING) << "Duplicated argument name found in operator def: "
+                     << ProtoDebugString(def);
+      }
+    }
     arg_map_[arg.name()] = &arg;
   }
 }

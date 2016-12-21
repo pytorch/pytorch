@@ -70,7 +70,7 @@ class CNNModelHelper(ModelHelperBase):
 
     def Conv(
         self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-        bias_init=None, **kwargs
+        bias_init=None, group=1, **kwargs
     ):
         """Convolution. We intentionally do not provide odd kernel/stride/pad
         settings in order to discourage the use of odd cases.
@@ -80,8 +80,9 @@ class CNNModelHelper(ModelHelperBase):
         bias_init = bias_init if bias_init else ('ConstantFill', {})
         blob_out = blob_out or self.net.NextName()
         weight_shape = (
-            [dim_out, dim_in, kernel, kernel]
-            if self.order == "NCHW" else [dim_out, kernel, kernel, dim_in]
+            [dim_out, int(dim_in / group), kernel, kernel]
+            if self.order == "NCHW" else
+            [dim_out, kernel, kernel, int(dim_in / group)]
         )
         if self.init_params:
             weight = self.param_init_net.__getattr__(weight_init[0])(
@@ -125,6 +126,13 @@ class CNNModelHelper(ModelHelperBase):
         else:
             inputs = [blob_in, weight]
 
+        # For the operator, we no longer need to provide the no_bias field
+        # because it can automatically figure this out from the number of
+        # inputs.
+        if 'no_bias' in kwargs:
+            del kwargs['no_bias']
+        if group != 1:
+            kwargs['group'] = group
         return self.net.Conv(
             inputs,
             blob_out,
@@ -180,6 +188,7 @@ class CNNModelHelper(ModelHelperBase):
             **kwargs
         )
 
+
     def GroupConv(
         self,
         blob_in,
@@ -187,14 +196,39 @@ class CNNModelHelper(ModelHelperBase):
         dim_in,
         dim_out,
         kernel,
-        weight_init,
-        bias_init,
+        weight_init=None,
+        bias_init=None,
         group=1,
         **kwargs
     ):
-        """Convolution. We intentionally do not provide odd kernel/stride/pad
-        settings in order to discourage the use of odd cases.
+        """Group Convolution.
+
+        This is essentially the same as Conv with a group argument passed in.
+        We specialize this for backward interface compatibility.
         """
+        return self.Conv(blob_in, blob_out, dim_in, dim_out, kernel,
+                         weight_init=weight_init, bias_init=bias_init,
+                         group=group, **kwargs)
+
+    def GroupConv_Deprecated(
+        self,
+        blob_in,
+        blob_out,
+        dim_in,
+        dim_out,
+        kernel,
+        weight_init=None,
+        bias_init=None,
+        group=1,
+        **kwargs
+    ):
+        """GroupConvolution's deprecated interface.
+
+        This is used to simulate a group convolution via split and concat. You
+        should always use the new group convolution in your new code.
+        """
+        weight_init = weight_init if weight_init else ('XavierFill', {})
+        bias_init = bias_init if bias_init else ('ConstantFill', {})
         if self.use_cudnn:
             kwargs['engine'] = 'CUDNN'
             kwargs['exhaustive_search'] = self.cudnn_exhaustive_search

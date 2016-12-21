@@ -152,7 +152,9 @@ GradientOpsMeta GetGradientForOp(
   // Copy arguments if needed.
   if (maker->CopyArguments() && def.arg_size()) {
     for (OperatorDef& grad_def : meta.ops_) {
-      grad_def.mutable_arg()->CopyFrom(def.arg());
+      for (auto& arg : def.arg()) {
+        grad_def.add_arg()->CopyFrom(arg);
+      }
     }
   }
   // VLOG for debugging purposes.

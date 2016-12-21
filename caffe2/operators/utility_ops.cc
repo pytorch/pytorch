@@ -589,11 +589,7 @@ class GetSqueezeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "ExpandDims",
-        "",
-        vector<string>{GO(0)},
-        vector<string>{GI(0)},
-        Def().arg());
+        "ExpandDims", "", vector<string>{GO(0)}, vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Squeeze, GetSqueezeGradient);
@@ -602,11 +598,7 @@ class GetExpandDimsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "Squeeze",
-        "",
-        vector<string>{GO(0)},
-        vector<string>{GI(0)},
-        Def().arg());
+        "Squeeze", "", vector<string>{GO(0)}, vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(ExpandDims, GetExpandDimsGradient);
