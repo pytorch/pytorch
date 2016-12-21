@@ -6,6 +6,7 @@ caffe_protobuf_generate_cpp_py(${CMAKE_CURRENT_BINARY_DIR} Caffe2_PROTO_SRCS Caf
 
 add_library(Caffe2_PROTO SHARED ${Caffe2_PROTO_HEADERS} ${Caffe2_PROTO_SRCS})
 target_include_directories(Caffe2_PROTO PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+install(TARGETS Caffe2_PROTO DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 
 if (USE_SYSTEM_PROTOBUF)
   target_link_libraries(Caffe2_PROTO protobuf)
