@@ -112,7 +112,7 @@ struct THCCachingAllocator
     } else {
       void* ptr;
       size_t alloc_size = small ? kSmallAlloc : size;
-      cudaError_t err = cuda_malloc_retry(device, &ptr, alloc_size);
+      err = cuda_malloc_retry(device, &ptr, alloc_size);
       if (err != cudaSuccess) {
         return err;
       }

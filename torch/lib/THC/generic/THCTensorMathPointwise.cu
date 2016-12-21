@@ -344,14 +344,14 @@ THCTensor_(cdiv)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *
              THCTensor_(nElement)(state, src2), 3, "sizes do not match");
 
   if (self_ == src1) {
-    // self *= src2
+    // self /= src2
     if (!THC_pointwiseApply2(state, self_, src2, TensorDivOp<real>())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
     THCTensor_(resizeAs)(state, self_, src1);
 
-    // self = src1 * src2
+    // self = src1 / src2
     if (!THC_pointwiseApply3(state, self_, src1, src2, TensorDivOp<real>())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
@@ -393,6 +393,44 @@ THCTensor_(cmin)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *s
   } else {
     THCTensor_(resizeAs)(state, self, src1);
     if (!THC_pointwiseApply3(state, self, src1, src2, TensorMinOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+}
+
+THC_API void
+THCTensor_(cremainder)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
+{
+  THAssert(THCTensor_(checkGPU)(state, 3, self, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
+
+  if (self == src1) {
+    if (!THC_pointwiseApply2(state, self, src2, TensorCRemainderOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self, src1);
+    if (!THC_pointwiseApply3(state, self, src1, src2, TensorCRemainderOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+}
+
+THC_API void
+THCTensor_(cfmod)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
+{
+  THAssert(THCTensor_(checkGPU)(state, 3, self, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
+
+  if (self == src1) {
+    if (!THC_pointwiseApply2(state, self, src2, TensorCFmodOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self, src1);
+    if (!THC_pointwiseApply3(state, self, src1, src2, TensorCFmodOp<real>())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
