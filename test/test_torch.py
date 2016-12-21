@@ -2481,8 +2481,10 @@ class TestTorch(TestCase):
             sys.modules[module.__name__] = module
             return module
 
+        import os
         with tempfile.NamedTemporaryFile() as checkpoint:
-            module = import_module('tmpmodule', 'data/network1.py')
+            fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
+            module = import_module('tmpmodule', fname)
             torch.save(module.Net(), checkpoint)
 
             # First check that the checkpoint can be loaded without warnings
@@ -2493,7 +2495,8 @@ class TestTorch(TestCase):
                 self.assertEquals(len(w), 0)
 
             # Replace the module with different source
-            module = import_module('tmpmodule', 'data/network2.py')
+            fname = os.path.join(os.path.dirname(__file__), 'data/network2.py')
+            module = import_module('tmpmodule', fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)

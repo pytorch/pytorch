@@ -96,8 +96,11 @@ class _TensorBase(object):
         if sys.version_info > (3,):
             return _tensor_str._str(self)
         else:
-            return _tensor_str._str(self).encode(
-                sys.stdout.encoding or 'UTF-8', 'replace')
+            if hasattr(sys.stdout, 'encoding'):
+                return _tensor_str._str(self).encode(
+                    sys.stdout.encoding or 'UTF-8', 'replace')
+            else:
+                return _tensor_str._str(self).encode('UTF-8', 'replace')
 
     def __iter__(self):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
