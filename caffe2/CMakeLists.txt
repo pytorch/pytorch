@@ -37,7 +37,7 @@ set(Caffe2_CPU_TEST_SRCS
     "/operators/utility_ops_test.cc"
     "/operators/elementwise_op_test.cc"
     "/operators/fully_connected_op_test.cc"
-    "/operators/conv_op_cache_cudnn_test.cc"
+    #"/operators/conv_op_cache_cudnn_test.cc"
     "/operators/text_file_reader_utils_test.cc"
     "/utils/proto_utils_test.cc"
     "/utils/math_test.cc"
