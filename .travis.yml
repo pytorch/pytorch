@@ -8,7 +8,7 @@ install:
   - sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev nvidia-cuda-toolkit libpthread-stubs0-dev cmake
   - pip install numpy
   - curl --retry 10 --retry-max-time 120 -L "https://launchpad.net/gcc-arm-embedded/5.0/5-2016-q2-update/+download/gcc-arm-none-eabi-5_4-2016q2-20160622-linux.tar.bz2" | tar xfj -
-  - export PATH=$PATH:$PWD/gcc-arm-none-eabi-5_4-2016q2/bin
+  - export PATH=$PWD/gcc-arm-none-eabi-5_4-2016q2/bin:$PATH
   - wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
   - sudo dpkg -i cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
   - sudo apt-get update
