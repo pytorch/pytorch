@@ -42,15 +42,21 @@ bool PairWiseLossOp<T, Context>::RunOnDevice() {
 
   const auto* Xdata = X.template data<T>();
   const auto* labelData = label.template data<T>();
+  int numPairs = 0;
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < i; ++j) {
-      if (labelData[i] == labelData[j]) {
+      if (std::abs(labelData[i] - labelData[j]) <
+          std::numeric_limits<T>::epsilon()) {
         continue;
       }
+      ++numPairs;
       // only use sigmoid loss function at the moment
       auto sign = labelData[i] > labelData[j] ? 1 : -1;
       Ydata[0] += logLogit(sign * (Xdata[j] - Xdata[i]));
     }
+  }
+  if (numPairs > 0) {
+    Ydata[0] /= numPairs;
   }
   return true;
 }
@@ -78,20 +84,24 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
   const T* dYdata = dY.template data<T>();
   const T* labelData = label.template data<T>();
   T* dXdata = dX->template mutable_data<T>();
+  int numPairs = 0;
   for (int i = 0; i < N; ++i) {
-    CAFFE_ENFORCE(
-        labelData[i] < 2,
-        "Label seems incorrect: label value larger than 2",
-        labelData[i]);
     for (int j = 0; j < i; ++j) {
-      if (labelData[i] == labelData[j]) {
+      if (std::abs(labelData[i] - labelData[j]) <
+          std::numeric_limits<T>::epsilon()) {
         continue;
       }
+      ++numPairs;
       // only use sigmoid loss function at the moment
       auto sign = labelData[i] > labelData[j] ? 1 : -1;
-      auto grad = sign * dYdata[0] / (1 + exp(sign * (Xdata[j] - Xdata[i])));
+      auto grad = sign * dYdata[0] / (1 + exp(-sign * (Xdata[j] - Xdata[i])));
       dXdata[i] -= grad;
       dXdata[j] += grad;
+    }
+  }
+  if (numPairs > 0) {
+    for (int i = 0; i < N; ++i) {
+      dXdata[i] /= numPairs;
     }
   }
   return true;
