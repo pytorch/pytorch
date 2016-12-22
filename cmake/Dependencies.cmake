@@ -112,6 +112,7 @@ include(cmake/Cuda.cmake)
 if(HAVE_CUDA)
   SET(CUDA_PROPAGATE_HOST_FLAGS OFF)
   LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
+  LIST(APPEND CUDA_NVCC_FLAGS -std=c++11)
   LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
 endif()
 
