@@ -15,7 +15,7 @@ install:
   - sudo apt-get install cuda
 
 script:
-  - mkdir build && cd build && cmake .. && make
+  - mkdir build && cd build && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON && make
 
 # safelist
 branches:
