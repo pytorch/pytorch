@@ -1,1 +1,0 @@
-<span class="hljs-comment">{- this is a <span class="hljs-comment">{- nested -}</span> comment -}</span>

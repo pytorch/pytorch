@@ -1,3 +1,0 @@
-<span class="hljs-comment">/* rust has
-<span class="hljs-comment">/* nested <span class="hljs-comment">/* block */</span> */</span>
-*/</span> comments

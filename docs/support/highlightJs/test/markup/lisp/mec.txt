@@ -1,4 +1,0 @@
-; MEC: Multiple Escape Characters. See https://github.com/isagalaev/highlight.js/issues/615
-(|spaces and
-newlines| x)
-(x '|quoted|)

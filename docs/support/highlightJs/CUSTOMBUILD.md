@@ -1,1 +1,0 @@
-node tools/build.js

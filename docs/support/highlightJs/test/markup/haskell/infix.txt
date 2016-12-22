@@ -1,3 +1,0 @@
-infix 3 `foo`
-infixl 6 `bar`
-infixr 9 `baz`

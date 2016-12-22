@@ -1,7 +1,0 @@
-<body>
-<%
-If i <  10 Then
-  response.write("Good morning!")
-End If
-%>
-</body>
