@@ -1,5 +1,0 @@
-<span class="hljs-matrix">[a1,a2]</span> = a<span class="hljs-cell">{<span class="hljs-number">1</span>:<span class="hljs-number">2</span>}</span>;
-b = <span class="hljs-matrix">[a{:}]</span>;
-c = <span class="hljs-built_in">cat</span>(<span class="hljs-number">1</span>, a<span class="hljs-cell">{:}</span>);
-d = <span class="hljs-cell">{[<span class="hljs-number">1</span>:<span class="hljs-number">2</span>],<span class="hljs-number">3</span>}</span>;
-e = <span class="hljs-cell">{<span class="hljs-number">1</span>:<span class="hljs-number">2</span>,<span class="hljs-number">3</span>}</span>;
