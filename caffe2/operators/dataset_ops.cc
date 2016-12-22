@@ -327,12 +327,12 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       outDim[0] = size;
       auto* out = Output(i);
       out->Resize(outDim);
+      void* src =
+          (char*)in.raw_data() + offset * innerSize * in.meta().itemsize();
+      void* dst = out->raw_mutable_data(in.meta()); // create the tensor
       if (out->size() == 0) {
         continue;
       }
-      void* src =
-          (char*)in.raw_data() + offset * innerSize * in.meta().itemsize();
-      void* dst = out->raw_mutable_data(in.meta());
       context_.template CopyItems<CPUContext, CPUContext>(
           in.meta(), out->size(), src, dst);
     }

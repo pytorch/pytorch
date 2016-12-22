@@ -95,19 +95,19 @@ class MKLFallbackOp final : public Operator<MKLContext> {
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
       if (src.IsType<float>()) {
-        Blob& dst = OperatorBase::OutputAt(i);
-        if (!dst.IsType<MKLMemory<float>>() ||
-            dst.Get<MKLMemory<float>>().dims() != src.dims()) {
-          dst.Reset(new MKLMemory<float>(src.dims());
+        Blob* dst = OperatorBase::OutputBlob(i);
+        if (!dst->IsType<MKLMemory<float>>() ||
+            dst->Get<MKLMemory<float>>().dims() != src.dims()) {
+          dst->Reset(new MKLMemory<float>(src.dims());
         }
-        dst.GetMutable < MKLMemory<float>()->CopyFrom(src);
+        dst->GetMutable<MKLMemory<float>>()->CopyFrom(src);
       } else if (src.IsType<double>()) {
-        Blob& dst = OperatorBase::OutputAt(i);
-        if (!dst.IsType<MKLMemory<double>>() ||
-            dst.Get<MKLMemory<double>>().dims() != src.dims()) {
-          dst.Reset(new MKLMemory<double>(src.dims());
+        Blob* dst = OperatorBase::OutputBlob(i);
+        if (!dst->IsType<MKLMemory<double>>() ||
+            dst->Get<MKLMemory<double>>().dims() != src.dims()) {
+          dst->Reset(new MKLMemory<double>(src.dims());
         }
-        dst.GetMutable < MKLMemory<double>()->CopyFrom(src);
+        dst->GetMutable<MKLMemory<double>>()->CopyFrom(src);
       } else {
         CAFFE_THROW("MKLMemory only supports float and double.");
       }

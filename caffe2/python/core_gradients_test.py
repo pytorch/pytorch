@@ -507,7 +507,9 @@ class TestGradientCalculation(test_util.TestCase):
                        'hidden3': 'hidden3_grad', 'hidden': 'hidden_grad',
                        'in': 'in_grad'})
 
-
+# Skip if sparse operators are not available
+@unittest.skipIf(not core.IsOperator('SparseFunHash'),
+                 'Sparse operators not available')
 class TestSparseGradientsAccumulation(test_util.TestCase):
     def testSparseAccumulationWithValues(self):
         # The gradient for "Gather" only computes values. indices are directly

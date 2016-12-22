@@ -49,6 +49,10 @@ input is 1, the shape will be identical to that of the input at run time with
 optional additional dimensions appended at the end as specified by 'extra_shape'
 argument. In that case the 'shape' argument should not be set.
 
+If input_as_shape is set to true, then the input should be a 1D tensor
+containing the desired output shape (the dimensions specified in extra_shape
+will also be appended)
+
 NOTE: Currently, it supports data type of float, int32, int64, and bool.
 )DOC")
     .Arg("value", "The value for the elements of the output tensor.")
@@ -65,6 +69,7 @@ NOTE: Currently, it supports data type of float, int32, int64, and bool.
         "The additional dimensions appended at the end of the shape indicated"
         "by the input blob."
         "Cannot set the extra_shape argument when there is no input blob.")
+    .Arg("input_as_shape", "1D tensor containing the desired output shape")
     .Input(0, "input", "Input tensor (optional) to provide shape information.")
     .Output(
         0,

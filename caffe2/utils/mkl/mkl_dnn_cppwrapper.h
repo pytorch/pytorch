@@ -5,6 +5,8 @@
 #include <stdarg.h>
 #include <stddef.h>
 
+#include <mkl.h>
+
 #define C2_MKL_TEMPLATE_PREFIX \
   template <typename T>        \
   inline

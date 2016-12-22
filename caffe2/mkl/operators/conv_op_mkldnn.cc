@@ -82,7 +82,7 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
       X_wrapper_->CopyFrom(X);
       filter_wrapper_->CopyFrom(filter);
       bias_wrapper_->CopyFrom(bias);
-      Y_wrapper_->ShareFrom(*Y);
+      Y_wrapper_->ShareFromTensor(*Y);
       resources_[dnnResourceSrc] = X_wrapper_->buffer();
       resources_[dnnResourceFilter] = filter_wrapper_->buffer();
       resources_[dnnResourceBias] = bias_wrapper_->buffer();
@@ -91,7 +91,7 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
       X_wrapper_->CopyFrom(X);
       filter_wrapper_->CopyFrom(filter);
       bias_wrapper_->CopyFrom(bias);
-      Y_wrapper_->ShareFrom(*Y);
+      Y_wrapper_->ShareFromTensor(*Y);
     }
     MKLDNN_SAFE_CALL(dnnExecute<float>(primitive_, resources_));
     Y_wrapper_->CopyTo(Y);

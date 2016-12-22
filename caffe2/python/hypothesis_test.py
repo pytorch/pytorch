@@ -21,42 +21,6 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def tanh(x):
-    return 2.0 * sigmoid(2.0 * x) - 1
-
-
-def lstm_unit(cell_t_prev, gates, seq_lengths, timestep):
-    D = cell_t_prev.shape[2]
-    G = gates.shape[2]
-    N = gates.shape[1]
-    t = (timestep[0].reshape(1, 1) * np.ones(shape=(N, D))).astype(np.int32)
-    assert t.shape == (N, D)
-    seq_lengths = (np.ones(shape=(N, D)) *
-                   seq_lengths.reshape(N, 1)).astype(np.int32)
-    assert seq_lengths.shape == (N, D)
-    assert G == 4 * D
-    # Resize to avoid broadcasting inconsistencies with NumPy
-    gates = gates.reshape(N, 4, D)
-    cell_t_prev = cell_t_prev.reshape(N, D)
-    i_t = gates[:, 0, :].reshape(N, D)
-    f_t = gates[:, 1, :].reshape(N, D)
-    o_t = gates[:, 2, :].reshape(N, D)
-    g_t = gates[:, 3, :].reshape(N, D)
-    i_t = sigmoid(i_t)
-    f_t = sigmoid(f_t)
-    o_t = sigmoid(o_t)
-    g_t = tanh(g_t)
-    valid = (t < seq_lengths).astype(np.int32)
-    assert valid.shape == (N, D)
-    cell_t = ((f_t * cell_t_prev) + (i_t * g_t)) * (valid) + \
-        (1 - valid) * cell_t_prev
-    assert cell_t.shape == (N, D)
-    hidden_t = (o_t * tanh(cell_t)) * valid
-    hidden_t = hidden_t.reshape(1, N, D)
-    cell_t = cell_t.reshape(1, N, D)
-    return hidden_t, cell_t
-
-
 @st.composite
 def _tensor_and_prefix(draw, dtype, elements, min_dim=1, max_dim=4, **kwargs):
     dims_ = draw(
@@ -80,7 +44,8 @@ _NUMPY_TYPE_TO_ENUM = {
 }
 
 
-def _dtypes(dtypes=[np.int32, np.int64, np.float32, np.float64]):
+def _dtypes(dtypes=None):
+    dtypes = dtypes if dtypes else [np.int32, np.int64, np.float32]
     return st.sampled_from(dtypes)
 
 
@@ -150,7 +115,24 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X1, X2], [0])
         self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
 
-    @given(inputs=hu.tensors(n=2), **hu.gcs)
+    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)
+    def test_row_mul(self, inputs, gc, dc):
+        op = core.CreateOperator("RowMul", ["X1", "X2"], ["Y"])
+        X1, Xtmp = inputs
+        X2 = Xtmp[:, 0]
+
+        def ref(x, y):
+            ret = np.zeros(shape=x.shape, dtype=x.dtype)
+            for i in range(y.size):
+                ret[i, ] = x[i, ] * y[i]
+            return [ret]
+
+        self.assertDeviceChecks(dc, op, [X1, X2], [0])
+        for i in range(2):
+            self.assertGradientChecks(gc, op, [X1, X2], i, [0])
+        self.assertReferenceChecks(gc, op, [X1, X2], ref)
+
+    @given(inputs=hu.tensors(n=2), **hu.gcs_cpu_only)
     def test_max(self, inputs, gc, dc):
         op = core.CreateOperator("Max", ["X1", "X2"], ["Y"])
 
@@ -217,15 +199,6 @@ class TestOperators(hu.HypothesisTestCase):
     @given(X=hu.tensor(), **hu.gcs)
     def test_tanh(self, X, gc, dc):
         op = core.CreateOperator("Tanh", "X", "Y")
-        self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
-
-    @given(X=hu.tensor(), **hu.gcs)
-    def test_relu(self, X, gc, dc):
-        op = core.CreateOperator("Relu", ["X"], ["Y"])
-        # go away from the origin point to avoid kink problems
-        X += 0.02 * np.sign(X)
-        X[X == 0.0] += 0.02
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
@@ -410,6 +383,29 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(num_inputs):
             self.assertGradientChecks(gc, op, inputs, i, [0])
+
+    @given(X=hu.arrays(dims=[5, 2],
+                       elements=st.floats(min_value=0.0, max_value=10.0)),
+           **hu.gcs_cpu_only)
+    def test_last_n_windows(self, X, gc, dc):
+        workspace.FeedBlob('input', X)
+        collect_net = core.Net('collect_net')
+        collect_net.LastNWindowCollector(
+            ['input'],
+            ['output'],
+            num_to_collect=7,
+        )
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=2))
+        workspace.RunPlan(plan)
+        output = workspace.FetchBlob('output')
+        inputs = workspace.FetchBlob('input')
+        new_output = np.zeros([7, inputs.shape[1]])
+        for i in range(inputs.shape[0] * 2):
+            new_output[i % 7] = inputs[i % inputs.shape[0]]
+        import numpy.testing as npt
+        npt.assert_almost_equal(output, new_output, decimal=5)
 
     @given(batch_size=st.integers(1, 3),
            stride=st.integers(1, 3),
@@ -1702,174 +1698,6 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, inputs, ref)
         self.assertEqual(dtype, out.dtype)
 
-    @given(n=st.integers(1, 10),
-           d=st.integers(1, 10),
-           t=st.integers(1, 10),
-           **hu.gcs)
-    def test_lstm_unit_recurrent_network(self, n, d, t, dc, gc):
-        op = core.CreateOperator(
-            "LSTMUnit",
-            ["cell_t_prev", "gates_t", "seq_lengths", "timestep"],
-            ["hidden_t", "cell_t"])
-        cell_t_prev = np.random.randn(1, n, d).astype(np.float32)
-        gates = np.random.randn(1, n, 4 * d).astype(np.float32)
-        seq_lengths = np.random.randint(0, t, size=(n,)).astype(np.int32)
-        timestep = np.random.randint(0, t, size=(1,)).astype(np.int32)
-        inputs = [cell_t_prev, gates, seq_lengths, timestep]
-        input_device_options = {"timestep": hu.cpu_do}
-        self.assertDeviceChecks(
-            dc, op, inputs, [0],
-            input_device_options=input_device_options)
-        self.assertReferenceChecks(
-            gc, op, inputs, lstm_unit,
-            input_device_options=input_device_options)
-        for i in range(2):
-            self.assertGradientChecks(
-                gc, op, inputs, i, [0, 1],
-                input_device_options=input_device_options)
-
-    @given(t=st.integers(1, 5),
-           n=st.integers(1, 5),
-           d=st.integers(1, 5))
-    def test_lstm_recurrent_network(self, t, n, d):
-        from caffe2.python import cnn
-        np.random.seed(1701)
-        step_net = cnn.CNNModelHelper(name="LSTM")
-        # TODO: name scope external inputs and outputs
-        step_net.Proto().external_input.extend(
-            ["input_t", "seq_lengths", "timestep", "hidden_t_prev",
-             "cell_t_prev", "gates_t_w", "gates_t_b"])
-        step_net.Proto().type = "simple"
-        step_net.Proto().external_output.extend(
-            ["hidden_t", "cell_t", "gates_t"])
-        step_net.FC("hidden_t_prev", "gates_t", dim_in=d, dim_out=4 * d, axis=2)
-        step_net.net.Sum(["gates_t", "input_t"], ["gates_t"])
-        step_net.net.LSTMUnit(
-            ["cell_t_prev", "gates_t", "seq_lengths", "timestep"],
-            ["hidden_t", "cell_t"])
-
-        # Initialize params for step net in the parent net
-        for op in step_net.param_init_net.Proto().op:
-            workspace.RunOperatorOnce(op)
-
-        backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
-            step_net.Proto().op,
-            {"hidden_t": "hidden_t_grad", "cell_t": "cell_t_grad"})
-        backward_mapping = {str(k): str(v) for k, v
-                            in backward_mapping.items()}
-        backward_step_net = core.Net("LSTMBackward")
-        del backward_step_net.Proto().op[:]
-        backward_step_net.Proto().op.extend(backward_ops)
-
-        # Code:
-        links = [
-            ("hidden_t_prev", "hidden", 0),
-            ("hidden_t", "hidden", 1),
-            ("cell_t_prev", "cell", 0),
-            ("cell_t", "cell", 1),
-            ("gates_t", "gates", 0),
-            ("input_t", "input", 0),
-        ]
-        link_internal, link_external, link_offset = zip(*links)
-        backward_links = [
-            ("hidden_t_prev_grad", "hidden_grad", 0),
-            ("hidden_t_grad", "hidden_grad", 1),
-            ("cell_t", "cell", 1),
-            ("cell_t_prev_grad", "cell_grad", 0),
-            ("cell_t_grad", "cell_grad", 1),
-            ("gates_t_grad", "gates_grad", 0),
-        ]
-        backward_link_internal, backward_link_external, backward_link_offset = \
-            zip(*backward_links)
-        backward_step_net.Proto().external_input.extend(
-            ["hidden_t_grad", "cell_t_grad"])
-        backward_step_net.Proto().external_input.extend(
-            step_net.Proto().external_input)
-        backward_step_net.Proto().external_input.extend(
-            step_net.Proto().external_output)
-        op = core.CreateOperator(
-            "RecurrentNetwork",
-            ["input", "seq_lengths", "gates_t_w", "gates_t_b",
-             "hidden_input", "cell_input"],
-            ["output", "hidden", "cell", "hidden_output", "cell_output"],
-            param=[str(p) for p in step_net.params],
-            param_gradient=[backward_mapping[str(p)] for p in step_net.params],
-            alias_src=["hidden", "hidden", "cell"],
-            alias_dst=["output", "hidden_output", "cell_output"],
-            alias_offset=[1, -1, -1],
-            recurrent_states=["hidden", "cell"],
-            recurrent_inputs=["hidden_input", "cell_input"],
-            recurrent_sizes=[d, d],
-            link_internal=link_internal,
-            link_external=link_external,
-            link_offset=link_offset,
-            backward_link_internal=backward_link_internal,
-            backward_link_external=backward_link_external,
-            backward_link_offset=backward_link_offset,
-            backward_alias_src=["gates_grad"],
-            backward_alias_dst=["input_grad"],
-            backward_alias_offset=[0],
-            scratch=["gates"],
-            backward_scratch=["gates_grad"],
-            scratch_sizes=[4 * d],
-            step_net=str(step_net.Proto()),
-            backward_step_net=str(backward_step_net.Proto()),
-            dim_out=d)
-        workspace.FeedBlob(
-            "input", np.random.randn(t, n, d * 4).astype(np.float32))
-        workspace.FeedBlob(
-            "hidden_input", np.random.randn(1, n, d).astype(np.float32))
-        workspace.FeedBlob(
-            "cell_input", np.random.randn(1, n, d).astype(np.float32))
-        workspace.FeedBlob(
-            "seq_lengths", np.random.randint(0, t, size=(n,)).astype(np.int32))
-
-        def reference(input, seq_lengths, gates_w, gates_b,
-                      hidden_input, cell_input):
-            T = input.shape[0]
-            N = input.shape[1]
-            G = input.shape[2]
-            D = hidden_input.shape[2]
-            hidden = np.zeros(shape=(T + 1, N, D))
-            cell = np.zeros(shape=(T + 1, N, D))
-            assert hidden.shape[0] == T + 1
-            assert cell.shape[0] == T + 1
-            assert hidden.shape[1] == N
-            assert cell.shape[1] == N
-            cell[0, :, :] = cell_input
-            hidden[0, :, :] = hidden_input
-            for t in range(T):
-                timestep = np.asarray([t]).astype(np.int32)
-                input_t = input[t].reshape(1, N, G)
-                hidden_t_prev = hidden[t].reshape(1, N, D)
-                cell_t_prev = cell[t].reshape(1, N, D)
-                gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
-                gates = gates + input_t
-                hidden_t, cell_t = lstm_unit(cell_t_prev, gates, seq_lengths,
-                                             timestep)
-                hidden[t + 1] = hidden_t
-                cell[t + 1] = cell_t
-            return hidden[1:], hidden, cell, hidden[-1].reshape(1, N, D), \
-                cell[-1].reshape(1, N, D)
-
-        self.assertReferenceChecks(
-            hu.cpu_do,
-            op,
-            [workspace.FetchBlob(name)
-             for name in ["input", "seq_lengths",
-                          "gates_t_w", "gates_t_b",
-                          "hidden_input", "cell_input"]],
-            reference)
-
-        for param in [0, 2, 3]:
-            self.assertGradientChecks(
-                hu.cpu_do,
-                op,
-                [workspace.FetchBlob(name)
-                 for name in ["input", "seq_lengths", "gates_t_w", "gates_t_b",
-                              "hidden_input", "cell_input"]],
-                param,
-                [0])
 
     @given(t=st.integers(1, 5),
            n=st.integers(1, 5),
@@ -2224,3 +2052,6 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X], ref_normalize)
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
+
+if __name__ == "__main__":
+    unittest.main()

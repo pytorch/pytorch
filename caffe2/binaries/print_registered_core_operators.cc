@@ -24,9 +24,8 @@ int main(int argc, char** argv) {
     const auto* schema = caffe2::OpSchemaRegistry::Schema(
         caffe2::FLAGS_schema);
     if (!schema) {
-      std::cerr << "Operator " << caffe2::FLAGS_schema 
-                << " doesn't have a schema"
-                << std::endl;
+      std::cerr << "Operator " << caffe2::FLAGS_schema
+                << " doesn't have a schema" << std::endl;
       return 1;
     }
     std::cout << "Operator " << caffe2::FLAGS_schema << ": " << std::endl
@@ -34,18 +33,20 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  std::cout << "CPU operator registry:" << std::endl;
-  for (const auto& key : caffe2::CPUOperatorRegistry()->Keys()) {
-    std::cout << "\t(schema: " << HasSchema(key) << ", doc: "
-              << HasDoc(key) << ")\t"
-              << key << std::endl;
+  for (const auto& pair : *caffe2::gDeviceTypeRegistry()) {
+    std::cout << "Device type " << pair.first
+#ifndef CAFFE2_USE_LITE_PROTO
+              << " (" << caffe2::DeviceType_Name(
+                             static_cast<caffe2::DeviceType>(pair.first))
+              << ")"
+#endif
+              << std::endl;
+    for (const auto& key : pair.second->Keys()) {
+      std::cout << "\t(schema: " << HasSchema(key) << ", doc: " << HasDoc(key)
+                << ")\t" << key << std::endl;
+    }
   }
-  std::cout << "CUDA operator registry:" << std::endl;
-  for (const auto& key : caffe2::CUDAOperatorRegistry()->Keys()) {
-    std::cout << "\t(schema: " << HasSchema(key) << ", doc: "
-              << HasDoc(key) << ")\t"
-              << key << std::endl;
-  }
+
   std::cout << "Operators that have gradients registered:" << std::endl;
   for (const auto& key : caffe2::GradientRegistry()->Keys()) {
     std::cout << "\t(schema: " << HasSchema(key) << ", doc: "

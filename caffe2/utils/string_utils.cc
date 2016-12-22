@@ -1,8 +1,5 @@
 #include "caffe2/utils/string_utils.h"
 
-#include <fcntl.h>
-#include <unistd.h>
-#include <cstring>
 #include <sstream>
 
 namespace caffe2 {

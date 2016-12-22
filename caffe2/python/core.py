@@ -521,6 +521,7 @@ class IR(object):
                     return remove_suffix(op_i.output[idx_i], '_indices')
                 if op_v:
                     return remove_suffix(op_v.output[idx_v], '_values')
+
         return input_name + '_grad'
 
     def _SetSumOpsDeviceOption(self, sum_ops, generators):
@@ -536,8 +537,8 @@ class IR(object):
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
-        grad_op.output[idx] = ('_' + grad_op.output[idx] +
-                               '_autosplit_{}'.format(cnt))
+        grad_op.output[idx] = (
+            '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
         return grad_op.output[idx], cnt + 1
 
     def _CheckSumOpsConflict(self, out_base_name, g):
@@ -562,7 +563,10 @@ class IR(object):
                 self._CheckSumOpsConflict(out_base_name, g)
                 sum_op_input.append(str(g))
 
-        sum_ops = [CreateOperator("Sum", sum_op_input, out_base_name)]
+        sum_ops = [CreateOperator(
+            "Sum",
+            map(BlobReference, sum_op_input),
+            BlobReference(out_base_name))]
         return sum_ops, out_base_name
 
     def _MakeSparseSumOps(self, generators, out_base_name):
@@ -598,14 +602,15 @@ class IR(object):
         sum_ops = [
             CreateOperator(
                 "Concat",
-                indices_concat_input,
-                [indices_concat_output, indices_concat_split],
+                map(BlobReference, indices_concat_input),
+                map(BlobReference,
+                    [indices_concat_output, indices_concat_split]),
                 axis=0
             ),
             CreateOperator(
                 "Concat",
-                values_concat_input,
-                [values_concat_output, values_concat_split],
+                map(BlobReference, values_concat_input),
+                map(BlobReference, [values_concat_output, values_concat_split]),
                 axis=0
             ),
         ]
@@ -1046,6 +1051,7 @@ def _get_blob_ref(blob_name_or_ref):
         else BlobReference(blob_name_or_ref)
     )
 
+
 class Net(object):
     _net_names_used = set()
     operator_registry_ = {}
@@ -1069,6 +1075,9 @@ class Net(object):
         """
         self._input_record = None
         self._output_record = None
+        self._recreate_lookup_tables = False
+        self._op_outputs = set()
+        self._external_input_map = set()
         self._attr_dict = defaultdict(list)
         if type(name_or_proto) is caffe2_pb2.NetDef:
             proto = name_or_proto
@@ -1076,14 +1085,22 @@ class Net(object):
             # initialize our network with the given netdef.
             self._net = caffe2_pb2.NetDef()
             self._net.CopyFrom(proto)
+
+            existing_outputs = [list(op.output) for op in self._net.op]
+
+            self._external_input_map.update(list(self._net.external_input))
+
             # Set the next name index properly.
             existing_names = set(
                 sum(
                     [list(op.input) for op in self._net.op], []
                 ) + sum(
-                    [list(op.output) for op in self._net.op], []
+                    existing_outputs, []
                 )
             )
+            for outs in existing_outputs:
+                self._op_outputs.update(outs)
+
             prefix_len = len(self._net.name + '_blob_')
             autogen_indices = []
             for s in existing_names:
@@ -1106,7 +1123,7 @@ class Net(object):
 
     def AppendNet(self, net):
         assert isinstance(net, Net)
-        self.Proto().op.extend(net.Proto().op)
+        self._ExtendOps(net.Proto().op)
         self.Proto().external_input.extend(
             [i for i in net.Proto().external_input
                 if i not in self.Proto().external_input])
@@ -1179,15 +1196,10 @@ class Net(object):
         Returns true if the given BlobReference is produced as output of
         an operator in this net, or if it is provided as an external input.
         """
-        blob_name = str(blob)
-        for input in self._net.external_input:
-            if input == blob_name:
-                return True
-        for op in self._net.op:
-            for output in op.output:
-                if output == blob_name:
-                    return True
-        return False
+        if self._recreate_lookup_tables:
+            self._RecreateLookupTables()
+        name = str(blob)
+        return (name in self._op_outputs) or (name in self._external_input_map)
 
     def UsesBlob(self, blob):
         """
@@ -1199,10 +1211,7 @@ class Net(object):
             for input in op.input:
                 if input == blob_name:
                     return True
-        for input in self._net.external_input:
-            if input == blob_name:
-                return True
-        return False
+        return blob_name in self._external_input_map
 
     def GetBlobRef(self, blob_name):
         """
@@ -1346,11 +1355,13 @@ class Net(object):
         new_out = [blob_mapping[o] for o in output_names]
         del new_net.Proto().external_input[:]
         new_net.Proto().external_input.extend(new_in)
+        new_net._external_input_map = set(list(new_in))
         del new_net.Proto().external_output[:]
         new_net.Proto().external_output.extend(new_out)
         return new_net, [new_net.GetBlobRef(o) for o in new_out]
 
     def Proto(self):
+        self._InvalidateLookupTables()
         return self._net
 
     def NextName(self, prefix=None, output_id=None):
@@ -1371,6 +1382,44 @@ class Net(object):
             output_name = self._net.name + '_blob_' + str(self._next_name_index)
             self._next_name_index += 1
         return str(output_name)
+
+    def _ExtendOps(self, new_ops):
+        self._net.op.extend(new_ops)
+        for op in new_ops:
+            self._op_outputs.update([str(o) for o in op.output])
+
+    def _CheckLookupTables(self):
+        '''
+        Called from unit tests to validate the internal lookup tables
+        match the protobuf contents.
+        '''
+        test_op_outputs = set()
+        for op in self._net.op:
+            for o in op.output:
+                test_op_outputs.add(o)
+
+        test_external_inp = set()
+        for inp in self._net.external_input:
+            test_external_inp.add(inp)
+
+        assert test_op_outputs.difference(self._op_outputs) == set()
+        assert test_external_inp.difference(self._external_input_map) == set()
+
+    def _InvalidateLookupTables(self):
+        self._recreate_lookup_tables = True
+
+    def _RecreateLookupTables(self):
+        self._op_outputs = set()
+        for op in self._net.op:
+            for o in op.output:
+                self._op_outputs.add(o)
+
+        self._external_input_map = set()
+        for inp in self._net.external_input:
+            self._external_input_map.add(inp)
+
+        self._recreate_lookup_tables = False
+
 
     def AddGradientOperators(self, ys, skip=0):
         """Add the gradient for operators in the net.
@@ -1403,21 +1452,30 @@ class Net(object):
         if workspace.IsImmediate():
             for op in grad_ops:
                 workspace.RunOperatorImmediate(op)
-        self._net.op.extend(grad_ops)
+        self._ExtendOps(grad_ops)
         return input_to_grad
 
-    def AddExternalInput(self, input):
-        input_name = str(input)
-        assert input_name not in self._net.external_input, (
-            'Net already contains an input named %s' % input_name)
-        self._net.external_input.extend([input_name])
-        return _get_blob_ref(input_name)
+    def AddExternalInput(self, *inputs):
+        assert len(inputs) > 0
+        refs = []
+        for input in inputs:
+            input_name = str(input)
+            assert str(input) not in self._net.external_input, (
+                'Net already contains an input named %s' % input_name)
+        for input in inputs:
+            input_name = str(input)
+            self._net.external_input.extend([input_name])
+            self._external_input_map.update([input_name])
+            refs.append(_get_blob_ref(input_name))
 
-    def AddExternalOutput(self, output):
-        assert isinstance(output, BlobReference)
-        assert self.BlobIsDefined(output)
-        self.Proto().external_output.extend([str(output)])
-        return output
+        return refs[0] if len(refs) == 1 else refs
+
+    def AddExternalOutput(self, *outputs):
+        for output in outputs:
+            assert isinstance(output, BlobReference)
+            assert self.BlobIsDefined(output)
+        for output in outputs:
+            self.Proto().external_output.extend([str(output)])
 
     @property
     def external_inputs(self):
@@ -1455,6 +1513,12 @@ class Net(object):
     def output_record(self):
         return self._output_record
 
+    def AddExternalInputs(self, *inputs):
+        return self.AddExternalInput(*inputs)
+
+    def AddExternalOutputs(self, *outputs):
+        self.AddExternalOutput(*outputs)
+
     def DeduplicateGradientSlices(self, g):
         assert isinstance(g, GradientSlice)
         unique, remapping = self.Unique([g.indices], 2, engine='SparseHash')
@@ -1491,7 +1555,7 @@ class Net(object):
                 for i in range(outputs)]
         outputs = _RectifyInputOutput(outputs, net=self)
         op = CreateOperator(op_type, inputs, outputs, **kwargs)
-        self._net.op.extend([op])
+        self._ExtendOps([op])
         if len(op.output) == 0:
             return
         elif len(op.output) == 1:
@@ -1812,3 +1876,9 @@ def execution_step(default_name,
         raise ValueError(
             'steps_or_nets must be a step, a net, or a list of nets or steps.')
     return step
+
+
+def scoped_execution_step(name, *args, **kwargs):
+    """Same as execution_step() except that the step name is scoped."""
+    default_name = ScopedName(name) if name else name
+    return execution_step(default_name, *args, **kwargs)

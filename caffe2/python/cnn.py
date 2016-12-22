@@ -16,10 +16,15 @@ class CNNModelHelper(ModelHelperBase):
     def __init__(self, order="NCHW", name=None,
                  use_cudnn=True, cudnn_exhaustive_search=False,
                  ws_nbytes_limit=None, init_params=True,
-                 skip_sparse_optim=False):
+                 skip_sparse_optim=False,
+                 param_model=None):
+
         super(CNNModelHelper, self).__init__(
-            name="CNN" if name is None else name, init_params=init_params,
-            skip_sparse_optim=skip_sparse_optim)
+            skip_sparse_optim=skip_sparse_optim,
+            name="CNN" if name is None else name,
+            init_params=init_params,
+            param_model=param_model,
+        )
 
         self.weights = []
         self.biases = []
@@ -65,17 +70,19 @@ class CNNModelHelper(ModelHelperBase):
 
     def Conv(
         self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-        bias_init=None, **kwargs
+        bias_init=None, group=1, **kwargs
     ):
         """Convolution. We intentionally do not provide odd kernel/stride/pad
         settings in order to discourage the use of odd cases.
         """
+        use_bias = False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
         weight_init = weight_init if weight_init else ('XavierFill', {})
         bias_init = bias_init if bias_init else ('ConstantFill', {})
         blob_out = blob_out or self.net.NextName()
         weight_shape = (
-            [dim_out, dim_in, kernel, kernel]
-            if self.order == "NCHW" else [dim_out, kernel, kernel, dim_in]
+            [dim_out, int(dim_in / group), kernel, kernel]
+            if self.order == "NCHW" else
+            [dim_out, kernel, kernel, int(dim_in / group)]
         )
         if self.init_params:
             weight = self.param_init_net.__getattr__(weight_init[0])(
@@ -84,27 +91,50 @@ class CNNModelHelper(ModelHelperBase):
                 shape=weight_shape,
                 **weight_init[1]
             )
-            bias = self.param_init_net.__getattr__(bias_init[0])(
-                [],
-                blob_out + '_b',
-                shape=[dim_out, ],
-                **bias_init[1]
-            )
+            if use_bias:
+                bias = self.param_init_net.__getattr__(bias_init[0])(
+                    [],
+                    blob_out + '_b',
+                    shape=[dim_out, ],
+                    **bias_init[1]
+                )
         else:
             weight = core.ScopedBlobReference(
                 blob_out + '_w', self.param_init_net)
-            bias = core.ScopedBlobReference(
-                blob_out + '_b', self.param_init_net)
-        self.params.extend([weight, bias])
+            if use_bias:
+                bias = core.ScopedBlobReference(
+                    blob_out + '_b', self.param_init_net)
+        if use_bias:
+            self.params.extend([weight, bias])
+        else:
+            self.params.extend([weight])
+
         self.weights.append(weight)
-        self.biases.append(bias)
+
+        if use_bias:
+            self.biases.append(bias)
+
         if self.use_cudnn:
             kwargs['engine'] = 'CUDNN'
             kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
             if self.ws_nbytes_limit:
                 kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
+
+        inputs = []
+        if use_bias:
+            inputs = [blob_in, weight, bias]
+        else:
+            inputs = [blob_in, weight]
+
+        # For the operator, we no longer need to provide the no_bias field
+        # because it can automatically figure this out from the number of
+        # inputs.
+        if 'no_bias' in kwargs:
+            del kwargs['no_bias']
+        if group != 1:
+            kwargs['group'] = group
         return self.net.Conv(
-            [blob_in, weight, bias],
+            inputs,
             blob_out,
             kernel=kernel,
             order=self.order,
@@ -158,6 +188,7 @@ class CNNModelHelper(ModelHelperBase):
             **kwargs
         )
 
+
     def GroupConv(
         self,
         blob_in,
@@ -165,14 +196,39 @@ class CNNModelHelper(ModelHelperBase):
         dim_in,
         dim_out,
         kernel,
-        weight_init,
-        bias_init,
+        weight_init=None,
+        bias_init=None,
         group=1,
         **kwargs
     ):
-        """Convolution. We intentionally do not provide odd kernel/stride/pad
-        settings in order to discourage the use of odd cases.
+        """Group Convolution.
+
+        This is essentially the same as Conv with a group argument passed in.
+        We specialize this for backward interface compatibility.
         """
+        return self.Conv(blob_in, blob_out, dim_in, dim_out, kernel,
+                         weight_init=weight_init, bias_init=bias_init,
+                         group=group, **kwargs)
+
+    def GroupConv_Deprecated(
+        self,
+        blob_in,
+        blob_out,
+        dim_in,
+        dim_out,
+        kernel,
+        weight_init=None,
+        bias_init=None,
+        group=1,
+        **kwargs
+    ):
+        """GroupConvolution's deprecated interface.
+
+        This is used to simulate a group convolution via split and concat. You
+        should always use the new group convolution in your new code.
+        """
+        weight_init = weight_init if weight_init else ('XavierFill', {})
+        bias_init = bias_init if bias_init else ('ConstantFill', {})
         if self.use_cudnn:
             kwargs['engine'] = 'CUDNN'
             kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
@@ -180,10 +236,12 @@ class CNNModelHelper(ModelHelperBase):
                 kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
         if dim_in % group:
             raise ValueError("dim_in should be divisible by group.")
+        if dim_out % group:
+            raise ValueError("dim_out should be divisible by group.")
         splitted_blobs = self.net.DepthSplit(
             blob_in,
             ['_' + blob_out + '_gconv_split_' + str(i) for i in range(group)],
-            dimensions=[dim_in / group for i in range(group)],
+            dimensions=[int(dim_in / group) for i in range(group)],
             order=self.order
         )
         weight_shape = (
@@ -191,6 +249,9 @@ class CNNModelHelper(ModelHelperBase):
             if self.order == "NCHW" else
             [dim_out / group, kernel, kernel, dim_in / group]
         )
+        # Make sure that the shapes are of int format. Especially for py3 where
+        # int division gives float output.
+        weight_shape = [int(v) for v in weight_shape]
         conv_blobs = []
         for i in range(group):
             if self.init_params:
@@ -203,7 +264,7 @@ class CNNModelHelper(ModelHelperBase):
                 bias = self.param_init_net.__getattr__(bias_init[0])(
                     [],
                     blob_out + '_gconv_%d_b' % i,
-                    shape=[dim_out / group],
+                    shape=[int(dim_out / group)],
                     **bias_init[1]
                 )
             else:
@@ -497,7 +558,9 @@ class CNNModelHelper(ModelHelperBase):
         scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
         running_mean = init_blob(0.0, "rm")
         running_inv_var = init_blob(1.0, "riv")
+
         self.params.extend([scale, bias])
+        self.computed_params.extend([running_mean, running_inv_var])
         self.weights.append(scale)
         self.biases.append(bias)
         blob_outs = [blob_out, running_mean, running_inv_var,

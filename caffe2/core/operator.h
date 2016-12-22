@@ -25,7 +25,8 @@ class OperatorBase {
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   virtual ~OperatorBase() {}
 
-  // Parameter getters. You can use these to get the arguments that you want.
+  /** @brief Checks if the operator has an argument of the given name.
+   */
   inline bool HasArgument(const string& name) const {
     return arg_helper_.HasArgument(name);
   }
@@ -61,12 +62,15 @@ class OperatorBase {
 
   template <typename T>
   inline T* Output(int idx) {
-    return OutputAt(idx).template GetMutable<T>();
+    return outputs_.at(idx)->template GetMutable<T>();
   }
 
-  inline Blob& OutputAt(int idx) {
-    DCHECK_LT(idx, outputs_.size());
-    return *outputs_.at(idx);
+  inline const Blob& InputBlob(int idx) {
+    return *inputs_.at(idx);
+  }
+
+  inline Blob* OutputBlob(int idx) {
+    return outputs_.at(idx);
   }
 
   template <typename T>
@@ -76,7 +80,7 @@ class OperatorBase {
 
   template <typename T>
   inline bool OutputIsType(int idx) {
-    return OutputAt(idx).template IsType<T>();
+    return outputs_.at(idx)->template IsType<T>();
   }
 
   inline int InputSize() { return inputs_.size(); }
@@ -139,9 +143,6 @@ class OperatorBase {
 template <class Context>
 class Operator : public OperatorBase {
  public:
-  // The constructor of the operator. Note that you should not do any
-  // custom initializations in the constructor; instead, do those in the
-  // SetUp() function.
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws),
         context_(operator_def.device_option()) {

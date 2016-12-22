@@ -61,9 +61,12 @@ private:                                                                       \
        (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define CAFFE2_IOS 1
 #define CAFFE2_MOBILE 1
+#elif (defined(__APPLE__) && TARGET_OS_MAC)
+#define CAFFE2_IOS 1
+#define CAFFE2_MOBILE 0
 #else
 #define CAFFE2_MOBILE 0
-#endif // ANDROID / IOS
+#endif // ANDROID / IOS / MACOS
 #endif // CAFFE2_MOBILE
 
 // make_unique is a C++14 feature. If we don't have 14, we will emulate

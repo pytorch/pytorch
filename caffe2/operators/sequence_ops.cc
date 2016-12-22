@@ -432,7 +432,7 @@ OPERATOR_SCHEMA(AddPadding)
     .SetDoc(R"DOC(
 Given a partitioned tensor T<N, D1..., Dn>, where the partitions are
 defined as ranges on its outer-most (slowest varying) dimension N,
-with given range lengths, return a tensor T<N + 2*pad_width, D1 ..., Dn>
+with given range lengths, return a tensor T<N + 2*padding_width, D1 ..., Dn>
 with paddings added to the start and end of each range.
 Optionally, different paddings can be provided for beginning and end. Paddings
 provided must be a tensor T<D1..., Dn>.
@@ -441,8 +441,12 @@ If no padding is provided, add zero padding.
 If no lengths vector is provided, add padding only once,
 at the start and end of data.
 )DOC")
-    .Arg("pad_width", "Number of copies of padding to add around each range.")
-    .Arg("end_pad_width", "(Optional) Specifies a different end-padding width.")
+    .Arg(
+        "padding_width",
+        "Number of copies of padding to add around each range.")
+    .Arg(
+        "end_padding_width",
+        "(Optional) Specifies a different end-padding width.")
     .Input(0, "data_in", "(T<N, D1..., Dn>) Input data")
     .Input(
         1,
@@ -454,7 +458,7 @@ at the start and end of data.
         "end_padding",
         "T<D1..., Dn> (optional) Padding for range end. "
         "If not provided, start_padding is used as end_padding as well.")
-    .Output(0, "data_out", "(T<N + 2*pad_width, D1..., Dn>) Padded data.")
+    .Output(0, "data_out", "(T<N + 2*padding_width, D1..., Dn>) Padded data.")
     .Output(1, "lengths_out", "(i64, optional) Lengths for each padded range.");
 
 OPERATOR_SCHEMA(RemovePadding)
@@ -465,15 +469,17 @@ Remove padding around the edges of each segment of the input data. This is
 the reverse opration of AddPadding, and uses the same arguments and conventions
 for input and output data format.
 )DOC")
-    .Arg("pad_width", "Outer-size of padding to remove around each range.")
-    .Arg("end_pad_width", "(Optional) Specifies a different end-padding width.")
+    .Arg("padding_width", "Outer-size of padding to remove around each range.")
+    .Arg(
+        "end_padding_width",
+        "(Optional) Specifies a different end-padding width.")
     .Input(0, "data_in", "T<N, D1..., Dn> Input data")
     .Input(
         1,
         "lengths",
         "(i64) Num of elements in each range. sum(lengths) = N. "
         "If not provided, considers all data as a single segment.")
-    .Output(0, "data_out", "(T<N - 2*pad_width, D1..., Dn>) Unpadded data.")
+    .Output(0, "data_out", "(T<N - 2*padding_width, D1..., Dn>) Unpadded data.")
     .Output(
         1,
         "lengths_out",
@@ -486,8 +492,10 @@ OPERATOR_SCHEMA(GatherPadding)
 Gather the sum of start and end paddings in a padded input sequence. Used in
 order to compute the gradients of AddPadding w.r.t the padding tensors.
 )DOC")
-    .Arg("pad_width", "Outer-size of padding present around each range.")
-    .Arg("end_pad_width", "(Optional) Specifies a different end-padding width.")
+    .Arg("padding_width", "Outer-size of padding present around each range.")
+    .Arg(
+        "end_padding_width",
+        "(Optional) Specifies a different end-padding width.")
     .Input(0, "data_in", "T<N, D1..., Dn> Padded input data")
     .Input(
         1,

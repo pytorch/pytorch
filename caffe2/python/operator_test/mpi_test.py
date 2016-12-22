@@ -14,14 +14,21 @@ import caffe2.python.hypothesis_test_util as hu
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/mpi:mpi_ops")
 
-try:
-    from mpi4py import MPI
-    _has_mpi = core.IsOperatorWithEngine("CreateCommonWorld", "MPI")
-    COMM = MPI.COMM_WORLD
-    RANK = COMM.Get_rank()
-    SIZE = COMM.Get_size()
-except ImportError:
-    _has_mpi = False
+_has_mpi =False
+COMM = None
+RANK = 0
+SIZE = 0
+
+def SetupMPI():
+    try:
+        from mpi4py import MPI
+        global _has_mpi, COMM, RANK, SIZE
+        _has_mpi = core.IsOperatorWithEngine("CreateCommonWorld", "MPI")
+        COMM = MPI.COMM_WORLD
+        RANK = COMM.Get_rank()
+        SIZE = COMM.Get_size()
+    except ImportError:
+        _has_mpi = False
 
 
 @unittest.skipIf(not _has_mpi,
@@ -186,5 +193,6 @@ class TestMPI(hu.HypothesisTestCase):
         workspace.ResetWorkspace()
 
 if __name__ == "__main__":
+    SetupMPI()
     import unittest
     unittest.main()

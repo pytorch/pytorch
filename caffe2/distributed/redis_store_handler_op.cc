@@ -1,29 +1,17 @@
 #include "redis_store_handler_op.h"
 
-#include <caffe2/core/logging.h>
+#include <caffe2/core/context_gpu.h>
 
 namespace caffe2 {
 
-RedisStoreHandlerCreateOp::RedisStoreHandlerCreateOp(
-    const OperatorDef& operator_def,
-    Workspace* ws)
-    : Operator(operator_def, ws),
-      host_(GetSingleArgument<std::string>("host", "")),
-      port_(GetSingleArgument<int>("port", 0)),
-      prefix_(GetSingleArgument<std::string>("prefix", "")) {
-  CAFFE_ENFORCE_NE(host_, "", "host is a required argument");
-  CAFFE_ENFORCE_NE(port_, 0, "port is a required argument");
-}
+REGISTER_CPU_OPERATOR(
+    RedisStoreHandlerCreate,
+    RedisStoreHandlerCreateOp<CPUContext>);
 
-bool RedisStoreHandlerCreateOp::RunOnDevice() {
-  auto ptr = std::unique_ptr<StoreHandler>(
-      new RedisStoreHandler(host_, port_, prefix_));
-  *OperatorBase::Output<std::unique_ptr<StoreHandler>>(HANDLER) =
-      std::move(ptr);
-  return true;
-}
+REGISTER_CUDA_OPERATOR(
+    RedisStoreHandlerCreate,
+    RedisStoreHandlerCreateOp<CUDAContext>);
 
-REGISTER_CPU_OPERATOR(RedisStoreHandlerCreate, RedisStoreHandlerCreateOp);
 OPERATOR_SCHEMA(RedisStoreHandlerCreate)
     .NumInputs(0)
     .NumOutputs(1)
@@ -36,4 +24,5 @@ Creates a unique_ptr<StoreHandler> that uses a Redis server as backing store.
     .Output(0, "handler", "unique_ptr<StoreHandler>");
 
 NO_GRADIENT(RedisStoreHandlerCreateOp);
-}
+
+} // namespace caffe2
