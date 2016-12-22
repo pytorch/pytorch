@@ -27,6 +27,7 @@ class TestConvolution(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "EIGEN"]),
            shared_buffer=st.booleans(),
+           use_bias=st.booleans(),
            **hu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_convolution_separate_stride_pad_gradients(self, stride_h, stride_w,
@@ -36,10 +37,11 @@ class TestConvolution(hu.HypothesisTestCase):
                                                        output_channels,
                                                        batch_size, order,
                                                        engine, shared_buffer,
+                                                       use_bias,
                                                        gc, dc):
         op = core.CreateOperator(
             "Conv",
-            ["X", "w", "b"],
+            ["X", "w", "b"] if use_bias else ["X", "w"],
             ["Y"],
             stride_h=stride_h,
             stride_w=stride_w,
@@ -62,9 +64,10 @@ class TestConvolution(hu.HypothesisTestCase):
             X = X.transpose((0, 3, 1, 2))
             w = w.transpose((0, 3, 1, 2))
 
-        self.assertDeviceChecks(dc, op, [X, w, b], [0])
-        for i in range(3):
-            self.assertGradientChecks(gc, op, [X, w, b], i, [0])
+        inputs = [X, w, b] if use_bias else [X, w]
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0])
 
     # CUDNN does NOT support different padding values and we skip it
     @given(stride_h=st.integers(1, 3),
@@ -78,13 +81,15 @@ class TestConvolution(hu.HypothesisTestCase):
             input_channels=st.integers(1, 8),
             output_channels=st.integers(1, 8),
             batch_size=st.integers(1, 3),
-            engine=st.sampled_from(["", "EIGEN"]), **hu.gcs)
+            engine=st.sampled_from(["", "EIGEN"]),
+            use_bias=st.booleans(),
+            **hu.gcs)
     def test_convolution_separate_stride_pad_layout(self, stride_h, stride_w,
                                                     pad_t, pad_l, pad_b, pad_r,
                                                     kernel, size,
                                                     input_channels,
                                                     output_channels, batch_size,
-                                                    engine, gc, dc):
+                                                    engine, use_bias, gc, dc):
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -95,7 +100,7 @@ class TestConvolution(hu.HypothesisTestCase):
         for order in ["NCHW", "NHWC"]:
             op = core.CreateOperator(
                 "Conv",
-                ["X", "w", "b"],
+                ["X", "w", "b"] if use_bias else ["X", "w"],
                 ["Y"],
                 stride_h=stride_h,
                 stride_w=stride_w,
@@ -135,17 +140,18 @@ class TestConvolution(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
+           use_bias=st.booleans(),
            **hu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_convolution_gradients(self, stride, pad, kernel, dilation, size,
                                    input_channels, output_channels, batch_size,
-                                   order, engine, gc, dc):
+                                   order, engine, use_bias, gc, dc):
         assume(size >= dilation * (kernel - 1) + 1)
         assume("" == engine or 1 == dilation)
 
         op = core.CreateOperator(
             "Conv",
-            ["X", "w", "b"],
+            ["X", "w", "b"] if use_bias else ["X", "w"],
             ["Y"],
             stride=stride,
             kernel=kernel,
@@ -164,9 +170,10 @@ class TestConvolution(hu.HypothesisTestCase):
             X = X.transpose((0, 3, 1, 2))
             w = w.transpose((0, 3, 1, 2))
 
-        self.assertDeviceChecks(dc, op, [X, w, b], [0])
-        for i in range(3):
-            self.assertGradientChecks(gc, op, [X, w, b], i, [0])
+        inputs = [X, w, b] if use_bias else [X, w]
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0])
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -176,10 +183,11 @@ class TestConvolution(hu.HypothesisTestCase):
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
            batch_size=st.integers(1, 3),
+           use_bias=st.booleans(),
            **hu.gcs)
     def test_convolution_layout(self, stride, pad, kernel, dilation, size,
                                 input_channels, output_channels, batch_size,
-                                gc, dc):
+                                use_bias, gc, dc):
         assume(size >= dilation * (kernel - 1) + 1)
 
         X = np.random.rand(
@@ -194,7 +202,7 @@ class TestConvolution(hu.HypothesisTestCase):
             for engine in (["", "CUDNN"] if dilation == 1 else [""]):
                 op = core.CreateOperator(
                     "Conv",
-                    ["X", "w", "b"],
+                    ["X", "w", "b"] if use_bias else ["X", "w"],
                     ["Y"],
                     stride=stride,
                     kernel=kernel,
@@ -210,7 +218,11 @@ class TestConvolution(hu.HypothesisTestCase):
                 else:
                     X_f = X
                     w_f = w
-                self.assertDeviceChecks(dc, op, [X_f, w_f, b], [0])
+                self.assertDeviceChecks(
+                    dc,
+                    op,
+                    [X_f, w_f, b] if use_bias else [X_f, w_f],
+                    [0])
                 self.ws.create_blob("X").feed(X_f, device_option=gc)
                 self.ws.create_blob("w").feed(w_f, device_option=gc)
                 self.ws.create_blob("b").feed(b, device_option=gc)
@@ -316,6 +328,7 @@ class TestConvolution(hu.HypothesisTestCase):
                 np.sum(np.square(output)),
                 1763719461732352.0,
                 rtol=1e-5)
+
 
 if __name__ == "__main__":
     import unittest

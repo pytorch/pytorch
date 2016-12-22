@@ -1,4 +1,3 @@
-#include <iostream>
 #include <vector>
 
 #include "caffe2/core/context_gpu.h"

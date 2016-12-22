@@ -12,7 +12,9 @@ void LoadOp<CPUContext>::SetCurrentDevice(BlobProto* proto) {
 namespace {
 REGISTER_CPU_OPERATOR(Load, LoadOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Save, SaveOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Snapshot, SnapshotOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Checkpoint, CheckpointOp<CPUContext>);
+// CPU Operator old name: do NOT use, we may deprecate this later.
+REGISTER_CPU_OPERATOR(Snapshot, CheckpointOp<CPUContext>);
 
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, 1)
@@ -54,26 +56,34 @@ db specified by the arguments.
 .Arg("db", "(string) the path to the db to load.")
 .Arg("db_type", "(string) the type of the db.");
 
-OPERATOR_SCHEMA(Snapshot).NumInputs(1, INT_MAX).NumOutputs(0)
-.SetDoc(R"DOC(
-The Snapshot operator is similar to the Save operator, but allows one to save
+OPERATOR_SCHEMA(Checkpoint)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(0)
+    .SetDoc(R"DOC(
+The Checkpoint operator is similar to the Save operator, but allows one to save
 to db every few iterations, with a db name that is appended with the iteration
 count. It takes [1, infinity) number of inputs and has no output. The first
 input has to be a TensorCPU of type int and has size 1 (i.e. the iteration
-counter). This is determined whether we need to do snapshotting.
+counter). This is determined whether we need to do checkpointing.
 )DOC")
-.Arg("absolute_path",
-     "(int, default 0) if set, use the db path directly and do not prepend "
-     "the current root folder of the workspace.")
-.Arg("db", "(string) a template string that one can combine with the "
-           "iteration to create the final db name. For example, "
-           "\"/home/lonestarr/checkpoint_%08d.db\"")
-.Arg("db_type", "(string) the type of the db.")
-.Arg("every", "(int, default 1) the snapshotting is carried out when "
-              "(iter mod every) is zero.");
+    .Arg(
+        "absolute_path",
+        "(int, default 0) if set, use the db path directly and do not prepend "
+        "the current root folder of the workspace.")
+    .Arg(
+        "db",
+        "(string) a template string that one can combine with the "
+        "iteration to create the final db name. For example, "
+        "\"/home/lonestarr/checkpoint_%08d.db\"")
+    .Arg("db_type", "(string) the type of the db.")
+    .Arg(
+        "every",
+        "(int, default 1) the checkpointing is carried out when "
+        "(iter mod every) is zero.");
 
 NO_GRADIENT(Load);
 SHOULD_NOT_DO_GRADIENT(Save);
+SHOULD_NOT_DO_GRADIENT(Checkpoint);
 SHOULD_NOT_DO_GRADIENT(Snapshot);
 }  // namespace
 }  // namespace caffe2

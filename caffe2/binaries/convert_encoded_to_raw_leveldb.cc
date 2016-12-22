@@ -8,7 +8,6 @@
 
 #include <opencv2/opencv.hpp>
 
-#include <algorithm>
 #include <fstream>  // NOLINT(readability/streams)
 #include <memory>
 #include <random>

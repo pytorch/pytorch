@@ -12,7 +12,13 @@ class ConvOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {
+    // Since this is the default convolution implementation, we will
+    // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.
+    CAFFE_ENFORCE(
+        group_ == 1 || order_ == StorageOrder::NCHW,
+        "Group convolution only supports NCHW order right now.");
+  }
   ~ConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -31,7 +37,15 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws),
+        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+    CAFFE_ENFORCE(
+        !(no_bias_ && OutputSize() == 3),
+        "If bias is not present, you should not have 3 grad output.");
+    CAFFE_ENFORCE(
+        group_ == 1 || order_ == StorageOrder::NCHW,
+        "Group convolution only supports NCHW order right now.");
+  }
   ~ConvGradientOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -40,10 +54,11 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  private:
   Tensor<Context> col_buffer_;
   Tensor<Context> bias_multiplier_;
+  bool no_bias_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
-  OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
+  OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
 } // namespace caffe2

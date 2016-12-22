@@ -22,6 +22,7 @@ def Parallelize_GPU(
     devices=range(0, workspace.NumCudaDevices()),
     rendezvous=None,
     net_type='dag',
+    broadcast_computed_params=True,
 ):
     '''
     Function to create a model that can run on many GPUs.
@@ -54,7 +55,7 @@ def Parallelize_GPU(
     '''
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
-    model_helper_obj.net.Proto().num_workers = len(devices) * 2 + extra_workers
+    model_helper_obj.net.Proto().num_workers = len(devices) * 4 + extra_workers
     model_helper_obj.net.Proto().type = net_type
 
     # Store some information in the model -- a bit ugly
@@ -76,19 +77,28 @@ def Parallelize_GPU(
                 log.info("Model for GPU: {}".format(device))
                 input_builder_fun(model_helper_obj)
                 losses = forward_pass_builder_fun(model_helper_obj)
-                assert isinstance(losses, list), \
-                    'Model builder function must return a list of loss blobs'
-                for loss in losses:
-                    assert isinstance(loss, core.BlobReference), \
-                        'Model builder func must return a list of loss blobs'
+                # Losses are not needed for test net
+                if param_update_builder_fun is not None:
+                    assert isinstance(losses, list), \
+                        'Model builder function must return list of loss blobs'
+                    for loss in losses:
+                        assert isinstance(loss, core.BlobReference), \
+                            'Model builder func must return list of loss blobs'
 
                 losses_by_gpu[device] = losses
 
     # Create parameter map
     model_helper_obj._device_grouped_blobs =\
         _GroupByDevice(devices, model_helper_obj.params)
+
+    # computed params
+    computed_params_grouped =\
+        _GroupByDevice(devices, model_helper_obj.computed_params)
+    model_helper_obj._device_grouped_blobs.update(computed_params_grouped)
+
     model_helper_obj._param_names =\
         model_helper_obj._device_grouped_blobs.keys()
+    model_helper_obj._computed_param_names = computed_params_grouped.keys()
 
     if (param_update_builder_fun is None):
         log.info("Parameter update function not defined --> only forward")
@@ -109,6 +119,8 @@ def Parallelize_GPU(
     model_helper_obj._grad_names = gradients_grouped.keys()
 
     log.info("Add gradient all-reduces for SyncSGD")
+    if broadcast_computed_params:
+        _BroadcastComputedParams(devices, model_helper_obj, rendezvous)
     _AllReduceGradients(
         devices, model_helper_obj, rendezvous
     )
@@ -421,9 +433,37 @@ def _AllReduceGradientsSingleHost(devices, model):
                 grads_group,
                 control_input=last_out,
             )
-
             # last_out is used to serialize the execution of nccls
             last_out = grads_group[0]
+
+
+def _BroadcastComputedParams(devices, model, rendezvous):
+    if rendezvous is None:
+        _BroadcastComputedParamsSingleHost(devices, model)
+    else:
+        _BroadcastComputedParamsDistributed(devices, model, rendezvous)
+
+
+def _BroadcastComputedParamsDistributed(
+    devices,
+    model,
+    rendezvous,
+):
+    _BroadcastComputedParamsSingleHost(devices, model)
+    log.warn("Distribetud computed params all-reduce not implemented yet")
+
+
+def _BroadcastComputedParamsSingleHost(devices, model):
+    '''
+    Average computed params over all devices
+    '''
+    if len(devices) == 1:
+        return
+
+    for param_name in model._computed_param_names:
+        # Copy from master to others -- averaging would be perhaps better,
+        # but currently NCCLAllReduce is too prone to deadlock
+        _Broadcast(devices, model, model.net, param_name)
 
 
 def _GetReverseOrderedGrads(model):

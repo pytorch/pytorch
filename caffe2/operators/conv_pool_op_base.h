@@ -57,6 +57,7 @@ class ConvPoolOpBase : public Operator<Context> {
         stride_w_(OperatorBase::GetSingleArgument<int>(
             "stride_w",
             OperatorBase::GetSingleArgument<int>("stride", 1))),
+        group_(OperatorBase::GetSingleArgument<int>("group", 1)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
@@ -75,13 +76,22 @@ class ConvPoolOpBase : public Operator<Context> {
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
     }
-
     CAFFE_ENFORCE(
         global_pooling_ == false ||
             (dilation_h_ == 1 && dilation_w_ == 1 && pad_ == 0 && pad_t_ == 0 &&
              pad_l_ == 0 && pad_b_ == 0 && pad_r_ == 0 && stride_h_ == 1 &&
              stride_w_ == 1),
         "If global_pooling is set, none of dilation/pad/stride should be set.");
+    // Check kernel only if we are doing conv or pooling. The reason is that a
+    // few other ops, like PadImage, are also using this base class. We really
+    // need to clean this up.
+    if (operator_def.name().find("Conv") == 0 ||
+        operator_def.name().find("Pool") != std::string::npos) {
+      CAFFE_ENFORCE(
+          kernel_h_ && kernel_w_,
+          "If you are doing convolution or pooling, you will need to set "
+          "explicitly the kernel size.");
+    }
     CAFFE_ENFORCE(dilation_h_ > 0);
     CAFFE_ENFORCE(dilation_w_ > 0);
     CAFFE_ENFORCE(pad_ >= 0);
@@ -91,6 +101,11 @@ class ConvPoolOpBase : public Operator<Context> {
     CAFFE_ENFORCE(pad_r_ >= 0);
     CAFFE_ENFORCE(stride_h_ > 0);
     CAFFE_ENFORCE(stride_w_ > 0);
+    if (group_ != 1) {
+      CAFFE_ENFORCE(
+          dilation_h_ == 1 && dilation_w_ == 1,
+          "When group is used, dilation should not be set at the same time.");
+    }
   }
 
   // Sets the output size. The output channel is manually provided since
@@ -198,8 +213,6 @@ class ConvPoolOpBase : public Operator<Context> {
       default:
         CAFFE_THROW("Unknown Storage order: ", order_);
     }
-    // To suppress old compiler warnings
-    return true;
   }
 
   // The actual function that does the computation, if the different
@@ -235,6 +248,7 @@ class ConvPoolOpBase : public Operator<Context> {
   int dilation_w_;
   int stride_h_;
   int stride_w_;
+  int group_;
   StorageOrder order_;
   bool shared_buffer_;
   Workspace* ws_;
@@ -337,6 +351,7 @@ class ConvPoolOpBase : public Operator<Context> {
   using ConvPoolOpBase<Context>::dilation_w_;     \
   using ConvPoolOpBase<Context>::stride_h_;       \
   using ConvPoolOpBase<Context>::stride_w_;       \
+  using ConvPoolOpBase<Context>::group_;          \
   using ConvPoolOpBase<Context>::order_;          \
   using ConvPoolOpBase<Context>::shared_buffer_;  \
   using ConvPoolOpBase<Context>::ws_

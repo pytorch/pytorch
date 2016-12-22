@@ -1,4 +1,3 @@
-#include <cfloat>
 #include <cstdio>
 
 #include "caffe2/core/common_gpu.h"

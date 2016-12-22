@@ -175,7 +175,7 @@ class TestHsm(hu.HypothesisTestCase):
 
     # Test to compare gradient calculated using the gradient operator and the
     # symmetric derivative calculated using Euler Method
-    # TODO: convert to both cpu and gpu test when ready.
+    # TODO : convert to both cpu and gpu test when ready.
     @given(**hu.gcs_cpu_only)
     def test_hsm_gradient(self, gc, dc):
         samples = 10
@@ -205,6 +205,41 @@ class TestHsm(hu.HypothesisTestCase):
         for i in range(3):
             self.assertGradientChecks(gc, op, [X, w, b, labels], i, [0])
 
+    def test_huffman_tree_hierarchy(self):
+        workspace.GlobalInit(['caffe2'])
+        labelSet = range(1, 7)
+        counts = [2, 4, 10, 15, 25, 40]
+        labels = sum([[l] * c for (l, c) in zip(labelSet, counts)], [])
+        Y = np.array(labels).astype(np.int64)
+        workspace.FeedBlob("labels", Y)
+        arg = caffe2_pb2.Argument()
+        arg.name = 'num_classes'
+        arg.i = 6
+        op = core.CreateOperator(
+            'HuffmanTreeHierarchy',
+            ['labels'],
+            ['huffman_tree'],
+            'HuffmanTreeHierarchy',
+            arg=[arg])
+        workspace.RunOperatorOnce(op)
+        huffmanTreePaths = workspace.FetchBlob('huffman_tree')
+        treePathOutput = hsm_pb2.HierarchyProto()
+        treePathOutput.ParseFromString(huffmanTreePaths[0])
+
+        def checkPath(label, path, indices, code):
+            self.assertEqual(path.word_id, label)
+            self.assertEqual(len(path.path_nodes), len(code))
+            self.assertEqual(len(path.path_nodes), len(code))
+            for path_node, index, target in \
+                    zip(path.path_nodes, indices, code):
+                self.assertEqual(path_node.index, index)
+                self.assertEqual(path_node.target, target)
+        checkPath(1, treePathOutput.paths[0], [4, 3, 2, 1, 0], [1, 1, 1, 0, 0])
+        checkPath(2, treePathOutput.paths[1], [4, 3, 2, 1, 0], [1, 1, 1, 0, 1])
+        checkPath(3, treePathOutput.paths[2], [4, 3, 2, 1], [1, 1, 1, 1])
+        checkPath(4, treePathOutput.paths[3], [4, 3, 2], [1, 1, 0])
+        checkPath(5, treePathOutput.paths[4], [4, 3], [1, 0])
+        checkPath(6, treePathOutput.paths[5], [4], [0])
 
 if __name__ == '__main__':
     unittest.main()

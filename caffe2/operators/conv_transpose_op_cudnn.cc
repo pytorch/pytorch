@@ -286,8 +286,8 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         bwd_data_algo_,
         &bwd_data_ws_size));
     cudnn_ws_nbytes_ = bwd_data_ws_size;
-    LOG(INFO) << "CuDNN algorithm: " << bwd_data_algo_;
-    LOG(INFO) << "CuDNN workspace size: " << bwd_data_ws_size;
+    VLOG(1) << "CuDNN algorithm: " << bwd_data_algo_;
+    VLOG(1) << "CuDNN workspace size: " << bwd_data_ws_size;
   }
 
   // Now, actually run the computation.
@@ -549,8 +549,8 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         &fwd_ws_size));
     cudnn_ws_nbytes_ = std::max(bwd_filter_ws_size, fwd_ws_size);
 
-    LOG(INFO) << "CuDNN bwd algorithm: " << bwd_filter_algo_ << ", " << algo_;
-    LOG(INFO) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
+    VLOG(1) << "CuDNN bwd algorithm: " << bwd_filter_algo_ << ", " << algo_;
+    VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
 
   // Now, actually run the computation.

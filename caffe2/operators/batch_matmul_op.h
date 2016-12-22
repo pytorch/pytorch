@@ -59,6 +59,11 @@ class BatchMatMulOp final : public Operator<Context> {
 
     Y->Resize(A.dim(0), a_dim0, b_dim1);
 
+    if (!A.dim(0)) {
+      Y->template mutable_data<T>(); // create output tensor
+      return true;
+    }
+
     // Y = A * B
     auto a_offset = A.size() / A.dim(0);
     auto b_offset = B.size() / B.dim(0);

@@ -1,5 +1,5 @@
-#ifndef CAFFE2_MKL_MKL_CONTEXT_H_
-#define CAFFE2_MKL_MKL_CONTEXT_H_
+#ifndef CAFFE2_UTILS_MKL_CONTEXT_H_
+#define CAFFE2_UTILS_MKL_CONTEXT_H_
 
 #include <cstdlib>
 #include <ctime>
@@ -108,4 +108,4 @@ inline void MKLContext::CopyBytes<MKLContext, CPUContext>(
 
 } // namespace caffe2
 
-#endif // CAFFE2_MKL_MKL_CONTEXT_H_
+#endif // CAFFE2_UTILS_MKL_CONTEXT_H_

@@ -88,16 +88,37 @@ class TestDB(unittest.TestCase):
                     np.int32,
                     metadata=schema.Metadata(categorical_limit=5)
                 )
+            ), (
+                'c', schema.List(
+                    schema.Scalar(
+                        np.int32,
+                        metadata=schema.Metadata(categorical_limit=6)
+                    )
+                )
             )
         )
+        # attach metadata to lengths field
+        s.c.lengths.set_metadata(schema.Metadata(categorical_limit=7))
+
         self.assertEqual(None, s.a.metadata)
         self.assertEqual(5, s.b.metadata.categorical_limit)
+        self.assertEqual(6, s.c.value.metadata.categorical_limit)
+        self.assertEqual(7, s.c.lengths.metadata.categorical_limit)
         sc = s.clone()
         self.assertEqual(None, sc.a.metadata)
         self.assertEqual(5, sc.b.metadata.categorical_limit)
-        sv = schema.from_blob_list(s, [np.array([3.4]), np.array([2])])
+        self.assertEqual(6, sc.c.value.metadata.categorical_limit)
+        self.assertEqual(7, sc.c.lengths.metadata.categorical_limit)
+        sv = schema.from_blob_list(
+            s, [
+                np.array([3.4]), np.array([2]), np.array([3]),
+                np.array([1, 2, 3])
+            ]
+        )
         self.assertEqual(None, sv.a.metadata)
         self.assertEqual(5, sv.b.metadata.categorical_limit)
+        self.assertEqual(6, sv.c.value.metadata.categorical_limit)
+        self.assertEqual(7, sv.c.lengths.metadata.categorical_limit)
 
     def testPreservesEmptyFields(self):
         s = schema.Struct(

@@ -4,7 +4,7 @@ namespace caffe2 {
 namespace {
 REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<float, CPUContext>);
 OPERATOR_SCHEMA(RecurrentNetwork)
-    .NumInputs(3, INT_MAX)
+    .NumInputs(1, INT_MAX)
     .NumOutputs(2, INT_MAX)
     .SetDoc(R"DOC(
 
