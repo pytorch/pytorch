@@ -56,6 +56,7 @@ void start_manager() {
     if (handle[handle.length()-1] == '\n')
       break;
   }
+  SYSCHECK(close(pipe_ends[0]));
   handle.pop_back(); // remove \n
   if (handle == "ERROR")
     throw std::exception();
@@ -134,4 +135,3 @@ THAllocator THManagedSharedAllocator = {
   libshm_realloc,
   libshm_free,
 };
-

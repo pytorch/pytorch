@@ -304,3 +304,6 @@ class Module(object):
     def zero_grad(self):
         for p in self.parameters():
             p.grad.zero_()
+
+    def share_memory(self):
+        return self._apply(lambda t: t.share_memory_())
