@@ -206,6 +206,7 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration se
 endforeach()
 
 # Set C++11 support
+list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
 list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
 
 # Set :expt-relaxed-constexpr to suppress Eigen warnings
