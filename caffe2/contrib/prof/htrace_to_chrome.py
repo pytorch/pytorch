@@ -3,9 +3,16 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import argparse
 import json
 import re
 import sys
+
+display_levels = ["network", "worker", "operator", "kernel"]
+
+
+def stop_display(limit, curr):
+    return display_levels.index(limit) <= display_levels.index(curr)
 
 
 def build_trace_dict(f):
@@ -50,7 +57,7 @@ def build_trace_dict(f):
     return trace_dic, root_list
 
 
-def generate_chrome_trace(root_list):
+def generate_chrome_trace(root_list, display):
     """Takes trace objects created by build_trace_dict() and generates a list of
     python dictionaries that can be written to a file in json format, which in
     turn can be given to Chrome tracing (chrome://tracing).
@@ -67,6 +74,7 @@ def generate_chrome_trace(root_list):
     """
     ct = []
     for root_idx, root in enumerate(root_list):
+        # network-level spans
         ct.append({
             "name": root["desc"],
             "ph": "X",
@@ -77,6 +85,7 @@ def generate_chrome_trace(root_list):
         })
 
         for _, v in root["children"].items():
+            # run-scopes and worker-scopes
             c = {
                 "name": v["desc"],
                 "ph": "X",
@@ -87,60 +96,78 @@ def generate_chrome_trace(root_list):
 
             if "run-scope" in v["desc"]:
                 c["tid"] = root_idx
+                ct.append(c)
             else:
+                if stop_display(display, "network"):
+                    continue
+
                 m = re.search("(?<=worker-scope-)\d+", v["desc"])
                 wid = m.group(0)
                 c["tid"] = wid
-                if "children" in v:
-                    for k_op, v_op in v["children"].items():
-                        if "children" in v_op:
-                            for idx, (k_gpu_op, v_gpu_op) in \
-                                    enumerate(sorted(v_op["children"].items(),
-                                                     key=lambda e: e[1]["begin"])):
-                                if idx == 0:
-                                    ct.append({
-                                        "name": v_op["desc"] + "-GPU",
-                                        "ph": "X",
-                                        "ts": v_gpu_op["begin"],
-                                        "dur": v_gpu_op["end"] - v_gpu_op["begin"],
-                                        "pid": root_idx,
-                                        "tid": wid,
-                                        "args": {
-                                            "desc": "NEW OPERATOR"
-                                        }
-                                    })
+                ct.append(c)
 
-                                ct.append({
-                                    "name": v_op["desc"] + "-GPU",
-                                    "ph": "i",
-                                    "ts": v_gpu_op["begin"],
-                                    "pid": root_idx,
-                                    "tid": wid,
-                                    "args": {
-                                        "desc": v_gpu_op["desc"]
-                                    }
-                                })
+                if stop_display(display, "worker") or "children" not in v:
+                    continue
+                for k_op, v_op in v["children"].items():
+                    # operator scopes
+                    ct.append({
+                        "name": v_op["desc"],
+                        "ph": "X",
+                        "ts": v_op["begin"],
+                        "dur": v_op["end"] - v_op["begin"],
+                        "pid": root_idx,
+                        "tid": wid
+                    })
 
-                        cc = {
-                            "name": v_op["desc"],
-                            "ph": "X",
-                            "ts": v_op["begin"],
-                            "dur": v_op["end"] - v_op["begin"],
+                    if stop_display(display, "operator") or "children" not in v_op:
+                        continue
+                    for idx, (k_gpu_op, v_gpu_op) in \
+                            enumerate(sorted(v_op["children"].items(),
+                                             key=lambda e: e[1]["begin"])):
+                        # kernel scopes
+                        if idx == 0:
+                            ct.append({
+                                "name": v_op["desc"] + "-GPU",
+                                "ph": "X",
+                                "ts": v_gpu_op["begin"],
+                                "dur": v_gpu_op["end"] - v_gpu_op["begin"],
+                                "pid": root_idx,
+                                "tid": wid,
+                                "args": {
+                                    "desc": "NEW OPERATOR"
+                                }
+                            })
+
+                        ct.append({
+                            "name": v_op["desc"] + "-GPU",
+                            "ph": "i",
+                            "ts": v_gpu_op["begin"],
                             "pid": root_idx,
-                            "tid": wid
-                        }
-                        ct.append(cc)
-
-            ct.append(c)
+                            "tid": wid,
+                            "args": {
+                                "desc": v_gpu_op["desc"]
+                            }
+                        })
 
     return ct
 
 
+def get_argument_parser():
+    parser = argparse.ArgumentParser(
+        description="Format conversion from HTrace to Chrome tracing.")
+    parser.add_argument("htrace_log", type=str, help="input htrace span log file")
+    parser.add_argument("--display",
+                        type=str, choices=display_levels, default="operator",
+                        help="deepest level of spans to display (default: operator)")
+    return parser
+
+
 def main():
-    with open(sys.argv[1], 'r') as f:
+    args = get_argument_parser().parse_args()
+    with open(args.htrace_log, "r") as f:
         trace_dic, root_list = build_trace_dict(f)
 
-    ct = generate_chrome_trace(root_list)
+    ct = generate_chrome_trace(root_list, args.display)
     print("Writing chrome json file to %s.json" % sys.argv[1])
     print("Now import %s.json in chrome://tracing" % sys.argv[1])
     with open(sys.argv[1] + ".json", "w") as f:
@@ -148,7 +175,4 @@ def main():
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print("Usage: %s some_htrace_span_log" % sys.argv[0])
-        sys.exit()
     main()
