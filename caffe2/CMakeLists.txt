@@ -6,7 +6,9 @@ set(Caffe2_DIR_EXCLUDES
         "/mpi"           # Exclude for now
         "/experiments"   # Exclude for now
         "/python"        # handled below
+        "/image"         # Exclude for now
 )
+
 set(Caffe2_FILE_EXCLUDES
         "/operators/fully_connected_op_sparse.cc"
         "/test/caffe2_gtest_main.cc"
@@ -15,6 +17,14 @@ set(Caffe2_FILE_EXCLUDES
         "/db/zmqdb.cc"
         "/utils/mkl_utils_test.cc"
         "/mpi/mpi_test.cc"
+)
+
+# ---[ Specific builds
+set(Caffe2_LEVELDB_SRCS
+        "/db/leveldb.cc"
+)
+set(Caffe2_LMDB_SRCS
+        "/db/lmdb.cc"
 )
 
 set(Caffe2_CPU_TEST_SRCS
@@ -61,6 +71,8 @@ prepend(Caffe2_DIR_EXCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DIR_EXCLUDES})
 prepend(Caffe2_FILE_EXCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_FILE_EXCLUDES})
 prepend(Caffe2_CPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_CPU_TEST_SRCS})
 prepend(Caffe2_GPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_GPU_TEST_SRCS})
+prepend(Caffe2_LEVELDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LEVELDB_SRCS})
+prepend(Caffe2_LMDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LMDB_SRCS})
 
 # ---[ List of libraries to link with
 set(Caffe2_LINK_LIBS Caffe_PROTO)
@@ -102,6 +114,12 @@ exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_FILE_EXCLUDES})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_CPU_TEST_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
+if (NOT USE_LEVELDB)
+        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LEVELDB_SRCS})
+endif()
+if (NOT USE_LMDB)
+        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LMDB_SRCS})
+endif()
 
 # Compile protobufs.
 add_subdirectory(proto)
