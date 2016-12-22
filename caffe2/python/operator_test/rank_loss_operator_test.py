@@ -9,10 +9,6 @@ import hypothesis.strategies as st
 import numpy as np
 
 
-def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-x))
-
-
 class TestPairWiseLossOps(hu.HypothesisTestCase):
     @given(X=hu.arrays(dims=[2, 1],
                        elements=st.floats(min_value=0.0, max_value=10.0)),
@@ -43,7 +39,7 @@ class TestPairWiseLossOps(hu.HypothesisTestCase):
 
         self.assertAlmostEqual(
             np.asscalar(output),
-            np.asscalar(np.log(1 + np.exp(sign * (-X[0] + X[1])))),
+            np.asscalar(np.log(1 + np.exp(sign * (X[1] - X[0])))),
             delta=1e-4
         )
         # check swapping row order doesn't alter overall loss
