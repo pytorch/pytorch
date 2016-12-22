@@ -19,24 +19,21 @@ def avg_pool3d(input, *args, **kwargs):
     return torch.nn.AvgPool3d(*args, **kwargs)(input)
 
 
-def max_pool1d(input, *args, **kwargs):
-    return functions.thnn.MaxPool1d(*args, **kwargs)(input)
-
-def max_pool2d(input, kernel_size, stride=1, padding=0, dilation=1,
-        return_indices=False, ceil_mode=False):
-    kernel_size = utils._pair(kernel_size)
-    stride = utils._pair(stride)
-    padding = utils._pair(padding)
-    dilation = utils._pair(dilation)
-    return functions.thnn.MaxPool2d(
-            kernel_size[0], kernel_size[1],
-            stride[0], stride[1],
-            padding[0], padding[1],
-            dilation[0], dilation[1],
+# share the same interface
+def max_pool1d(input, kernel_size, stride=1, padding=0, dilation=1,
+        ceil_mode=False, return_indices=False):
+    return functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation,
             return_indices, ceil_mode)(input)
 
-def max_pool3d(input, *args, **kwargs):
-    return functions.thnn.MaxPool3d(*args, **kwargs)(input)
+def max_pool2d(input, kernel_size, stride=1, padding=0, dilation=1,
+        ceil_mode=False, return_indices=False):
+    return functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation,
+            return_indices, ceil_mode)(input)
+
+def max_pool3d(input, kernel_size, stride=1, padding=0, dilation=1,
+        ceil_mode=False, return_indices=False):
+    return functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation,
+            return_indices, ceil_mode)(input)
 
 
 def linear(input, weight, bias=None):

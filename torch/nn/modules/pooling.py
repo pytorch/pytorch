@@ -239,9 +239,9 @@ class MaxPool3d(Module):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        return self._backend.MaxPool3d(self.kernel_size, self.stride,
+        return functional.max_pool3d(input, self.kernel_size, self.stride,
                 self.padding, self.dilation, self.return_indices,
-                self.ceil_mode)(input)
+                self.return_indices)
 
 class AvgPool3d(Module):
     """Applies a 3D average pooling over an input signal composed of several input
