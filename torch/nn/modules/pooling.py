@@ -42,8 +42,8 @@ class MaxPool1d(Module):
 
     def forward(self, input):
         return self._backend.MaxPool1d(self.kernel_size, self.stride,
-                self.padding, self.dilation, self.ceil_mode,
-                self.return_indices)(input)
+                self.padding, self.dilation, self.return_indices,
+                self.ceil_mode)(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -83,19 +83,23 @@ class MaxPool2d(Module):
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
         super(MaxPool2d, self).__init__()
-        self.kh, self.kw = _pair(kernel_size)
-        self.dh, self.dw = _pair(stride or kernel_size)
-        self.padh, self.padw = _pair(padding)
-        self.dilh, self.dilw = _pair(dilation)
+        self.kernel_size = kernel_size
+        self.stride = stride or kernel_size
+        self.padding = padding
+        self.dilation = dilation
         self.return_indices = return_indices
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        return self._backend.MaxPool2d(self.kw, self.kh, self.dw, self.dh,
-                self.padw, self.padh, self.dilh, self.dilw, self.ceil_mode,
-                self.return_indices)(input)
+        return self._backend.MaxPool2d(self.kernel_size, self.stride,
+                self.padding, self.dilation, self.return_indices,
+                self.ceil_mode)(input)
 
     def __repr__(self):
+        kh, kw = _pair(self.kernel_size)
+        dh, dw = _pair(self.stride)
+        padh, padw = _pair(self.padding)
+        dilh, dilw = _pair(self.dilation)
         padding_str=', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
                       if self.padh != 0 and self.padw !=0 else ''
         dilation_str=(', dilation=(' + str(self.dilh) + ', ' + str(self.dilw) + ')' \
@@ -227,20 +231,17 @@ class MaxPool3d(Module):
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
             return_indices=False, ceil_mode=False):
         super(MaxPool3d, self).__init__()
-        self.kt, self.kh, self.kw = _triple(kernel_size)
-        self.dt, self.dh, self.dw = _triple(stride or kernel_size)
-        self.padt, self.padh, self.padw = _triple(padding)
-        self.dilt, self.dilh, self.dilw = _triple(dilation)
+        self.kernel_size = kernel_size
+        self.stride = stride or kernel_size
+        self.padding = padding
+        self.dilation = dilation
         self.return_indices = return_indices
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        # TODO: allow to specify output size
-        return self._backend.MaxPool3d(self.kt, self.kw, self.kh,
-                self.dt, self.dw, self.dh, self.padt, self.padw, self.padh,
-                self.dilt, self.dilw, self.dilh,
-                self.ceil_mode, self.return_indices)(input)
-
+        return self._backend.MaxPool3d(self.kernel_size, self.stride,
+                self.padding, self.dilation, self.return_indices,
+                self.ceil_mode)(input)
 
 class AvgPool3d(Module):
     """Applies a 3D average pooling over an input signal composed of several input
