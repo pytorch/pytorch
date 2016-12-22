@@ -37,10 +37,21 @@ def layer_exists(name):
 def create_layer(name, *args, **kwargs):
     return _LAYER_REGISTRY[name](*args, **kwargs)
 
+
 # TODO(amalevich): Modify this to some better struct, something closer to
 # ParameterInfo.
 LayerParameter = namedtuple(
     'LayerParameter', ['parameter', 'optimizer', 'initializer'])
+
+
+def _is_request_only_scalar(scalar):
+    if len(scalar.field_metadata()) == 0:
+        return False
+    for metadata in scalar.field_metadata():
+        if not (metadata and metadata.feature_specs and
+                metadata.feature_specs.feature_is_request_only):
+            return False
+    return True
 
 
 class ModelLayer(object):
@@ -51,13 +62,12 @@ class ModelLayer(object):
         self.kwargs = kwargs
         self.input_record = input_record
         self.request_only = True
-        for field in self.input_record.all_scalars():
-            if len(field.field_metadata()) == 0:
+        if len(input_record.all_scalars()) == 0:
+            self.request_only = False
+        for scalar in input_record.all_scalars():
+            if not _is_request_only_scalar(scalar):
                 self.request_only = False
-            for metadata in field.field_metadata():
-                if not (metadata and metadata.feature_specs and
-                        metadata.feature_specs.feature_is_request_only):
-                    self.request_only = False
+                break
         self.output_schema = None
         self.tags = set(tags)
         self.tags.update(TagContext.current().tags)
