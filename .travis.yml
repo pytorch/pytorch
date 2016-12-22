@@ -1,47 +1,53 @@
 dist: trusty
 sudo: required
 language: cpp
-
 compiler: gcc
-language: cpp
 matrix:
   include:
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          sources: ['ubuntu-toolchain-r-test']
-          packages: ['g++-4.8']
-      env: COMPILER=g++-4.8
-
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          sources: ['ubuntu-toolchain-r-test']
-          packages: ['g++-4.9']
-      env: COMPILER=g++-4.9
-   
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          sources: ['ubuntu-toolchain-r-test']
-          packages: ['g++-5']
-      env: COMPILER=g++-5
-
+  - os: linux
+    compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-4.8
+    env: COMPILER=g++-4.8
+  - os: linux
+    compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-4.9
+    env: COMPILER=g++-4.9
+  - os: linux
+    compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-5
+    env: COMPILER=g++-5
 install:
-  - sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev nvidia-cuda-toolkit libpthread-stubs0-dev cmake
-  - pip install numpy
-  - wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_7.5-18_amd64.deb
-  - sudo dpkg -i cuda-repo-ubuntu1404_7.5-18_amd64.deb
-  - sudo apt-get update
-  - sudo apt-get install cuda
-
+- sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev
+  libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev
+  libopencv-dev nvidia-cuda-toolkit libpthread-stubs0-dev cmake
+- pip install numpy
+- wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_8.0.44-1_amd64.deb   
+- sudo dpkg -i cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
+- sudo dpkg -i libcudnn5_5.1.5-1\+cuda8.0_amd64.deb
+- sudo apt-get update
+- sudo apt-get install cuda libcudnn5
 script:
-  - mkdir build && cd build && export CXX=$COMPILER && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON && make CXX=$COMPILER
-
-# safelist
+- mkdir build && cd build && export CXX=$COMPILER && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON
+  && make CXX=$COMPILER
 branches:
   only:
-    - master
+  - master
+before_install:
+- openssl aes-256-cbc -K $encrypted_e57bb0bf9245_key -iv $encrypted_e57bb0bf9245_iv
+  -in libcudnn5_5.1.5-1\+cuda8.0_amd64.deb.enc -out libcudnn5_5.1.5-1\+cuda8.0_amd64.deb
+  -d
