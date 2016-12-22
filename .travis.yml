@@ -38,9 +38,9 @@ install:
 - pip install numpy
 - wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_8.0.44-1_amd64.deb   
 - sudo dpkg -i cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
-- sudo dpkg -i libcudnn5_5.1.5-1\+cuda8.0_amd64.deb
 - sudo apt-get update
-- sudo apt-get install cuda libcudnn5
+- sudo apt-get install cuda
+
 script:
 - mkdir build && cd build && export CXX=$COMPILER && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON
   && make CXX=$COMPILER
@@ -48,6 +48,9 @@ branches:
   only:
   - master
 before_install:
-- openssl aes-256-cbc -K $encrypted_e57bb0bf9245_key -iv $encrypted_e57bb0bf9245_iv
-  -in libcudnn5_5.1.5-1\+cuda8.0_amd64.deb.enc -out libcudnn5_5.1.5-1\+cuda8.0_amd64.deb
-  -d
+- CUDNN_DOWNLOAD_SUM=a87cb2df2e5e7cc0a05e266734e679ee1a2fadad6f06af82a76ed81a23b102c8 &&
+    curl -fsSL http://developer.download.nvidia.com/compute/redist/cudnn/v5.1/cudnn-8.0-linux-x64-v5.1.tgz -O &&
+    echo "$CUDNN_DOWNLOAD_SUM  cudnn-8.0-linux-x64-v5.1.tgz" | sha256sum -c --strict - &&
+    sudo tar -xzf cudnn-8.0-linux-x64-v5.1.tgz -C /usr/local &&
+    rm cudnn-8.0-linux-x64-v5.1.tgz &&
+    sudo ldconfig
