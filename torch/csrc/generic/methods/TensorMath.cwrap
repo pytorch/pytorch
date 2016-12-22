@@ -1106,7 +1106,6 @@
 
 [[
   name: fmod
-  defined_if: "!IS_CUDA"
   return: argument 0
   with_stateless: True
   options:
@@ -1126,7 +1125,6 @@
 
 [[
   name: fmod_
-  defined_if: "!IS_CUDA"
   return: argument 0
   options:
     - cname: fmod
@@ -1144,7 +1142,6 @@
 
 [[
   name: remainder
-  defined_if: "!IS_CUDA"
   return: argument 0
   with_stateless: True
   options:
@@ -1164,7 +1161,6 @@
 
 [[
   name: remainder_
-  defined_if: "!IS_CUDA"
   return: argument 0
   options:
     - cname: remainder

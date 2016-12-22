@@ -119,6 +119,8 @@ tests = [
     ('addr',          medium_2d,          lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar' ),
     ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
     ('atan2',         medium_2d,          lambda t: [medium_2d(t)],                          None,    float_types),
+    ('fmod',          small_3d,           lambda t: [3],                                  'value'           ),
+    ('fmod',          small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
     ('chunk',         medium_2d,          lambda t: [4],                                                    ),
     ('chunk',         medium_2d,          lambda t: [4, 1],                                 'dim'           ),
     ('clamp',         medium_2d_scaled,   lambda t: [-1, 5],                                                ),
@@ -165,6 +167,8 @@ tests = [
     ('mean',          small_3d,           lambda t: [1],                                    'dim'           ),
     ('mode',          small_3d,           lambda t: [],                                                     ),
     ('mode',          small_3d,           lambda t: [1],                                    'dim'           ),
+    ('remainder',     small_3d,           lambda t: [3],                                  'value'           ),
+    ('remainder',     small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
     ('std',           small_3d,           lambda t: [],                                                     ),
     ('std',           small_3d,           lambda t: [1],                                    'dim'           ),
     ('var',           small_3d,           lambda t: [],                                                     ),
@@ -235,7 +239,6 @@ custom_precision = {
 
 simple_pointwise = [
     'abs',
-    'remainder',
     'sign',
 ]
 for fn in simple_pointwise:
@@ -256,7 +259,6 @@ simple_pointwise_float = [
     'exp',
     'cinv',
     'floor',
-    'fmod',
     'frac',
     'neg',
     'round',
