@@ -627,9 +627,9 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
   THCTensor_(free)(state, a);
 
 #if defined(THC_REAL_IS_FLOAT)
-  magma_sorgqr_gpu(m, n, k, q_data, m, tau_data, work_data, nb, &info);
+  magma_sorgqr_gpu(m, k, k, q_data, m, tau_data, work_data, nb, &info);
 #else
-  magma_dorgqr_gpu(m, n, k, q_data, m, tau_data, work_data, nb, &info);
+  magma_dorgqr_gpu(m, k, k, q_data, m, tau_data, work_data, nb, &info);
 #endif
 
   if (info != 0)

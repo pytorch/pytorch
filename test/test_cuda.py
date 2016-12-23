@@ -71,16 +71,16 @@ def small_3d_unique(t):
     return t(S, S, S).copy_(torch.range(1, S*S*S))
 
 def small_1d_lapack(t):
-    return torch.range(1, 3).view(3)
+    return t(1, 3).copy_(torch.range(1, 3).view(3))
 
 def small_2d_lapack(t):
-    return torch.range(1, 9).view(3, 3)
+    return t(3, 3).copy_(torch.range(1, 9).view(3, 3))
 
 def small_2d_lapack_skinny(t):
-    return torch.range(1, 12).view(3, 4)
+    return t(3, 4).copy_(torch.range(1, 12).view(3, 4))
 
 def small_2d_lapack_fat(t):
-    return torch.range(1, 12).view(4, 3)
+    return t(4, 3).copy_(torch.range(1, 12).view(4, 3))
 
 def new_t(*sizes):
     def tmp(t):
@@ -119,6 +119,8 @@ tests = [
     ('addr',          medium_2d,          lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar' ),
     ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
     ('atan2',         medium_2d,          lambda t: [medium_2d(t)],                          None,    float_types),
+    ('fmod',          small_3d,           lambda t: [3],                                  'value'           ),
+    ('fmod',          small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
     ('chunk',         medium_2d,          lambda t: [4],                                                    ),
     ('chunk',         medium_2d,          lambda t: [4, 1],                                 'dim'           ),
     ('clamp',         medium_2d_scaled,   lambda t: [-1, 5],                                                ),
@@ -165,6 +167,8 @@ tests = [
     ('mean',          small_3d,           lambda t: [1],                                    'dim'           ),
     ('mode',          small_3d,           lambda t: [],                                                     ),
     ('mode',          small_3d,           lambda t: [1],                                    'dim'           ),
+    ('remainder',     small_3d,           lambda t: [3],                                  'value'           ),
+    ('remainder',     small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
     ('std',           small_3d,           lambda t: [],                                                     ),
     ('std',           small_3d,           lambda t: [1],                                    'dim'           ),
     ('var',           small_3d,           lambda t: [],                                                     ),
@@ -235,7 +239,6 @@ custom_precision = {
 
 simple_pointwise = [
     'abs',
-    'remainder',
     'sign',
 ]
 for fn in simple_pointwise:
@@ -256,7 +259,6 @@ simple_pointwise_float = [
     'exp',
     'cinv',
     'floor',
-    'fmod',
     'frac',
     'neg',
     'round',
