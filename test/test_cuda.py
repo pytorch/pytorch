@@ -71,16 +71,16 @@ def small_3d_unique(t):
     return t(S, S, S).copy_(torch.range(1, S*S*S))
 
 def small_1d_lapack(t):
-    return torch.range(1, 3).view(3)
+    return t(1, 3).copy_(torch.range(1, 3).view(3))
 
 def small_2d_lapack(t):
-    return torch.range(1, 9).view(3, 3)
+    return t(3, 3).copy_(torch.range(1, 9).view(3, 3))
 
 def small_2d_lapack_skinny(t):
-    return torch.range(1, 12).view(3, 4)
+    return t(3, 4).copy_(torch.range(1, 12).view(3, 4))
 
 def small_2d_lapack_fat(t):
-    return torch.range(1, 12).view(4, 3)
+    return t(4, 3).copy_(torch.range(1, 12).view(4, 3))
 
 def new_t(*sizes):
     def tmp(t):

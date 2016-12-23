@@ -1614,7 +1614,7 @@ static const char *R = &__R;
 
 [[
   name: gesv
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -1628,7 +1628,7 @@ static const char *R = &__R;
 
 [[
   name: gels
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -1669,7 +1669,7 @@ static const char *R = &__R;
 [[
   name: symeig
   cname: syev
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -1691,7 +1691,7 @@ static const char *R = &__R;
 [[
   name: eig
   cname: geev
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -1709,7 +1709,7 @@ static const char *R = &__R;
 [[
   name: svd
   cname: gesvd
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0,1,2
   arguments:
@@ -1729,7 +1729,7 @@ static const char *R = &__R;
 [[
   name: inverse
   cname: getri
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -1740,7 +1740,7 @@ static const char *R = &__R;
 
 [[
   name: potrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -1755,7 +1755,7 @@ static const char *R = &__R;
 
 [[
   name: potrs
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -1771,7 +1771,7 @@ static const char *R = &__R;
 
 [[
   name: potri
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -1807,7 +1807,7 @@ static const char *R = &__R;
 
 [[
   name: qr
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   return: argument 0,1
   arguments:
