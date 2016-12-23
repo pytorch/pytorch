@@ -6,8 +6,9 @@ set(Caffe2_DIR_EXCLUDES
         "/mpi"           # Exclude for now
         "/experiments"   # Exclude for now
         "/python"        # handled below
-        "/cuda_rtc"      # TODO: Handle this somehow
+        "/image"         # Exclude for now
 )
+
 set(Caffe2_FILE_EXCLUDES
         "/operators/fully_connected_op_sparse.cc"
         "/test/caffe2_gtest_main.cc"
@@ -16,6 +17,14 @@ set(Caffe2_FILE_EXCLUDES
         "/db/zmqdb.cc"
         "/utils/mkl_utils_test.cc"
         "/mpi/mpi_test.cc"
+)
+
+# ---[ Specific builds
+set(Caffe2_LEVELDB_SRCS
+        "/db/leveldb.cc"
+)
+set(Caffe2_LMDB_SRCS
+        "/db/lmdb.cc"
 )
 
 set(Caffe2_CPU_TEST_SRCS
@@ -62,6 +71,8 @@ prepend(Caffe2_DIR_EXCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DIR_EXCLUDES})
 prepend(Caffe2_FILE_EXCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_FILE_EXCLUDES})
 prepend(Caffe2_CPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_CPU_TEST_SRCS})
 prepend(Caffe2_GPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_GPU_TEST_SRCS})
+prepend(Caffe2_LEVELDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LEVELDB_SRCS})
+prepend(Caffe2_LMDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LMDB_SRCS})
 
 # ---[ List of libraries to link with
 set(Caffe2_LINK_LIBS Caffe_PROTO)
@@ -103,6 +114,12 @@ exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_FILE_EXCLUDES})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_CPU_TEST_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
+if (NOT USE_LEVELDB)
+        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LEVELDB_SRCS})
+endif()
+if (NOT USE_LMDB)
+        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LMDB_SRCS})
+endif()
 
 # Compile protobufs.
 add_subdirectory(proto)
@@ -112,22 +129,25 @@ list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
 # Compile exposed libraries.
 LIST(APPEND CMAKE_CXX_FLAGS "-std=c++11 -fPIC")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
-target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS})
+target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS} glog gflags ${Caffe2_LINKER_LIBS})
+install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 list(APPEND Caffe2_LINK_LIBS Caffe2_CPU)
 
-# CUDA library
+# ---[ CUDA library
 if(HAVE_CUDA)
   CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
-  target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} glog gflags atlas cblas)
+  target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} glog gflags ${Caffe2_LINKER_LIBS})
   list(APPEND Caffe2_LINK_LIBS Caffe2_GPU)
+  install(TARGETS Caffe2_GPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 endif()
 
 # Compile test binaries.
 foreach(test_src ${Caffe2_CPU_TEST_SRCS})
   get_filename_component(test_name ${test_src} NAME_WE)
   add_executable(${test_name} "${test_src}")
-  target_link_libraries(${test_name} ${Caffe2_LINK_LIBS} glog atlas cblas gtest gtest_main ${Caffe2_LINKER_LIBS})
+  target_link_libraries(${test_name} ${Caffe2_LINK} gtest_main)
   target_compile_features(${test_name} PRIVATE cxx_range_for)
+  install(TARGETS ${test_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/test)
 endforeach()
 
 # ---[ Python
@@ -161,7 +181,8 @@ endif()
 foreach(binary_src ${Caffe2_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} -Wl,--whole-archive ${Caffe2_LINK_LIBS} glog atlas cblas ${Caffe2_LINKER_LIBS} -Wl,--no-whole-archive)
+  target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem ${Caffe2_LINKER_LIBS})
+  install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
 
 

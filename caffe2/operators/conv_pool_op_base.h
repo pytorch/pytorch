@@ -57,6 +57,7 @@ class ConvPoolOpBase : public Operator<Context> {
         stride_w_(OperatorBase::GetSingleArgument<int>(
             "stride_w",
             OperatorBase::GetSingleArgument<int>("stride", 1))),
+        group_(OperatorBase::GetSingleArgument<int>("group", 1)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
@@ -75,13 +76,22 @@ class ConvPoolOpBase : public Operator<Context> {
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
     }
-
     CAFFE_ENFORCE(
         global_pooling_ == false ||
             (dilation_h_ == 1 && dilation_w_ == 1 && pad_ == 0 && pad_t_ == 0 &&
              pad_l_ == 0 && pad_b_ == 0 && pad_r_ == 0 && stride_h_ == 1 &&
              stride_w_ == 1),
         "If global_pooling is set, none of dilation/pad/stride should be set.");
+    // Check kernel only if we are doing conv or pooling. The reason is that a
+    // few other ops, like PadImage, are also using this base class. We really
+    // need to clean this up.
+    if (operator_def.name().find("Conv") == 0 ||
+        operator_def.name().find("Pool") != std::string::npos) {
+      CAFFE_ENFORCE(
+          kernel_h_ && kernel_w_,
+          "If you are doing convolution or pooling, you will need to set "
+          "explicitly the kernel size.");
+    }
     CAFFE_ENFORCE(dilation_h_ > 0);
     CAFFE_ENFORCE(dilation_w_ > 0);
     CAFFE_ENFORCE(pad_ >= 0);
@@ -91,15 +101,25 @@ class ConvPoolOpBase : public Operator<Context> {
     CAFFE_ENFORCE(pad_r_ >= 0);
     CAFFE_ENFORCE(stride_h_ > 0);
     CAFFE_ENFORCE(stride_w_ > 0);
+    if (group_ != 1) {
+      CAFFE_ENFORCE(
+          dilation_h_ == 1 && dilation_w_ == 1,
+          "When group is used, dilation should not be set at the same time.");
+    }
   }
 
   // Sets the output size. The output channel is manually provided since
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
   // sizes.
+  // Note(jiayq): the templatization of this function is mainly to help
+  // implementations that do not use first-class Tensor objects, such as the
+  // MKL operator. One can still call this function with dummy
+  // Tensor<CPUContext> objects in order to obtain the sizes.
+  template <typename AlternativeContext>
   void SetOutputSize(
-      const Tensor<Context>& input,
-      Tensor<Context>* output,
+      const Tensor<AlternativeContext>& input,
+      Tensor<AlternativeContext>* output,
       int output_channel) {
     CAFFE_ENFORCE(4 == input.ndim());
     CAFFE_ENFORCE(input.size() > 0);
@@ -119,7 +139,7 @@ class ConvPoolOpBase : public Operator<Context> {
         W = input.dim32(3);
         break;
       default:
-        LOG(FATAL) << "Unknown Storage order: " << order_;
+        CAFFE_THROW("Unknown Storage order: ", order_);
     }
 
     int output_height = 0, output_width = 0;
@@ -191,10 +211,8 @@ class ConvPoolOpBase : public Operator<Context> {
         // VLOG(2) << "Running NCHW";
         return RunOnDeviceWithOrderNCHW();
       default:
-        LOG(FATAL) << "Unknown storage order: " << order_;
+        CAFFE_THROW("Unknown Storage order: ", order_);
     }
-    // To suppress old compiler warnings
-    return true;
   }
 
   // The actual function that does the computation, if the different
@@ -230,6 +248,7 @@ class ConvPoolOpBase : public Operator<Context> {
   int dilation_w_;
   int stride_h_;
   int stride_w_;
+  int group_;
   StorageOrder order_;
   bool shared_buffer_;
   Workspace* ws_;
@@ -332,6 +351,7 @@ class ConvPoolOpBase : public Operator<Context> {
   using ConvPoolOpBase<Context>::dilation_w_;     \
   using ConvPoolOpBase<Context>::stride_h_;       \
   using ConvPoolOpBase<Context>::stride_w_;       \
+  using ConvPoolOpBase<Context>::group_;          \
   using ConvPoolOpBase<Context>::order_;          \
   using ConvPoolOpBase<Context>::shared_buffer_;  \
   using ConvPoolOpBase<Context>::ws_

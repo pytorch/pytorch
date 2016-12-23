@@ -491,7 +491,6 @@ class MaxOp : public Operator<Context> {
     }
 
     T* output_data = output->template mutable_data<T>();
-#pragma omp parallel for
     for (int i = 1; i < InputSize(); i++) {
       auto input_data = Input(i).template data<T>();
       for (int j = 0; j < input0.size(); j++) {

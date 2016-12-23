@@ -141,7 +141,7 @@ class Torch final {
         luaT_toudata(L(), -1, Traits::tensorTy));
     auto* thDst = static_cast<typename Traits::Tensor*>(torchDst);
     auto* tcDst = dst->template GetMutable<Tensor<Context>>();
-    CHECK_NOTNULL(src->storage->data);
+    CAFFE_ENFORCE(src->storage->data);
     CAFFE_ENFORCE(src->storage->size);
     CAFFE_ENFORCE_EQ(src->storage->data, thDst->storage->data);
     CAFFE_ENFORCE_EQ(src->storage->data, tcDst->template data<float>());

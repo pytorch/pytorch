@@ -37,8 +37,10 @@
 // All caffe2 mkl related headers
 
 #ifdef CAFFE2_HAS_MKL_DNN
+#include "caffe2/utils/mkl/mkl_context.h"
 #include "caffe2/utils/mkl/mkl_dnn_cppwrapper.h"
 #include "caffe2/utils/mkl/mkl_memory.h"
+#include "caffe2/utils/mkl/mkl_operator.h"
 #endif // CAFFE2_HAS_MKL_DNN
 
 #ifdef CAFFE2_HAS_MKL_SGEMM_PACK

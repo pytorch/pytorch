@@ -1,7 +1,0 @@
-<span class="hljs-keyword">var</span> noop = <span class="hljs-function"><span class="hljs-keyword">function</span>(<span class="hljs-params"></span>) </span>{};
-
-<span class="hljs-keyword">var</span> identity = <span class="hljs-function"><span class="hljs-keyword">function</span>(<span class="hljs-params">foo</span>) </span>{
-  <span class="hljs-keyword">return</span> foo;
-};
-
-<span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">println</span>(<span class="hljs-params">value: <span class="hljs-built_in">string</span></span>)</span>;

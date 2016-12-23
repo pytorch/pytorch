@@ -272,26 +272,26 @@ string FormatString(const string& pattern, Ts... values) {
   */
 }
 
-// SnapshotOp is a wrapper over a SaveFloatTensorOp that basically allows
+// CheckpointOp is a wrapper over a SaveFloatTensorOp that basically allows
 // flexible naming over iterations.
 // The file pattern in db_name should be a format string that can be passed into
 // sprintf with an int argument specifying the current iteration. An example:
-//     "/path/to/my/snapshot/snapshot_at_%d.pb"
+//     "/path/to/my/checkpoint/checkpoint_at_%d.pb"
 template <class Context>
-class SnapshotOp final : public Operator<Context> {
+class CheckpointOp final : public Operator<Context> {
  public:
-  SnapshotOp(const OperatorDef& operator_def, Workspace* ws)
+  CheckpointOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         db_pattern_(OperatorBase::GetSingleArgument<string>("db", "")),
         every_(OperatorBase::GetSingleArgument<int>("every", 1)),
         ws_(ws),
         save_op_def_(operator_def) {
     CAFFE_ENFORCE_GT(
-        db_pattern_.size(), 0, "Must specify a snapshot file pattern.");
-    CAFFE_ENFORCE_GT(every_, 0, "Snapshot interval should be positive.");
+        db_pattern_.size(), 0, "Must specify a checkpoint file pattern.");
+    CAFFE_ENFORCE_GT(every_, 0, "Checkpoint interval should be positive.");
     if (every_ == 1) {
       // Just issue a warning, but it's totally legal so we don't do anything.
-      LOG(WARNING) << "It seems that we are snapshotting every iteration. "
+      LOG(WARNING) << "It seems that we are checkpointting every iteration. "
                    << "Is that intended?";
     }
     save_op_def_.set_type("Save");

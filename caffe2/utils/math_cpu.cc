@@ -103,7 +103,7 @@ void Gemm<float, CPUContext>(
 }
 
 template <>
-void Gemm<float, CPUContext>(
+void GemmEx<float, CPUContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
     const int M,
@@ -113,8 +113,8 @@ void Gemm<float, CPUContext>(
     const float* A,
     const int lda,
     const float* B,
-    const float beta,
     const int ldb,
+    const float beta,
     float* C,
     const int ldc,
     CPUContext*) {
@@ -280,11 +280,21 @@ void Gemm<float, CPUContext>(
 }
 
 template <>
-void Gemm<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K, const float alpha, const float* A,
-    const int lda, const float* B, const float beta, const int ldb, float* C,
-    const int ldc, CPUContext* context) {
+void GemmEx<float, CPUContext>(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const float* A,
+    const int lda,
+    const float* B,
+    const int ldb,
+    const float beta,
+    float* C,
+    const int ldc,
+    CPUContext* context) {
   cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
               beta, C, ldc);
 }
@@ -389,15 +399,22 @@ CAFFE2_SPECIALIZED_AXPBY(double, d)
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef CAFFE2_USE_MKL
 
-#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc)              \
-template <>                                                                    \
-void Funcname<T, CPUContext>(                                                  \
-    const int N, const T* x, T* y,                                             \
-    CPUContext* context) {                                                     \
-  OriginalFunc(N, x, y);                                                       \
-}
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, vsExp)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, vdExp)
+#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc, ...) \
+  template <>                                                          \
+  void Funcname<T, CPUContext>(                                        \
+      const int N, const T* x, T* y, CPUContext* context) {            \
+    OriginalFunc(N, x, y, ##__VA_ARGS__);                              \
+  }
+DELEGATE_SIMPLE_UNARY_FUNCTION(
+    float,
+    Exp,
+    vmsExp,
+    VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE)
+DELEGATE_SIMPLE_UNARY_FUNCTION(
+    double,
+    Exp,
+    vmdExp,
+    VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, vsLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, vdLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
@@ -560,16 +577,16 @@ DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
 #undef DEFINE_BROADCAST_BINARY_FUNCTION
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
-#define CAFFE2_SPECIALIZED_SET(T)                               \
-template <>                                                     \
-void Set<T, CPUContext>(const int N, const T alpha, T *Y,       \
-                        CPUContext* context) {                  \
-  if (alpha == (T) 0) {                                         \
-    memset(Y, 0, N * sizeof(T));                                \
-  } else {                                                      \
-    EigenVectorMap<T>(Y, N).setConstant(alpha);                 \
-  }                                                             \
-}
+#define CAFFE2_SPECIALIZED_SET(T)                                 \
+  template <>                                                     \
+  void Set<T, CPUContext>(                                        \
+      const TIndex N, const T alpha, T* Y, CPUContext* context) { \
+    if (alpha == (T)0) {                                          \
+      memset(Y, 0, N * sizeof(T));                                \
+    } else {                                                      \
+      EigenVectorMap<T>(Y, N).setConstant(alpha);                 \
+    }                                                             \
+  }
 
 CAFFE2_SPECIALIZED_SET(float);
 CAFFE2_SPECIALIZED_SET(double);

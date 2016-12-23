@@ -24,15 +24,22 @@ class FillerOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         shape_(ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))),
         extra_shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("extra_shape"))) {
+            OperatorBase::GetRepeatedArgument<int>("extra_shape"))),
+        input_as_shape_(
+            OperatorBase::GetSingleArgument<bool>("input_as_shape", false)) {
     if (InputSize()) {
       if (shape_.size() != 0) {
         CAFFE_THROW(
             "Cannot set the shape argument and pass in an input at "
             "the same time");
       }
-    } else if (!extra_shape_.empty()) {
-      CAFFE_THROW("Cannot set extra_shape when there is no input");
+    } else {
+      if (!extra_shape_.empty()) {
+        CAFFE_THROW("Cannot set extra_shape when there is no input");
+      }
+      if (input_as_shape_) {
+        CAFFE_THROW("An input must be given if input_as_shape is true");
+      }
     }
   }
 
@@ -42,18 +49,25 @@ class FillerOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto* output = Operator<Context>::Output(0);
     if (InputSize()) {
-      auto shape = Input(0).dims();
+      auto& input = Input(0);
+      auto shape = vector<TIndex>{};
+      if (input_as_shape_) {
+        CAFFE_ENFORCE_EQ(
+            input.ndim(),
+            1,
+            "When input_as_shape is true, the input must be a 1D tensor of "
+            "data type TIndex");
+        auto* shape_data = input.template data<TIndex>();
+        shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+      } else {
+        shape.insert(shape.end(), input.dims().begin(), input.dims().end());
+      }
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
     } else {
       output->Resize(shape_);
     }
-    if (output->size()) {
-      return Fill(output);
-    } else {
-      VLOG(1) << "Output has zero size, skipping filling.";
-      return true;
-    }
+    return Fill(output);
   }
 
   virtual bool Fill(Tensor<Context>* output) = 0;
@@ -61,6 +75,7 @@ class FillerOp : public Operator<Context> {
  protected:
   vector<TIndex> shape_;
   vector<TIndex> extra_shape_;
+  bool input_as_shape_;
 };
 
 template <typename T, class Context>
@@ -142,8 +157,10 @@ class ConstantFillOp final : public FillerOp<Context> {
   template <typename T>
   bool FillWithType(Tensor<Context>* output) {
     T value = OperatorBase::GetSingleArgument<T>("value", 0);
-    math::Set<T, Context>(
-        output->size(), value, output->template mutable_data<T>(), &context_);
+    auto* data = output->template mutable_data<T>();
+    if (output->size()) {
+      math::Set<T, Context>(output->size(), value, data, &context_);
+    }
     return true;
   }
 
@@ -168,8 +185,11 @@ class GivenTensorFillOp final : public FillerOp<Context> {
     DCHECK_EQ(output->size(), values_.size())
         << "output size: " << output->size()
         << " given size: " << values_.size();
-    context_.template Copy<T, CPUContext, Context>(
-        output->size(), values_.data(), output->template mutable_data<T>());
+    auto* data = output->template mutable_data<T>();
+    if (output->size()) {
+      context_.template Copy<T, CPUContext, Context>(
+          output->size(), values_.data(), data);
+    }
     return true;
   }
 

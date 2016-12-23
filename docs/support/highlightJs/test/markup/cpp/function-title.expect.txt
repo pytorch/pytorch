@@ -1,8 +1,0 @@
-<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">()</span> </span>{
-  A a = <span class="hljs-keyword">new</span> A();
-  <span class="hljs-keyword">if</span> (a-&gt;check1())
-    <span class="hljs-keyword">return</span> <span class="hljs-number">3</span>;
-  <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (a-&gt;check2())
-    <span class="hljs-keyword">return</span> <span class="hljs-number">4</span>;
-  <span class="hljs-keyword">return</span> a-&gt;result();
-}

@@ -1,8 +1,0 @@
-       261917242 function calls in 686.251 CPU seconds
-
-       ncalls  tottime  filename:lineno(function)
-       152824  513.894  {method 'sort' of 'list' objects}
-    129590630   83.894  rrule.py:842(__cmp__)
-    129590630   82.439  {cmp}
-       153900    1.296  rrule.py:399(_iter)
-304393/151570    0.963  rrule.py:102(_iter_cached)

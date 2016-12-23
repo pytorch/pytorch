@@ -1,23 +1,17 @@
 #include "file_store_handler_op.h"
 
+#include <caffe2/core/context_gpu.h>
+
 namespace caffe2 {
 
-FileStoreHandlerCreateOp::FileStoreHandlerCreateOp(
-    const OperatorDef& operator_def,
-    Workspace* ws)
-    : Operator(operator_def, ws),
-      basePath_(GetSingleArgument<std::string>("path", "")) {
-  CHECK_NE(basePath_, "") << "path is a required argument";
-}
+REGISTER_CPU_OPERATOR(
+    FileStoreHandlerCreate,
+    FileStoreHandlerCreateOp<CPUContext>);
 
-bool FileStoreHandlerCreateOp::RunOnDevice() {
-  auto ptr = std::unique_ptr<StoreHandler>(new FileStoreHandler(basePath_));
-  *OperatorBase::Output<std::unique_ptr<StoreHandler>>(HANDLER) =
-      std::move(ptr);
-  return true;
-}
+REGISTER_CUDA_OPERATOR(
+    FileStoreHandlerCreate,
+    FileStoreHandlerCreateOp<CUDAContext>);
 
-REGISTER_CPU_OPERATOR(FileStoreHandlerCreate, FileStoreHandlerCreateOp);
 OPERATOR_SCHEMA(FileStoreHandlerCreate)
     .NumInputs(0)
     .NumOutputs(1)

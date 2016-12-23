@@ -155,6 +155,16 @@ bool ConcatOp<Context>::RunOnDevice() {
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   CAFFE_ENFORCE_LT(axis_, input_zero.ndim(), "Axis not in input ndim range.");
+  for (int i = 1; i < InputSize(); ++i) {
+    CAFFE_ENFORCE(
+        Input(i).meta() == input_zero.meta(),
+        "All inputs must have the same type, expected: ",
+        input_zero.meta().name(),
+        " but got: ",
+        Input(i).meta().name(),
+        " for input: ",
+        i);
+  }
 
   int before = 1, after = 1;
   vector<TIndex> output_dims(input_zero.dims());
@@ -208,7 +218,7 @@ bool ConcatOp<Context>::RunOnDevice() {
         input.dim32(axis_) * after,
         input.raw_data(),
         input.dim32(axis_) * after,
-        static_cast<char*>(output->raw_mutable_data(input.meta())) +
+        static_cast<char*>(output->raw_mutable_data(input_zero.meta())) +
             output_offset,
         output_channels * after,
         &context_);

@@ -1,8 +1,0 @@
-<span class="hljs-comment"># Regexps</span>
-x = <span class="hljs-regexp">/\//</span>
-x = <span class="hljs-regexp">/\n/</span>
-x = <span class="hljs-regexp">/ab\/ ab/</span>
-x = f <span class="hljs-regexp">/6 * 2/</span> - <span class="hljs-number">3</span>
-x = f <span class="hljs-regexp">/foo * 2/gm</span>
-x = <span class="hljs-keyword">if</span> <span class="hljs-literal">true</span> <span class="hljs-keyword">then</span> <span class="hljs-regexp">/\n/</span> <span class="hljs-keyword">else</span> <span class="hljs-regexp">/[.,]+/</span>
-x = <span class="hljs-regexp">///^key-<span class="hljs-subst">#{key}</span>-\d+///</span>

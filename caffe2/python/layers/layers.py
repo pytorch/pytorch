@@ -50,6 +50,14 @@ class ModelLayer(object):
         self.model = model
         self.kwargs = kwargs
         self.input_record = input_record
+        self.request_only = True
+        for field in self.input_record.all_scalars():
+            if len(field.field_metadata()) == 0:
+                self.request_only = False
+            for metadata in field.field_metadata():
+                if not (metadata and metadata.feature_specs and
+                        metadata.feature_specs.feature_is_request_only):
+                    self.request_only = False
         self.output_schema = None
         self.tags = set(tags)
         self.tags.update(TagContext.current().tags)

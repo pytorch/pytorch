@@ -57,13 +57,21 @@ class ModelHelperBase(object):
     """
 
     def __init__(self, name=None, init_params=True, allow_not_known_ops=True,
-                 skip_sparse_optim=False):
+                 skip_sparse_optim=False, param_model=None):
         self.name = name or "model"
         self.net = core.Net(self.name)
-        self.param_init_net = core.Net(self.name + '_init')
 
-        self.param_to_grad = {}
-        self.params = []
+        if param_model is not None:
+            self.param_init_net = param_model.param_init_net
+            self.param_to_grad = param_model.param_to_grad
+            self.params = param_model.params
+            self.computed_params = param_model.computed_params
+        else:
+            self.param_init_net = core.Net(name + '_init')
+            self.param_to_grad = {}
+            self.params = []
+            self.computed_params = []
+
         self._param_info = []
         self._devices = []
         self.gradient_ops_added = False
@@ -195,6 +203,28 @@ class ModelHelperBase(object):
             return {param: grad for param, grad in param_to_grad.items()
                     if not isinstance(grad, core.GradientSlice)}
 
+    def GetComputedParams(self, namescope=None):
+        '''
+        Returns the computed params in current namescope. 'Computed params'
+        are such parameters that are not optimized via gradient descent but are
+        directly computed from data, such as the running mean and variance
+        of Spatial Batch Normalization.
+        '''
+        if namescope is None:
+            namescope = scope.CurrentNameScope()
+        else:
+            if not namescope.endswith(scope._NAMESCOPE_SEPARATOR):
+                namescope += scope._NAMESCOPE_SEPARATOR
+
+        if namescope == '':
+            return self.computed_params[:]
+        else:
+            return [p for p in self.computed_params
+                    if p.GetNameScope() == namescope]
+
+    def GetAllParams(self, namescope=None):
+        return self.GetParams(namescope) + self.GetComputedParams(namescope)
+
     def TensorProtosDBInput(
         self, unused_blob_in, blob_out, batch_size, db, db_type, **kwargs
     ):
@@ -255,7 +285,10 @@ class ModelHelperBase(object):
             "SparseAdagrad",
             "AveragedLoss",
             "Cast",
+            "Checkpoint",
             "ConstantFill",
+            "CopyGPUToCPU",
+            "CopyCPUToGPU",
             "DequeueBlobs",
             "EnsureCPUOutput",
             "FlattenToVec",
@@ -272,7 +305,7 @@ class ModelHelperBase(object):
             "ScatterWeightedSum",
             "Sigmoid",
             "SortedSegmentSum",
-            "Snapshot",
+            "Snapshot", # Note: snapshot is deprecated, use Checkpoint
             "Softmax",
             "SoftmaxWithLoss",
             "SquaredL2Distance",

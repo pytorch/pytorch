@@ -1,6 +1,7 @@
 # Known NVIDIA GPU achitectures Caffe2 can be compiled for.
 # This list will be used for CUDA_ARCH_NAME = All option
-set(Caffe2_known_gpu_archs "20 21(20) 30 35 50")
+set(Caffe2_known_gpu_archs "20 21(20) 30 35 50 52 60 61")
+set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52")
 
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
@@ -52,7 +53,7 @@ endfunction()
 #   caffe_select_nvcc_arch_flags(out_variable)
 function(caffe2_select_nvcc_arch_flags out_variable)
   # List of arch names
-  set(__archs_names "Fermi" "Kepler" "Maxwell" "All" "Manual")
+  set(__archs_names "Kepler" "Maxwell" "Pascal" "All" "Manual")
   set(__archs_name_default "All")
   if(NOT CMAKE_CROSSCOMPILING)
     list(APPEND __archs_names "Auto")
@@ -79,9 +80,7 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     unset(CUDA_ARCH_PTX CACHE)
   endif()
 
-  if(${CUDA_ARCH_NAME} STREQUAL "Fermi")
-    set(__cuda_arch_bin "20 21(20)")
-  elseif(${CUDA_ARCH_NAME} STREQUAL "Kepler")
+  if(${CUDA_ARCH_NAME} STREQUAL "Kepler")
     set(__cuda_arch_bin "30 35")
   elseif(${CUDA_ARCH_NAME} STREQUAL "Maxwell")
     set(__cuda_arch_bin "50")
@@ -171,24 +170,47 @@ endif()
 
 set(HAVE_CUDA TRUE)
 message(STATUS "CUDA detected: " ${CUDA_VERSION})
+if (${CUDA_VERSION} LESS 8.0)
+  set(Caffe2_known_gpu_archs ${Caffe2_known_gpu_archs7})
+  list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
+  list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
+endif()
 include_directories(SYSTEM ${CUDA_INCLUDE_DIRS})
 list(APPEND Caffe2_LINKER_LIBS ${CUDA_CUDART_LIBRARY}
                               ${CUDA_curand_LIBRARY} ${CUDA_CUBLAS_LIBRARIES})
+
+# find libcuda.so and lbnvrtc.so
+find_library(CUDA_CUDA_LIB cuda
+    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64)
+find_library(CUDA_NVRTC_LIB nvrtc
+    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64)
 
 # setting nvcc arch flags
 caffe2_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
+if(CUDA_CUDA_LIB)
+    message(STATUS "Found libcuda: ${CUDA_CUDA_LIB}")
+    list(APPEND Caffe2_LINKER_LIBS ${CUDA_CUDA_LIB})
+endif()
+if(CUDA_NVRTC_LIB)
+  message(STATUS "Found libnvrtc: ${CUDA_NVRTC_LIB}")
+  list(APPEND Caffe2_LINKER_LIBS ${CUDA_NVRTC_LIB})
+endif()
 
 # disable some nvcc diagnostic that apears in boost, glog, glags, opencv, etc.
 foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration set_but_not_used)
   list(APPEND CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
 endforeach()
 
-# setting default testing device
-if(NOT CUDA_TEST_DEVICE)
-  set(CUDA_TEST_DEVICE -1)
-endif()
+# Set C++11 support
+list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
+list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+
+# Set :expt-relaxed-constexpr to suppress Eigen warnings
+list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
 mark_as_advanced(CUDA_BUILD_CUBIN CUDA_BUILD_EMULATION CUDA_VERBOSE_BUILD)
 mark_as_advanced(CUDA_SDK_ROOT_DIR CUDA_SEPARABLE_COMPILATION)

@@ -2,7 +2,7 @@
 set(Caffe2_LINKER_LIBS "")
 
 # ---[ Custom Protobuf
-include(cmake/ProtoBuf.cmake)
+include("cmake/External/Protobuf.cmake")
 
 # ---[ Threads
 find_package(Threads REQUIRED)
@@ -11,6 +11,7 @@ list(APPEND Caffe2_LINKER_LIBS ${CMAKE_THREAD_LIBS_INIT})
 # ---[ BLAS
 set(BLAS "Atlas" CACHE STRING "Selected BLAS library")
 set_property(CACHE BLAS PROPERTY STRINGS "Atlas;OpenBLAS;MKL")
+list(APPEND Caffe2_LINKER_LIBS cblas)
 
 if(BLAS STREQUAL "Atlas")
   find_package(Atlas REQUIRED)
@@ -46,10 +47,6 @@ if(USE_LMDB)
   find_package(LMDB REQUIRED)
   include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
   list(APPEND Caffe2_LINKER_LIBS ${LMDB_LIBRARIES})
-  add_definitions(-DUSE_LMDB)
-  if(ALLOW_LMDB_NOLOCK)
-    add_definitions(-DALLOW_LMDB_NOLOCK)
-  endif()
 endif()
 
 # ---[ LevelDB
@@ -57,7 +54,6 @@ if(USE_LEVELDB)
   find_package(LevelDB REQUIRED)
   include_directories(SYSTEM ${LevelDB_INCLUDE})
   list(APPEND Caffe2_LINKER_LIBS ${LevelDB_LIBRARIES})
-  add_definitions(-DUSE_LEVELDB)
 endif()
 
 # ---[ Snappy
@@ -69,11 +65,15 @@ endif()
 
 # ---[ OpenCV
 if(USE_OPENCV)
+  # OpenCV 3
   find_package(OpenCV QUIET COMPONENTS core highgui imgproc imgcodecs)
+  if(NOT OpenCV_FOUND)
+    # OpenCV 2
+    find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
+  endif()
   include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
   list(APPEND Caffe2_LINKER_LIBS ${OpenCV_LIBS})
   message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
-  add_definitions(-DUSE_OPENCV)
 endif()
 
 # ---[ EIGEN
@@ -116,6 +116,7 @@ if(HAVE_CUDA)
   LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
 endif()
 
+
 # ---[ CUDNN
 if(HAVE_CUDA)
   find_package(CuDNN REQUIRED)
@@ -129,6 +130,7 @@ endif()
 if(HAVE_CUDA)
   include("cmake/External/nccl.cmake")
   include_directories(SYSTEM ${NCCL_INCLUDE_DIRS})
+  message(STATUS "NCCL: ${NCCL_LIBRARIES}")
   list(APPEND Caffe2_LINKER_LIBS ${NCCL_LIBRARIES})
 endif()
 
@@ -141,5 +143,7 @@ endif()
 if(HAVE_CUDA)
   add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/cnmem)
   include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cnmem/include)
-  list(APPEND ${Caffe2_LINKER_LIBS} ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so)
+  # message(STATUS "cnmem: ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so")
+  # message(STATUS "${CMAKE_CURRENT_BINARY_DIR}")
+  list(APPEND Caffe2_LINKER_LIBS "${CMAKE_CURRENT_BINARY_DIR}/third_party/cnmem/libcnmem.so")
 endif()

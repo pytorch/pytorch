@@ -77,7 +77,7 @@ class CloseBlobsQueueOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(InputSize(), 1);
     auto queue =
         OperatorBase::Inputs()[0]->template Get<std::shared_ptr<BlobsQueue>>();
-    CHECK(queue);
+    CAFFE_ENFORCE(queue);
     queue->close();
     return true;
   }

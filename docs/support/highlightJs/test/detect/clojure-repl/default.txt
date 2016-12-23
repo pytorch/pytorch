@@ -1,7 +1,0 @@
-user=> (defn f [x y]
-  #_=>   (+ x y))
-#'user/f
-user=> (f 5 7)
-12
-user=> nil
-nil

@@ -507,6 +507,63 @@ class TestGradientCalculation(test_util.TestCase):
                        'hidden3': 'hidden3_grad', 'hidden': 'hidden_grad',
                        'in': 'in_grad'})
 
+# Skip if sparse operators are not available
+@unittest.skipIf(not core.IsOperator('SparseFunHash'),
+                 'Sparse operators not available')
+class TestSparseGradientsAccumulation(test_util.TestCase):
+    def testSparseAccumulationWithValues(self):
+        # The gradient for "Gather" only computes values. indices are directly
+        # passed from the input
+        #
+        # x1-->Gather-->x4-->
+        #        |          |
+        # x2-----+     DotProduct-->x6
+        #        |          |
+        # x3-->Gather-->x5-->
+        net = core.Net("test_net")
+        net.Gather(["x2", "x1"], "x4")
+        net.Gather(["x2", "x3"], "x5")
+        net.DotProduct(["x4", "x5"], "x6")
+        net.AddGradientOperators(["x6"])
+        sum_op_i = net.Proto().op[-2]
+        sum_op_v = net.Proto().op[-1]
+        self.assertEqual(sum_op_i.input[0], "x3")
+        self.assertEqual(sum_op_i.input[1], "x1")
+        self.assertEqual(sum_op_i.output[0], "x2_grad_indices_concat")
+        self.assertEqual(sum_op_v.input[0], "x5_grad")
+        self.assertEqual(sum_op_v.input[1], "x4_grad")
+        self.assertEqual(sum_op_v.output[0], "x2_grad_values_concat")
+
+    def testSparseAccumulationWithIndicesAndValues(self):
+        # The gradient for "SparseFunHash" computes both indices and values
+        #
+        # x1-------->
+        #           |
+        # x2---->   |
+        #       |   |
+        # x3---SparseFunHash-->x8
+        #       /               \
+        # x4---+            DotProduct-->x10
+        #       \               /
+        # x5---SparseFunHash-->x9
+        #       |   |
+        # x6---->   |
+        #           |
+        # x7-------->
+        net = core.Net("test_net")
+        net.SparseFunHash(["x1", "x2", "x3", "x4"], "x8")
+        net.SparseFunHash(["x5", "x6", "x7", "x4"], "x9")
+        net.DotProduct(["x8", "x9"], "x10")
+        net.AddGradientOperators(["x10"])
+        sum_op_i = net.Proto().op[-2]
+        sum_op_v = net.Proto().op[-1]
+        self.assertEqual(sum_op_i.input[0], "_x4_grad_indices_autosplit_0")
+        self.assertEqual(sum_op_i.input[1], "_x4_grad_indices_autosplit_1")
+        self.assertEqual(sum_op_i.output[0], "x4_grad_indices_concat")
+        self.assertEqual(sum_op_v.input[0], "_x4_grad_values_autosplit_0")
+        self.assertEqual(sum_op_v.input[1], "_x4_grad_values_autosplit_1")
+        self.assertEqual(sum_op_v.output[0], "x4_grad_values_concat")
+
 
 class TestGradientsAccumulationWithNoGradientOps(test_util.TestCase):
     def testNormalAccumulation(self):

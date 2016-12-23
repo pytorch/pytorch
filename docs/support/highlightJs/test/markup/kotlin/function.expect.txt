@@ -1,6 +1,0 @@
-<span class="hljs-function"><span class="hljs-keyword">fun</span> <span class="hljs-title">a</span><span class="hljs-params">()</span> = 1</span>
-<span class="hljs-function"><span class="hljs-keyword">fun</span> <span class="hljs-title">b</span><span class="hljs-params">(a : <span class="hljs-typename">Int</span>)</span> = a</span>
-
-
-<span class="hljs-function"><span class="hljs-keyword">fun</span> <span class="hljs-type">&lt;T&gt;</span> <span class="hljs-title">c</span><span class="hljs-params">()</span> = 1</span>
-<span class="hljs-keyword">inline</span> <span class="hljs-function"><span class="hljs-keyword">fun</span> <span class="hljs-type">&lt;<span class="hljs-keyword">reified</span> T&gt;</span> <span class="hljs-title">d</span><span class="hljs-params">()</span> = 1</span>
