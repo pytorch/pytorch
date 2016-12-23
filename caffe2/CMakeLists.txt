@@ -161,7 +161,7 @@ endif()
 foreach(binary_src ${Caffe2_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} -Wl,--whole-archive ${Caffe2_LINK_LIBS} glog atlas cblas cnmem ${Caffe2_LINKER_LIBS} -Wl,--no-whole-archive)
+  target_link_libraries(${bin_name} -Wl,--whole-archive ${Caffe2_LINK_LIBS} glog atlas cblas ${Caffe2_LINKER_LIBS} -Wl,--no-whole-archive)
 endforeach()
 
 
