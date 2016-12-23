@@ -1,6 +1,25 @@
+"""
+The torch package contains data structures for multi-dimensional
+tensors and mathematical operations over these are defined.
+Additionally, it provides many utilities for efficient serializing of
+Tensors and arbitrary types, and other useful utilities.
+
+It has a CUDA counterpart, that enables you to run your tensor computations
+on an NVIDIA GPU with compute capability >= 2.0.
+"""
+
 import sys
-import math
 from ._utils import _import_dotted_name
+
+__all__ = [
+    'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
+    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed',
+    'save', 'load', 'set_printoptions',
+    'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
+    'ShortStorage', 'CharStorage', 'ByteStorage',
+    'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor',
+]
 
 ################################################################################
 # Load the extension module
@@ -22,7 +41,13 @@ if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
 
 old_flags = sys.getdlopenflags()
 sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
+
 from torch._C import *
+
+__all__ += [name for name in dir(_C)
+            if name[0] != '_' and
+            not name.endswith('Base')]
+
 sys.setdlopenflags(old_flags)
 del _dl_flags
 del old_flags
@@ -150,25 +175,15 @@ class ByteTensor(_C.ByteTensorBase, _TensorBase):
         return ByteStorage
 
 
-_tensor_classes = set()
-_storage_classes = set()
+_storage_classes = {
+    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
+    CharStorage, ByteStorage,
+}
 
-
-_storage_classes.add(DoubleStorage)
-_storage_classes.add(FloatStorage)
-_storage_classes.add(LongStorage)
-_storage_classes.add(IntStorage)
-_storage_classes.add(ShortStorage)
-_storage_classes.add(CharStorage)
-_storage_classes.add(ByteStorage)
-
-_tensor_classes.add(DoubleTensor)
-_tensor_classes.add(FloatTensor)
-_tensor_classes.add(LongTensor)
-_tensor_classes.add(IntTensor)
-_tensor_classes.add(ShortTensor)
-_tensor_classes.add(CharTensor)
-_tensor_classes.add(ByteTensor)
+_tensor_classes = {
+    DoubleTensor, FloatTensor, LongTensor, IntTensor, ShortTensor,
+    CharTensor, ByteTensor,
+}
 
 
 set_default_tensor_type('torch.FloatTensor')
@@ -215,3 +230,5 @@ import torch.cuda
 import torch.autograd
 import torch.nn
 import torch.optim
+from . import docs  # attaches docstrings to torch functions
+del docs
