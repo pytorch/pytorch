@@ -1,5 +1,8 @@
 #include "caffe2/operators/h_softmax_op.h"
 
+#include <queue>
+#include <stack>
+
 namespace caffe2 {
 
 template <>
@@ -410,11 +413,141 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+template <typename T, class Context>
+bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
+  const auto& Y = Input(0);
+  auto* treePathsOutput = Output(0);
+  CAFFE_ENFORCE_EQ(Y.ndim(), 1, "Input labels must be a vector.");
+  const auto y_data = Y.template data<T>();
+  treePathsOutput->Resize(1);
+  std::vector<int> labelCounts;
+  labelCounts.resize(num_classes_, 0);
+  for (int i = 0; i < Y.dim32(0); ++i) {
+    const int label_index =
+        y_data[i] - 1; // Labels are in range [1, num_classes]
+    CAFFE_ENFORCE_LT(
+        label_index,
+        num_classes_,
+        "Found an input label ",
+        label_index,
+        " not in range [",
+        0,
+        ",",
+        num_classes_,
+        "]");
+    labelCounts[label_index]++;
+  }
+
+  std::priority_queue<Node, std::vector<Node>, NodeComparator> nodes;
+  std::vector<Node> huffmanTree;
+  std::vector<int> labelIndices;
+  labelIndices.resize(num_classes_);
+
+  int current_node_index = 0;
+  for (int i = 0; i < num_classes_; ++i) {
+    const int label = i + 1;
+    Node node(label, labelCounts[i]);
+    nodes.push(node);
+  }
+
+  // Extract node with minimum count and insert it in the tree array.
+  auto get_next_node = [&nodes, &huffmanTree, &labelIndices]() {
+    auto node = nodes.top();
+    int node_index = huffmanTree.size();
+    if (node.label != -1) {
+      int label_index = node.label - 1;
+      labelIndices[label_index] = node_index;
+    }
+    nodes.pop();
+    huffmanTree.push_back(node);
+    return std::pair<int, Node>(node_index, node);
+  };
+
+  // Set the parent id to the children nodes if exist.
+  auto update_node_childrens =
+      [&huffmanTree](const std::pair<int, Node>& indexed_node) {
+        if (indexed_node.second.left_ch_index != -1) {
+          huffmanTree[indexed_node.second.left_ch_index].parent_index =
+              indexed_node.first;
+        }
+        if (indexed_node.second.right_ch_index != -1) {
+          huffmanTree[indexed_node.second.right_ch_index].parent_index =
+              indexed_node.first;
+        }
+      };
+
+  // Merge two nodes and insert the results in the queue.
+  auto merge_nodes = [&nodes, &current_node_index](
+      const std::pair<int, Node>& node_l, const std::pair<int, Node>& node_r) {
+    Node node(-1, node_l.second.count + node_r.second.count);
+    node.index = current_node_index++;
+    node.left_ch_index = node_l.first;
+    node.right_ch_index = node_r.first;
+    nodes.push(node);
+  };
+
+  // Traverse the tree bottom up push path and code into stack to get
+  // the top down path and code.
+  auto get_node_path = [&huffmanTree, &labelIndices](const int label_index) {
+    std::stack<int> path;
+    std::stack<int> pathCode;
+    const int label = label_index + 1;
+    int index = labelIndices[label_index];
+    while (huffmanTree[index].parent_index != -1) {
+      int parentIndex = huffmanTree[index].parent_index;
+      int code = huffmanTree[parentIndex].right_ch_index == index;
+      int pathIndex = huffmanTree[parentIndex].index;
+      path.push(pathIndex);
+      pathCode.push(code);
+      index = parentIndex;
+    }
+
+    PathProto pathProto;
+    pathProto.set_word_id(label);
+    while (!path.empty()) {
+      auto pathNode = pathProto.add_path_nodes();
+      pathNode->set_length(2); // nodes are always binary
+      pathNode->set_target(pathCode.top());
+      pathNode->set_index(path.top());
+      path.pop();
+      pathCode.pop();
+    }
+    return pathProto;
+  };
+
+  // Main loop for buttom up huffman tree construction.
+  while (!nodes.empty()) {
+    auto lNode = get_next_node();
+    update_node_childrens(lNode);
+    if (!nodes.empty()) {
+      auto rNode = get_next_node();
+      update_node_childrens(rNode);
+      merge_nodes(lNode, rNode);
+    }
+  }
+
+  // The parameter matrix size the number of non-leaf nodes.
+  const int wSize = huffmanTree.size() - num_classes_;
+  HierarchyProto huffmanHierarchy;
+  huffmanHierarchy.set_size(wSize);
+  for (int i = 0; i < num_classes_; ++i) {
+    *huffmanHierarchy.add_paths() = get_node_path(i);
+  }
+
+  huffmanHierarchy.SerializeToString(
+      treePathsOutput->template mutable_data<string>());
+
+  return true;
+}
+
 namespace {
 REGISTER_CPU_OPERATOR(HSoftmax, HSoftmaxOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(HSoftmaxGradient,
   HSoftmaxGradientOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(HSoftmaxSearch, HSoftmaxSearchOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    HuffmanTreeHierarchy,
+    HuffmanTreeHierarchyOp<int64_t, CPUContext>);
 
 OPERATOR_SCHEMA(HSoftmax)
   .NumInputs(4)
@@ -496,5 +629,18 @@ OPERATOR_SCHEMA(HSoftmaxSearch)
         "For leafs, it will be the index of the word in the tree.")
     .Output(1, "Y_scores", "The corresponding scores of Y_names");
 SHOULD_NOT_DO_GRADIENT(HSoftmaxSearch);
+
+OPERATOR_SCHEMA(HuffmanTreeHierarchy)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+    HuffmanTreeHierarchy is an operator to generate huffman tree hierarchy given
+    the input labels. It returns the tree as seralized HierarchyProto
+    )DOC")
+    .Arg("num_classes", "The number of classes used to build the hierarchy.")
+    .Input(0, "Labels", "The labels vector")
+    .Output(0, "Hierarch", "Huffman coding hierarchy of the labels");
+
+SHOULD_NOT_DO_GRADIENT(HuffmanTreeHierarchyOp);
 }  // namespace
 }  // namespace caffe2

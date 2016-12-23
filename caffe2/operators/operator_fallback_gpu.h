@@ -9,32 +9,6 @@
 
 namespace caffe2 {
 
-template <int... values>
-class SkipIndices {
- private:
-  template <int V>
-  static inline bool ContainsInternal(const int i) {
-    return (i == V);
-  }
-  template <int First, int Second, int... Rest>
-  static inline bool ContainsInternal(const int i) {
-    return (i == First) && ContainsInternal<Second, Rest...>(i);
-  }
-
- public:
-  static inline bool Contains(const int i) {
-    return ContainsInternal<values...>(i);
-  }
-};
-
-template <>
-class SkipIndices<> {
- public:
-  static inline bool Contains(const int i) {
-    return false;
-  }
-};
-
 /**
  * @brief A templated class to allow one to wrap a CPU operator as a CUDA
  * operator.

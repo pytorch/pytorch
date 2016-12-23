@@ -1,2 +1,0 @@
-float_var := 1.0e10f
-complex_var := 1.2e5+2.3i

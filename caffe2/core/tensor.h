@@ -21,10 +21,6 @@ CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 
 namespace caffe2 {
 
-// Data type for Tensor Index. We use size_t to be safe here as well as for
-// large matrices that are common in sparse math.
-typedef int64_t TIndex;
-
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
  */
@@ -167,7 +163,10 @@ class Tensor {
       return;
     }
     auto newSize = std::accumulate(
-        newDims.begin(), newDims.end(), 1, std::multiplies<TIndex>());
+        newDims.begin(),
+        newDims.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
     if (newSize * meta_.itemsize() <= capacity_) {
       dims_ = newDims;
       size_ = newSize;
@@ -184,7 +183,10 @@ class Tensor {
   template <class T, class ContextForCopy>
   void Reserve(const std::vector<T>& newCapacity, ContextForCopy* context) {
     auto newSize = std::accumulate(
-        newCapacity.begin(), newCapacity.end(), 1, std::multiplies<TIndex>());
+        newCapacity.begin(),
+        newCapacity.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
     if (newSize * meta_.itemsize() <= capacity_) {
       return;
     }
@@ -212,7 +214,10 @@ class Tensor {
         "New outer dimension must be smaller than current.");
     dims_[0] = outer_dim;
     size_ = std::accumulate(
-        dims_.begin(), dims_.end(), 1, std::multiplies<TIndex>());
+        dims_.begin(),
+        dims_.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
   }
 
   /**
@@ -299,7 +304,7 @@ class Tensor {
    *
    * To share data between two tensors, the sizes of the two tensors must be
    * equal already. The reason we do not implicitly do a Resize to make the two
-   * tensors have the same shape is that, we want to allow tensors of different
+   * tensors have the same shape is that we want to allow tensors of different
    * shapes but the same number of items to still be able to share data. This
    * allows one to e.g. have a n-dimensional Tensor and a flattened version
    * sharing the same underlying storage.
@@ -324,7 +329,7 @@ class Tensor {
   /**
    * @brief Shares the data with an externally managed pointer.
    *
-   * This is similar to SharData() but the tensor does not take over ownership
+   * This is similar to ShareData() but the tensor does not take over ownership
    * of the pointer, so the caller can explicitly manage the memory storage.
    * One needs to make sure that the external memory is deallocated only after
    * the tensor finishes using it.

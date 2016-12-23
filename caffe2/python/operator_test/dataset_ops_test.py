@@ -315,6 +315,46 @@ class TestDatasetOps(TestCase):
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
 
+    def test_last_n_window_ops(self):
+        collect_net = core.Net('collect_net')
+        collect_net.GivenTensorFill(
+            [],
+            'input',
+            shape=[3, 2],
+            values=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        )
+        collect_net.LastNWindowCollector(
+            ['input'],
+            ['output'],
+            num_to_collect=7,
+        )
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=1))
+        workspace.RunPlan(plan)
+        reference_result = workspace.FetchBlob('output')
+        self.assertSequenceEqual(
+            [item for sublist in reference_result for item in sublist],
+            [1, 2, 3, 4, 5, 6])
+
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=2))
+        workspace.RunPlan(plan)
+        reference_result = workspace.FetchBlob('output')
+        self.assertSequenceEqual(
+            [item for sublist in reference_result for item in sublist],
+            [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6])
+
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_data',
+                                         [collect_net], num_iter=3))
+        workspace.RunPlan(plan)
+        reference_result = workspace.FetchBlob('output')
+        self.assertSequenceEqual(
+            [item for sublist in reference_result for item in sublist],
+            [3, 4, 5, 6, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2])
+
     def test_collect_tensor_ops(self):
         init_net = core.Net('init_net')
         blobs = ['blob_1', 'blob_2', 'blob_3']

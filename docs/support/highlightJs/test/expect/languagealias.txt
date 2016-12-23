@@ -1,1 +1,0 @@
-<span class="hljs-keyword">var</span> x = <span class="hljs-string">'&lt;p&gt;this should &lt;b&gt;not&lt;/b&gt; be highlighted as &lt;em&gt;HTML&lt;/em&gt;'</span>;

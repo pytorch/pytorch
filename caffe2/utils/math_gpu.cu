@@ -86,10 +86,10 @@ void Gemm<float, CUDAContext>(
 }
 
 template <>
-void Gemm<float, CUDAContext>(
+void GemmEx<float, CUDAContext>(
     const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
     const int M, const int N, const int K, const float alpha, const float* A,
-    const int lda, const float* B, const float beta, const int ldb, float* C,
+    const int lda, const float* B, const int ldb, const float beta, float* C,
     const int ldc, CUDAContext* context) {
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
@@ -122,9 +122,9 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
 }
 }  // namespace
 
-#define CAFFE2_SPECIALIZED_CUDA_SET(T)                                     \
+#define CAFFE2_SPECIALIZED_CUDA_SET(T)                                         \
   template <>                                                                  \
-  void Set<T, CUDAContext>(const int N, const T alpha, T *Y,       \
+  void Set<T, CUDAContext>(const TIndex N, const T alpha, T *Y,                \
                               CUDAContext* context) {                          \
     SetKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,                   \
                 0, context->cuda_stream()>>>(N, alpha, Y);                     \

@@ -132,11 +132,22 @@ void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
 
 // We also provide a gemm that has explicit lda, ldb and ldc specified.
 // In most cases you probably want to use the function above, though.
-template <typename T, class Context, class Engine=DefaultEngine>
-void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K, const T alpha, const T* A,
-    const int lda, const T* B, const T beta, const int ldb, T* C,
-    const int ldc, Context* context);
+template <typename T, class Context, class Engine = DefaultEngine>
+void GemmEx(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int M,
+    const int N,
+    const int K,
+    const T alpha,
+    const T* A,
+    const int lda,
+    const T* B,
+    const int ldb,
+    const T beta,
+    T* C,
+    const int ldc,
+    Context* context);
 
 // Gemv always takes in a M*N matrix A, and depending on whether we set TransA
 // to Trans, the output is:
@@ -148,7 +159,7 @@ void Gemv(const CBLAS_TRANSPOSE TransA, const int M, const int N,
     T* y, Context* context);
 
 template <typename T, class Context>
-void Set(const int N, const T alpha, T* X, Context* context);
+void Set(const TIndex N, const T alpha, T* X, Context* context);
 
 template <typename T, class Context>
 void RandUniform(const int n, const T a, const T b, T* r,

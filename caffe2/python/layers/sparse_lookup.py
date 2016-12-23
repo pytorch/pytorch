@@ -15,7 +15,8 @@ import numpy as np
 
 
 class SparseLookup(ModelLayer):
-    _supported_reducers = ['LogMeanExp', 'LogSumExp', 'Max', 'Mean', 'Sum']
+    _supported_reducers = ['PositionWeighted', 'LogMeanExp', 'LogSumExp', 'Max',
+                           'Mean', 'Sum']
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
@@ -42,6 +43,17 @@ class SparseLookup(ModelLayer):
             (np.float32, inner_shape),
             core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
 
+        if self.request_only:
+            schema.attach_metadata_to_scalars(
+                self.output_schema,
+                schema.Metadata(
+                    categorical_limit=None,
+                    expected_value=None,
+                    feature_specs=schema.FeatureSpec(
+                        feature_is_request_only=True
+                    )
+                )
+            )
         scale = math.sqrt(1.0 / input_dim)
         self.shape = [input_dim] + inner_shape
         self.weight_init = weight_init if weight_init else (
@@ -60,6 +72,21 @@ class SparseLookup(ModelLayer):
                 optimizer=weight_optim
             ))
 
+        if reducer == 'PositionWeighted':
+            self.pos_w = core.ScopedBlobReference(
+                model.net.NextName(self.name + "_pos_w"))
+            self.params.append(
+                LayerParameter(
+                    parameter=self.pos_w,
+                    initializer=core.CreateOperator('ConstantFill',
+                                                    [],
+                                                    self.pos_w,
+                                                    shape=[input_dim, ],
+                                                    value=1.0
+                                                    ),
+                    optimizer=weight_optim
+                ))
+
     def add_ops(self, net):
         if schema.equal_schemas(self.input_record, IdList):
             if self.reducer == 'Sum':
@@ -69,6 +96,22 @@ class SparseLookup(ModelLayer):
                         self.input_record.items(),
                         self.input_record.lengths()
                     ],
+                    self.output_schema.field_blobs()
+                )
+            elif self.reducer == 'PositionWeighted':
+                inc_seq = net.LengthsRangeFill(
+                    [self.input_record.lengths()],
+                    self.input_record.lengths() + '_seq'
+                )
+                gather_pos_w = net.Gather(
+                    [self.pos_w, inc_seq], self.pos_w + '_gather')
+                gather_w = net.Gather(
+                    [self.w, self.input_record.items()], self.w + '_gather')
+
+                weighted_w = net.RowMul([gather_w, gather_pos_w],
+                                        gather_w + '_weighted')
+                net.LengthsSum(
+                    [weighted_w, self.input_record.lengths()],
                     self.output_schema.field_blobs()
                 )
             else:

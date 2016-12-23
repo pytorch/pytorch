@@ -4,6 +4,7 @@
 extern "C" {
 #include <THCStorage.h>
 #include <THCTensor.h>
+#include <THCStream.h>
 }
 
 namespace caffe2 {
@@ -39,7 +40,10 @@ THCState* cudaState(Torch<CUDAContext>* t) {
 
 template <>
 void Torch<CUDAContext>::setContext(CUDAContext* context) {
-  cudaState(this)->currentStream = context->cuda_stream();
+  THCState *state = cudaState(this);
+  THCStream* stream = THCState_getStream(state);
+  THCudaCheck(cudaStreamDestroy(stream->stream));
+  stream->stream = context->cuda_stream();
 }
 
 template <>

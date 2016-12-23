@@ -1,7 +1,0 @@
-@meta
-class C:
-
-    @decorator
-    def f(self, H, V, beta, r):
-        S = (H @ beta - r).T @ inv(H @ V @ H.T) @ (H @ beta - r)
-        return S

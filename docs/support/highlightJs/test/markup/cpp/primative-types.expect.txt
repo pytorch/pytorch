@@ -1,6 +1,0 @@
-<span class="hljs-keyword">const</span> <span class="hljs-keyword">uint64_t</span> MAX_INT_64;
-
-<span class="hljs-keyword">struct</span> position_tag;
-<span class="hljs-keyword">struct</span> texcoord_tag;
-<span class="hljs-keyword">struct</span> color_tag;
-<span class="hljs-keyword">struct</span> normal_tag;

@@ -31,38 +31,75 @@ include(ExternalProject)
 include(cmake/Utils.cmake)
 
 # options
-option(USE_NERVANA_GPU
-       "Use Nervana GPU backend" OFF)
-option(USE_LMDB
-       "Use LMDB" ON)
-option(USE_LEVELDB
-       "Use LMDB" ON)
-option(USE_OPENCV
-       "Use openCV" ON)
-option(USE_ZMQ
-       "Use ZMQ" OFF)
-option(USE_ROCKSDB
-       "Use RocksDB" OFF)
-option(USE_MPI
-       "Use MPI" OFF)
+option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
+option(USE_LMDB "Use LMDB" ON)
+option(USE_LEVELDB "Use LMDB" ON)
+option(USE_OPENCV "Use openCV" ON)
+option(USE_ZMQ "Use ZMQ" OFF)
+option(USE_ROCKSDB "Use RocksDB" OFF)
+option(USE_MPI "Use MPI" OFF)
+option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
+option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ON)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
 
-# Third party builds.
+# ---[ Set link flag, handle additional deps for gcc 5.x
+if(BUILD_SHARED_LIBS)
+    if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0.0)
+      message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
+      set(Caffe2_LINK Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO gcc_s gcc)
+    else()
+      set(Caffe2_LINK Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO)
+    endif()
+else()
+    if(CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0)
+        set(Caffe2_LINK -Wl,--whole-archive Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO gcc_s gcc -Wl,--no-whole-archive)
+    else()
+        set(Caffe2_LINK -Wl,--whole-archive Caffe2_CPU Caffe2_GPU Caffe_PROTO Caffe2_PROTO -Wl,--no-whole-archive)
+    endif()
+endif()
+
+# ---[ Set output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "binaries")
+
+# ---[ Third party builds.
 include_directories(${CMAKE_SOURCE_DIR})
 
-# Old caffe protobuf.
+# ---[ Old caffe protobuf.
 add_subdirectory(caffe/proto)
 
+# ---[ Main build
 add_subdirectory(caffe2)
-target_link_libraries(Caffe2_CPU)
-target_compile_features(Caffe2_CPU PRIVATE cxx_range_for)
 
 # ---[ Copy all python files to build directory
-# ---[ Assemble list of python files to copy
+
+# ---[ Generate and create all needed __init__.py files as they aren't present in source tree
+set(Caffe2_INIT_PY
+        ${CMAKE_BINARY_DIR}/caffe2/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe2/python/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/css/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe2/python/mint/templates/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe2/python/mint/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe2/proto/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe/__init__.py
+        ${CMAKE_BINARY_DIR}/caffe/proto/__init__.py
+)
+foreach(init ${Caffe2_INIT_PY})
+    # create each __init__.py file in build directory
+    file(WRITE ${init} "")
+endforeach()
+
 # Copy the files
-# file(COPY ${Caffe2_PYTHON_SRC} DESTINATION ${CMAKE_BINARY_DIR})
-install(DIRECTORY ${CMAKE_SOURCE_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}
+message(STATUS ${CMAKE_BINARY_DIR})
+# Pick up static python files
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
+        FILES_MATCHING PATTERN "*.py")
+# Caffe proto files
+install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${CMAKE_INSTALL_PREFIX}
+        FILES_MATCHING PATTERN "*.py")
+# Caffe2 proto files
+install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
         FILES_MATCHING PATTERN "*.py")
 

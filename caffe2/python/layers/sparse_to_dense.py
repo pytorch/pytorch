@@ -9,7 +9,6 @@ from caffe2.python.layers.layers import (
 )
 import numpy as np
 
-
 class SparseToDense(ModelLayer):
     _known_types = ['FLOAT', 'ID_LIST']
 
@@ -75,16 +74,12 @@ class SparseToDense(ModelLayer):
         # will break things badly, but this is the most elegant way to pass
         # this info around. Should we change it or it'll be too much work and
         # not worse it?
-        """
         for field, feature_specs in input_specs:
-            self.output_schema[field].set_metadata(
+            schema.attach_metadata_to_scalars(
+                self.output_schema[field],
                 schema.Metadata(
-                    categorical_limit=None,
-                    expected_value=None,
-                    feature_specs=feature_specs
-                )
+                    feature_specs=feature_specs)
             )
-        """
         self.zero = model.global_constants['ZERO']
         self.zero_range = model.global_constants['ZERO_RANGE']
 
