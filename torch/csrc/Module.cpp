@@ -524,6 +524,31 @@ PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs
   return result;
 }
 
+PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
+{
+  // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
+  PyObject *obj;
+  PyObject *doc;
+  if (!PyArg_ParseTuple(args, "OO!", &obj, &THPUtils_stringType, &doc)) {
+    return NULL;
+  }
+
+  if (Py_TYPE(obj) == &PyCFunction_Type) {
+    PyCFunctionObject* f = (PyCFunctionObject *)obj;
+    if (f->m_ml->ml_doc) {
+      return PyErr_Format(PyExc_RuntimeError,
+          "function '%s' already has a docstring", f->m_ml->ml_name);
+    }
+    f->m_ml->ml_doc = THPUtils_stringAsString(doc);
+    Py_INCREF(doc);
+  } else {
+    return PyErr_Format(PyExc_TypeError,
+        "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
+  }
+
+  Py_RETURN_NONE;
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
@@ -547,28 +572,29 @@ extern PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles);
 #endif
 
 static PyMethodDef TorchMethods[] = {
-  {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_O,  NULL},
-  {"_autograd_init",  (PyCFunction)THPAutograd_initExtension,   METH_NOARGS,  NULL},
+  {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
+  {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
+  {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
 #ifdef WITH_CUDA
-  {"_cuda_init",      (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
-  {"_cuda_setDevice", (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
-  {"_cuda_getDevice", (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
+  {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
+  {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
+  {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
-  {"_cuda_setStream", (PyCFunction)THCPModule_setStream_wrap, METH_O, NULL},
+  {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
-  {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState, METH_NOARGS, NULL},
-  {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState, METH_O, NULL},
-  {"_cuda_manualSeed", (PyCFunction)THCPModule_manualSeed, METH_O, NULL},
-  {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll, METH_O, NULL},
-  {"_cuda_seed", (PyCFunction)THCPModule_seed, METH_NOARGS, NULL},
-  {"_cuda_seedAll", (PyCFunction)THCPModule_seedAll, METH_NOARGS, NULL},
-  {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed, METH_NOARGS, NULL},
+  {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
+  {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
+  {"_cuda_manualSeed",  (PyCFunction)THCPModule_manualSeed,       METH_O,       NULL},
+  {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll,  METH_O,       NULL},
+  {"_cuda_seed",        (PyCFunction)THCPModule_seed,             METH_NOARGS,  NULL},
+  {"_cuda_seedAll",     (PyCFunction)THCPModule_seedAll,          METH_NOARGS,  NULL},
+  {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  NULL},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
-  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
-  {"_cuda_getLibPath", (PyCFunction)THCPModule_getLibPath, METH_NOARGS, NULL},
-  {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
+  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize,  METH_NOARGS,  NULL},
+  {"_cuda_getLibPath",  (PyCFunction)THCPModule_getLibPath,       METH_NOARGS,  NULL},
+  {"_cuda_sleep",       (PyCFunction)THCPModule_cudaSleep,        METH_O,       NULL},
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},

@@ -5,10 +5,10 @@ class SGD(Optimizer):
     """Implements stochastic gradient descent with optional momentum.
 
     Args:
-        params: parameters to optimize
-        lr: learning rate
-        momentum: momentum factory (default: 0)
-        weight_decay: weight decay (L2 penalty) (default: 0)
+        params: (sequence) parameters to optimize
+        lr: (float) learning rate
+        momentum: (float) momentum factor (default: 0)
+        weight_decay: (float) weight decay (L2 penalty) (default: 0)
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> def closure():
