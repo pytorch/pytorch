@@ -57,7 +57,7 @@ class Conv1d(Module):
     def forward(self, input):
         func = self._backend.Conv2d(
             stride=(1, self.stride),
-            pad=(0, 0),
+            padding=(0, 0),
             groups=1)
         input = input.view(input.size(0), input.size(1), 1, input.size(2))
         weight = self.weight.view(self.weight.size(0), self.weight.size(1), 1,
@@ -144,7 +144,7 @@ class Conv2d(Module):
         else:
             func = self._backend.Conv2d(
                 stride=(self.dh, self.dw),
-                pad=(self.padh, self.padw),
+                padding=(self.padh, self.padw),
                 groups=self.groups)
         if self.bias is None:
             return func(input, self.weight)
@@ -233,8 +233,10 @@ class ConvTranspose2d(Conv2d):
                         input.size(2), input.size(3)))
 
         func = self._backend.ConvTranspose2d(
-            self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
-            out_padw, out_padh, self.groups)
+                stride = (self.dh, self.dw),
+                padding = (self.padh, self.padw),
+                out_pad = (out_padh, out_padw),
+                groups = self.groups)
         if self.bias is None:
             return func(input, self.weight)
         else:
