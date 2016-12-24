@@ -4,13 +4,13 @@
 
 static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *output_p,
                                                       THIndex_t *ind_p,
-                                                      long nslices,
-                                                      long iwidth, long iheight,
-                                                      long owidth, long oheight)
+                                                      int nslices,
+                                                      int iwidth, int iheight,
+                                                      int owidth, int oheight)
 {
-  long k;
+  int k;
   int has_error = 0;
-  long error_index;
+  THIndex_t error_index;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
@@ -18,7 +18,8 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *o
     real *input_p_k = input_p + k*iwidth*iheight;
     THIndex_t *ind_p_k = ind_p + k*iwidth*iheight;
 
-    long i, j, maxp;
+    int i, j;
+    THIndex_t maxp;
     for(i = 0; i < iheight; i++)
     {
       for(j = 0; j < iwidth; j++)
@@ -37,7 +38,7 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *o
     }
   }
   if (has_error) {
-    THError("found an invalid max index %ld (output volumes are of size %ldx%ld)",
+    THError("found an invalid max index %ld (output volumes are of size %dx%d)",
         error_index, oheight, owidth);
   }
 }
@@ -98,7 +99,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   }
   else
   {
-    long p;
+    int p;
 
     THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
     THTensor_(zero)(output);
@@ -107,14 +108,15 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
     output_data = THTensor_(data)(output);
     indices_data = THIndexTensor_(data)(indices);
 
-#pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {
-      THNN_(SpatialMaxUnpooling_updateOutput_frame)(input_data+p*nslices*iwidth*iheight, output_data+p*nslices*owidth*oheight,
-                                                indices_data+p*nslices*iwidth*iheight,
-                                                nslices,
-                                                iwidth, iheight,
-                                                owidth, oheight);
+      THNN_(SpatialMaxUnpooling_updateOutput_frame)(
+						    input_data+p*nslices*iwidth*iheight,
+						    output_data+p*nslices*owidth*oheight,
+						    indices_data+p*nslices*iwidth*iheight,
+						    nslices,
+						    iwidth, iheight,
+						    owidth, oheight);
     }
   }
 
@@ -125,11 +127,11 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
 
 static void THNN_(SpatialMaxUnpooling_updateGradInput_frame)(real *gradInput_p, real *gradOutput_p,
                                                          THIndex_t *ind_p,
-                                                         long nslices,
-                                                         long iwidth, long iheight,
-                                                         long owidth, long oheight)
+                                                         int nslices,
+                                                         int iwidth, int iheight,
+                                                         int owidth, int oheight)
 {
-  long k;
+  int k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
@@ -137,14 +139,15 @@ static void THNN_(SpatialMaxUnpooling_updateGradInput_frame)(real *gradInput_p, 
     real *gradOutput_p_k = gradOutput_p + k*owidth*oheight;
     THIndex_t *ind_p_k = ind_p + k*iwidth*iheight;
 
-    long i, j, maxp;
+    int i, j;
+    THIndex_t maxp;
     for(i = 0; i < iheight; i++)
     {
       for(j = 0; j < iwidth; j++)
       {
         maxp = ind_p_k[i*iwidth + j] - TH_INDEX_BASE; /* retrieve position of max */
-        if(maxp<0 || maxp>=owidth*oheight){
-            THError("invalid max index %d, owidth= %d, oheight= %d",maxp,owidth,oheight);
+        if(maxp < 0 || maxp >= owidth * oheight) {
+            THError("invalid max index %ld, owidth= %d, oheight= %d", maxp, owidth, oheight);
         }
         gradInput_p_k[i*iwidth + j] = gradOutput_p_k[maxp]; /* update gradient */
       }
@@ -193,7 +196,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
 
   if(owidth!=gradOutput->size[dimw] || oheight!=gradOutput->size[dimh]){
     THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d",
-	    oheight, owidth,gradOutput->size[dimh],gradOutput->size[dimw]);
+	    oheight, owidth, gradOutput->size[dimh], gradOutput->size[dimw]);
   }
 
   /* get raw pointers */
@@ -212,8 +215,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   }
   else
   {
-    long p;
-#pragma omp parallel for private(p)
+    int p;
     for (p = 0; p < nbatch; p++)
     {
       THNN_(SpatialMaxUnpooling_updateGradInput_frame)(gradInput_data+p*nslices*iwidth*iheight, gradOutput_data+p*nslices*owidth*oheight,
