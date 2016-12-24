@@ -9,7 +9,7 @@ class MaxPool1d(Function):
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
         self.kernel_size = kernel_size
-        self.stride = stride
+        self.stride = stride if stride is not None else kernel_size
         self.pad = padding
         self.dilation = dilation
         self.return_indices = return_indices
@@ -54,10 +54,10 @@ class MaxPool1d(Function):
 class MaxPool2d(Function):
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
-        self.kh, self.kw = _pair(kernel_size)
-        self.dh, self.dw = _pair(stride or kernel_size)
-        self.padh, self.padw = _pair(padding)
-        self.dilh, self.dilw = _pair(dilation)
+        self.kernel_size = _pair(kernel_size)
+        self.stride = _pair(stride if stride is not None else kernel_size)
+        self.padding = _pair(padding)
+        self.dilation = _pair(dilation)
         self.return_indices = return_indices
         self.ceil_mode = ceil_mode
 
@@ -66,10 +66,10 @@ class MaxPool2d(Function):
         indices, output = input.new().long(), input.new()
         backend.SpatialDilatedMaxPooling_updateOutput(backend.library_state,
                 input, output, indices,
-                self.kw, self.kh,
-                self.dw, self.dh,
-                self.padw, self.padh,
-                self.dilw, self.dilh,
+                self.kernel_size[1], self.kernel_size[0],
+                self.stride[1], self.stride[0],
+                self.padding[1], self.padding[0],
+                self.dilation[1], self.dilation[0],
                 self.ceil_mode)
         if self.return_indices:
             self.save_for_backward(input, indices)
@@ -90,10 +90,10 @@ class MaxPool2d(Function):
         backend = type2backend[type(input)]
         backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
                 input, grad_output, grad_input, indices, 
-                self.kw, self.kh,
-                self.dw, self.dh,
-                self.padw, self.padh,
-                self.dilw, self.dilh,
+                self.kernel_size[1], self.kernel_size[0],
+                self.stride[1], self.stride[0],
+                self.padding[1], self.padding[0],
+                self.dilation[1], self.dilation[0],
                 self.ceil_mode)
         return grad_input
 
@@ -102,7 +102,7 @@ class MaxPool3d(Function):
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
         self.kernel_size = _triple(kernel_size)
-        self.stride = _triple(stride or kernel_size)
+        self.stride = _triple(stride if stride is not None else kernel_size)
         self.padding  = _triple(padding)
         self.dilation = _triple(dilation)
         self.return_indices = return_indices
@@ -113,10 +113,10 @@ class MaxPool3d(Function):
         indices, output = input.new().long(), input.new()
         backend.VolumetricDilatedMaxPooling_updateOutput(backend.library_state,
                 input, output, indices,
-                self.kernel_size[0], self.kernel_size[1], self.kernel_size[2],
-                self.stride[0], self.stride[1], self.stride[2],
-                self.padding[0], self.padding[1], self.padding[2],
-                self.dilation[0], self.dilation[1], self.dilation[2],
+                self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+                self.stride[0], self.stride[2], self.stride[1],
+                self.padding[0], self.padding[2], self.padding[1],
+                self.dilation[0], self.dilation[2], self.dilation[1],
                 self.ceil_mode)
         if self.return_indices:
             self.save_for_backward(input, indices)
@@ -137,10 +137,10 @@ class MaxPool3d(Function):
         backend = type2backend[type(input)]
         backend.VolumetricDilatedMaxPooling_updateGradInput(backend.library_state,
                 input, grad_output, grad_input, indices, 
-                self.kernel_size[0], self.kernel_size[1], self.kernel_size[2],
-                self.stride[0], self.stride[1], self.stride[2],
-                self.padding[0], self.padding[1], self.padding[2],
-                self.dilation[0], self.dilation[1], self.dilation[2],
+                self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+                self.stride[0], self.stride[2], self.stride[1],
+                self.padding[0], self.padding[2], self.padding[1],
+                self.dilation[0], self.dilation[2], self.dilation[1],
                 self.ceil_mode)
         return grad_input
 
