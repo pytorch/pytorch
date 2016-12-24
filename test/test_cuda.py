@@ -9,6 +9,11 @@ import torch.cuda.comm as comm
 
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state
 
+if not torch.cuda.is_available():
+    print('CUDA not available, skipping tests')
+    import sys
+    sys.exit()
+
 def is_floating(t):
     return type(t) in [torch.FloatTensor, torch.DoubleTensor,
                        torch.cuda.FloatTensor, torch.cuda.DoubleTensor]

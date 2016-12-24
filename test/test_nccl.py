@@ -6,6 +6,11 @@ import torch.cuda
 
 from common import TestCase
 
+if not torch.cuda.is_available():
+    print('CUDA not available, skipping tests')
+    import sys
+    sys.exit()
+
 nGPUs = torch.cuda.device_count()
 
 

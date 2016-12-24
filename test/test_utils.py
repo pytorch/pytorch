@@ -297,7 +297,7 @@ class TestLuaReader(TestCase):
         print('Downloading test file for TestLuaReader.')
         DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_modules.t7'
         urllib = cls._get_urllib('request')
-        data = urllib.urlopen(DATA_URL).read()
+        data = urllib.urlopen(DATA_URL, timeout=15).read()
         with open(test_file_path, 'wb') as f:
             f.write(data)
 

@@ -37,16 +37,11 @@ $PYCMD test_utils.py
 echo "Running dataloader tests"
 $PYCMD test_dataloader.py
 
-if which nvcc >/dev/null 2>&1
-then
-    echo "Running cuda tests"
-    $PYCMD test_cuda.py
+echo "Running cuda tests"
+$PYCMD test_cuda.py
 
-    echo "Running NCCL tests"
-    $PYCMD test_nccl.py
-else
-    echo "nvcc not found in PATH, skipping CUDA tests"
-fi
+echo "Running NCCL tests"
+$PYCMD test_nccl.py
 
 if [ "$1" == "coverage" ];
 then
