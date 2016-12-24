@@ -232,7 +232,7 @@ class ConvTranspose2d(Conv2d):
                         input.size(2), input.size(3)))
         return functional.conv2d_transpose(input, self.weight, self.bias, 
                 stride=(self.dh, self.dw),
-                pad=(self.padh, self.padw),
+                padding=(self.padh, self.padw),
                 out_pad=(out_padh, out_padw),
                 groups=self.groups)
 
