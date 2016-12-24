@@ -178,11 +178,11 @@ if(NOT USE_MPI)
   exclude(Caffe2_BINARY_SRCS "${Caffe2_BINARY_SRCS}" "${tmp}")
 endif()
 
-foreach(binary_src ${Caffe2_BINARY_SRCS})
-  get_filename_component(bin_name ${binary_src} NAME_WE)
-  add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem ${Caffe2_LINKER_LIBS})
-  install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
-endforeach()
+#foreach(binary_src ${Caffe2_BINARY_SRCS})
+#  get_filename_component(bin_name ${binary_src} NAME_WE)
+#  add_executable(${bin_name} ${binary_src})
+#  target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem ${Caffe2_LINKER_LIBS})
+#  install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
+#endforeach()
 
 
