@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Function
 from torch._thnn import type2backend
 import torch.backends.cudnn as cudnn
-
+from torch.nn.modules.utils import _pair
 
 class _Conv2dBase(Function):
 
@@ -39,16 +39,16 @@ class _Conv2dBase(Function):
 
 class Conv2d(_Conv2dBase):
 
-    def __init__(self, stride, pad, groups):
+    def __init__(self, stride=1, padding=0, groups=1):
         super(Conv2d, self).__init__()
-        self.stride = stride
-        self.pad = pad
+        self.stride = _pair(stride)
+        self.padding = _pair(padding)
         self.groups = groups
 
     def _output_size(self, input, weight):
         kh, kw = weight.size(2), weight.size(3)
-        h = (input.size(2) + 2 * self.pad[0] - kh) // self.stride[0] + 1
-        w = (input.size(3) + 2 * self.pad[1] - kw) // self.stride[1] + 1
+        h = (input.size(2) + 2 * self.padding[0] - kh) // self.stride[0] + 1
+        w = (input.size(3) + 2 * self.padding[1] - kw) // self.stride[1] + 1
 
         return input.size(0), weight.size(0), h, w
 
@@ -56,7 +56,7 @@ class Conv2d(_Conv2dBase):
         self.use_cudnn = cudnn.is_acceptable(input)
         if self.use_cudnn:
             self._cudnn_info = torch._C._cudnn_convolution_full_forward(
-                input, weight, bias, output, self.pad[0], self.pad[1],
+                input, weight, bias, output, self.padding[0], self.padding[1],
                 self.stride[0], self.stride[1], self.groups, cudnn.benchmark)
         else:
             # TODO: implement groups for THNN
@@ -68,7 +68,7 @@ class Conv2d(_Conv2dBase):
             backend.SpatialConvolutionMM_updateOutput(
                 backend.library_state, input, output, weight, bias,
                 self._finput, self._fgrad_input, weight.size(3), weight.size(2),
-                self.stride[1], self.stride[0], self.pad[1], self.pad[0])
+                self.stride[1], self.stride[0], self.padding[1], self.padding[0])
 
     def _grad_input(self, input, weight, bias, grad_output):
         if self.use_cudnn:
@@ -82,8 +82,8 @@ class Conv2d(_Conv2dBase):
             backend.SpatialConvolutionMM_updateGradInput(
                 backend.library_state, input, grad_output, grad_input,
                 weight, self._finput, self._fgrad_input, weight.size(3),
-                weight.size(2), self.stride[1], self.stride[0], self.pad[1],
-                self.pad[0])
+                weight.size(2), self.stride[1], self.stride[0], self.padding[1],
+                self.padding[0])
         return grad_input
 
     def _grad_params(self, input, weight, bias, grad_output):
@@ -107,23 +107,23 @@ class Conv2d(_Conv2dBase):
             backend.SpatialConvolutionMM_accGradParameters(
                 backend.library_state, input, grad_output, grad_weight,
                 grad_bias, self._finput, self._fgrad_input, weight.size(3),
-                weight.size(2), self.stride[1], self.stride[0], self.pad[1],
-                self.pad[0], 1)
+                weight.size(2), self.stride[1], self.stride[0], self.padding[1],
+                self.padding[0], 1)
         return grad_weight, grad_bias
 
 
 class ConvTranspose2d(_Conv2dBase):
-    def __init__(self, kw, kh, dw, dh, padw, padh, out_padw, out_padh, groups):
+    def __init__(self, stride=1, padding=0, groups=1, out_pad=0):
         super(ConvTranspose2d, self).__init__()
-        self.stride = (dh, dw)
-        self.pad = (padh, padw)
-        self.out_pad = (out_padh, out_padw)
+        self.stride = _pair(stride)
+        self.padding = _pair(padding)
+        self.out_pad = _pair(out_pad)
         self.groups = groups
 
     def _output_size(self, input, weight):
         kh, kw = weight.size(2), weight.size(3)
-        h = (input.size(2) - 1) * self.stride[0] - 2 * self.pad[0] + kh + self.out_pad[0]
-        w = (input.size(3) - 1) * self.stride[1] - 2 * self.pad[1] + kw + self.out_pad[1]
+        h = (input.size(2) - 1) * self.stride[0] - 2 * self.padding[0] + kh + self.out_pad[0]
+        w = (input.size(3) - 1) * self.stride[1] - 2 * self.padding[1] + kw + self.out_pad[1]
         return input.size(0), weight.size(1), h, w
 
     def _update_output(self, input, weight, bias, output):
@@ -131,7 +131,7 @@ class ConvTranspose2d(_Conv2dBase):
         if self.use_cudnn:
             self._cudnn_info = \
                 torch._C._cudnn_convolution_transpose_full_forward(
-                    input, weight, bias, output, self.pad[0], self.pad[1],
+                    input, weight, bias, output, self.padding[0], self.padding[1],
                     self.stride[0], self.stride[1], self.groups, cudnn.benchmark)
         else:
             # TODO: implement groups for THNN
@@ -143,7 +143,7 @@ class ConvTranspose2d(_Conv2dBase):
             backend.SpatialFullConvolution_updateOutput(
                 backend.library_state, input, output, weight, bias,
                 _finput, _fgrad_input, weight.size(3), weight.size(2),
-                self.stride[1], self.stride[0], self.pad[1], self.pad[0],
+                self.stride[1], self.stride[0], self.padding[1], self.padding[0],
                 self.out_pad[1], self.out_pad[0])
 
     def _grad_input(self, input, weight, bias, grad_output):
@@ -161,8 +161,8 @@ class ConvTranspose2d(_Conv2dBase):
             backend.SpatialFullConvolution_updateGradInput(
                 backend.library_state, input, grad_output, grad_input,
                 weight, grad_columns, weight.size(3),
-                weight.size(2), self.stride[1], self.stride[0], self.pad[1],
-                self.pad[0], self.out_pad[1], self.out_pad[0])
+                weight.size(2), self.stride[1], self.stride[0], self.padding[1],
+                self.padding[0], self.out_pad[1], self.out_pad[0])
         return grad_input
 
     def _grad_params(self, input, weight, bias, grad_output):
@@ -188,7 +188,7 @@ class ConvTranspose2d(_Conv2dBase):
             backend.SpatialFullConvolution_accGradParameters(
                 backend.library_state, input, grad_output, grad_weight,
                 grad_bias, _finput, _fgrad_input, weight.size(3),
-                weight.size(2), self.stride[1], self.stride[0], self.pad[1],
-                self.pad[0], self.out_pad[1], self.out_pad[0], 1)
+                weight.size(2), self.stride[1], self.stride[0], self.padding[1],
+                self.padding[0], self.out_pad[1], self.out_pad[0], 1)
         return grad_weight, grad_bias
 
