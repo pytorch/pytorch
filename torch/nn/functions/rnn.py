@@ -71,7 +71,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
             input = torch.cat(all_output, 2)
 
             if dropout != 0 and i < num_layers - 1:
-                input = F.dropout(p=dropout, train=train, inplace=False)(input)
+                input = F.dropout(input, p=dropout, training=train, inplace=False)
 
         if lstm:
             next_h, next_c = zip(*next_hidden)
