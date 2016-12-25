@@ -203,8 +203,8 @@ class AvgPool2d(Module):
         self.count_include_pad = count_include_pad
 
     def forward(self, input):
-        return self._backend.AvgPool2d(self.kernel_size, self.stride,
-                self.padding, self.ceil_mode, self.count_include_pad)(input)
+        return F.avg_pool2d(input, self.kernel_size, self.stride,
+                self.padding, self.ceil_mode, self.count_include_pad)
 
 
 class MaxPool3d(Module):
@@ -266,7 +266,7 @@ class AvgPool3d(Module):
         self.stride = stride
 
     def forward(self, input):
-        return self._backend.AvgPool3d(self.kernel_size, self.stride)(input)
+        return F.avg_pool3d(input, self.kernel_size, self.stride)
 
 
 class FractionalMaxPool2d(Module):

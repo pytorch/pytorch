@@ -24,11 +24,12 @@ def conv2d_transpose(input, weight, bias=None, stride=1, padding=0, groups=1, ou
 
 # Pooling
 
-def avg_pool2d(input, *args, **kwargs):
-    return torch.nn.AvgPool2d(*args, **kwargs)(input)
+def avg_pool2d(input, kernel_size, stride=1, padding=0,
+        ceil_mode=False, count_include_pad=True):
+    return functions.thnn.AvgPool2d(kernel_size, stride, padding, ceil_mode)(input)
 
-def avg_pool3d(input, *args, **kwargs):
-    return torch.nn.AvgPool3d(*args, **kwargs)(input)
+def avg_pool3d(input, kernel_size, stride=1):
+    return functions.thnn.AvgPool3d(kernel_size, stride)(input)
 
 
 # share the same interface
