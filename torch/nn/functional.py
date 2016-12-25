@@ -89,9 +89,6 @@ def sigmoid(input):
 def logsigmoid(input):
     return functions.thnn.LogSigmoid()(input)
 
-def tanh(input):
-    return torch.tanh(input)
-
 def hardshrink(input, lambd=0.5):
     return functions.thnn.auto.Hardshrink(lambd)(input)
 
