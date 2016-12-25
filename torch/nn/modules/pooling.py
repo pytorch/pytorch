@@ -100,13 +100,13 @@ class MaxPool2d(Module):
         dh, dw = _pair(self.stride)
         padh, padw = _pair(self.padding)
         dilh, dilw = _pair(self.dilation)
-        padding_str=', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
-                      if self.padh != 0 and self.padw !=0 else ''
-        dilation_str=(', dilation=(' + str(self.dilh) + ', ' + str(self.dilw) + ')' \
-                        if self.dilh != 0 and self.dilw != 0 else '')
+        padding_str=', padding=(' + str(padh) + ', ' + str(padw) + ')' \
+                      if padh != 0 and padw !=0 else ''
+        dilation_str=(', dilation=(' + str(dilh) + ', ' + str(dilw) + ')' \
+                        if dilh != 0 and dilw != 0 else '')
         return  self.__class__.__name__ + ' (' \
-            + 'size=(' + str(self.kh) + ', ' + str(self.kw) + ')' \
-            + ', stride=(' + str(self.dh) + ', ' + str(self.dw) + ')' \
+            + 'size=(' + str(kh) + ', ' + str(kw) + ')' \
+            + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
             + padding_str + dilation_str + ')'
 
 
