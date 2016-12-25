@@ -2,26 +2,30 @@ from torch.autograd.function import Function
 from torch._thnn import type2backend
 
 from . import _all_functions
+from torch.nn.modules.utils import _pair, _triple
 
 
-class _MaxPoolingBase(Function):
-    def __init__(self, *args):
-        super(_MaxPoolingBase, self).__init__()
-        self.additional_args = args[:-1]
-        self.save_indices = args[-1]
-
-    def _fw_call(self, *args):
-        self._backend.SpatialDilatedMaxPooling_updateOutput(*args)
-
-    def _bw_call(self, *args):
-        self._backend.SpatialDilatedMaxPooling_updateGradInput(*args)
+class MaxPool1d(Function):
+    def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
+                 return_indices=False, ceil_mode=False):
+        self.kernel_size = kernel_size
+        self.stride = stride if stride is not None else kernel_size
+        self.pad = padding
+        self.dilation = dilation
+        self.return_indices = return_indices
+        self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        self._backend = type2backend[type(input)]
+        backend = type2backend[type(input)]
         indices, output = input.new().long(), input.new()
-        self._fw_call(self._backend.library_state, input, output, indices,
-                *self.additional_args)
-        if self.save_indices:
+        backend.SpatialDilatedMaxPooling_updateOutput(backend.library_state,
+                input, output, indices,
+                self.kernel_size, 1,
+                self.stride, 1,
+                self.pad, 0,
+                self.dilation, 1,
+                self.ceil_mode)
+        if self.return_indices:
             self.save_for_backward(input, indices)
             self.mark_non_differentiable(indices)
             return output, indices
@@ -31,35 +35,114 @@ class _MaxPoolingBase(Function):
             return output
 
     def backward(self, grad_output, _indices_grad=None):
-        if self.save_indices:
+        if self.return_indices:
             input, indices = self.saved_tensors
         else:
             input, = self.saved_tensors
             indices = self.indices
         grad_input = grad_output.new()
-        self._bw_call(self._backend.library_state, input, grad_output,
-                grad_input, indices, *self.additional_args)
+        backend = type2backend[type(input)]
+        backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
+                input, grad_output, grad_input, indices, 
+                self.kernel_size, 1,
+                self.stride, 1,
+                self.pad, 0,
+                self.dilation, 1,
+                self.ceil_mode)
         return grad_input
 
+class MaxPool2d(Function):
+    def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
+                 return_indices=False, ceil_mode=False):
+        self.kernel_size = _pair(kernel_size)
+        self.stride = _pair(stride if stride is not None else kernel_size)
+        self.padding = _pair(padding)
+        self.dilation = _pair(dilation)
+        self.return_indices = return_indices
+        self.ceil_mode = ceil_mode
 
-class MaxPool1d(_MaxPoolingBase):
-    def __init__(self, *args):
-        super(MaxPool1d, self).__init__(*args)
-        aa = self.additional_args
-        self.additional_args = (aa[0], 1, aa[1], 1, aa[2], 0, aa[3], 1, aa[4])
+    def forward(self, input):
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        backend.SpatialDilatedMaxPooling_updateOutput(backend.library_state,
+                input, output, indices,
+                self.kernel_size[1], self.kernel_size[0],
+                self.stride[1], self.stride[0],
+                self.padding[1], self.padding[0],
+                self.dilation[1], self.dilation[0],
+                self.ceil_mode)
+        if self.return_indices:
+            self.save_for_backward(input, indices)
+            self.mark_non_differentiable(indices)
+            return output, indices
+        else:
+            self.save_for_backward(input)
+            self.indices = indices
+            return output
 
+    def backward(self, grad_output, _indices_grad=None):
+        if self.return_indices:
+            input, indices = self.saved_tensors
+        else:
+            input, = self.saved_tensors
+            indices = self.indices
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
+                input, grad_output, grad_input, indices, 
+                self.kernel_size[1], self.kernel_size[0],
+                self.stride[1], self.stride[0],
+                self.padding[1], self.padding[0],
+                self.dilation[1], self.dilation[0],
+                self.ceil_mode)
+        return grad_input
 
-class MaxPool2d(_MaxPoolingBase):
-    pass
+class MaxPool3d(Function):
 
+    def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
+                 return_indices=False, ceil_mode=False):
+        self.kernel_size = _triple(kernel_size)
+        self.stride = _triple(stride if stride is not None else kernel_size)
+        self.padding  = _triple(padding)
+        self.dilation = _triple(dilation)
+        self.return_indices = return_indices
+        self.ceil_mode = ceil_mode
 
-class MaxPool3d(_MaxPoolingBase):
+    def forward(self, input):
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        backend.VolumetricDilatedMaxPooling_updateOutput(backend.library_state,
+                input, output, indices,
+                self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+                self.stride[0], self.stride[2], self.stride[1],
+                self.padding[0], self.padding[2], self.padding[1],
+                self.dilation[0], self.dilation[2], self.dilation[1],
+                self.ceil_mode)
+        if self.return_indices:
+            self.save_for_backward(input, indices)
+            self.mark_non_differentiable(indices)
+            return output, indices
+        else:
+            self.save_for_backward(input)
+            self.indices = indices
+            return output
 
-    def _fw_call(self, *args):
-        self._backend.VolumetricDilatedMaxPooling_updateOutput(*args)
-
-    def _bw_call(self, *args):
-        self._backend.VolumetricDilatedMaxPooling_updateGradInput(*args)
+    def backward(self, grad_output, _indices_grad=None):
+        if self.return_indices:
+            input, indices = self.saved_tensors
+        else:
+            input, = self.saved_tensors
+            indices = self.indices
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.VolumetricDilatedMaxPooling_updateGradInput(backend.library_state,
+                input, grad_output, grad_input, indices, 
+                self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+                self.stride[0], self.stride[2], self.stride[1],
+                self.padding[0], self.padding[2], self.padding[1],
+                self.dilation[0], self.dilation[2], self.dilation[1],
+                self.ceil_mode)
+        return grad_input
 
 
 class MaxUnpool2d(Function):
