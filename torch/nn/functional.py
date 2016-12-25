@@ -83,9 +83,6 @@ def prelu(input, weight):
 def rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False):
     return functions.thnn.RReLU(lower, upper, training, inplace)(input)
 
-def sigmoid(input):
-    return functions.thnn.Sigmoid()(input)
-
 def logsigmoid(input):
     return functions.thnn.LogSigmoid()(input)
 

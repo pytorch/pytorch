@@ -160,7 +160,7 @@ class Sigmoid(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        return F.sigmoid(input)
+        return torch.sigmoid(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'

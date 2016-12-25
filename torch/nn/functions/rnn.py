@@ -22,10 +22,10 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
         ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
-        ingate = F.sigmoid(ingate)
-        forgetgate = F.sigmoid(forgetgate)
+        ingate = torch.sigmoid(ingate)
+        forgetgate = torch.sigmoid(forgetgate)
         cellgate = torch.tanh(cellgate)
-        outgate = F.sigmoid(outgate)
+        outgate = torch.sigmoid(outgate)
 
         cy = (forgetgate * cx) + (ingate * cellgate)
         hy = outgate * torch.tanh(cy)
@@ -39,8 +39,8 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         i_r, i_i, i_n = gi.chunk(3, 1)
         h_r, h_i, h_n = gh.chunk(3, 1)
 
-        resetgate = F.sigmoid(i_r + h_r)
-        inputgate = F.sigmoid(i_i + h_i)
+        resetgate = torch.sigmoid(i_r + h_r)
+        inputgate = torch.sigmoid(i_i + h_i)
         newgate = torch.tanh(i_n + resetgate * h_n)
         hy = newgate + inputgate * (hidden - newgate)
 
