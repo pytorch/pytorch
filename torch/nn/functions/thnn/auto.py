@@ -212,13 +212,11 @@ def _generate_function_classes(scope_dict):
     name_remap = {
         'TemporalConvolution': 'Conv1d',
         'SpatialDilatedConvolution': 'DilatedConv2d',
-        'SpatialAveragePooling': 'AvgPool2d',
         'SpatialMaxUnpooling': 'MaxUnpool2d',
         'SpatialReflectionPadding': 'ReflectionPad2d',
         'SpatialReplicationPadding': 'ReplicationPad2d',
         'VolumetricReplicationPadding': 'ReplicationPad3d',
         'VolumetricMaxUnpooling': 'MaxUnpool3d',
-        'VolumetricAveragePooling': 'AvgPool3d',
         'SoftMax': 'Softmax',
         'LogSoftMax': 'LogSoftmax',
         'HardTanh': 'Hardtanh',

@@ -195,16 +195,15 @@ class AvgPool2d(Module):
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
             count_include_pad=True):
         super(AvgPool2d, self).__init__()
-        self.kh, self.kw = _pair(kernel_size)
-        self.dh, self.dw = _pair(stride or kernel_size)
-        self.padh, self.padw = _pair(padding)
+        self.kernel_size = kernel_size
+        self.stride = stride or kernel_size
+        self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
 
     def forward(self, input):
-        return self._backend.AvgPool2d(self.kw, self.kh, self.dw, self.dh,
-                self.padw, self.padh, self.ceil_mode,
-                self.count_include_pad)(input)
+        return self._backend.AvgPool2d(self.kernel_size, self.stride,
+                self.padding, self.ceil_mode, self.count_include_pad)(input)
 
 
 class MaxPool3d(Module):
@@ -262,12 +261,11 @@ class AvgPool3d(Module):
     """
     def __init__(self, kernel_size, stride=None):
         super(AvgPool3d, self).__init__()
-        self.kt, self.kh, self.kw = _triple(kernel_size)
-        self.dt, self.dh, self.dw = _triple(stride or kernel_size)
+        self.kernel_size = kernel_size
+        self.stride = stride
 
     def forward(self, input):
-        return self._backend.AvgPool3d(self.kt, self.kw, self.kh,
-                self.dt, self.dw, self.dh)(input)
+        return self._backend.AvgPool3d(self.kernel_size, self.stride)(input)
 
 
 class FractionalMaxPool2d(Module):
@@ -390,8 +388,8 @@ class LPPool2d(Module):
 
     def forward(self, input):
         out = input.pow(self.norm_type)
-        out = self._backend.AvgPool2d(self.kw, self.kh, self.dw, self.dh,
-                0, 0, self.ceil_mode, True)(out)
+        out = self._backend.AvgPool2d((self.kh, self.kw),
+                (self.dh, self.dw), self.ceil_mode)(out)
         return out.mul(self.kw * self.kh).pow(1./self.norm_type)
 
 
