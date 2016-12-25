@@ -3,7 +3,7 @@ from torch.autograd import Variable
 
 from .module import Module
 from .utils import _pair, _triple
-from .. import functional
+from .. import functional as F
 
 
 class MaxPool1d(Module):
@@ -42,7 +42,7 @@ class MaxPool1d(Module):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        return functional.max_pool1d(input, self.kernel_size, self.stride,
+        return F.max_pool1d(input, self.kernel_size, self.stride,
                 self.padding, self.dilation, self.ceil_mode,
                 self.return_indices)
 
@@ -92,7 +92,7 @@ class MaxPool2d(Module):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        return functional.max_pool2d(input, self.kernel_size, self.stride,
+        return F.max_pool2d(input, self.kernel_size, self.stride,
                 self.padding, self.dilation, self.return_indices,
                 self.return_indices)
 
@@ -239,7 +239,7 @@ class MaxPool3d(Module):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        return functional.max_pool3d(input, self.kernel_size, self.stride,
+        return F.max_pool3d(input, self.kernel_size, self.stride,
                 self.padding, self.dilation, self.return_indices,
                 self.return_indices)
 
@@ -383,15 +383,13 @@ class LPPool2d(Module):
     def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
         super(LPPool2d, self).__init__()
         self.norm_type = norm_type
-        self.kh, self.kw = _pair(kernel_size)
-        self.dh, self.dw = _pair(stride or kernel_size)
+        self.kernel_size = kernel_size
+        self.stride = stride
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        out = input.pow(self.norm_type)
-        out = self._backend.AvgPool2d((self.kh, self.kw),
-                (self.dh, self.dw), self.ceil_mode)(out)
-        return out.mul(self.kw * self.kh).pow(1./self.norm_type)
+        return F.lp_pool2d(input, self.norm_type, self.kernel_size,
+                self.stride, self.ceil_mode)
 
 
 # TODO: AdaptiveMaxPool2d
