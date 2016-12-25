@@ -8,7 +8,7 @@ except ImportError:
 
 
 def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        hy = F.ReLU(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+        hy = F.relu(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
         return hy
 
 
