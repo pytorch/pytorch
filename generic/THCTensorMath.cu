@@ -81,38 +81,53 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   int i, j;
   long offset;
   int ndim = dimension + 1;
+  int ldimension = dimension;
+
   for (i = 0; i < numInputs; i++)
   {
     ndim = THMax(ndim, THCTensor_(nDimension)(state, inputs[i]));
   }
 
+  if (dimension == -2) ldimension = ndim ? (ndim - 1) : 0;
+
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
-  THArgCheck(dimension >= 0, 4, "invalid dimension %d", dimension+1);
+  THArgCheck(ldimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
 
   size = THLongStorage_newWithSize(ndim);
   for(i = 0; i < ndim; i++)
   {
+    // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
     long dimSize = i < THCTensor_(nDimension)(state, inputs[0])
                        ? THCTensor_(size)(state, inputs[0], i)
-                       : 1;
-    if (i == dimension)
+                       : THMin(THCTensor_(nDimension)(state, inputs[0]), 1);
+    if (i == ldimension)
     {
       for (j = 1; j < numInputs; j++)
       {
+        // accumulate the size over the dimension we want to cat on.
+        // Empty tensors are allowed
         dimSize += i < THCTensor_(nDimension)(state, inputs[j])
                        ? THCTensor_(size)(state, inputs[j], i)
-                       : 1;
+                       : THMin(THCTensor_(nDimension)(state, inputs[j]), 1);
       }
     }
     else
     {
       for (j = 1; j < numInputs; j++)
       {
-        if (dimSize != (i < THCTensor_(nDimension)(state, inputs[j])
-			? THCTensor_(size)(state, inputs[j], i)
-			: 1)) {
+        long sz = i < THCTensor_(nDimension)(state, inputs[j])
+                      ? THCTensor_(size)(state, inputs[j], i)
+                      : THMin(THCTensor_(nDimension)(state, inputs[j]), 1);
+
+        // If it's a dimension we're not catting on
+        // Then fail if sizes are different AND > 0
+        if (dimSize != sz && dimSize && sz) {
           THLongStorage_free(size);
           THError("inconsistent tensor sizes");
+        }
+        else if(!dimSize)
+        {
+          dimSize = sz;
         }
       }
     }
@@ -125,11 +140,15 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   offset = 0;
   for (j = 0; j < numInputs; j++)
   {
-    long dimSize = dimension < THCTensor_(nDimension)(state, inputs[j])
-			       ? THCTensor_(size)(state, inputs[j], dimension)
+    // No reason to copy when input is empty
+    if (!THCTensor_(nDimension)(state, inputs[j])) continue;
+
+    long dimSize = ldimension < THCTensor_(nDimension)(state, inputs[j])
+			       ? THCTensor_(size)(state, inputs[j], ldimension)
 			       : 1;
+
     THCTensor *nt = THCTensor_(newWithTensor)(state, result);
-    THCTensor_(narrow)(state, nt, NULL, dimension, offset, dimSize);
+    THCTensor_(narrow)(state, nt, NULL, ldimension, offset, dimSize);
     THCTensor_(copy)(state, nt, inputs[j]);
     THCTensor_(free)(state, nt);
     offset += dimSize;
