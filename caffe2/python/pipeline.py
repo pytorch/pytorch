@@ -29,7 +29,7 @@ class Output(object):
         self.should_stop = should_stop
 
 
-DEFAULT_QUEUE_CAPACITY = 10
+DEFAULT_QUEUE_CAPACITY = 100
 
 
 def _init_output(output, capacity, global_init_net, global_exit_net):

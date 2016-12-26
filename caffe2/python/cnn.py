@@ -229,6 +229,7 @@ class CNNModelHelper(ModelHelperBase):
         """
         weight_init = weight_init if weight_init else ('XavierFill', {})
         bias_init = bias_init if bias_init else ('ConstantFill', {})
+        use_bias = False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
         if self.use_cudnn:
             kwargs['engine'] = 'CUDNN'
             kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
@@ -261,23 +262,35 @@ class CNNModelHelper(ModelHelperBase):
                     shape=weight_shape,
                     **weight_init[1]
                 )
-                bias = self.param_init_net.__getattr__(bias_init[0])(
-                    [],
-                    blob_out + '_gconv_%d_b' % i,
-                    shape=[int(dim_out / group)],
-                    **bias_init[1]
-                )
+                if use_bias:
+                    bias = self.param_init_net.__getattr__(bias_init[0])(
+                        [],
+                        blob_out + '_gconv_%d_b' % i,
+                        shape=[int(dim_out / group)],
+                        **bias_init[1]
+                    )
             else:
                 weight = core.ScopedBlobReference(
                     blob_out + '_gconv_%d_w' % i, self.param_init_net)
-                bias = core.ScopedBlobReference(
-                    blob_out + '_gconv_%d_b' % i, self.param_init_net)
-            self.params.extend([weight, bias])
+                if use_bias:
+                    bias = core.ScopedBlobReference(
+                        blob_out + '_gconv_%d_b' % i, self.param_init_net)
+            if use_bias:
+                self.params.extend([weight, bias])
+            else:
+                self.params.extend([weight])
             self.weights.append(weight)
-            self.biases.append(bias)
+            if use_bias:
+                self.biases.append(bias)
+            if use_bias:
+                inputs = [weight, bias]
+            else:
+                inputs = [weight]
+            if 'no_bias' in kwargs:
+                del kwargs['no_bias']
             conv_blobs.append(
                 splitted_blobs[i].Conv(
-                    [weight, bias],
+                    inputs,
                     blob_out + '_gconv_%d' % i,
                     kernel=kernel,
                     order=self.order,
