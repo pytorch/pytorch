@@ -532,6 +532,8 @@ void THTensor_(lsh)(THTensor *r_, THTensor *t, real value)
           rp[i] = tp[i] * temp;
 #elif defined(TH_REAL_IS_DOUBLE)
           rp[i] = tp[i] * temp;
+#elif defined(TH_REAL_IS_BYTE)
+          rp[i] = ((real) tp[i]) << value;
 #else
           rp[i] = ((unsigned real) tp[i]) << value;
 #endif
@@ -541,6 +543,8 @@ void THTensor_(lsh)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data * temp););
 #elif defined(TH_REAL_IS_DOUBLE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data * temp););
+#elif defined(TH_REAL_IS_BYTE)
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((real) *t_data) << value););
 #else
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((unsigned real) *t_data) << value););
 #endif
@@ -566,6 +570,8 @@ void THTensor_(rsh)(THTensor *r_, THTensor *t, real value)
           rp[i] = tp[i] / temp;
 #elif defined(TH_REAL_IS_DOUBLE)
           rp[i] = tp[i] / temp;
+#elif defined(TH_REAL_IS_BYTE)
+          rp[i] = ((real) tp[i]) >> value;
 #else
           rp[i] = ((unsigned real) tp[i]) >> value;
 #endif
@@ -575,6 +581,8 @@ void THTensor_(rsh)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data / temp););
 #elif defined(TH_REAL_IS_DOUBLE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data / temp););
+#elif defined(TH_REAL_IS_BYTE)
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((real) *t_data) >> value););
 #else
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((unsigned real) *t_data) >> value););
 #endif
