@@ -805,14 +805,14 @@ TH_API void THNN_(SoftMarginCriterion_updateOutput)(
                   THCTensor *input,
                   THCTensor *target,
                   THCTensor *output,
-                  int sizeAverage);
+                  bool sizeAverage);
 
 TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *target,
                   THCTensor *gradInput,
-                  int sizeAverage);
+                  bool sizeAverage);
 
 TH_API void THNN_(SoftMax_updateOutput)(
                   THCState *state,
