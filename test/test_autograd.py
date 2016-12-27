@@ -1,5 +1,6 @@
 import contextlib
 import gc
+import sys
 import math
 import torch
 import unittest
@@ -9,6 +10,11 @@ from collections import OrderedDict
 from common import make_jacobian, TestCase, iter_tensors, get_numerical_jacobian
 from torch.autograd.functions import *
 from torch.autograd import Variable, Function
+
+if sys.version_info[0] == 2:
+    import cPickle as pickle
+else:
+    import pickle
 
 PRECISION = 1e-4
 
@@ -557,6 +563,24 @@ class TestAutograd(TestCase):
         b.reinforce(torch.randn(10))
         b.backward()
         self.assertGreater(x.grad.abs().sum(), 0)
+
+    def test_pickle(self):
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        y = Variable(torch.randn(10, 10), volatile=True)
+        z = Variable(torch.randn(10, 10), requires_grad=False)
+
+        def assert_strict_equal(var1, var2):
+            self.assertEqual(var1.data, var2.data)
+            self.assertEqual(var1.requires_grad, var2.requires_grad)
+            self.assertEqual(var1.volatile, var2.volatile)
+
+        serialized = [pickle.dumps([x, y, z], protocol=p) for p in range(3)]
+        for dump in serialized:
+            xc, yc, zc = pickle.loads(dump)
+            assert_strict_equal(xc, x)
+            assert_strict_equal(yc, y)
+            assert_strict_equal(zc, z)
+
 
 def index_variable(num_indices, max_indices):
     index = torch.randperm(max_indices)[:num_indices].long()
