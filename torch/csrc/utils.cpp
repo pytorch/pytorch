@@ -281,7 +281,7 @@ void THPUtils_invalidArguments(PyObject *given_args,
     }
   }
 
-  PyErr_SetString(PyExc_ValueError, error_msg.c_str());
+  PyErr_SetString(PyExc_TypeError, error_msg.c_str());
 }
 
 
