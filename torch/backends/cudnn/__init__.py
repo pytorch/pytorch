@@ -5,6 +5,8 @@ import torch.cuda
 import sys
 import os.path as path
 
+enabled = True  # set to False to globally disable cuDNN
+
 lib = None
 # TODO: fix libname for Windows
 # TODO: dynamic version checks via cudnnGetVersion
@@ -38,6 +40,8 @@ def _loadlib():
         raise OSError("Could not load cuDNN")
 
 def is_acceptable(tensor):
+    if not enabled:
+        return False
     if not (isinstance(tensor, torch.cuda.HalfTensor) or
             isinstance(tensor, torch.cuda.FloatTensor) or
             isinstance(tensor, torch.cuda.DoubleTensor)):

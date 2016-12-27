@@ -45,6 +45,7 @@ class InputVariableMixin(object):
 class NewModuleTest(InputVariableMixin, ModuleTest):
     def __init__(self, *args, **kwargs):
         super(NewModuleTest, self).__init__(*args, **kwargs)
+        self.cudnn = kwargs.get('cudnn', False)
         self.check_inplace = kwargs.get('check_inplace', False)
 
     def _do_test(self, test_case, module, input):
@@ -120,6 +121,16 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
+
+                if self.cudnn:
+                    torch.backends.cudnn.enabled = False
+                    try:
+                        module(input)
+                        for p in module.parameters():
+                            test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                            test_case.assertEqual(p.get_device(), 0)
+                    finally:
+                        torch.backends.cudnn.enabled = True
 
                 if torch.cuda.device_count() >= 2:
                     # to GPU1
@@ -1031,12 +1042,14 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
-        input_size=(2, 4, 10)
+        input_size=(2, 4, 10),
+        cudnn=True,
     ),
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
         input_size=(2, 4, 10),
+        cudnn=True,
         desc='stride'
     ),
     dict(
@@ -1052,42 +1065,49 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv2d',
-        constructor_args=(3, 4, (3, 3)),
-        input_size=(2, 3, 6, 6)
+        constructor_args=(3, 4, (3, 2)),
+        input_size=(2, 3, 7, 5),
+        cudnn=True,
     ),
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 3), (2, 2)),
         input_size=(2, 3, 6, 6),
+        cudnn=True,
         desc='strided'
     ),
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 3), (2, 2), (1, 1)),
         input_size=(2, 3, 6, 6),
+        cudnn=True,
         desc='padding'
     ),
     dict(
         module_name='Conv2d',
         constructor_args=(3, 2, (3, 3), (2, 2), (1, 1), (2, 2)),
         input_size=(2, 3, 8, 8),
+        cudnn=True,
         desc='dilated'
     ),
     dict(
         module_name='Conv2d',
-        constructor_args=(3, 4, (3, 3), 1, 0, None, 1, False),
-        input_size=(2, 3, 6, 6),
+        constructor_args=(3, 4, (3, 2), 1, 0, None, 1, False),
+        input_size=(2, 3, 6, 5),
+        cudnn=True,
         desc='no_bias',
     ),
     dict(
         module_name='ConvTranspose2d',
-        constructor_args=(3, 4, 3, (2, 2), 1, (1, 1)),
-        input_size=(1, 3, 7, 7)
+        constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
+        cudnn=True,
+        input_size=(1, 3, 7, 6)
     ),
     dict(
         module_name='ConvTranspose2d',
-        constructor_args=(3, 4, 3, (2, 2), 1, (1, 1), 1, False),
-        input_size=(1, 3, 7, 7),
+        constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
+        input_size=(1, 3, 6, 7),
+        cudnn=True,
         desc='no_bias'
     ),
     dict(
@@ -1135,25 +1155,29 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv3d',
-        constructor_args=(3, 4, 2),
-        input_size=(2, 3, 3, 3, 3)
+        constructor_args=(3, 4, (2, 3, 4)),
+        input_size=(2, 3, 3, 4, 5),
+        cudnn=True,
     ),
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, 2, 2),
         input_size=(2, 3, 5, 5, 5),
+        cudnn=True,
         desc='stride'
     ),
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, 2, 2, 1),
         input_size=(2, 3, 5, 5, 5),
+        cudnn=True,
         desc='stride_padding'
     ),
     dict(
         module_name='ConvTranspose3d',
-        constructor_args=(2, 3, (2, 2, 2)),
-        input_size=(1, 2, 4, 4, 4)
+        constructor_args=(2, 3, (2, 3, 2)),
+        cudnn=True,
+        input_size=(1, 2, 4, 5, 4)
     ),
     dict(
         module_name='MaxPool3d',

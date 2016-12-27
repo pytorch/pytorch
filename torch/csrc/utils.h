@@ -37,7 +37,6 @@
 #define THPUtils_stringAsString(obj)         PyBytes_AS_STRING(PyUnicode_AsUTF8String(obj))
 #endif
 
-
 #if PY_MAJOR_VERSION == 2
 #define THPUtils_checkReal_FLOAT(object)                                       \
     (PyFloat_Check(object) || PyLong_Check(object) || PyInt_Check(object))
@@ -135,6 +134,9 @@ THP_API void THPUtils_invalidArguments(PyObject *given_args,
             const char *function_name, size_t num_options, ...);
 
 #ifdef _THP_CORE
+
+bool THPUtils_checkIntTuple(PyObject *arg);
+std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
 
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
 

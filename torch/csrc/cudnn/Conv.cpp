@@ -3,11 +3,12 @@
 #include "THC/THC.h"
 
 #include <cudnn.h>
-#include <stdint.h>
-#include <memory>
-#include <unordered_map>
 #include <functional>
+#include <memory>
 #include <mutex>
+#include <sstream>
+#include <stdint.h>
+#include <unordered_map>
 
 namespace torch { namespace cudnn {
 
@@ -26,27 +27,39 @@ union Constant
   }
 };
 
+#define CHECK_ARG(cond) _CHECK_ARG(cond, #cond, __FILE__, __LINE__)
+
+static inline void _CHECK_ARG(bool cond, const char* code, const char* f, int line) {
+  if (!cond) {
+    std::stringstream ss;
+    ss << "CHECK_ARG(" << code << ") failed at " << f << ":" << line;
+    throw std::runtime_error(ss.str());
+  }
+}
+
 void setTensorDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor, int groups)
 {
-  int inputSize[4];
-  int inputStride[4];
-  for (int i = 0; i < 4; ++i) {
+  CHECK_ARG(tensor->nDimension <= 5);
+  int inputSize[5];
+  int inputStride[5];
+  for (int i = 0; i < tensor->nDimension; ++i) {
     inputSize[i] = (int) tensor->size[i];
     inputStride[i] = (int) tensor->stride[i];
   }
   inputSize[1] /= groups;
-  desc.set(dataType, 4, inputSize, inputStride);
+  desc.set(dataType, tensor->nDimension, inputSize, inputStride);
 }
 
 void setWeightDescriptor(FilterDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* weight, int groups)
 {
-  int inputSize[4] = { 1, 1, 1, 1 };
-  for (int i = 0; i < 4; ++i) {
+  CHECK_ARG(weight->nDimension <= 5);
+  int inputSize[5];
+  for (int i = 0; i < weight->nDimension; ++i) {
     inputSize[i] = (int) weight->size[i];
   }
   inputSize[0] /= groups;
   inputSize[1] /= groups;
-  desc.set(dataType, inputSize);
+  desc.set(dataType, weight->nDimension, inputSize);
 }
 
 struct ParamsHash {
@@ -198,19 +211,23 @@ static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD"
 
 Convolution::Convolution(
     cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
-    THVoidTensor* bias, THVoidTensor* output, int pad[2], int stride[2],
-    int groups, bool transposed)
+    THVoidTensor* bias, THVoidTensor* output, std::vector<int> pad,
+    std::vector<int> stride, int groups, bool transposed)
   : idesc(), odesc(), odesc_bias(), bdesc(), wdesc(), cdesc(), groups(groups)
   , transposed(transposed)
 {
+  CHECK_ARG(input->nDimension <= 5);
+  CHECK_ARG(input->nDimension == output->nDimension);
+  CHECK_ARG((long)pad.size() == input->nDimension - 2);
+  CHECK_ARG(pad.size() == stride.size());
   memset(&params, 0, sizeof(ConvolutionParams));
   params.dataType = dataType;
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i != input->nDimension; ++i) {
     params.input_size[i] = (int) input->size[i];
     params.input_stride[i] = (int) input->stride[i];
     params.weight_size[i] = (int) weight->size[i];
   }
-  for (int i = 0; i < 2; ++i) {
+  for (size_t i = 0; i != pad.size(); ++i) {
     params.pad[i] = pad[i];
     params.stride[i] = stride[i];
   }
@@ -222,19 +239,7 @@ Convolution::Convolution(
   else
     setTensorDescriptor(odesc_bias, dataType, input, 1);
   setWeightDescriptor(wdesc, dataType, weight, groups);
-  cdesc.set(dataType, pad, stride);
-}
-
-Convolution* cudnn_convolution_init(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool transposed)
-{
-  int pad[2] = {padH, padW};
-  int stride[2] = {dH, dW};
-  return new Convolution(dataType, input, weight, bias, output, pad,
-          stride, groups, transposed);
-
+  cdesc.set(dataType, pad.size(), pad.data(), stride.data());
 }
 
 void cudnn_convolution_forward(
@@ -275,12 +280,13 @@ void cudnn_convolution_add_bias(
     THVoidTensor* bias, THVoidTensor* output,
     Convolution* info)
 {
+  CHECK_ARG(output->nDimension <= 5);
   TensorDescriptor& odesc_bias = info->odesc_bias;
   TensorDescriptor& bdesc = info->bdesc;
 
-  int size[4] = { 1, (int)bias->size[0], 1, 1 };
-  int stride[4] = { 1, (int)bias->stride[0], 1, 1};
-  bdesc.set(dataType, 4, size, stride);
+  int size[5] = { 1, (int)bias->size[0], 1, 1, 1 };
+  int stride[5] = { 1, (int)bias->stride[0], 1, 1, 1 };
+  bdesc.set(dataType, output->nDimension, size, stride);
 
   void* bias_ptr = tensorPointer(dataType, bias, 0, 1);
   void* output_ptr = tensorPointer(dataType, output, 0, 1);
@@ -380,13 +386,12 @@ void cudnn_convolution_backward_bias(
 Convolution* cudnn_convolution_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool benchmark)
+    std::vector<int> pad, std::vector<int> stride, int groups, bool benchmark)
 {
-    std::unique_ptr<Convolution> info(cudnn_convolution_init(
-        state, handle, dataType, input, weight, bias, output, padH, padW,
-        dH, dW, groups, false));
-    cudnn_convolution_forward(state, handle, dataType, input, weight, output,
-        info.get(), benchmark);
+    std::unique_ptr<Convolution> info(new Convolution(
+        dataType, input, weight, bias, output, pad, stride, groups, false));
+    cudnn_convolution_forward(
+        state, handle, dataType, input, weight, output, info.get(), benchmark);
     if (bias) {
         cudnn_convolution_add_bias(
             state, handle, dataType, bias, output, info.get());
@@ -397,13 +402,12 @@ Convolution* cudnn_convolution_full_forward(
 Convolution* cudnn_convolution_transpose_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool benchmark)
+    std::vector<int> pad, std::vector<int> stride, int groups, bool benchmark)
 {
-    std::unique_ptr<Convolution> info(cudnn_convolution_init(
-        state, handle, dataType, output, weight, bias, input, padH, padW,
-        dH, dW, groups, true));
-    cudnn_convolution_backward_data(state, handle, dataType, input, output,
-            weight, info.get(), benchmark);
+    std::unique_ptr<Convolution> info(new Convolution(
+        dataType, output, weight, bias, input, pad, stride, groups, true));
+    cudnn_convolution_backward_data(
+        state, handle, dataType, input, output, weight, info.get(), benchmark);
     if (bias) {
         cudnn_convolution_add_bias(
             state, handle, dataType, bias, output, info.get());

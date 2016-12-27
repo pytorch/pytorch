@@ -8,6 +8,7 @@ class CuDNNPlugin(CWrapPlugin):
     TYPE_UNPACK = {
         'THTensor*':        Template('((THPVoidTensor*)$arg)->cdata'),
         'int':              Template('THPUtils_unpackLong($arg)'),
+        'std::vector<int>': Template('THPUtils_unpackIntTuple($arg)'),
         'cudnnDataType_t':  Template('$arg'),
         'cudnnHandle_t':    Template('$arg'),
         'Convolution*':     Template('(Convolution*)THPWrapper_get($arg)'),
@@ -18,6 +19,7 @@ class CuDNNPlugin(CWrapPlugin):
         'Convolution*':     Template('THPWrapper_check($arg)'),
         'THTensor*':        Template('(PyObject*)Py_TYPE($arg) == tensorClass'),
         'int':              Template('THPUtils_checkLong($arg)'),
+        'std::vector<int>': Template('THPUtils_checkIntTuple($arg)'),
         'bool':             Template('PyBool_Check($arg)'),
     }
 
@@ -78,8 +80,8 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         arg_desc = []
         for option in declaration['options']:
             option_desc = [self.TYPE_NAMES.get(arg['type'], arg['type']) + ' ' + arg['name']
-                    for arg in option['arguments']
-                    if not arg.get('ignore_check', False)]
+                           for arg in option['arguments']
+                           if not arg.get('ignore_check', False)]
             # TODO: this should probably go to THPLongArgsPlugin
             if option_desc:
                 arg_desc.append('({})'.format(', '.join(option_desc)))
@@ -130,7 +132,7 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         return unique
 
     def preprocessor_guard(self, code, condition):
-            return '#if ' + condition + '\n' + code + '#endif\n'
+        return '#if ' + condition + '\n' + code + '#endif\n'
 
     def process_wrapper(self, code, declaration):
         if 'defined_if' in declaration:

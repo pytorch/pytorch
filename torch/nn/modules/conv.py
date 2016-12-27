@@ -55,7 +55,8 @@ class Conv1d(Module):
         self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        func = self._backend.Conv2d(
+        func = self._backend.Conv(
+            ndim=2,
             stride=(1, self.stride),
             padding=(0, 0),
             groups=1)
@@ -142,7 +143,8 @@ class Conv2d(Module):
                 self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
                 self.dilh, self.dilw)
         else:
-            func = self._backend.Conv2d(
+            func = self._backend.Conv(
+                ndim=2,
                 stride=(self.dh, self.dw),
                 padding=(self.padh, self.padw),
                 groups=self.groups)
@@ -158,7 +160,7 @@ class Conv2d(Module):
                         + str(self.dilw) + ')' if self.is_dilated else '')
         groups_str = (', groups=' + str(self.groups) if self.groups != 1 else '')
         bias_str= (', bias=False' if self.bias == None else '')
-        return  self.__class__.__name__ + ' (' + str(self.in_channels) \
+        return self.__class__.__name__ + ' (' + str(self.in_channels) \
             + ' -> ' + str(self.out_channels) \
             + ', size=(' + str(self.kh) + ', ' + str(self.kw) + ')' \
             + ', stride=(' + str(self.dh) + ', ' + str(self.dw) + ')' \
@@ -201,8 +203,9 @@ class ConvTranspose2d(Conv2d):
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, groups=1, bias=True):
-        super(ConvTranspose2d, self).__init__(in_channels, out_channels, kernel_size,
-                                              stride=stride, padding=padding, bias=bias)
+        super(ConvTranspose2d, self).__init__(
+            in_channels, out_channels, kernel_size,
+            stride=stride, padding=padding, bias=bias)
         # Conv2d uses a different weight layout than Conv2d
         self.weight.data = self.weight.data.transpose(0, 1).contiguous()
         self.out_padh, self.out_padw = _pair(output_padding)
@@ -232,11 +235,12 @@ class ConvTranspose2d(Conv2d):
                         sizeh+self.dh-1, sizew+self.dw-1,
                         input.size(2), input.size(3)))
 
-        func = self._backend.ConvTranspose2d(
-                stride = (self.dh, self.dw),
-                padding = (self.padh, self.padw),
-                out_pad = (out_padh, out_padw),
-                groups = self.groups)
+        func = self._backend.ConvTranspose(
+            ndim=2,
+            stride=(self.dh, self.dw),
+            padding=(self.padh, self.padw),
+            out_pad=(out_padh, out_padw),
+            groups=self.groups)
         if self.bias is None:
             return func(input, self.weight)
         else:
@@ -308,9 +312,10 @@ class Conv3d(_Conv3dBase):
         self.reset_parameters()
 
     def forward(self, input):
-        func = self._backend.Conv3d(
-            self.kt, self.kw, self.kh, self.dt, self.dw, self.dh, self.padt,
-            self.padw, self.padh)
+        func = self._backend.Conv(
+            ndim=3,
+            stride=(self.dt, self.dh, self.dw),
+            padding=(self.padt, self.padh, self.padw))
         if self.bias is None:
             return func(input, self.weight)
         else:
@@ -354,9 +359,10 @@ class ConvTranspose3d(_Conv3dBase):
         self.reset_parameters()
 
     def forward(self, input):
-        func = self._backend.ConvTranspose3d(
-            self.kt, self.kw, self.kh, self.dt, self.dw, self.dh, self.padt,
-            self.padw, self.padh)
+        func = self._backend.ConvTranspose(
+            ndim=3,
+            stride=(self.dt, self.dh, self.dw),
+            padding=(self.padt, self.padh, self.padw))
         if self.bias is None:
             return func(input, self.weight)
         else:

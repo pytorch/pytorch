@@ -6,6 +6,4 @@ from .activation import *
 from .batchnorm import *
 from .pooling import *
 from .sparse import *
-from .conv import *
 from .loss import *
-

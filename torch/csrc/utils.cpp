@@ -67,6 +67,31 @@ bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStora
   return true;
 }
 
+bool THPUtils_checkIntTuple(PyObject *arg)
+{
+  if (!PyTuple_Check(arg)) {
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
+    if (!THPUtils_checkLong(PyTuple_GET_ITEM(arg, i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::vector<int> THPUtils_unpackIntTuple(PyObject *arg)
+{
+  if (!THPUtils_checkIntTuple(arg)) {
+    throw std::runtime_error("Couldn't unpack int tuple");
+  }
+  std::vector<int> values(PyTuple_GET_SIZE(arg));
+  for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
+    values[i] = (int)THPUtils_unpackLong(PyTuple_GET_ITEM(arg, i));
+  }
+  return values;
+}
+
 void THPUtils_setError(const char *format, ...)
 {
   static const size_t ERROR_BUFFER_SIZE = 1000;
