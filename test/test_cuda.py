@@ -139,7 +139,7 @@ tests = [
     ('dim',           small_3d,           lambda t: [],                                                     ),
     ('dist',          small_2d,           lambda t: [small_2d(t)],                                          ),
     ('dist',          small_2d,           lambda t: [small_2d(t), 3],                       '3_norm'        ),
-    ('dist',          small_2d,           lambda t: [small_2d(t), 2.5],                     '2.5_norm'      ),
+    ('dist',          small_2d,           lambda t: [small_2d(t), 2.5],                     '2_5_norm'      ),
     ('dot',           medium_1d,          lambda t: [medium_1d(t)],                                         ),
     ('element_size',  medium_1d,          lambda t: [],                                                     ),
     ('eq',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
