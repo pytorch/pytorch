@@ -42,6 +42,10 @@ list(APPEND Caffe2_LINKER_LIBS ${GFLAGS_LIBRARIES})
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest)
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include)
 
+# ---[ Google benchmark
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/benchmark)
+include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/benchmark/include)
+
 # ---[ LMDB
 if(USE_LMDB)
   find_package(LMDB REQUIRED)
@@ -109,13 +113,6 @@ endif()
 
 # ---[ CUDA
 include(cmake/Cuda.cmake)
-if(HAVE_CUDA)
-  SET(CUDA_PROPAGATE_HOST_FLAGS OFF)
-  LIST(APPEND CUDA_NVCC_FLAGS -Xcompiler -std=c++11)
-  LIST(APPEND CUDA_NVCC_FLAGS -std=c++11)
-  LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_52,code=sm_52)
-endif()
-
 
 # ---[ CUDNN
 if(HAVE_CUDA)
