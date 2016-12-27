@@ -1,3 +1,4 @@
+import sys
 import torch._C as _C
 from collections import OrderedDict
 
@@ -78,6 +79,15 @@ class Variable(_C._VariableBase):
                 volatile=self.volatile)
         memo[id(self)] = result
         return result
+
+    def __reduce_ex__(self, proto):
+        if proto > 1:
+            return super(Variable, self).__reduce_ex__(proto)
+        if sys.version_info[0] == 2:
+            from copy_reg import __newobj__
+        else:
+            from copyreg import __newobj__
+        return __newobj__, (type(self),), self.__getstate__()
 
     def backward(self, gradient=None, retain_variables=False):
         if self.volatile:
