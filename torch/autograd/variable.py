@@ -70,9 +70,6 @@ class Variable(_C._VariableBase):
             else:
                 return SetItem(key, value)(self)
 
-    def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size(0))))
-
     def __deepcopy__(self, memo):
         if self.creator is not None:
             raise RuntimeError("Only Variables created explicitly by the user "
@@ -163,6 +160,9 @@ class Variable(_C._VariableBase):
 
     def float(self):
         return self.type(self._get_type('FloatTensor'))
+
+    def half(self):
+        return self.type(self._get_type('HalfTensor'))
 
     def long(self):
         return self.type(self._get_type('LongTensor'))
@@ -612,6 +612,12 @@ class Variable(_C._VariableBase):
 
     def __neg__(self):
         return Negate()(self)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __iter__(self):
+        return iter(map(lambda i: self[i], range(self.size(0))))
 
     class _torch(object):
 

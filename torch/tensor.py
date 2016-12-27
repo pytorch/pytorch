@@ -114,6 +114,8 @@ class _TensorBase(object):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
     def split(self, split_size, dim=0):
+        if dim < 0:
+            dim += self.dim()
         dim_size = self.size(dim)
         num_splits = int(math.ceil(float(dim_size) / split_size))
         last_split_size = split_size - (split_size * num_splits - dim_size)

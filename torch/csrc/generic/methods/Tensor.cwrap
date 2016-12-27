@@ -235,6 +235,8 @@ PyObject * THPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
   if (pydim && THPUtils_checkLong(pydim)) {
     int dim = (int)THPUtils_unpackLong(pydim);
+    if (dim < 0)
+      dim += tensor->nDimension;
     return PyInt_FromLong(THTensor_(size)(LIBRARY_STATE tensor, dim));
   }
 
@@ -273,6 +275,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
   if (pydim && THPUtils_checkLong(pydim)) {
     int dim = (int)THPUtils_unpackLong(pydim);
+    if (dim < 0)
+      dim += tensor->nDimension;
     return PyInt_FromLong(THTensor_(stride)(LIBRARY_STATE tensor, dim));
   }
 
