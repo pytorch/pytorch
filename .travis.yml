@@ -42,7 +42,7 @@ install:
 - sudo apt-get install cuda
 
 script:
-- mkdir build && cd build && export CXX=$COMPILER && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON
+- mkdir build && cd build && export CXX=$COMPILER && ${DEPS_DIR}/cmake3.3.1/bin/cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON
   && make CXX=$COMPILER
 branches:
   only:
