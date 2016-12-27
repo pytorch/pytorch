@@ -630,7 +630,7 @@ def GetArgumentParser():
     parser.add_argument("--net_type", type=str, default="dag")
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--use-nvtx", default=False, action='store_true')
-    parser.add_argument("--htrace_conf", type=str)
+    parser.add_argument("--htrace_span_log_path", type=str)
     return parser
 
 
@@ -645,8 +645,9 @@ if __name__ == '__main__':
     workspace.GlobalInit(
         ['caffe2', '--caffe2_log_level=0'] +
         (['--caffe2_use_nvtx'] if args.use_nvtx else []) +
-        (['--caffe2_htrace_conf=' + args.htrace_conf]
-            if args.htrace_conf else []))
+        (['--caffe2_htrace_span_log_path=' + args.htrace_span_log_path]
+            if args.htrace_span_log_path else []))
+
     model_map = {
         'AlexNet': AlexNet,
         'OverFeat': OverFeat,
