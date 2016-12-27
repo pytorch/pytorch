@@ -68,10 +68,41 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
 }
 
 template <typename T>
+__device__ int binarySearchForMultinomial(T* dist,
+                                          int size,
+                                          T val) {
+  int start = 0;
+  int end = size;
+
+  while (end - start > 0) {
+    int mid = start + (end - start) / 2;
+
+    T midVal = dist[mid];
+    if (THCNumerics<T>::lt(midVal, val)) {
+      start = mid + 1;
+    } else {
+      end = mid;
+    }
+  }
+
+  if (start == size) {
+    // No probability mass or precision problems; just return the
+    // first element
+    start = 0;
+  }
+
+  T curVal = dist[start];
+  while(start >= 1 && THCNumerics<T>::eq(dist[start - 1], curVal)) start--;
+
+  return start;
+}
+
+template <typename T>
 __global__ void
-sampleMultinomialOnce(T* dest,
+sampleMultinomialOnce(long* dest,
                       long distributions,
                       int categories,
+                      T* sampled,
                       T* dist) {
   extern __shared__ __align__(sizeof(T)) unsigned char my_smem[];
   T *smem = reinterpret_cast<T *>(my_smem);
@@ -92,7 +123,7 @@ sampleMultinomialOnce(T* dest,
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       smem[0] = sum;
-      smem[1] = dest[curDist];
+      smem[1] = sampled[curDist];
     }
     __syncthreads();
 
@@ -103,7 +134,7 @@ sampleMultinomialOnce(T* dest,
     if (THCNumerics<T>::eq(sum,  zero) || THCNumerics<T>::eq(sample, zero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
-        dest[curDist] = ScalarConvert<int, T>::to(1);
+        dest[curDist] = 1;
       }
 
       continue;
@@ -117,7 +148,7 @@ sampleMultinomialOnce(T* dest,
       int cat = chunk * blockDim.x + threadIdx.x;
 
       T val =
-        cat < categories ? THCNumerics<T>::div(dist[curDist * categories + cat], sum) : 
+        cat < categories ? THCNumerics<T>::div(dist[curDist * categories + cat], sum) :
         zero;
 
       smem[threadIdx.x] = val;
@@ -153,7 +184,7 @@ sampleMultinomialOnce(T* dest,
         // We're done; we have the sample
         // Torch indices are 1-based
         // FIXME: broadcast exit flag?
-        dest[curDist] = ScalarConvert<int, T>::to(cat + TH_INDEX_BASE);
+        dest[curDist] = cat + TH_INDEX_BASE;
       }
 
       // Store the previous scan's high value for future use
@@ -165,40 +196,10 @@ sampleMultinomialOnce(T* dest,
 }
 
 template <typename T>
-__device__ int binarySearchForMultinomial(T* dist,
-                                          int size,
-                                          T val) {
-  int start = 0;
-  int end = size;
-
-  while (end - start > 0) {
-    int mid = start + (end - start) / 2;
-
-    T midVal = dist[mid];
-    if (THCNumerics<T>::lt(midVal, val)) {
-      start = mid + 1;
-    } else {
-      end = mid;
-    }
-  }
-
-  if (start == size) {
-    // No probability mass or precision problems; just return the
-    // first element
-    start = 0;
-  }
-
-  T curVal = dist[start];
-  while(start >= 1 && THCNumerics<T>::eq(dist[start - 1], curVal)) start--;
-
-  return start;
-}
-
-template <typename T>
 __global__ void
 sampleMultinomialWithReplacement(curandStateMtgp32* state,
                                  int totalSamples,
-                                 T* dest,
+                                 long* dest,
                                  long distributions,
                                  int categories,
                                  T* normDistPrefixSum) {
@@ -228,7 +229,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
           r);
 
         // Torch indices are 1-based
-        dest[curDist * totalSamples + sample] = ScalarConvert<int, T>::to(choice + TH_INDEX_BASE);
+        dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
       }
     }
   }
@@ -239,7 +240,7 @@ __global__ void
 sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
                                     int totalSamples,
                                     int sample,
-                                    T* dest,
+                                    long* dest,
                                     long distributions,
                                     int categories,
                                     T* origDist,
@@ -269,7 +270,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
         r);
 
       // Torch indices are 1-based
-      dest[curDist * totalSamples + sample] = ScalarConvert<int, T>::to(choice + TH_INDEX_BASE);
+      dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
 
       // Without replacement, so update the original probability so it
       // is not considered a second time
