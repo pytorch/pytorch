@@ -165,9 +165,9 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
       THCudaLongTensor_data(state, self),
       numDist,
       numCategories,
-      THCTensor_(data)(state, sampled);
+      THCTensor_(data)(state, sampled),
       THCTensor_(data)(state, probDistContig));
-    THCTensor_(free)(sampled);
+    THCTensor_(free)(state, sampled);
   } else {
     // Generic, slow implementation with memory allocations
 
