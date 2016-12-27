@@ -1,4 +1,5 @@
 from torch.autograd import Variable
+import torch
 from .module import Module
 from .container import Sequential
 from .activation import LogSoftmax
@@ -265,8 +266,8 @@ class CrossEntropyLoss(_WeighedLoss):
     """
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.sparse_cross_entropy_with_logits(input, target,
-                weight=self.weight, size_average=self.size_average)
+        return F.cross_entropy(input, target,
+                self.weight, self.size_average)
 
 class MultiLabelSoftMarginLoss(_WeighedLoss):
     """Creates a criterion that optimizes a multi-label one-versus-all 
@@ -280,9 +281,8 @@ class MultiLabelSoftMarginLoss(_WeighedLoss):
     `y` and `x` must have the same size.
     """
     def forward(self, input, target):
-        sigmoid = self._backend.Sigmoid()(input)
-        return self._backend.BCELoss(self.size_average, weight=self.weight)(
-                sigmoid, target)
+        return F.binary_cross_entropy(torch.sigmoid(input), target,
+                self.weight, self.size_average)
 
 
 class CosineEmbeddingLoss(Module):

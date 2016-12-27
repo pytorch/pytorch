@@ -2,7 +2,7 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 
-from .. import functional
+from .. import functional as F
 from .module import Module
 from .utils import _pair, _triple
 
@@ -56,15 +56,7 @@ class Conv1d(Module):
         self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        func = self._backend.Conv(
-            ndim=2,
-            stride=(1, self.stride),
-            padding=(0, 0),
-            groups=1)
-        input = input.view(input.size(0), input.size(1), 1, input.size(2))
-        weight = self.weight.view(self.weight.size(0), self.weight.size(1), 1,
-                                  self.weight.size(2))
-        return func(input, weight, self.bias)
+        return F.conv1d(input, self.weight, self.bias, self.stride)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -144,7 +136,7 @@ class Conv2d(Module):
                 self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
                 self.dilh, self.dilw)
                 self.dilh, self.dilw)(input, self.weight, self.bias)
-        return functional.conv2d(input, self.weight, self.bias, 
+        return F.conv2d(input, self.weight, self.bias, 
                 stride=(self.dh, self.dw),
                 padding=(self.padh, self.padw),
                 groups=self.groups)
@@ -230,10 +222,10 @@ class ConvTranspose2d(Conv2d):
                     "{}x{})").format(out_sizeh, out_sizew, sizeh, sizew,
                         sizeh+self.dh-1, sizew+self.dw-1,
                         input.size(2), input.size(3)))
-        return functional.conv2d_transpose(input, self.weight, self.bias, 
+        return F.conv_transpose2d(input, self.weight, self.bias, 
                 stride=(self.dh, self.dw),
                 padding=(self.padh, self.padw),
-                out_pad=(out_padh, out_padw),
+                output_padding=(out_padh, out_padw),
                 groups=self.groups)
 
 
