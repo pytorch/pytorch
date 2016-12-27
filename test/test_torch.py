@@ -906,6 +906,11 @@ class TestTorch(TestCase):
                         k = random.randint(1, testTensor.size(dim))
                         compare(testTensor, k, dim, dir)
 
+    def test_topk_arguments(self):
+        q = torch.randn(10, 2, 10)
+        # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
+        self.assertRaises(ValueError, lambda: q.topk(4, True))
+
     def test_kthvalue(self):
         SIZE = 50
         x = torch.rand(SIZE, SIZE, SIZE)
