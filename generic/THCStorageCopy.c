@@ -46,7 +46,7 @@ void TH_CONCAT_4(TH,TYPEC,Storage_copyCuda,Real)(THCState *state, TH##TYPEC##Sto
       THCTensor_(newWithStorage1d)(state, src, 0, src->size, 1);            \
   TH_CONCAT_4(TH,TYPEC,Tensor_copyCuda,Real)(state, selfTensor, srcTensor); \
   THCTensor_(free)(state, srcTensor);                                       \
-  THCTensor_(free)(state, selfTensor);                                      \
+  TH##TYPEC##Tensor_free(selfTensor);                                   \
 }
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Byte)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Char)
