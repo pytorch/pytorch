@@ -193,7 +193,7 @@ tests = [
     ('sum',           small_2d,           lambda t: [],                                                     ),
     ('sum',           small_3d,           lambda t: [1],                                    'dim'           ),
     ('renorm',        small_3d,           lambda t: [2, 1, 1],                              '2_norm'        ),
-    ('renorm',        small_3d,           lambda t: [1.5, 1, 1],                            '1.5_norm'      ),
+    ('renorm',        small_3d,           lambda t: [1.5, 1, 1],                            '1_5_norm'      ),
     ('repeat',        small_2d,           lambda t: [2, 2, 2],                                              ),
     ('size',          new_t(1, 2, 3, 4),  lambda t: [],                                                     ),
     ('sort',          small_3d_unique,    lambda t: [],                                                     ),
