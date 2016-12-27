@@ -22,3 +22,6 @@
 [submodule "third_party/nervanagpu"]
 	path = third_party/nervanagpu
 	url = https://github.com/NervanaSystems/nervanagpu.git
+[submodule "third_party/benchmark"]
+	path = third_party/benchmark
+	url = https://github.com/google/benchmark.git

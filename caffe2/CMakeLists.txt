@@ -46,7 +46,7 @@ set(Caffe2_CPU_TEST_SRCS
     "/operators/utility_ops_test.cc"
     "/operators/elementwise_op_test.cc"
     "/operators/fully_connected_op_test.cc"
-    #"/operators/conv_op_cache_cudnn_test.cc"
+    "/operators/conv_op_cache_cudnn_test.cc"
     "/operators/text_file_reader_utils_test.cc"
     "/utils/proto_utils_test.cc"
     "/utils/math_test.cc"
@@ -178,11 +178,11 @@ if(NOT USE_MPI)
   exclude(Caffe2_BINARY_SRCS "${Caffe2_BINARY_SRCS}" "${tmp}")
 endif()
 
-#foreach(binary_src ${Caffe2_BINARY_SRCS})
-#  get_filename_component(bin_name ${binary_src} NAME_WE)
-#  add_executable(${bin_name} ${binary_src})
-#  target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem ${Caffe2_LINKER_LIBS})
-#  install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
-#endforeach()
+foreach(binary_src ${Caffe2_BINARY_SRCS})
+  get_filename_component(bin_name ${binary_src} NAME_WE)
+  add_executable(${bin_name} ${binary_src})
+  target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem benchmark ${Caffe2_LINKER_LIBS})
+  install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
+endforeach()
 
 
