@@ -909,7 +909,7 @@ class TestTorch(TestCase):
     def test_topk_arguments(self):
         q = torch.randn(10, 2, 10)
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
-        self.assertRaises(ValueError, lambda: q.topk(4, True))
+        self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     def test_kthvalue(self):
         SIZE = 50
@@ -1050,7 +1050,7 @@ class TestTorch(TestCase):
             self.assertEqual(res1.narrow(dim, 0, 13), x, 0)
             self.assertEqual(res1.narrow(dim, 13, 17), y, 0)
             self.assertEqual(res1.narrow(dim, 30, 19), z, 0)
-            self.assertRaises(ValueError, lambda: torch.cat([]))
+            self.assertRaises(TypeError, lambda: torch.cat([]))
 
     def test_linspace(self):
         _from = random.random()
