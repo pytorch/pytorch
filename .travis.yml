@@ -42,22 +42,19 @@ install:
 - sudo apt-get install cuda
 
 script:
-- mkdir build && cd build && export CXX=$COMPILER && ${DEPS_DIR}/cmake3.3.1/bin/cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON
+- mkdir build
+- cd build
+- export CXX=$COMPILER && ${DEPS_DIR}/cmake3.3.1/bin/cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON
   && make CXX=$COMPILER
 branches:
   only:
   - master
 before_install:
-# http://stackoverflow.com/questions/33196136/travis-ci-update-cmake-using-the-packages-cache
-- CMAKE_URL="http://www.cmake.org/files/v3.3/cmake-3.3.1-Linux-x86_64.tar.gz" &&
-  mkdir cmake3.3.1 &&
-  travis_retry wget --quiet -O - ${CMAKE_URL} | tar --strip-components=1 -xz -C cmake3.3.1 &&
-  export PATH=${DEPS_DIR}/cmake3.3.1/bin:${PATH}
 # https://github.com/NVIDIA/nvidia-docker/blob/master/ubuntu-16.04/cuda/8.0/devel/cudnn5/Dockerfile#L11-L16
 - CUDNN_DOWNLOAD_SUM=a87cb2df2e5e7cc0a05e266734e679ee1a2fadad6f06af82a76ed81a23b102c8 &&
-    CUDNN_URL="http://developer.download.nvidia.com/compute/redist/cudnn/v5.1/cudnn-8.0-linux-x64-v5.1.tgz" &&
-    travis_retry curl -fsSL ${CUDNN_URL} -O &&
-    echo "$CUDNN_DOWNLOAD_SUM  cudnn-8.0-linux-x64-v5.1.tgz" | sha256sum -c --strict - &&
-    sudo tar -xzf cudnn-8.0-linux-x64-v5.1.tgz -C /usr/local &&
-    rm cudnn-8.0-linux-x64-v5.1.tgz &&
-    sudo ldconfig
+  CUDNN_URL="http://developer.download.nvidia.com/compute/redist/cudnn/v5.1/cudnn-8.0-linux-x64-v5.1.tgz" &&
+  travis_retry curl -fsSL ${CUDNN_URL} -O &&
+  echo "$CUDNN_DOWNLOAD_SUM  cudnn-8.0-linux-x64-v5.1.tgz" | sha256sum -c --strict - &&
+  sudo tar -xzf cudnn-8.0-linux-x64-v5.1.tgz -C /usr/local &&
+  rm cudnn-8.0-linux-x64-v5.1.tgz &&
+  sudo ldconfig
