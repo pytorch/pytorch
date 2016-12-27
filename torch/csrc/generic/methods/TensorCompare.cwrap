@@ -547,10 +547,10 @@
         - THTensor* self
         - long k
         - long dim
-        - arg: bool smallest
-          default: "false"
+        - arg: bool largest
+          default: "true"
         - arg: bool sorted
-          default: "false"
+          default: "true"
 ]]
 
 [[

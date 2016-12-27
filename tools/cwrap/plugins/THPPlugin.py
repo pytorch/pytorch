@@ -46,7 +46,7 @@ class THPPlugin(CWrapPlugin):
         'void*':            Template('THPUtils_checkLong($arg)'),
         'long':             Template('THPUtils_checkLong($arg)'),
         'int':              Template('THPUtils_checkLong($arg)'),
-        'bool':             Template('(($arg == Py_True) || ($arg == Py_False))'),
+        'bool':             Template('PyBool_Check($arg)'),
         'float':            Template('THPFloatUtils_checkReal($arg)'),
         'double':           Template('THPDoubleUtils_checkReal($arg)'),
         'real':             Template('THPUtils_(checkReal)($arg)'),
