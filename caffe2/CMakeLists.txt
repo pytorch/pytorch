@@ -135,7 +135,7 @@ list(APPEND Caffe2_LINK_LIBS Caffe2_CPU)
 
 # ---[ CUDA library
 if(HAVE_CUDA)
-  CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
+  CUDA_ADD_LIBRARY(Caffe2_GPU SHARED ${Caffe2_GPU_SRCS})
   target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} glog gflags ${Caffe2_LINKER_LIBS})
   list(APPEND Caffe2_LINK_LIBS Caffe2_GPU)
   install(TARGETS Caffe2_GPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
