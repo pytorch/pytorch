@@ -233,7 +233,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   with_stateless: True
   return: argument 0
   arguments:
-    - arg: THTensor* result
+    - arg: THIndexTensor* result
       allocate: True
     - THTensor* self
     - long num_samples
