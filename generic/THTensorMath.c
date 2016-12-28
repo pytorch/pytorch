@@ -2538,7 +2538,7 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalu
   );
 }
 
-void THTensor_(histc2)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue)
+void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue)
 {  
   THArgCheck(THTensor_(nDimension)(tensor) < 3, 2, "invalid dimension %d, the input must be a 2d tensor", THTensor_(nDimension)(tensor));
   
