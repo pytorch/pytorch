@@ -1,0 +1,38 @@
+using System;
+
+#pragma warning disable 414, 3021
+
+public class Program
+{
+    /// <summary>The entry point to the program.</summary>
+    public static int Main(string[] args)
+    {
+        Console.WriteLine("Hello, World!");
+        string s = @"This
+""string""
+spans
+multiple
+lines!";
+
+        dynamic x = new ExpandoObject();
+        x.MyProperty = 2;
+
+        return 0;
+    }
+}
+
+async Task<int> AccessTheWebAsync()
+{
+    // ...
+    string urlContents = await getStringTask;
+    return urlContents.Length;
+}
+
+internal static void ExceptionFilters()
+{
+  try 
+  {
+      throw new Exception();
+  }
+  catch (Exception e) when (e.Message == "My error") { }
+}

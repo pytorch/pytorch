@@ -1,0 +1,730 @@
+support-for-ie = true
+
+@import 'nib'
+
+// Fonts
+$body-font = Helvetica Neue, Open Sans, sans-serif
+$mono-font = Menlo, monospace
+
+// Margins
+$pad = 40px      // Space between things
+$sidepad = 30px  // Padding to the left of the sidebar
+$minipad = 20px  // Space for mobile
+$vmargin = 10px  // Margin between blocks
+
+// Colors
+// jordwalke: Original
+// $offwhite = #f3f6fb
+// jordwalke: Red hint
+// $offwhite = #fcfaf9
+// jordwalke: Red Hint
+// $grey = #aa9090
+// jordwalke: Red hint
+// $accent = #DD4B39 * 0.85
+// jordwalke: Blue hint
+// $accent = #3970DD
+// jordwalke: Red hint
+// $line = #ece7e4 * 0.98
+
+$background = #fdfcfc
+$grey = #959595
+$italicgrey = #858585
+$txt = #505050
+$offwhite = #FBFAFA
+$moreoffwhite = #DFDEDE
+$offwhitecode = #F8F7F7
+$accent = #DD4B39
+$accent_border = $accent * 0.95
+$accent_hover = $accent * 0.9
+$accent_hover_border = $accent * 0.85
+$accent_light_color = #aaa
+$accent_light = #eee
+$accent_light_border = $accent_light * 0.95
+$accent_light_hover = $accent_light * 0.95
+$accent_light_hover_border = $accent_light * 0.9
+$line = #ECECEC * 0.98
+$menu_link_active = white
+$menu_link = $offwhite * 0.9
+$menu_link_hover = $offwhite
+$menu_link_level1 = $offwhite * 0.9
+$menu_link_level1_hover = $offwhite
+$indicator = $offwhite
+
+$code_string = #5F7B45
+$code_keyword = #455C7B 
+
+// Misc
+$shadow-str = 0.05
+
+// Dimensions
+$sidebar-width = 230px
+$content-width = 550px
+$pre-width = 380px
+
+/* ----------------------------------------------------------------------------
+ * Fonts
+ */
+
+@import url('../fontSupport/montserratCSS.css')
+
+// ----------------------------------------------------------------------------
+// Mixins
+
+scrollbar($bg=transparent)
+  &
+    -webkit-overflow-scrolling: touch
+  &::-webkit-scrollbar
+    width: 5px
+    height: 5px
+    margin-right:4px
+  &::-webkit-scrollbar-thumb
+    background: transparent
+    border-radius: 2px
+  &:hover::-webkit-scrollbar-thumb
+    background: #999
+
+antialias()
+  -webkit-font-smoothing: antialiased
+  text-rendering: optimizeLegibility
+
+/* ----------------------------------------------------------------------------
+ * Base
+ */
+
+global-reset()
+
+html, body
+  height: 100%
+
+html
+  overflow-x: hidden
+
+body, td, textarea, input
+  /* If both this and window's overflow-x is hidden, scroll perf suffers
+   * horribly, but the sticky menubar flicker is fixed */
+  /*overflow-x: hidden*/
+  font-family: $body-font
+  line-height: 1.6
+  font-size: 13px
+  color:$txt
+
+  @media (max-width: 480px) /* Mobile */
+    font-size: 12px
+
+a
+  color: $accent
+  text-decoration: none
+  &:hover
+    color: $accent * 0.8
+
+/* ----------------------------------------------------------------------------
+ * Content styling
+ */
+
+.content
+  p, ul, ol, h1, h2, h3, h4, h5, h6, pre, blockquote
+    padding: $vmargin 0
+    box-sizing: border-box
+
+  h1, h2, h3, h4, h5, h6
+    font-weight: bold
+    antialias()
+
+  h6
+    margin-top: 10px
+    color: #888
+    font-size: 0.9em
+
+  pre
+    font-family: $mono-font
+
+  ul > li
+    list-style-type: disc
+
+  ol > li
+    list-style-type: decimal
+
+  ul, ol
+    margin-left: 20px
+
+  ul > li
+    list-style-type: none
+    position: relative
+    &:before
+      content: ''
+      display: block
+      absolute: left -17px top 7px
+      width: 5px
+      height: 5px
+      border-radius: 4px
+      box-sizing: border-box
+      background: white
+      border: solid 1px $grey
+
+  li > :first-child
+    padding-top: 0
+
+  strong, b
+    font-weight: bold
+
+  i, em
+    font-style: italic
+    color: $italicgrey
+
+  code
+    font-family: $mono-font
+    background: $offwhitecode
+    padding: 1px 3px
+    font-size: 0.95em
+
+  pre > code
+    display: block
+    background: transparent
+    font-size: 0.85em
+
+  blockquote:first-child
+      padding-top: 0
+  blockquote:last-child
+      padding-bottom: 0
+
+  table
+    /* P is required to maintain propper size, but don't want to pay extra padding */
+    p
+      padding: 0px
+
+    code
+      padding: 0px
+
+    pre
+      padding: 0px
+
+
+  table
+
+    margin-top: $vmargin
+    margin-bottom: $vmargin
+    padding: 0
+    border-collapse: collapse
+    clear: both
+
+    tr
+      border-top: 1px solid $moreoffwhite
+      background-color: white
+      margin: 0
+      padding: 0
+
+      /*:nth-child(2n)
+        background-color: #f8f8f8 */
+
+      th
+        text-align: auto;
+        font-size: 0.85em
+        font-weight: bold
+        border: 1px solid $moreoffwhite
+        margin: 0
+        padding: 4px 10px
+        background-color: $offwhite
+
+      td
+        font-size: 0.85em
+        text-align: auto;
+        border: 1px solid $moreoffwhite
+        margin: 0
+        padding: 4px 10px
+
+    
+
+/* ----------------------------------------------------------------------------
+ * Content
+ */
+
+.content-root
+  min-height: 90%
+  position: relative
+
+.content
+  padding-top: $pad - $vmargin
+  padding-bottom: $pad
+  padding-left: $pad
+  padding-right: $pad
+  clearfix()
+
+  max-width: 700px
+
+  blockquote
+    color: $grey
+    text-shadow: 0 1px 0 rgba(white, 0.5)
+
+  h1, h2, h3
+    antialias()
+    font-family: montserrat
+    padding-bottom: 0
+
+    + p, ul, ol
+      padding-top: 10px
+
+  h1, h2
+    text-transform: uppercase
+    letter-spacing: 1px
+    font-size: 1.5em
+
+  h3
+    font-size: 1.2em
+
+  // Lines
+  h1, h2, .big-heading
+    padding-top: $pad * 2
+    &:before
+      display: block
+      content: ''
+      background: linear-gradient(left, rgba($line, 1.0) 80%, rgba($line, 0.0))
+      box-shadow: 0 1px 0 rgba(white, 0.4)
+      height: 1px
+      // For some reason this messes with the z-index though it looks better
+      // position: relative
+      top: $pad * -1
+      left: $pad * -1
+      width: 100%
+
+    @media (max-width: 768px) /* Mobile and tablet */
+      padding-top: $minipad * 2
+      &:before
+        background: $line
+        left: $pad * -1
+        top: $minipad * -1
+
+  // Small headings
+  h4, h5, .small-heading
+    border-bottom: solid 1px rgba(black, 0.06)
+    color: $grey
+    padding-top: $vmargin * 3
+    padding-bottom: 10px
+
+  body:not(.big-h3) & h3
+    @extends .content .small-heading
+    font-size: 0.9em
+
+  body.big-h3 & h3
+    @extends .content .big-heading
+
+  h1:first-child
+    padding-top: 0
+    &, a, a:visited
+      color: $txt
+    &:before
+      display: none
+
+@media (max-width: 768px) /* Tablet */
+  .content
+    h4, h5, .small-heading, body:not(.big-h3) & h3
+      padding-top: $vmargin * 2
+
+@media (max-width: 480px) /* Mobile */
+  .content
+    padding: $minipad
+    padding-top: $minipad * 2
+
+    h4, h5, .small-heading, body:not(.big-h3) & h3
+      padding-top: $vmargin
+
+// ----------------------------------------------------------------------------
+// Code blocks
+
+inset-box()
+  background: $offwhite
+  border: solid 1px $offwhite*0.95
+  display: block
+  padding: 10px
+  border-radius: 1px
+
+  overflow: auto
+  scrollbar($offwhite)
+
+body.no-literate .content pre > code
+  inset-box()
+
+@media (max-width: 1180px) /* Small desktop */
+  .content pre > code
+    inset-box()
+    
+// ----------------------------------------------------------------------------
+// Buttons
+
+.button
+  antialias()
+  transition: background-color 0.2s ease
+  transition: border-color 0.2s ease
+  font-family: montserrat, sans-serif
+  font-weight: bold
+
+  display: inline-block
+  padding: 3px 25px
+
+  border-bottom: solid 3px $accent_border
+  // jordwalke:
+  border-radius: 1px
+
+  margin-right: 15px
+
+  &, &:visited
+    background: $accent
+    color: white
+    text-shadow: none
+
+  &:hover
+    background: $accent_hover
+    border-bottom: solid 3px $accent_hover_border
+    color: white
+
+  &.light
+    &, &:visited
+      background: $accent_light
+      color: $accent_light_color
+      border-color: $accent_light_border
+      text-shadow: none
+
+    &:hover
+      color: $accent_light_color * 0.9
+      background: $accent_light_hover
+      border-color: $accent_light_hover_border
+    
+.content
+  .button + em
+    color: $grey
+
+
+// ----------------------------------------------------------------------------
+// Literate mode content
+
+@media (min-width: 1180px) /* Big desktop */
+  body:not(.no-literate)
+    .content-root
+      background-color: $background
+      $w = ($sidebar-width + $content-width)
+      box-shadow: inset $w 0 white, inset ($w + 1) 0 $line, inset ($w + 10) 0 3px -10px rgba(black, $shadow-str)
+
+// Literate mode
+@media (min-width: 1180px) /* Big desktop */
+  small-heading()
+    margin-left: $pad
+    width: $content-width - $pad * 2
+    margin-bottom: 3px
+
+    padding-left: 0
+    padding-right: 0
+
+  body:not(.no-literate)
+    .content
+      padding-left: 0
+      padding-right: 0
+
+      width: $content-width + $pre-width
+      max-width: none
+
+      >
+        p, ul, ol, h1, h2, h3, h4, h5, h6, pre, blockquote
+          width: $content-width
+          box-sizing: border-box
+          padding-right: $pad
+          padding-left: $pad
+        h1, h2, h3
+          clear: both
+          width: 100%
+        pre, blockquote
+          width: $pre-width
+          padding-left: ($pad/2)
+          padding-right: ($pad/2)
+          float: right
+          clear: right
+          +
+            p, ul, ol, h4, h5, h6
+              clear: both
+        p, ul, ol, h4, h5, h6
+          float: left
+          clear: left
+
+        h4, h5, .small-heading, body:not(.big-h3) & h3
+          small-heading()
+
+        table
+          margin-left: $pad
+          margin-right: $pad
+          max-width: $content-width - $pad*2
+
+  body:not(.no-literate):not(.big-h3)
+    .content > h3
+      small-heading()
+
+// ----------------------------------------------------------------------------
+// Header
+
+.header
+  background: $offwhite
+  /*text-shadow: 0 1px 0 rgba(white, 0.5)*/
+  border-bottom: solid 1px $line
+  padding: 15px 15px 15px $sidepad
+  clearfix()
+
+  line-height: 20px
+  position: relative
+
+  .left
+    float: left
+
+  .right
+    text-align: right
+    position: absolute
+    right: 15px
+    top: 15px
+
+    iframe
+      display: inline-block
+      vertical-align: middle
+
+  h1
+    antialias()
+    font-weight: bold
+    font-family: montserrat, sans-serif
+    font-size: 14px
+
+    a
+      transition: color 0.1s ease
+      
+    &, a, a:visited
+      color: $grey
+    a:hover, a:focus
+      color: $txt
+
+  li a
+    transition: color 0.1s ease
+    font-size: 13px
+    color: $grey
+    display: block
+
+    &:hover, &:focus
+      color: $grey*0.4
+
+  @media (min-width: 480px) /* Tablet & Desktop */
+    h1
+      float: left
+
+    ul, li
+      display: block
+      float: left
+
+    ul
+      margin-left: -15px
+
+    h1 + ul
+      border-left: solid 1px $line
+      margin-left: 15px
+
+    li
+      border-left: solid 1px rgba(white, 0.5)
+      border-right: solid 1px $line
+      &:last-child
+        border-right: 0
+
+    li a
+      padding: 0 15px
+
+@media (max-width: 480px) /* Mobile */
+  // Hide extra stuff on mobile
+  .right
+    display: none
+
+// ----------------------------------------------------------------------------
+// Sidebar
+
+.menubar
+  antialias()
+  .section
+    padding: $sidepad $sidepad
+    box-sizing: border-box
+
+  // jordwalke: Removed
+  // .section + .section
+  //   border-top: solid 1px $line
+
+  .section.no-line
+    border-top: 0
+    padding-top: 0
+
+a.big.button
+  display: block
+  box-sizing: border-box
+  width: 100%
+  padding: 8px 18px
+  text-align: center
+
+  font-weight: bold
+  font-size: 1.3em
+
+  // jordwalke:
+  // background: transparent
+  border: solid 3px $accent
+  border-radius: 30px
+  font-family: montserrat, sans-serif
+
+  &, &:visited
+    // jordwalke:
+    // color: $accent
+    text-decoration: none
+
+  // jordwalke:
+  // &:hover
+  //   background: $accent
+  //   &, &:visited
+  //     color: white
+
+@media (max-width: 480px) /* Mobile */
+  .menubar
+    padding: $minipad
+    border-bottom: solid 1px $line
+
+@media (max-width: 768px) /* Mobile and tablet */
+  .menubar
+    display: none
+
+@media (min-width: 768px) /* Desktop */
+  .content-root
+    padding-left: $sidebar-width
+
+  .menubar
+    position: absolute
+    left: 0
+    top: 0
+    bottom: 0
+    width: $sidebar-width
+    border-right: solid 1px $line
+
+  .menubar.fixed
+    position: fixed
+
+    scrollbar()
+    overflow-y: auto
+
+.menubar
+  font-size: 0.9em
+
+// Menu items
+.menu
+  ul.level-1 > li + li
+    margin-top: 20px
+
+  a
+    box-sizing: border-box
+    position: relative
+
+    display: block
+    padding-top: 1px
+    padding-bottom: 1px
+    margin-right: ($sidepad * -1)
+
+    &, &:visited
+      color: $menu_link
+    &:hover
+      color: $menu_link_hover
+
+  a.level-1
+    font-family: montserrat, sans-serif
+    text-transform: uppercase
+    font-size: 1.1em
+    font-weight: bold
+    &, &:visited
+      color: $menu_link_level1
+    &:hover
+      color: $menu_link_level1_hover
+
+  a.level-2
+    margin-left: 4px
+    font-size: 1.0em
+    font-weight: normal
+
+  a.level-3
+    font-weight: normal
+    font-size: 1.0em
+    padding-left: 10px
+
+  a.active
+    &, &:visited, &:hover
+      color: $menu_link_active !important
+    font-weight: bold !important
+    
+    // Indicator
+    &:after
+      content: ''
+      display: block
+      box-sizing: border-box
+
+      absolute: top 10px right $sidepad
+
+      width: 9px
+      height: 3px
+      border-radius: 2px
+      opacity:0.0
+      background: $indicator
+
+// Currently unused
+.docTable
+  border: 1px solid rgba(233,233,233,1)
+  border-collapse: collapse
+  border-spacing: 0
+  empty-cells: hide
+  margin: 20px 0 36px
+  text-align: left
+  width: 100%
+
+.docTableCaption
+  caption-side: top
+  text-align: left
+  margin-top: 8px
+  margin-bottom: 8px
+  color: #A5A5A5
+
+
+// ----------------------------------------------------------------------------
+// Syntax highlighting
+
+code
+  .string, .number
+    color: $code_string
+  .init
+    color: #383
+  .keyword
+    color: $code_keyword
+    font-weight: bold
+  .comment
+    color: $grey * 1.2
+
+// ----------------------------------------------------------------------------
+
+.content
+  .large-brief & > h1:first-child + p,
+  > p.brief
+    font-size: 1.3em
+    font-family: Open Sans, sans-serif
+    font-weight: 300
+
+// ----------------------------------------------------------------------------
+
+.title-area
+  min-height: 100px
+  box-sizing: border-box
+  antialias()
+  text-align: center
+  border-bottom: solid 1px $line
+  overflow: hidden
+
+  > img.bg
+    z-index: 0
+
+    // Start it off screen
+    position: absolute
+    left: -9999px
+
+  > div
+    position: relative
+    z-index: 1
+  
+

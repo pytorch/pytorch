@@ -1,0 +1,157 @@
+
+
+.hljs-forDocGrammarHighlighting {
+  border-radius: 9px;
+  background-color: rgb(246, 246, 255);
+  border: 1px solid rgb(228, 228, 236);
+  padding-top: 1px;
+  padding-bottom: 0px;
+  padding-left: 4px;
+  padding-right: 4px;
+  box-sizing: border-box;
+  color: rgb(103, 103, 120)
+}
+.featureContainer {
+  font-family: Open Sans, sans-serif;
+  margin-top: 20px;
+  display:flex;
+  text-align: center;
+}
+
+.featureIcon {
+  font-size:64px;
+}
+
+.featureColumn {
+  text-align: center;
+  flex-direction: column;
+  display:flex;
+  flex:1;
+}
+.featureItemBox {
+  margin-top: 14px;
+  padding:2px;
+  padding-top:14px;
+  padding-bottom:14px;
+  margin: 5px;
+  flex:1;
+}
+.featureComingSoon {
+  opacity: 0.4;
+}
+.featureItemBox:first-child {
+  margin-left: 0px;
+}
+.featureItemBox:last-child {
+  margin-right: 0px;
+}
+
+.featureHeader {
+  margin-bottom: 8px;
+  display:block;
+  vertical-align: middle;
+  text-align: center;
+  font-weight: bold;
+  font-size:15px;
+}
+
+.featureDet {
+  margin-bottom:4px;
+  text-align: center;
+}
+
+.menubar {
+  background-color: #444;
+}
+.title-card {
+  text-rendering: optimizeLegibility !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale; }
+
+/* jordwalke: Original
+background: #1d3b47;
+
+jordwalke: Red hint
+background: #F4F2F2;
+jordwalke: blue hint */
+.title-card {
+  background: #F6F4F4;
+  background-position: center center;
+  background-size: cover;
+  color: #ccc;
+  text-align: center;
+
+  position: relative;
+  z-index: 1;
+
+  width: 100%;
+  display: table; }
+
+.title-card > .in {
+  display: table-cell;
+  vertical-align: middle; }
+
+.title-card .headline {
+  vertical-align: middle;
+  display: inline-block;
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+
+  /* text-shadow: 0 0 4px rgba(0, 0, 0, 0.5); */
+
+  padding-left: 40px;
+  padding-right: 40px;
+  max-width: 800px;
+  line-height: 1.7; }
+
+.title-card h1 {
+  font-family: 'Open Sans', sans-serif;
+  font-size: 3.3em;
+  font-weight: 300;
+  line-height: 1.1;
+  margin-bottom: 0.5em;
+  color: #fff; }
+
+.title-card p {
+  font-family: montserrat, sans-serif;
+  color: #b8eaea;
+  font-weight: bold;
+  font-size: 1.3em; }
+
+.title-card h5 {
+  /* jordwalke */
+  /* margin-top: 150px; */
+  margin-top: 0px;
+
+  font-family: montserrat, sans-serif;
+  font-weight: bold;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-size: 1.8em; }
+
+.title-card h5 span {
+  display: inline-block;
+  padding: 5px 20px;
+  border: solid 3px #fff; }
+
+@media (max-width: 768px) /* Tablet */ {
+  .title-card h5 {
+    margin-top: 100px; }
+}
+
+@media (max-width: 480px) /* Mobile */ {
+  .title-card {
+    padding: 50px 0; }
+  .title-card .headline {
+    padding-left: 10px;
+    padding-right: 10px;
+    min-height: none; }
+  .title-card h1 {
+    font-size: 2.2em; }
+  .title-card p {
+    font-size: 1.1em; }
+  .title-card h5 {
+    margin-top: 40px;
+    font-size: 0.9em; }
+}

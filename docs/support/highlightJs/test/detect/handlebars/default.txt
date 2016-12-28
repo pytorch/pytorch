@@ -1,0 +1,7 @@
+<h3>Hours</h3>
+
+<ul>
+  {{#each content.users}}
+  <li {{bindAttr hello="world"}}>{{firstName}}</li>
+  {{/each}}
+</ul>

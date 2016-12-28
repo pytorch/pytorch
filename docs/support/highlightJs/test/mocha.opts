@@ -1,0 +1,6 @@
+--require should
+--reporter spec
+--ui bdd
+--bail
+--check-leaks
+--inline-diffs

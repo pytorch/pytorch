@@ -1,0 +1,24 @@
+% "Hello World" in Mercury.
+:- module hello.
+
+
+:- interface.
+:- import_module io.
+
+:- pred main(io::di, io::uo) is det.
+
+
+:- implementation.
+
+main(!IO) :-
+    io.write_string("Hello, world\n", !IO).
+
+:- pred filter(pred(T), list(T), list(T), list(T) ).
+:- mode filter(in(pred(in) is semidet), in, out, out ) is det.
+
+filter(_, [], [], []).
+filter(P, [X | Xs], Ys, Zs) :-
+    filter(P, Xs, Ys0, Zs0),
+    ( if P(X)   then    Ys = [X | Ys0],   Zs = Zs0
+                else    Ys = Ys0      ,   Zs = [X | Zs0]
+    ).

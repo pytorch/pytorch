@@ -1,0 +1,23 @@
+2.0.0p0 :001 > ['some']
+ => ["some"]
+2.0.0p0 :002 > if true
+2.0.0p0 :003?>   "yop"
+2.0.0p0 :004?>   end
+ => "yop"
+
+jruby-1.7.16 :001 > "RVM-Format"
+
+>> obj = OpenStruct.new :integer => 987, :symbol => :so_great
+=> #<OpenStruct integer=987, symbol=:so_great>
+>> [obj,obj,obj]
+=> [#<OpenStruct integer=987, symbol=:so_great>, #<OpenStruct integer=987, symbol=:so_great>, #<OpenStruct integer=987, symbol=:so_great>]
+>> {1 => obj, 2 => obj}
+=> {1=>#<OpenStruct integer=987, symbol=:so_great>, 2=>#<OpenStruct integer=987, symbol=:so_great>}
+>> if 10 > 20
+>> "YEAH"
+>> else
+?> "NO"
+>> end
+=> "NO"
+
+irb(main):002:0> test = 1

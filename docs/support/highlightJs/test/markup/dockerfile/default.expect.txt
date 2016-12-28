@@ -1,0 +1,44 @@
+<span class="hljs-comment"># Example instructions from https://docs.docker.com/reference/builder/</span>
+<span class="hljs-built_in">FROM</span> ubuntu:<span class="hljs-number">14.04</span>
+
+<span class="hljs-built_in">MAINTAINER</span> example@example.com
+
+<span class="hljs-built_in">ENV</span> foo /bar
+<span class="hljs-built_in">WORKDIR</span> <span class="bash"><span class="hljs-variable">${foo}</span>   <span class="hljs-comment"># WORKDIR /bar</span>
+</span><span class="hljs-built_in">ADD</span> <span class="bash">. <span class="hljs-variable">$foo</span>       <span class="hljs-comment"># ADD . /bar</span>
+</span><span class="hljs-built_in">COPY</span> <span class="bash">\<span class="hljs-variable">$foo</span> /quux <span class="hljs-comment"># COPY $foo /quux</span>
+</span>
+<span class="hljs-built_in">RUN</span> <span class="bash">apt-get update &amp;&amp; apt-get install -y software-properties-common\
+    zsh curl wget git htop\
+    unzip vim telnet
+</span><span class="hljs-built_in">RUN</span> <span class="bash">[<span class="hljs-string">"/bin/bash"</span>, <span class="hljs-string">"-c"</span>, <span class="hljs-string">"echo hello <span class="hljs-variable">${USER}</span>"</span>]
+</span>
+<span class="hljs-built_in">CMD</span> <span class="bash">[<span class="hljs-string">"executable"</span>,<span class="hljs-string">"param1"</span>,<span class="hljs-string">"param2"</span>]
+</span><span class="hljs-built_in">CMD</span> <span class="bash"><span class="hljs-built_in">command</span> param1 param2
+</span>
+<span class="hljs-built_in">EXPOSE</span> <span class="hljs-number">1337</span>
+
+<span class="hljs-built_in">ENV</span> myName=<span class="hljs-string">"John Doe"</span> myDog=Rex\ The\ Dog \
+    myCat=fluffy
+
+<span class="hljs-built_in">ENV</span> myName John Doe
+<span class="hljs-built_in">ENV</span> myDog Rex The Dog
+<span class="hljs-built_in">ENV</span> myCat fluffy
+
+<span class="hljs-built_in">ADD</span> <span class="bash">hom* /mydir/        <span class="hljs-comment"># adds all files starting with "hom"</span>
+</span><span class="hljs-built_in">ADD</span> <span class="bash">hom?.txt /mydir/    <span class="hljs-comment"># ? is replaced with any single character</span>
+</span>
+<span class="hljs-built_in">COPY</span> <span class="bash">hom* /mydir/        <span class="hljs-comment"># adds all files starting with "hom"</span>
+</span><span class="hljs-built_in">COPY</span> <span class="bash">hom?.txt /mydir/    <span class="hljs-comment"># ? is replaced with any single character</span>
+</span>
+<span class="hljs-built_in">ENTRYPOINT</span> <span class="bash">[<span class="hljs-string">"executable"</span>, <span class="hljs-string">"param1"</span>, <span class="hljs-string">"param2"</span>]
+</span><span class="hljs-built_in">ENTRYPOINT</span> <span class="bash"><span class="hljs-built_in">command</span> param1 param2
+</span>
+<span class="hljs-built_in">VOLUME</span> <span class="bash">[<span class="hljs-string">"/data"</span>]
+</span>
+<span class="hljs-built_in">USER</span> daemon
+
+<span class="hljs-built_in">WORKDIR</span> <span class="bash">/path/to/workdir
+</span>
+<span class="hljs-built_in">ONBUILD</span> <span class="hljs-built_in">ADD</span> <span class="bash">. /app/src
+</span>

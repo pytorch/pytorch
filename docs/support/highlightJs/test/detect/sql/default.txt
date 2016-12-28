@@ -1,0 +1,19 @@
+BEGIN;
+CREATE TABLE "topic" (
+    -- This is the greatest table of all time
+    "id" serial NOT NULL PRIMARY KEY,
+    "forum_id" integer NOT NULL,
+    "subject" varchar(255) NOT NULL -- Because nobody likes an empty subject
+);
+ALTER TABLE "topic" ADD CONSTRAINT forum_id FOREIGN KEY ("forum_id") REFERENCES "forum" ("id");
+
+-- Initials
+insert into "topic" ("forum_id", "subject") values (2, 'D''artagnian');
+
+select /* comment */ count(*) from cicero_forum;
+
+-- this line lacks ; at the end to allow people to be sloppy and omit it in one-liners
+/*
+but who cares?
+*/
+COMMIT
