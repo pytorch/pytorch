@@ -12,26 +12,6 @@ using namespace torch;
 extern THCState* state;
 
 [[
-  name: cudnn_convolution_init
-  return: Convolution*
-  arguments:
-    - cudnnHandle_t handle
-    - cudnnDataType_t dataType
-    - THTensor* input
-    - THTensor* weight
-    - type: THTensor*
-      name: bias
-      nullable: True
-    - THTensor* output
-    - int padH
-    - int padW
-    - int dH
-    - int dW
-    - int groups
-    - bool transposed
-]]
-
-[[
   name: cudnn_convolution_forward
   return: void
   arguments:
@@ -67,10 +47,8 @@ extern THCState* state;
       name: bias
       nullable: True
     - THTensor* output
-    - int padH
-    - int padW
-    - int dH
-    - int dW
+    - std::vector<int> pad
+    - std::vector<int> stride
     - int groups
     - bool benchmark
 ]]
@@ -87,10 +65,8 @@ extern THCState* state;
       name: bias
       nullable: True
     - THTensor* output
-    - int padH
-    - int padW
-    - int dH
-    - int dW
+    - std::vector<int> pad
+    - std::vector<int> stride
     - int groups
     - bool benchmark
 ]]

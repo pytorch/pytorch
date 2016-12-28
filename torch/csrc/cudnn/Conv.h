@@ -1,6 +1,7 @@
 #ifndef THP_CUDNN_CONV_INC
 #define THP_CUDNN_CONV_INC
 
+#include <vector>
 #include <cudnn.h>
 #include "THC/THC.h"
 
@@ -12,11 +13,11 @@ namespace torch { namespace cudnn {
 struct ConvolutionParams
 {
   cudnnDataType_t dataType;
-  int input_size[4];
-  int input_stride[4];
-  int weight_size[4];
-  int pad[2];
-  int stride[2];
+  int input_size[5];
+  int input_stride[5];
+  int weight_size[5];
+  int pad[3];
+  int stride[3];
   int groups;
 };
 
@@ -39,14 +40,9 @@ struct Convolution
 
   Convolution(
       cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
-      THVoidTensor* bias, THVoidTensor* output, int pad[2], int stride[2],
-      int groups, bool transposed);
+      THVoidTensor* bias, THVoidTensor* output, std::vector<int> pad,
+      std::vector<int> stride, int groups, bool transposed);
 };
-
-Convolution* cudnn_convolution_init(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool transposed);
 
 void cudnn_convolution_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
@@ -77,12 +73,12 @@ void cudnn_convolution_backward_bias(
 Convolution* cudnn_convolution_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool benchmark);
+    std::vector<int> pad, std::vector<int> stride, int groups, bool benchmark);
 
 Convolution* cudnn_convolution_transpose_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool benchmark);
+    std::vector<int> pad, std::vector<int> stride, int groups, bool benchmark);
 
 }}  // namespace torch::cudnn
 

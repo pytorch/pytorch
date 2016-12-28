@@ -42,8 +42,8 @@ struct FilterDescriptor
   ~FilterDescriptor() {
     cudnnDestroyFilterDescriptor(desc);
   }
-  void set(cudnnDataType_t dataType, int* size) {
-    CHECK(cudnnSetFilterNdDescriptor(desc, dataType, CUDNN_TENSOR_NCHW, 4, size));
+  void set(cudnnDataType_t dataType, int dim, int* size) {
+    CHECK(cudnnSetFilterNdDescriptor(desc, dataType, CUDNN_TENSOR_NCHW, dim, size));
   }
 };
 
@@ -62,9 +62,9 @@ struct ConvolutionDescriptor
   ~ConvolutionDescriptor() {
     cudnnDestroyConvolutionDescriptor(desc);
   }
-  void set(cudnnDataType_t dataType, int* pad, int* stride) {
-    int upscale[2] = {1, 1};
-    CHECK(cudnnSetConvolutionNdDescriptor(desc, 2, pad, stride, upscale,
+  void set(cudnnDataType_t dataType, int dim, int* pad, int* stride) {
+    int upscale[3] = {1, 1, 1};
+    CHECK(cudnnSetConvolutionNdDescriptor(desc, dim, pad, stride, upscale,
           CUDNN_CROSS_CORRELATION, dataType));
   }
 };
