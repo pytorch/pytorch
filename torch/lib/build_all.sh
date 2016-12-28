@@ -45,7 +45,7 @@ function build_nccl() {
                -DCMAKE_C_FLAGS="$C_FLAGS" \
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
-   cp "lib/libnccl.so" "${INSTALL_DIR}/lib/libnccl.so"
+   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
    cd ../..
 }
 
