@@ -1,0 +1,16 @@
+{% if articles|length %}
+{% for article in articles %}
+
+{# Striped table #}
+<tr class="{% cycle odd,even %}">
+  <td>{{ article|default:"Hi... "|escape }}</td>
+  <td {% if article.today %}class="today"{% endif %}>{{ article.date|date:'d.m.Y' }}</td>
+</tr>
+
+{% endfor %}
+{% endif %}
+
+{% comment %}
+Comments may be long and multiline.
+Markup is <em>not</em> highlighted within comments.
+{% endcomment %}

@@ -1,0 +1,6 @@
+POST /task?id=1 HTTP/1.1
+Host: example.org
+Content-Type: application/json; charset=utf-8
+Content-Length: 19
+
+{"status": "ok", "extended": true}

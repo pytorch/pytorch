@@ -1,0 +1,6 @@
+public void MyClass.doSomething() throws Exception{
+  // intertype method body
+}
+public void A.doSomething(int param1){
+  // intertype method body
+}

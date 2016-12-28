@@ -1,0 +1,7 @@
+&lt;div&gt;
+<span class="hljs-preprocessor">[</span><span class="hljs-built_in">local</span>(y<span class="hljs-tag">::decimal</span> = <span class="hljs-number">.57721</span>)<span class="hljs-preprocessor">]</span><span class="hljs-markup">
+</span><span class="hljs-preprocessor">[noprocess]</span><span class="hljs-markup"> &lt;?lasso delimiters?&gt; [until] </span><span class="hljs-preprocessor">[/noprocess</span><span class="hljs-preprocessor">]</span><span class="hljs-markup">
+</span><span class="hljs-preprocessor">[no_square_brackets</span><span class="hljs-preprocessor">]</span><span class="hljs-markup"> skip subsequent [square brackets]
+<span class="hljs-comment">&lt;!--ignore &lt;?LassoScript in HTML comments ?&gt;--&gt;</span>
+</span><span class="hljs-preprocessor">&lt;?=</span><span class="hljs-subst">!</span><span class="hljs-variable">#y</span> ? <span class="hljs-literal">true</span> | <span class="hljs-string">`string`</span><span class="hljs-preprocessor">?&gt;</span><span class="hljs-markup">
+&lt;/div&gt;</span>

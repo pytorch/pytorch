@@ -1,0 +1,29 @@
+let i = 14
+let i = -14
+let i = 1_000
+let i = 0b100
+let i = 0x1FF
+let i = 0o777
+let i64 = 128L
+let i64 = 0b10L
+let i32 = 32l
+let i32 = 0x12l
+let nat = 10n
+let nat = 0o644n
+let f = 5.
+let f = 5.1
+let f = 1e+1
+let f = 1e1
+let f = 1e-1
+let f = 1_024e12
+let f = 1L
+
+let b = true || false
+let l = []
+let a = [||]
+let () = ignore (b)
+
+let c = 'a'
+let c = '\xFF'
+let c = '\128'
+let c = '\n'

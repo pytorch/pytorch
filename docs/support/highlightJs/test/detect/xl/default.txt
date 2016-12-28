@@ -1,0 +1,28 @@
+import Animate
+import SeasonsGreetingsTheme
+import "myhelper.xl"
+theme "SeasonsGreetings"
+function X:real -> sin(X*0.5) + 16#0.002
+page "A nice car",
+// --------------------------------------
+//    Display car model on a pedestal
+// --------------------------------------
+    clear_color 0, 0, 0, 1
+    hand_scale -> 0.3
+
+    // Display the background image
+    background -4000,
+        locally
+            disable_depth_test
+            corridor N:integer ->
+                locally
+                    rotatez 60 * N
+                    translatex 1000
+                    rotatey 90
+                    color "white"
+                    texture "stars.png"
+                    texture_wrap true, true
+                    texture_transform
+                        translate (time + N) * 0.02 mod 1, 0, 0
+                        scale 0.2, 0.3, 0.3
+                    rectangle 0, 0, 100000, 1154

@@ -1,0 +1,25 @@
+proc string[] getSelectedLights()
+
+{
+  string $selectedLights[];
+
+  string $select[] = `ls -sl -dag -leaf`;
+
+  for ( $shape in $select )
+  {
+    // Determine if this is a light.
+    //
+    string $class[] = getClassification( `nodeType $shape` );
+
+
+    if ( ( `size $class` ) > 0 && ( "light" == $class[0] ) )
+    {
+      $selectedLights[ `size $selectedLights` ] = $shape;
+    }
+  }
+
+  // Result is an array of all lights included in
+
+  // current selection list.
+  return $selectedLights;
+}

@@ -1,0 +1,4 @@
+<span class="hljs-preprocessor"># These will all work:</span>
+<span class="hljs-function"><span class="hljs-keyword">char</span>** <span class="hljs-title">foo_bar</span><span class="hljs-params">()</span></span>;
+<span class="hljs-function"><span class="hljs-keyword">char</span> ** <span class="hljs-title">foo_bar</span><span class="hljs-params">()</span></span>;
+<span class="hljs-function"><span class="hljs-keyword">char</span> **<span class="hljs-title">foo_bar</span><span class="hljs-params">()</span></span>;
