@@ -266,11 +266,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
   THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
 
-  input_data = THTensor_(data)(input);
-
   THTensor_(resizeAs)(gradInput, input);
 
-  input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   THArgCheck(THTensor_(isContiguous)(gradInput), 4, "gradInput must be contiguous");
 
@@ -326,7 +323,6 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     }
   }
 
-  THTensor_(free)(input);
   THTensor_(free)(gradOutput);
 }
 
