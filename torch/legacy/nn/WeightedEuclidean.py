@@ -80,7 +80,7 @@ class WeightedEuclidean(Module):
             self._repeat.resize_as_(self._expand).copy_(self._expand)
             self._repeat.add_(-1, self.weight)
             self._repeat.mul_(self.diagCov)
-            torch.norm(self.output, self._repeat, 2, 0)
+            torch.norm(self._repeat, 2, 0, out=self.output)
             self.output.resize_(outputSize)
         elif input.dim() == 2:
             batchSize = input.size(0)
@@ -107,7 +107,7 @@ class WeightedEuclidean(Module):
                 self._repeat.mul_(self._expand3)
 
 
-            torch.norm(self.output, self._repeat, 2, 1)
+            torch.norm(self._repeat, 2, 1, out=self.output)
             self.output.resize_(batchSize, outputSize)
         else:
            raise RuntimeError("1D or 2D input expected")
@@ -141,7 +141,7 @@ class WeightedEuclidean(Module):
         # to prevent div by zero (NaN) bugs
         self._output.resize_as_(self.output).copy_(self.output).add_(1e-7)
         self._view(self._gradOutput, gradOutput, gradOutput.size())
-        torch.div(self._div, gradOutput, self._output)
+        torch.div(gradOutput, self._output, out=self._div)
         if input.dim() == 1:
             self._div.resize_(1, outputSize)
             self._expand4 = self._div.expand_as(self.weight)
@@ -153,7 +153,7 @@ class WeightedEuclidean(Module):
                 self._repeat2.mul_(self._repeat, self._expand4)
 
             self._repeat2.mul_(self.diagCov)
-            torch.sum(self.gradInput, self._repeat2, 1)
+            torch.sum(self._repeat2, 1, out=self.gradInput)
             self.gradInput.resize_as_(input)
         elif input.dim() == 2:
             batchSize = input.size(0)
@@ -166,11 +166,11 @@ class WeightedEuclidean(Module):
                 self._repeat2.mul_(self._repeat)
                 self._repeat2.mul_(self._repeat3)
             else:
-                torch.mul(self._repeat2, self._repeat, self._expand4)
+                torch.mul(self._repeat, self._expand4, out=self._repeat2)
                 self._repeat2.mul_(self._expand3)
 
 
-            torch.sum(self.gradInput, self._repeat2, 2)
+            torch.sum(self._repeat2, 2, out=self.gradInput)
             self.gradInput.resize_as_(input)
         else:
             raise RuntimeError("1D or 2D input expected")
@@ -201,14 +201,14 @@ class WeightedEuclidean(Module):
                 self._repeat2.resize_as_(self._expand4).copy_(self._expand4)
                 self._repeat2.mul_(self._repeat)
             else:
-                torch.mul(self._repeat2, self._repeat, self._expand4)
+                torch.mul(self._repeat, self._expand4, out=self._repeat2)
 
 
             self.gradDiagCov.add_(self._repeat2)
         elif input.dim() == 2:
             if self._sum is None:
                   self._sum = input.new()
-            torch.sum(self._sum, self._repeat2, 0)
+            torch.sum(self._repeat2, 0, out=self._sum)
             self._sum.resize_(inputSize, outputSize)
             self.gradWeight.add_(-scale, self._sum)
 
@@ -226,7 +226,7 @@ class WeightedEuclidean(Module):
                 self._repeat.mul_(self._expand4)
 
 
-            torch.sum(self._sum, self._repeat, 0)
+            torch.sum(self._repeat, 0, out=self._sum)
             self._sum.resize_(inputSize, outputSize)
             self.gradDiagCov.add_(scale, self._sum)
         else:

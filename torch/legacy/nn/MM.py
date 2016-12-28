@@ -21,7 +21,7 @@ class MM(Module):
             if self.transB:
                 b = b.t()
             self.output.resize_(a.size(0), b.size(1))
-            torch.mm(self.output, a, b)
+            torch.mm(a, b, out=self.output)
         else:
             if self.transA:
                 a = a.transpose(2, 3)
@@ -29,7 +29,7 @@ class MM(Module):
                 b = b.transpose(2, 3)
 
             self.output.resize_(a.size(0), a.size(1), b.size(2))
-            torch.bmm(self.output, a, b)
+            torch.bmm(a, b, out=self.output)
 
         return self.output
 
@@ -59,14 +59,14 @@ class MM(Module):
             b = b.transpose(h_dim, w_dim)
 
         if self.transA:
-            getattr(torch, f)(self.gradInput[0], b, gradOutput.transpose(h_dim, w_dim))
+            getattr(torch, f)(b, gradOutput.transpose(h_dim, w_dim), out=self.gradInput[0])
         else:
-            getattr(torch, f)(self.gradInput[0], gradOutput, b)
+            getattr(torch, f)(gradOutput, b, out=self.gradInput[0])
 
         if self.transB:
-            getattr(torch, f)(self.gradInput[1], gradOutput.transpose(h_dim, w_dim), a)
+            getattr(torch, f)(gradOutput.transpose(h_dim, w_dim), a, out=self.gradInput[1])
         else:
-            getattr(torch, f)(self.gradInput[1], a, gradOutput)
+            getattr(torch, f)(a, gradOutput, out=self.gradInput[1])
 
         return self.gradInput
 

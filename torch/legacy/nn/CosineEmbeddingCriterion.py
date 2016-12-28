@@ -36,29 +36,29 @@ class CosineEmbeddingCriterion(Criterion):
             else:
                 self._idx = torch.ByteTensor()
 
-        torch.mul(self.buffer, input1, input2)
-        torch.sum(self.w1, self.buffer, 1)
+        torch.mul(input1, input2, out=self.buffer)
+        torch.sum(self.buffer, 1, out=self.w1)
 
         epsilon = 1e-12
-        torch.mul(self.buffer, input1, input1)
-        torch.sum(self.w22, self.buffer, 1).add_(epsilon)
+        torch.mul(input1, input1, out=self.buffer)
+        torch.sum(self.buffer, 1, out=self.w22).add_(epsilon)
         # self._outputs is also used as a temporary buffer
         self._outputs.resize_as_(self.w22).fill_(1)
-        torch.div(self.w22, self._outputs, self.w22)
+        torch.div(self._outputs, self.w22, out=self.w22)
         self.w.resize_as_(self.w22).copy_(self.w22)
 
-        torch.mul(self.buffer, input2, input2)
-        torch.sum(self.w32, self.buffer, 1).add_(epsilon)
-        torch.div(self.w32, self._outputs, self.w32)
+        torch.mul(input2, input2, out=self.buffer)
+        torch.sum(self.buffer, 1, out=self.w32).add_(epsilon)
+        torch.div(self._outputs, self.w32, out=self.w32)
         self.w.mul_(self.w32)
         self.w.sqrt_()
 
-        torch.mul(self._outputs, self.w1, self.w)
+        torch.mul(self.w1, self.w, out=self._outputs)
         self._outputs = self._outputs.select(1, 0)
 
-        torch.eq(self._idx, y, -1)
+        torch.eq(y, -1, out=self._idx)
         self._outputs[self._idx] = self._outputs[self._idx].add_(-self.margin).cmax_(0)
-        torch.eq(self._idx, y, 1)
+        torch.eq(y, 1, out=self._idx)
         self._outputs[self._idx] = self._outputs[self._idx].mul_(-1).add_(1)
 
         self.output = self._outputs.sum()
@@ -78,21 +78,21 @@ class CosineEmbeddingCriterion(Criterion):
         gw1.resize_as_(v1).copy_(v2)
         gw2.resize_as_(v1).copy_(v1)
 
-        torch.mul(self.buffer, self.w1, self.w22)
+        torch.mul(self.w1, self.w22, out=self.buffer)
         gw1.addcmul_(-1, self.buffer.expand_as(v1), v1)
         gw1.mul_(self.w.expand_as(v1))
 
-        torch.mul(self.buffer, self.w1, self.w32)
+        torch.mul(self.w1, self.w32, out=self.buffer)
         gw2.addcmul_(-1, self.buffer.expand_as(v1), v2)
         gw2.mul_(self.w.expand_as(v1))
 
         # self._idx = self._outputs <= 0
-        torch.le(self._idx, self._outputs, 0)
+        torch.le(self._outputs, 0, out=self._idx)
         self._idx = self._idx.view(-1, 1).expand(gw1.size())
         gw1[self._idx] = 0
         gw2[self._idx] = 0
 
-        torch.eq(self._idx, y, 1)
+        torch.eq(y, 1, out=self._idx)
         self._idx = self._idx.view(-1, 1).expand(gw2.size())
         gw1[self._idx] = gw1[self._idx].mul_(-1)
         gw2[self._idx] = gw2[self._idx].mul_(-1)

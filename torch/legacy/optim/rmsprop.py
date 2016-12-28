@@ -50,7 +50,7 @@ def rmsprop(opfunc, x, config, state=None):
     state['m'].addcmul_(1.0-alpha, dfdx, dfdx)
 
     # (5) perform update
-    torch.sqrt(state['tmp'], state['m']).add_(epsilon)
+    torch.sqrt(state['m'], out=state['tmp']).add_(epsilon)
     x.addcdiv_(-lr, dfdx, state['tmp'])
 
     # return x*, f(x) before optimization

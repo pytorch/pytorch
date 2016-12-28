@@ -31,14 +31,14 @@ class BCECriterion(Criterion):
             weights = self.weights.view(1, target.size(1)).expand_as(target)
 
         # log(input) * target
-        torch.add(buffer, input, self.eps).log_()
+        torch.add(input, self.eps, out=buffer).log_()
         if weights is not None:
             buffer.mul_(weights)
 
         output = torch.dot(target, buffer)
 
         # log(1 - input) * (1 - target)
-        torch.mul(buffer, input, -1).add_(1+self.eps).log_()
+        torch.mul(input, -1, out=buffer).add_(1+self.eps).log_()
         if weights is not None:
             buffer.mul_(weights)
 
@@ -75,11 +75,11 @@ class BCECriterion(Criterion):
 
          buffer.resize_as_(input)
          # - x ( 1 + self.eps -x ) + self.eps
-         torch.add(buffer, input, -1).add_(-self.eps).mul_(input).add_(-self.eps)
+         torch.add(input, -1, out=buffer).add_(-self.eps).mul_(input).add_(-self.eps)
 
          gradInput.resize_as_(input)
          # y - x
-         torch.add(gradInput, target, -1, input)
+         torch.add(target, -1, input, out=gradInput)
          # - (y - x) / ( x ( 1 + self.eps -x ) + self.eps )
          gradInput.div_(buffer)
 

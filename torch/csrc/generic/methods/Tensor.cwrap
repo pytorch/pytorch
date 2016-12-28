@@ -102,7 +102,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: THSize* size
       long_args: True
 ]]
@@ -123,7 +123,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: THSize* size
       long_args: True
 ]]
@@ -355,7 +355,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - THBoolTensor* mask
 ]]
@@ -417,12 +417,12 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   options:
     - arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
     - cname: squeeze1d
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - long dim
 ]]
@@ -448,7 +448,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - arg: THIndexTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -485,7 +485,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - long dim
     - THIndexTensor* index
@@ -532,7 +532,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - long dimension
     - long start
@@ -544,7 +544,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - long dimension
     - long size
@@ -558,7 +558,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - accreal xmin
     - accreal xmax
     - arg: accreal step
@@ -592,7 +592,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     THTensor_(resize)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, _size, NULL);
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - long dim
     - THIndexTensor* index

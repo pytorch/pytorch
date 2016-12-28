@@ -5,7 +5,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
     - long n
@@ -57,7 +57,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   return: argument 0
   arguments:
     - arg: THLongTensor* result
-      allocate: True
+      output: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
     - THTensor* self
@@ -115,7 +115,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - cname: normal_means
       arguments:
         - arg: THTensor* output
-          allocate: True
+          output: True
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
         - THTensor* means
@@ -124,7 +124,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - cname: normal_stddevs
       arguments:
         - arg: THTensor* output
-          allocate: True
+          output: True
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
         - arg: real mean
@@ -133,7 +133,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - cname: normal_means_stddevs
       arguments:
         - arg: THTensor* output
-          allocate: True
+          output: True
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
         - THTensor* means
@@ -206,7 +206,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
     - arg: THSize* size
@@ -220,7 +220,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
     - arg: THSize* size
@@ -234,7 +234,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   return: argument 0
   arguments:
     - arg: THIndexTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - long num_samples
     - arg: bool replacement
@@ -288,7 +288,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - cname: normal
       arguments:
         - arg: THTensor* output
-          allocate: True
+          output: True
         - arg: double mean
           default: 0
         - arg: double stddev
@@ -296,21 +296,21 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - cname: normal_means
       arguments:
         - arg: THTensor* output
-          allocate: True
+          output: True
         - THTensor* means
         - arg: double stddev
           default: 1
     - cname: normal_stddevs
       arguments:
         - arg: THTensor* output
-          allocate: True
+          output: True
         - arg: double mean
           default: 0
         - THTensor* stddevs
     - cname: normal_means_stddevs
       arguments:
         - arg: THTensor* output
-          allocate: True
+          output: True
         - THTensor* means
         - THTensor* stddevs
 ]]
@@ -373,7 +373,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: THSize* size
       long_args: True
 ]]
@@ -385,7 +385,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: THSize* size
       long_args: True
 ]]
@@ -415,7 +415,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   cname: BERNOULLI_TENSOR
   arguments:
     - arg: THTensor* output
-      allocate: True
+      output: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
     - THTensor* self
@@ -473,7 +473,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg1)->cdata);
   arguments:
     - arg: THTensor* output
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 

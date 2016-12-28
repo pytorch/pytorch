@@ -65,9 +65,9 @@ class Bilinear(Module):
         # compute output scores:
         self.output.resize_(input[0].size(0), self.weight.size(0))
         for k in range(self.weight.size(0)):
-            torch.mm(self.buff2, input[0], self.weight[k])
+            torch.mm(input[0], self.weight[k], out=self.buff2)
             self.buff2.mul_(input[1])
-            torch.sum(self.output.narrow(1, k, 1), self.buff2, 1)
+            torch.sum(self.buff2, 1, out=self.output.narrow(1, k, 1))
 
         if self.bias is not None:
             self.output.add_(self.bias.view(1, self.bias.nelement()).expand_as(self.output))
@@ -99,12 +99,12 @@ class Bilinear(Module):
             self.buff1.resize_as_(input[0])
 
             for k in range(1, self.weight.size(0)):
-                torch.mm(self.buff1, input[1], self.weight[k].t())
+                torch.mm(input[1], self.weight[k].t(), out=self.buff1)
                 self.buff1.mul_(gradOutput.narrow(1, k, 1).expand(self.gradInput[0].size(0),
                     self.gradInput[0].size(1)))
                 self.gradInput[0].add_(self.buff1)
 
-                torch.mm(self.buff2, input[0], self.weight[k])
+                torch.mm(input[0], self.weight[k], out=self.buff2)
                 self.buff2.mul_(gradOutput.narrow(1, k, 1).expand(self.gradInput[1].size(0),
                     self.gradInput[1].size(1)))
                 self.gradInput[1].add_(self.buff2)
@@ -123,7 +123,7 @@ class Bilinear(Module):
 
         # accumulate parameter gradients:
         for k in range(self.weight.size(0)):
-            torch.mul(self.buff1, input[0], gradOutput.narrow(1, k, 1).expand_as(input[0]))
+            torch.mul(input[0], gradOutput.narrow(1, k, 1).expand_as(input[0]), out=self.buff1)
             self.gradWeight[k].addmm_(self.buff1.t(), input[1])
 
         if self.bias is not None:

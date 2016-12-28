@@ -77,7 +77,7 @@ class PartialLinear(Module):
             if self.buffer is None:
                 self.buffer = input.new()
             self.buffer.resize_(gradOutput.size(1))
-            torch.mv(self.buffer, gradOutput.t(), self.addBuffer).mul_(scale)
+            torch.mv(gradOutput.t(), self.addBuffer, out=self.buffer).mul_(scale)
             self.gradBias.index_add_(
                 1, self.partition, self.buffer.view(1, self.buffer.nelement())
             )

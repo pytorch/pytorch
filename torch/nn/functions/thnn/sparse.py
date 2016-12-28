@@ -43,11 +43,10 @@ class Embedding(Function):
         if self.max_norm is not None:
             self._renorm(indices, weight)
 
-        output = weight.new()
         if indices.dim() == 1:
-            torch.index_select(output, weight, 0, indices)
+            output = torch.index_select(weight, 0, indices)
         else:
-            torch.index_select(output, weight, 0, indices.view(-1))
+            output = torch.index_select(weight, 0, indices.view(-1))
             output = output.view(indices.size(0), indices.size(1), weight.size(1))
 
         return output

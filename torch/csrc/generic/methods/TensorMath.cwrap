@@ -5,7 +5,7 @@
   with_stateless: True
   arguments:
     - arg: THTensor* destination
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -38,7 +38,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -60,7 +60,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -82,7 +82,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -104,7 +104,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -126,7 +126,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -148,7 +148,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -170,7 +170,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -192,7 +192,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -214,7 +214,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -236,7 +236,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -258,7 +258,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -280,7 +280,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -302,7 +302,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -324,7 +324,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -346,7 +346,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -368,7 +368,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -390,7 +390,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -412,7 +412,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -434,7 +434,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -456,7 +456,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -473,7 +473,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
         - long dim
 ]]
@@ -491,7 +491,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
         - long dim
         - CONSTANT false
@@ -510,7 +510,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
         - long dim
         - CONSTANT false
@@ -531,7 +531,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
         - real p
         - long dim
@@ -546,7 +546,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
         - real p
         - long dim
@@ -590,7 +590,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
 ]]
 
@@ -614,7 +614,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
 ]]
 
@@ -637,7 +637,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* destination
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* other
 ]]
@@ -666,19 +666,19 @@
     - cname: pow
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
         - real exponent
     - cname: cpow
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - THTensor* self
         - THTensor* exponent
     - cname: tpow
       arguments:
         - arg: THTensor* destination
-          allocate: True
+          output: True
         - real base
         - THTensor* self
 ]]
@@ -709,7 +709,7 @@
   cname: lerp
   arguments:
     - arg: THTensor* destination
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* end
     - real weight
@@ -734,7 +734,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - real start
     - real end
     - arg: long steps
@@ -748,7 +748,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - real start
     - real end
     - arg: long steps
@@ -763,28 +763,28 @@
   options:
     - arguments:
       - arg: THTensor* destination
-        allocate: True
+        output: True
       - THTensor* self
       - CONSTANT 100
       - CONSTANT 0
       - CONSTANT 0
     - arguments:
       - arg: THTensor* destination
-        allocate: True
+        output: True
       - THTensor* self
       - long bins
       - CONSTANT 0
       - CONSTANT 0
     - arguments:
       - arg: THTensor* destination
-        allocate: True
+        output: True
       - THTensor* self
       - long bins
       - real min
       - CONSTANT 0
     - arguments:
       - arg: THTensor* destination
-        allocate: True
+        output: True
       - THTensor* self
       - long bins
       - real min
@@ -807,13 +807,13 @@
     - cname: cmax
       arguments:
       - arg: THTensor* result
-        allocate: True
+        output: True
       - THTensor* self
       - THTensor* other
     - cname: cmaxValue
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
 ]]
@@ -842,13 +842,13 @@
     - cname: cmin
       arguments:
       - arg: THTensor* result
-        allocate: True
+        output: True
       - THTensor* self
       - THTensor* other
     - cname: cminValue
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
 ]]
@@ -881,7 +881,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - long dim
 ]]
@@ -898,7 +898,7 @@
       return: argument 0
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - long dim
 ]]
@@ -909,7 +909,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - long dim
 ]]
@@ -920,7 +920,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - long dim
 ]]
@@ -931,7 +931,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -960,13 +960,13 @@
     - cname: add
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
     - cname: cadd
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - arg: real value
           default: AS_REAL(1)
@@ -1000,13 +1000,13 @@
     - cname: sub
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
     - cname: csub
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - arg: real value
           default: AS_REAL(1)
@@ -1040,13 +1040,13 @@
     - cname: mul
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
     - cname: cmul
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - THTensor* other
 ]]
@@ -1076,13 +1076,13 @@
     - cname: div
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
     - cname: cdiv
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - THTensor* other
 ]]
@@ -1112,13 +1112,13 @@
     - cname: fmod
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
     - cname: cfmod
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - THTensor* other
 ]]
@@ -1148,13 +1148,13 @@
     - cname: remainder
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - real value
     - cname: cremainder
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - THTensor* other
 ]]
@@ -1181,7 +1181,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* destination
-      allocate: True
+      output: True
     - THTensor* self
     - real min
     - real max
@@ -1214,7 +1214,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* destination
-      allocate: True
+      output: True
     - THTensor* self
     - arg: long k
       default: 0
@@ -1237,7 +1237,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* destination
-      allocate: True
+      output: True
     - THTensor* self
     - arg: long k
       default: 0
@@ -1260,7 +1260,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* destination
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* other
     - arg: long dim
@@ -1275,12 +1275,12 @@
   options:
     - arguments:
       - arg: THTensor* result
-        allocate: True
+        output: True
       - long n
       - argument 1
     - arguments:
       - arg: THTensor* result
-        allocate: True
+        output: True
       - long n
       - long m
 ]]
@@ -1292,7 +1292,7 @@
   options:
     - arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* self
         - arg: long diagonal
           default: 0
@@ -1304,7 +1304,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: real beta
       default: AS_REAL(1)
     - THTensor* self
@@ -1335,7 +1335,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: real beta
       default: AS_REAL(1)
     - THTensor* self
@@ -1366,7 +1366,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: real beta
       default: AS_REAL(1)
     - THTensor* self
@@ -1403,7 +1403,7 @@
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1422,7 +1422,7 @@
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1442,7 +1442,7 @@
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1463,7 +1463,7 @@
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1477,7 +1477,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: real beta
       default: AS_REAL(1)
     - THTensor* self
@@ -1508,7 +1508,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - arg: real beta
       default: AS_REAL(1)
     - THTensor* self
@@ -1539,7 +1539,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - arg: real value
       default: AS_REAL(1)
@@ -1566,7 +1566,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - arg: real value
       default: AS_REAL(1)
@@ -1619,9 +1619,9 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* solution
-      allocate: True
+      output: True
     - arg: THTensor* lu
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* A
 ]]
@@ -1633,9 +1633,9 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THTensor* res2
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* A
 ]]
@@ -1647,9 +1647,9 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THTensor* res2
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* A
     - arg: bool upper
@@ -1674,9 +1674,9 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THTensor* res2
-      allocate: True
+      output: True
     - THTensor* self
     - arg: bool eigenvectors
       if_true: V
@@ -1696,9 +1696,9 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THTensor* res2
-      allocate: True
+      output: True
     - THTensor* self
     - arg: bool eigenvectors
       if_true: V
@@ -1714,11 +1714,11 @@ static const char *R = &__R;
   return: argument 0,1,2
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THTensor* res2
-      allocate: True
+      output: True
     - arg: THTensor* res3
-      allocate: True
+      output: True
     - THTensor* self
     - arg: bool some
       if_true: S
@@ -1734,7 +1734,7 @@ static const char *R = &__R;
   return: argument 0
   arguments:
     - arg: THTensor* output
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -1745,7 +1745,7 @@ static const char *R = &__R;
   return: argument 0
   arguments:
     - arg: THTensor* output
-      allocate: True
+      output: True
     - THTensor* self
     - arg: bool upper
       if_true: U
@@ -1760,7 +1760,7 @@ static const char *R = &__R;
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* input2
     - arg: bool upper
@@ -1776,7 +1776,7 @@ static const char *R = &__R;
   return: argument 0
   arguments:
     - arg: THTensor* output
-      allocate: True
+      output: True
     - THTensor* self
     - arg: bool upper
       if_true: U
@@ -1793,9 +1793,9 @@ static const char *R = &__R;
     THIntTensor_sub(((THPIntTensor*)$arg1)->cdata, ((THPIntTensor*)$arg1)->cdata, 1);
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THIntTensor* res2
-      allocate: True
+      output: True
     - THTensor* self
     - arg: bool upper
       if_true: U
@@ -1812,9 +1812,9 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THTensor* res2
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -1825,9 +1825,9 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
-      allocate: True
+      output: True
     - arg: THTensor* res2
-      allocate: True
+      output: True
     - THTensor* self
 ]]
 
@@ -1838,7 +1838,7 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* input2
 ]]
@@ -1850,7 +1850,7 @@ static const char *R = &__R;
   return: argument 0,1
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* self
     - THTensor* input2
     - THTensor* input3

@@ -59,9 +59,9 @@ class LookupTable(Module):
         self.renorm(input)
         input = self._makeInputContiguous(input)
         if input.dim() == 1:
-           torch.index_select(self.output, self.weight, 0, input)
+           torch.index_select(self.weight, 0, input, out=self.output)
         elif input.dim() == 2:
-           torch.index_select(self.output, self.weight, 0, input.view(-1))
+           torch.index_select(self.weight, 0, input.view(-1), out=self.output)
            self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
         else:
            raise RuntimeError("input must be a vector or matrix")

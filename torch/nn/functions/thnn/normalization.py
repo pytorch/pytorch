@@ -52,7 +52,7 @@ class CrossMapLRN2d(Function):
 
             # use output storage as temporary buffer
             input_square = output
-            torch.pow(input_square, input, 2)
+            torch.pow(input, 2, out=input_square)
 
             pre_pad = int((self.size - 1)/2 + 1)
             pre_pad_crop = channels if pre_pad > channels else pre_pad
@@ -79,7 +79,7 @@ class CrossMapLRN2d(Function):
 
             self.scale.mul_(self.alpha / self.size).add_(self.k)
 
-            torch.pow(output, self.scale, -self.beta)
+            torch.pow(self.scale, -self.beta, out=output)
             output.mul_(input)
 
         self.save_for_backward(input, output)
@@ -116,16 +116,16 @@ class CrossMapLRN2d(Function):
             inversePrePad = int(self.size - (self.size - 1) / 2)
 
             grad_input.resize_as_(input)
-            torch.pow(grad_input, self.scale, -self.beta).mul_(grad_output)
+            torch.pow(self.scale, -self.beta, out=grad_input).mul_(grad_output)
 
             paddded_ratio.zero_()
             padded_ratio_center = paddded_ratio.narrow(0, inversePrePad,
                     channels)
             for n in range(batch_size):
-                torch.mul(padded_ratio_center, grad_output[n], output[n])
+                torch.mul(grad_output[n], output[n], out=padded_ratio_center)
                 padded_ratio_center.div_(self.scale[n])
-                torch.sum(accum_ratio,
-                        paddded_ratio.narrow(0, 0, self.size-1), 0)
+                torch.sum(
+                        paddded_ratio.narrow(0, 0, self.size-1), 0, out=accum_ratio)
                 for c in range(channels):
                     accum_ratio.add_(paddded_ratio[c+self.size-1])
                     grad_input[n][c].addcmul_(-cache_ratio_value, input[n][c],

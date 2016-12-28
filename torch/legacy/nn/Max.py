@@ -27,7 +27,7 @@ class Max(Module):
     def updateOutput(self, input):
         self._lazyInit()
         dimension = self._getPositiveDimension(input)
-        torch.max(self._output, self._indices, input, dimension)
+        torch.max(input, dimension, out=(self._output, self._indices))
         if input.dim() > 1:
           self.output.set_(self._output.select(dimension, 0))
         else:
