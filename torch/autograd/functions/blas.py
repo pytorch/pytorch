@@ -24,8 +24,8 @@ class Addmm(_BlasBase):
     def forward(self, add_matrix, matrix1, matrix2):
         self.save_for_backward(matrix1, matrix2)
         output = self._get_output(add_matrix)
-        return torch.addmm(output, self.alpha, add_matrix, self.beta,
-                matrix1, matrix2)
+        return torch.addmm(self.alpha, add_matrix, self.beta,
+                matrix1, matrix2, out=output)
 
     def backward(self, grad_output):
         matrix1, matrix2 = self.saved_tensors
@@ -54,8 +54,8 @@ class Addbmm(_BlasBase):
     def forward(self, add_matrix, batch1, batch2):
         self.save_for_backward(batch1, batch2)
         output = self._get_output(add_matrix)
-        return torch.addbmm(output, self.alpha, add_matrix, self.beta,
-                batch1, batch2)
+        return torch.addbmm(self.alpha, add_matrix, self.beta,
+                batch1, batch2, out=output)
 
     def backward(self, grad_output):
         batch1, batch2 = self.saved_tensors
@@ -89,8 +89,8 @@ class Baddbmm(_BlasBase):
     def forward(self, add_batch, batch1, batch2):
         self.save_for_backward(batch1, batch2)
         output = self._get_output(add_batch)
-        return torch.baddbmm(output, self.alpha, add_batch, self.beta,
-                batch1, batch2)
+        return torch.baddbmm(self.alpha, add_batch, self.beta,
+                batch1, batch2, out=output)
 
     def backward(self, grad_output):
         batch1, batch2 = self.saved_tensors
@@ -119,8 +119,8 @@ class Addmv(_BlasBase):
     def forward(self, add_vector, matrix, vector):
         self.save_for_backward(matrix, vector)
         output = self._get_output(add_vector)
-        return torch.addmv(output, self.alpha, add_vector, self.beta,
-                matrix, vector)
+        return torch.addmv(self.alpha, add_vector, self.beta,
+                matrix, vector, out=output)
 
     def backward(self, grad_output):
         matrix, vector = self.saved_tensors
@@ -149,8 +149,8 @@ class Addr(_BlasBase):
     def forward(self, add_matrix, vector1, vector2):
         self.save_for_backward(vector1, vector2)
         output = self._get_output(add_matrix)
-        return torch.addr(output, self.alpha, add_matrix, self.beta,
-                vector1, vector2)
+        return torch.addr(self.alpha, add_matrix, self.beta,
+                vector1, vector2, out=output)
 
     def backward(self, grad_output):
         vector1, vector2 = self.saved_tensors

@@ -40,7 +40,9 @@ class KwargsPlugin(CWrapPlugin):
         for option in declaration['options']:
             for arg in option['arguments']:
                 name = arg['name']
-                if not arg.get('ignore_check') and name not in seen_args:
+                if (not arg.get('ignore_check') and
+                        not arg.get('no_kwargs') and
+                        name not in seen_args):
                     seen_args.add(name)
                     args.append(name)
         declarations = '\n    '.join(['PyObject *__kw_{} = NULL;'.format(name) for name in args])

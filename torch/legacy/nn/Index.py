@@ -11,7 +11,7 @@ class Index(Module):
     def updateOutput(self, input):
          t = input[0]
          index = input[1]
-         torch.index_select(self.output, t, self.dimension, index)
+         torch.index_select(t, self.dimension, index, out=self.output)
          return self.output
 
     def updateGradInput(self, input, gradOutput):

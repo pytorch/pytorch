@@ -22,7 +22,7 @@ class PairwiseDistance(Module):
         if self.diff is None:
               self.diff = input[0].new()
 
-        torch.add(self.diff, input[0], -1, input[1]).abs_()
+        torch.add(input[0], -1, input[1], out=self.diff).abs_()
 
         self.output.resize_(input[0].size(0))
         self.output.zero_()

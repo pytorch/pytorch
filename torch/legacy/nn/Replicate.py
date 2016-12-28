@@ -28,5 +28,5 @@ class Replicate(Module):
         size.insert(self.dim, 1)
 
         gradInput = self.gradInput.view(*size)
-        torch.sum(gradInput, gradOutput, self.dim)
+        torch.sum(gradOutput, self.dim, out=gradInput)
         return self.gradInput

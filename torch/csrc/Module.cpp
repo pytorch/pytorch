@@ -355,7 +355,7 @@ IMPLEMENT_STATELESS_REVERSED(ne)
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
 // tensor's type.
-static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
+static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args, PyObject *kwargs)
 {
   PyObject *tensor = THPDefaultTensorClass;
   if (PyTuple_Size(args) == 1)
@@ -369,19 +369,22 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
   THPObjectPtr method = PyObject_GetAttrString(methods, "nonzero");
   THPUtils_assert(method, "Type %s doesn't implement stateless method nonzero",
       tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  return PyObject_Call(method, args, NULL);
+  return PyObject_Call(method, args, kwargs);
 }
 
-static PyObject * THPModule_randperm(PyObject *_unused, PyObject *args)
+static PyObject * THPModule_randperm(PyObject *_unused, PyObject *args, PyObject *kwargs)
 {
   PyObject *tensor = THPLongTensorClass;
+  PyObject *out;
+  if (kwargs && (out = PyDict_GetItemString(kwargs, "out")))
+      tensor = out;
   THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
   THPUtils_assert(methods, "Type %s doesn't implement stateless methods",
       tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
   THPObjectPtr method = PyObject_GetAttrString(methods, "randperm");
   THPUtils_assert(method, "Type %s doesn't implement stateless method randperm",
       tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  return PyObject_Call(method, args, NULL);
+  return PyObject_Call(method, args, kwargs);
 }
 
 static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
@@ -584,7 +587,7 @@ static PyMethodDef TorchMethods[] = {
   {"t",               (PyCFunction)THPModule_t,                 METH_VARARGS | METH_KEYWORDS, NULL},
   {"transpose",       (PyCFunction)THPModule_transpose,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"squeeze",         (PyCFunction)THPModule_squeeze,           METH_VARARGS | METH_KEYWORDS, NULL},
-  {"nonzero",         (PyCFunction)THPModule_nonzero,           METH_VARARGS, NULL},
+  {"nonzero",         (PyCFunction)THPModule_nonzero,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"renorm",          (PyCFunction)THPModule_renorm,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"dist",            (PyCFunction)THPModule_dist,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"linspace",        (PyCFunction)THPModule_linspace,          METH_VARARGS | METH_KEYWORDS, NULL},

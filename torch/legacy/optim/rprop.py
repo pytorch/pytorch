@@ -60,13 +60,12 @@ def rprop(opfunc, x, config, state=None):
 
 
         # sign of derivative from last step to this one
-        torch.mul(state['sign'], dfdx, state['delta'])
-        torch.sign(state['sign'], state['sign'])
+        torch.mul(dfdx, state['delta'], out=state['sign']).sign_()
 
         # get indices of >0, <0 and ==0 entries
-        torch.gt(state['psign'], state['sign'], 0)
-        torch.lt(state['nsign'], state['sign'], 0)
-        torch.eq(state['zsign'], state['sign'], 0)
+        torch.gt(state['sign'], 0, out=state['psign'])
+        torch.lt(state['sign'], 0, out=state['nsign'])
+        torch.eq(state['sign'], 0, out=state['zsign'])
 
         # get step size updates
         state['sign'][state['psign']] = etaplus
@@ -78,16 +77,16 @@ def rprop(opfunc, x, config, state=None):
 
         # threshold step sizes
         # >50 => 50
-        torch.gt(state['dminmax'], state['stepsize'], stepsizemax)
+        torch.gt(state['stepsize'], stepsizemax, out=state['dminmax'])
         state['stepsize'][state['dminmax']] = stepsizemax
         # <1e-6 ==> 1e-6
-        torch.lt(state['dminmax'], state['stepsize'], stepsizemin)
+        torch.lt(state['stepsize'], stepsizemin, out=state['dminmax'])
         state['stepsize'][state['dminmax']] = stepsizemin
 
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx
         dfdx[state['nsign']] = 0
-        torch.sign(state['sign'], dfdx)
+        torch.sign(dfdx, out=state['sign'])
 
         # update weights
         x.addcmul_(-1, state['sign'], state['stepsize'])

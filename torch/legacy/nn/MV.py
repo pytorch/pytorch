@@ -21,13 +21,13 @@ class MV(Module):
             if self.trans:
                 M = M.transpose(0, 1)
             self.output.resize_(M.size(0))
-            torch.mv(self.output, M, v)
+            torch.mv(M, v, out=self.output)
         else:
             assert v.ndimension() == 2
             if self.trans:
                 M = M.transpose(1, 2)
             self.output.resize_(M.size(0), M.size(1), 1)
-            torch.bmm(self.output, M, v.view(v.size(0), v.size(1), 1)).resize_(M.size(0), M.size(1))
+            torch.bmm(M, v.view(v.size(0), v.size(1), 1), out=self.output).resize_(M.size(0), M.size(1))
 
         return self.output
 
@@ -46,20 +46,20 @@ class MV(Module):
             idim = M.size(2)
 
             if self.trans:
-                torch.bmm(self.gradInput[0], v.view(bdim, odim, 1), gradOutput.view(bdim, 1, idim))
-                torch.bmm(self.gradInput[1].view(bdim, odim, 1), M, gradOutput.view(bdim, idim, 1))
+                torch.bmm(v.view(bdim, odim, 1), gradOutput.view(bdim, 1, idim), out=self.gradInput[0])
+                torch.bmm(M, gradOutput.view(bdim, idim, 1), out=self.gradInput[1].view(bdim, odim, 1))
             else:
-                torch.bmm(self.gradInput[0], gradOutput.view(bdim, odim, 1), v.view(bdim, 1, idim))
-                torch.bmm(self.gradInput[1].view(bdim, idim, 1), M.transpose(1, 2), gradOutput.view(bdim, odim, 1))
+                torch.bmm(gradOutput.view(bdim, odim, 1), v.view(bdim, 1, idim), out=self.gradInput[0])
+                torch.bmm(M.transpose(1, 2), gradOutput.view(bdim, odim, 1), out=self.gradInput[1].view(bdim, idim, 1))
         else:
             assert M.ndimension() == 2
             assert v.ndimension() == 1
 
             if self.trans:
-                torch.ger(self.gradInput[0], v, gradOutput)
+                torch.ger(v, gradOutput, out=self.gradInput[0])
                 self.gradInput[1] = M * gradOutput
             else:
-                torch.ger(self.gradInput[0], gradOutput, v)
+                torch.ger(gradOutput, v, out=self.gradInput[0])
                 self.gradInput[1] = M.t() * gradOutput
 
         return self.gradInput

@@ -42,7 +42,7 @@ class SpatialCrossMapLRN(Module):
 
             # use output storage as temporary buffer
             inputSquare = self.output
-            torch.pow(inputSquare, input, 2)
+            torch.pow(input, 2, out=inputSquare)
 
             prePad = int((self.size - 1)/2 + 1)
             prePadCrop = channels if prePad > channels else prePad
@@ -69,7 +69,7 @@ class SpatialCrossMapLRN(Module):
 
             self.scale.mul_(self.alpha / self.size).add_(self.k)
 
-            torch.pow(self.output, self.scale, -self.beta)
+            torch.pow(self.scale, -self.beta, out=self.output)
             self.output.mul_(input)
 
         return self.output
@@ -107,14 +107,14 @@ class SpatialCrossMapLRN(Module):
             inversePrePad = int(self.size - (self.size - 1) / 2)
 
             self.gradInput.resize_as_(input)
-            torch.pow(self.gradInput, self.scale, -self.beta).mul_(gradOutput)
+            torch.pow(self.scale, -self.beta, out=self.gradInput).mul_(gradOutput)
 
             self.paddedRatio.zero_()
             paddedRatioCenter = self.paddedRatio.narrow(0, inversePrePad, channels)
             for n in range(batchSize):
-                torch.mul(paddedRatioCenter, gradOutput[n], self.output[n])
+                torch.mul(gradOutput[n], self.output[n], out=paddedRatioCenter)
                 paddedRatioCenter.div_(self.scale[n])
-                torch.sum(self.accumRatio, self.paddedRatio.narrow(0, 0,self.size-1), 0)
+                torch.sum(self.paddedRatio.narrow(0, 0,self.size-1), 0, out=self.accumRatio)
                 for c in range(channels):
                     self.accumRatio.add_(self.paddedRatio[c+self.size-1])
                     self.gradInput[n][c].addcmul_(-cacheRatioValue, input[n][c], self.accumRatio)

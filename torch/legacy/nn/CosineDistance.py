@@ -45,22 +45,22 @@ class CosineDistance(Module):
            self.w32 = input1.new()
            self.ones = input1.new()
 
-        torch.mul(self.buffer, input1, input2)
-        torch.sum(self.w1, self.buffer, 1)
+        torch.mul(input1, input2, out=self.buffer)
+        torch.sum(self.buffer, 1, out=self.w1)
 
         epsilon = 1e-12
-        torch.mul(self.buffer, input1, input1)
-        torch.sum(self.w22, self.buffer, 1).add_(epsilon)
+        torch.mul(input1, input1, out=self.buffer)
+        torch.sum(self.buffer, 1, out=self.w22).add_(epsilon)
         self.w22.cinv_()
         self.w.resize_as_(self.w22).copy_(self.w22)
 
-        torch.mul(self.buffer, input2, input2)
-        torch.sum(self.w32, self.buffer, 1).add_(epsilon)
+        torch.mul(input2, input2, out=self.buffer)
+        torch.sum(self.buffer, 1, out=self.w32).add_(epsilon)
         self.w32.cinv_()
         self.w.mul_(self.w32)
         self.w.sqrt_()
 
-        torch.mul(self.output, self.w1, self.w)
+        torch.mul(self.w1, self.w, out=self.output)
         self.output.resize_(input1.size(0))
 
         return self.output
@@ -83,11 +83,11 @@ class CosineDistance(Module):
         gw1.resize_as_(v1).copy_(v2)
         gw2.resize_as_(v1).copy_(v1)
 
-        torch.mul(self.buffer, self.w1, self.w22)
+        torch.mul(self.w1, self.w22, out=self.buffer)
         gw1.addcmul_(-1, self.buffer.expand_as(v1), v1)
         gw1.mul_(self.w.expand_as(v1))
 
-        torch.mul(self.buffer, self.w1, self.w32)
+        torch.mul(self.w1, self.w32, out=self.buffer)
         gw2.addcmul_(-1, self.buffer.expand_as(v1), v2)
         gw2.mul_(self.w.expand_as(v1))
 

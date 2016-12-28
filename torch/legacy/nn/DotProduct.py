@@ -15,8 +15,8 @@ class DotProduct(Module):
         if self.buffer is None:
            self.buffer = input1.new()
 
-        torch.mul(self.buffer, input1, input2)
-        torch.sum(self.output, self.buffer, 1)
+        torch.mul(input1, input2, out=self.buffer)
+        torch.sum(self.buffer, 1, out=self.output)
         self.output.resize_(input1.size(0))
         return self.output
 

@@ -80,6 +80,7 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
     int __argcount = __tuplecount + __dictcount;
     $variables
+    $init
 
     $options
     }
@@ -141,6 +142,10 @@ ${cpu}
         'bool': 'bool',
     }
 
+    OUT_INIT = """
+    __out = kwargs ? PyDict_GetItemString(kwargs, "out") : NULL;
+    """
+
     def __init__(self):
         self.declarations = []
         self.stateless_declarations = []
@@ -167,7 +172,8 @@ ${cpu}
         def format_args(args, var_args=False):
             option_desc = [format_arg(arg, var_args)
                            for arg in args
-                           if not arg.get('ignore_check', False)]
+                           if not arg.get('ignore_check', False)
+                           and not arg.get('output')]
             if option_desc:
                 return '({})'.format(', '.join(option_desc))
             else:
@@ -181,13 +187,14 @@ ${cpu}
         arg_desc = ['"' + desc + '"' for desc in arg_desc]
         arg_str = ', '.join(arg_desc)
         variables_str = '\n'.join(declaration.get('variables', []))
+        init_str = '\n'.join(declaration.get('init', []))
         if 'stateless' in declaration['name']:
             readable_name = 'torch.' + declaration['python_name']
         else:
             readable_name = declaration['python_name']
         return Template(self.WRAPPER_TEMPLATE.safe_substitute(
             readable_name=readable_name, num_options=len(arg_desc),
-            expected_args=arg_str, variables=variables_str))
+            expected_args=arg_str, variables=variables_str, init=init_str))
 
     def get_return_wrapper(self, option):
         return self.RETURN_WRAPPER.get(option['return'], None)
@@ -195,8 +202,13 @@ ${cpu}
     def get_arg_accessor(self, arg, option):
         if arg['name'] == 'self':
             return 'self'
-        if 'allocate' in arg and arg['allocate']:
-            return arg['name']
+        if arg.get('output'):
+            if not option['output_provided']:
+                return arg['name']
+            if option['output_count'] == 1:
+                return '__out'
+            else:
+                return 'PyTuple_GET_ITEM(__out, {})'.format(arg['output_idx'])
 
     def process_docstrings(self):
         for declaration in self.declarations:
@@ -211,6 +223,37 @@ ${cpu}
                 continue
             declaration['docstring_content'] = docstr.replace('\n', '\\n')
             declaration['docstring_var'] = 'stateless_docstr_' + declaration['python_name']
+
+    def generate_out_options(self, declaration):
+        new_options = []
+        declaration.setdefault('init', [])
+        declaration['init'] += [self.OUT_INIT]
+        for option in declaration['options']:
+            out_idx = []
+            for i, arg in enumerate(option['arguments']):
+                if arg.get('output'):
+                    out_idx.append(i)
+            if not out_idx:
+                option['has_output'] = True
+                option['output_provided'] = False
+                new_options.append(option)
+                continue
+            for output_provided in (True, False):
+                option_copy = deepcopy(option)
+                option_copy['has_output'] = True
+                option_copy['output_provided'] = output_provided
+                option_copy['output_count'] = len(out_idx)
+                for i, idx in enumerate(out_idx):
+                    arg = option_copy['arguments'][idx]
+                    arg['output_idx'] = i
+                    if not output_provided:
+                        arg['ignore_check'] = True
+                    else:
+                        option_copy['argcount_offset'] =  -len(out_idx) + 1
+                        arg['no_kwargs'] = True
+                        arg['no_idx'] = True
+                new_options.append(option_copy)
+        declaration['options'] = self.filter_unique_options(new_options)
 
     def process_declarations(self, declarations):
         new_declarations = []
@@ -227,6 +270,11 @@ ${cpu}
                        for option in declaration['options']
                        for arg in option['arguments'])
 
+        def has_output_args(declaration):
+            return any(arg.get('output')
+                       for option in declaration['options']
+                       for arg in option['arguments'])
+
         for declaration in declarations:
             if declaration.get('only_register', False):
                 continue
@@ -236,10 +284,15 @@ ${cpu}
                 declaration['variables'] += ['THLongStoragePtr __size;']
             if has_arg_type(declaration, 'THStride*'):
                 declaration['variables'] += ['THLongStoragePtr __stride;']
+            if has_output_args(declaration):
+                declaration['variables'] += ['PyObject *__out;']
+                self.generate_out_options(declaration)
             if has_long_args(declaration):
                 declaration['no_kwargs'] = True
+            for option in declaration['options']:
+                option['cname'] = 'THTensor_({})'.format(option['cname'])
             if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
-                stateless_declaration = self.make_stateless(deepcopy(declaration))
+                stateless_declaration = self.make_stateless(declaration)
                 new_declarations.append(stateless_declaration)
                 self.stateless_declarations.append(stateless_declaration)
             if declaration.get('only_stateless', False):
@@ -248,11 +301,8 @@ ${cpu}
             self.declarations.append(declaration)
             declaration['name'] = 'THPTensor_({})'.format(declaration['name'])
             for option in declaration['options']:
-                option['cname'] = 'THTensor_({})'.format(option['cname'])
                 for arg in option['arguments']:
                     if arg['name'] == 'self':
-                        arg['ignore_check'] = True
-                    if 'allocate' in arg and arg['allocate']:
                         arg['ignore_check'] = True
             # TODO: we can probably allow duplicate signatures once we implement
             # keyword arguments
@@ -269,32 +319,20 @@ ${cpu}
         return all_declarations
 
     def make_stateless(self, declaration):
+        declaration = deepcopy(declaration)
         declaration['name'] = 'THPTensor_stateless_({})'.format(declaration['name'])
-        new_options = []
         for option in declaration['options']:
-            option['cname'] = 'THTensor_({})'.format(option['cname'])
-            allocated = []
-            for i, arg in enumerate(option['arguments']):
-                if 'allocate' in arg and arg['allocate']:
-                    arg['ignore_check'] = True
-                    allocated.append(i)
+            for arg in option['arguments']:
                 if arg['name'] == 'self':
                     arg['name'] = 'source'
-            for permutation in product((True, False), repeat=len(allocated)):
-                option_copy = deepcopy(option)
-                for i, bit in zip(allocated, permutation):
-                    arg = option_copy['arguments'][i]
-                    # By default everything is allocated, so we don't have to do anything
-                    if not bit:
-                        del arg['allocate']
-                        del arg['ignore_check']
-                new_options.append(option_copy)
-        declaration['options'] = self.filter_unique_options(declaration['options'] + new_options)
         return declaration
 
     def filter_unique_options(self, options):
         def signature(option):
-            return '#'.join(arg['type'] for arg in option['arguments'] if not 'ignore_check' in arg or not arg['ignore_check'])
+            return '#'.join(
+                    arg['type'] + str(arg.get('output', False))
+                    for arg in option['arguments']
+                    if not arg.get('ignore_check'))
         seen_signatures = set()
         unique = []
         for option in options:
@@ -339,6 +377,18 @@ ${cpu}
         return 'LIBRARY_STATE ' + code
 
     def process_all_checks(self, code, option):
+        if option.get('has_output'):
+            indent = " " * 10
+            if option['output_provided']:
+                checks = "__out != NULL &&\n" + indent
+                if option['output_count'] > 1:
+                    checks += "PyTuple_Check(__out) &&\n" + indent
+                    length_check = "PyTuple_GET_SIZE(__out) == {} &&\n".format(
+                            option['output_count'])
+                    checks += length_check + indent
+                code = checks + code
+            else:
+                code = "__out == NULL &&\n" + indent + code
         if any(arg.get('long_args', False) for arg in option['arguments']):
             code = code.replace('__argcount ==', '__argcount >=')
         return code
@@ -346,7 +396,7 @@ ${cpu}
     def process_option_code_template(self, template, option):
         new_args = []
         for arg in option['arguments']:
-            if 'allocate' in arg and arg['allocate']:
+            if not option.get('output_provided', True) and arg.get('output'):
                 new_args.append(self.ALLOCATE_TYPE[arg['type']].substitute(name=arg['name']))
         template = new_args + template
         return template

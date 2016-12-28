@@ -97,8 +97,8 @@ class CMul(Module):
         contiguousView(self._gradOutput, gradOutput, batchSize, -1)
         self._gradWeight = self.gradWeight.view(1, -1)
 
-        torch.mul(self._repeat, self._input, self._gradOutput)
-        torch.sum(self._sum, self._repeat, 0)
+        torch.mul(self._input, self._gradOutput, out=self._repeat)
+        torch.sum(self._repeat, 0, out=self._sum)
         self._gradWeight.add_(scale, self._sum)
 
     def type(self, type=None, tensorCache=None):

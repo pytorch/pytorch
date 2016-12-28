@@ -185,7 +185,10 @@ class cwrap(object):
             lambda arg: not 'ignore_check' in arg or not arg['ignore_check'],
             option['arguments']))
         option['num_checked_args'] = len(checked_args)
-        for i, arg in enumerate(checked_args):
+        idx_args = list(filter(
+            lambda arg: not arg.get('ignore_check') and not arg.get('no_idx'),
+            option['arguments']))
+        for i, arg in enumerate(idx_args):
             arg['idx'] = i
 
         # Generate checks

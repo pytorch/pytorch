@@ -70,8 +70,8 @@ class MixtureTable(Module):
                 self.backwardSetup = False
 
             self._gaterView = gaterInput.view(self.size)
-            torch.mul(self._expert, self._gaterView.expand_as(expertInputs), expertInputs)
-            torch.sum(self.output, self._expert, self.dim)
+            torch.mul(self._gaterView.expand_as(expertInputs), expertInputs, out=self._expert)
+            torch.sum(self._expert, self.dim, out=self.output)
             self.output.resize_as_(expertInputs.select(self.dim, 0))
 
         return self.output
@@ -103,13 +103,13 @@ class MixtureTable(Module):
             # like CMulTable, but with broadcasting
             for i, expertGradInput in enumerate(expertGradInputs):
                 # gater updateGradInput
-                torch.mul(self._expert, gradOutput, expertInputs[i])
+                torch.mul(gradOutput, expertInputs[i], out=self._expert)
                 if self.dimG == 0:
                     self._expertView = self._expert.view(-1)
                 else:
                     self._expertView = self._expert.view(gradOutput.size(0), -1)
 
-                torch.sum(self._sum, self._expertView, self.dimG)
+                torch.sum(self._expertView, self.dimG, out=self._sum)
                 if self.dimG == 0:
                     gaterGradInput[i] = self._sum.select(self.dimG, 0)
                 else:
@@ -129,7 +129,7 @@ class MixtureTable(Module):
             # gater updateGradInput
             self._expertView = gradOutput.view(torch.Size(self.size2))
             gradOutput = self._expertView.expand_as(expertInputs)
-            torch.mul(self._expert, gradOutput, expertInputs)
+            torch.mul(gradOutput, expertInputs, out=self._expert)
             expert = self._expert.transpose(self.dim, self.dimG)
             if not expert.is_contiguous():
                 self._expert2.resize_as_(expert)
@@ -140,11 +140,11 @@ class MixtureTable(Module):
             else:
                 self._expertView2 = expert.view(gaterInput.size(0), gaterInput.size(1), -1)
 
-            torch.sum(gaterGradInput, self._expertView2, self.dimG+1)
+            torch.sum(self._expertView2, self.dimG+1, out=gaterGradInput)
             gaterGradInput.resize_as_(gaterInput)
 
             # expert updateGradInput
-            torch.mul(expertGradInputs, self._gaterView.expand_as(expertInputs), gradOutput)
+            torch.mul(self._gaterView.expand_as(expertInputs), gradOutput, out=expertGradInputs)
 
         return self.gradInput
 
