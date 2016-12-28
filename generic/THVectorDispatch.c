@@ -20,6 +20,12 @@ static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(fill_VSX), SIMDExtension_VSX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -38,6 +44,12 @@ static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(add_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(add_VSX), SIMDExtension_VSX),
     #endif
   #endif
 
@@ -63,6 +75,12 @@ static FunctionDescription THVector_(diff_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(diff_VSX), SIMDExtension_VSX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -85,6 +103,12 @@ static FunctionDescription THVector_(scale_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(scale_VSX), SIMDExtension_VSX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -104,6 +128,12 @@ static FunctionDescription THVector_(mul_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(mul_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(mul_VSX), SIMDExtension_VSX),
     #endif
   #endif
 

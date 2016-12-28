@@ -5,6 +5,10 @@
 #include "vector/NEON.c"
 #endif
 
+#ifdef __PPC64__
+#include "vector/VSX.c"
+#endif
+
 #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
         || defined(USE_SSE4_1) || defined(USE_SSE4_2)
 #include "vector/SSE.c"

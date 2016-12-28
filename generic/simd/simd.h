@@ -40,6 +40,8 @@ enum SIMDExtensions
 {
 #if defined(__NEON__)
   SIMDExtension_NEON    = 0x1,
+#elif defined(__PPC64__)
+  SIMDExtension_VSX     = 0x1,
 #else
   SIMDExtension_AVX2    = 0x1,
   SIMDExtension_AVX     = 0x2,
@@ -48,23 +50,44 @@ enum SIMDExtensions
   SIMDExtension_DEFAULT = 0x0
 };
 
-#if defined(__NEON__)
+
+#if defined(__arm__)
+
+ #if defined(__NEON__)
 
 static inline uint32_t detectHostSIMDExtensions()
 {
   return SIMDExtension_NEON;
 }
 
-#else // x86
-
-#if defined(__arm__) //ARM without NEON
+ #else //ARM without NEON
 
 static inline uint32_t detectHostSIMDExtensions()
 {
   return SIMDExtension_DEFAULT;
 }
+
+ #endif
+
+#elif defined(__PPC64__)
+
+ #if defined(__VSX__)
+
+static inline uint32_t detectHostSIMDExtensions()
+{
+  return SIMDExtension_VSX;
+}
+
+ #else
+
+static inline uint32_t detectHostSIMDExtensions()
+{
+  return SIMDExtension_DEFAULT;
+}
+
+ #endif
   
-#else
+#else   // x86
 static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
 {
 #ifndef _MSC_VER
@@ -106,7 +129,6 @@ static inline uint32_t detectHostSIMDExtensions()
   return hostSimdExts;
 }
 
-#endif // end x86 SIMD extension detection code
-#endif // end __arm__
+#endif // end SIMD extension detection code
 
 #endif
