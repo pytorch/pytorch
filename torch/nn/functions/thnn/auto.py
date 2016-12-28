@@ -189,16 +189,16 @@ def _generate_function_classes(scope_dict):
     function_by_name = {fn.name: fn for fn in function_list}
     classes_to_generate = {fn.name.partition('_')[0] for fn in function_list}
     exceptions = {
-        'AvgPool2d',
-        'AvgPool3d',
         'Linear',
         'SpatialFullConvolution',
         'SpatialConvolutionMM',
         'SparseLinear',
         'TemporalConvolution',
+        'SpatialAveragePooling',
         'SpatialMaxPooling',
         'SpatialDilatedMaxPooling',
         'SpatialMaxUnpooling',
+        'VolumetricAveragePooling',
         'VolumetricMaxPooling',
         'VolumetricMaxUnpooling',
         'VolumetricConvolution',
