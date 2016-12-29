@@ -45,7 +45,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, groups=1):
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
         >>> output = F.conv2d(input, filters, padding=1)
     """
-    f = functions.conv.Conv2d(stride, padding, groups)
+    f = functions.conv.Conv(2, stride, padding, groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
@@ -87,7 +87,7 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
     composed of several input planes, sometimes also called "deconvolution"
     The operator multiplies each input value element-wise by a
     learnable kernel, and sums over the outputs from all input feature planes.
-    This module can be seen as the exact reverse of the Conv2d module.
+    This module can be seen as the exact reverse of the conv2d function
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iH x iW)
@@ -107,7 +107,7 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
     Examples:
         >>> #TODO
     """
-    f = functions.conv.ConvTranspose2d(stride, padding, groups, output_padding)
+    f = functions.conv.ConvTranspose(2, stride, padding, groups, output_padding)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 

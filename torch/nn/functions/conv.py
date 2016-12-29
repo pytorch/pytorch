@@ -150,7 +150,6 @@ class Conv(ConvBase):
         return grad_weight, grad_bias
 
 
-<<<<<<< HEAD
 class ConvTranspose(ConvBase):
     def __init__(self, ndim, stride=1, padding=0, groups=1, output_padding=0):
         super(ConvTranspose, self).__init__(ndim, stride, padding, groups)

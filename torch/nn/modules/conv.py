@@ -134,7 +134,6 @@ class Conv2d(Module):
             # TODO: merge this into the Conv2d function
             return self._backend.DilatedConv2d(
                 self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
-                self.dilh, self.dilw)
                 self.dilh, self.dilw)(input, self.weight, self.bias)
         return F.conv2d(input, self.weight, self.bias, 
                 stride=(self.dh, self.dw),
