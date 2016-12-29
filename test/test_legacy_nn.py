@@ -28,6 +28,9 @@ class OldModuleTest(ModuleTest):
         # Test .clearState()
         module.clearState()
 
+        # test if module can be printed
+        module.__repr__()
+
         if self.check_inplace:
             input2 = deepcopy(input)
             module_ip = self.constructor(*self.constructor_args, inplace=True)
