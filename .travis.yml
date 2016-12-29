@@ -1,5 +1,9 @@
 sudo: required
 language: cpp
+addons:
+  apt:
+    sources:
+    - ubuntu-toolchain-r-test
 
 matrix:
   include:
