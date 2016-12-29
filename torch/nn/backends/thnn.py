@@ -13,7 +13,7 @@ def _get_thnn_function_backend():
 def _initialize_backend():
     from ..functions.thnn import _all_functions as _thnn_functions
     from ..functions.linear import Linear
-    from ..functions.conv import Conv, ConvTranspose
+    from ..functions.conv import ConvNd
     from ..functions.rnn import RNN, \
         RNNTanhCell, RNNReLUCell, GRUCell, LSTMCell
     from ..functions.dropout import Dropout, FeatureDropout
@@ -22,8 +22,7 @@ def _initialize_backend():
         HingeEmbeddingLoss, MarginRankingLoss
 
     backend.register_function('Linear', Linear)
-    backend.register_function('Conv', Conv)
-    backend.register_function('ConvTranspose', ConvTranspose)
+    backend.register_function('ConvNd', ConvNd)
     backend.register_function('RNN', RNN)
     backend.register_function('RNNTanhCell', RNNTanhCell)
     backend.register_function('RNNReLUCell', RNNReLUCell)

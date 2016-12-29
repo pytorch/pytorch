@@ -3,11 +3,13 @@
 import torch
 from . import functions
 from .modules import utils
-from torch.nn.functions.conv import Conv, ConvTranspose
+from torch.nn.functions.conv import ConvNd
+from .modules.utils import _single, _pair, _triple
 # Convolutions
 
 
-def conv2d(input, weight, bias=None, stride=1, padding=0, groups=1):
+def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
+           groups=1):
     """Applies a 2D convolution over an input image composed of several input
     planes.
 
@@ -47,11 +49,13 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, groups=1):
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
         >>> F.conv2d(inputs, filters, padding=1)
     """
-    f = Conv(2, stride, padding, groups)
+    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
+               _pair(0), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv1d(input, weight, bias=None, stride=1):
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
+           groups=1):
     """Applies a 1D convolution over an input signal composed of several input
     planes.
 
@@ -81,11 +85,13 @@ def conv1d(input, weight, bias=None, stride=1):
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
         >>> F.conv1d(inputs)
     """
-    return conv2d(input.unsqueeze(2), weight.unsqueeze(2), bias,
-                  (1, stride)).squeeze(2)
+    f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
+               _single(0), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv3d(input, weight, bias=None, stride=1, padding=0):
+def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
+           groups=1):
     """Applies a 3D convolution over an input image composed of several input
     planes.
 
@@ -113,12 +119,13 @@ def conv3d(input, weight, bias=None, stride=1, padding=0):
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
         >>> F.conv3d(inputs)
     """
-    f = Conv(3, stride, padding)
+    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
+               _triple(0), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
-                     output_padding=0):
+def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
+                     output_padding=0, groups=1):
     """Applies a 2D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution"
     The operator multiplies each input value element-wise by a
@@ -145,11 +152,13 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
     Examples:
         >>> #TODO
     """
-    f = ConvTranspose(2, stride, padding, groups, output_padding)
+    f = ConvNd(_pair(stride), _pair(padding), _pair(1), True,
+               _pair(output_padding), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv_transpose3d(input, weight, bias=None, stride=1, padding=0):
+def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
+                     output_padding=0, groups=1):
     """Applies a 3D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution"
     The operator multiplies each input value element-wise by a
@@ -173,7 +182,8 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0):
     Examples:
         >>> #TODO
     """
-    f = ConvTranspose(3, stride, padding)
+    f = ConvNd(_triple(stride), _triple(padding), _triple(1), True,
+               _triple(output_padding), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
