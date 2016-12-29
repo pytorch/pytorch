@@ -2,6 +2,7 @@ dist: trusty
 sudo: required
 language: cpp
 compiler: gcc
+python: 2.7
 matrix:
   include:
   - os: linux
