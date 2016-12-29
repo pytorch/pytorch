@@ -78,7 +78,7 @@ def conv1d(input, weight, bias=None, stride=1):
         >>> output = m(input)
     """
     return conv2d(input.unsqueeze(2), weight.unsqueeze(2), bias,
-                  stride).squeeze(2)
+                  (1, stride)).squeeze(2)
 
 
 def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
