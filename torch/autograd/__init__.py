@@ -1,6 +1,6 @@
 """
 torch.autograd provides classes and functions implementing automatic
-differentiation of arbitrary scalar valued functions. It requires only minimal
+differentiation of arbitrary scalar valued functions. It requires minimal
 changes to the existing code - you only need to wrap all tensors in
 :class:`.Variable` objects.
 """

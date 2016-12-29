@@ -5,19 +5,105 @@ from itertools import chain
 
 
 class Function(_C._FunctionBase):
+    """Records operation history and defines formulas for differentiating ops.
 
+    Every operation performed on :class:`Variable` s creates a new function
+    object, that performs the computation, and records that it happened.
+    The history is retained in the form of a DAG of functions, with edges
+    denoting data dependencies (``input <- output``). Then, when backward is
+    called, the graph is processed in the topological ordering, by calling
+    :func:`backward` methods of each :class:`Function` object, and passing
+    returned gradients on to next :class:`Function` s.
+
+    Normally, the only way users interact with functions is by creating
+    subclasses and defining new operations. This is a recommended way of
+    extending torch.autograd.
+
+    Since Function logic is a hotspot in most scripts, almost all of it
+    was moved to our C backend, to ensure that the framework overhead is
+    minimal.
+
+    Each function is meant to be used only once (in the forward pass).
+
+    Attributes:
+        saved_tensors: Tuple of Tensors that were saved in the call to
+            :func:`forward`.
+        needs_input_grad: Tuple of booleans of length :attr:`num_inputs`,
+            indicating whether a given input requires gradient. This can be
+            used to optimize buffers saved for backward, and ignoring gradient
+            computation in :func:`~Function.backward`.
+        num_inputs: Number of inputs given to :func:`forward`.
+        num_outputs: Number of tensors returned by :func:`forward`.
+        requires_grad: Boolean indicating whether the :func:`backward` will
+            ever need to be called.
+        previous_functions: Tuple of (int, Function) pairs of length
+            :attr:`num_inputs`. Each entry contains a reference to a
+            :class:`Function` that created corresponding input, and an index
+            of the previous function output that's been used.
+    """
     __call__ = _C._FunctionBase._do_forward
 
     def save_for_backward(self, *tensors):
+        """Saves given tensors for a future call to :func:`~Function.backward`.
+
+        **This should be called at most once, and only from inside the**
+        :func:`forward` **method.**
+
+        Later, saved tensors can be accessed through the :attr:`saved_tensors`
+        attribute. Before returning them to the user, a check is made, to
+        ensure they weren't used in any in-place operation that modified
+        their content.
+
+        Arguments can also be ``None``.
+        """
         self.to_save = tensors
 
     def mark_dirty(self, *args):
+        """Marks given tensors as modified in an in-place operation.
+
+        **This should be called at most once, only from inside the**
+        :func:`forward` **method, and all arguments should be inputs.**
+
+        Every tensor that's been modified in-place in a call to :func:`forward`
+        should be given to this function, to ensure correcness of our checks.
+        It doesn't matter wheter the function is called before or after
+        modification.
+        """
         self.dirty_tensors = args
 
     def mark_shared_storage(self, *pairs):
+        """Marks that given pairs of distinct tensors are sharing storage.
+
+        **This should be called at most once, only from inside the**
+        :func:`forward` **method, and all arguments should be pairs of
+        (input, output).**
+
+        If some of the outputs are going to be tensors sharing storage with
+        some of the inputs, all pairs of (input_arg, output_arg) should be
+        given to this function, to ensure correctness checking of in-place
+        modification. The only exception is when an output is exactly the same
+        tensor as input (e.g. in-place ops). In such case it's easy to conclude
+        that they're sharing data, so we don't require specifying such
+        dependencies.
+
+        This function is not needed in most functions. It's primarily used in
+        indexing and transpose ops.
+        """
         self.shared_pairs = pairs
 
     def mark_non_differentiable(self, *args):
+        """Marks outputs as non-differentiable.
+
+        **This should be called at most once, only from inside the**
+        :func:`forward` **method, and all arguments should be outputs.**
+
+        This will mark outputs as non requiring gradient, increasing the
+        efficiency of backward computation. You still need to accept a gradient
+        for this output in :meth:`~Function.backward`, but it's always going to
+        be ``None``.
+
+        This is used e.g. for indices returned from a max :class:`Function`.
+        """
         self.non_differentiable = args
 
     def register_hook(self, name, hook):
@@ -32,9 +118,25 @@ class Function(_C._FunctionBase):
         del self._backward_hooks[name]
 
     def forward(self, *input):
+        """Performs the operation.
+
+        This function is to be overriden by all subclasses.
+
+        It can take and return an arbitrary number of tensors.
+        """
         raise NotImplementedError
 
     def backward(self, *grad_output):
+        """Defines a formula for differentiating the operation.
+
+        This function is to be overriden by all subclasses.
+
+        All arguments are tensors. It has to accept exactly as many arguments,
+        as many outputs did :func:`forward` return, and it should return as
+        many tensors, as there were inputs to :func:`forward`. Each argument
+        is the gradient w.r.t the given output, and each returned value should
+        be the gradient w.r.t. the corresponding input.
+        """
         raise NotImplementedError
 
 
