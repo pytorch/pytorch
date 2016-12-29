@@ -46,7 +46,6 @@ set(Caffe2_CPU_TEST_SRCS
     "/operators/utility_ops_test.cc"
     "/operators/elementwise_op_test.cc"
     "/operators/fully_connected_op_test.cc"
-    "/operators/conv_op_cache_cudnn_test.cc"
     "/operators/text_file_reader_utils_test.cc"
     "/utils/proto_utils_test.cc"
     "/utils/math_test.cc"
@@ -60,6 +59,7 @@ set(Caffe2_GPU_TEST_SRCS
     "/core/blob_gpu_test.cc"
     "/mpi/mpi_gpu_test.cc"
     "/core/context_gpu_test.cc"
+    "/operators/conv_op_cache_cudnn_test.cc"
     "/operators/operator_fallback_gpu_test.cc"
     "/operators/utility_ops_gpu_test.cc"
     "/operators/fully_connected_op_gpu_test.cc"
@@ -154,36 +154,81 @@ endforeach()
 # ---[ Python
 add_subdirectory(python)
 
-# ---[ All binaries
-file(GLOB Caffe2_BINARY_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/binaries/*.cc)
+# ---[ Binaries
+set(Caffe2_CPU_BINARY_SRCS
+    "convert_caffe_image_db.cc"
+    "convert_db.cc"
+    "db_throughput.cc"
+    "fb_run_plan_mpi.cc"
+    "make_cifar_db.cc"
+    "make_image_db.cc"
+    "make_mnist_db.cc"
+    "predictor_verifier.cc"
+    "print_registered_core_operators.cc"
+    "run_plan.cc"
+    "run_plan_mpi.cc"
+    "speed_benchmark.cc"
+    "split_db.cc"
+    "zmq_feeder.cc"
+)
+
+set(Caffe2_GPU_BINARY_SRCS
+    "core_overhead_benchmark.cc"
+    "inspect_gpus.cc"
+    "print_core_object_sizes.cc"
+)
+
+prepend(Caffe2_CPU_BINARY_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_CPU_BINARY_SRCS}")
+prepend(Caffe2_GPU_BINARY_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_GPU_BINARY_SRCS}")
 
 # ZMQ src
-set(Caffe2_ZMQ_BINARY_SRC
+set(Caffe2_ZMQ_BINARY_SRCS
     "zmq_feeder.cc"
 )
 # Prune out ZMQ if no support
 if(NOT USE_ZMQ)
   message(STATUS "Excluding ZMQ binary")
-  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_ZMQ_BINARY_SRC}")
-  exclude(Caffe2_BINARY_SRCS "${Caffe2_BINARY_SRCS}" "${tmp}")
+  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_ZMQ_BINARY_SRCS}")
+  exclude(Caffe2_CPU_BINARY_SRCS "${Caffe2_CPU_BINARY_SRCS}" "${tmp}")
+  exclude(Caffe2_GPU_BINARY_SRCS "${Caffe2_GPU_BINARY_SRCS}" "${tmp}")
 endif()
 
 # MPI-based binaries
-set(Caffe2_MPI_BINARY_SRC
+set(Caffe2_MPI_BINARY_SRCS
     "fb_run_plan_mpi.cc"
     "run_plan_mpi.cc"
 )
 if(NOT USE_MPI)
   message(STATUS "Excluding MPI binaries")
-  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_MPI_BINARY_SRC}")
-  exclude(Caffe2_BINARY_SRCS "${Caffe2_BINARY_SRCS}" "${tmp}")
+  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_MPI_BINARY_SRCS}")
+  exclude(Caffe2_CPU_BINARY_SRCS "${Caffe2_CPU_BINARY_SRCS}" "${tmp}")
+  exclude(Caffe2_GPU_BINARY_SRCS "${Caffe2_GPU_BINARY_SRCS}" "${tmp}")
 endif()
 
-foreach(binary_src ${Caffe2_BINARY_SRCS})
+# OpenCV-based binaries
+set(Caffe2_OPENCV_BINARY_SRCS
+    "convert_encoded_to_raw_leveldb.cc"
+    "make_image_db.cc"
+)
+if(NOT USE_OPENCV)
+  message(STATUS "Excluding OPENCV binaries")
+  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_OPENCV_BINARY_SRCS}")
+  exclude(Caffe2_CPU_BINARY_SRCS "${Caffe2_CPU_BINARY_SRCS}" "${tmp}")
+  exclude(Caffe2_GPU_BINARY_SRCS "${Caffe2_GPU_BINARY_SRCS}" "${tmp}")
+endif()
+
+foreach(binary_src ${Caffe2_CPU_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem benchmark ${Caffe2_LINKER_LIBS})
+  target_link_libraries(${bin_name} ${Caffe2_LINK} glog benchmark ${Caffe2_LINKER_LIBS})
   install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
 
-
+if(HAVE_CUDA)
+  foreach(binary_src ${Caffe2_GPU_BINARY_SRCS})
+    get_filename_component(bin_name ${binary_src} NAME_WE)
+    add_executable(${bin_name} ${binary_src})
+    target_link_libraries(${bin_name} ${Caffe2_LINK} glog cnmem benchmark ${Caffe2_LINKER_LIBS})
+    install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
+  endforeach()
+endif()

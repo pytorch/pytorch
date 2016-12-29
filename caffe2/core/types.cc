@@ -17,12 +17,15 @@ CAFFE_KNOWN_TYPE(int8_t);
 CAFFE_KNOWN_TYPE(uint16_t);
 CAFFE_KNOWN_TYPE(int16_t);
 CAFFE_KNOWN_TYPE(int64_t);
+CAFFE_KNOWN_TYPE(long);
 CAFFE_KNOWN_TYPE(float16);
 CAFFE_KNOWN_TYPE(double);
 CAFFE_KNOWN_TYPE(char);
 CAFFE_KNOWN_TYPE(std::unique_ptr<std::mutex>);
 CAFFE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>);
 CAFFE_KNOWN_TYPE(std::vector<int64_t>);
+CAFFE_KNOWN_TYPE(std::vector<long>);
+CAFFE_KNOWN_TYPE(std::vector<unsigned long>);
 
 TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
   static_assert(sizeof(int) == 4,
