@@ -2,6 +2,7 @@
 #define TH_GENERIC_FILE "generic/THTensorConv.h"
 #else
 
+#ifndef TH_GENERIC_NO_MATH
 
 TH_API void THTensor_(validXCorr2Dptr)(real *r_,
                                     real alpha,
@@ -77,4 +78,5 @@ TH_API void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t
 TH_API void THTensor_(conv3Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long sdepth, long srow, long scol, const char *vf, const char *xc);
 TH_API void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long sdepth, long srow, long scol, const char *vf, const char *xc);
 
+#endif
 #endif
