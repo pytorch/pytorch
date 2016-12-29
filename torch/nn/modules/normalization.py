@@ -16,7 +16,6 @@ class CrossMapLRN2d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.threshold) \
             + ', alpha=' + str(self.alpha) \
             + ', beta=' + str(self.beta) \
             + ', k=' + str(self.k) \

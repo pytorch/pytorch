@@ -42,7 +42,7 @@ class _BatchNorm(Module):
                 self.weight, self.bias, self.training, self.momentum, self.eps)
 
     def __repr__(self):
-        return  self.__class__.__name__ + ' (' + str(self.weight.data.size(0)) \
+        return  self.__class__.__name__ + ' (' + str(self.running_mean.size(0)) \
             + ', eps=' + str(self.eps) \
             + ', momentum=' + str(self.momentum) \
             + ', affine=' + str(self.affine) + ')'

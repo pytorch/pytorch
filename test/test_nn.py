@@ -51,6 +51,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
     def _do_test(self, test_case, module, input):
         test_case.check_jacobian(module, input, self.jacobian_input)
 
+        # check if module can be printed
+        module.__repr__()
+
         if self.check_inplace:
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
