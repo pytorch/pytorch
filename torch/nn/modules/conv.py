@@ -253,8 +253,8 @@ class _Conv3dBase(Module):
         padding_str = ', padding=(' + str(padt) \
                       + ', ' + str(padh) + ', ' + str(padw) + ')' \
                       if padt != 0 and padh != 0 and padw !=0 else ''
-        return  self.__class__.__name__ + ' (' + str(in_channels) \
-            + ' -> ' + str(out_channels) \
+        return  self.__class__.__name__ + ' (' + str(self.in_channels) \
+            + ' -> ' + str(self.out_channels) \
             + ', size=(' + str(kt) + ', ' + str(kh) + ', ' + str(kw) + ')' \
             + ', stride=(' + str(dt) + ', ' + str(dh) + ', ' + str(dw) + ')' \
             + padding_str + ')'
