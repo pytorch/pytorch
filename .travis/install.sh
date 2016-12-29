@@ -10,7 +10,7 @@ if [[ $TRAVIS_OS_NAME == 'osx' ]]; then
   ########################
 
   brew install homebrew/science/openblas
-  brew install glog gtest automake protobuf leveled lmdb
+  brew install glog automake protobuf leveled lmdb
 
 else
 #********************#
@@ -21,7 +21,7 @@ else
   # Install dependencies #
   ########################
 
-  sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev
+  sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev
   sudo pip install numpy
 
   ################
