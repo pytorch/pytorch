@@ -1,118 +1,114 @@
 import torch
 from torch.autograd import Function
 from torch._thnn import type2backend
+from torch.nn.functions.thnn.auto import function_by_name
 import torch.backends.cudnn as cudnn
-from torch.nn.modules.utils import _ntuple
 
 
-class ConvBase(Function):
-    def __init__(self, ndim, stride=1, padding=0, groups=1):
-        super(ConvBase, self).__init__()
-        self.ndim = ndim
-        self.stride = _ntuple(self.ndim)(stride)
-        self.padding = _ntuple(self.ndim)(padding)
+_thnn_convs = {}
+
+
+class ConvNd(Function):
+    def __init__(self, stride, padding, dilation, transposed, output_padding,
+                 groups):
+        super(ConvNd, self).__init__()
+        if len(stride) == 1:
+            # view 1d convolutions as 2d
+            stride = (1,) + stride
+            padding = (0,) + padding
+            dilation = (1,) + dilation
+            output_padding = (0,) + output_padding
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.transposed = transposed
+        self.output_padding = output_padding
         self.groups = groups
 
     def forward(self, input, weight, bias=None):
-        output = input.new(*self._output_size(input, weight))
+        k = input.dim()
         self.save_for_backward(input, weight, bias)
+        if k == 3:
+            input, weight = _view4d(input, weight)
+        output = input.new(*self._output_size(input, weight))
         self._update_output(input, weight, bias, output)
+        if k == 3:
+            output, = _view3d(output)
         return output
 
     def backward(self, grad_output):
+        k = grad_output.dim()
         input, weight, bias = self.saved_tensors
-        grad_input = (self._grad_input(input, weight, bias, grad_output)
+        if k == 3:
+            grad_output, input, weight = _view4d(grad_output, input, weight)
+        grad_input = (self._grad_input(input, weight, grad_output)
                       if self.needs_input_grad[0] else None)
         grad_weight, grad_bias = (
             self._grad_params(input, weight, bias, grad_output)
             if any(self.needs_input_grad[1:]) else (None, None))
+        if k == 3:
+            grad_input, grad_weight, = _view3d(grad_input, grad_weight)
         return grad_input, grad_weight, grad_bias
 
+    def is_dilated(self):
+        return self.dilation != (1,) * len(self.dilation)
 
-def _thnn_size(size):
-    # THNN uses [T] x W x H instead of [T] x H x W
-    if len(size) == 3:
-        return (size[0], size[2], size[1])
-    elif len(size) == 2:
-        return (size[1], size[0])
-    else:
-        raise ValueError("invalid size")
-
-
-class Conv(ConvBase):
     def _output_size(self, input, weight):
-        output_size = (input.size(0), weight.size(0),)
-        for d in range(self.ndim):
-            k = weight.size(d + 2)
-            s = (input.size(d + 2) + 2 * self.padding[d] - k) // self.stride[d] + 1
-            output_size += (s,)
+        channels = weight.size(1) if self.transposed else weight.size(0)
+        output_size = (input.size(0), channels)
+        for d in range(input.dim() - 2):
+            in_size = input.size(d + 2)
+            pad = self.padding[d]
+            kernel = self.dilation[d] * (weight.size(d + 2) - 1) + 1
+            stride = self.stride[d]
+            if self.transposed:
+                out_pad = self.output_padding[d]
+                output_size += (
+                    (in_size - 1) * stride - (2 * pad) + kernel + out_pad,)
+            else:
+                output_size += ((in_size + (2 * pad) - kernel) // stride + 1,)
         return output_size
 
-    def _conv_size(self, weight):
-        return (_thnn_size(weight.size()[2:]), _thnn_size(self.stride),
-                _thnn_size(self.padding))
-
     def _update_output(self, input, weight, bias, output):
-        self.use_cudnn = cudnn.is_acceptable(input)
+        self.use_cudnn = cudnn.is_acceptable(input) and not self.is_dilated()
         if self.use_cudnn:
-            self._cudnn_info = torch._C._cudnn_convolution_full_forward(
-                input, weight, bias, output, self.padding,
-                self.stride, self.groups, cudnn.benchmark)
+            if self.transposed:
+                self._cudnn_info = (
+                    torch._C._cudnn_convolution_transpose_full_forward(
+                        input, weight, bias, output, self.padding, self.stride,
+                        self.groups, cudnn.benchmark))
+            else:
+                self._cudnn_info = torch._C._cudnn_convolution_full_forward(
+                    input, weight, bias, output, self.padding, self.stride,
+                    self.groups, cudnn.benchmark)
             return
 
         if self.groups != 1:
             # TODO: implement groups for THNN
             raise ValueError('THNN does not support groups')
 
-        backend = type2backend[type(input)]
-        self._finput = input.new()
-        self._fgrad_input = input.new()
-        kernel, stride, padding = self._conv_size(weight)
-        if self.ndim == 2:
-            backend.SpatialConvolutionMM_updateOutput(
-                backend.library_state, input, output, weight, bias,
-                self._finput, self._fgrad_input, *(kernel + stride + padding))
-        elif self.ndim == 3 and input.is_cuda:
-            backend.VolumetricConvolution_updateOutput(
-                backend.library_state, input, output, weight, bias,
-                self._finput, self._fgrad_input, *(stride + padding))
-        else:
-            assert(self.ndim == 3)
-            backend.VolumetricConvolutionMM_updateOutput(
-                backend.library_state, input, output, weight, bias,
-                self._finput, *(kernel + stride + padding))
+        return self.call_thnn('update_output', input, output, weight, bias)
 
-    def _grad_input(self, input, weight, bias, grad_output):
+    def _grad_input(self, input, weight, grad_output):
         if self.use_cudnn:
             grad_input = input.new().resize_as_(input)
-            torch._C._cudnn_convolution_backward_data(
-                grad_output, grad_input, weight, self._cudnn_info,
-                cudnn.benchmark)
+            if self.transposed:
+                # ConvTranspose uses the same kernels as regular convolution
+                # but swaps forward and backward calls
+                torch._C._cudnn_convolution_forward(
+                    grad_output, weight, grad_input, self._cudnn_info,
+                    cudnn.benchmark)
+            else:
+                torch._C._cudnn_convolution_backward_data(
+                    grad_output, grad_input, weight, self._cudnn_info,
+                    cudnn.benchmark)
             return grad_input
 
-        backend = type2backend[type(input)]
-        grad_input = input.new().resize_as_(input).zero_()
-        kernel, stride, padding = self._conv_size(weight)
-        if self.ndim == 2:
-            backend.SpatialConvolutionMM_updateGradInput(
-                backend.library_state, input, grad_output, grad_input,
-                weight, self._finput, self._fgrad_input,
-                *(kernel + stride + padding))
-        elif self.ndim == 3 and input.is_cuda:
-            backend.VolumetricConvolution_updateGradInput(
-                backend.library_state, input, grad_output, grad_input,
-                weight, self._finput, *(stride + padding))
-        else:
-            assert(self.ndim == 3)
-            backend.VolumetricConvolutionMM_updateGradInput(
-                backend.library_state, input, grad_output, grad_input,
-                weight, self._finput, self._fgrad_input,
-                *(kernel + stride + padding))
-        return grad_input
+        return self.call_thnn('grad_input', input, weight, grad_output)
 
     def _grad_params(self, input, weight, bias, grad_output):
-        grad_weight = grad_bias = None
         if self.use_cudnn:
+            grad_weight = grad_bias = None
             if self.needs_input_grad[1]:
                 grad_weight = weight.new().resize_as_(weight)
                 torch._C._cudnn_convolution_backward_filter(
@@ -126,129 +122,132 @@ class Conv(ConvBase):
 
             return grad_weight, grad_bias
 
-        backend = type2backend[type(input)]
-        kernel, stride, padding = self._conv_size(weight)
-        grad_weight = weight.new().resize_as_(weight).zero_()
-        if bias is not None and self.needs_input_grad[2]:
-            grad_bias = bias.new().resize_as_(bias).zero_()
-        if self.ndim == 2:
-            backend.SpatialConvolutionMM_accGradParameters(
-                backend.library_state, input, grad_output, grad_weight,
-                grad_bias, self._finput, self._fgrad_input,
-                *(kernel + stride + padding + (1.0,)))
-        elif self.ndim == 3 and input.is_cuda:
-            backend.VolumetricConvolution_accGradParameters(
-                backend.library_state, input, grad_output, grad_weight,
-                grad_bias, self._finput, self._fgrad_input,
-                *(stride + padding + (1.0,)))
+        return self.call_thnn('grad_params', input, weight, bias, grad_output)
+
+    def thnn_class_name(self, input):
+        assert input.dim() == 4 or input.dim() == 5
+        if self.transposed:
+            if input.dim() == 4:
+                return 'SpatialFullConvolution'
+            else:
+                return 'VolumetricFullConvolution'
+        elif self.is_dilated():
+            if input.dim() == 4:
+                return 'SpatialDilatedConvolution'
+            else:
+                return 'VolumetricDilatedConvolution'
+        elif input.dim() == 4:
+            return 'SpatialConvolutionMM'
+        elif input.dim() == 5 and input.is_cuda:
+            return 'VolumetricConvolution'
         else:
-            assert(self.ndim == 3)
-            backend.VolumetricConvolutionMM_accGradParameters(
-                backend.library_state, input, grad_output, grad_weight,
-                grad_bias, self._finput,
-                *(kernel + stride + padding + (1.0,)))
-        return grad_weight, grad_bias
+            return 'VolumetricConvolutionMM'
+
+    def call_thnn(self, fn_name, input, *args):
+        impl = _thnn_convs[self.thnn_class_name(input)]
+        return impl[fn_name](self, input, *args)
 
 
-class ConvTranspose(ConvBase):
-    def __init__(self, ndim, stride=1, padding=0, groups=1, output_padding=0):
-        super(ConvTranspose, self).__init__(ndim, stride, padding, groups)
-        self.output_padding = _ntuple(ndim)(output_padding)
+def _view4d(*tensors):
+    # view 3d tensor as 4d (conv1d as conv2d)
+    output = []
+    for t in tensors:
+        assert t.dim() == 3
+        size = list(t.size())
+        size.insert(2, 1)
+        output += [t.view(*size)]
+    return output
 
-    def _output_size(self, input, weight):
-        output_size = (input.size(0), weight.size(1),)
-        for d in range(self.ndim):
-            s = ((input.size(d + 2) - 1) * self.stride[d] -
-                 self.padding[d] * 2 + weight.size(d + 2) + self.output_padding[d])
-            output_size += (s,)
-        return output_size
 
-    def _conv_size(self, weight):
-        return (_thnn_size(weight.size()[2:]), _thnn_size(self.stride),
-                _thnn_size(self.padding), _thnn_size(self.output_padding))
+def _view3d(*tensors):
+    # view 4d tensor as 3d
+    output = []
+    for t in tensors:
+        assert t.dim() == 4 and t.size(2) == 1
+        output += [t.squeeze(2)]
+    return output
 
-    def _update_output(self, input, weight, bias, output):
-        self.use_cudnn = cudnn.is_acceptable(input)
-        if self.use_cudnn:
-            self._cudnn_info = \
-                torch._C._cudnn_convolution_transpose_full_forward(
-                    input, weight, bias, output, self.padding, self.stride,
-                    self.groups, cudnn.benchmark)
-            return
 
-        if self.groups != 1:
-            raise ValueError('THNN does not support groups')
-
-        backend = type2backend[type(input)]
-        kernel, stride, padding, output_padding = self._conv_size(weight)
-        _finput = input.new()
-        _fgrad_input = input.new()
-        if self.ndim == 2:
-            backend.SpatialFullConvolution_updateOutput(
-                backend.library_state, input, output, weight, bias,
-                _finput, _fgrad_input, *(kernel + stride + padding + output_padding))
+def parse_arguments(self, arguments, buffers, kernel_size):
+    idx = {'T': -3, 'H': -2, 'W': -1}
+    buf_idx = 0
+    params = []
+    for arg in arguments:
+        if arg.type == 'THTensor*':
+            params.append(buffers[buf_idx])
+            buf_idx += 1
+        elif arg.name == 'scale':
+            params.append(1.0)
+        elif arg.name.startswith('dil'):
+            params.append(self.dilation[idx[arg.name[-1]]])
+        elif arg.name[0] == 'k':
+            params.append(kernel_size[idx[arg.name[-1]]])
+        elif arg.name[0] == 'd':
+            params.append(self.stride[idx[arg.name[-1]]])
+        elif arg.name[0] == 'p':
+            params.append(self.padding[idx[arg.name[-1]]])
+        elif arg.name[0] == 'a':
+            params.append(self.output_padding[idx[arg.name[-1]]])
         else:
-            backend.VolumetricFullConvolution_updateOutput(
-                backend.library_state, input, output, weight, bias,
-                _finput, _fgrad_input, *(stride + padding + output_padding))
+            raise RuntimeError('unexpected argument in THNN header: ' + arg)
+    return params
 
-    def _grad_input(self, input, weight, bias, grad_output):
-        if self.use_cudnn:
-            grad_input = input.new().resize_as_(input)
-            # ConvTranspose uses the same kernels as regular convolution
-            # but swaps forward and backward calls
-            torch._C._cudnn_convolution_forward(
-                grad_output, weight, grad_input, self._cudnn_info,
-                cudnn.benchmark)
-            return grad_input
 
+def make_update_output(fn):
+    def call_update_output(self, input, output, weight, bias):
         backend = type2backend[type(input)]
-        kernel, stride, padding, output_padding = self._conv_size(weight)
+        self._bufs = [input.new(), input.new()]
+        kernel_size = weight.size()[2:]
+        args = parse_arguments(self, fn.arguments[5:], self._bufs, kernel_size)
+        getattr(backend, fn.name)(backend.library_state, input, output, weight,
+                                  bias, *args)
+    return call_update_output
+
+
+def make_grad_input(fn):
+    def call_grad_input(self, input, weight, grad_output):
+        backend = type2backend[type(input)]
         grad_input = input.new().resize_as_(input).zero_()
-        grad_columns = input.new()
-        if self.ndim == 2:
-            backend.SpatialFullConvolution_updateGradInput(
-                backend.library_state, input, grad_output, grad_input,
-                weight, grad_columns, *(kernel + stride + padding + output_padding))
-        else:
-            tmp = input.new()  # not actually used by THNN/THCUNN
-            backend.VolumetricFullConvolution_updateGradInput(
-                backend.library_state, input, grad_output, grad_input,
-                weight, grad_columns, tmp, *(stride + padding + output_padding))
-
+        kernel_size = weight.size()[2:]
+        args = parse_arguments(self, fn.arguments[5:], self._bufs, kernel_size)
+        getattr(backend, fn.name)(backend.library_state, input, grad_output,
+                                  grad_input, weight, *args)
         return grad_input
+    return call_grad_input
 
-    def _grad_params(self, input, weight, bias, grad_output):
-        grad_weight = grad_bias = None
-        if self.use_cudnn:
-            if self.needs_input_grad[1]:
-                grad_weight = weight.new().resize_as_(weight)
-                torch._C._cudnn_convolution_backward_filter(
-                    grad_output, input, grad_weight, self._cudnn_info,
-                    cudnn.benchmark)
 
-            if bias is not None and self.needs_input_grad[2]:
-                grad_bias = bias.new().resize_as_(bias)
-                torch._C._cudnn_convolution_backward_bias(
-                    grad_output, grad_bias, self._cudnn_info)
-
-            return grad_weight, grad_bias
-
+def make_grad_params(fn):
+    def call_grad_params(self, input, weight, bias, grad_output):
         backend = type2backend[type(input)]
-        kernel, stride, padding, output_padding = self._conv_size(weight)
         grad_weight = weight.new().resize_as_(weight).zero_()
+        grad_bias = None
         if bias is not None and self.needs_input_grad[2]:
             grad_bias = bias.new().resize_as_(bias).zero_()
-        _finput = input.new()
-        _fgrad_input = input.new()
-        if self.ndim == 2:
-            backend.SpatialFullConvolution_accGradParameters(
-                backend.library_state, input, grad_output, grad_weight,
-                grad_bias, _finput, _fgrad_input,
-                *(kernel + stride + padding + output_padding + (1,)))
-        else:
-            backend.VolumetricFullConvolution_accGradParameters(
-                backend.library_state, input, grad_output, grad_weight,
-                grad_bias, _finput, _fgrad_input,
-                *(stride + padding + output_padding + (1,)))
+        kernel_size = weight.size()[2:]
+        args = parse_arguments(self, fn.arguments[5:], self._bufs, kernel_size)
+        getattr(backend, fn.name)(backend.library_state, input, grad_output,
+                                  grad_weight, grad_bias, *args)
         return grad_weight, grad_bias
+    return call_grad_params
+
+
+def _bind_functions():
+    classes = [
+        'SpatialConvolutionMM',
+        'VolumetricConvolution',
+        'VolumetricConvolutionMM',
+        'SpatialDilatedConvolution',
+        'VolumetricDilatedConvolution',
+        'SpatialFullConvolution',
+        'VolumetricFullConvolution',
+    ]
+    fns = function_by_name
+    for name in classes:
+        _thnn_convs[name] = {
+            'update_output': make_update_output(fns[name + '_updateOutput']),
+            'grad_input': make_grad_input(fns[name + '_updateGradInput']),
+            'grad_params': make_grad_params(fns[name + '_accGradParameters']),
+        }
+
+
+_bind_functions()

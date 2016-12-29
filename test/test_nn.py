@@ -796,12 +796,8 @@ class TestNN(NNTestCase):
         for h in range(15, 22):
             for w in range(15, 22):
                 if 18 <= h <= 20 and 18 <= w <= 20:
-                    size = (h, w)
-                    if h == 19:
-                        size = torch.LongStorage(size)
-                    elif h == 2:
-                        size = torch.LongStorage((2, 4) + size)
-                    m(i, output_size=(h, w))
+                    output = m(i, output_size=(h, w))
+                    self.assertEqual(output.size()[2:], (h, w))
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
@@ -1097,6 +1093,11 @@ new_module_tests = [
         desc='stride'
     ),
     dict(
+        fullname='Conv1d_dilated',
+        constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
+        input_size=(2, 4, 10),
+    ),
+    dict(
         module_name='MaxPool1d',
         constructor_args=(4,),
         input_size=(2, 10, 4)
@@ -1136,7 +1137,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv2d',
-        constructor_args=(3, 4, (3, 2), 1, 0, None, 1, False),
+        constructor_args=(3, 4, (3, 2), 1, 0, 1, 1, False),
         input_size=(2, 3, 6, 5),
         cudnn=True,
         desc='no_bias',
@@ -1216,6 +1217,11 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride_padding'
+    ),
+    dict(
+        fullname='Conv3d_dilated',
+        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
+        input_size=(2, 3, 5, 5, 5),
     ),
     dict(
         module_name='ConvTranspose3d',
