@@ -38,6 +38,7 @@ matrix:
 
 install:
   - ./.travis/install.sh
+  sudo pip install numpy
 
 script:
   - export CXX=$COMPILER && ./.travis/build.sh
