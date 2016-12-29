@@ -88,7 +88,7 @@ find_package(PythonInterp 2.7)
 find_package(PythonLibs 2.7)
 find_package(NumPy REQUIRED)
 
-include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIRS})
+include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
 list(APPEND Caffe2_LINKER_LIBS ${PYTHON_LIBRARIES})
 
 # ---[ pybind11
