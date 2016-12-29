@@ -156,38 +156,6 @@ class TestWorkspace(unittest.TestCase):
             self.assertEqual(fetched_back.dtype, dtype)
             np.testing.assert_array_equal(fetched_back, data)
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
-    def testFetchFeedBlobTypeAsserts(self):
-        # This should pass as we are not using CUDA
-        data = np.random.rand(2, 3)
-        workspace.FeedBlob("a", data)
-
-        device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
-        with core.DeviceScope(device_opt):
-            threw = False
-            try:
-                workspace.FeedBlob("b", data)
-            except Exception as e:
-                print(e)
-                threw = True
-            self.assertTrue(threw, "Should reject float64 type for CUDA")
-
-            threw = False
-            try:
-                workspace.FeedBlob("c", data.astype(np.float32))
-            except Exception as e:
-                print(e)
-                threw = True
-            self.assertFalse(threw, "Should accept float32 type for CUDA")
-
-        threw = False
-        try:
-            workspace.FeedBlob("d", data, device_option=device_opt)
-        except Exception as e:
-            print(e)
-            threw = True
-        self.assertTrue(threw, "Should reject float64 type for CUDA")
-
     def testFetchFeedBlobBool(self):
         """Special case for bool to ensure coverage of both true and false."""
         data = np.zeros((2, 3, 4)).astype(np.bool)

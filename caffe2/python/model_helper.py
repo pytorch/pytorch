@@ -29,8 +29,9 @@ class ParameterInfo(object):
         self._cloned_init_net = None
 
     def grad_type(self):
-        assert self.grad is not None, (
-            'Gradient not defined for parameter %s' % self.name)
+        # self.grad could be None for model parallelism with parameter server
+        if self.grad is None:
+            return
         return (
             ParameterType.SPARSE if isinstance(self.grad, core.GradientSlice)
             else ParameterType.DENSE)

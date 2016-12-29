@@ -1,0 +1,156 @@
+/PROG  ALL
+/ATTR
+OWNER		= MNEDITOR;
+COMMENT		= "";
+PROG_SIZE	= 3689;
+CREATE		= DATE 14-05-13  TIME 17:03:06;
+MODIFIED	= DATE 14-05-13  TIME 17:21:44;
+FILE_NAME	= ;
+VERSION		= 0;
+LINE_COUNT	= 118;
+MEMORY_SIZE	= 4365;
+PROTECT		= READ_WRITE;
+TCD:  STACK_SIZE	= 0,
+      TASK_PRIORITY	= 50,
+      TIME_SLICE	= 0,
+      BUSY_LAMP_OFF	= 0,
+      ABORT_REQUEST	= 0,
+      PAUSE_REQUEST	= 0;
+DEFAULT_GROUP	= 1,*,*,*,*;
+CONTROL_CODE	= 00000000 00000000;
+/MN
+  ! motion ;
+J P[1:test point] 100% FINE    ;
+J P[1] 100.0sec CNT100    ;
+J P[1] 100msec CNT R[1]    ;
+L P[1] 100/sec FINE    ;
+L P[1] 100cm/min CNT100    ;
+L P[1] 100.0inch/min CNT100    ;
+L P[1] 100deg/sec CNT100    ;
+  ! indirect speed ;
+L P[1] R[1]sec CNT100    ;
+  ! indirect indirect ;
+L PR[1] R[R[1]]msec CNT100    ;
+  ! indirect destination ;
+L PR[R[1]] max_speed CNT100    ;
+   ;
+  ! assignment ;
+  R[1]=R[2]    ;
+  ! indirect assignment ;
+  R[R[1]]=R[2] ;
+  ! system variables ;
+  $foo=$bar[100].$baz ;
+  R[1]=$FOO.$BAR ;
+    ;
+  ! various keyword assignments ;
+  PR[1]=LPOS    ;
+  PR[1]=JPOS    ;
+  PR[1]=UFRAME[1] ;
+  PR[1]=UTOOL[1] ;
+  PR[1]=P[1]    ;
+  PR[1,1:component]=5    ;
+  SR[1:string reg]=SR[2]+AR[1]    ;
+  R[1]=SO[1:Cycle start] DIV SI[2:Remote]    ;
+  R[1]=UO[1:Cmd enabled] MOD UI[1:*IMSTP]    ;
+  ! mixed logic ;
+  DO[1]=(DI[1] AND AR[1] AND F[1] OR TIMER[1]>TIMER_OVERFLOW[1]) ;
+  F[1]=(ON) ;
+  JOINT_MAX_SPEED[1]=5 ;
+  LINEAR_MAX_SPEED=5 ;
+  SKIP CONDITION DI[1]=OFF-   ;
+  PAYLOAD[R[1]] ;
+  OFFSET CONDITION PR[1]    ;
+  UFRAME_NUM=1 ;
+  UTOOL_NUM=1 ;
+  UFRAME[1]=PR[1] ;
+  UTOOL[1]=PR[1] ;
+  RSR[1]=ENABLE ;
+  RSR[AR[1]]=DISABLE ;
+  UALM[1] ;
+  TIMER[1]=START ;
+  TIMER[1]=STOP ;
+  TIMER[1]=RESET ;
+  OVERRIDE=50% ;
+  TOOL_OFFSET CONDITION PR[1]    ;
+  LOCK PREG ;
+  UNLOCK PREG ;
+  COL DETECT ON ;
+  COL DETECT OFF ;
+  COL GUARD ADJUST R[1] ;
+  COL GUARD ADJUST 50 ;
+  MONITOR TEST ;
+  MONITOR END TEST ;
+  R[1]=STRLEN SR[1] ;
+  SR[1]=SUBSTR SR[2],R[3],R[4] ;
+  R[1]=FINDSTR SR[1],SR[2] ;
+  DIAG_REC[1,5,2] ;
+   ;
+  ! program calls ;
+  CALL TEST ;
+  CALL TEST(1,'string',SR[1],AR[1]) ;
+  RUN TEST ;
+  RUN TEST(1,'string',SR[1],AR[1]) ;
+   ;
+  ! conditionals ;
+  IF R[1]=1,JMP LBL[5] ;
+  IF R[1]=AR[1],CALL TEST ;
+  IF (DI[1]),R[1]=(5) ;
+  SELECT R[1]=1,JMP LBL[5] ;
+         =2,CALL TEST ;
+         ELSE,JMP LBL[100] ;
+  FOR R[1]=1 TO R[2] ;
+  ENDFOR ;
+   ;
+  ! wait statement ;
+  WAIT   1.00(sec) ;
+  WAIT R[5] ;
+  WAIT DI[1]=ON    ;
+  WAIT DI[1]=ON+    ;
+  WAIT ERR_NUM=1    ;
+  WAIT (DI[1]=ON) ;
+   ;
+  ! jumps and labels ;
+  JMP LBL[1] ;
+  JMP LBL[R[1]] ;
+  LBL[100] ;
+  LBL[100:TEST] ;
+   ;
+  ! statements ;
+  PAUSE ;
+  ABORT ;
+  ERROR_PROG=ALL ;
+  RESUME_PROG[1]=TEST ;
+  END ;
+  MESSAGE[ASDF] ;
+   ;
+  ! comments ;
+  --eg:ASDFASDFASDF ;
+  // L P[9] 100mm/sec CNT100 ACC100    ;
+   ;
+  ! motion modifiers ;
+L P[1] 100mm/sec CNT100 ACC100    ;
+L P[1] 100mm/sec CNT100 ACC R[1]    ;
+L P[1] 100mm/sec CNT100 Skip,LBL[1]    ;
+L P[1] 100mm/sec CNT100 BREAK    ;
+L P[1] 100mm/sec CNT100 Offset    ;
+L P[1] 100mm/sec CNT100 PSPD50    ;
+L P[1] 100mm/sec CNT100 Offset,PR[1]    ;
+L P[1] 100mm/sec CNT100 INC    ;
+L P[1] 100mm/sec CNT100 RT_LDR[1]    ;
+L P[1] 100mm/sec CNT100 AP_LD50    ;
+L P[1] 100mm/sec CNT100 Tool_Offset    ;
+L P[1] 100mm/sec CNT100 Tool_Offset,PR[1]    ;
+L P[1] 100mm/sec CNT100 Skip,LBL[1],PR[1]=LPOS    ;
+L P[1] 100mm/sec CNT100 TB R[5]sec,CALL ALL    ;
+L P[1] 100mm/sec CNT100 TA   0.00sec,AO[1]=R[5]    ;
+L P[1] 100mm/sec CNT100 DB    0.0mm,CALL ALL    ;
+L P[1] 100mm/sec CNT100 PTH    ;
+L P[1] 100mm/sec CNT100 VOFFSET,VR[1] ;
+/POS
+P[1:"test"]{
+   GP1:
+	UF : 0, UT : 1,		CONFIG : '',
+	X =   550.000  mm,	Y =     0.000  mm,	Z =  -685.000  mm,
+	W =   180.000 deg,	P =     0.000 deg,	R =     0.000 deg
+};
+/END

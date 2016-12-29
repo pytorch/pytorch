@@ -1,0 +1,37 @@
+ BEGIN_PROVIDER [ integer(bit_kind), psi_det_sorted_bit, (N_int,2,psi_det_size) ]
+&BEGIN_PROVIDER [ double precision, psi_coef_sorted_bit, (psi_det_size,N_states) ]
+ implicit none
+ BEGIN_DOC
+ ! Determinants on which we apply <i|H|psi> for perturbation.
+ ! They are sorted by determinants interpreted as integers. Useful
+ ! to accelerate the search of a random determinant in the wave
+ ! function.
+ END_DOC
+ integer :: i,j,k
+ integer, allocatable ::  iorder(:)
+ integer*8, allocatable :: bit_tmp(:)
+ integer*8, external :: det_search_key
+
+ allocate ( iorder(N_det), bit_tmp(N_det) )
+
+ do i=1,N_det
+   iorder(i) = i
+   !DIR$ FORCEINLINE
+   bit_tmp(i) = det_search_key(psi_det(1,1,i),N_int)
+ enddo
+ call isort(bit_tmp,iorder,N_det)
+ !DIR$ IVDEP
+ do i=1,N_det
+  do j=1,N_int
+    psi_det_sorted_bit(j,1,i) = psi_det(j,1,iorder(i))
+    psi_det_sorted_bit(j,2,i) = psi_det(j,2,iorder(i))
+  enddo
+  do k=1,N_states
+    psi_coef_sorted_bit(i,k) = psi_coef(iorder(i),k)
+  enddo
+ enddo
+
+ deallocate(iorder, bit_tmp)
+
+END_PROVIDER
+

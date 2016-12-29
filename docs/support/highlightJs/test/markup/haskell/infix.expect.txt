@@ -1,0 +1,3 @@
+<span class="hljs-infix"><span class="hljs-keyword">infix</span> <span class="hljs-number">3</span> `foo`</span>
+<span class="hljs-infix"><span class="hljs-keyword">infixl</span> <span class="hljs-number">6</span> `bar`</span>
+<span class="hljs-infix"><span class="hljs-keyword">infixr</span> <span class="hljs-number">9</span> `baz`</span>

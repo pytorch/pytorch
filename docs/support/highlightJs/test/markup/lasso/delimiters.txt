@@ -1,0 +1,7 @@
+<div>
+[local(y::decimal = .57721)]
+[noprocess] <?lasso delimiters?> [until] [/noprocess]
+[no_square_brackets] skip subsequent [square brackets]
+<!--ignore <?LassoScript in HTML comments ?>-->
+<?=!#y ? true | `string`?>
+</div>
