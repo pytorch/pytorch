@@ -23,7 +23,7 @@ else
   sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
   sudo apt-get update
   sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev
-  sudo pip install numpy
+  sudo apt-get install python-numpy || sudo pip install numpy
 
   ################
   # Install CUDA #
