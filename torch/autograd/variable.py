@@ -6,6 +6,65 @@ from .functions import *
 
 
 class Variable(_C._VariableBase):
+    """Wraps a tensor and records operations applied to it.
+
+    Variable is only a thin wrapper around a Tensor object, that also holds
+    the gradient w.r.t. to it, and a reference to a function that output it.
+    This reference allows of retracing the whole chain of operations that
+    created the data. If the Variable has been created by the user, its creator
+    will be ``None`` and we call such objects leaf Variables.
+
+    Since autograd only supports scalar valued function differentiation, grad
+    size always matches the data size. Also, grad is normally only allocated
+    for leaf variables, and will be always zero otherwise.
+
+    **Flags**
+
+    Every Variable has two flags: :attr:`requires_grad` and :attr:`volatile`.
+    They both allow for fine grained exclusion of subgraphs from gradient
+    computation and can increase efficiency.
+
+    If there's a single input to an operation that requires gradient, its output
+    will also require gradient. Conversely, only if all inputs don't require
+    gradient, the output also won't require it. Backward computation is never
+    performed in the subgraphs, where all Variables didn't require gradients.
+
+    Volatile is a similar setting, but differs in how the flag propagates.
+    If there's even a single volatile input to an operation, its output is also
+    going to be volatile. Volatility spreads accross the graph much easier than
+    non-requiring gradient - you only need a **single** volatile leaf to have a
+    volatile output, while you need **all** leaves to not require gradient to
+    have an output the doesn't require gradient. Using volatile flag you don't
+    need to change any settings of your model parameters to use it for
+    inference. It's enough to create a volatile input, and this will ensure that
+    no intermediate states are saved.
+
+    **API compatibility**
+
+    Variable API is nearly the same as regular Tensor API (with the exception
+    of a couple in-place methods, that would overwrite inputs required for
+    gradient computation). In most cases Tensors can be safely replaced with
+    Variables and the code will remain to work just fine.
+
+    Attributes:
+        data: Wrapped tensor of any type.
+        grad: Tensor holding the gradient of type and location matching
+            the ``.data``.  This attribute is lazily allocated and can't
+            be reassigned.
+        requires_grad: Boolean indicating whether the Variable has been
+            created by a subgraph containing any Variable, that requires it.
+            Can be changed only on leaf Variables.
+        volatile: Boolean indicating that the Variable should be used in
+            inference mode, i.e. don't save the history. Can be changed only
+            on leaf Variables.
+        creator: Function of which the variable was an output. For leaf
+            (user created) variables it's ``None``. Read-only attribute.
+
+    Parameters:
+        data (any tensor class): Tensor to wrap.
+        requires_grad (bool): Value of the requires_grad flag. **Keyword only.**
+        volatile (bool): Value of the volatile flag. **Keyword only.**
+    """
 
     _fallthrough_methods = {
         'size',
@@ -89,19 +148,62 @@ class Variable(_C._VariableBase):
             from copyreg import __newobj__
         return __newobj__, (type(self),), self.__getstate__()
 
+    def __repr__(self):
+        return 'Variable containing:' + self.data.__repr__()
+
     def backward(self, gradient=None, retain_variables=False):
+        """Computes the gradient of current variable w.r.t. graph leaves.
+
+        The graph is differentiated using the chain rule. If the variable is
+        non-scalar (i.e. its data has more than one element) and requires
+        gradient, the function additionaly requires specifying ``gradient``.
+        It should be a tensor of matching type and location, that containins
+        the gradient of the differentiated function w.r.t. ``self``.
+
+        This function accumulates gradients in the leaves - you might need to zero
+        them before calling it.
+
+        Arguments:
+            gradient (Tensor): Gradient of the differentiated function
+                w.r.t. the data. Required only if the data has more than one
+                element. Type and location should match these of ``self.data``.
+            retain_variables (bool): If ``True``, buffers necessary for computing
+                gradients won't be freed after use. It is only necessary to
+                specify ``True`` if you want to differentiate some subgraph multiple
+                times (in some cases it will be much more efficient to use
+                `autograd.backward`).
+        """
         if self.volatile:
             raise RuntimeError('calling backward on a volatile variable')
         if gradient is None and self.requires_grad:
             if self.data.numel() != 1:
                 raise RuntimeError('backward should be called only on a scalar (i.e. 1-element tensor) or with gradient w.r.t. the variable')
-            gradient = self.data.new(1).fill_(1)
+            gradient = self.data.new().resize_as_(self.data).fill_(1)
         self._execution_engine.run_backward((self,), (gradient,), retain_variables)
 
-    def __repr__(self):
-        return 'Variable containing:' + self.data.__repr__()
-
     def register_hook(self, name, hook):
+        """Registers a named backward hook.
+
+        Given hook will be saved and called with the gradient w.r.t. the
+        variable at every backward pass. To remove a hook use
+        :func:`remove_hook`. Saved hooks are called in the same order
+        in which they were registered.
+
+        You should never modify the data of gradient tensor given to your hook,
+        but you can use it in out-of-place operations and return a new tensor::
+
+            variable.register_hook('double_grad', lambda grad: grad * 2)
+
+        The returned value will replace the original tensor. Note that you
+        don't need to return anything from the hook, in which case it won't
+        change the gradient.
+
+
+        Parameters:
+            name(str): Name of the hook.
+            hook(callable): Hook callable. It will be given a single argument
+                that's gradient w.r.t. the variable its registered on.
+        """
         if self.volatile:
             raise RuntimeError("registering hook on a volatile variable")
         if not self.requires_grad:
@@ -115,6 +217,13 @@ class Variable(_C._VariableBase):
         self._backward_hooks[name] = hook
 
     def remove_hook(self, name):
+        """Removes a previously registered backward hook.
+
+        Raises RuntimeError if there's no hook registered under a given name.
+
+        Parameters:
+            name(str): Name of the hook.
+        """
         if self.volatile:
             raise RuntimeError("volatile variables don't support hooks")
         assert self._backward_hooks and name in self._backward_hooks, \
@@ -135,12 +244,23 @@ class Variable(_C._VariableBase):
         return tuple()
 
     def reinforce(self, reward):
+        """Registers a reward obtained as a result of a stochastic process.
+
+        Differentiating stochastic nodes requires providing them with reward
+        value. If your graph contains any stochastic operations, you should
+        call this function on their outputs. Otherwise an error will be raised.
+
+        Parameters:
+            reward(Tensor): Tensor with per-element rewards. It has to match
+                the location and shape of Variable's data.
+        """
         if not isinstance(self.creator, StochasticFunction):
             raise RuntimeError("reinforce() can be only called on outputs "
                     "of stochastic functions")
         self.creator._reinforce(reward)
 
     def no_grad(self):
+        """Detaches the Variable from the graph that created it."""
         return NoGrad()(self)
 
     def contiguous(self):
