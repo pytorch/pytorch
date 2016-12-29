@@ -6,13 +6,13 @@ from .functions import *
 
 
 class Variable(_C._VariableBase):
-    """Wraps a tensor and records operations applied to it.
+    """Wraps a tensor and records the operations applied to it.
 
-    Variable is only a thin wrapper around a Tensor object, that also holds
-    the gradient w.r.t. to it, and a reference to a function that output it.
-    This reference allows of retracing the whole chain of operations that
+    Variable is a thin wrapper around a Tensor object, that also holds
+    the gradient w.r.t. to it, and a reference to a function that created it.
+    This reference allows retracing the whole chain of operations that
     created the data. If the Variable has been created by the user, its creator
-    will be ``None`` and we call such objects leaf Variables.
+    will be ``None`` and we call such objects *leaf* Variables.
 
     Since autograd only supports scalar valued function differentiation, grad
     size always matches the data size. Also, grad is normally only allocated
@@ -252,7 +252,7 @@ class Variable(_C._VariableBase):
 
         Parameters:
             reward(Tensor): Tensor with per-element rewards. It has to match
-                the location and shape of Variable's data.
+                the device location and shape of Variable's data.
         """
         if not isinstance(self.creator, StochasticFunction):
             raise RuntimeError("reinforce() can be only called on outputs "
