@@ -1,3 +1,4 @@
+from .module import Module
 from .linear import Linear
 from .conv import Conv1d, Conv2d, ConvTranspose2d, Conv3d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
