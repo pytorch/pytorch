@@ -22,90 +22,30 @@ class Container(Module):
     your operations.
 
     To make it easier to understand, given is a small example.
-    ```
-    # Example of using Container
-     class Net(nn.Container):
-        def __init__(self):
-            super(Net, self).__init__(
-                conv1 = nn.Conv2d(1, 20, 5),
-                relu  = nn.ReLU()
-             )
-        def forward(self, input):
-            output = self.relu(self.conv1(x))
-            return output
-     model = Net()
-     ```
+
+    ::
+
+        # Example of using Container
+        class Net(nn.Container):
+            def __init__(self):
+                super(Net, self).__init__(
+                    conv1 = nn.Conv2d(1, 20, 5),
+                    relu  = nn.ReLU()
+                )
+            def forward(self, input):
+                output = self.relu(self.conv1(x))
+                return output
+        model = Net()
 
     One can also add new modules to a container after construction.
     You can do this with the add_module function
-    or by assigning them as Container attributes.
+    or by assigning them as Container attributes::
 
-    ```python
-    # one can add modules to the container after construction
-    model.add_module('pool1', nn.MaxPool2d(2, 2))
+        # one can add modules to the container after construction
+        model.add_module('pool1', nn.MaxPool2d(2, 2))
 
-    # one can also set modules as attributes of the container
-    model.conv1 = nn.Conv2d(12, 24, 3)
-    ```
-
-    The container has some important additional methods:
-
-    **`[generator] parameters()`**
-
-    returns a generator over all learnable parameters in the container instance.
-    This can typically be passed to the optimizer API
-
-    ```python
-    # .parameters()
-    >>> for param in model.parameters():
-    >>>     print(type(param.data), param.size())
-    <class 'torch.FloatTensor'> (20L,)
-    <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
-    ```
-
-    **`[dict] state_dict()`**
-
-    returns a dictionary containing a whole state of the Container (both
-    parameters and persistent buffers e.g. running averages)
-    For example: ['conv1.weight' : Parameter(torch.FloatTensor(20x1x5x5)),
-                  'conv1.bias'   : Parameter(torch.FloatTensor(20)),
-                 ]
-
-    ```python
-    # .state_dict()
-    >>> pdict = model.state_dict()
-    >>> print(pdict.keys())
-    ['conv1.bias', 'conv1.weight']
-    ```
-
-
-    **`load_state_dict(dict)`**
-
-    Given a state dict, updates the parameters of self if respective keys are
-    present in the dict. Excessive or non-matching parameter names are ignored.
-    For example, the input dict has an entry 'conv44.weight', but
-    if the container does not have a module named 'conv44', then this entry is ignored.
-
-    **`children()`**
-
-    Returns a generator over all the children modules of self
-
-    **`train()`**
-
-    Sets the Container (and all it's child modules) to training mode (for modules such as batchnorm, dropout etc.)
-
-    **`eval()`**
-
-    Sets the Container (and all it's child modules) to evaluate mode (for modules such as batchnorm, dropout etc.)
-
-    **`apply(closure)`**
-
-    Applies the given closure to each parameter of the container.
-
-
-    **__Note: Apart from these, the container will define the base functions that it has derived from nn.Module __**
-
-
+        # one can also set modules as attributes of the container
+        model.conv1 = nn.Conv2d(12, 24, 3)
     """
 
     dump_patches = False
@@ -154,6 +94,16 @@ class Container(Module):
             Module.__delattr__(self, name)
 
     def state_dict(self, destination=None, prefix=''):
+        """Returns a dictionary containing a whole state of the model.
+
+        Both parameters and persistent buffers (e.g. running averages) are
+        included. Keys are computed using a natural Python's indexing syntax
+        (e.g. 'subcontainer.module.weight'), excluding ``self``.
+
+        Example:
+            >>> print(model.state_dict().keys())
+            ['conv1.bias', 'conv1.weight']
+        """
         result = super(Container, self).state_dict(destination, prefix)
         for name, module in self._modules.items():
             if module is not None:
@@ -161,12 +111,35 @@ class Container(Module):
         return result
 
     def load_state_dict(self, state_dict, prefix=''):
+        """Replaces model parameters using values from a given state_dict.
+
+        Copies all state_dict entries, where keys match any of the submodules.
+        For example, if the state_dict has an entry ``'conv44.weight'``, but
+        if the container does not have any submodule named ``'conv44'``, then
+        such entry will be ignored. However, once a module is found, this will
+        load all values from the state dict (including such that weren't
+        registered before loading).
+
+        Arguments:
+            state_dict (dict): A dict containing loaded parameters and
+                persistent buffers.
+        """
         super(Container, self).load_state_dict(state_dict)
         for name, module in self._modules.items():
             if module is not None:
                 module.load_state_dict(state_dict, prefix + name + '.')
 
     def parameters(self, memo=None):
+        """Returns an iterator over model parameters (including submodules).
+
+        This is typically passed to an optimizer.
+
+        Example:
+            >>> for param in model.parameters():
+            >>>     print(type(param.data), param.size())
+            <class 'torch.FloatTensor'> (20L,)
+            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+        """
         if memo is None:
             memo = set()
         for p in super(Container, self).parameters(memo):
@@ -176,6 +149,7 @@ class Container(Module):
                 yield p
 
     def children(self):
+        """Returns an iterator over children modules."""
         memo = set()
         for module in self._modules.values():
             if module is not None and module not in memo:
@@ -193,12 +167,20 @@ class Container(Module):
                     yield m
 
     def train(self):
+        """Sets the module (including children) in training mode.
+
+        This has any effect only on modules such as Dropout or BatchNorm.
+        """
         super(Container, self).train()
         for module in self.children():
             module.train()
         return self
 
     def eval(self):
+        """Sets the module (including children) in evaluation mode.
+
+        This has any effect only on modules such as Dropout or BatchNorm.
+        """
         super(Container, self).eval()
         for module in self.children():
             module.eval()

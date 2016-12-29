@@ -8,119 +8,9 @@ from torch.autograd import Variable
 
 
 class Module(object):
-    """This is the base class for all Modules defined in the nn package.
-    Even the Container class derives from this class.
+    """Base class for all Modules defined in the nn package.
 
-    An nn.Module has the following interface:
-
-    **Constructor:**
-       nn.Module()
-
-    **forward(...)**
-
-    This is the function that one defines when subclassing to create
-    their own modules.
-    It takes in inputs and returns outputs.
-
-    **__call__(...)**
-
-    This calls the forward function, as well as the hooks
-
-    **register_parameter(name, param)**
-
-    Adds a parameter to the module. The parameter can be accessed as an
-    attribute of the module by its name.
-
-    **register_buffer(name, tensor)**
-
-    This is typically used to register a buffer that is not a Parameter.
-    For example, in BatchNorm, the running_mean is a buffer, so one would
-    register it in the constructor of BatchNorm with:
-
-    `self.register_buffer('running_mean', torch.zeros(num_features))`
-
-    The registered buffers can simply be accessed as class members
-    when needed.
-
-    **cpu()**
-
-    Recursively moves all it's parameters and buffers to the CPU
-
-    **cuda(device_id=None)**
-    Recursively moves all it's parameters and buffers to the CUDA memory.
-    If device_id is given, moves it to GPU number device_id
-
-    **float()**
-    Typecasts the parameters and buffers to float
-
-    **double()**
-    Typecasts the parameters and buffers to double
-
-    **register_forward_hook(name, hook)**
-
-    This will register a user-defined closure on the module.
-    Whenever the module finishes it's forward operation,
-    the user closure is called.
-    The signature of the closure is `def closure(input, output)`
-
-    **register_backward_hook(name, hook)**
-
-    This will register a user-defined closure on the module.
-    Whenever the module finishes it's backward operation,
-    the user closure is called.
-    The signature of the closure is `def closure(gradOutput, gradInput)`
-
-    **remove_forward_hook(name)**
-
-    Removes a registered forward hook with the given name
-
-    **remove_backward_hook(name)**
-
-    Removes a registered backward hook with the given name
-
-    **`[generator] parameters()`**
-
-    returns a generator over all learnable parameters in the container instance.
-    This can typically be passed to the optimizer API
-
-    ```python
-    # .parameters()
-    >>> for param in model.parameters():
-    >>>     print(type(param.data), param.size())
-    <class 'torch.FloatTensor'> (20L,)
-    <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
-    ```
-
-    **`[dict] state_dict()`**
-
-    returns a dictionary of learnable parameters of the Module.
-    For example: ['weight' : Parameter(torch.FloatTensor(20x1x5x5)),
-                  'bias'   : Parameter(torch.FloatTensor(20)),
-                 ]
-
-    ```python
-    # .state_dict()
-    >>> pdict = model.state_dict()
-    >>> print(pdict.keys())
-    ['bias', 'weight']
-    ```
-
-    **`load_state_dict(dict)`**
-
-    Given a parameter dict, sets the parameters of self to be the given dict.
-
-    **`train()`**
-
-    Sets the Container to training mode (for modules such as batchnorm, dropout etc.)
-
-    **`eval()`**
-
-    Sets the Container to evaluate mode (for modules such as batchnorm, dropout etc.)
-
-    **`zero_grad()`**
-
-    Zeroes the gradients of each Parameter of the module
-
+    Even the Container class derives from it.
     """
     def __init__(self):
         self._backend = thnn_backend
@@ -139,12 +29,31 @@ class Module(object):
             self._parameters[name] = param
 
     def forward(self, *input):
+        """Defines the computation performed at every call.
+
+        Should be overriden by all subclasses.
+        """
         raise NotImplementedError
 
     def register_buffer(self, name, tensor):
+        """Adds a persistent buffer to the module.
+
+        This is typically used to register a buffer that should not to be
+        considered a model parameter. For example, BatchNorm's ``running_mean``
+        is not a parameter, but is part of the persistent state.
+
+        Buffers can be accessed as attributes using given names.
+
+        Example:
+            self.register_buffer('running_mean', torch.zeros(num_features))
+        """
         self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
+        """Adds a parameter to the module.
+
+        The parameter can be accessed as an attribute using given name.
+        """
         if '_parameters' not in self.__dict__:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
@@ -182,36 +91,73 @@ class Module(object):
         return self
 
     def cuda(self, device_id=None):
+        """Moves all model parameters and buffers to the GPU.
+
+        Arguments:
+            device_id (int, optional): if specified, all parameters will be
+                copied to that device
+        """
         return self._apply(lambda t: t.cuda(device_id))
 
     def cpu(self, device_id=None):
+        """Moves all model parameters and buffers to the CPU."""
         return self._apply(lambda t: t.cpu())
 
     def type(self, dst_type):
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self):
+        """Casts all parameters and buffers to float datatype."""
         return self._apply(lambda t: t.float())
 
     def double(self):
+        """Casts all parameters and buffers to double datatype."""
         return self._apply(lambda t: t.double())
 
+    def half(self):
+        """Casts all parameters and buffers to half datatype."""
+        return self._apply(lambda t: t.half())
+
     def register_backward_hook(self, name, hook):
+        """Registers a backward hook on the module, under a given name.
+
+        The hook will be called every time the gradient w.r.t. module inputs
+        is computed. The callable should accept two arguments - gradient w.r.t.
+        the input and gradient w.r.t. the output, where both arguments can be
+        tuples if the module had multiple inputs or outputs.
+        The hook should never modify its arguments in-place, but it can
+        optionally return a new gradient w.r.t. the input, that will be used
+        in subsequent computation.
+        """
         assert name not in self._backward_hooks, \
             "Trying to register a second backward hook with name {}".format(name)
         self._backward_hooks[name] = lambda gi, go: hook(self, gi, go)
 
     def remove_backward_hook(self, name):
+        """Removes a backward hook with a given name.
+
+        If no such hook exists, a RuntimeError is raised.
+        """
         assert name in self._backward_hooks, \
             "Trying to remove an inexistent backward hook with name {}".format(name)
         del self._backward_hooks[name]
 
     def register_forward_hook(self, name, hook):
+        """Registers a forward hook on the module, under a given name.
+
+        The hook will be called every time :func:`forward` computes an output.
+        The callable should accept two arguments - module's input and output.
+        Both should not be modified by the hook.
+        """
         assert name not in self._forward_hooks, \
             "Trying to register a second forward hook with name {}".format(name)
         self._forward_hooks[name] = hook
 
     def remove_forward_hook(self, name):
+        """Removes a forward hook with a given name.
+
+        If no such hook exists, a RuntimeError is raised.
+        """
         assert name in self._forward_hooks, \
             "Trying to remove an inexistent forward hook with name {}".format(name)
         del self._forward_hooks[name]
@@ -256,6 +202,15 @@ class Module(object):
             object.__delattr__(self, name)
 
     def state_dict(self, destination=None, prefix=''):
+        """Returns a dictionary containing a whole state of the module.
+
+        Both parameters and persistent buffers (e.g. running averages) are
+        included. Keys are corresponding parameter and buffer names.
+
+        Example:
+            >>> print(module.state_dict().keys())
+            ['bias', 'weight']
+        """
         if destination is None:
             destination = OrderedDict()
         for name, param in chain(self._buffers.items(), self._parameters.items()):
@@ -264,6 +219,15 @@ class Module(object):
         return destination
 
     def load_state_dict(self, state_dict, prefix=''):
+        """Replaces module parameters using values from a given state_dict.
+
+        This will load all values from the state dict (including such that
+        weren't registered before loading).
+
+        Arguments:
+            state_dict (dict): A dict containing loaded parameters and
+                persistent buffers.
+        """
         for name, param in self._parameters.items():
             new_param = state_dict.get(prefix + name, param)
             if not isinstance(new_param, Parameter) and new_param is not None:
@@ -275,6 +239,16 @@ class Module(object):
             self._buffers[name] = state_dict.get(prefix + name, buf)
 
     def parameters(self, memo=None):
+        """Returns an iterator over module parameters.
+
+        This is typically passed to an optimizer.
+
+        Example:
+            >>> for param in model.parameters():
+            >>>     print(type(param.data), param.size())
+            <class 'torch.FloatTensor'> (20L,)
+            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+        """
         if memo is None:
             memo = set()
         for p in self._parameters.values():
@@ -283,6 +257,7 @@ class Module(object):
                 yield p
 
     def children(self):
+        """Returns an iterator over children modules."""
         if False:
             yield
 
@@ -294,14 +269,23 @@ class Module(object):
             yield self
 
     def train(self):
+        """Sets the module in training mode.
+
+        This has any effect only on modules such as Dropout or BatchNorm.
+        """
         self.training = True
         return self
 
     def eval(self):
+        """Sets the module in evaluation mode.
+
+        This has any effect only on modules such as Dropout or BatchNorm.
+        """
         self.training = False
         return self
 
     def zero_grad(self):
+        """Sets gradients of all model parameters to zero."""
         for p in self.parameters():
             p.grad.zero_()
 
