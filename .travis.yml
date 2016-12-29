@@ -8,12 +8,15 @@ addons:
 matrix:
   include:
   - os: linux
+    distro: trusty
     compiler: gcc
     env: COMPILER=g++-4.8
   - os: linux
+    distro: trusty
     compiler: gcc
     env: COMPILER=g++-4.9
   - os: linux
+    distro: trusty
     compiler: gcc
     env: COMPILER=g++-5
   - os: osx
