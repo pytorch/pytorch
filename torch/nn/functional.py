@@ -26,13 +26,15 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, groups=1):
     to add proper padding in images.
 
     Args:
-        input: input tensor of shape (minibatch x in_channels x iH x iW)
-        weight: filters tensor of shape (out_channels, in_channels, kH, kW)
-        bias: bias tensor of shape (out_channels)
+        input: input tensor (minibatch x in_channels x iH x iW)
+        weight: filters tensor (out_channels, in_channels/groups, kH, kW)
+        bias: optional bias tensor (out_channels)
         stride: the stride of the convolving kernel. Can be a single number or
           a tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
 
     Output Shape: [ * , out_channels , * , * ]  : Output shape is precisely
                         minibatch
@@ -43,7 +45,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, groups=1):
         >>> # With square kernels and equal stride
         >>> filters = autograd.Variable(torch.randn(8,4,3,3))
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
-        >>> output = F.conv2d(input, filters, padding=1)
+        >>> F.conv2d(inputs, filters, padding=1)
     """
     f = Conv(2, stride, padding, groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
@@ -68,7 +70,7 @@ def conv1d(input, weight, bias=None, stride=1):
     Args:
         input: input tensor of shape (minibatch x in_channels x iW)
         weight: filters of shape (out_channels, in_channels, kW)
-        bias: bias of shape (out_channels)
+        bias: optional bias of shape (out_channels)
         stride: the stride of the convolving kernel, default 1
     Output Shape:[ * , out_channels , * ]  : Output shape is precisely
                  minibatch
@@ -77,7 +79,7 @@ def conv1d(input, weight, bias=None, stride=1):
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
-        >>> output = F.conv1d(input)
+        >>> F.conv1d(inputs)
     """
     return conv2d(input.unsqueeze(2), weight.unsqueeze(2), bias,
                   (1, stride)).squeeze(2)
@@ -95,7 +97,7 @@ def conv3d(input, weight, bias=None, stride=1, padding=0):
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
         weight: filters tensor of shape (out_channels, in_channels, kT, kH, kW)
-        bias: bias tensor of shape (out_channels)
+        bias: optional bias tensor of shape (out_channels)
         stride: the stride of the convolving kernel. Can be a single number or
           a tuple (st x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
@@ -109,7 +111,7 @@ def conv3d(input, weight, bias=None, stride=1, padding=0):
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
-        >>> output = F.conv3d(input)
+        >>> F.conv3d(inputs)
     """
     f = Conv(3, stride, padding)
     return f(input, weight, bias) if bias is not None else f(input, weight)
@@ -126,11 +128,13 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
     Args:
         input: input tensor of shape (minibatch x in_channels x iH x iW)
         weight: filters of shape (in_channels x out_channels x kH x kW)
-        bias: bias of shape (out_channels)
+        bias: optional bias of shape (out_channels)
         stride: the stride of the convolving kernel, a single number or a
           tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input, a single number or a
           tuple (padh x padw). Default: 0
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
         output_padding: A zero-padding of 0 <= padding < stride that should be
           added to the output. Can be a single number or a tuple. Default: 0
     Output Shape:[ * , out_channels , * , * ]  : Output shape is
@@ -155,13 +159,11 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0):
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
         weight: filters of shape (in_channels x out_channels x kH x kW)
-        bias: bias of shape (out_channels)
+        bias: optional bias of shape (out_channels)
         stride: the stride of the convolving kernel, a single number or a
           tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input, a single number or a
           tuple (padh x padw). Default: 0
-        output_padding: A zero-padding of 0 <= padding < stride that should be
-          added to the output. Can be a single number or a tuple. Default: 0
     Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely
                         minibatch
                         x out_channels
@@ -177,30 +179,73 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0):
 
 # Pooling
 
-def avg_pool2d(input, kernel_size, stride=1, padding=0,
+def avg_pool2d(input, kernel_size, stride=None, padding=0,
                ceil_mode=False, count_include_pad=True):
+    """Applies 2D average-pooling operation in kh x kw regions by step size
+    dh x dw steps. The number of output features is equal to the number of
+    input planes.
+
+    By default, the output of each pooling region is divided by the number of
+    elements inside the padded image (which is usually kh x kw, except in some
+    corner cases in which it can be smaller). You can also divide by the number
+    of elements inside the original non-padded image.
+    To switch between different division factors, set count_include_pad to
+    True or False. If padW=padH=0, both options give the same results.
+
+    Args:
+        :param input: input tensor (minibatch x in_channels x iH x iW)
+        :param kernel_size: size of the pooling region, a single number or a
+          tuple (kh x kw)
+        :param stride: stride of the pooling operation, a single number or a
+          tuple (sh x sw). Default is equal to kernel size
+        :param padding: implicit zero padding on the input, a single number or
+          a tuple (padh x padw), Default: 0
+        :param ceil_mode: operation that defines spatial output shape
+        :param count_include_pad: divide by the number of elements inside the
+          original non-padded image or kh * kw
+        :return: output tensor of shape
+    Output Shape: [ * , in_channels, * , * ] : Output shape is precisely
+                        minibatch
+                        x in_channels
+                        x op((iH + 2*padh - kh) / dh + 1)
+                        x op((iW + 2*padw - kw) / dw + 1)
+    Examples:
+        >>> #TODO
+    """
     return functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                     ceil_mode, count_include_pad)(input)
 
 
-def avg_pool3d(input, kernel_size, stride=1):
+def avg_pool3d(input, kernel_size, stride=None):
+    """Applies 3D average-pooling operation in kt x kh x kw regions by step
+    size kt x dh x dw steps. The number of output features is equal to the
+    number of input planes / dt.
+
+    Args:
+        :param input:
+        :param kernel_size:
+        :param stride:
+        :return:
+    Examples:
+        >>> #TODO
+    """
     return functions.thnn.AvgPool3d(kernel_size, stride)(input)
 
 
 # share the same interface
-def max_pool1d(input, kernel_size, stride=1, padding=0, dilation=1,
+def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
     return functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation,
                                     return_indices, ceil_mode)(input)
 
 
-def max_pool2d(input, kernel_size, stride=1, padding=0, dilation=1,
+def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
     return functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation,
                                     return_indices, ceil_mode)(input)
 
 
-def max_pool3d(input, kernel_size, stride=1, padding=0, dilation=1,
+def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
     return functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation,
                                     return_indices, ceil_mode)(input)
