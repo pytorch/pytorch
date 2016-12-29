@@ -7,10 +7,10 @@ if [[ $TRAVIS_OS_NAME == 'osx' ]]; then
 #************#
 # OS X build #
 #************#
-  export CXX=$COMPILER && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON -DBLAS=OpenBLAS -DUSE_OPENCV=off && make CXX=$COMPILER
+  cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON -DBLAS=OpenBLAS -DUSE_OPENCV=off && make
 else
 #*************#
 # Linux build #
 #*************#
-  export CXX=$COMPILER && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON && make CXX=$COMPILER
+  cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON && make
 fi

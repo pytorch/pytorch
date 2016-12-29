@@ -1,8 +1,7 @@
-distro: trusty
+dist: trusty
 sudo: required
 language: cpp
 compiler: gcc
-
 matrix:
   include:
   - os: linux
@@ -21,7 +20,7 @@ matrix:
         sources:
         - ubuntu-toolchain-r-test
         packages:
-        - g++-4.8
+        - g++-4.9
     env: COMPILER=g++-4.9
   - os: linux
     compiler: gcc
@@ -30,7 +29,7 @@ matrix:
         sources:
         - ubuntu-toolchain-r-test
         packages:
-        - g++-4.8
+        - g++-5
     env: COMPILER=g++-5
   - os: osx
     compiler: clang
@@ -40,7 +39,7 @@ install:
   - ./.travis/install.sh
 
 script:
-  - ./.travis/build.sh
+  - export CXX=$COMPILER && ./.travis/build.sh
 
 branches:
   only:
