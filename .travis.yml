@@ -40,9 +40,7 @@ install:
   - ./.travis/install.sh
 
 script:
-  - mkdir build
-  - cd build
-  - export CXX=$COMPILER && cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON && make CXX=$COMPILER
+  - ./.travis/build.sh
 
 branches:
   only:
