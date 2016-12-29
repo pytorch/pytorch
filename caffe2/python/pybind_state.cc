@@ -758,7 +758,24 @@ void addGlobalMethods(py::module& m) {
     return __builtin_cpu_supports(#feature);     \
   })
 
+// Clang does not support __builtin_cpu_supports until
+// revision r240994:
+// http://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20150629/131941.html
+#if (__clang__ &&\
+      (__apple_build_version__ && \
+        (__clang_major__ == 8 && __clang_minor__ == 0) ||\
+        (__clang_major__ <= 7)\
+      ) ||\
+      (!__apple_build_version__ && \
+        (__clang_major__ == 3 && __clang_minor__ < 7) ||\
+        (__clang_major__ <= 2)\
+      )\
+    )
+#warning\
+  "Compiling without AVX2. Please consider upgrading your version of Clang."
+#else
   CAFFE2_CPU_FEATURE_SUPPORT(avx2);
+#endif
 
 #undef CAFFE2_CPU_FEATURE_SUPPORT
 

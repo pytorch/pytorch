@@ -1,0 +1,27 @@
+1> Str = "abcd".
+"abcd"
+2> L = test:length(Str).
+4
+3> Descriptor = {L, list_to_atom(Str)}.
+{4,abcd}
+4> L.
+4
+5> b().
+Descriptor = {4,abcd}
+L = 4
+Str = "abcd"
+ok
+6> f(L).
+ok
+7> b().
+Descriptor = {4,abcd}
+Str = "abcd"
+ok
+8> {L, _} = Descriptor.
+{4,abcd}
+9> L.
+4
+10> 2#101.
+5
+11> 1.85e+3.
+1850

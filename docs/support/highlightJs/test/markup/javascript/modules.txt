@@ -1,0 +1,8 @@
+//------ underscore.js ------
+export default function (obj) {};
+export function each(obj, iterator, context) {};
+export { each as forEach };
+export function something() {};
+
+//------ main.js ------
+import _, { each, something as otherthing } from 'underscore';

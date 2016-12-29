@@ -1,0 +1,24 @@
+Book 1 - Language Definition Testing File
+
+[Comments in Inform 7 can be [nested] inside one another]
+
+Syntax highlighting is an action applying to one thing.
+Understand "highlight [something preferably codeish]" as syntax highlighting.
+
+Code is a kind of thing. Code is usually plural-named.
+
+Code can be highlighted. Code is usually not highlighted.
+
+Check syntax highlighting:
+  unless the noun is code:
+    say "[The noun] isn't source code you can highlight.";
+    rule fails.
+
+Carry out syntax highlighting:
+  now the noun is highlighted.
+
+Table of Programming Languages
+language  utility
+ruby      "Web back-end development"
+lua       "Embedded scripting"
+erlang    "High-concurrency server applications"

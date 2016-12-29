@@ -1,0 +1,8 @@
+int main() {
+  A a = new A();
+  if (a->check1())
+    return 3;
+  else if (a->check2())
+    return 4;
+  return a->result();
+}
