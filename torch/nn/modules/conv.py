@@ -2,6 +2,7 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 
+from .. import functional as F
 from .module import Module
 from .utils import _pair, _triple
 
@@ -55,15 +56,7 @@ class Conv1d(Module):
         self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        func = self._backend.Conv(
-            ndim=2,
-            stride=(1, self.stride),
-            padding=(0, 0),
-            groups=1)
-        input = input.view(input.size(0), input.size(1), 1, input.size(2))
-        weight = self.weight.view(self.weight.size(0), self.weight.size(1), 1,
-                                  self.weight.size(2))
-        return func(input, weight, self.bias)
+        return F.conv1d(input, self.weight, self.bias, self.stride)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -139,19 +132,13 @@ class Conv2d(Module):
     def forward(self, input):
         if self.is_dilated:
             # TODO: merge this into the Conv2d function
-            func = self._backend.DilatedConv2d(
+            return self._backend.DilatedConv2d(
                 self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
-                self.dilh, self.dilw)
-        else:
-            func = self._backend.Conv(
-                ndim=2,
+                self.dilh, self.dilw)(input, self.weight, self.bias)
+        return F.conv2d(input, self.weight, self.bias,
                 stride=(self.dh, self.dw),
                 padding=(self.padh, self.padw),
                 groups=self.groups)
-        if self.bias is None:
-            return func(input, self.weight)
-        else:
-            return func(input, self.weight, self.bias)
 
     def __repr__(self):
         padding_str = ', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
@@ -234,17 +221,11 @@ class ConvTranspose2d(Conv2d):
                     "{}x{})").format(out_sizeh, out_sizew, sizeh, sizew,
                         sizeh+self.dh-1, sizew+self.dw-1,
                         input.size(2), input.size(3)))
-
-        func = self._backend.ConvTranspose(
-            ndim=2,
-            stride=(self.dh, self.dw),
-            padding=(self.padh, self.padw),
-            out_pad=(out_padh, out_padw),
-            groups=self.groups)
-        if self.bias is None:
-            return func(input, self.weight)
-        else:
-            return func(input, self.weight, self.bias)
+        return F.conv_transpose2d(input, self.weight, self.bias,
+                stride=(self.dh, self.dw),
+                padding=(self.padh, self.padw),
+                output_padding=(out_padh, out_padw),
+                groups=self.groups)
 
 
 class _Conv3dBase(Module):
@@ -254,24 +235,28 @@ class _Conv3dBase(Module):
         super(_Conv3dBase, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.kt, self.kh, self.kw = _triple(kernel_size)
-        self.dt, self.dh, self.dw = _triple(stride)
-        self.padt, self.padh, self.padw = _triple(padding)
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.kt * self.kh * self.kw * self.in_channels)
+        kt, kh, kw = _triple(self.kernel_size)
+        stdv = 1. / math.sqrt(kt * kh * kw * self.in_channels)
         self.weight.data.uniform_(-stdv, stdv)
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)
 
     def __repr__(self):
-        padding_str = ', padding=(' + str(self.padt) \
-                      + ', ' + str(self.padh) + ', ' + str(self.padw) + ')' \
-                      if self.padt != 0 and self.padh != 0 and self.padw !=0 else ''
-        return  self.__class__.__name__ + ' (' + str(self.in_channels) \
-            + ' -> ' + str(self.out_channels) \
-            + ', size=(' + str(self.kt) + ', ' + str(self.kh) + ', ' + str(self.kw) + ')' \
-            + ', stride=(' + str(self.dt) + ', ' + str(self.dh) + ', ' + str(self.dw) + ')' \
+        kt, kh, kw = _triple(self.kernel_size)
+        dt, dh, dw = _triple(self.stride)
+        padt, padh, padw = _triple(self.padding)
+        padding_str = ', padding=(' + str(padt) \
+                      + ', ' + str(padh) + ', ' + str(padw) + ')' \
+                      if padt != 0 and padh != 0 and padw !=0 else ''
+        return  self.__class__.__name__ + ' (' + str(in_channels) \
+            + ' -> ' + str(out_channels) \
+            + ', size=(' + str(kt) + ', ' + str(kh) + ', ' + str(kw) + ')' \
+            + ', stride=(' + str(dt) + ', ' + str(dh) + ', ' + str(dw) + ')' \
             + padding_str + ')'
 
 
@@ -306,20 +291,15 @@ class Conv3d(_Conv3dBase):
                  padding=0):
         super(Conv3d, self).__init__(in_channels, out_channels, kernel_size,
                                      stride, padding)
+        kt, kh, kw = _triple(kernel_size)
         self.weight = Parameter(torch.Tensor(
-            self.out_channels, self.in_channels, self.kt, self.kh, self.kw))
+            self.out_channels, self.in_channels, kt, kh, kw))
         self.bias = Parameter(torch.Tensor(self.out_channels))
         self.reset_parameters()
 
     def forward(self, input):
-        func = self._backend.Conv(
-            ndim=3,
-            stride=(self.dt, self.dh, self.dw),
-            padding=(self.padt, self.padh, self.padw))
-        if self.bias is None:
-            return func(input, self.weight)
-        else:
-            return func(input, self.weight, self.bias)
+        return F.conv3d(input, self.weight, self.bias,
+                        self.stride, self.padding)
 
 
 class ConvTranspose3d(_Conv3dBase):
@@ -353,21 +333,15 @@ class ConvTranspose3d(_Conv3dBase):
                  padding=0):
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding)
+        kt, kh, kw = _triple(kernel_size)
         self.weight = Parameter(torch.Tensor(
-            self.in_channels, self.out_channels, self.kt, self.kh, self.kw))
+            self.in_channels, self.out_channels, kt, kh, kw))
         self.bias = Parameter(torch.Tensor(self.out_channels))
         self.reset_parameters()
 
     def forward(self, input):
-        func = self._backend.ConvTranspose(
-            ndim=3,
-            stride=(self.dt, self.dh, self.dw),
-            padding=(self.padt, self.padh, self.padw))
-        if self.bias is None:
-            return func(input, self.weight)
-        else:
-            return func(input, self.weight, self.bias)
-
+        return F.conv_transpose3d(input, self.weight, self.bias,
+                                  self.stride, self.padding)
 
 # TODO: Conv2dLocal
 # TODO: Conv2dMap

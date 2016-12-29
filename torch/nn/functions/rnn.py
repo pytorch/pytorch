@@ -1,70 +1,47 @@
 from torch.autograd import Function, NestedIOFunction, Variable
-from torch._thnn import type2backend
 import torch.backends.cudnn as cudnn
+from .. import functional as F
 try:
     import torch.backends.cudnn.rnn
 except ImportError:
     pass
 
 
-# FIXME: write a proper function library
-from .thnn import Tanh, Sigmoid, Threshold
-from .linear import Linear
-from .dropout import Dropout
-
-
-def _wrap(fn, *args):
-    def inner(*inner_args):
-        return fn(*args)(*inner_args)
-    return inner
-tanh = _wrap(Tanh)
-sigmoid = _wrap(Sigmoid)
-ReLU = _wrap(Threshold, 0, 0, False)
-
-
-# get around autograd's lack of None-handling
-def linear(input, w, b):
-    if b is not None:
-        return Linear()(input, w, b)
-    else:
-        return Linear()(input, w)
-
-
 def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        hy = ReLU(linear(input, w_ih, b_ih) + linear(hidden, w_hh, b_hh))
+        hy = F.relu(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
         return hy
 
 
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        hy = tanh(linear(input, w_ih, b_ih) + linear(hidden, w_hh, b_hh))
+        hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
         return hy
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hx, cx = hidden
-        gates = linear(input, w_ih, b_ih) + linear(hx, w_hh, b_hh)
+        gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
         ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
-        ingate = sigmoid(ingate)
-        forgetgate = sigmoid(forgetgate)
-        cellgate = tanh(cellgate)
-        outgate = sigmoid(outgate)
+        ingate = F.sigmoid(ingate)
+        forgetgate = F.sigmoid(forgetgate)
+        cellgate = F.tanh(cellgate)
+        outgate = F.sigmoid(outgate)
 
         cy = (forgetgate * cx) + (ingate * cellgate)
-        hy = outgate * tanh(cy)
+        hy = outgate * F.tanh(cy)
 
         return hy, cy
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        gi = linear(input, w_ih, b_ih)
-        gh = linear(hidden, w_hh, b_hh)
+        gi = F.linear(input, w_ih, b_ih)
+        gh = F.linear(hidden, w_hh, b_hh)
         i_r, i_i, i_n = gi.chunk(3, 1)
         h_r, h_i, h_n = gh.chunk(3, 1)
 
-        resetgate = sigmoid(i_r + h_r)
-        inputgate = sigmoid(i_i + h_i)
-        newgate = tanh(i_n + resetgate * h_n)
+        resetgate = F.sigmoid(i_r + h_r)
+        inputgate = F.sigmoid(i_i + h_i)
+        newgate = F.tanh(i_n + resetgate * h_n)
         hy = newgate + inputgate * (hidden - newgate)
 
         return hy
@@ -94,7 +71,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
             input = torch.cat(all_output, 2)
 
             if dropout != 0 and i < num_layers - 1:
-                input = Dropout(p=dropout, train=train, inplace=False)(input)
+                input = F.dropout(input, p=dropout, training=train, inplace=False)
 
         if lstm:
             next_h, next_c = zip(*next_hidden)

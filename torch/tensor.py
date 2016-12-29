@@ -252,7 +252,7 @@ class _TensorBase(object):
         sizes = list(self.size())
         sizes.insert(dim, 1)
         strides = list(self.stride())
-        strides.insert(dim, 0)
+        strides.insert(dim, strides[dim] if len(strides) < dim else 1)
         return self.set_(self.storage(), self.storage_offset(),
                          torch.Size(sizes), tuple(strides))
 

@@ -278,7 +278,68 @@ class FractionalMaxPool2d(Function):
 
         return grad_input
 
+class AvgPool2d(Function):
+    def __init__(self, kernel_size, stride=None, padding=0,
+            ceil_mode=False, count_include_pad=True):
+        self.kernel_size = _pair(kernel_size)
+        self.stride = _pair(stride if stride is not None else kernel_size)
+        self.padding = _pair(padding)
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
+    def forward(self, input):
+        backend = type2backend[type(input)]
+        output = input.new()
+        # can avoid this with cudnn
+        self.save_for_backward(input)
+        backend.SpatialAveragePooling_updateOutput(backend.library_state,
+                input, output,
+                self.kernel_size[1], self.kernel_size[0],
+                self.stride[1], self.stride[0],
+                self.padding[1], self.padding[0],
+                self.ceil_mode, self.count_include_pad)
+        return output
+
+    def backward(self, grad_output):
+        backend = type2backend[type(grad_output)]
+        input, = self.saved_tensors
+        grad_input = grad_output.new()
+        backend.SpatialAveragePooling_updateGradInput(backend.library_state,
+                input, grad_output, grad_input,
+                self.kernel_size[1], self.kernel_size[0],
+                self.stride[1], self.stride[0],
+                self.padding[1], self.padding[0],
+                self.ceil_mode, self.count_include_pad)
+        return grad_input
+
+class AvgPool3d(Function):
+    def __init__(self, kernel_size, stride=None):
+        self.kernel_size = _triple(kernel_size)
+        self.stride = _triple(stride if stride is not None else kernel_size)
+
+    def forward(self, input):
+        backend = type2backend[type(input)]
+        output = input.new()
+        # can avoid this with cudnn
+        self.save_for_backward(input)
+        backend.VolumetricAveragePooling_updateOutput(backend.library_state,
+                input, output,
+                self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+                self.stride[0], self.stride[2], self.stride[1])
+        return output
+
+    def backward(self, grad_output):
+        backend = type2backend[type(grad_output)]
+        input, = self.saved_tensors
+        grad_input = grad_output.new()
+        backend.VolumetricAveragePooling_updateGradInput(backend.library_state,
+                input, grad_output, grad_input,
+                self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+                self.stride[0], self.stride[2], self.stride[1])
+        return grad_input
+
+_all_functions.append(AvgPool2d)
+_all_functions.append(AvgPool3d)
 _all_functions.append(MaxPool1d)
 _all_functions.append(MaxPool2d)
 _all_functions.append(MaxPool3d)

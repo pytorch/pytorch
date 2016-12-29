@@ -2,6 +2,7 @@ import torch
 from torch.nn.parameter import Parameter
 
 from .module import Module
+from .. import functional as F
 
 
 class Threshold(Module):
@@ -31,7 +32,7 @@ class Threshold(Module):
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
     def forward(self, input):
-        return self._backend.Threshold(self.threshold, self.value, self.inplace)(input)
+        return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
@@ -73,8 +74,7 @@ class RReLU(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.RReLU(self.lower, self.upper, self.training,
-                self.inplace)(input)
+        return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
@@ -114,7 +114,7 @@ class Hardtanh(Module):
         assert self.max_val > self.min_val
 
     def forward(self, input):
-        return self._backend.Hardtanh(self.min_val, self.max_val, self.inplace)(input)
+        return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
@@ -160,7 +160,7 @@ class Sigmoid(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        return self._backend.Sigmoid()(input)
+        return torch.sigmoid(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -181,7 +181,7 @@ class Tanh(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        return self._backend.Tanh()(input)
+        return torch.tanh(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -208,7 +208,7 @@ class ELU(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.ELU(self.alpha, self.inplace)(input)
+        return F.elu(input, self.alpha, self.inplace)
 
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
@@ -240,7 +240,7 @@ class Hardshrink(Module):
         self.lambd = lambd
 
     def forward(self, input):
-        return self._backend.Hardshrink(self.lambd)(input)
+        return F.hardshrink(input, self.lambd)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -268,7 +268,7 @@ class LeakyReLU(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.LeakyReLU(self.negative_slope, self.inplace)(input)
+        return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
@@ -290,7 +290,7 @@ class LogSigmoid(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        return self._backend.LogSigmoid()(input)
+        return F.logsigmoid(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -321,7 +321,7 @@ class Softplus(Module):
         self.threshold = threshold
 
     def forward(self, input):
-        return self._backend.Softplus(self.beta, self.threshold)(input)
+        return F.softplus(input, self.beta, self.threshold)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -351,7 +351,7 @@ class Softshrink(Module):
         self.lambd = lambd
 
     def forward(self, input):
-        return self._backend.Softshrink(self.lambd)(input)
+        return F.softshrink(input, self.lambd)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -386,7 +386,7 @@ class PReLU(Module):
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
     def forward(self, input):
-        return self._backend.PReLU()(input, self.weight)
+        return F.prelu(input, self.weight)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -407,7 +407,7 @@ class Softsign(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        return self._backend.Softsign()(input)
+        return F.softsign(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -426,8 +426,7 @@ class Tanhshrink(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        tanh = self._backend.Tanh()(input)
-        return input - tanh
+        return F.tanhshrink(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -451,7 +450,7 @@ class Softmin(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        return self._backend.Softmin()(input)
+        return F.softmin(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -482,7 +481,7 @@ class Softmax(Module):
     """
     def forward(self, input):
         assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
-        return self._backend.Softmax()(input)
+        return F.softmax(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -506,7 +505,7 @@ class Softmax2d(Module):
     """
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
-        return self._backend.Softmax()(input)
+        return F.softmax(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -528,7 +527,7 @@ class LogSoftmax(Module):
         >>> print(m(input))
     """
     def forward(self, input):
-        return self._backend.LogSoftmax()(input)
+        return F.log_softmax(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'

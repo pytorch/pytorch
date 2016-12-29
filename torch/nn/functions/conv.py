@@ -151,21 +151,21 @@ class Conv(ConvBase):
 
 
 class ConvTranspose(ConvBase):
-    def __init__(self, ndim, stride=1, padding=0, groups=1, out_pad=0):
+    def __init__(self, ndim, stride=1, padding=0, groups=1, output_padding=0):
         super(ConvTranspose, self).__init__(ndim, stride, padding, groups)
-        self.out_pad = _ntuple(ndim)(out_pad)
+        self.output_padding = _ntuple(ndim)(output_padding)
 
     def _output_size(self, input, weight):
         output_size = (input.size(0), weight.size(1),)
         for d in range(self.ndim):
             s = ((input.size(d + 2) - 1) * self.stride[d] -
-                 self.padding[d] * 2 + weight.size(d + 2) + self.out_pad[d])
+                 self.padding[d] * 2 + weight.size(d + 2) + self.output_padding[d])
             output_size += (s,)
         return output_size
 
     def _conv_size(self, weight):
         return (_thnn_size(weight.size()[2:]), _thnn_size(self.stride),
-                _thnn_size(self.padding), _thnn_size(self.out_pad))
+                _thnn_size(self.padding), _thnn_size(self.output_padding))
 
     def _update_output(self, input, weight, bias, output):
         self.use_cudnn = cudnn.is_acceptable(input)
@@ -180,17 +180,17 @@ class ConvTranspose(ConvBase):
             raise ValueError('THNN does not support groups')
 
         backend = type2backend[type(input)]
-        kernel, stride, padding, out_pad = self._conv_size(weight)
+        kernel, stride, padding, output_padding = self._conv_size(weight)
         _finput = input.new()
         _fgrad_input = input.new()
         if self.ndim == 2:
             backend.SpatialFullConvolution_updateOutput(
                 backend.library_state, input, output, weight, bias,
-                _finput, _fgrad_input, *(kernel + stride + padding + out_pad))
+                _finput, _fgrad_input, *(kernel + stride + padding + output_padding))
         else:
             backend.VolumetricFullConvolution_updateOutput(
                 backend.library_state, input, output, weight, bias,
-                _finput, _fgrad_input, *(stride + padding + out_pad))
+                _finput, _fgrad_input, *(stride + padding + output_padding))
 
     def _grad_input(self, input, weight, bias, grad_output):
         if self.use_cudnn:
@@ -203,18 +203,18 @@ class ConvTranspose(ConvBase):
             return grad_input
 
         backend = type2backend[type(input)]
-        kernel, stride, padding, out_pad = self._conv_size(weight)
+        kernel, stride, padding, output_padding = self._conv_size(weight)
         grad_input = input.new().resize_as_(input).zero_()
         grad_columns = input.new()
         if self.ndim == 2:
             backend.SpatialFullConvolution_updateGradInput(
                 backend.library_state, input, grad_output, grad_input,
-                weight, grad_columns, *(kernel + stride + padding + out_pad))
+                weight, grad_columns, *(kernel + stride + padding + output_padding))
         else:
             tmp = input.new()  # not actually used by THNN/THCUNN
             backend.VolumetricFullConvolution_updateGradInput(
                 backend.library_state, input, grad_output, grad_input,
-                weight, grad_columns, tmp, *(stride + padding + out_pad))
+                weight, grad_columns, tmp, *(stride + padding + output_padding))
 
         return grad_input
 
@@ -235,7 +235,7 @@ class ConvTranspose(ConvBase):
             return grad_weight, grad_bias
 
         backend = type2backend[type(input)]
-        kernel, stride, padding, out_pad = self._conv_size(weight)
+        kernel, stride, padding, output_padding = self._conv_size(weight)
         grad_weight = weight.new().resize_as_(weight).zero_()
         if bias is not None and self.needs_input_grad[2]:
             grad_bias = bias.new().resize_as_(bias).zero_()
@@ -245,10 +245,10 @@ class ConvTranspose(ConvBase):
             backend.SpatialFullConvolution_accGradParameters(
                 backend.library_state, input, grad_output, grad_weight,
                 grad_bias, _finput, _fgrad_input,
-                *(kernel + stride + padding + out_pad + (1,)))
+                *(kernel + stride + padding + output_padding + (1,)))
         else:
             backend.VolumetricFullConvolution_accGradParameters(
                 backend.library_state, input, grad_output, grad_weight,
                 grad_bias, _finput, _fgrad_input,
-                *(stride + padding + out_pad + (1,)))
+                *(stride + padding + output_padding + (1,)))
         return grad_weight, grad_bias
