@@ -1,21 +1,35 @@
 distro: trusty
 sudo: required
 language: cpp
-addons:
-  apt:
-    sources:
-    - ubuntu-toolchain-r-test
 
 matrix:
   include:
   - os: linux
     compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-4.8
     env: COMPILER=g++-4.8
   - os: linux
     compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-4.8
     env: COMPILER=g++-4.9
   - os: linux
     compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-4.8
     env: COMPILER=g++-5
   - os: osx
     compiler: clang
