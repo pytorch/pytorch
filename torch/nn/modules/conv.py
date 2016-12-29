@@ -25,7 +25,7 @@ class _ConvNd(Module):
         self.groups = groups
         if transposed:
             self.weight = Parameter(torch.Tensor(
-                in_channels // groups, out_channels, *kernel_size))
+                in_channels, out_channels // groups, *kernel_size))
         else:
             self.weight = Parameter(torch.Tensor(
                 out_channels, in_channels // groups, *kernel_size))
