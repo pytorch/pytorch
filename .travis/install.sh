@@ -10,7 +10,7 @@ if [[ $TRAVIS_OS_NAME == 'osx' ]]; then
   ########################
 
   brew install homebrew/science/openblas
-  brew install glog automake protobuf leveled lmdb
+  brew install glog automake protobuf leveldb lmdb
 
 else
 #********************#
