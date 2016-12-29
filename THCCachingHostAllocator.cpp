@@ -77,6 +77,9 @@ struct HostAllocator
       return cudaSuccess;
     }
 
+    // note that cudaHostAlloc may not touch pointer if size is 0
+    *ptr = 0;
+
     // allocate a new block if no cached allocation is found
     err = cudaHostAlloc(ptr, size, cudaHostAllocDefault);
     if (err != cudaSuccess) {
