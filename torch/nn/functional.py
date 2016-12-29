@@ -3,7 +3,7 @@
 import torch
 from . import functions
 from .modules import utils
-
+from torch.nn.functions.conv import Conv, ConvTranspose
 # Convolutions
 
 
@@ -35,17 +35,17 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, groups=1):
           a tuple. Default: 0
 
     Output Shape: [ * , out_channels , * , * ]  : Output shape is precisely
-                        minibatch x
-                        out_channels x
-                        floor((iH  + 2*padH - kH) / dH + 1) x
-                        floor((iW  + 2*padW - kW) / dW + 1)
+                        minibatch
+                        x out_channels
+                        x floor((iH  + 2*padH - kH) / dH + 1)
+                        x floor((iW  + 2*padW - kW) / dW + 1)
     Examples:
         >>> # With square kernels and equal stride
         >>> filters = autograd.Variable(torch.randn(8,4,3,3))
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
         >>> output = F.conv2d(input, filters, padding=1)
     """
-    f = functions.conv.Conv(2, stride, padding, groups)
+    f = Conv(2, stride, padding, groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
@@ -71,14 +71,48 @@ def conv1d(input, weight, bias=None, stride=1):
         bias: bias of shape (out_channels)
         stride: the stride of the convolving kernel, default 1
     Output Shape:[ * , out_channels , * ]  : Output shape is precisely
-                 minibatch x out_channels x floor((iW  + 2*padW - kW) / dW + 1)
+                 minibatch
+                 x out_channels
+                 x floor((iW  + 2*padW - kW) / dW + 1)
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
-        >>> output = m(input)
+        >>> output = F.conv1d(input)
     """
     return conv2d(input.unsqueeze(2), weight.unsqueeze(2), bias,
                   (1, stride)).squeeze(2)
+
+
+def conv3d(input, weight, bias=None, stride=1, padding=0):
+    """Applies a 3D convolution over an input image composed of several input
+    planes.
+
+
+    Note that depending of the size of your kernel, several (of the last)
+    columns or rows of the input image might be lost. It is up to the user
+    to add proper padding in images.
+
+    Args:
+        input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
+        weight: filters tensor of shape (out_channels, in_channels, kT, kH, kW)
+        bias: bias tensor of shape (out_channels)
+        stride: the stride of the convolving kernel. Can be a single number or
+          a tuple (st x sh x sw). Default: 1
+        padding: implicit zero padding on the input. Can be a single number or
+          a tuple. Default: 0
+    Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely
+                minibatch
+                x out_channels x floor((iT  + 2*padT - kT) / dT + 1)
+                x floor((iH  + 2*padH - kH) / dH + 1)
+                x floor((iW  + 2*padW - kW) / dW + 1)
+
+    Examples:
+        >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
+        >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
+        >>> output = F.conv3d(input)
+    """
+    f = Conv(3, stride, padding)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
@@ -86,7 +120,7 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
     """Applies a 2D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution"
     The operator multiplies each input value element-wise by a
-    learnable kernel, and sums over the outputs from all input feature planes.
+    kernel, and sums over the outputs from all input feature planes.
     This module can be seen as the exact reverse of the conv2d function
 
     Args:
@@ -107,7 +141,37 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, groups=1,
     Examples:
         >>> #TODO
     """
-    f = functions.conv.ConvTranspose(2, stride, padding, groups, output_padding)
+    f = ConvTranspose(2, stride, padding, groups, output_padding)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
+
+
+def conv_transpose3d(input, weight, bias=None, stride=1, padding=0):
+    """Applies a 3D transposed convolution operator over an input image
+    composed of several input planes, sometimes also called "deconvolution"
+    The operator multiplies each input value element-wise by a
+    kernel, and sums over the outputs from all input feature planes.
+    This module can be seen as the exact reverse of the conv3d function
+
+    Args:
+        input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
+        weight: filters of shape (in_channels x out_channels x kH x kW)
+        bias: bias of shape (out_channels)
+        stride: the stride of the convolving kernel, a single number or a
+          tuple (sh x sw). Default: 1
+        padding: implicit zero padding on the input, a single number or a
+          tuple (padh x padw). Default: 0
+        output_padding: A zero-padding of 0 <= padding < stride that should be
+          added to the output. Can be a single number or a tuple. Default: 0
+    Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely
+                        minibatch
+                        x out_channels
+                        x (iT - 1) * sT - 2*padT + kT
+                        x (iH - 1) * sH - 2*padH + kH
+                        x (iW - 1) * sW - 2*padW + kW
+    Examples:
+        >>> #TODO
+    """
+    f = ConvTranspose(3, stride, padding)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
