@@ -230,5 +230,6 @@ import torch.cuda
 import torch.autograd
 import torch.nn
 import torch.optim
+import torch.multiprocessing
 from . import docs  # attaches docstrings to torch functions
 del docs

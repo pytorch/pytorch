@@ -70,6 +70,24 @@ class _StorageBase(object):
         allocator = torch.cuda._host_allocator()
         return type(self)(self.size(), allocator=allocator).copy_(self)
 
+    def share_memory_(self):
+        """Moves the storage to shared memory.
+
+        This is a no-op for storages already in shared memory and for CUDA
+        storages, which do not need to be moved for sharing across processes.
+        Storages in shared memory cannot be resized.
+
+        Returns: self
+        """
+        from torch.multiprocessing import get_sharing_strategy
+        if self.is_cuda:
+            pass  # CUDA doesn't use POSIX shared memory
+        elif get_sharing_strategy() == 'file_system':
+            self._share_filename_()
+        else:
+            self._share_fd_()
+        return self
+
 
 _StorageBase.type = _type
 _StorageBase.cuda = _cuda

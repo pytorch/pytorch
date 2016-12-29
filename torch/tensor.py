@@ -73,6 +73,15 @@ class _TensorBase(object):
             storage = (self.storage_type())()
         return type(self)().set_(storage.pin_memory()).view_as(self)
 
+    def share_memory_(self):
+        """Moves the underlying storage to shared memory.
+
+        This is a no-op if the underlying storage is already in shared memory
+        and for CUDA tensors. Tensors in shared memory cannot be resized.
+        """
+        self.storage().share_memory_()
+        return self
+
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:

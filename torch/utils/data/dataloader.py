@@ -36,9 +36,14 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
             data_queue.put((idx, samples))
 
 
-def _pin_memory_loop(in_queue, out_queue):
+def _pin_memory_loop(in_queue, out_queue, done_event):
     while True:
-        r = in_queue.get()
+        try:
+            r = in_queue.get()
+        except:
+            if done_event.is_set():
+                return
+            raise
         if r is None:
             break
         if isinstance(r[1], ExceptionWrapper):
@@ -92,13 +97,14 @@ class DataLoaderIter(object):
         self.sampler = loader.sampler
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory
+        self.done_event = threading.Event()
 
         self.samples_remaining = len(self.sampler)
         self.sample_iter = iter(self.sampler)
 
         if self.num_workers > 0:
-            self.index_queue = multiprocessing.Queue()
-            self.data_queue = multiprocessing.Queue()
+            self.index_queue = multiprocessing.SimpleQueue()
+            self.data_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.shutdown = False
             self.send_idx = 0
@@ -120,7 +126,7 @@ class DataLoaderIter(object):
                 self.data_queue = queue.Queue()
                 self.pin_thread = threading.Thread(
                     target=_pin_memory_loop,
-                    args=(in_data, self.data_queue))
+                    args=(in_data, self.data_queue, self.done_event))
                 self.pin_thread.daemon = True
                 self.pin_thread.start()
 
@@ -197,6 +203,7 @@ class DataLoaderIter(object):
     def _shutdown_workers(self):
         if not self.shutdown:
             self.shutdown = True
+            self.done_event.set()
             for _ in self.workers:
                 self.index_queue.put(None)
 

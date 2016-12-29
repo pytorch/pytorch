@@ -1,11 +1,13 @@
-from __future__ import print_function
 import contextlib
 import platform
 import ctypes
 import os
 import torch
+from multiprocessing.util import register_after_fork as _register_after_fork
 
 _initialized = False
+_in_bad_fork = False
+_original_pid = False
 _cudart = None
 
 
@@ -67,15 +69,36 @@ of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
 def _lazy_init():
-    global _initialized, _cudart
+    global _initialized, _cudart, _original_pid
     if _initialized:
         return
+    if _in_bad_fork:
+        from sys import version_info
+        if version_info < (3, 4):
+            msg = ("To use CUDA with multiprocessing, you must use Python "
+                   "3.4+ and the 'spawn' start method")
+        else:
+            msg = ("To use CUDA with multiprocessing, you must use the "
+                   "'spawn' start method")
+        raise RuntimeError(
+            "Cannot re-initialize CUDA in forked subprocess. " + msg)
     _check_driver()
     assert torch._C._cuda_init()
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
+    _original_pid = os.getpid()
     _initialized = True
+
+
+def _after_fork(arg):
+    global _initialized, _in_bad_fork
+    if _initialized and _original_pid != os.getpid():
+        _initialized = False
+        _in_bad_fork = True
+
+
+_register_after_fork(_after_fork, _after_fork)
 
 
 def cudart():

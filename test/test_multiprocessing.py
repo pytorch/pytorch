@@ -1,3 +1,4 @@
+import contextlib
 import gc
 import os
 import sys
@@ -26,6 +27,22 @@ def simple_pool_fill(tensor):
     return tensor.add(1)
 
 
+def send_tensor(queue, event, tp):
+    t = torch.ones(5, 5).type(tp)
+    queue.put(t)
+    queue.put(t)
+    event.wait()
+
+
+def queue_get_exception(inqueue, outqueue):
+    try:
+        inqueue.get()
+    except Exception as e:
+        outqueue.put(e)
+    else:
+        outqueue.put('no exception')
+
+
 # Multiply by two in a separate stream
 def cuda_multiply_two(queue, ready, done):
     ready.set()
@@ -38,6 +55,16 @@ def cuda_multiply_two(queue, ready, done):
         del cuda_event
 
 
+@contextlib.contextmanager
+def fs_sharing():
+    prev_strategy = mp.get_sharing_strategy()
+    mp.set_sharing_strategy('file_system')
+    try:
+        yield
+    finally:
+        mp.set_sharing_strategy(prev_strategy)
+
+
 class leak_checker(object):
 
     def __init__(self, test_case):
@@ -45,24 +72,30 @@ class leak_checker(object):
         self.test_case = test_case
 
     def __enter__(self):
-        self.next_fd = self._get_next_fd()
+        self.next_fds = self._get_next_fds(10)
         return self
 
     def __exit__(self, *args):
         if args[0] is None:
-            gc.collect()
-            self.test_case.assertEqual(self.next_fd, self._get_next_fd())
+            # Check that the 10th available file-descriptor at the end of the
+            # test is no more than 4 higher than the 10th available at the
+            # start. This attempts to catch file descriptor leaks, but allows
+            # one-off initialization that may use up a file descriptor
+            available_fds = self._get_next_fds(10)
+            self.test_case.assertLessEqual(
+                available_fds[-1] - self.next_fds[-1], 4)
             self.test_case.assertFalse(self.has_shm_files())
         return False
 
     def check_pid(self, pid):
         self.checked_pids.append(pid)
 
-    def _get_next_fd(self):
+    def _get_next_fds(self, n=1):
         # dup uses the lowest-numbered unused descriptor for the new descriptor
-        fd = os.dup(0)
-        os.close(fd)
-        return fd
+        fds = [os.dup(0) for i in range(n)]
+        for fd in fds:
+            os.close(fd)
+        return fds
 
     def has_shm_files(self, wait=True):
         if not HAS_SHM_FILES:
@@ -88,8 +121,8 @@ class TestMultiprocessing(TestCase):
     def __init__(self, *args, **kwargs):
         super(TestMultiprocessing, self).__init__(*args, **kwargs)
 
-    def _test_sharing(self, ctx=mp, type=torch.FloatTensor):
-        def do_test():
+    def _test_sharing(self, ctx=mp, type=torch.FloatTensor, repeat=1):
+        def test_fill():
             x = torch.zeros(5, 5).type(type)
             q = ctx.Queue()
             e = ctx.Event()
@@ -104,10 +137,26 @@ class TestMultiprocessing(TestCase):
             p.join(1)
             self.assertFalse(p.is_alive())
 
-        with leak_checker(self) as lc:
-            do_test()
+        def test_receive():
+            q = ctx.Queue()
+            e = ctx.Event()
+            p = ctx.Process(target=send_tensor, args=(q, e, type))
+            lc.check_pid(p.pid)
+            p.start()
+            t1 = q.get()
+            t2 = q.get()
+            self.assertTrue(t1.eq(1).all())
+            self.assertTrue(id(t1.storage()) == id(t2.storage()))
+            e.set()
+            p.join(1)
+            self.assertFalse(p.is_alive())
 
-    def _test_preserve_sharing(self, ctx=mp):
+        with leak_checker(self) as lc:
+            for i in range(repeat):
+                test_fill()
+                test_receive()
+
+    def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
             x = torch.randn(5, 5)
             data = [x.storage(), x.storage()[1:4], x, x[2], x[:,1]]
@@ -124,64 +173,99 @@ class TestMultiprocessing(TestCase):
             # self.assertEqual(new_data[1], new_data[0][1:4], 0)
 
         with leak_checker(self):
-            do_test()
+            for i in range(repeat):
+                do_test()
 
-    def _test_pool(self, ctx=mp):
+    def _test_pool(self, ctx=mp, repeat=1):
         def do_test():
             p = ctx.Pool(2)
             for proc in p._pool:
                 lc.check_pid(proc.pid)
 
-            buffers = (torch.zeros(2, 2) for i in range(4))
+            buffers = [torch.zeros(2, 2) for i in range(4)]
             results = p.map(simple_pool_fill, buffers, 1)
+            self.assertEqual(len(results), len(buffers))
             for r in results:
                 self.assertEqual(r, torch.ones(2, 2) * 5, 0)
-            self.assertEqual(len(results), 4)
+            for b in buffers:
+                self.assertEqual(b, torch.ones(2, 2) * 4, 0)
 
             p.close()
             p.join()
 
         with leak_checker(self) as lc:
-            do_test()
+            for i in range(repeat):
+                do_test()
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_sharing(self):
-        self._test_sharing()
+        self._test_sharing(repeat=20)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_preserve_sharing(self):
-        self._test_preserve_sharing()
+        self._test_preserve_sharing(repeat=20)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_pool(self):
-        self._test_pool()
+        self._test_pool(repeat=20)
 
     def test_fs_sharing(self):
-        self._test_sharing(ctx=mp.get_context(sharing_strategy='file_system'))
+        with fs_sharing():
+            self._test_sharing(repeat=20)
 
     def test_fs_preserve_sharing(self):
-        self._test_preserve_sharing(ctx=mp.get_context(sharing_strategy='file_system'))
+        with fs_sharing():
+            self._test_preserve_sharing(repeat=20)
 
     def test_fs_pool(self):
-        self._test_pool(ctx=mp.get_context(sharing_strategy='file_system'))
+        with fs_sharing():
+            self._test_pool(repeat=20)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
     def test_fs(self):
-        ctx = mp.get_context(sharing_strategy='file_system')
-        with leak_checker(self) as lc:
+        def queue_put():
             x = torch.DoubleStorage(4)
-            q = ctx.Queue()
+            q = mp.Queue()
             self.assertFalse(lc.has_shm_files())
             q.put(x)
+            time.sleep(0.05)  # queue serializes asynchronously
             self.assertTrue(lc.has_shm_files(wait=False))
             q.get()
-            del x
-            del q  # We have to clean up fds for leak_checker
+
+        with fs_sharing(), leak_checker(self) as lc:
+            for i in range(20):
+                queue_put()
+
+    def test_inherit_tensor(self):
+        class SubProcess(mp.Process):
+            def __init__(self, tensor):
+                super(SubProcess, self).__init__()
+                self.tensor = tensor
+
+            def run(self):
+                self.tensor.add_(3)
+
+        t = torch.zeros(5, 5)
+        p = SubProcess(t.share_memory_())
+        p.start()
+        p.join()
+        self.assertEqual(t, torch.ones(5, 5) * 3, 0)
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    def test_cuda_bad_call(self):
+        t = torch.zeros(5, 5).cuda()
+        inq = mp.Queue()
+        outq = mp.Queue()
+        p = mp.Process(target=queue_get_exception, args=(inq, outq))
+        p.start()
+        inq.put(t)
+        p.join()
+        self.assertIsInstance(outq.get(), RuntimeError)
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_event(self):
