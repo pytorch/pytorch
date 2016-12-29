@@ -93,7 +93,7 @@ class MaxPool2d(Module):
 
     def forward(self, input):
         return F.max_pool2d(input, self.kernel_size, self.stride,
-                self.padding, self.dilation, self.return_indices,
+                self.padding, self.dilation, self.ceil_mode,
                 self.return_indices)
 
     def __repr__(self):
@@ -240,7 +240,7 @@ class MaxPool3d(Module):
 
     def forward(self, input):
         return F.max_pool3d(input, self.kernel_size, self.stride,
-                self.padding, self.dilation, self.return_indices,
+                self.padding, self.dilation, self.ceil_mode,
                 self.return_indices)
 
 class AvgPool3d(Module):
