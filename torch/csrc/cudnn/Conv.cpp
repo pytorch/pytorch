@@ -53,13 +53,12 @@ void setTensorDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoi
 void setWeightDescriptor(FilterDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* weight, int groups)
 {
   CHECK_ARG(weight->nDimension <= 5);
-  int inputSize[5];
+  int weightSize[5];
   for (int i = 0; i < weight->nDimension; ++i) {
-    inputSize[i] = (int) weight->size[i];
+    weightSize[i] = (int) weight->size[i];
   }
-  inputSize[0] /= groups;
-  inputSize[1] /= groups;
-  desc.set(dataType, weight->nDimension, inputSize);
+  weightSize[0] /= groups;
+  desc.set(dataType, weight->nDimension, weightSize);
 }
 
 struct ParamsHash {
@@ -190,14 +189,14 @@ int dataSize(cudnnDataType_t dataType)
   }
 }
 
-void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx, int groups)
+void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx, int groups, int dim)
 {
   int elementSize = dataSize(dataType);
   char* ptr = (char*) tensor->storage->data;
   ptr += elementSize * tensor->storageOffset;
   if (groupIdx > 0) {
     long size = 1;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = dim; i < tensor->nDimension; ++i) {
       size *= tensor->size[i];
     }
     ptr += elementSize * size * groupIdx / groups;
@@ -264,9 +263,9 @@ void cudnn_convolution_forward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   for (int i = 0; i < groups; ++i) {
-    void* input_ptr = tensorPointer(dataType, input, i, groups);
-    void* output_ptr = tensorPointer(dataType, output, i, groups);
-    void* weight_ptr = tensorPointer(dataType, weight, i, groups);
+    void* input_ptr = tensorPointer(dataType, input, i, groups, 1);
+    void* output_ptr = tensorPointer(dataType, output, i, groups, 1);
+    void* weight_ptr = tensorPointer(dataType, weight, i, groups, 0);
 
     CHECK(cudnnConvolutionForward(
       handle, &one, idesc.desc, input_ptr, wdesc.desc,
@@ -288,8 +287,8 @@ void cudnn_convolution_add_bias(
   int stride[5] = { 1, (int)bias->stride[0], 1, 1, 1 };
   bdesc.set(dataType, output->nDimension, size, stride);
 
-  void* bias_ptr = tensorPointer(dataType, bias, 0, 1);
-  void* output_ptr = tensorPointer(dataType, output, 0, 1);
+  void* bias_ptr = tensorPointer(dataType, bias, 0, 1, 0);
+  void* output_ptr = tensorPointer(dataType, output, 0, 1, 1);
 
   Constant one(dataType, 1);
   CHECK(cudnnAddTensor(handle, &one, bdesc.desc, bias_ptr, &one,
@@ -318,9 +317,9 @@ void cudnn_convolution_backward_data(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   for (int i = 0; i < groups; ++i) {
-    void* gradInput_ptr = tensorPointer(dataType, gradInput, i, groups);
-    void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups);
-    void* weight_ptr = tensorPointer(dataType, weight, i, groups);
+    void* gradInput_ptr = tensorPointer(dataType, gradInput, i, groups, 1);
+    void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups, 1);
+    void* weight_ptr = tensorPointer(dataType, weight, i, groups, 0);
 
     CHECK(cudnnConvolutionBackwardData(
         handle, &one, wdesc.desc, weight_ptr, odesc.desc, gradOutput_ptr,
@@ -351,9 +350,9 @@ void cudnn_convolution_backward_filter(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   for (int i = 0; i < groups; ++i) {
-    void* input_ptr = tensorPointer(dataType, input, i, groups);
-    void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups);
-    void* gradWeight_ptr = tensorPointer(dataType, gradWeight, i, groups);
+    void* input_ptr = tensorPointer(dataType, input, i, groups, 1);
+    void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups, 1);
+    void* gradWeight_ptr = tensorPointer(dataType, gradWeight, i, groups, 0);
 
     if (info->transposed) {
         std::swap(input_ptr, gradOutput_ptr);
@@ -375,8 +374,8 @@ void cudnn_convolution_backward_bias(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  void* gradOutput_ptr = tensorPointer(dataType, gradOutput, 0, 1);
-  void* gradBias_ptr = tensorPointer(dataType, gradBias, 0, 1);
+  void* gradOutput_ptr = tensorPointer(dataType, gradOutput, 0, 1, 0);
+  void* gradBias_ptr = tensorPointer(dataType, gradBias, 0, 1, 0);
 
   CHECK(cudnnConvolutionBackwardBias(
       handle, &one, odesc_bias.desc, gradOutput_ptr, &zero, bdesc.desc,

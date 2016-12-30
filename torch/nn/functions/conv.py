@@ -30,8 +30,7 @@ class ConvNd(Function):
         self.save_for_backward(input, weight, bias)
         if k == 3:
             input, weight = _view4d(input, weight)
-        output = input.new(*self._output_size(input, weight))
-        self._update_output(input, weight, bias, output)
+        output = self._update_output(input, weight, bias)
         if k == 3:
             output, = _view3d(output)
         return output
@@ -54,7 +53,8 @@ class ConvNd(Function):
         return self.dilation != (1,) * len(self.dilation)
 
     def _output_size(self, input, weight):
-        channels = weight.size(1) if self.transposed else weight.size(0)
+        channels = (weight.size(1) * self.groups if self.transposed
+                    else weight.size(0))
         output_size = (input.size(0), channels)
         for d in range(input.dim() - 2):
             in_size = input.size(d + 2)
@@ -69,9 +69,10 @@ class ConvNd(Function):
                 output_size += ((in_size + (2 * pad) - kernel) // stride + 1,)
         return output_size
 
-    def _update_output(self, input, weight, bias, output):
+    def _update_output(self, input, weight, bias):
         self.use_cudnn = cudnn.is_acceptable(input) and not self.is_dilated()
         if self.use_cudnn:
+            output = input.new(*self._output_size(input, weight))
             if self.transposed:
                 self._cudnn_info = (
                     torch._C._cudnn_convolution_transpose_full_forward(
@@ -81,13 +82,10 @@ class ConvNd(Function):
                 self._cudnn_info = torch._C._cudnn_convolution_full_forward(
                     input, weight, bias, output, self.padding, self.stride,
                     self.groups, cudnn.benchmark)
-            return
+            return output
 
-        if self.groups != 1:
-            # TODO: implement groups for THNN
-            raise ValueError('THNN does not support groups')
-
-        return self.call_thnn('update_output', input, output, weight, bias)
+        self._bufs = [[] for g in range(self.groups)]
+        return self._thnn('update_output', input, weight, bias)
 
     def _grad_input(self, input, weight, grad_output):
         if self.use_cudnn:
@@ -104,7 +102,7 @@ class ConvNd(Function):
                     cudnn.benchmark)
             return grad_input
 
-        return self.call_thnn('grad_input', input, weight, grad_output)
+        return self._thnn('grad_input', input, weight, grad_output)
 
     def _grad_params(self, input, weight, bias, grad_output):
         if self.use_cudnn:
@@ -122,7 +120,7 @@ class ConvNd(Function):
 
             return grad_weight, grad_bias
 
-        return self.call_thnn('grad_params', input, weight, bias, grad_output)
+        return self._thnn('grad_params', input, weight, bias, grad_output)
 
     def thnn_class_name(self, input):
         assert input.dim() == 4 or input.dim() == 5
@@ -143,9 +141,26 @@ class ConvNd(Function):
         else:
             return 'VolumetricConvolutionMM'
 
-    def call_thnn(self, fn_name, input, *args):
+    def _thnn(self, fn_name, input, weight, *args):
         impl = _thnn_convs[self.thnn_class_name(input)]
-        return impl[fn_name](self, input, *args)
+        if self.groups == 1:
+            return impl[fn_name](self, self._bufs[0], input, weight, *args)
+        else:
+            res = []
+            for g in range(self.groups):
+                def group(tensor, dim=None):
+                    if dim is None:
+                        dim = 0 if tensor.dim() == 1 else 1
+                    n = tensor.size(dim) // self.groups
+                    return tensor.narrow(dim, n * g, n).contiguous()
+
+                grouped_args = [group(input, 1), group(weight, 0)]
+                grouped_args += [group(t) for t in args]
+                res.append(impl[fn_name](self, self._bufs[g], *grouped_args))
+            if fn_name == 'grad_params':
+                return [torch.cat(t, 0) for t in zip(*res)]
+            else:
+                return torch.cat(res, 1)
 
 
 def _view4d(*tensors):
@@ -194,22 +209,24 @@ def parse_arguments(self, arguments, buffers, kernel_size):
 
 
 def make_update_output(fn):
-    def call_update_output(self, input, output, weight, bias):
+    def call_update_output(self, bufs, input, weight, bias):
         backend = type2backend[type(input)]
-        self._bufs = [input.new(), input.new()]
+        bufs.extend([input.new(), input.new()])
+        output = input.new(*self._output_size(input, weight))
         kernel_size = weight.size()[2:]
-        args = parse_arguments(self, fn.arguments[5:], self._bufs, kernel_size)
+        args = parse_arguments(self, fn.arguments[5:], bufs, kernel_size)
         getattr(backend, fn.name)(backend.library_state, input, output, weight,
                                   bias, *args)
+        return output
     return call_update_output
 
 
 def make_grad_input(fn):
-    def call_grad_input(self, input, weight, grad_output):
+    def call_grad_input(self, bufs, input, weight, grad_output):
         backend = type2backend[type(input)]
         grad_input = input.new().resize_as_(input).zero_()
         kernel_size = weight.size()[2:]
-        args = parse_arguments(self, fn.arguments[5:], self._bufs, kernel_size)
+        args = parse_arguments(self, fn.arguments[5:], bufs, kernel_size)
         getattr(backend, fn.name)(backend.library_state, input, grad_output,
                                   grad_input, weight, *args)
         return grad_input
@@ -217,14 +234,14 @@ def make_grad_input(fn):
 
 
 def make_grad_params(fn):
-    def call_grad_params(self, input, weight, bias, grad_output):
+    def call_grad_params(self, bufs, input, weight, bias, grad_output):
         backend = type2backend[type(input)]
         grad_weight = weight.new().resize_as_(weight).zero_()
         grad_bias = None
         if bias is not None and self.needs_input_grad[2]:
             grad_bias = bias.new().resize_as_(bias).zero_()
         kernel_size = weight.size()[2:]
-        args = parse_arguments(self, fn.arguments[5:], self._bufs, kernel_size)
+        args = parse_arguments(self, fn.arguments[5:], bufs, kernel_size)
         getattr(backend, fn.name)(backend.library_state, input, grad_output,
                                   grad_weight, grad_bias, *args)
         return grad_weight, grad_bias

@@ -801,6 +801,33 @@ class TestNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
+    def test_Conv2d_naive_groups(self):
+        # Check that grouped convolutions matches two half convolutions
+        m = nn.Conv2d(4, 4, kernel_size=3, groups=2)
+        i = Variable(torch.randn(2, 4, 6, 6), requires_grad=True)
+        output = m(i)
+        grad_output = torch.randn(2, 4, 4, 4)
+        output.backward(grad_output)
+
+        m1 = nn.Conv2d(2, 2, kernel_size=3)
+        m1.weight.data.copy_(m.weight.data[:2])
+        m1.bias.data.copy_(m.bias.data[:2])
+        i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+        output1 = m1(i1)
+        output1.backward(grad_output[:, :2].contiguous())
+
+        m2 = nn.Conv2d(2, 2, kernel_size=3)
+        m2.weight.data.copy_(m.weight.data[2:])
+        m2.bias.data.copy_(m.bias.data[2:])
+        i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+        output2 = m2(i2)
+        output2.backward(grad_output[:, 2:].contiguous())
+
+        self.assertEqual(output, torch.cat([output1, output2], 1))
+        self.assertEqual(i.grad, torch.cat([i1.grad, i2.grad], 1))
+        self.assertEqual(m.bias.grad, torch.cat([m1.bias.grad, m2.bias.grad], 0))
+        self.assertEqual(m.weight.grad, torch.cat([m1.weight.grad, m2.weight.grad], 0))
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)
@@ -1098,6 +1125,12 @@ new_module_tests = [
         input_size=(2, 4, 10),
     ),
     dict(
+        fullname='Conv1d_groups',
+        constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
+        input_size=(2, 4, 6),
+        cudnn=True,
+    ),
+    dict(
         module_name='MaxPool1d',
         constructor_args=(4,),
         input_size=(2, 10, 4)
@@ -1143,6 +1176,12 @@ new_module_tests = [
         desc='no_bias',
     ),
     dict(
+        fullname='Conv2d_groups',
+        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
+        input_size=(2, 4, 6, 5),
+        cudnn=True,
+    ),
+    dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
@@ -1154,6 +1193,12 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='no_bias'
+    ),
+    dict(
+        fullname='ConvTranspose2d_groups',
+        constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
+        input_size=(1, 2, 4, 5),
+        cudnn=True,
     ),
     dict(
         module_name='MaxPool2d',
@@ -1217,6 +1262,12 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride_padding'
+    ),
+    dict(
+        fullname='Conv3d_groups',
+        constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
+        input_size=(2, 4, 4, 5, 4),
+        cudnn=True,
     ),
     dict(
         fullname='Conv3d_dilated',
