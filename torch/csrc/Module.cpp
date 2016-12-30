@@ -232,7 +232,6 @@ IMPLEMENT_STATELESS(cumprod)
 IMPLEMENT_STATELESS(clamp)
 IMPLEMENT_STATELESS(equal)
 IMPLEMENT_STATELESS(eye)
-IMPLEMENT_STATELESS(fill)
 IMPLEMENT_STATELESS(diag)
 IMPLEMENT_STATELESS(numel)
 IMPLEMENT_STATELESS(sign)
@@ -278,9 +277,7 @@ IMPLEMENT_STATELESS(uniform)
 IMPLEMENT_STATELESS(normal)
 IMPLEMENT_STATELESS(cauchy)
 IMPLEMENT_STATELESS(log_normal)
-IMPLEMENT_STATELESS(exponential)
 IMPLEMENT_STATELESS(random)
-IMPLEMENT_STATELESS(geometric)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(unfold)
 IMPLEMENT_STATELESS(range)
@@ -564,7 +561,6 @@ static PyMethodDef TorchMethods[] = {
   {"clamp",           (PyCFunction)THPModule_clamp,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"equal",           (PyCFunction)THPModule_equal,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"eye",             (PyCFunction)THPModule_eye,               METH_VARARGS | METH_KEYWORDS, NULL},
-  {"fill",            (PyCFunction)THPModule_fill,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"diag",            (PyCFunction)THPModule_diag,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel",           (PyCFunction)THPModule_numel,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"sign",            (PyCFunction)THPModule_sign,              METH_VARARGS | METH_KEYWORDS, NULL},
@@ -616,9 +612,7 @@ static PyMethodDef TorchMethods[] = {
   {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"cauchy",          (PyCFunction)THPModule_cauchy,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"log_normal",      (PyCFunction)THPModule_log_normal,        METH_VARARGS | METH_KEYWORDS, NULL},
-  {"exponential",     (PyCFunction)THPModule_exponential,       METH_VARARGS | METH_KEYWORDS, NULL},
   {"random",          (PyCFunction)THPModule_random,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"geometric",       (PyCFunction)THPModule_geometric,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
