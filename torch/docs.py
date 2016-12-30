@@ -261,7 +261,7 @@ add_docstr(torch._C.gt,
 
 add_docstr(torch._C.histc,
 """
-histc([result], tensor, bins=100, min=0, max=0) -> tensor
+histc([result], tensor, bins=100, min=0, max=0) -> Tensor
 
 Computes the histogram of a tensor.
 
@@ -269,14 +269,14 @@ The elements are sorted into equal width bins between `min` and `max`. If `min`
 and `max` are both zero, the minimum and maximum values of the data are used.
 
 Args:
-    result: (tensor) optional result tensor
-    tensor: (tensor) input data
-    bins: (int) number of histogram bins
-    min: (int) lower end of the range (inclusive)
-    max: (int) upper end of the range (inclusive)
+    result (Tensor): optional result tensor
+    tensor (Tensor): input data
+    bins (int): number of histogram bins
+    min (int): lower end of the range (inclusive)
+    max (int): upper end of the range (inclusive)
 
 Returns:
-    tensor: the histogram
+    Tensor: the histogram
 
 Example:
     >>> torch.histc(torch.FloatTensor([1, 2, 1]), bins=4, min=0, max=3)
