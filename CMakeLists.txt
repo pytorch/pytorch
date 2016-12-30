@@ -78,6 +78,21 @@ IF (CORTEXA9_FOUND)
   SET(CMAKE_C_FLAGS "-mcpu=cortex-a9 ${CMAKE_C_FLAGS}")
 ENDIF (CORTEXA9_FOUND)
 
+INCLUDE(CheckIncludeFile)
+CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
+# Check for a cpuid intrinsic
+IF(HAVE_CPUID_H)
+    CHECK_C_SOURCE_COMPILES("#include <cpuid.h>
+        int main()
+        {
+            unsigned int eax, ebx, ecx, edx;
+            return __get_cpuid(0, &eax, &ebx, &ecx, &edx);
+        }" HAVE_GCC_GET_CPUID)
+ENDIF()
+IF(HAVE_GCC_GET_CPUID)
+  SET(CMAKE_C_FLAGS "-DHAVE_GCC_GET_CPUID")
+ENDIF(HAVE_GCC_GET_CPUID)
+
 FIND_PACKAGE(SSE)
 IF(C_SSE2_FOUND)
   SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} -DUSE_SSE2 ${CMAKE_C_FLAGS}")
