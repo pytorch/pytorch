@@ -297,7 +297,21 @@ THC_API void THCTensor_(sort)(THCState* state,
   // How large are the slices that we are sorting?
   long sliceSize = THCTensor_(size)(state, input, dim);
 
-  if (sliceSize <= 2048) {
+  // Workaround:
+  // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
+  // and so for the double word types,
+  // we get "too many resources requested for launch" in the 2048 case
+#if CUDA_VERSION >= 8000
+#if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
+  int maxSliceSize = 1024;
+#else
+  int maxSliceSize = 2048;
+#endif
+#else
+  int maxSliceSize = 2048;
+#endif
+
+  if (sliceSize <= maxSliceSize) {
     // Fill `indices` (the values) with the
     // slice-relative index.
     THCudaLongTensor_fillSliceWithIndex(state, indices, dim);
