@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Function
 from torch._thnn import type2backend
-from torch.nn.functions.thnn.auto import function_by_name
+from .thnn.auto import function_by_name
 import torch.backends.cudnn as cudnn
 
 

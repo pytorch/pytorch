@@ -1,9 +1,9 @@
 """Functional interface"""
 
 import torch
-from . import functions
+from . import _functions
 from .modules import utils
-from torch.nn.functions.conv import ConvNd
+from torch.nn._functions.conv import ConvNd
 from .modules.utils import _single, _pair, _triple
 # Convolutions
 
@@ -222,7 +222,7 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
     Examples:
         >>> #TODO
     """
-    return functions.thnn.AvgPool2d(kernel_size, stride, padding,
+    return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                     ceil_mode, count_include_pad)(input)
 
 
@@ -239,25 +239,25 @@ def avg_pool3d(input, kernel_size, stride=None):
     Examples:
         >>> #TODO
     """
-    return functions.thnn.AvgPool3d(kernel_size, stride)(input)
+    return _functions.thnn.AvgPool3d(kernel_size, stride)(input)
 
 
 # share the same interface
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation,
+    return _functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation,
                                     return_indices, ceil_mode)(input)
 
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation,
+    return _functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation,
                                     return_indices, ceil_mode)(input)
 
 
 def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation,
+    return _functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation,
                                     return_indices, ceil_mode)(input)
 
 
@@ -270,47 +270,47 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
-    return functions.dropout.Dropout(p, training, inplace)(input)
+    return _functions.dropout.Dropout(p, training, inplace)(input)
 
 
 def threshold(input, threshold, value, inplace=False):
-    return functions.thnn.auto.Threshold(threshold, value, inplace)(input)
+    return _functions.thnn.auto.Threshold(threshold, value, inplace)(input)
 
 
 def relu(input, inplace=False):
-    return functions.thnn.auto.Threshold(0, 0, inplace)(input)
+    return _functions.thnn.auto.Threshold(0, 0, inplace)(input)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
-    return functions.thnn.auto.Hardtanh(min_val, max_val, inplace)(input)
+    return _functions.thnn.auto.Hardtanh(min_val, max_val, inplace)(input)
 
 
 def relu6(input, inplace=False):
-    return functions.thnn.auto.Hardtanh(0, 6, inplace)(input)
+    return _functions.thnn.auto.Hardtanh(0, 6, inplace)(input)
 
 
 def elu(input, alpha=1., inplace=False):
-    return functions.thnn.auto.ELU(alpha, inplace)(input)
+    return _functions.thnn.auto.ELU(alpha, inplace)(input)
 
 
 def leaky_relu(input, negative_slope=1e-2, inplace=False):
-    return functions.thnn.auto.LeakyReLU(negative_slope, inplace)(input)
+    return _functions.thnn.auto.LeakyReLU(negative_slope, inplace)(input)
 
 
 def prelu(input, weight):
-    return functions.thnn.PReLU()(input, weight)
+    return _functions.thnn.PReLU()(input, weight)
 
 
 def rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False):
-    return functions.thnn.RReLU(lower, upper, training, inplace)(input)
+    return _functions.thnn.RReLU(lower, upper, training, inplace)(input)
 
 
 def logsigmoid(input):
-    return functions.thnn.LogSigmoid()(input)
+    return _functions.thnn.LogSigmoid()(input)
 
 
 def hardshrink(input, lambd=0.5):
-    return functions.thnn.auto.Hardshrink(lambd)(input)
+    return _functions.thnn.auto.Hardshrink(lambd)(input)
 
 
 def tanhshrink(input):
@@ -318,27 +318,27 @@ def tanhshrink(input):
 
 
 def softsign(input):
-    return functions.activation.Softsign()(input)
+    return _functions.activation.Softsign()(input)
 
 
 def softplus(input, beta=1, threshold=20):
-    return functions.thnn.auto.Softplus(beta, threshold)(input)
+    return _functions.thnn.auto.Softplus(beta, threshold)(input)
 
 
 def softmin(input):
-    return functions.thnn.Softmin()(input)
+    return _functions.thnn.Softmin()(input)
 
 
 def softmax(input):
-    return functions.thnn.auto.Softmax()(input)
+    return _functions.thnn.auto.Softmax()(input)
 
 
 def softshrink(input, lambd=0.5):
-    return functions.thnn.auto.Softshrink(lambd)(input)
+    return _functions.thnn.auto.Softshrink(lambd)(input)
 
 
 def log_softmax(input):
-    return functions.thnn.LogSoftmax()(input)
+    return _functions.thnn.LogSoftmax()(input)
 
 
 def tanh(input):
@@ -352,19 +352,19 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    state = functions.linear.Linear()
+    state = _functions.linear.Linear()
     return bias and state(input, weight, bias) or state(input, weight)
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    state = functions.thnn.BatchNorm(running_mean, running_var,
+    state = _functions.thnn.BatchNorm(running_mean, running_var,
                                      training, momentum, eps)
     return weight and state(input, weight, bias) or state(input)
 
 
 def nll_loss(input, target, weight=None, size_average=True):
-    return functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
+    return _functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
 
 
 def cross_entropy(input, target, weight=None, size_average=True):
@@ -372,4 +372,4 @@ def cross_entropy(input, target, weight=None, size_average=True):
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
-    return functions.thnn.BCELoss(size_average, weight=weight)(input, target)
+    return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
