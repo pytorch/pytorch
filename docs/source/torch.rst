@@ -49,9 +49,7 @@ Math operations
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: exp
-.. autofunction:: exponential
 .. autofunction:: eye
-.. autofunction:: fill
 .. autofunction:: floor
 .. autofunction:: fmod
 .. autofunction:: frac
@@ -59,7 +57,6 @@ Math operations
 .. autofunction:: gather
 .. autofunction:: ge
 .. autofunction:: gels
-.. autofunction:: geometric
 .. autofunction:: geqrf
 .. autofunction:: ger
 .. autofunction:: gesv
