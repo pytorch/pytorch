@@ -2,7 +2,7 @@ import sys
 import torch._C as _C
 from collections import OrderedDict
 
-from .functions import *
+from ._functions import *
 
 
 class Variable(_C._VariableBase):

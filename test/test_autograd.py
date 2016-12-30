@@ -8,7 +8,7 @@ from copy import deepcopy
 from collections import OrderedDict
 
 from common import make_jacobian, TestCase, iter_tensors, get_numerical_jacobian
-from torch.autograd.functions import *
+from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
 if sys.version_info[0] == 2:
