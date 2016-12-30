@@ -94,4 +94,24 @@
 #undef THInf
 #undef TH_REAL_IS_DOUBLE
 
+#if TH_GENERIC_USE_HALF
+#include "THHalf.h"
+#define real THHalf
+#define accreal float
+#define Real Half
+#define THInf TH_HALF_MAX
+#define TH_REAL_IS_HALF
+#if !TH_NATIVE_HALF
+# define TH_GENERIC_NO_MATH 1
+#endif
+#line 1 TH_GENERIC_FILE
+#include TH_GENERIC_FILE
+#undef real
+#undef accreal
+#undef Real
+#undef THInf
+#undef TH_REAL_IS_HALF
+#undef TH_GENERIC_NO_MATH
+#endif
+
 #undef TH_GENERIC_FILE

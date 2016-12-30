@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THVectorDispatch.c"
 #else
 
+#ifndef TH_GENERIC_NO_MATH
+
 /* For now there are only SIMD implementations for FLOAT and DOUBLE.
  * Hopefully in the future this can be made totally generic (e.g, there are SIMD implementations
  * for a lot of functions */
@@ -20,6 +22,12 @@ static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(fill_VSX), SIMDExtension_VSX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -32,12 +40,17 @@ void THVector_(fill)(real *x, const real c, const ptrdiff_t n) {
   THVector_(fill_DISPATCHPTR)(x, c, n);
 }
 
-
 static void (*THVector_(add_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(add_DEFAULT);
 static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(add_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(add_VSX), SIMDExtension_VSX),
     #endif
   #endif
 
@@ -63,6 +76,12 @@ static FunctionDescription THVector_(diff_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(diff_VSX), SIMDExtension_VSX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -85,6 +104,12 @@ static FunctionDescription THVector_(scale_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(scale_VSX), SIMDExtension_VSX),
+    #endif
+  #endif
+
   #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
           || defined(USE_SSE4_1) || defined(USE_SSE4_2)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -104,6 +129,12 @@ static FunctionDescription THVector_(mul_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(mul_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(mul_VSX), SIMDExtension_VSX),
     #endif
   #endif
 
@@ -136,5 +167,5 @@ void THVector_(vectorDispatchInit)(void)
   INIT_DISPATCH_PTR(scale);
   INIT_DISPATCH_PTR(mul);
 }
-
+#endif /* TH_GENERIC_NO_MATH */
 #endif

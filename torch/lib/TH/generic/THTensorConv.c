@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensorConv.c"
 #else
 
+/* Tensor math may be disabled for certain types, e.g. 'TH_half' */
+#ifndef TH_GENERIC_NO_MATH
 
 /*
   2D Input, 2D kernel  : convolve given image with the given kernel.
@@ -775,7 +777,7 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
         real *ptr_output = output_data + k*nInputPlane*nOutputCols*nOutputRows + i*nOutputCols*nOutputRows;
         /* get input */
         real *ptr_input = input_data + p*istride0 + i*istride1;
-  
+
         /* do image, kernel convolution */
         THTensor_(validXCorr2DRevptr)(ptr_output,
                                       alpha,
@@ -1174,7 +1176,7 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
         real *ptr_weight = weight_data + k*kstride0 + i*kstride1;
         /* get input */
         real *ptr_input = input_data + p*nInputPlane*nInputRows*nInputCols + i*nInputRows*nInputCols;
-  
+
         /* do image, kernel convolution */
         if (*vf == 'F')
           if (*xc == 'X')
@@ -1955,5 +1957,5 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   THTensor_(free)(input);
   THTensor_(free)(kernel);
 }
-
+#endif
 #endif

@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.c"
 #else
 
+/* Tensor math may be disabled for certain types, e.g. 'half' */
+#ifndef TH_GENERIC_NO_MATH
+
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
 #if defined(TH_REAL_IS_BYTE)
@@ -246,5 +249,7 @@ void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
   THGenerator_copy(_generator, rng_state);
 }
 #endif
+
+#endif /* TH_GENERIC_NO_MATH */
 
 #endif

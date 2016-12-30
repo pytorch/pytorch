@@ -19,6 +19,9 @@ IMPLEMENT_THFILE_RW(Int, int)
 IMPLEMENT_THFILE_RW(Long, long)
 IMPLEMENT_THFILE_RW(Float, float)
 IMPLEMENT_THFILE_RW(Double, double)
+#if TH_GENERIC_USE_HALF
+IMPLEMENT_THFILE_RW(Half, THHalf)
+#endif
 
 size_t THFile_readStringRaw(THFile *self, const char *format, char **str_)
 {
@@ -133,6 +136,9 @@ IMPLEMENT_THFILE_SCALAR(Int, int)
 IMPLEMENT_THFILE_SCALAR(Long, long)
 IMPLEMENT_THFILE_SCALAR(Float, float)
 IMPLEMENT_THFILE_SCALAR(Double, double)
+#if TH_GENERIC_USE_HALF
+IMPLEMENT_THFILE_SCALAR(Half, THHalf)
+#endif
 
 #define IMPLEMENT_THFILE_STORAGE(TYPEC, TYPE)                           \
   size_t THFile_read##TYPEC(THFile *self, TH##TYPEC##Storage *storage)    \
@@ -152,3 +158,6 @@ IMPLEMENT_THFILE_STORAGE(Int, int)
 IMPLEMENT_THFILE_STORAGE(Long, long)
 IMPLEMENT_THFILE_STORAGE(Float, float)
 IMPLEMENT_THFILE_STORAGE(Double, double)
+#if TH_GENERIC_USE_HALF
+IMPLEMENT_THFILE_STORAGE(Half, THHalf)
+#endif

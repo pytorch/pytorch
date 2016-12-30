@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THBlas.c"
 #else
 
+# ifndef TH_GENERIC_NO_MATH
+
 #ifdef BLAS_F2C
 # define ffloat double
 #else
@@ -24,8 +26,8 @@ TH_EXTERNC void dger_(int *m, int *n, double *alpha, double *x, int *incx, doubl
 TH_EXTERNC void sger_(int *m, int *n, float *alpha, float *x, int *incx, float *y, int *incy, float *a, int *lda);
 TH_EXTERNC void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, double *a, int *lda, double *b, int *ldb, double *beta, double *c, int *ldc);
 TH_EXTERNC void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, float *a, int *lda, float *b, int *ldb, float *beta, float *c, int *ldc);
-    
- 
+
+
 
 void THBlas_(swap)(long n, real *x, long incx, real *y, long incy)
 {
@@ -182,9 +184,9 @@ void THBlas_(gemv)(char trans, long m, long n, real alpha, real *a, long lda, re
 {
   if(n == 1)
     lda = m;
-  
+
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (m <= INT_MAX) && (n <= INT_MAX) && 
+  if( (m <= INT_MAX) && (n <= INT_MAX) &&
       (lda > 0) && (lda <= INT_MAX) &&
       (incx > 0) && (incx <= INT_MAX) &&
       (incy > 0) && (incy <= INT_MAX) )
@@ -224,7 +226,7 @@ void THBlas_(gemv)(char trans, long m, long n, real alpha, real *a, long lda, re
     {
       if(beta != 1)
         THBlas_(scal)(m, beta, y, incy);
-      
+
       for(j = 0; j < n; j++)
       {
         real *column_ = a+lda*j;
@@ -402,5 +404,5 @@ void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha,
     }
   }
 }
-
+# endif /* TH_GENERIC_NO_MATH */
 #endif

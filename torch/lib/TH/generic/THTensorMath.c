@@ -2,6 +2,7 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
 
+#ifndef TH_GENERIC_NO_MATH
 #define TH_OMP_OVERHEAD_THRESHOLD 100000
 
 void THTensor_(fill)(THTensor *r_, real value)
@@ -98,10 +99,15 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   long i = 0;
   long dim;
   long div = 1;
+#ifdef TH_REAL_IS_HALF
+#define IS_NONZERO(val) (TH_half2float(val)!=0)
+#else
+#define IS_NONZERO(val) ((val)!=0)
+#endif
 
   /* First Pass to determine size of subscripts */
   TH_TENSOR_APPLY(real, tensor,
-                  if (*tensor_data != 0) {
+                  if IS_NONZERO(*tensor_data) {
                     ++numel;
                   });
 #ifdef DEBUG
@@ -112,7 +118,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   /* Second pass populates subscripts */
   subscript_data = THLongTensor_data(subscript);
   TH_TENSOR_APPLY(real, tensor,
-                  if (*tensor_data != 0) {
+                  if IS_NONZERO(*tensor_data) {
                     div = 1;
 
                     for (dim = tensor->nDimension - 1; dim >= 0; dim--) {
@@ -395,6 +401,7 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    break;);
   return sum;
 }
+
 
 #undef th_isnan
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -2539,4 +2546,6 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalu
 }
 
 #endif /* floating point only part */
+#undef IS_NONZERO
+#endif /* TH_GENERIC_NO_MATH */
 #endif
