@@ -51,12 +51,14 @@
         - THTensor* other
     - cname: ltValueT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - real value
     - cname: ltTensorT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - THTensor* other
 ]]
@@ -115,12 +117,14 @@
         - THTensor* other
     - cname: gtValueT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - real value
     - cname: gtTensorT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - THTensor* other
 ]]
@@ -179,12 +183,14 @@
         - THTensor* other
     - cname: leValueT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - real value
     - cname: leTensorT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - THTensor* other
 ]]
@@ -243,12 +249,14 @@
         - THTensor* other
     - cname: geValueT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - real value
     - cname: geTensorT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - THTensor* other
 ]]
@@ -307,12 +315,14 @@
         - THTensor* other
     - cname: eqValueT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - real value
     - cname: eqTensorT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - THTensor* other
 ]]
@@ -371,12 +381,14 @@
         - THTensor* other
     - cname: neValueT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - real value
     - cname: neTensorT
       arguments:
-        - THTensor* result
+        - arg: THTensor* result
+          output: True
         - THTensor* tensor
         - THTensor* other
 ]]

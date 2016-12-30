@@ -59,7 +59,7 @@ class MarginRankingCriterion(Criterion):
             self.mask = self.mask.resize_as_(input[0]).copy_(dist)
             mask = self.mask
 
-            torch.ge(mask, dist, 0)
+            torch.ge(dist, 0, out=mask)
 
             self.gradInput[0].resize_(dist.size())
             self.gradInput[1].resize_(dist.size())
