@@ -1,4 +1,5 @@
 from .module import Module
+from .. import functional as F
 
 
 class PixelShuffle(Module):
@@ -24,18 +25,7 @@ class PixelShuffle(Module):
         self.upscale_factor = upscale_factor
 
     def forward(self, input):
-        batch_size, channels, in_height, in_width = input.size()
-        channels //= self.upscale_factor ** 2
-
-        out_height = in_height * self.upscale_factor
-        out_width = in_width * self.upscale_factor
-
-        input_view = input.contiguous().view(
-            batch_size, channels, self.upscale_factor, self.upscale_factor,
-            in_height, in_width)
-
-        shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3).contiguous()
-        return shuffle_out.view(batch_size, channels, out_height, out_width)
+        return F.pixel_shuffle(input, self.upscale_factor)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (upscale_factor=' + str(self.upscale_factor) + ')'
