@@ -23,7 +23,7 @@ def _replicate_module(module, gpu, param_remap):
 
 
 def replicate(module, device_ids):
-    from .functions import Broadcast
+    from ._functions import Broadcast
     seen_params = set()
     param_remap = [{} for dev_id in device_ids]
     for param in module.parameters():

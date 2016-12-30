@@ -1,5 +1,5 @@
 from torch.autograd import Variable
-from .functions import Scatter, Gather
+from ._functions import Scatter, Gather
 
 
 def scatter(input, target_gpus):

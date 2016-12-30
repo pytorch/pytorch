@@ -11,14 +11,14 @@ def _get_thnn_function_backend():
 
 
 def _initialize_backend():
-    from ..functions.thnn import _all_functions as _thnn_functions
-    from ..functions.linear import Linear
-    from ..functions.conv import ConvNd
-    from ..functions.rnn import RNN, \
+    from .._functions.thnn import _all_functions as _thnn_functions
+    from .._functions.linear import Linear
+    from .._functions.conv import ConvNd
+    from .._functions.rnn import RNN, \
         RNNTanhCell, RNNReLUCell, GRUCell, LSTMCell
-    from ..functions.dropout import Dropout, FeatureDropout
-    from ..functions.activation import Softsign
-    from ..functions.loss import CosineEmbeddingLoss, \
+    from .._functions.dropout import Dropout, FeatureDropout
+    from .._functions.activation import Softsign
+    from .._functions.loss import CosineEmbeddingLoss, \
         HingeEmbeddingLoss, MarginRankingLoss
 
     backend.register_function('Linear', Linear)
