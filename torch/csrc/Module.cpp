@@ -210,23 +210,17 @@ IMPLEMENT_STATELESS(norm)
 IMPLEMENT_STATELESS(cinv)
 IMPLEMENT_STATELESS(neg)
 IMPLEMENT_STATELESS(add)
-IMPLEMENT_STATELESS(csub)
 IMPLEMENT_STATELESS(mul)
 IMPLEMENT_STATELESS(div)
 IMPLEMENT_STATELESS(fmod)
-IMPLEMENT_STATELESS(cmul)
-IMPLEMENT_STATELESS(cdiv)
-IMPLEMENT_STATELESS(cfmod)
 IMPLEMENT_STATELESS(min)
 IMPLEMENT_STATELESS(max)
 IMPLEMENT_STATELESS(cmax)
 IMPLEMENT_STATELESS(cmin)
-IMPLEMENT_STATELESS(cpow)
 IMPLEMENT_STATELESS(dot)
 IMPLEMENT_STATELESS(sum)
 IMPLEMENT_STATELESS(prod)
 IMPLEMENT_STATELESS(remainder)
-IMPLEMENT_STATELESS(cremainder)
 IMPLEMENT_STATELESS(cumsum)
 IMPLEMENT_STATELESS(cumprod)
 IMPLEMENT_STATELESS(clamp)
@@ -537,25 +531,17 @@ static PyMethodDef TorchMethods[] = {
   {"cinv",            (PyCFunction)THPModule_cinv,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"neg",             (PyCFunction)THPModule_neg,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"add",             (PyCFunction)THPModule_add,               METH_VARARGS | METH_KEYWORDS, NULL},
-  {"csub",            (PyCFunction)THPModule_csub,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"mul",             (PyCFunction)THPModule_mul,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"div",             (PyCFunction)THPModule_div,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"fmod",            (PyCFunction)THPModule_fmod,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"mod",             (PyCFunction)THPModule_fmod,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cmul",            (PyCFunction)THPModule_cmul,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cdiv",            (PyCFunction)THPModule_cdiv,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cfmod",           (PyCFunction)THPModule_cfmod,             METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cmod",            (PyCFunction)THPModule_cfmod,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"min",             (PyCFunction)THPModule_min,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"max",             (PyCFunction)THPModule_max,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"cmax",            (PyCFunction)THPModule_cmax,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"cmin",            (PyCFunction)THPModule_cmin,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cpow",            (PyCFunction)THPModule_cpow,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"dot",             (PyCFunction)THPModule_dot,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"sum",             (PyCFunction)THPModule_sum,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"prod",            (PyCFunction)THPModule_prod,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"remainder",       (PyCFunction)THPModule_remainder,         METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cremainder",      (PyCFunction)THPModule_cremainder,        METH_VARARGS | METH_KEYWORDS, NULL},
   {"cumsum",          (PyCFunction)THPModule_cumsum,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"cumprod",         (PyCFunction)THPModule_cumprod,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp",           (PyCFunction)THPModule_clamp,             METH_VARARGS | METH_KEYWORDS, NULL},

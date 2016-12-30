@@ -92,15 +92,7 @@ add_docstr(torch._C.cauchy,
 """
 """)
 
-add_docstr(torch._C.cdiv,
-"""
-""")
-
 add_docstr(torch._C.ceil,
-"""
-""")
-
-add_docstr(torch._C.cfmod,
 """
 """)
 
@@ -120,14 +112,6 @@ add_docstr(torch._C.cmin,
 """
 """)
 
-add_docstr(torch._C.cmod,
-"""
-""")
-
-add_docstr(torch._C.cmul,
-"""
-""")
-
 add_docstr(torch._C.cos,
 """
 """)
@@ -136,19 +120,7 @@ add_docstr(torch._C.cosh,
 """
 """)
 
-add_docstr(torch._C.cpow,
-"""
-""")
-
-add_docstr(torch._C.cremainder,
-"""
-""")
-
 add_docstr(torch._C.cross,
-"""
-""")
-
-add_docstr(torch._C.csub,
 """
 """)
 
@@ -629,10 +601,6 @@ add_docstr(torch._C.min,
 """)
 
 add_docstr(torch._C.mm,
-"""
-""")
-
-add_docstr(torch._C.mod,
 """
 """)
 
