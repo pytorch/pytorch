@@ -28,10 +28,9 @@ class Container(Module):
         # Example of using Container
         class Net(nn.Container):
             def __init__(self):
-                super(Net, self).__init__(
-                    conv1 = nn.Conv2d(1, 20, 5),
-                    relu  = nn.ReLU()
-                )
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5)
+                self.relu  = nn.ReLU()
             def forward(self, input):
                 output = self.relu(self.conv1(x))
                 return output
