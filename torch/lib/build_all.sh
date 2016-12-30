@@ -4,7 +4,7 @@ cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
-BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
+BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -DTH_GENERIC_USE_HALF=1 -DCUDA_HAS_FP16=1 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
 LDFLAGS="-L$INSTALL_DIR/lib "
 if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
