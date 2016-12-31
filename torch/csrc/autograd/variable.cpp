@@ -116,6 +116,8 @@ int THPVariable_init(THPVariable *self, PyObject *args, PyObject *kwargs)
   if (self->creator == Py_None)
     self->creator = NULL;
   Py_XINCREF(self->creator);
+  THPUtils_assertRet(-1, !(self->is_volatile && self->requires_grad),
+          "Variable can't be volatile and require_grad at the same time!");
   THPUtils_assertRet(-1, !self->creator || THPFunction_Check(self->creator),
           "Variable creator has to be a Function object or None, but got %s",
           THPUtils_typename(self->creator));
