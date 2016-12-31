@@ -720,6 +720,23 @@ class Variable(_C._VariableBase):
     def __imul__(self, other):
         return self.mul_(other)
 
+    def __matmul__(self, other):
+        dim_self = self.dim()
+        try:
+            dim_other = other.dim()
+        except AttributeError:  # not a Variable
+            return NotImplemented
+        if dim_self == 1 and dim_other == 1:
+            return self.dot(other)
+        if dim_self == 2 and dim_other == 1:
+            return self.mv(other)
+        if dim_self == 1 and dim_other == 2:
+            return self.unsqueeze(0).mm(other).squeeze(0)
+        elif dim_self == 2 and dim_other == 2:
+            return self.mm(other)
+        raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
+                "but they are {}D and {}D".format(dim_self, dim_other))
+
     def __div__(self, other):
         return self.div(other)
     __truediv__ = __div__

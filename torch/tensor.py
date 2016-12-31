@@ -289,14 +289,20 @@ class _TensorBase(object):
 
     def __matmul__(self, other):
         dim_self = self.dim()
-        dim_other = other.dim()
-        # TODO: should this really be dot product?
-        # if dim_self == 1 and dim_other == 1:
-            # return self.dot(other)
+        try:
+            dim_other = other.dim()
+        except AttributeError:  # not a tensor
+            return NotImplemented
+        if dim_self == 1 and dim_other == 1:
+            return self.dot(other)
         if dim_self == 2 and dim_other == 1:
-            return torch.mv(self, other)
+            return self.mv(other)
+        if dim_self == 1 and dim_other == 2:
+            return self.unsqueeze(0).mm(other).squeeze(0)
         elif dim_self == 2 and dim_other == 2:
-            return torch.mm(self, other)
+            return self.mm(other)
+        raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
+                "but they are {}D and {}D".format(dim_self, dim_other))
 
     def __div__(self, other):
         return self.div(other)
