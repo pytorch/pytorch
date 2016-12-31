@@ -1032,15 +1032,6 @@ class TestTorch(TestCase):
 
     def test_cat(self):
         SIZE = 10
-        # 2-arg cat
-        for dim in range(3):
-            x = torch.rand(13, SIZE, SIZE).transpose(0, dim)
-            y = torch.rand(17, SIZE, SIZE).transpose(0, dim)
-            res1 = torch.cat((x, y), dim)
-            self.assertEqual(res1.narrow(dim, 0, 13), x, 0)
-            self.assertEqual(res1.narrow(dim, 13, 17), y, 0)
-
-        # Check iterables
         for dim in range(3):
             x = torch.rand(13, SIZE, SIZE).transpose(0, dim)
             y = torch.rand(17, SIZE, SIZE).transpose(0, dim)
@@ -1050,7 +1041,16 @@ class TestTorch(TestCase):
             self.assertEqual(res1.narrow(dim, 0, 13), x, 0)
             self.assertEqual(res1.narrow(dim, 13, 17), y, 0)
             self.assertEqual(res1.narrow(dim, 30, 19), z, 0)
-            self.assertRaises(TypeError, lambda: torch.cat([]))
+
+        x = torch.randn(20, SIZE, SIZE)
+        self.assertEqual(torch.cat(torch.split(x, 7)), x)
+        self.assertEqual(torch.cat(torch.chunk(x, 7)), x)
+
+        y = torch.randn(1, SIZE, SIZE)
+        z = torch.cat([x, y])
+        self.assertEqual(z.size(), (21, SIZE, SIZE))
+
+        self.assertRaises(TypeError, lambda: torch.cat([]))
 
     def test_linspace(self):
         _from = random.random()

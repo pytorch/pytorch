@@ -639,8 +639,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
       goto invalid_arguments;
     dimension = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   } else {
-    dimension = THTensor_(size)(LIBRARY_STATE item_tensors[0],
-        THTensor_(nDimension)(LIBRARY_STATE item_tensors[0])-1);
+    dimension = 0;
   }
 
   result = (THPTensor *)THPTensor_(NewEmpty)();

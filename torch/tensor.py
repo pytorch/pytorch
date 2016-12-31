@@ -130,19 +130,10 @@ class _TensorBase(object):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
     def split(self, split_size, dim=0):
-        if dim < 0:
-            dim += self.dim()
-        dim_size = self.size(dim)
-        num_splits = int(math.ceil(float(dim_size) / split_size))
-        last_split_size = split_size - (split_size * num_splits - dim_size)
-        def get_split_size(i):
-            return split_size if i < num_splits-1 else last_split_size
-        return tuple(self.narrow(int(dim), int(i*split_size), int(get_split_size(i))) for i
-                in _range(0, num_splits))
+        return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
-        split_size = math.ceil(float(self.size(dim)) / n_chunks)
-        return self.split(split_size, dim)
+        return torch.chunk(self, n_chunks, dim)
 
     def tolist(self):
         dim = self.dim()

@@ -14,7 +14,7 @@ from ._utils import _import_dotted_name
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed',
-    'save', 'load', 'set_printoptions',
+    'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
@@ -187,6 +187,12 @@ _tensor_classes = {
 
 
 set_default_tensor_type('torch.FloatTensor')
+
+################################################################################
+# Import interface functions defined in Python
+################################################################################
+
+from .functional import *
 
 ################################################################################
 # Initialize extension
