@@ -13,7 +13,9 @@ from common import TestCase
 
 
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
-TEST_CUDA_IPC = torch.cuda.is_available() and sys.version_info[0] == 3
+TEST_CUDA_IPC = torch.cuda.is_available() and \
+                sys.version_info[0] == 3 and \
+                sys.platform != 'darwin'
 
 
 def simple_fill(queue, event):
@@ -36,7 +38,7 @@ def send_tensor(queue, event, tp):
 
 def queue_get_exception(inqueue, outqueue):
     try:
-        inqueue.get()
+        torch.zeros(5, 5).cuda()
     except Exception as e:
         outqueue.put(e)
     else:
@@ -258,7 +260,8 @@ class TestMultiprocessing(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_cuda_bad_call(self):
-        t = torch.zeros(5, 5).cuda()
+        # Initialize CUDA
+        t = torch.zeros(5, 5).cuda().cpu()
         inq = mp.Queue()
         outq = mp.Queue()
         p = mp.Process(target=queue_get_exception, args=(inq, outq))
