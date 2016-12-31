@@ -82,6 +82,13 @@ class _TensorBase(object):
         self.storage().share_memory_()
         return self
 
+    def is_shared(self):
+        """Checks if tensor is in shared memory.
+
+        This is always ``True`` for CUDA tensors.
+        """
+        return self.storage().is_shared()
+
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:

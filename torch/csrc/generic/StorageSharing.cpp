@@ -366,6 +366,22 @@ static PyObject * THPStorage_(newView)(THPStorage *self, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THPStorage_(isShared)(THPStorage *self)
+{
+#ifdef THC_GENERIC_FILE
+  Py_RETURN_TRUE;
+#else
+  void *allocator = self->cdata->allocator;
+  if (allocator == &THMapAllocator ||
+      allocator == &THStorageWeakRefAllocator ||
+      allocator == &THManagedSharedAllocator) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+#endif
+}
+
 static PyMethodDef THPStorage_(sharingMethods)[] = {
   {"_new_with_weak_ptr", (PyCFunction)THPStorage_(newWithWeakPtr), METH_O | METH_CLASS, NULL},
 #ifdef THC_GENERIC_FILE
@@ -382,5 +398,6 @@ static PyMethodDef THPStorage_(sharingMethods)[] = {
   {"_shared_decref", (PyCFunction)THPStorage_(sharedDecref), METH_NOARGS, NULL},
   {"_shared_incref", (PyCFunction)THPStorage_(sharedIncref), METH_NOARGS, NULL},
   {"_get_shared_fd", (PyCFunction)THPStorage_(sharedFd), METH_NOARGS, NULL},
+  {"is_shared", (PyCFunction)THPStorage_(isShared), METH_NOARGS, NULL},
   {NULL}
 };
