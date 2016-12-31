@@ -6,8 +6,12 @@ cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
 BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -DTH_GENERIC_USE_HALF=1 -DCUDA_HAS_FP16=1 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
 LDFLAGS="-L$INSTALL_DIR/lib "
+LD_POSTFIX=".so.1"
+LD_POSTFIX_UNVERSIONED=".so"
 if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
+    LD_POSTFIX=".1.dylib"
+    LD_POSTFIX_UNVERSIONED=".dylib"
 else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
 fi
@@ -23,9 +27,17 @@ function build() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
               -DCUDA_NVCC_FLAGS="$BASIC_C_FLAGS" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
-              -DTH_LIB_PATH="$INSTALL_DIR/lib"
+              -DTH_LIB_PATH="$INSTALL_DIR/lib" \
+              -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
+              -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
+              -DTH_SO_VERSION=1 \
+              -DTHC_SO_VERSION=1 \
+              -DTHNN_SO_VERSION=1 \
+              -DTHCUNN_SO_VERSION=1 
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
+
+  rm -rf $INSTALL_DIR/lib/lib$1$LD_POSTFIX_UNVERSIONED
 
   if [[ $(uname) == 'Darwin' ]]; then
     cd tmp_install/lib

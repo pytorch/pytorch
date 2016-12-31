@@ -168,8 +168,22 @@ include_dirs += [
 
 extra_link_args.append('-L' + lib_path)
 
+# we specify exact lib names to avoid conflict with lua-torch installs
+TH_LIB     = os.path.join(lib_path, 'libTH.so.1')
+THC_LIB    = os.path.join(lib_path, 'libTHC.so.1')
+THNN_LIB   = os.path.join(lib_path, 'libTHNN.so.1')
+THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
+if platform.system() == 'Darwin':
+    TH_LIB     = os.path.join(lib_path, 'libTH.1.dylib')
+    THC_LIB    = os.path.join(lib_path, 'libTHC.1.dylib')
+    THNN_LIB   = os.path.join(lib_path, 'libTHNN.1.dylib')
+    THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
+
 main_compile_args = ['-D_THP_CORE']
-main_libraries = ['TH', 'shm']
+main_libraries = ['shm']
+main_link_args = [
+    '-l:' + TH_LIB,
+    ]
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -208,7 +222,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_libraries += ['THC']
+    main_link_args += ['-l:' + THC_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -257,7 +271,7 @@ C = Extension("torch._C",
     language='c++',
     extra_compile_args=main_compile_args + extra_compile_args,
     include_dirs=include_dirs,
-    extra_link_args=extra_link_args + [make_relative_rpath('lib')]
+    extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')],
 )
 extensions.append(C)
 
@@ -268,23 +282,30 @@ DL = Extension("torch._dl",
 extensions.append(DL)
 
 THNN = Extension("torch._thnn._THNN",
-    libraries=['TH', 'THNN'],
     sources=['torch/csrc/nn/THNN.cpp'],
     language='c++',
     extra_compile_args=extra_compile_args,
     include_dirs=include_dirs,
-    extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
+    extra_link_args=extra_link_args + [
+        '-l:' + TH_LIB,
+        '-l:' + THNN_LIB,
+        make_relative_rpath('../lib'),
+    ]
 )
 extensions.append(THNN)
 
 if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
-        libraries=['TH', 'THC', 'THCUNN'],
         sources=['torch/csrc/nn/THCUNN.cpp'],
         language='c++',
         extra_compile_args=extra_compile_args,
         include_dirs=include_dirs,
-        extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
+        extra_link_args=extra_link_args + [
+            '-l:' + TH_LIB,
+            '-l:' + THC_LIB,
+            '-l:' + THCUNN_LIB,
+            make_relative_rpath('../lib'),
+        ]
     )
     extensions.append(THCUNN)
 
