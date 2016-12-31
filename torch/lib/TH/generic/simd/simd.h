@@ -2,8 +2,10 @@
 #define TH_SIMD_INC
 
 #include <stdint.h>
-#ifdef _MSC_VER
+#if defined(_MSC_VER)
 #include <intrin.h>
+#elif defined(HAVE_GCC_GET_CPUID)
+#include <cpuid.h>
 #endif
 
 // Can be found on Intel ISA Reference for CPUID
@@ -90,7 +92,17 @@ static inline uint32_t detectHostSIMDExtensions()
 #else   // x86
 static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
 {
-#ifndef _MSC_VER
+#if defined(_MSC_VER)
+  uint32_t cpuInfo[4];
+  __cpuid(cpuInfo, *eax);
+  *eax = cpuInfo[0];
+  *ebx = cpuInfo[1];
+  *ecx = cpuInfo[2];
+  *edx = cpuInfo[3];
+#elif defined(HAVE_GCC_GET_CPUID)
+  uint32_t level = *eax;
+  __get_cpuid (level, eax, ebx, ecx, edx);
+#else
   uint32_t a = *eax, b, c, d;
   asm volatile ( "cpuid\n\t"
                  : "+a"(a), "=b"(b), "=c"(c), "=d"(d) );
@@ -98,13 +110,6 @@ static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *
   *ebx = b;
   *ecx = c;
   *edx = d;
-#else
-  uint32_t cpuInfo[4];
-  __cpuid(cpuInfo, *eax);
-  *eax = cpuInfo[0];
-  *ebx = cpuInfo[1];
-  *ecx = cpuInfo[2];
-  *edx = cpuInfo[3];
 #endif
 }
 
