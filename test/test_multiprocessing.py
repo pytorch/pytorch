@@ -9,6 +9,8 @@ from sys import platform
 import torch
 import torch.cuda
 import torch.multiprocessing as mp
+from torch.autograd import Variable
+from torch.nn import Parameter
 from common import TestCase
 
 
@@ -55,6 +57,23 @@ def cuda_multiply_two(queue, ready, done):
         cuda_event.record()
         done.set()
         del cuda_event
+
+
+def autograd_sharing(queue, ready, master_modified):
+    var = queue.get()
+    ready.set()
+    master_modified.wait()
+
+    expected_var = torch.range(1, 25).view(5, 5)
+    expected_var[0,0] = 1000
+    is_ok = var.data.equal(expected_var)
+    var.data[:] = torch.ones(5, 5)
+
+    if var.grad is not None:
+        is_ok &= var.grad.equal(torch.ones(5, 5) * 4)
+        var.grad[:] = torch.ones(5, 5)
+
+    queue.put(is_ok)
 
 
 @contextlib.contextmanager
@@ -293,6 +312,44 @@ class TestMultiprocessing(TestCase):
             event.synchronize()
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
+
+    def _test_autograd_sharing(self, var):
+        ready = mp.Event()
+        master_modified = mp.Event()
+        queue = mp.Queue()
+        p = mp.Process(target=autograd_sharing, args=(queue, ready, master_modified))
+        p.start()
+        queue.put(var)
+
+        ready.wait()
+        var.data[0,0] = 1000
+        if var.grad is not None:
+            var.grad[:] = torch.ones(5, 5) * 4
+        master_modified.set()
+
+        worker_ok = queue.get()
+        self.assertTrue(worker_ok)
+
+        self.assertEqual(var.data, torch.ones(5, 5))
+        if var.grad is not None:
+            self.assertEqual(var.grad, torch.ones(5, 5))
+        p.join()
+
+    def test_variable_sharing(self):
+        configs = [
+            (True, False),
+            (False, False),
+            (False, True),
+        ]
+        for requires_grad, volatile in configs:
+            var = Variable(torch.range(1, 25).view(5, 5),
+                            requires_grad=requires_grad,
+                            volatile=volatile)
+            self._test_autograd_sharing(var)
+
+    def test_parameter_sharing(self):
+        param = Parameter(torch.range(1, 25).view(5, 5))
+        self._test_autograd_sharing(param)
 
 
 if __name__ == '__main__':
