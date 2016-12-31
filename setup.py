@@ -169,11 +169,13 @@ include_dirs += [
 extra_link_args.append('-L' + lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
+link_prefix='-l:'
 TH_LIB     = os.path.join(lib_path, 'libTH.so.1')
 THC_LIB    = os.path.join(lib_path, 'libTHC.so.1')
 THNN_LIB   = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
 if platform.system() == 'Darwin':
+    link_prefix=''
     TH_LIB     = os.path.join(lib_path, 'libTH.1.dylib')
     THC_LIB    = os.path.join(lib_path, 'libTHC.1.dylib')
     THNN_LIB   = os.path.join(lib_path, 'libTHNN.1.dylib')
@@ -181,9 +183,7 @@ if platform.system() == 'Darwin':
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [
-    '-l:' + TH_LIB,
-    ]
+main_link_args = [link_prefix + TH_LIB]
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -222,7 +222,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_link_args += ['-l:' + THC_LIB]
+    main_link_args += [link_prefix + THC_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -287,8 +287,8 @@ THNN = Extension("torch._thnn._THNN",
     extra_compile_args=extra_compile_args,
     include_dirs=include_dirs,
     extra_link_args=extra_link_args + [
-        '-l:' + TH_LIB,
-        '-l:' + THNN_LIB,
+        link_prefix + TH_LIB,
+        link_prefix + THNN_LIB,
         make_relative_rpath('../lib'),
     ]
 )
@@ -301,9 +301,9 @@ if WITH_CUDA:
         extra_compile_args=extra_compile_args,
         include_dirs=include_dirs,
         extra_link_args=extra_link_args + [
-            '-l:' + TH_LIB,
-            '-l:' + THC_LIB,
-            '-l:' + THCUNN_LIB,
+            link_prefix + TH_LIB,
+            link_prefix + THC_LIB,
+            link_prefix + THCUNN_LIB,
             make_relative_rpath('../lib'),
         ]
     )
