@@ -351,6 +351,25 @@ class TestMultiprocessing(TestCase):
         param = Parameter(torch.range(1, 25).view(5, 5))
         self._test_autograd_sharing(param)
 
+    def _test_is_shared(self):
+        t = torch.randn(5, 5)
+        self.assertFalse(t.is_shared())
+        t.share_memory_()
+        self.assertTrue(t.is_shared())
+
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
+    def test_is_shared(self):
+        self._test_is_shared()
+
+    def test_fs_is_shared(self):
+        with fs_sharing():
+            self._test_is_shared()
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    def test_is_shared_cuda(self):
+        t = torch.randn(5, 5).cuda()
+        self.assertTrue(t.is_shared())
+
 
 if __name__ == '__main__':
     unittest.main()
