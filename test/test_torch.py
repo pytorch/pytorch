@@ -1052,6 +1052,18 @@ class TestTorch(TestCase):
 
         self.assertRaises(TypeError, lambda: torch.cat([]))
 
+    def test_stack(self):
+        x = torch.rand(2, 3, 4)
+        y = torch.rand(2, 3, 4)
+        z = torch.rand(2, 3, 4)
+        for dim in range(4):
+            res = torch.stack((x, y, z), dim)
+            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            self.assertEqual(res.size(), expected_size)
+            self.assertEqual(res.select(dim, 0), x, 0)
+            self.assertEqual(res.select(dim, 1), y, 0)
+            self.assertEqual(res.select(dim, 2), z, 0)
+
     def test_linspace(self):
         _from = random.random()
         to = _from + random.random()

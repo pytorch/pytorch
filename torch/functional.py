@@ -19,3 +19,10 @@ def chunk(tensor, n_chunks, dim=0):
     split_size = (tensor.size(dim) + n_chunks - 1) // n_chunks
     return split(tensor, split_size, dim)
 
+
+def stack(sequence, dim=0):
+    if len(sequence) == 0:
+        raise TypeError("stack expects a non-empty sequence of tensors")
+    if dim < 0:
+        dim += sequence[0].dim()
+    return torch.cat(list(t.unsqueeze(dim) for t in sequence), dim)
