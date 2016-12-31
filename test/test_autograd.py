@@ -353,7 +353,7 @@ class TestAutograd(TestCase):
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.device_count() < 2,
             "CUDA not available or <2 GPUs detected")
     def test_unused_output_gpu(self):
-        from torch.nn.parallel.functions import Broadcast
+        from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
         outputs = Broadcast(list(range(torch.cuda.device_count())))(x)
         y = outputs[-1] * 2
