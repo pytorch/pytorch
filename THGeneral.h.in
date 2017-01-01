@@ -47,7 +47,7 @@
 #endif
 
 #ifndef TH_GENERIC_USE_HALF
-# define TH_GENERIC_USE_HALF 0
+# define TH_GENERIC_USE_HALF 1
 #endif
 
 #ifndef TH_NATIVE_HALF
