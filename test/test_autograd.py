@@ -399,6 +399,67 @@ class TestAutograd(TestCase):
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
 
+    def test_return_leaf(self):
+        class Identity(Function):
+            def forward(self, a, b):
+                return a, a + b
+
+            def backward(self, grad_a, grad_b):
+                return grad_a + grad_b, grad_b
+
+        class Inplace(InplaceFunction):
+            def forward(self, a, b):
+                self.mark_dirty(a)
+                return a.add_(b), b + 2
+
+            def backward(self, grad_a, grad_b):
+                return grad_a, grad_a + grad_b
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        q, p = Identity()(x, y)
+        # Make sure hooks only receive grad from usage of q, not x.
+        q.register_hook(
+                'test', lambda grad: self.assertEqual(grad, torch.ones(5, 5)))
+        (q + p + x).sum().backward()
+        self.assertEqual(x.grad, torch.ones(5, 5) * 3)
+        self.assertEqual(y.grad, torch.ones(5, 5))
+        del q, p  # these need to be freed, or next part will raise an error
+
+    def test_return_leaf_inplace(self):
+        class Inplace(InplaceFunction):
+            def forward(self, a, b):
+                self.mark_dirty(a)
+                return a.add_(b), b + 2
+
+            def backward(self, grad_a, grad_b):
+                return grad_a, grad_a + grad_b
+
+        x = Variable(torch.randn(5, 5))
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        fn = Inplace(True)
+        q, p = fn(x, y)
+        self.assertIs(q, x)
+        self.assertIs(q.creator, fn)
+        self.assertTrue(q.requires_grad)
+        q.sum().backward()
+        self.assertEqual(y.grad, torch.ones(5, 5))
+
+    def test_leaf_assignment(self):
+        x = Variable(torch.randn(5, 5))
+        y = Variable(torch.randn(5), requires_grad=True)
+        z = Variable(torch.randn(5), requires_grad=True)
+
+        x[0] = y
+        x[1] = 2 * z
+        self.assertTrue(x.requires_grad)
+        self.assertIsNot(x.creator, None)
+        x.sum().backward()
+        self.assertEqual(y.grad, torch.ones(5))
+        self.assertEqual(z.grad, torch.ones(5) * 2)
+
     def test_backward_copy(self):
       # This tests checks backward engine for a very subtle bug that appreared
       # in one of the initial versions of autograd. Gradients tensors were
@@ -480,18 +541,18 @@ class TestAutograd(TestCase):
         class MyFn(Function):
             def forward(self, input):
                 self.save_for_backward(None, input, None)
-                return input
+                return input * input
 
             def backward(self, grad_output):
                 n1, input, n2 = self.saved_tensors
                 test_case.assertIsNone(n1)
                 test_case.assertIsNone(n2)
-                return input * grad_output
+                return 2 * input * grad_output
 
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = MyFn()(x)
         y.sum().backward()
-        self.assertEqual(x.grad, x.data)
+        self.assertEqual(x.grad, 2 * x.data)
 
     def test_too_many_grads(self):
         class MyFn(Function):
