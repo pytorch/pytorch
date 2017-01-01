@@ -98,10 +98,15 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   long i = 0;
   long dim;
   long div = 1;
+#ifdef TH_REAL_IS_HALF
+#define IS_NONZERO(val) (TH_half2float(val)!=0)
+#else
+#define IS_NONZERO(val) ((val)!=0)
+#endif
 
   /* First Pass to determine size of subscripts */
   TH_TENSOR_APPLY(real, tensor,
-                  if (*tensor_data != 0) {
+                  if IS_NONZERO(*tensor_data) {
                     ++numel;
                   });
 #ifdef DEBUG
@@ -112,7 +117,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   /* Second pass populates subscripts */
   subscript_data = THLongTensor_data(subscript);
   TH_TENSOR_APPLY(real, tensor,
-                  if (*tensor_data != 0) {
+                  if IS_NONZERO(*tensor_data) {
                     div = 1;
 
                     for (dim = tensor->nDimension - 1; dim >= 0; dim--) {
@@ -395,6 +400,7 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    break;);
   return sum;
 }
+
 
 #undef th_isnan
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -2596,5 +2602,45 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalu
   );
 }
 
+void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue)
+{
+  THArgCheck(THTensor_(nDimension)(tensor) < 3, 2, "invalid dimension %d, the input must be a 2d tensor", THTensor_(nDimension)(tensor));
+
+  int dimension = 1;
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(tensor), 2, "invalid dimension %d",
+      dimension + TH_INDEX_BASE);
+
+  real minval;
+  real maxval;
+  real *h_data;
+
+  THTensor_(resize2d)(hist, tensor->size[0], nbins);
+  THTensor_(zero)(hist);
+
+  minval = minvalue;
+  maxval = maxvalue;
+  if (minval == maxval)
+  {
+    minval = THTensor_(minall)(tensor);
+    maxval = THTensor_(maxall)(tensor);
+  }
+  if (minval == maxval)
+  {
+    minval = minval - 1;
+    maxval = maxval + 1;
+  }
+
+  TH_TENSOR_DIM_APPLY2(real, tensor, real, hist, dimension, long i;
+                        for(i = 0; i < tensor_size; i++)
+                        {
+                          if(tensor_data[i*tensor_stride] >= minval && tensor_data[i*tensor_stride] <= maxval) {
+                            const int bin = (int)((tensor_data[i*tensor_stride]-minval) / (maxval-minval) * nbins);
+                            hist_data[THMin(bin, nbins-1)] += 1;
+                          }
+                        }
+  );
+}
+
 #endif /* floating point only part */
+#undef IS_NONZERO
 #endif

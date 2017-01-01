@@ -2,8 +2,10 @@
 #define TH_SIMD_INC
 
 #include <stdint.h>
-#ifdef _MSC_VER
+#if defined(_MSC_VER)
 #include <intrin.h>
+#elif defined(HAVE_GCC_GET_CPUID)
+#include <cpuid.h>
 #endif
 
 // Can be found on Intel ISA Reference for CPUID
@@ -40,6 +42,8 @@ enum SIMDExtensions
 {
 #if defined(__NEON__)
   SIMDExtension_NEON    = 0x1,
+#elif defined(__PPC64__)
+  SIMDExtension_VSX     = 0x1,
 #else
   SIMDExtension_AVX2    = 0x1,
   SIMDExtension_AVX     = 0x2,
@@ -48,26 +52,57 @@ enum SIMDExtensions
   SIMDExtension_DEFAULT = 0x0
 };
 
-#if defined(__NEON__)
+
+#if defined(__arm__)
+
+ #if defined(__NEON__)
 
 static inline uint32_t detectHostSIMDExtensions()
 {
   return SIMDExtension_NEON;
 }
 
-#else // x86
-
-#if defined(__arm__) //ARM without NEON
+ #else //ARM without NEON
 
 static inline uint32_t detectHostSIMDExtensions()
 {
   return SIMDExtension_DEFAULT;
 }
+
+ #endif
+
+#elif defined(__PPC64__)
+
+ #if defined(__VSX__)
+
+static inline uint32_t detectHostSIMDExtensions()
+{
+  return SIMDExtension_VSX;
+}
+
+ #else
+
+static inline uint32_t detectHostSIMDExtensions()
+{
+  return SIMDExtension_DEFAULT;
+}
+
+ #endif
   
-#else
+#else   // x86
 static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
 {
-#ifndef _MSC_VER
+#if defined(_MSC_VER)
+  uint32_t cpuInfo[4];
+  __cpuid(cpuInfo, *eax);
+  *eax = cpuInfo[0];
+  *ebx = cpuInfo[1];
+  *ecx = cpuInfo[2];
+  *edx = cpuInfo[3];
+#elif defined(HAVE_GCC_GET_CPUID)
+  uint32_t level = *eax;
+  __get_cpuid (level, eax, ebx, ecx, edx);
+#else
   uint32_t a = *eax, b, c, d;
   asm volatile ( "cpuid\n\t"
                  : "+a"(a), "=b"(b), "=c"(c), "=d"(d) );
@@ -75,13 +110,6 @@ static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *
   *ebx = b;
   *ecx = c;
   *edx = d;
-#else
-  uint32_t cpuInfo[4];
-  __cpuid(cpuInfo, *eax);
-  *eax = cpuInfo[0];
-  *ebx = cpuInfo[1];
-  *ecx = cpuInfo[2];
-  *edx = cpuInfo[3];
 #endif
 }
 
@@ -106,7 +134,6 @@ static inline uint32_t detectHostSIMDExtensions()
   return hostSimdExts;
 }
 
-#endif // end x86 SIMD extension detection code
-#endif // end __arm__
+#endif // end SIMD extension detection code
 
 #endif

@@ -8,7 +8,6 @@
 #define THInf UCHAR_MAX
 #define TH_REAL_IS_BYTE
 #line 1 TH_GENERIC_FILE
-/*#line 1 "THByteStorage.h"*/
 #include TH_GENERIC_FILE
 #undef real
 #undef accreal

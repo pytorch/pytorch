@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.h"
 #else
 
-
-
 TH_API void THTensor_(fill)(THTensor *r_, real value);
 TH_API void THTensor_(zero)(THTensor *r_);
 
@@ -163,6 +161,7 @@ TH_API void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension
 TH_API void THTensor_(renorm)(THTensor *r_, THTensor *t, real value, int dimension, real maxnorm);
 TH_API accreal THTensor_(dist)(THTensor *a, THTensor *b, real value);
 TH_API void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue);
+TH_API void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue);
 
 TH_API accreal THTensor_(meanall)(THTensor *self);
 TH_API accreal THTensor_(varall)(THTensor *self);
@@ -173,7 +172,6 @@ TH_API void THTensor_(linspace)(THTensor *r_, real a, real b, long n);
 TH_API void THTensor_(logspace)(THTensor *r_, real a, real b, long n);
 TH_API void THTensor_(rand)(THTensor *r_, THGenerator *_generator, THLongStorage *size);
 TH_API void THTensor_(randn)(THTensor *r_, THGenerator *_generator, THLongStorage *size);
-
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
