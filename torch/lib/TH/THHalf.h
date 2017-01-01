@@ -6,18 +6,18 @@
 
 /* Neither built-in nor included from Cutorch, use our definition lifted from CUDA */
 #if defined(__GNUC__)
-#define __align__(n) __attribute__((aligned(n)))
+#define __thalign__(n) __attribute__((aligned(n)))
 #elif defined(_WIN32)
-#define __align__(n) __declspec(align(n))
+#define __thalign__(n) __declspec(align(n))
 #else
-#define __align__(n)
+#define __thalign__(n)
 #endif
 
-typedef struct __align__(2){
+typedef struct __thalign__(2){
   unsigned short x;
 } __THHalf;
 
-typedef struct __align__(4) {
+typedef struct __thalign__(4) {
     unsigned int x;
 } __THHalf2;
 
@@ -36,4 +36,5 @@ TH_API float TH_half2float(THHalf a);
 
 #define TH_HALF_MAX TH_HALF_BITS_TO_LITERAL(0x7BFF)
 
+#undef __thalign__
 #endif
