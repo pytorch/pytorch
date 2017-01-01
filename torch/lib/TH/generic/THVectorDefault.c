@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THVectorDefault.c"
 #else
 
-#ifndef TH_GENERIC_NO_MATH
-
 void THVector_(fill_DEFAULT)(real *x, const real c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
 
@@ -82,5 +80,5 @@ void THVector_(mul_DEFAULT)(real *y, const real *x, const ptrdiff_t n)
   for(; i < n; i++)
     y[i] *= x[i];
 }
-# endif
+
 #endif

@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.h"
 #else
 
-#ifndef TH_GENERIC_NO_MATH
-
 TH_API void THTensor_(fill)(THTensor *r_, real value);
 TH_API void THTensor_(zero)(THTensor *r_);
 
@@ -183,5 +181,4 @@ TH_API int THTensor_(logicalany)(THTensor *self);
 
 #endif /* TH_REAL_IS_BYTE */
 
-#endif /* TH_GENERIC_NO_MATH */
 #endif

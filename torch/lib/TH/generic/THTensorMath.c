@@ -2,7 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
 
-#ifndef TH_GENERIC_NO_MATH
 #define TH_OMP_OVERHEAD_THRESHOLD 100000
 
 void THTensor_(fill)(THTensor *r_, real value)
@@ -2546,9 +2545,9 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalu
 }
 
 void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue)
-{  
+{
   THArgCheck(THTensor_(nDimension)(tensor) < 3, 2, "invalid dimension %d, the input must be a 2d tensor", THTensor_(nDimension)(tensor));
-  
+
   int dimension = 1;
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(tensor), 2, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
@@ -2575,7 +2574,7 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, long nbins, real minval
 
   TH_TENSOR_DIM_APPLY2(real, tensor, real, hist, dimension, long i;
                         for(i = 0; i < tensor_size; i++)
-                        {  
+                        {
                           if(tensor_data[i*tensor_stride] >= minval && tensor_data[i*tensor_stride] <= maxval) {
                             const int bin = (int)((tensor_data[i*tensor_stride]-minval) / (maxval-minval) * nbins);
                             hist_data[THMin(bin, nbins-1)] += 1;
@@ -2586,5 +2585,4 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, long nbins, real minval
 
 #endif /* floating point only part */
 #undef IS_NONZERO
-#endif /* TH_GENERIC_NO_MATH */
 #endif

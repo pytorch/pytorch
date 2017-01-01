@@ -14,7 +14,13 @@
 #include "generic/THStorage.h"
 #include "THGenerateAllTypes.h"
 
+#include "generic/THStorage.h"
+#include "THGenerateHalfType.h"
+
 #include "generic/THStorageCopy.h"
 #include "THGenerateAllTypes.h"
+
+#include "generic/THStorageCopy.h"
+#include "THGenerateHalfType.h"
 
 #endif

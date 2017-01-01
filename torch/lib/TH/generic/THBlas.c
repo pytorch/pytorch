@@ -2,7 +2,6 @@
 #define TH_GENERIC_FILE "generic/THBlas.c"
 #else
 
-# ifndef TH_GENERIC_NO_MATH
 
 #ifdef BLAS_F2C
 # define ffloat double
@@ -404,5 +403,5 @@ void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha,
     }
   }
 }
-# endif /* TH_GENERIC_NO_MATH */
+
 #endif

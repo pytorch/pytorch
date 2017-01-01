@@ -58,9 +58,7 @@ IMPLEMENT_THStorage_COPY(Int)
 IMPLEMENT_THStorage_COPY(Long)
 IMPLEMENT_THStorage_COPY(Float)
 IMPLEMENT_THStorage_COPY(Double)
-#if TH_GENERIC_USE_HALF
 IMPLEMENT_THStorage_COPY_FROM_HALF(Half)
-#endif
 #else
 /* only allow pass-through for Half */
 IMPLEMENT_THStorage_COPY_TO_FROM_HALF(Half)

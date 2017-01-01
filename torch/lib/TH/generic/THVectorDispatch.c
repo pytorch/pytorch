@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THVectorDispatch.c"
 #else
 
-#ifndef TH_GENERIC_NO_MATH
-
 /* For now there are only SIMD implementations for FLOAT and DOUBLE.
  * Hopefully in the future this can be made totally generic (e.g, there are SIMD implementations
  * for a lot of functions */
@@ -167,5 +165,5 @@ void THVector_(vectorDispatchInit)(void)
   INIT_DISPATCH_PTR(scale);
   INIT_DISPATCH_PTR(mul);
 }
-#endif /* TH_GENERIC_NO_MATH */
+
 #endif

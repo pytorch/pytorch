@@ -16,8 +16,14 @@ typedef struct {
 #include "generic/THTensor.h"
 #include "THGenerateAllTypes.h"
 
+#include "generic/THTensor.h"
+#include "THGenerateHalfType.h"
+
 #include "generic/THTensorCopy.h"
 #include "THGenerateAllTypes.h"
+
+#include "generic/THTensorCopy.h"
+#include "THGenerateHalfType.h"
 
 #include "THTensorMacros.h"
 

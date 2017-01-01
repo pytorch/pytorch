@@ -339,6 +339,7 @@ INSTALL(FILES
   THFilePrivate.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateAllTypes.h
+  THGenerateHalfType.h
   THGenerateFloatTypes.h
   THGenerateIntTypes.h
   THLapack.h
