@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.h"
 #else
 
-#ifndef TH_GENERIC_NO_MATH
-
 TH_API void THTensor_(random)(THTensor *self, THGenerator *_generator);
 TH_API void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p);
 TH_API void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p);
@@ -24,5 +22,4 @@ TH_API void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self);
 TH_API void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self);
 #endif
 
-#endif
 #endif

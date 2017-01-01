@@ -33,9 +33,7 @@ IMPLEMENT_THTensor_COPY(Int, int)
 IMPLEMENT_THTensor_COPY(Long, long)
 IMPLEMENT_THTensor_COPY(Float, float)
 IMPLEMENT_THTensor_COPY(Double, double)
-#if TH_GENERIC_USE_HALF
 IMPLEMENT_THTensor_COPY_FROM_HALF(Half, THHalf)
-#endif
 #else
 /* only allow pass-through for Half */
 IMPLEMENT_THTensor_COPY(Half, THHalf)
