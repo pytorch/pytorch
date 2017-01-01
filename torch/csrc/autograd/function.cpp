@@ -2,6 +2,7 @@
 #include <structmember.h>
 
 #include <unordered_map>
+#include <unordered_set>
 #include <exception>
 
 #include "THP.h"
@@ -101,7 +102,8 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
 
-static void _mark_dirty(THPFunction *self, t2var_type &t2var)
+static void _mark_dirty(THPFunction *self, t2var_type &t2var,
+        std::unordered_set<PyObject *> &dirty_inputs)
 {
   // Increase versions of modified tensors
   if (!self->dirty_tensors) return;
@@ -112,6 +114,7 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var)
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   for (int i = 0; i < num_dirty; i++) {
     PyObject *tensor = PyTuple_GET_ITEM(self->dirty_tensors, i);
+    dirty_inputs.insert(tensor);
     THPVariable *variable;
     try {
       variable = t2var.at(tensor);
@@ -135,7 +138,8 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var)
 }
 
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
-    PyObject *raw_output, PyObject *outputs)
+    std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
+    PyObject *outputs)
 {
   // Wrap outputs in Variables
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
@@ -161,16 +165,48 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
         Py_INCREF(self);
         input_var->creator = (PyObject*)self;
       } else {
-        // If it's a leaf it's not as simple. Leaves will raise an error in
-        // backward if they've been changed, or they're no longer leaves. In
-        // some cases (e.g. broadcast) it's perfectly valid to return the same
-        // tensor untouched, so instead of moving it we're going to create a
-        // copy and join their version counters. This works for broadcast,
-        // and if the use wasn't valid we'll still detect an error, because
-        // the leaf will have a version != 0.
-        output_var = (THPVariable*)THPVariable_New(output, (PyObject*)self, self->requires_grad);
-        if (!output_var) throw python_error();
-        output_var->version_counter->join_with(*input_var->version_counter);
+        // If the Variable has been changed, we have to move it after the
+        // current function to ensure the gradient is computed correctly.
+        // There are two cases now:
+        // 1. If it requires grad, it is an error, and this will be caught
+        // when its _do_backward is called, because it won't be a leaf anymore.
+        // Also we'll change its version.
+        // 2. If it doesn't require grad, we can safely move it in the graph,
+        // because its _do_backward will never be called.
+        if (dirty_inputs.count(output) > 0) {
+          Py_INCREF(input_var);
+          output_var = input_var;
+          Py_INCREF(self);
+          output_var->creator = (PyObject*)self;
+          if (!output_var->requires_grad && self->requires_grad) {
+            // Now, there's another subtlety. We move the input in the graph
+            // and we change it's requires_grad to True. However, remember
+            // that we're still holding a reference to is as a previous
+            // function. Backward engine will think that it was really a
+            // leaf that initialy did require grad and call its _do_backward
+            // and that will throw. Because of this, we need to allocate
+            // a dummy leaf that doesn't require grad and put it as our
+            // previous function.
+            output_var->requires_grad = self->requires_grad;
+            PyObject* dummy_prev_fn = THPVariable_New(output, NULL, false);
+            if (!dummy_prev_fn) throw python_error();
+            self->previous_functions[i] = THPFunctionPtr(dummy_prev_fn, 0);
+          }
+        } else {
+          // An input has been returned, but it wasn't modified. It's better
+          // not to move the Variable, because there are some legitimate cases
+          // where making it non-leaf would break stuff (e.g. broadcast). Also,
+          // returning the input Variable is also not a very good option,
+          // because if someone uses hooks, they will fire with grads from
+          // all usages, not only from usages of this output. This is why we'll
+          // just return a copy and join their version counters. This has
+          // a side-effect of making in-place ops on any of these Variables an
+          // immediate error, but it would be raised anyway, once someone
+          // calls backward.
+          output_var = (THPVariable*)THPVariable_New(output, (PyObject*)self, self->requires_grad);
+          if (!output_var) throw python_error();
+          output_var->version_counter->join_with(*input_var->version_counter);
+        }
       }
     }
     if (!output_var) throw python_error();
@@ -390,8 +426,9 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
         self->previous_functions[i] = THPFunctionPtr(prev_fn, input_var->output_nr);
       }
 
-      _mark_dirty(self, t2var);
-      _wrap_outputs(self, t2var, raw_output, outputs);
+      std::unordered_set<PyObject *> dirty_inputs;
+      _mark_dirty(self, t2var, dirty_inputs);
+      _wrap_outputs(self, t2var, dirty_inputs, raw_output, outputs);
       _join_version_counters(self, t2var);
       if (self->requires_grad ||
           PyObject_IsInstance((PyObject*)self, THPStochasticFunctionClass)) {

@@ -42,13 +42,15 @@ PyObject * THPVariable_NewVolatile(PyObject *data)
 }
 
 // This function DOES NOT steal a reference to data and creator
+// To create a leaf Variable pass NULL as creator.
 PyObject * THPVariable_New(PyObject *data, PyObject *creator, char requires_grad)
 {
   if (num_cached > 0) {
     Py_INCREF(data);
-    Py_INCREF(creator);
+    Py_XINCREF(creator);
     return (PyObject*)pop_cache(data, creator, requires_grad);
   }
+  creator = creator ? creator : Py_None;
   return PyObject_CallFunction(THPVariableClass, "OObb", data, creator, (char)0, requires_grad);
 }
 
