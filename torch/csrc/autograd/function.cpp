@@ -180,7 +180,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
           output_var->creator = (PyObject*)self;
           if (!output_var->requires_grad && self->requires_grad) {
             // Now, there's another subtlety. We move the input in the graph
-            // and we change it's requires_grad to True. However, remember
+            // and we change its requires_grad to True. However, remember
             // that we're still holding a reference to is as a previous
             // function. Backward engine will think that it was really a
             // leaf that initialy did require grad and call its _do_backward
@@ -196,14 +196,15 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
           // An input has been returned, but it wasn't modified. It's better
           // not to move the Variable, because there are some legitimate cases
           // where making it non-leaf would break stuff (e.g. broadcast). Also,
-          // returning the input Variable is also not a very good option,
-          // because if someone uses hooks, they will fire with grads from
-          // all usages, not only from usages of this output. This is why we'll
-          // just return a copy and join their version counters. This has
+          // returning the input Variable is not a good option either,
+          // because if someone registers hooks on it, they will fire with grads
+          // from all usages, not only from usages of this output. This is why
+          // we'll return a copy and join their version counters. This has
           // a side-effect of making in-place ops on any of these Variables an
-          // immediate error, but it would be raised anyway, once someone
+          // immediate error, but it would be raised anyway once someone
           // calls backward.
-          output_var = (THPVariable*)THPVariable_New(output, (PyObject*)self, self->requires_grad);
+          output_var = (THPVariable*)THPVariable_New(output, (PyObject*)self,
+                  self->requires_grad);
           if (!output_var) throw python_error();
           output_var->version_counter->join_with(*input_var->version_counter);
         }

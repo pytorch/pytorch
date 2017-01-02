@@ -99,7 +99,7 @@ class Variable(_C._VariableBase):
             if value is False:
                 hint = (" If you want to use a computed variable in a subgraph "
                     "that doesn't require differentiation use "
-                    "var_no_grad = var.no_grad().")
+                    "var_no_grad = var.detach().")
             else:
                 hint = ''
             raise RuntimeError("you can only change requires_grad flags of "
@@ -259,7 +259,7 @@ class Variable(_C._VariableBase):
                     "of stochastic functions")
         self.creator._reinforce(reward)
 
-    def no_grad(self):
+    def detach(self):
         """Detaches the Variable from the graph that created it."""
         return NoGrad()(self)
 
