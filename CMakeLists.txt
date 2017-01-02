@@ -78,7 +78,8 @@ IF (CORTEXA9_FOUND)
   SET(CMAKE_C_FLAGS "-mcpu=cortex-a9 ${CMAKE_C_FLAGS}")
 ENDIF (CORTEXA9_FOUND)
 
-INCLUDE(CheckIncludeFile)
+INCLUDE (CheckIncludeFile)
+INCLUDE (CheckCSourceCompiles)
 CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
 # Check for a cpuid intrinsic
 IF(HAVE_CPUID_H)
@@ -308,7 +309,6 @@ SET(TH_INLINE "")
 ENDIF(NOT DEFINED C_INLINE)
 
 # Is __thread supported?
-INCLUDE (CheckCSourceCompiles)
 IF(NOT MSVC)
   CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
 ELSE(NOT MSVC)
