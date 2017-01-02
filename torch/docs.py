@@ -15,13 +15,29 @@ Example:
 
 add_docstr(torch._C.acos,
 """
-acos(tensor, out=None) -> tensor
+acos(input, out=None) -> Tensor
 
-Computes the element-wise inverse cosine of a tensor.
+Returns a new `Tensor` with the arccosine  of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
 
 Example:
-    >>> torch.acos(torch.FloatTensor([1, -1]))
-    FloatTensor([0.0000, 3.1416])
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.acos(a)
+     2.2608
+     1.2956
+     1.1075
+        nan
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.add,
@@ -50,26 +66,117 @@ add_docstr(torch._C.addmv,
 
 add_docstr(torch._C.addr,
 """
-""")
+addr(beta=1, mat, alpha=1, vec1, vec2, out=None) -> Tensor
 
-add_docstr(torch._C.all,
-"""
-""")
+Performs the outer-product between vectors :attr:`vec1` and :attr:`vec2` and adds it to the matrix :attr:`mat`.
 
-add_docstr(torch._C.any,
-"""
+Optional values :attr:`beta` and :attr:`alpha` are scalars that multiply :attr:`mat` and `(vec1 [out] vec2)` respectively
+
+In other words,
+
+:math:`res_{ij} = (beta * mat_i_j) + (alpha * vec1_i * vec2_j)`
+
+If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`, then :attr:`mat` must be a matrix of size `n x m`
+
+Args:
+    beta (float, optional): multiplier for :attr:`mat`
+    mat (Tensor): matrix to be added
+    alpha (float, optional): multiplier for `vec1 (out) vec2`
+    vec1 (Tensor): First vector of the outer product
+    vec2 (Tensor): Second vector of the outer product
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> vec1 = torch.range(1, 3)
+    >>> vec2 = torch.range(1, 2)
+    >>> M = torch.zeros(3, 2)
+    >>> torch.addr(M, x, y)
+     1  2
+     2  4
+     3  6
+    [torch.FloatTensor of size 3x2]
 """)
 
 add_docstr(torch._C.asin,
 """
+asin(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the arcsine  of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.asin(a)
+    -0.6900
+     0.2752
+     0.4633
+        nan
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.atan,
 """
+atan(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the arctangent  of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.atan(a)
+    -0.5669
+     0.2653
+     0.4203
+     0.9196
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.atan2,
 """
+atan2(input1, input2, out=None) -> Tensor
+
+Returns a new `Tensor` with the arctangent of the elements of :attr:`input1` and :attr:`input2`.
+
+Args:
+    tensor (Tensor): the first input `Tensor`
+    tensor (Tensor): the second input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.atan2(a, torch.randn(4))
+    -2.4167
+     2.9755
+     0.9363
+     1.6613
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.baddbmm,
@@ -114,10 +221,56 @@ add_docstr(torch._C.cmin,
 
 add_docstr(torch._C.cos,
 """
+cos(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the cosine  of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.cos(a)
+     0.8041
+     0.9633
+     0.9018
+     0.2557
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.cosh,
 """
+cosh(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the hyperbolic cosine  of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.cosh(a)
+     1.2095
+     1.0372
+     1.1015
+     1.9917
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.cross,
@@ -788,10 +941,56 @@ add_docstr(torch._C.sign,
 
 add_docstr(torch._C.sin,
 """
+sin(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the sine of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.sin(a)
+    -0.5944
+     0.2684
+     0.4322
+     0.9667
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.sinh,
 """
+sinh(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the hyperbolic sine of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.sinh(a)
+    -0.6804
+     0.2751
+     0.4619
+     1.7225
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.sort,
@@ -828,10 +1027,56 @@ add_docstr(torch._C.t,
 
 add_docstr(torch._C.tan,
 """
+tan(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the tangent of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.tan(a)
+    -0.7392
+     0.2786
+     0.4792
+     3.7801
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.tanh,
 """
+tanh(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the hyperbolic tangent of the elements of :attr:`input`.
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> a = torch.randn(4)
+    >>> print(a)
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.tanh(a)
+    -0.5625
+     0.2653
+     0.4193
+     0.8648
+    [torch.FloatTensor of size 4]
 """)
 
 add_docstr(torch._C.topk,
