@@ -279,8 +279,6 @@ IMPLEMENT_STATELESS(gather)
 IMPLEMENT_STATELESS(scatter)
 IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
-IMPLEMENT_STATELESS(all)
-IMPLEMENT_STATELESS(any)
 IMPLEMENT_STATELESS(masked_select)
 IMPLEMENT_STATELESS(gesv)
 IMPLEMENT_STATELESS(gels)
@@ -607,8 +605,6 @@ static PyMethodDef TorchMethods[] = {
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"scatter",         (PyCFunction)THPModule_scatter,           METH_VARARGS | METH_KEYWORDS, NULL},
-  {"all",             (PyCFunction)THPModule_all,               METH_VARARGS | METH_KEYWORDS, NULL},
-  {"any",             (PyCFunction)THPModule_any,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
   {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS | METH_KEYWORDS, NULL},

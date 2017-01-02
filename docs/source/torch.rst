@@ -14,8 +14,6 @@ Math operations
 .. autofunction:: addmm
 .. autofunction:: addmv
 .. autofunction:: addr
-.. autofunction:: all
-.. autofunction:: any
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
