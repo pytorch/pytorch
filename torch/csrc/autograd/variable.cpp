@@ -50,6 +50,10 @@ PyObject * THPVariable_New(PyObject *data, PyObject *creator, char requires_grad
     Py_XINCREF(creator);
     return (PyObject*)pop_cache(data, creator, requires_grad);
   }
+  // We can't pass a NULL creator to this Python call, because Py_BuildValue
+  // will raise an error (it tries to be overly smart by setting its own error
+  // if there's no flag set at the moment and we're giving NULL to some
+  // function).
   creator = creator ? creator : Py_None;
   return PyObject_CallFunction(THPVariableClass, "OObb", data, creator, (char)0, requires_grad);
 }
