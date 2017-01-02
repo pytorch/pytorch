@@ -643,8 +643,20 @@ class TestAutograd(TestCase):
             assert_strict_equal(zc, z)
 
 
-def index_variable(num_indices, max_indices):
-    index = torch.randperm(max_indices)[:num_indices].long()
+def index_variable(shape, max_indices):
+    if not isinstance(shape, tuple):
+        shape = (shape,)
+    index = torch.rand(*shape).mul_(max_indices).floor_().long()
+    return Variable(index, requires_grad=False)
+
+def gather_variable(shape, index_dim, max_indices):
+    assert len(shape) == 2
+    assert index_dim < 2
+    batch_dim = 1 - index_dim
+    index = torch.LongTensor(*shape)
+    for i in range(shape[index_dim]):
+        index.select(index_dim, i).copy_(
+                torch.randperm(max_indices)[:shape[batch_dim]])
     return Variable(index, requires_grad=False)
 
 
@@ -740,6 +752,10 @@ function_tests = [
     (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill,     (0, 2),             ((S, S), index_variable(2, S))              ),
     (IndexSelect,   (0,),               ((S, S), index_variable(2, S))              ),
+    (Gather,        (0,),               ((M, S), gather_variable((S, S), 1, M))     ),
+    (Gather,        (1,),               ((M, S), gather_variable((M, S//2), 0, S)), 'dim1'),
+    (Scatter,       (0,),               ((M, S), gather_variable((S, S), 1, M), (S, S))),
+    (Scatter,       (1,),               ((M, S), gather_variable((M, S//2), 0, S), (M, S//2)), 'dim1'),
     (Concat,        (0,),               ((1, S, S), (2, S, S), (3, S, S))           ),
     (Resize,        (S*S, S),           ((S, S, S),)                                ),
     (Diag,          (),                 ((S, S),),                  '2d'            ),

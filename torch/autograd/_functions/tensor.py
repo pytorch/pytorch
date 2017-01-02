@@ -521,7 +521,52 @@ class Chunk(Function):
         return grad_input
 
 
-# TODO: gather
+class Gather(Function):
+
+    def __init__(self, dim):
+        super(Gather, self).__init__()
+        self.dim = dim
+
+    def forward(self, input, index):
+        assert not self.needs_input_grad[1], "Gather can't differentiate " \
+            "the index"
+        self.input_size = input.size()
+        self.save_for_backward(index)
+        return input.gather(self.dim, index)
+
+    def backward(self, grad_output):
+        index, = self.saved_tensors
+        grad_input = grad_output.new(self.input_size).zero_()
+        return grad_input.scatter_(self.dim, index, grad_output), None
+
+
+class Scatter(InplaceFunction):
+
+    def __init__(self, dim, inplace=False):
+        super(Scatter, self).__init__(inplace)
+        self.dim = dim
+
+    def forward(self, input, index, source):
+        assert not self.needs_input_grad[1], "Scatter can't differentiate " \
+            "the index"
+        if self.inplace:
+            self.mark_dirty(input)
+        else:
+            input = input.clone()
+        self.save_for_backward(index)
+        return input.scatter_(self.dim, index, source)
+
+    def backward(self, grad_output):
+        index, = self.saved_tensors
+        grad_input = grad_source = None
+        if self.needs_input_grad[0]:
+            grad_input = grad_output.clone()
+            grad_input.scatter_(self.dim, index, 0)
+        if self.needs_input_grad[2]:
+            grad_source = grad_output.gather(self.dim, index)
+        return grad_input, None, grad_source
+
+
 # TODO: kthvalue
 # TODO: repeat
 # TODO: sort
