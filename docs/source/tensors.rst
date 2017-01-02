@@ -26,12 +26,16 @@ The :class:`torch.Tensor` constructor is an alias for the default tensor type
 
 A tensor can be constructed from a Python :class:`list` or sequence:
 
+::
+
     >>> torch.FloatTensor([[1, 2, 3], [4, 5, 6]])
     1  2  3
     4  5  6
     [torch.FloatTensor of size 2x3]
 
 An empty tensor can be constructed by specifying its size:
+
+::
 
     >>> torch.IntTensor(2, 4).zero_()
     0  0  0  0
@@ -40,6 +44,8 @@ An empty tensor can be constructed by specifying its size:
 
 The contents of a tensor can be accessed and modified using Python's indexing
 and slicing notation:
+
+::
 
     >>> x = torch.FloatTensor([[1, 2, 3], [4, 5, 6]])
     >>> print(x[1][2])

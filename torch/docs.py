@@ -24,14 +24,17 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
+    
     -0.6366
      0.2718
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.acos(a)
      2.2608
      1.2956
@@ -42,6 +45,81 @@ Example:
 
 add_docstr(torch._C.add,
 """
+.. function:: add(tensor, value, out=None)
+
+Adds the scalar :attr:`value` to each element of the input :attr:`tensor` and returns a new resulting tensor.
+
+:math:`out = tensor + value`
+
+Args:
+    tensor (Tensor): the input `Tensor`
+    value (number): the number to be added to each element of :attr:`tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+::
+
+    >>> a = torch.randn(4)
+    >>> print(a)
+
+     0.4050
+    -1.2227
+     1.8688
+    -0.4185
+    [torch.FloatTensor of size 4]
+
+    >>> torch.add(a, 20)
+
+     20.4050
+     18.7773
+     21.8688
+     19.5815
+    [torch.FloatTensor of size 4]
+
+
+.. function:: add(tensor, value=1, other, out=None)
+
+Each element of the Tensor :attr:`other` is multiplied by the scalar :attr:`value` and added to each element of the Tensor :attr:`tensor`. The resulting Tensor is returned.
+The shapes of :attr:`tensor` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+
+.. note:: When the shapes do not match, the shape of :attr:`tensor` is used as the shape for the returned output Tensor
+
+:math:`out = tensor + (other * value)`
+
+Args:
+    tensor (Tensor): the first input `Tensor`
+    value (number): the scalar multiplier for :attr:`other`
+    other (Tensor): the second input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+::
+
+    >>> import torch
+    >>> a = torch.randn(4)
+    >>> print(a)    
+
+    -0.9310
+     2.0330
+     0.0852
+    -0.2941
+    [torch.FloatTensor of size 4]
+
+    >>> b = torch.randn(2, 2)
+    >>> print(b)
+
+     1.0663  0.2544
+    -0.1513  0.0749
+    [torch.FloatTensor of size 2x2]
+
+    >>> torch.add(a, 10, b)
+     9.7322
+     4.5770
+    -1.4279
+     0.4552
+    [torch.FloatTensor of size 4]
+    
+
 """)
 
 add_docstr(torch._C.addbmm,
@@ -68,10 +146,13 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> M = torch.randn(3, 5)
     >>> batch1 = torch.randn(10, 3, 4)
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.addbmm(M, batch1, batch2)
+
      -3.1162  11.0071   7.3102   0.1824  -7.6892
       1.8265   6.0739   0.4589  -0.5641  -5.4283
      -9.3387  -0.1794  -1.2318  -6.8841  -4.7239
@@ -95,10 +176,13 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> t = torch.randn(2, 3)
     >>> t1 = torch.randn(1, 6)
     >>> t2 = torch.randn(6, 1)
     >>> torch.addcdiv(t, 0.1, t1, t2)
+
      0.0122 -0.0188 -0.2354
      0.7396 -1.5721  1.2878
     [torch.FloatTensor of size 2x3]
@@ -121,13 +205,17 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> t = torch.randn(2, 3)
     >>> t1 = torch.randn(1, 6)
     >>> t2 = torch.randn(6, 1)
     >>> torch.addcmul(t, 0.1, t1, t2)
+
      0.0122 -0.0188 -0.2354
      0.7396 -1.5721  1.2878
-    [torch.FloatTensor of size 2x3]""")
+    [torch.FloatTensor of size 2x3]
+""")
 
 add_docstr(torch._C.addmm,
 """
@@ -152,10 +240,13 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> M = torch.randn(2, 3)
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
     >>> torch.addmm(M, mat1, mat2)
+
     -0.4095 -1.9703  1.3561
      5.7674 -4.9760  2.7378
     [torch.FloatTensor of size 2x3]
@@ -185,10 +276,13 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> M = torch.randn(2)
     >>> mat = torch.randn(2, 3)
     >>> vec = torch.randn(3)
     >>> torch.addmv(M, mat, vec)
+
     -2.0939
     -2.2950
     [torch.FloatTensor of size 2]
@@ -217,6 +311,8 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> vec1 = torch.range(1, 3)
     >>> vec2 = torch.range(1, 2)
     >>> M = torch.zeros(3, 2)
@@ -238,6 +334,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -265,6 +363,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -293,6 +393,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -332,6 +434,8 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> M = torch.randn(10, 3, 5)
     >>> batch1 = torch.randn(10, 3, 4)
     >>> batch2 = torch.randn(10, 4, 5)
@@ -360,6 +464,8 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> batch1 = torch.randn(10, 3, 4)
     >>> batch2 = torch.randn(10, 4, 5)
     >>> res = torch.bmm(M, batch1, batch2)
@@ -406,6 +512,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -433,6 +541,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -481,6 +591,8 @@ Computes the dot product (inner product) of two tensors. Both tensors are
 treated as 1-D vectors.
 
 Example:
+::
+
     >>> torch.dot(torch.Tensor([2, 3]), torch.Tensor([2, 1]))
     7.0
 """)
@@ -523,6 +635,8 @@ Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where the tensors are equal and a 0 at every other location
 
 Example:
+::
+
     >>> torch.eq(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
     1  0
     0  1
@@ -536,6 +650,8 @@ equal(tensor1, tensor2) -> bool
 True if two tensors have the same size and elements, False otherwise.
 
 Example:
+::
+
     >>> torch.equal(torch.Tensor([1, 2]), torch.Tensor([1, 2]))
     True
 """)
@@ -547,6 +663,8 @@ exp(tensor, out=None) -> tensor
 Computes the exponential of each element.
 
 Example:
+::
+
     >>> torch.exp(torch.Tensor([0, math.log(2)]))
     torch.FloatTensor([1, 2])
 """)
@@ -566,6 +684,8 @@ Returns:
     Tensor: a 2-D tensor with ones on the diagonal and zeros elsewhere
 
 Example:
+::
+
     >>> torch.eye(3)
      1  0  0
      0  1  0
@@ -581,6 +701,8 @@ Computes the floor of each element in `tensor`. That is, each element is
 rounded down to the nearest integer.
 
 Example:
+::
+
     >>> torch.floor(torch.Tensor([1.5, -2.7, 3.0]))
     torch.FloatTensor([1, -3, 3])
 """)
@@ -601,12 +723,14 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> torch.fmod(torch.Tensor([-3, -2, -1, 1, 2, 3]), 2)
     torch.FloatTensor([-1, -0, -1, 1, 0, 1])
     >>> torch.fmod(torch.Tensor([1, 2, 3, 4, 5]), 1.5)
     torch.FloatTensor([1.0, 0.5, 0.0, 1.0, 0.5])
 
-    .. seealso::
+.. seealso::
 
         :func:`torch.remainder`, which computes the element-wise remainder of
         division equivalently to Python's `%` operator
@@ -619,6 +743,8 @@ frac(tensor, out=None) -> Tensor
 Computes the fractional portion of each element in `tensor`.
 
 Example:
+::
+
     >>> torch.frac(torch.Tensor([1, 2.5, -3.2])
     torch.FloatTensor([0, 0.5, -0.2])
 """)
@@ -634,6 +760,8 @@ tensor will be reflected in the `ndarray` and vice versa. The returned tensor
 is not resizable.
 
 Example:
+::
+
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.from_numpy(a)
     >>> t
@@ -662,6 +790,8 @@ Args:
     out (Tensor, optional): Destination tensor
 
 Example:
+::
+
     >>> t = torch.Tensor([[1,2],[3,4]])
     >>> torch.gather(t, 1, torch.LongTensor([[0,0],[1,0]]))
      1  1
@@ -686,6 +816,8 @@ Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
 Example:
+::
+
     >>> torch.ge(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      1  1
      0  1
@@ -738,6 +870,8 @@ Returns:
     `(m, 1)`.
 
 Example:
+::
+
 
     >>> A = torch.Tensor([[1, 1, 1],
     ...                   [2, 3, 4],
@@ -794,6 +928,8 @@ Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
 Example:
+::
+
     >>> torch.gt(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      0  1
      0  0
@@ -820,6 +956,8 @@ Returns:
     Tensor: the histogram
 
 Example:
+::
+
     >>> torch.histc(torch.FloatTensor([1, 2, 1]), bins=4, min=0, max=3)
     FloatTensor([0, 2, 1, 0])
 
@@ -855,6 +993,8 @@ Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
 Example:
+::
+
     >>> torch.le(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      1  0
      1  1
@@ -903,6 +1043,8 @@ Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
 Example:
+::
+
     >>> torch.lt(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      0  0
      1  0
@@ -943,6 +1085,8 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
     >>> torch.mm(mat1, mat2)
@@ -977,6 +1121,8 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> M = torch.randn(2)
     >>> mat = torch.randn(2, 3)
     >>> vec = torch.randn(3)
@@ -1004,6 +1150,8 @@ Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
 Example:
+::
+
     >>> torch.ne(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      0  1
      1  0
@@ -1106,12 +1254,14 @@ Args:
     out (Tensor, optional): Output tensor
 
 Example:
+::
+
     >>> torch.remainder(torch.Tensor([-3, -2, -1, 1, 2, 3]), 2)
     torch.FloatTensor([1, 0, 1, 1, 0, 1])
     >>> torch.remainder(torch.Tensor([1, 2, 3, 4, 5]), 1.5)
     torch.FloatTensor([1.0, 0.5, 0.0, 1.0, 0.5])
 
-    .. seealso::
+.. seealso::
 
         :func:`torch.fmod`, which computes the element-wise remainder of
         division equivalently to the C library function ``fmod()``
@@ -1163,6 +1313,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -1190,6 +1342,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -1249,6 +1403,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
@@ -1276,6 +1432,8 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example:
+::
+
     >>> a = torch.randn(4)
     >>> print(a)
     -0.6366
