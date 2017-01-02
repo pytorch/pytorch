@@ -46,22 +46,152 @@ add_docstr(torch._C.add,
 
 add_docstr(torch._C.addbmm,
 """
+addbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
+
+Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and :attr:`batch2`, 
+with a reduced add step (all matrix multiplications get accumulated in a single place). 
+:attr:`mat` is added to the final result.
+
+:attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
+
+If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
+
+In other words,
+:math:`res = (beta * M) + (alpha * sum(batch1_i * batch2_i, i = 1, b))`
+
+Args:
+    beta (float, optional): multiplier for :attr:`mat`
+    mat (Tensor): matrix to be added
+    alpha (float, optional): multiplier for `batch1 @ batch2`
+    batch1 (Tensor): First batch of matrices to be multiplied
+    batch2 (Tensor): Second batch of matrices to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> M = torch.randn(3, 5)
+    >>> batch1 = torch.randn(10, 3, 4)
+    >>> batch2 = torch.randn(10, 4, 5)
+    >>> torch.addbmm(M, batch1, batch2)
+     -3.1162  11.0071   7.3102   0.1824  -7.6892
+      1.8265   6.0739   0.4589  -0.5641  -5.4283
+     -9.3387  -0.1794  -1.2318  -6.8841  -4.7239
+    [torch.FloatTensor of size 3x5]
 """)
 
 add_docstr(torch._C.addcdiv,
 """
+addcdiv(tensor, value=1, tensor1, tensor2, out=None) -> Tensor
+
+Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`, multiply
+the result by the scalar :attr:`value` and add it to :attr:`tensor`.
+
+The number of elements must match, but sizes do not matter.
+
+Args:
+    tensor (Tensor): the tensor to be added
+    value (float, optional): multiplier for `tensor1 ./ tensor2`
+    tensor1 (Tensor): Numerator tensor
+    tensor2 (Tensor): Denominator tensor
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> t = torch.randn(2, 3)
+    >>> t1 = torch.randn(1, 6)
+    >>> t2 = torch.randn(6, 1)
+    >>> torch.addcdiv(t, 0.1, t1, t2)
+     0.0122 -0.0188 -0.2354
+     0.7396 -1.5721  1.2878
+    [torch.FloatTensor of size 2x3]
 """)
 
 add_docstr(torch._C.addcmul,
 """
-""")
+addcmul(tensor, value=1, tensor1, tensor2, out=None) -> Tensor
+
+Performs the element-wise multiplication of :attr:`tensor1` by :attr:`tensor2`, multiply
+the result by the scalar :attr:`value` and add it to :attr:`tensor`.
+
+The number of elements must match, but sizes do not matter.
+
+Args:
+    tensor (Tensor): the tensor to be added
+    value (float, optional): multiplier for `tensor1 .* tensor2`
+    tensor1 (Tensor): tensor to be multiplied
+    tensor2 (Tensor): tensor to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> t = torch.randn(2, 3)
+    >>> t1 = torch.randn(1, 6)
+    >>> t2 = torch.randn(6, 1)
+    >>> torch.addcmul(t, 0.1, t1, t2)
+     0.0122 -0.0188 -0.2354
+     0.7396 -1.5721  1.2878
+    [torch.FloatTensor of size 2x3]""")
 
 add_docstr(torch._C.addmm,
 """
+addmm(beta=1, mat, alpha=1, mat1, mat2, out=None) -> Tensor
+
+Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`. 
+The matrix :attr:`mat` is added to the final result.
+
+If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
+
+`alpha` and `beta` are scaling factors on `mat1@mat2` and `mat` respectively.
+
+In other words,
+:math:`out = (beta * M) + (alpha * mat1 * mat2)`
+
+Args:
+    beta (float, optional): multiplier for :attr:`mat`
+    mat (Tensor): matrix to be added
+    alpha (float, optional): multiplier for `mat1 @ mat2`
+    mat1 (Tensor): First matrix to be multiplied
+    mat2 (Tensor): Second matrix to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> M = torch.randn(2, 3)
+    >>> mat1 = torch.randn(2, 3)
+    >>> mat2 = torch.randn(3, 3)
+    >>> torch.addmm(M, mat1, mat2)
+    -0.4095 -1.9703  1.3561
+     5.7674 -4.9760  2.7378
+    [torch.FloatTensor of size 2x3]
 """)
 
 add_docstr(torch._C.addmv,
 """
+addmv(beta=1, tensor, alpha=1, mat, vec, out=None) -> Tensor
+
+Performs a matrix-vector product of the matrix :attr:`mat` and the vector :attr:`vec`.
+The vector :attr:`tensor` is added to the final result.
+
+If :attr:`mat` is a `n x m` Tensor, :attr:`vec` is a 1D Tensor of size `m`, :attr:`out` and :attr:`tensor` will be 1D of size `n`.
+
+`alpha` and `beta` are scaling factors on `mat*vec` and `tensor` respectively.
+
+In other words:
+
+:math:`out = (beta * tensor) + (alpha * (mat * vec2))`
+
+Args:
+    beta (float, optional): multiplier for :attr:`tensor`
+    tensor (Tensor): vector to be added
+    alpha (float, optional): multiplier for `mat @ vec`
+    mat (Tensor): matrix to be multiplied
+    vec (Tensor): vector to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> M = torch.randn(2)
+    >>> mat = torch.randn(2, 3)
+    >>> vec = torch.randn(3)
+    >>> torch.addmv(M, mat, vec)
+    -2.0939
+    -2.2950
+    [torch.FloatTensor of size 2]
 """)
 
 add_docstr(torch._C.addr,
@@ -90,7 +220,7 @@ Example:
     >>> vec1 = torch.range(1, 3)
     >>> vec2 = torch.range(1, 2)
     >>> M = torch.zeros(3, 2)
-    >>> torch.addr(M, x, y)
+    >>> torch.addr(M, vec1, vec2)
      1  2
      2  4
      3  6
@@ -181,6 +311,32 @@ Example:
 
 add_docstr(torch._C.baddbmm,
 """
+baddbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
+
+Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and :attr:`batch2`. 
+:attr:`mat` is added to the final result.
+
+:attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
+
+If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor, :attr:`out` and :attr:`mat` will be `b x n x p` Tensors.
+
+In other words,
+:math:`res_i = (beta * M_i) + (alpha * batch1_i * batch2_i)`
+
+Args:
+    beta (float, optional): multiplier for :attr:`mat`
+    mat (Tensor): tensor to be added
+    alpha (float, optional): multiplier for `batch1 @ batch2`
+    batch1 (Tensor): First batch of matrices to be multiplied
+    batch2 (Tensor): Second batch of matrices to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> M = torch.randn(10, 3, 5)
+    >>> batch1 = torch.randn(10, 3, 4)
+    >>> batch2 = torch.randn(10, 4, 5)
+    >>> torch.baddbmm(M, batch1, batch2).size()
+    torch.Size([10, 3, 5])
 """)
 
 add_docstr(torch._C.bernoulli,
@@ -189,6 +345,26 @@ add_docstr(torch._C.bernoulli,
 
 add_docstr(torch._C.bmm,
 """
+bmm(batch1, batch2, out=None) -> Tensor
+
+Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and :attr:`batch2`.
+
+:attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
+
+If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor, 
+:attr:`out` will be a `b x n x p` Tensor.
+
+Args:
+    batch1 (Tensor): First batch of matrices to be multiplied
+    batch2 (Tensor): Second batch of matrices to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> batch1 = torch.randn(10, 3, 4)
+    >>> batch2 = torch.randn(10, 4, 5)
+    >>> res = torch.bmm(M, batch1, batch2)
+    >>> print(res.size())
+    torch.Size([10, 3, 5])
 """)
 
 add_docstr(torch._C.cat,
@@ -755,6 +931,24 @@ add_docstr(torch._C.min,
 
 add_docstr(torch._C.mm,
 """
+mm(mat1, mat2, out=None) -> Tensor
+
+Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`. 
+
+If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor, :attr:`out` will be a `n x p` Tensor.
+
+Args:
+    mat1 (Tensor): First matrix to be multiplied
+    mat2 (Tensor): Second matrix to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> mat1 = torch.randn(2, 3)
+    >>> mat2 = torch.randn(3, 3)
+    >>> torch.mm(mat1, mat2)
+     0.0519 -0.3304  1.2232
+     4.3910 -5.1498  2.7571
+    [torch.FloatTensor of size 2x3]
 """)
 
 add_docstr(torch._C.mode,
@@ -771,6 +965,25 @@ add_docstr(torch._C.multinomial,
 
 add_docstr(torch._C.mv,
 """
+addmv(mat, vec, out=None) -> Tensor
+
+Performs a matrix-vector product of the matrix :attr:`mat` and the vector :attr:`vec`.
+
+If :attr:`mat` is a `n x m` Tensor, :attr:`vec` is a 1D Tensor of size `m`, :attr:`out` will be 1D of size `n`.
+
+Args:
+    mat (Tensor): matrix to be multiplied
+    vec (Tensor): vector to be multiplied
+    out (Tensor, optional): Output tensor
+
+Example:
+    >>> M = torch.randn(2)
+    >>> mat = torch.randn(2, 3)
+    >>> vec = torch.randn(3)
+    >>> torch.mv(mat, vec)
+    -2.0939
+    -2.2950
+    [torch.FloatTensor of size 2]
 """)
 
 add_docstr(torch._C.ne,
