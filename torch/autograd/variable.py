@@ -628,6 +628,15 @@ class Variable(_C._VariableBase):
     def index_select(self, dim, index):
         return IndexSelect(dim)(self, index)
 
+    def gather(self, dim, index):
+        return Gather(dim)(self, index)
+
+    def scatter(self, dim, index, source):
+        return Scatter(dim)(self, index, source)
+
+    def scatter_(self, dim, index, source):
+        return Scatter(dim, True)(self, index, source)
+
     def masked_copy(self, mask, variable):
         return MaskedCopy()(self, mask, variable)
 
