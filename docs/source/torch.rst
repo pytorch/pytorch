@@ -136,3 +136,19 @@ Parallelism
 ----------------------------------
 .. autofunction:: get_num_threads
 .. autofunction:: set_num_threads
+
+
+Random sampling
+----------------------------------
+.. autofunction:: manual_seed
+.. autofunction:: initial_seed
+.. autofunction:: get_rng_state
+.. autofunction:: set_rng_state
+.. autodata:: default_generator
+
+
+Tensors
+----------------------------------
+.. autofunction:: is_tensor
+.. autofunction:: is_storage
+.. autofunction:: set_default_tensor_type
