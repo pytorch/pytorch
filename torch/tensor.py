@@ -295,6 +295,12 @@ class _TensorBase(object):
         raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
                 "but they are {}D and {}D".format(dim_self, dim_other))
 
+    def __pow__(self, other):
+        return self.pow(other)
+
+    def __ipow__(self, other):
+        return self.pow_(other)
+
     def __div__(self, other):
         return self.div(other)
     __truediv__ = __div__
