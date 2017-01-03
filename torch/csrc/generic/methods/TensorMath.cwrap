@@ -975,7 +975,7 @@
       cname: spcadd
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - THTensor* mat1
         - arg: real value
           default: AS_REAL(1)
@@ -1322,7 +1322,7 @@
   options:
     - arguments:
       - arg: THTensor* result
-        allocate: True
+        output: True
       - arg: real beta
         default: AS_REAL(1)
       - THTensor* self
@@ -1334,7 +1334,7 @@
       sparse: yes
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - arg: real beta
           default: AS_REAL(1)
         - THTensor* self
@@ -1485,7 +1485,7 @@
         THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - CONSTANT AS_REAL(0)
         - argument 0
         - CONSTANT AS_REAL(1)
@@ -1497,9 +1497,10 @@
         long s1 = THSTensor_(size)(LIBRARY_STATE ((THSPTensor*)$arg4)->cdata, 0);
         long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
         THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+        THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
       arguments:
         - arg: THTensor* result
-          allocate: True
+          output: True
         - CONSTANT AS_REAL(0)
         - argument 0
         - CONSTANT AS_REAL(1)

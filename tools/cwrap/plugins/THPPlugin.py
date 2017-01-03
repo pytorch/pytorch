@@ -216,11 +216,11 @@ class THPPlugin(CWrapPlugin):
         init_str = '\n'.join(declaration.get('init', []))
         if 'stateless' in declaration['name']:
             readable_name = 'torch.' + declaration['python_name']
-            else:
-                readable_name = declaration['python_name']
-                return Template(self.WRAPPER_TEMPLATE.safe_substitute(
-                    readable_name=readable_name, num_options=len(arg_desc),
-                    expected_args=arg_str, variables=variables_str, init=init_str))
+        else:
+            readable_name = declaration['python_name']
+        return Template(self.WRAPPER_TEMPLATE.safe_substitute(
+            readable_name=readable_name, num_options=len(arg_desc),
+            expected_args=arg_str, variables=variables_str, init=init_str))
 
     def get_return_wrapper(self, option):
         return self.RETURN_WRAPPER.get(option['return'], None)
@@ -259,11 +259,11 @@ class THPPlugin(CWrapPlugin):
             for i, arg in enumerate(option['arguments']):
                 if arg.get('output'):
                     out_idx.append(i)
-                    if not out_idx:
-                        option['has_output'] = True
-                        option['output_provided'] = False
-                        new_options.append(option)
-                        continue
+            if not out_idx:
+                option['has_output'] = True
+                option['output_provided'] = False
+                new_options.append(option)
+                continue
             for output_provided in (True, False):
                 option_copy = deepcopy(option)
                 option_copy['has_output'] = True
@@ -274,12 +274,12 @@ class THPPlugin(CWrapPlugin):
                     arg['output_idx'] = i
                     if not output_provided:
                         arg['ignore_check'] = True
-                        else:
-                            option_copy['argcount_offset'] =  -len(out_idx) + 1
-                            arg['no_kwargs'] = True
-                            arg['no_idx'] = True
-                            new_options.append(option_copy)
-                            declaration['options'] = self.filter_unique_options(new_options)
+                    else:
+                        option_copy['argcount_offset'] =  -len(out_idx) + 1
+                        arg['no_kwargs'] = True
+                        arg['no_idx'] = True
+                new_options.append(option_copy)
+        declaration['options'] = self.filter_unique_options(new_options)
 
     def process_declarations(self, declarations):
         new_declarations = []
@@ -308,28 +308,27 @@ class THPPlugin(CWrapPlugin):
             declaration.setdefault('variables', [])
             if has_arg_type(declaration, 'THSize*'):
                 declaration['variables'] += ['THLongStoragePtr __size;']
-                if has_arg_type(declaration, 'THStride*'):
-                    declaration['variables'] += ['THLongStoragePtr __stride;']
-                    if has_output_args(declaration):
-                        declaration['variables'] += ['PyObject *__out;']
-                        self.generate_out_options(declaration)
-                        if has_long_args(declaration):
-                            declaration['no_kwargs'] = True
-                            for option in declaration['options']:
-                                option['cname'] = 'THTensor_({})'.format(option['cname'])
-                                if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
-                                    stateless_declaration = self.make_stateless(declaration)
-                                    new_declarations.append(stateless_declaration)
-                                    self.stateless_declarations.append(stateless_declaration)
-                                    if declaration.get('only_stateless', False):
-                                        continue
+            if has_arg_type(declaration, 'THStride*'):
+                declaration['variables'] += ['THLongStoragePtr __stride;']
+            if has_output_args(declaration):
+                declaration['variables'] += ['PyObject *__out;']
+                self.generate_out_options(declaration)
+            if has_long_args(declaration):
+                declaration['no_kwargs'] = True
+            for option in declaration['options']:
+                option['cname'] = 'TH{}Tensor_({})'.format(
+                    'S' if option['sparse'] else '', option['cname'])
+            if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
+                stateless_declaration = self.make_stateless(declaration)
+                new_declarations.append(stateless_declaration)
+                self.stateless_declarations.append(stateless_declaration)
+            if declaration.get('only_stateless', False):
+                continue
 
             self.declarations.append(declaration)
             declaration['name'] = 'TH{}PTensor_({})'.format(
                 'S' if declaration['sparse'] else '', declaration['name'])
             for option in declaration['options']:
-                option['cname'] = 'TH{}Tensor_({})'.format(
-                    'S' if option['sparse'] else '', option['cname'])
                 for arg in option['arguments']:
                     if arg['name'] == 'self':
                         arg['ignore_check'] = True

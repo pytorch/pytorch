@@ -35,7 +35,6 @@ THLongTensor *THSTensor_(indices)(const THSTensor *self) {
     THLongTensor_retain(self->indices);
     return self->indices;
   }
-  THSTensor_(contiguous)(self);
   return THLongTensor_newNarrow(self->indices, 1, 0, self->nnz);
 }
 
@@ -44,7 +43,6 @@ THTensor *THSTensor_(values)(const THSTensor *self) {
     THTensor_(retain)(self->values);
     return self->values;
   }
-  THSTensor_(contiguous)(self);
   return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
 }
 

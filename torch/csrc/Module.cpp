@@ -641,8 +641,8 @@ static PyMethodDef TorchMethods[] = {
   {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS | METH_KEYWORDS, NULL},
 
   // Sparse functions
-  {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS,  NULL},
-  {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS,  NULL},
+  {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
+  {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 

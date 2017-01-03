@@ -119,7 +119,7 @@
     THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -140,7 +140,7 @@
     THSTensor_(resize2d)(LIBRARY_STATE ((THSPTensor*)$arg0)->cdata, s1, s2);
   arguments:
     - arg: THSTensor* result
-      allocate: True
+      output: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -156,7 +156,7 @@
   return: argument 0
   arguments:
     - arg: THSTensor* result
-      allocate: True
+      output: True
     - arg: real beta
       default: AS_REAL(1)
     - THSTensor* self
@@ -175,7 +175,7 @@
   return: argument 0
   arguments:
     - arg: THTensor* result
-      allocate: True
+      output: True
     - THTensor* mat1
     - arg: real value
       default: AS_REAL(1)
