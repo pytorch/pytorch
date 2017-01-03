@@ -24,7 +24,7 @@ if (NOT __PROTOBUF_INCLUDED)
     ExternalProject_Add(protobuf_external
       SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/protobuf
       BUILD_IN_SOURCE 1
-      CONFIGURE_COMMAND "./autogen.sh" COMMAND ./configure --prefix=${CMAKE_SOURCE_DIR}/third_party/protobuf/build
+      CONFIGURE_COMMAND "./autogen.sh" COMMAND ./configure --prefix=${CMAKE_SOURCE_DIR}/third_party/protobuf/_build
       BUILD_COMMAND make 
       INSTALL_COMMAND make install
       )
