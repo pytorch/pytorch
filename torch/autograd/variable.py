@@ -18,34 +18,6 @@ class Variable(_C._VariableBase):
     size always matches the data size. Also, grad is normally only allocated
     for leaf variables, and will be always zero otherwise.
 
-    **Flags**
-
-    Every Variable has two flags: :attr:`requires_grad` and :attr:`volatile`.
-    They both allow for fine grained exclusion of subgraphs from gradient
-    computation and can increase efficiency.
-
-    If there's a single input to an operation that requires gradient, its output
-    will also require gradient. Conversely, only if all inputs don't require
-    gradient, the output also won't require it. Backward computation is never
-    performed in the subgraphs, where all Variables didn't require gradients.
-
-    Volatile is a similar setting, but differs in how the flag propagates.
-    If there's even a single volatile input to an operation, its output is also
-    going to be volatile. Volatility spreads accross the graph much easier than
-    non-requiring gradient - you only need a **single** volatile leaf to have a
-    volatile output, while you need **all** leaves to not require gradient to
-    have an output the doesn't require gradient. Using volatile flag you don't
-    need to change any settings of your model parameters to use it for
-    inference. It's enough to create a volatile input, and this will ensure that
-    no intermediate states are saved.
-
-    **API compatibility**
-
-    Variable API is nearly the same as regular Tensor API (with the exception
-    of a couple in-place methods, that would overwrite inputs required for
-    gradient computation). In most cases Tensors can be safely replaced with
-    Variables and the code will remain to work just fine.
-
     Attributes:
         data: Wrapped tensor of any type.
         grad: Tensor holding the gradient of type and location matching
@@ -53,10 +25,12 @@ class Variable(_C._VariableBase):
             be reassigned.
         requires_grad: Boolean indicating whether the Variable has been
             created by a subgraph containing any Variable, that requires it.
+            See `Excluding subgraphs from backward`_ for more details.
             Can be changed only on leaf Variables.
         volatile: Boolean indicating that the Variable should be used in
-            inference mode, i.e. don't save the history. Can be changed only
-            on leaf Variables.
+            inference mode, i.e. don't save the history. See
+            `Excluding subgraphs from backward`_ for more details.
+            Can be changed only on leaf Variables.
         creator: Function of which the variable was an output. For leaf
             (user created) variables it's ``None``. Read-only attribute.
 
