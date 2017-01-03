@@ -140,6 +140,7 @@ if(HAVE_CUDA)
   install(TARGETS Caffe2_GPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
   link_directories(${CMAKE_INSTALL_PREFIX}/lib)
   list(APPEND Caffe2_LINK_LIBS Caffe2_GPU)
+  list(APPEND Caffe2_LINK Caffe2_GPU)
 endif()
 
 # Compile test binaries.
