@@ -121,7 +121,6 @@ Math operations
 .. autofunction:: trtrs
 .. autofunction:: trunc
 .. autofunction:: unfold
-.. autofunction:: uniform
 .. autofunction:: var
 .. autofunction:: zeros
 

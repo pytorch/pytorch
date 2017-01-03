@@ -1615,6 +1615,48 @@ add_docstr(torch._C.lerp,
 
 add_docstr(torch._C.linspace,
 """
+linspace(start, end, steps=100, out=None) -> Tensor
+
+Returns a one-dimensional Tensor of :attr:`steps` 
+equally spaced points between :attr:`start` and :attr:`end`
+
+The output tensor is 1D of size :attr:`steps`
+
+Args:
+    start (float): The starting value for the set of points
+    start (float): The ending value for the set of points
+    steps (long): Number of points to sample between :attr:`start` and :attr:`end`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> torch.linspace(3, 10, steps=5)
+    
+      3.0000
+      4.7500
+      6.5000
+      8.2500
+     10.0000
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.linspace(-10, 10, steps=5)
+    
+    -10
+     -5
+      0
+      5
+     10
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.linspace(start=-10, end=10, steps=5)
+    
+    -10
+     -5
+      0
+      5
+     10
+    [torch.FloatTensor of size 5]
+                
 """)
 
 add_docstr(torch._C.log,
@@ -1658,7 +1700,7 @@ Returns a new `Tensor` with the natural logarithm of (1 + :attr:`input`).
 
 :math:`y_i = log(x_i + 1)`
 
-.. note:: This function is more accurate than :function:`torch.log` for small values of :attr:`input`
+.. note:: This function is more accurate than :func:`torch.log` for small values of :attr:`input`
 
 Args:
     input (Tensor): the input `Tensor`
@@ -1689,6 +1731,39 @@ Example::
 
 add_docstr(torch._C.logspace,
 """
+logspace(start, end, steps=100, out=None) -> Tensor
+
+Returns a one-dimensional Tensor of :attr:`steps` 
+logirathmically equally spaced points between :math:`10^start` and :math:`10^end`
+
+The output tensor is 1D of size :attr:`steps`
+
+Args:
+    start (float): The starting value for the set of points
+    start (float): The ending value for the set of points
+    steps (long): Number of points to sample between :attr:`start` and :attr:`end`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> torch.logspace(start=-10, end=10, steps=5)
+    
+     1.0000e-10
+     1.0000e-05
+     1.0000e+00
+     1.0000e+05
+     1.0000e+10
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.logspace(start=0.1, end=1.0, steps=5)
+    
+      1.2589
+      2.1135
+      3.5481
+      5.9566
+     10.0000
+    [torch.FloatTensor of size 5]
+            
 """)
 
 add_docstr(torch._C.lt,
@@ -1891,6 +1966,37 @@ Example::
 
 add_docstr(torch._C.neg,
 """
+neg(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the negative of the elements of :attr:`input`.
+
+:math:`out = -1 * input`
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(5)
+    >>> a
+    
+    -0.4430
+     1.1690
+    -0.8836
+    -0.4565
+     0.2968
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.neg(a)
+    
+     0.4430
+    -1.1690
+     0.8836
+     0.4565
+    -0.2968
+    [torch.FloatTensor of size 5]
+    
 """)
 
 add_docstr(torch._C.nonzero,
@@ -1967,6 +2073,39 @@ add_docstr(torch._C.randperm,
 
 add_docstr(torch._C.range,
 """
+range(start, end, step=1, out=None) -> Tensor
+
+returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values 
+from :attr:`start` to :attr:`end` with step :attr:`step`. Step is the gap between two values in the tensor.
+:math:`x_{i+1} = x_i + step`
+
+Args:
+    start (float): The starting value for the set of points
+    start (float): The ending value for the set of points
+    step (float): The gap between each pair of adjacent points
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+    
+    >>> torch.range(1, 4)
+    
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.range(1, 4, 0.5)
+    
+     1.0000
+     1.5000
+     2.0000
+     2.5000
+     3.0000
+     3.5000
+     4.0000
+    [torch.FloatTensor of size 7]
+                    
 """)
 
 add_docstr(torch._C.remainder,
@@ -2312,10 +2451,6 @@ add_docstr(torch._C.trunc,
 """)
 
 add_docstr(torch._C.unfold,
-"""
-""")
-
-add_docstr(torch._C.uniform,
 """
 """)
 
