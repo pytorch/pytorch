@@ -109,7 +109,8 @@ static PyObject * THPStorage_(newSharedFilename)(PyObject *_unused, PyObject *ar
   PyObject *_object_handle = PyTuple_GET_ITEM(args, 1);
   PyObject *_size = PyTuple_GET_ITEM(args, 2);
   if (!THPUtils_checkBytes(_manager_handle) || !THPUtils_checkBytes(_object_handle) || !THPUtils_checkLong(_size)) {
-    THPUtils_invalidArguments(args, "_new_shared in file system mode", 1, "a handle (string/bytes) and storage size (int)");
+    THPUtils_invalidArguments(args, NULL, "_new_shared in file system mode", 1,
+        "a handle (string/bytes) and storage size (int)");
     return NULL;
   }
   const char *manager_handle = THPUtils_bytesAsString(_manager_handle);
@@ -163,7 +164,8 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
   PyObject *_tmp_fd = PyTuple_GET_ITEM(args, 0);
   PyObject *_size = PyTuple_GET_ITEM(args, 1);
   if (!THPUtils_checkLong(_tmp_fd) || !THPUtils_checkLong(_size)) {
-    THPUtils_invalidArguments(args, "_new_shared in file descriptor mode", 1, "a file descriptor (int) and storage size (int)");
+    THPUtils_invalidArguments(args, NULL, "_new_shared in file descriptor mode",
+        1, "a file descriptor (int) and storage size (int)");
     return NULL;
   }
   int fd;
@@ -233,7 +235,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size)
       && (_handle == Py_None || PyBytes_Check(_handle))
       && THPUtils_checkLong(_offset) && THPUtils_checkLong(_view_size))) {
-    THPUtils_invalidArguments(args, "_new_shared in CUDA mode", 1,
+    THPUtils_invalidArguments(args, NULL, "_new_shared in CUDA mode", 1,
         "(int device, bytes handle, int storage_size, int offset, int view_size");
     return NULL;
   }
@@ -357,7 +359,7 @@ static PyObject * THPStorage_(newView)(THPStorage *self, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_Size(args) != 2 || !THPUtils_checkLong(PyTuple_GET_ITEM(args, 0))
       || ! THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "_new_view", 1, "(int offset, int size)");
+    THPUtils_invalidArguments(args, NULL, "_new_view", 1, "(int offset, int size)");
     return NULL;
   }
   long offset = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));

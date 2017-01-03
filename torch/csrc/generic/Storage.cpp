@@ -151,7 +151,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   }
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, THPStorageStr " constructor", 6,
+  THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
           "no arguments",
           "(int size)",
           "(Sequence data)",

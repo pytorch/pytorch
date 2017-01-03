@@ -240,7 +240,7 @@ PyObject * THPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
     return PyInt_FromLong(THTensor_(size)(LIBRARY_STATE tensor, dim));
   }
 
-  THPUtils_invalidArguments(args, "size", 2, "(int dim)", "no arguments");
+  THPUtils_invalidArguments(args, kwargs, "size", 2, "(int dim)", "no arguments");
   return NULL;
   END_HANDLE_TH_ERRORS
 }
@@ -280,7 +280,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     return PyInt_FromLong(THTensor_(stride)(LIBRARY_STATE tensor, dim));
   }
 
-  THPUtils_invalidArguments(args, "stride", 2, "(int dim)", "no arguments");
+  THPUtils_invalidArguments(args, kwargs, "stride", 2, "(int dim)", "no arguments");
   return NULL;
   END_HANDLE_TH_ERRORS
 }
@@ -650,9 +650,9 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
   return (PyObject*)result.release();
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, "cat", 2,
-      "(sequence tensors)",
-      "(sequence tensors, int dim)");
+  THPUtils_invalidArguments(args, NULL, "cat", 2,
+      "(sequence[" THPTensorStr "] tensors)",
+      "(sequence[" THPTensorStr "] tensors, int dim)");
   return NULL;
   END_HANDLE_TH_ERRORS
 }

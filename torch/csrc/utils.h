@@ -130,8 +130,9 @@
 #define THPUtils_assertRet(value, cond, ...)                                   \
 if (__builtin_expect(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
 THP_API void THPUtils_setError(const char *format, ...);
-THP_API void THPUtils_invalidArguments(PyObject *given_args,
-            const char *function_name, size_t num_options, ...);
+THP_API void THPUtils_invalidArguments(
+        PyObject *given_args, PyObject *given_kwargs,
+        const char *function_name, size_t num_options, ...);
 
 #ifdef _THP_CORE
 

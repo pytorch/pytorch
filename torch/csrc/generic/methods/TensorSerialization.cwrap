@@ -6,7 +6,7 @@
 PyObject * THPTensor_(writeMetadata)(THPTensor *self, PyObject *args)
 {
   if (!args || PyTuple_Size(args) != 1) {
-    THPUtils_invalidArguments(args, "_write_metadata", 1, "a single file object");
+    THPUtils_invalidArguments(args, NULL, "_write_metadata", 1, "a single file object");
     return NULL;
   }
   int fd = PyObject_AsFileDescriptor(PyTuple_GET_ITEM(args, 0));
@@ -28,7 +28,8 @@ PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
 {
   if (!args || PyTuple_Size(args) != 2 ||
         !THPStorage_(Check)(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "_new_with_metadata_file", 1, "single file object and a storage object");
+    THPUtils_invalidArguments(args, NULL, "_new_with_metadata_file", 1,
+        "single file object and a storage object");
     return NULL;
   }
   int fd = PyObject_AsFileDescriptor(PyTuple_GET_ITEM(args, 0));

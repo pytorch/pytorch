@@ -70,7 +70,7 @@ PyObject * $name(PyObject *_unused, PyObject *args)
   int __argcount = args ? PyTuple_Size(args) : 0;
     $options
   } else {
-    THPUtils_invalidArguments(args, "$name", 1, $expected_args);
+    THPUtils_invalidArguments(args, NULL, "$name", 1, $expected_args);
     return NULL;
   }
   END_HANDLE_TH_ERRORS

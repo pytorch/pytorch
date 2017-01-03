@@ -382,7 +382,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     return (PyObject *)self.release();
   }
 
-  THPUtils_invalidArguments(args, THPTensorStr " constructor", 6,
+  THPUtils_invalidArguments(args, kwargs, THPTensorStr " constructor", 6,
           "no arguments",
           "(int ...)",
           "(" THPTensorStr " viewed_tensor)",
