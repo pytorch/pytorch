@@ -559,8 +559,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   arguments:
     - arg: THTensor* result
       output: True
-    - accreal xmin
-    - accreal xmax
+    - accreal start
+    - accreal end
     - arg: accreal step
       default: 1
 ]]
