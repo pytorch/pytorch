@@ -20,7 +20,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    nn
    optim
    torch.autograd <autograd>
-   multiprocessing
+   torch.multiprocessing <multiprocessing>
    legacy
    cuda
    data
