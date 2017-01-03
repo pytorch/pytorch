@@ -53,7 +53,7 @@ Adds the scalar :attr:`value` to each element of the input :attr:`input` and ret
 
 Args:
     input (Tensor): the input `Tensor`
-    value (Float): the number to be added to each element of :attr:`input`
+    value (float): the number to be added to each element of :attr:`input`
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -87,7 +87,7 @@ The shapes of :attr:`input` and :attr:`other` dont need to match. The total numb
 
 Args:
     input (Tensor): the first input `Tensor`
-    value (Float): the scalar multiplier for :attr:`other`
+    value (float): the scalar multiplier for :attr:`other`
     other (Tensor): the second input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
@@ -136,9 +136,9 @@ In other words,
 :math:`res = (beta * M) + (alpha * sum(batch1_i @ batch2_i, i = 0, b))`
 
 Args:
-    beta (Float, optional): multiplier for :attr:`mat`
+    beta (float, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (Float, optional): multiplier for `batch1 @ batch2`
+    alpha (float, optional): multiplier for `batch1 @ batch2`
     batch1 (Tensor): First batch of matrices to be multiplied
     batch2 (Tensor): Second batch of matrices to be multiplied
     out (Tensor, optional): Output tensor
@@ -167,7 +167,7 @@ The number of elements must match, but sizes do not matter.
 
 Args:
     tensor (Tensor): the tensor to be added
-    value (Float, optional): multiplier for `tensor1 ./ tensor2`
+    value (float, optional): multiplier for `tensor1 ./ tensor2`
     tensor1 (Tensor): Numerator tensor
     tensor2 (Tensor): Denominator tensor
     out (Tensor, optional): Output tensor
@@ -195,7 +195,7 @@ The number of elements must match, but sizes do not matter.
 
 Args:
     tensor (Tensor): the tensor to be added
-    value (Float, optional): multiplier for `tensor1 .* tensor2`
+    value (float, optional): multiplier for `tensor1 .* tensor2`
     tensor1 (Tensor): tensor to be multiplied
     tensor2 (Tensor): tensor to be multiplied
     out (Tensor, optional): Output tensor
@@ -227,9 +227,9 @@ In other words,
 :math:`out = (beta * M) + (alpha * mat1 @ mat2)`
 
 Args:
-    beta (Float, optional): multiplier for :attr:`mat`
+    beta (float, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (Float, optional): multiplier for `mat1 @ mat2`
+    alpha (float, optional): multiplier for `mat1 @ mat2`
     mat1 (Tensor): First matrix to be multiplied
     mat2 (Tensor): Second matrix to be multiplied
     out (Tensor, optional): Output tensor
@@ -262,9 +262,9 @@ In other words:
 :math:`out = (beta * tensor) + (alpha * (mat @ vec2))`
 
 Args:
-    beta (Float, optional): multiplier for :attr:`tensor`
+    beta (float, optional): multiplier for :attr:`tensor`
     tensor (Tensor): vector to be added
-    alpha (Float, optional): multiplier for `mat @ vec`
+    alpha (float, optional): multiplier for `mat @ vec`
     mat (Tensor): matrix to be multiplied
     vec (Tensor): vector to be multiplied
     out (Tensor, optional): Output tensor
@@ -296,9 +296,9 @@ In other words,
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`, then :attr:`mat` must be a matrix of size `n x m`
 
 Args:
-    beta (Float, optional): multiplier for :attr:`mat`
+    beta (float, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (Float, optional): multiplier for `vec1 (out) vec2`
+    alpha (float, optional): multiplier for `vec1 (out) vec2`
     vec1 (Tensor): First vector of the outer product
     vec2 (Tensor): Second vector of the outer product
     out (Tensor, optional): Output tensor
@@ -415,9 +415,9 @@ In other words,
 :math:`res_i = (beta * M_i) + (alpha * batch1_i @ batch2_i)`
 
 Args:
-    beta (Float, optional): multiplier for :attr:`mat`
+    beta (float, optional): multiplier for :attr:`mat`
     mat (Tensor): tensor to be added
-    alpha (Float, optional): multiplier for `batch1 @ batch2`
+    alpha (float, optional): multiplier for `batch1 @ batch2`
     batch1 (Tensor): First batch of matrices to be multiplied
     batch2 (Tensor): Second batch of matrices to be multiplied
     out (Tensor, optional): Output tensor
@@ -544,8 +544,8 @@ Clamp all elements in :attr:`input` into the range `[min, max]` and return a res
 
 Args:
     input (Tensor): the input `Tensor`
-    min (Float): lower-bound of the range to be clamped to
-    max (Float): upper-bound of the range to be clamped to
+    min (float): lower-bound of the range to be clamped to
+    max (float): upper-bound of the range to be clamped to
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -577,7 +577,7 @@ Takes the element-wise `max` of the scalar :attr:`value` and each element of the
 
 Args:
     input (Tensor): the input `Tensor`
-    value (Float): the scalar to be compared with
+    value (float): the scalar to be compared with
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -654,7 +654,7 @@ Takes the element-wise `min` of the scalar :attr:`value` and each element of the
 
 Args:
     input (Tensor): the input `Tensor`
-    value (Float): the scalar to be compared with
+    value (float): the scalar to be compared with
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -793,7 +793,7 @@ If :attr:`dim` is not given, it defaults to the first dimension found with the s
 Args:
     input (Tensor): the input `Tensor`
     other  (Tensor): the second input `Tensor`
-    dim  (Long, optional): the dimension to take the cross-product in.
+    dim  (long, optional): the dimension to take the cross-product in.
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -844,7 +844,7 @@ For example, if :attr:`input` is a vector of size N, the result will also be a v
 
 Args:
     input (Tensor): the input `Tensor`
-    dim  (Long): the dimension to do the operation over
+    dim  (long): the dimension to do the operation over
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -906,7 +906,7 @@ For example, if :attr:`input` is a vector of size N, the result will also be a v
 
 Args:
     input (Tensor): the input `Tensor`
-    dim  (Long): the dimension to do the operation over
+    dim  (long): the dimension to do the operation over
     out (Tensor, optional): The result `Tensor`
 
 Example::
