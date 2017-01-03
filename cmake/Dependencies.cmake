@@ -9,22 +9,28 @@ find_package(Threads REQUIRED)
 list(APPEND Caffe2_LINKER_LIBS ${CMAKE_THREAD_LIBS_INIT})
 
 # ---[ BLAS
-set(BLAS "Atlas" CACHE STRING "Selected BLAS library")
+set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
 set_property(CACHE BLAS PROPERTY STRINGS "Atlas;OpenBLAS;MKL")
-list(APPEND Caffe2_LINKER_LIBS cblas)
 
-if(BLAS STREQUAL "Atlas")
+if(BLAS STREQUAL "Eigen")
+  # Eigen is header-only and we do not have any dependent libraries
+  add_definitions(-DCAFFE2_USE_EIGEN_FOR_BLAS)
+elseif(BLAS STREQUAL "Atlas")
   find_package(Atlas REQUIRED)
   include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
   list(APPEND Caffe2_LINKER_LIBS ${ATLAS_LIBRARIES})
+  list(APPEND Caffe2_LINKER_LIBS cblas)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_LINKER_LIBS ${OpenBLAS_LIB})
+  list(APPEND Caffe2_LINKER_LIBS cblas)
 elseif(BLAS STREQUAL "MKL")
   find_package(MKL REQUIRED)
   include_directories(SYSTEM ${MKL_INCLUDE_DIR})
   list(APPEND Caffe2_LINKER_LIBS ${MKL_LIBRARIES})
+  list(APPEND Caffe2_LINKER_LIBS cblas)
+  add_definitions(-DCAFFE2_USE_MKL)
 endif()
 
 # ---[ Google-glog
