@@ -90,7 +90,6 @@ Math operations
 .. autofunction:: qr
 .. autofunction:: rand
 .. autofunction:: randn
-.. autofunction:: random
 .. autofunction:: randperm
 .. autofunction:: range
 .. autofunction:: remainder

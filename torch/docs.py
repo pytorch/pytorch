@@ -1611,6 +1611,46 @@ Example::
 
 add_docstr(torch._C.lerp,
 """
+lerp(start, end, weight, out=None)
+
+Does a linear interpolation of two tensors :attr:`start` and :attr:`end` based on a scalar :attr:`weight`: and returns the resulting :attr:`out` Tensor.
+
+:math:`out_i = start_i + weight * (end_i - start_i)`
+
+Args:
+    start (Tensor): the `Tensor` with the starting points
+    end (Tensor): the `Tensor` with the ending points
+    weight (float): the weight for the interpolation formula
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> start = torch.range(1, 4)
+    >>> end = torch.Tensor(4).fill_(10)
+    >>> start
+    
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 4]
+    
+    >>> end
+    
+     10
+     10
+     10
+     10
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.lerp(start, end, 0.5)
+    
+     5.5000
+     6.0000
+     6.5000
+     7.0000
+    [torch.FloatTensor of size 4]
+    
 """)
 
 add_docstr(torch._C.linspace,
@@ -1797,18 +1837,233 @@ add_docstr(torch._C.masked_select,
 
 add_docstr(torch._C.max,
 """
+.. function:: max(input) -> float
+
+Returns the maximum value of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+     0.4729 -0.2266 -0.2085
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.max(a)
+    0.4729
+    
+
+.. function:: max(input, dim, max=None, max_indices=None) -> (Tensor, LongTensor)
+
+Returns the maximum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+Also returns the index location of each maximum value found.
+
+THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    max (Tensor, optional): the result Tensor with maximum values in dimension :attr:`dim`
+    max_indices (LongTensor, optional): the result Tensor with the index locations of the maximum values in dimension :attr:`dim`
+
+Example::
+
+    >> a = torch.randn(4, 4)
+    >> a
+    
+    0.0692  0.3142  1.2513 -0.5428
+    0.9288  0.8552 -0.2073  0.6409
+    1.0695 -0.0101 -2.4507 -1.2230
+    0.7426 -0.7666  0.4862 -0.6628
+    torch.FloatTensor of size 4x4]
+    
+    >>> torch.max(a, 1)
+    (
+     1.2513
+     0.9288
+     1.0695
+     0.7426
+    [torch.FloatTensor of size 4x1]
+    ,
+     2
+     0
+     0
+     0
+    [torch.LongTensor of size 4x1]
+    )
+        
 """)
 
 add_docstr(torch._C.mean,
 """
+.. function:: mean(input) -> float
+
+Returns the mean value of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+    -0.2946 -0.9143  2.1809
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.mean(a)
+    0.32398951053619385
+    
+
+.. function:: mean(input, dim, out=None) -> Tensor
+
+Returns the mean value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+
+THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    
+    -1.2738 -0.3058  0.1230 -1.9615
+     0.8771 -0.5430 -0.9233  0.9879
+     1.4107  0.0317 -0.6823  0.2255
+    -1.3854  0.4953 -0.2160  0.2435
+    [torch.FloatTensor of size 4x4]
+    
+    >>> torch.mean(a, 1)
+    
+    -0.8545
+     0.0997
+     0.2464
+    -0.2157
+    [torch.FloatTensor of size 4x1]
+            
 """)
 
 add_docstr(torch._C.median,
 """
+median(input, dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+
+Returns the median value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+Also returns the index location of the median value as a `LongTensor`.
+
+By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
+
+THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    values (Tensor, optional): the result Tensor
+    indices (Tensor, optional): the result index Tensor
+
+Example::
+
+    >>> a
+    
+     -0.6891 -0.6662
+     0.2697  0.7412
+     0.5254 -0.7402
+     0.5528 -0.2399
+    [torch.FloatTensor of size 4x2]
+    
+    >>> a = torch.randn(4, 5)
+    >>> a
+    
+     0.4056 -0.3372  1.0973 -2.4884  0.4334
+     2.1336  0.3841  0.1404 -0.1821 -0.7646
+    -0.2403  1.3975 -2.0068  0.1298  0.0212
+    -1.5371 -0.7257 -0.4871 -0.2359 -1.1724
+    [torch.FloatTensor of size 4x5]
+    
+    >>> torch.median(a, 1)
+    (
+     0.4056
+     0.1404
+     0.0212
+    -0.7257
+    [torch.FloatTensor of size 4x1]
+    ,
+     0
+     2
+     4
+     1
+    [torch.LongTensor of size 4x1]
+    )
+  
 """)
 
 add_docstr(torch._C.min,
 """
+.. function:: min(input) -> float
+
+Returns the minimum value of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+     0.4729 -0.2266 -0.2085
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.min(a)
+    -0.22663167119026184
+    
+
+.. function:: min(input, dim, min=None, min_indices=None) -> (Tensor, LongTensor)
+
+Returns the minimum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+Also returns the index location of each minimum value found.
+
+THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    min (Tensor, optional): the result Tensor with minimum values in dimension :attr:`dim`
+    min_indices (LongTensor, optional): the result Tensor with the index locations of the minimum values in dimension :attr:`dim`
+
+Example::
+
+    >> a = torch.randn(4, 4)
+    >> a
+    
+    0.0692  0.3142  1.2513 -0.5428
+    0.9288  0.8552 -0.2073  0.6409
+    1.0695 -0.0101 -2.4507 -1.2230
+    0.7426 -0.7666  0.4862 -0.6628
+    torch.FloatTensor of size 4x4]
+    
+    >> torch.min(a, 1)
+    
+    0.5428
+    0.2073
+    2.4507
+    0.7666
+    torch.FloatTensor of size 4x1]
+    
+    3
+    2
+    2
+    1
+    torch.LongTensor of size 4x1]
+    
 """)
 
 add_docstr(torch._C.mm,
@@ -1836,6 +2091,57 @@ Example::
 
 add_docstr(torch._C.mode,
 """
+mode(input, dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+
+Returns the mode value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+Also returns the index location of the mode value as a `LongTensor`.
+
+By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
+
+THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    values (Tensor, optional): the result Tensor
+    indices (Tensor, optional): the result index Tensor
+
+Example::
+
+    >>> a
+    
+     -0.6891 -0.6662
+     0.2697  0.7412
+     0.5254 -0.7402
+     0.5528 -0.2399
+    [torch.FloatTensor of size 4x2]
+    
+    >>> a = torch.randn(4, 5)
+    >>> a
+    
+     0.4056 -0.3372  1.0973 -2.4884  0.4334
+     2.1336  0.3841  0.1404 -0.1821 -0.7646
+    -0.2403  1.3975 -2.0068  0.1298  0.0212
+    -1.5371 -0.7257 -0.4871 -0.2359 -1.1724
+    [torch.FloatTensor of size 4x5]
+        
+    >>> torch.mode(a, 1)
+    (
+    -2.4884
+    -0.7646
+    -2.0068
+    -1.5371
+    [torch.FloatTensor of size 4x1]
+    ,
+     3
+     4
+     2
+     0
+    [torch.LongTensor of size 4x1]
+    )
+
 """)
 
 add_docstr(torch._C.mul,
@@ -2001,10 +2307,115 @@ Example::
 
 add_docstr(torch._C.nonzero,
 """
+nonzero(input, out=None) -> LongTensor
+
+Returns a list of indices of all the non-zero elements of the :attr:`input` Tensor. Each row in the result Tensor is one set of indices giving the location of a non-zero element in :attr:`input`
+
+If :attr:`input` has `n` dimensions, then the resulting indices Tensor :attr:`out` is of size `z x n`, where `z` is the total number of non-zero elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (LongTensor, optional): The result `Tensor` containing indices
+
+Example::
+
+    >>> a = torch.Tensor(5).bernoulli_()
+    >>> a
+    
+     1
+     1
+     1
+     0
+     1
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.nonzero(a)
+    
+     0
+     1
+     2
+     4
+    [torch.LongTensor of size 4x1]
+    
+    >>> a = torch.diag(torch.randn(4)) # create a matrix where only the diagonal is non-zero
+    >>> a
+    
+     0.6116  0.0000  0.0000  0.0000
+     0.0000  0.4126  0.0000  0.0000
+     0.0000  0.0000 -1.2886  0.0000
+     0.0000  0.0000  0.0000 -0.4112
+    [torch.FloatTensor of size 4x4]
+    
+    >>> torch.nonzero(a)
+    
+     0  0
+     1  1
+     2  2
+     3  3
+    [torch.LongTensor of size 4x2]
+        
 """)
 
 add_docstr(torch._C.norm,
 """
+.. function:: norm(input, p=2) -> float
+
+Returns the p-norm of the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+    p (float, optional): the exponent value in the norm formulation
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+    -0.4376 -0.5328  0.9547
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.norm(a, 3)
+    1.0338925067372466
+        
+
+.. function:: norm(input, p, dim, out=None) -> Tensor
+
+Returns the p-norm of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+
+THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    p (float):  the exponent value in the norm formulation
+    dim (long): the dimension to reduce
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> a = torch.randn(4, 2)
+    >>> a
+    
+    -0.6891 -0.6662
+     0.2697  0.7412
+     0.5254 -0.7402
+     0.5528 -0.2399
+    [torch.FloatTensor of size 4x2]
+    
+    >>> torch.norm(a, 2, 1)
+    
+     0.9585
+     0.7888
+     0.9077
+     0.6026
+    [torch.FloatTensor of size 4x1]
+    
+    >>> torch.norm(a, 0, 1)
+    
+     2
+     2
+     2
+     2
+    [torch.FloatTensor of size 4x1]
+            
 """)
 
 add_docstr(torch._C.normal,
@@ -2013,6 +2424,22 @@ add_docstr(torch._C.normal,
 
 add_docstr(torch._C.numel,
 """
+numel(input) -> long
+
+Returns the total number of elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1,2,3,4,5)
+    >>> torch.numel(a)
+    120
+    >>> a = torch.zeros(4,4)
+    >>> torch.numel(a)
+    16
+    
 """)
 
 add_docstr(torch._C.ones,
@@ -2041,10 +2468,150 @@ add_docstr(torch._C.potrs,
 
 add_docstr(torch._C.pow,
 """
+.. function:: pow(input, exponent, out=None)
+
+Takes the power of each element in :attr:`input` with :attr:`exponent` and returns a Tensor with the result.
+
+:attr:`exponent` can be either a single ``float`` number or a ``Tensor`` 
+with the same number of elements as :attr:`input`.
+
+When :attr:`exponent` is a scalar value, the operation applied is:
+
+:math:`out_i = x_i ^ {exponent}`
+
+When :attr:`exponent` is a Tensor, the operation applied is:
+
+:math:`out_i = x_i ^ {exponent_i}`
+
+Args:
+    input (Tensor): the input `Tensor`
+    exponent (float or Tensor): the exponent value
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+    -0.5274
+    -0.8232
+    -2.1128
+     1.7558
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.pow(a, 2)
+    
+     0.2781
+     0.6776
+     4.4640
+     3.0829
+    [torch.FloatTensor of size 4]
+    
+    >>> exp = torch.range(1, 4)
+    >>> a = torch.range(1, 4)
+    >>> a
+    
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 4]
+    
+    >>> exp
+    
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.pow(a, exp)
+    
+       1
+       4
+      27
+     256
+    [torch.FloatTensor of size 4]
+    
+
+.. function:: pow(base, input, out=None)
+
+:attr:`base` is a scalar ``float`` value, and :attr:`input` is a Tensor. The returned Tensor :attr:`out` is of the same shape as :attr:`input`
+
+The operation applied is: 
+
+:math:`out_i = base ^ {input_i}`
+
+Args:
+    base (float): the scalar base value for the power operation
+    input (Tensor): the exponent `Tensor`    
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> exp = torch.range(1, 4)
+    >>> base = 2
+    >>> torch.pow(base, exp)
+    
+      2
+      4
+      8
+     16
+    [torch.FloatTensor of size 4]
+            
 """)
 
 add_docstr(torch._C.prod,
 """
+.. function:: prod(input) -> float
+
+Returns the product of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+     0.6170  0.3546  0.0253
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.prod(a)
+    0.005537458061418483
+    
+
+.. function:: prod(input, dim, out=None) -> Tensor
+
+Returns the product of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+
+THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> a = torch.randn(4, 2)
+    >>> a
+    
+     0.1598 -0.6884
+    -0.1831 -0.4412
+    -0.9925 -0.6244
+    -0.2416 -0.8080
+    [torch.FloatTensor of size 4x2]
+    
+    >>> torch.prod(a, 1)
+    
+    -0.1100
+     0.0808
+     0.6197
+     0.1952
+    [torch.FloatTensor of size 4x1]
+        
 """)
 
 add_docstr(torch._C.pstrf,
@@ -2063,12 +2630,37 @@ add_docstr(torch._C.randn,
 """
 """)
 
-add_docstr(torch._C.random,
-"""
-""")
-
 add_docstr(torch._C.randperm,
 """
+randperm(n, out=None) -> long
+
+Returns a random permutation of integers from `1` to :attr:`n`.
+
+Args:
+    n (long): the last integer in the sequence
+
+Example::
+
+    >>> torch.randperm(4)
+    
+     2
+     1
+     3
+     0
+    [torch.LongTensor of size 4]
+    
+    >>> torch.randperm(8)
+    
+     2
+     6
+     5
+     4
+     3
+     1
+     7
+     0
+    [torch.LongTensor of size 8]
+    
 """)
 
 add_docstr(torch._C.range,
@@ -2219,6 +2811,33 @@ Sets the number of OpenMP threads used for parallelizing CPU operations
 
 add_docstr(torch._C.sigmoid,
 """
+sigmoid(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the sigmoid of the elements of :attr:`input`.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+    -0.4972
+     1.3512
+     0.1056
+    -0.2650
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.sigmoid(a)
+    
+     0.3782
+     0.7943
+     0.5264
+     0.4341
+    [torch.FloatTensor of size 4]
+        
 """)
 
 add_docstr(torch._C.sign,
@@ -2348,10 +2967,108 @@ add_docstr(torch._C.squeeze,
 
 add_docstr(torch._C.std,
 """
+.. function:: std(input) -> float
+
+Returns the standard-deviation of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+    -1.3063  1.4182 -0.3061
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.std(a)
+    1.3782334731508061
+            
+
+.. function:: std(input, dim, out=None) -> Tensor
+
+Returns the standard-deviation of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+
+THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    
+     0.1889 -2.4856  0.0043  1.8169
+    -0.7701 -0.4682 -2.2410  0.4098
+     0.1919 -1.1856 -1.0361  0.9085
+     0.0173  1.0662  0.2143 -0.5576
+    [torch.FloatTensor of size 4x4]
+    
+    >>> torch.std(a, dim=1)
+    
+     1.7756
+     1.1025
+     1.0045
+     0.6725
+    [torch.FloatTensor of size 4x1]
+    
 """)
 
 add_docstr(torch._C.sum,
 """
+.. function:: sum(input) -> float
+
+Returns the sum of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+     0.6170  0.3546  0.0253
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.sum(a)
+    0.9969287421554327
+    
+
+.. function:: sum(input, dim, out=None) -> Tensor
+
+Returns the sum of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+
+THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    
+    -0.4640  0.0609  0.1122  0.4784
+    -1.3063  1.6443  0.4714 -0.7396
+    -1.3561 -0.1959  1.0609 -1.9855
+     2.6833  0.5746 -0.5709 -0.4430
+    [torch.FloatTensor of size 4x4]
+    
+    >>> torch.sum(a, 1)
+    
+     0.1874
+     0.0698
+    -2.4767
+     2.2440
+    [torch.FloatTensor of size 4x1]
+    
 """)
 
 add_docstr(torch._C.svd,
@@ -2436,10 +3153,108 @@ add_docstr(torch._C.transpose,
 
 add_docstr(torch._C.tril,
 """
+tril(input, k=0, out=None) -> Tensor
+
+Returns the lower triangular part of the matrix (2D Tensor) :attr:`input`, 
+the other elements of the result Tensor :attr:`out` are set to 0.
+
+The lower triangular part of the matrix is defined as the elements on and below the diagonal.
+
+The argument :attr:`k` controls which diagonal to consider.
+
+- :attr:`k` = 0, is the main diagonal.
+- :attr:`k` > 0, is above the main diagonal.
+- :attr:`k` < 0, is below the main diagonal.
+
+Args:
+    input (Tensor): the input `Tensor`
+    k (long, optional): the diagonal to consider
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(3,3)
+    >>> a
+    
+     1.3225  1.7304  1.4573
+    -0.3052 -0.3111 -0.1809
+     1.2469  0.0064 -1.6250
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.tril(a)
+    
+     1.3225  0.0000  0.0000
+    -0.3052 -0.3111  0.0000
+     1.2469  0.0064 -1.6250
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.tril(a, k=1)
+    
+     1.3225  1.7304  0.0000
+    -0.3052 -0.3111 -0.1809
+     1.2469  0.0064 -1.6250
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.tril(a, k=-1)
+    
+     0.0000  0.0000  0.0000
+    -0.3052  0.0000  0.0000
+     1.2469  0.0064  0.0000
+    [torch.FloatTensor of size 3x3]
+    
 """)
 
 add_docstr(torch._C.triu,
 """
+triu(input, k=0, out=None) -> Tensor
+
+Returns the upper triangular part of the matrix (2D Tensor) :attr:`input`, 
+the other elements of the result Tensor :attr:`out` are set to 0.
+
+The upper triangular part of the matrix is defined as the elements on and above the diagonal.
+
+The argument :attr:`k` controls which diagonal to consider.
+
+- :attr:`k` = 0, is the main diagonal.
+- :attr:`k` > 0, is above the main diagonal.
+- :attr:`k` < 0, is below the main diagonal.
+
+Args:
+    input (Tensor): the input `Tensor`
+    k (long, optional): the diagonal to consider
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(3,3)
+    >>> a
+    
+     1.3225  1.7304  1.4573
+    -0.3052 -0.3111 -0.1809
+     1.2469  0.0064 -1.6250
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.triu(a)
+    
+     1.3225  1.7304  1.4573
+     0.0000 -0.3111 -0.1809
+     0.0000  0.0000 -1.6250
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.triu(a, k=1)
+    
+     0.0000  1.7304  1.4573
+     0.0000  0.0000 -0.1809
+     0.0000  0.0000  0.0000
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.triu(a, k=-1)
+    
+     1.3225  1.7304  1.4573
+    -0.3052 -0.3111 -0.1809
+     0.0000  0.0064 -1.6250
+    [torch.FloatTensor of size 3x3]
+                        
 """)
 
 add_docstr(torch._C.trtrs,
@@ -2448,6 +3263,33 @@ add_docstr(torch._C.trtrs,
 
 add_docstr(torch._C.trunc,
 """
+trunc(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the truncated integer values of the elements of :attr:`input`.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+    -0.4972
+     1.3512
+     0.1056
+    -0.2650
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.trunc(a)
+    
+    -0
+     1
+     0
+    -0
+    [torch.FloatTensor of size 4]
+            
 """)
 
 add_docstr(torch._C.unfold,
@@ -2456,6 +3298,55 @@ add_docstr(torch._C.unfold,
 
 add_docstr(torch._C.var,
 """
+.. function:: var(input) -> float
+
+Returns the variance of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    
+    -1.3063  1.4182 -0.3061
+    [torch.FloatTensor of size 1x3]
+    
+    >>> torch.var(a)
+    1.899527506513334
+        
+
+.. function:: var(input, dim, out=None) -> Tensor
+
+Returns the variance of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
+
+THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (long): the dimension to reduce
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    
+    -1.2738 -0.3058  0.1230 -1.9615
+     0.8771 -0.5430 -0.9233  0.9879
+     1.4107  0.0317 -0.6823  0.2255
+    -1.3854  0.4953 -0.2160  0.2435
+    [torch.FloatTensor of size 4x4]
+    
+    >>> torch.var(a, 1)
+    
+     0.8859
+     0.9509
+     0.7548
+     0.6949
+    [torch.FloatTensor of size 4x1]
+                
 """)
 
 add_docstr(torch._C.zeros,
