@@ -287,6 +287,13 @@ bool SimpleNet::RunAsync() {
   return true;
 }
 
+namespace {
+template <typename A, typename B>
+bool PairLargerThan(const std::pair<A, B>& x, const std::pair<A, B>& y) {
+  return x.second > y.second;
+}
+}
+
 vector<float> SimpleNet::TEST_Benchmark(
     const int warmup_runs,
     const int main_runs,
@@ -357,7 +364,7 @@ vector<float> SimpleNet::TEST_Benchmark(
     std::sort(
         time_per_op_type_vec.begin(),
         time_per_op_type_vec.end(),
-        [](const auto& a, const auto& b) { return a.second > b.second; });
+        PairLargerThan<string, float>);
     for (const auto& item : time_per_op_type_vec) {
       LOG(INFO) << std::setw(15) << std::setfill(' ') << item.second / main_runs
                 << " " << item.first;
