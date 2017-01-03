@@ -21,7 +21,6 @@ Math operations
 .. autofunction:: bernoulli
 .. autofunction:: bmm
 .. autofunction:: cat
-.. autofunction:: cauchy
 .. autofunction:: ceil
 .. autofunction:: cinv
 .. autofunction:: clamp
@@ -61,7 +60,6 @@ Math operations
 .. autofunction:: linspace
 .. autofunction:: log
 .. autofunction:: log1p
-.. autofunction:: log_normal
 .. autofunction:: logspace
 .. autofunction:: lt
 .. autofunction:: masked_select
@@ -125,7 +123,6 @@ Math operations
 .. autofunction:: unfold
 .. autofunction:: uniform
 .. autofunction:: var
-.. autofunction:: zero
 .. autofunction:: zeros
 
 
