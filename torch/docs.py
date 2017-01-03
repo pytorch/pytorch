@@ -4,11 +4,12 @@ import torch._C
 from torch._C import _add_docstr as add_docstr
 
 add_docstr(torch._C.abs,
-"""abs(tensor, out=None) -> tensor
+"""abs(input, out=None) -> Tensor
 
-Computes the element-wise absolute value of a tensor.
+Computes the element-wise absolute value of the given :attr:`input` a tensor.
 
-Example:
+Example::
+
     >>> torch.abs(torch.FloatTensor([-1, -2, 3]))
     FloatTensor([1, 2, 3])
 """)
@@ -20,14 +21,13 @@ acos(input, out=None) -> Tensor
 Returns a new `Tensor` with the arccosine  of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     
     -0.6366
      0.2718
@@ -45,22 +45,21 @@ Example:
 
 add_docstr(torch._C.add,
 """
-.. function:: add(tensor, value, out=None)
+.. function:: add(input, value, out=None)
 
-Adds the scalar :attr:`value` to each element of the input :attr:`tensor` and returns a new resulting tensor.
+Adds the scalar :attr:`value` to each element of the input :attr:`input` and returns a new resulting tensor.
 
 :math:`out = tensor + value`
 
 Args:
-    tensor (Tensor): the input `Tensor`
-    value (number): the number to be added to each element of :attr:`tensor`
+    input (Tensor): the input `Tensor`
+    value (Float): the number to be added to each element of :attr:`input`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
 
      0.4050
     -1.2227
@@ -77,27 +76,26 @@ Example:
     [torch.FloatTensor of size 4]
 
 
-.. function:: add(tensor, value=1, other, out=None)
+.. function:: add(input, value=1, other, out=None)
 
-Each element of the Tensor :attr:`other` is multiplied by the scalar :attr:`value` and added to each element of the Tensor :attr:`tensor`. The resulting Tensor is returned.
-The shapes of :attr:`tensor` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+Each element of the Tensor :attr:`other` is multiplied by the scalar :attr:`value` and added to each element of the Tensor :attr:`input`. The resulting Tensor is returned.
+The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
 
-.. note:: When the shapes do not match, the shape of :attr:`tensor` is used as the shape for the returned output Tensor
+.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
 :math:`out = tensor + (other * value)`
 
 Args:
-    tensor (Tensor): the first input `Tensor`
-    value (number): the scalar multiplier for :attr:`other`
+    input (Tensor): the first input `Tensor`
+    value (Float): the scalar multiplier for :attr:`other`
     other (Tensor): the second input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> import torch
     >>> a = torch.randn(4)
-    >>> print(a)    
+    >>> a    
 
     -0.9310
      2.0330
@@ -106,7 +104,7 @@ Example:
     [torch.FloatTensor of size 4]
 
     >>> b = torch.randn(2, 2)
-    >>> print(b)
+    >>> b
 
      1.0663  0.2544
     -0.1513  0.0749
@@ -127,7 +125,7 @@ add_docstr(torch._C.addbmm,
 addbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and :attr:`batch2`, 
-with a reduced add step (all matrix multiplications get accumulated in a single place). 
+with a reduced add step (all matrix multiplications get accumulated along the first dimension). 
 :attr:`mat` is added to the final result.
 
 :attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
@@ -135,18 +133,17 @@ with a reduced add step (all matrix multiplications get accumulated in a single 
 If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
 
 In other words,
-:math:`res = (beta * M) + (alpha * sum(batch1_i * batch2_i, i = 1, b))`
+:math:`res = (beta * M) + (alpha * sum(batch1_i @ batch2_i, i = 0, b))`
 
 Args:
-    beta (float, optional): multiplier for :attr:`mat`
+    beta (Float, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (float, optional): multiplier for `batch1 @ batch2`
+    alpha (Float, optional): multiplier for `batch1 @ batch2`
     batch1 (Tensor): First batch of matrices to be multiplied
     batch2 (Tensor): Second batch of matrices to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> M = torch.randn(3, 5)
     >>> batch1 = torch.randn(10, 3, 4)
@@ -170,13 +167,12 @@ The number of elements must match, but sizes do not matter.
 
 Args:
     tensor (Tensor): the tensor to be added
-    value (float, optional): multiplier for `tensor1 ./ tensor2`
+    value (Float, optional): multiplier for `tensor1 ./ tensor2`
     tensor1 (Tensor): Numerator tensor
     tensor2 (Tensor): Denominator tensor
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> t = torch.randn(2, 3)
     >>> t1 = torch.randn(1, 6)
@@ -199,13 +195,12 @@ The number of elements must match, but sizes do not matter.
 
 Args:
     tensor (Tensor): the tensor to be added
-    value (float, optional): multiplier for `tensor1 .* tensor2`
+    value (Float, optional): multiplier for `tensor1 .* tensor2`
     tensor1 (Tensor): tensor to be multiplied
     tensor2 (Tensor): tensor to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> t = torch.randn(2, 3)
     >>> t1 = torch.randn(1, 6)
@@ -226,21 +221,20 @@ The matrix :attr:`mat` is added to the final result.
 
 If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
 
-`alpha` and `beta` are scaling factors on `mat1@mat2` and `mat` respectively.
+`alpha` and `beta` are scaling factors on `mat1 @ mat2` and `mat` respectively.
 
 In other words,
-:math:`out = (beta * M) + (alpha * mat1 * mat2)`
+:math:`out = (beta * M) + (alpha * mat1 @ mat2)`
 
 Args:
-    beta (float, optional): multiplier for :attr:`mat`
+    beta (Float, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (float, optional): multiplier for `mat1 @ mat2`
+    alpha (Float, optional): multiplier for `mat1 @ mat2`
     mat1 (Tensor): First matrix to be multiplied
     mat2 (Tensor): Second matrix to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> M = torch.randn(2, 3)
     >>> mat1 = torch.randn(2, 3)
@@ -261,22 +255,21 @@ The vector :attr:`tensor` is added to the final result.
 
 If :attr:`mat` is a `n x m` Tensor, :attr:`vec` is a 1D Tensor of size `m`, :attr:`out` and :attr:`tensor` will be 1D of size `n`.
 
-`alpha` and `beta` are scaling factors on `mat*vec` and `tensor` respectively.
+`alpha` and `beta` are scaling factors on `mat * vec` and `tensor` respectively.
 
 In other words:
 
-:math:`out = (beta * tensor) + (alpha * (mat * vec2))`
+:math:`out = (beta * tensor) + (alpha * (mat @ vec2))`
 
 Args:
-    beta (float, optional): multiplier for :attr:`tensor`
+    beta (Float, optional): multiplier for :attr:`tensor`
     tensor (Tensor): vector to be added
-    alpha (float, optional): multiplier for `mat @ vec`
+    alpha (Float, optional): multiplier for `mat @ vec`
     mat (Tensor): matrix to be multiplied
     vec (Tensor): vector to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> M = torch.randn(2)
     >>> mat = torch.randn(2, 3)
@@ -298,20 +291,19 @@ Optional values :attr:`beta` and :attr:`alpha` are scalars that multiply :attr:`
 
 In other words,
 
-:math:`res_{ij} = (beta * mat_i_j) + (alpha * vec1_i * vec2_j)`
+:math:`res_{ij} = (beta * mat_i_j) + (alpha * vec1_i @ vec2_j)`
 
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`, then :attr:`mat` must be a matrix of size `n x m`
 
 Args:
-    beta (float, optional): multiplier for :attr:`mat`
+    beta (Float, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (float, optional): multiplier for `vec1 (out) vec2`
+    alpha (Float, optional): multiplier for `vec1 (out) vec2`
     vec1 (Tensor): First vector of the outer product
     vec2 (Tensor): Second vector of the outer product
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> vec1 = torch.range(1, 3)
     >>> vec2 = torch.range(1, 2)
@@ -330,14 +322,13 @@ asin(input, out=None) -> Tensor
 Returns a new `Tensor` with the arcsine  of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -359,14 +350,13 @@ atan(input, out=None) -> Tensor
 Returns a new `Tensor` with the arctangent  of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -388,15 +378,14 @@ atan2(input1, input2, out=None) -> Tensor
 Returns a new `Tensor` with the arctangent of the elements of :attr:`input1` and :attr:`input2`.
 
 Args:
-    tensor (Tensor): the first input `Tensor`
-    tensor (Tensor): the second input `Tensor`
+    input1 (Tensor): the first input `Tensor`
+    input2 (Tensor): the second input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -415,7 +404,7 @@ add_docstr(torch._C.baddbmm,
 """
 baddbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
 
-Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and :attr:`batch2`. 
+Performs a batch matrix-matrix product of matrices in :attr:`batch1` and :attr:`batch2`. 
 :attr:`mat` is added to the final result.
 
 :attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
@@ -423,18 +412,17 @@ Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and 
 If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor, :attr:`out` and :attr:`mat` will be `b x n x p` Tensors.
 
 In other words,
-:math:`res_i = (beta * M_i) + (alpha * batch1_i * batch2_i)`
+:math:`res_i = (beta * M_i) + (alpha * batch1_i @ batch2_i)`
 
 Args:
-    beta (float, optional): multiplier for :attr:`mat`
+    beta (Float, optional): multiplier for :attr:`mat`
     mat (Tensor): tensor to be added
-    alpha (float, optional): multiplier for `batch1 @ batch2`
+    alpha (Float, optional): multiplier for `batch1 @ batch2`
     batch1 (Tensor): First batch of matrices to be multiplied
     batch2 (Tensor): Second batch of matrices to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> M = torch.randn(10, 3, 5)
     >>> batch1 = torch.randn(10, 3, 4)
@@ -463,13 +451,12 @@ Args:
     batch2 (Tensor): Second batch of matrices to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> batch1 = torch.randn(10, 3, 4)
     >>> batch2 = torch.randn(10, 4, 5)
     >>> res = torch.bmm(M, batch1, batch2)
-    >>> print(res.size())
+    >>> res.size()
     torch.Size([10, 3, 5])
 """)
 
@@ -483,22 +470,257 @@ add_docstr(torch._C.cauchy,
 
 add_docstr(torch._C.ceil,
 """
+ceil(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the ceil of the elements of :attr:`input`, the smallest integer greater than or equal to each element.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.ceil(a)
+    
+     2
+     1
+    -0
+    -0
+    [torch.FloatTensor of size 4]
+    
 """)
 
 add_docstr(torch._C.cinv,
 """
+cinv(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the scalar inverse of the elements of :attr:`input`, i.e. :math:`1.0 / x`
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.cinv(a)
+    
+     0.7210
+     2.5565
+    -1.1583
+    -1.8289
+    [torch.FloatTensor of size 4]    
+
 """)
 
 add_docstr(torch._C.clamp,
 """
+clamp(input, min, max, out=None) -> Tensor
+
+Clamp all elements in :attr:`input` into the range `[min, max]` and return a resulting Tensor.
+
+::
+
+          | min, if x_i < min
+    y_i = | x_i, if min <= x_i <= max
+          | max, if x_i > max
+
+Args:
+    input (Tensor): the input `Tensor`
+    min (Float): lower-bound of the range to be clamped to
+    max (Float): upper-bound of the range to be clamped to
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.clamp(a, min=-0.5, max=0.5)
+    
+     0.5000
+     0.3912
+    -0.5000
+    -0.5000
+    [torch.FloatTensor of size 4]
+    
 """)
 
 add_docstr(torch._C.cmax,
 """
+.. function:: cmax(input, value, out=None) -> Tensor
+
+Takes the element-wise `max` of the scalar :attr:`value` and each element of the input :attr:`input` and returns a new tensor with the result.
+
+Args:
+    input (Tensor): the input `Tensor`
+    value (Float): the scalar to be compared with
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.cmax(a, 0.5)
+
+     1.3869
+     0.5000
+     0.5000
+     0.5000
+    [torch.FloatTensor of size 4]
+    
+    
+.. function:: cmax(input, other, out=None) -> Tensor
+
+Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input` 
+and an element-wise `max` is taken. The resulting Tensor is returned.
+
+The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+
+.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+
+:math:`out_i = max(tensor_i, other_i)`
+
+Args:
+    input (Tensor): the input `Tensor`
+    other (Tensor): the second input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> b = torch.randn(4)
+    >>> b
+    
+     1.0067
+    -0.8010
+     0.6258
+     0.3627
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.cmax(a, b)
+    
+     1.3869
+     0.3912
+     0.6258
+     0.3627
+    [torch.FloatTensor of size 4]
+
 """)
 
 add_docstr(torch._C.cmin,
 """
+.. function:: cmin(input, value, out=None) -> Tensor
+
+Takes the element-wise `min` of the scalar :attr:`value` and each element of the input :attr:`input` and returns a new tensor with the result.
+
+Args:
+    input (Tensor): the input `Tensor`
+    value (Float): the scalar to be compared with
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.cmin(a, 0.5)
+    
+     0.5000
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+        
+    
+.. function:: cmin(input, other, out=None) -> Tensor
+
+Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input` 
+and an element-wise `min` is taken. The resulting Tensor is returned.
+
+The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+
+.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+
+:math:`out_i = min(tensor_i, other_i)`
+
+Args:
+    input (Tensor): the input `Tensor`
+    other (Tensor): the second input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> b = torch.randn(4)
+    >>> b
+    
+     1.0067
+    -0.8010
+     0.6258
+     0.3627
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.cmin(a, b)    
+    
+     1.0067
+    -0.8010
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
 """)
 
 add_docstr(torch._C.cos,
@@ -508,14 +730,13 @@ cos(input, out=None) -> Tensor
 Returns a new `Tensor` with the cosine  of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -537,14 +758,13 @@ cosh(input, out=None) -> Tensor
 Returns a new `Tensor` with the hyperbolic cosine  of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -561,14 +781,166 @@ Example:
 
 add_docstr(torch._C.cross,
 """
+cross(input, other, dim=-1, out=None) -> Tensor
+
+
+Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input` and :attr:`other`.
+
+:attr:`input` and :attr:`other` must have the same size, and the size of their :attr:`dim` dimension should be 3.
+
+If :attr:`dim` is not given, it defaults to the first dimension found with the size 3.
+
+Args:
+    input (Tensor): the input `Tensor`
+    other  (Tensor): the second input `Tensor`
+    dim  (Long, optional): the dimension to take the cross-product in.
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4, 3)
+    >>> a
+    
+    -0.6652 -1.0116 -0.6857
+     0.2286  0.4446 -0.5272
+     0.0476  0.2321  1.9991
+     0.6199  1.1924 -0.9397
+    [torch.FloatTensor of size 4x3]
+    
+    >>> b = torch.randn(4, 3)
+    >>> b
+    
+    -0.1042 -1.1156  0.1947
+     0.9947  0.1149  0.4701
+    -1.0108  0.8319 -0.0750
+     0.9045 -1.3754  1.0976
+    [torch.FloatTensor of size 4x3]
+    
+    >>> torch.cross(a, b, dim=1)
+    
+    -0.9619  0.2009  0.6367
+     0.2696 -0.6318 -0.4160
+    -1.6805 -2.0171  0.2741
+     0.0163 -1.5304 -1.9311
+    [torch.FloatTensor of size 4x3]
+    
+    >>> torch.cross(a, b)
+    
+    -0.9619  0.2009  0.6367
+     0.2696 -0.6318 -0.4160
+    -1.6805 -2.0171  0.2741
+     0.0163 -1.5304 -1.9311
+    [torch.FloatTensor of size 4x3]
 """)
 
 add_docstr(torch._C.cumprod,
 """
+cumprod(input, dim, out=None) -> Tensor
+
+Returns the cumulative product of elements of :attr:`input` in the dimension :attr:`dim`.
+
+For example, if :attr:`input` is a vector of size N, the result will also be a vector of size N, with elements:
+:math:`y_i = x_1 * x_2 * x_3 * ... * x_i`
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim  (Long): the dimension to do the operation over
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(10)
+    >>> a
+    
+     1.1148
+     1.8423
+     1.4143
+    -0.4403
+     1.2859
+    -1.2514
+    -0.4748
+     1.1735
+    -1.6332
+    -0.4272
+    [torch.FloatTensor of size 10]
+    
+    >>> torch.cumprod(a, dim=0)
+    
+     1.1148
+     2.0537
+     2.9045
+    -1.2788
+    -1.6444
+     2.0578
+    -0.9770
+    -1.1466
+     1.8726
+    -0.8000
+    [torch.FloatTensor of size 10]
+    
+    >>> a[5] = 0.0
+    >>> torch.cumprod(a, dim=0)
+    
+     1.1148
+     2.0537
+     2.9045
+    -1.2788
+    -1.6444
+    -0.0000
+     0.0000
+     0.0000
+    -0.0000
+     0.0000
+    [torch.FloatTensor of size 10]
+        
 """)
 
 add_docstr(torch._C.cumsum,
 """
+cumsum(input, dim, out=None) -> Tensor
+
+Returns the cumulative sum of elements of :attr:`input` in the dimension :attr:`dim`.
+
+For example, if :attr:`input` is a vector of size N, the result will also be a vector of size N, with elements:
+:math:`y_i = x_1 + x_2 + x_3 + ... + x_i`
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim  (Long): the dimension to do the operation over
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(10)
+    >>> a
+    
+    -0.6039
+    -0.2214
+    -0.3705
+    -0.0169
+     1.3415
+    -0.1230
+     0.9719
+     0.6081
+    -0.1286
+     1.0947
+    [torch.FloatTensor of size 10]
+    
+    >>> torch.cumsum(a, dim=0)
+    
+    -0.6039
+    -0.8253
+    -1.1958
+    -1.2127
+     0.1288
+     0.0058
+     0.9777
+     1.5858
+     1.4572
+     2.5519
+    [torch.FloatTensor of size 10]
+            
+    
 """)
 
 add_docstr(torch._C.diag,
@@ -590,8 +962,7 @@ dot(tensor1, tensor2) -> float
 Computes the dot product (inner product) of two tensors. Both tensors are
 treated as 1-D vectors.
 
-Example:
-::
+Example::
 
     >>> torch.dot(torch.Tensor([2, 3]), torch.Tensor([2, 1]))
     7.0
@@ -619,7 +990,7 @@ Returns:
 
 add_docstr(torch._C.eq,
 """
-eq(tensor, other, out=None) -> Tensor
+eq(input, other, out=None) -> Tensor
 
 Computes element-wise equality
 
@@ -627,15 +998,14 @@ The second argument can be a number or a tensor of the same shape and
 type as the first argument.
 
 Args:
-    tensor (Tensor): Tensor to compare
+    input (Tensor): Tensor to compare
     other (Tensor or float): Tensor or value to compare
     out (Tensor, optional): Output tensor. Must be a `ByteTensor` or the same type as `tensor`.
 
 Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where the tensors are equal and a 0 at every other location
 
-Example:
-::
+Example::
 
     >>> torch.eq(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
     1  0
@@ -649,8 +1019,7 @@ equal(tensor1, tensor2) -> bool
 
 True if two tensors have the same size and elements, False otherwise.
 
-Example:
-::
+Example::
 
     >>> torch.equal(torch.Tensor([1, 2]), torch.Tensor([1, 2]))
     True
@@ -658,12 +1027,11 @@ Example:
 
 add_docstr(torch._C.exp,
 """
-exp(tensor, out=None) -> tensor
+exp(tensor, out=None) -> Tensor
 
 Computes the exponential of each element.
 
-Example:
-::
+Example::
 
     >>> torch.exp(torch.Tensor([0, math.log(2)]))
     torch.FloatTensor([1, 2])
@@ -683,8 +1051,7 @@ Args:
 Returns:
     Tensor: a 2-D tensor with ones on the diagonal and zeros elsewhere
 
-Example:
-::
+Example::
 
     >>> torch.eye(3)
      1  0  0
@@ -695,21 +1062,39 @@ Example:
 
 add_docstr(torch._C.floor,
 """
-floor(tensor, out=None) -> Tensor
+floor(input, out=None) -> Tensor
 
-Computes the floor of each element in `tensor`. That is, each element is
-rounded down to the nearest integer.
+Returns a new `Tensor` with the floor of the elements of :attr:`input`, the largest integer less than or equal to each element.
 
-Example:
-::
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
 
-    >>> torch.floor(torch.Tensor([1.5, -2.7, 3.0]))
-    torch.FloatTensor([1, -3, 3])
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.floor(a)
+    
+     1
+     0
+    -1
+    -1
+    [torch.FloatTensor of size 4]
+    
+
 """)
 
 add_docstr(torch._C.fmod,
 """
-fmod(tensor, divisor, out=None) -> Tensor
+fmod(input, divisor, out=None) -> Tensor
 
 Computes the element-wise remainder of division.
 
@@ -717,13 +1102,12 @@ The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the dividend `tensor`.
 
 Args:
-    tensor (Tensor): The dividend
+    input (Tensor): The dividend
     divisor (Tensor or float): The divisor. This may be either a number or a
                                tensor of the same shape as the dividend.
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> torch.fmod(torch.Tensor([-3, -2, -1, 1, 2, 3]), 2)
     torch.FloatTensor([-1, -0, -1, 1, 0, 1])
@@ -742,8 +1126,7 @@ frac(tensor, out=None) -> Tensor
 
 Computes the fractional portion of each element in `tensor`.
 
-Example:
-::
+Example::
 
     >>> torch.frac(torch.Tensor([1, 2.5, -3.2])
     torch.FloatTensor([0, 0.5, -0.2])
@@ -759,8 +1142,7 @@ The returned tensor and `ndarray` share the same memory. Modifications to the
 tensor will be reflected in the `ndarray` and vice versa. The returned tensor
 is not resizable.
 
-Example:
-::
+Example::
 
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.from_numpy(a)
@@ -773,7 +1155,7 @@ Example:
 
 add_docstr(torch._C.gather,
 """
-gather(tensor, dim, index, out=None) -> Tensor
+gather(input, dim, index, out=None) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -784,13 +1166,12 @@ For a 3-D tensor the output is specified by::
     out[i][j][k] = tensor[i][j][index[i][j][k]]  # dim=3
 
 Args:
-    tensor (Tensor): The source tensor
+    input (Tensor): The source tensor
     dim (int): The axis along which to index
     index (LongTensor): The indices of elements to gather
     out (Tensor, optional): Destination tensor
 
-Example:
-::
+Example::
 
     >>> t = torch.Tensor([[1,2],[3,4]])
     >>> torch.gather(t, 1, torch.LongTensor([[0,0],[1,0]]))
@@ -800,7 +1181,7 @@ Example:
 
 add_docstr(torch._C.ge,
 """
-ge(tensor, other, out=None) -> Tensor
+ge(input, other, out=None) -> Tensor
 
 Computes `tensor >= other` element-wise.
 
@@ -808,15 +1189,14 @@ The second argument can be a number or a tensor of the same shape and
 type as the first argument.
 
 Args:
-    tensor (Tensor): Tensor to compare
+    input (Tensor): Tensor to compare
     other (Tensor or float): Tensor or value to compare
     out (Tensor, optional): Output tensor. Must be a `ByteTensor` or the same type as `tensor`.
 
 Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
-Example:
-::
+Example::
 
     >>> torch.ge(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      1  1
@@ -869,8 +1249,7 @@ Returns:
     of the input matrices. That is, they will have stride `(1, m)` instead of
     `(m, 1)`.
 
-Example:
-::
+Example::
 
 
     >>> A = torch.Tensor([[1, 1, 1],
@@ -912,7 +1291,7 @@ Gets the number of OpenMP threads used for parallelizing CPU operations
 
 add_docstr(torch._C.gt,
 """
-gt(tensor, other, out=None) -> Tensor
+gt(input, other, out=None) -> Tensor
 
 Computes `tensor > other` element-wise.
 
@@ -920,15 +1299,14 @@ The second argument can be a number or a tensor of the same shape and
 type as the first argument.
 
 Args:
-    tensor (Tensor): Tensor to compare
+    input (Tensor): Tensor to compare
     other (Tensor or float): Tensor or value to compare
     out (Tensor, optional): Output tensor. Must be a `ByteTensor` or the same type as `tensor`.
 
 Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
-Example:
-::
+Example::
 
     >>> torch.gt(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      0  1
@@ -938,7 +1316,7 @@ Example:
 
 add_docstr(torch._C.histc,
 """
-histc(tensor, bins=100, min=0, max=0, out=None) -> Tensor
+histc(input, bins=100, min=0, max=0, out=None) -> Tensor
 
 Computes the histogram of a tensor.
 
@@ -946,7 +1324,7 @@ The elements are sorted into equal width bins between `min` and `max`. If `min`
 and `max` are both zero, the minimum and maximum values of the data are used.
 
 Args:
-    tensor (Tensor): Input data
+    input (Tensor): Input data
     bins (int): Number of histogram bins
     min (int): Lower end of the range (inclusive)
     max (int): Upper end of the range (inclusive)
@@ -955,8 +1333,7 @@ Args:
 Returns:
     Tensor: the histogram
 
-Example:
-::
+Example::
 
     >>> torch.histc(torch.FloatTensor([1, 2, 1]), bins=4, min=0, max=3)
     FloatTensor([0, 2, 1, 0])
@@ -977,7 +1354,7 @@ add_docstr(torch._C.kthvalue,
 
 add_docstr(torch._C.le,
 """
-le(tensor, other, out=None) -> Tensor
+le(input, other, out=None) -> Tensor
 
 Computes `tensor <= other` element-wise.
 
@@ -985,15 +1362,14 @@ The second argument can be a number or a tensor of the same shape and
 type as the first argument.
 
 Args:
-    tensor (Tensor): Tensor to compare
+    input (Tensor): Tensor to compare
     other (Tensor or float): Tensor or value to compare
     out (Tensor, optional): Output tensor. Must be a `ByteTensor` or the same type as `tensor`.
 
 Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
-Example:
-::
+Example::
 
     >>> torch.le(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      1  0
@@ -1027,7 +1403,7 @@ add_docstr(torch._C.logspace,
 
 add_docstr(torch._C.lt,
 """
-lt(tensor, other, out=None) -> Tensor
+lt(input, other, out=None) -> Tensor
 
 Computes `tensor < other` element-wise.
 
@@ -1035,15 +1411,14 @@ The second argument can be a number or a tensor of the same shape and
 type as the first argument.
 
 Args:
-    tensor (Tensor): Tensor to compare
+    input (Tensor): Tensor to compare
     other (Tensor or float): Tensor or value to compare
     out (Tensor, optional): Output tensor. Must be a `ByteTensor` or the same type as `tensor`.
 
 Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
-Example:
-::
+Example::
 
     >>> torch.lt(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      0  0
@@ -1084,8 +1459,7 @@ Args:
     mat2 (Tensor): Second matrix to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
@@ -1120,8 +1494,7 @@ Args:
     vec (Tensor): vector to be multiplied
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> M = torch.randn(2)
     >>> mat = torch.randn(2, 3)
@@ -1134,7 +1507,7 @@ Example:
 
 add_docstr(torch._C.ne,
 """
-ne(tensor, other, out=None) -> Tensor
+ne(input, other, out=None) -> Tensor
 
 Computes `tensor != other` element-wise.
 
@@ -1142,15 +1515,14 @@ The second argument can be a number or a tensor of the same shape and
 type as the first argument.
 
 Args:
-    tensor (Tensor): Tensor to compare
+    input (Tensor): Tensor to compare
     other (Tensor or float): Tensor or value to compare
     out (Tensor, optional): Output tensor. Must be a `ByteTensor` or the same type as `tensor`.
 
 Returns:
     Tensor: a ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
 
-Example:
-::
+Example::
 
     >>> torch.ne(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
      0  1
@@ -1240,7 +1612,7 @@ add_docstr(torch._C.range,
 
 add_docstr(torch._C.remainder,
 """
-remainder(tensor, divisor, out=None) -> Tensor
+remainder(input, divisor, out=None) -> Tensor
 
 Computes the element-wise remainder of division.
 
@@ -1248,13 +1620,12 @@ The divisor and dividend may contain both for integer and floating point
 numbers. The remainder has the same sign as the divisor.
 
 Args:
-    tensor (Tensor): The dividend
+    input (Tensor): The dividend
     divisor (Tensor or float): The divisor. This may be either a number or a
                                tensor of the same shape as the dividend.
     out (Tensor, optional): Output tensor
 
-Example:
-::
+Example::
 
     >>> torch.remainder(torch.Tensor([-3, -2, -1, 1, 2, 3]), 2)
     torch.FloatTensor([1, 0, 1, 1, 0, 1])
@@ -1309,14 +1680,13 @@ sin(input, out=None) -> Tensor
 Returns a new `Tensor` with the sine of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -1338,14 +1708,13 @@ sinh(input, out=None) -> Tensor
 Returns a new `Tensor` with the hyperbolic sine of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -1399,14 +1768,13 @@ tan(input, out=None) -> Tensor
 Returns a new `Tensor` with the tangent of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
@@ -1428,14 +1796,13 @@ tanh(input, out=None) -> Tensor
 Returns a new `Tensor` with the hyperbolic tangent of the elements of :attr:`input`.
 
 Args:
-    tensor (Tensor): the input `Tensor`
+    input (Tensor): the input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
-Example:
-::
+Example::
 
     >>> a = torch.randn(4)
-    >>> print(a)
+    >>> a
     -0.6366
      0.2718
      0.4469
