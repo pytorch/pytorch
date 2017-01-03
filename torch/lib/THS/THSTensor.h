@@ -2,6 +2,7 @@
 #define THS_TENSOR_INC
 
 #include "TH.h"
+#include <stdint.h>
 
 #define THSTensor          TH_CONCAT_3(THS,Real,Tensor)
 #define THSTensor_(NAME)   TH_CONCAT_4(THS,Real,Tensor_,NAME)

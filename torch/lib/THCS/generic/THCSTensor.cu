@@ -35,12 +35,12 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   THLongStorage_free(storage);
   return other;
   */
-  printf("WARNING: Sparse Cuda Tensor op toDense is not implemented");
+  THError("WARNING: Sparse Cuda Tensor op toDense is not implemented");
   return NULL;
 }
 
 void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
-  printf("WARNING: Sparse Cuda Tensor op reorder is not implemented");
+  THError("WARNING: Sparse Cuda Tensor op reorder is not implemented");
 }
 
 void THCSTensor_(contiguous)(THCState *state, THCSTensor *self) {
@@ -66,7 +66,7 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   self->contiguous = 0;
   THFree(indices);
   */
-  printf("WARNING: Sparse Cuda Tensor op transpose is not implemented");
+  THError("WARNING: Sparse Cuda Tensor op transpose is not implemented");
 }
 
 #endif

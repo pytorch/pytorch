@@ -1,18 +1,6 @@
 // Sparse Tensors not supported for CUDA
 
 [[
-  name: set
-  defined_if: "!IS_CUDA"
-  sparse: yes
-  cname: set
-  return: THSTensor*
-  arguments:
-  - THSTensor* self
-  - THLongTensor* indices
-  - THTensor* values
-]]
-
-[[
   name: size
   defined_if: "!IS_CUDA"
   sparse: yes

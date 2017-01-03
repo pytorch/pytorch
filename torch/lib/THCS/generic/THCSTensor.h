@@ -5,7 +5,7 @@
 typedef struct THCSTensor
 {  // Stored in COO format, indices + values
     long *size;
-    long nnz;
+    ptrdiff_t nnz;
     int nDimension;
 
     // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
@@ -14,23 +14,16 @@ typedef struct THCSTensor
     THCTensor *values;
     // Math operations can only be performed on ordered sparse tensors
     int contiguous;
-    /*
-    long storageOffset;
-    int refcount;
-
-    char flag;
-    */
 
 } THCSTensor;
 
 /**** access methods ****/
 TH_API int THCSTensor_(nDimension)(THCState *state, const THCSTensor *self);
 TH_API long THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim);
-TH_API long THCSTensor_(nnz)(THCState *state, const THCSTensor *self);
+TH_API ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self);
 TH_API THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self);
 TH_API THCIndexTensor *THCSTensor_(indices)(THCState *state, const THCSTensor *self);
 TH_API THCTensor *THCSTensor_(values)(THCState *state, const THCSTensor *self);
-TH_API THCSTensor *THCSTensor_(set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 
 /**** creation methods ****/
 TH_API THCSTensor *THCSTensor_(new)(THCState *state);

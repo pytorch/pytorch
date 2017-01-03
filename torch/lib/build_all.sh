@@ -33,7 +33,7 @@ function build() {
               -DTH_SO_VERSION=1 \
               -DTHC_SO_VERSION=1 \
               -DTHNN_SO_VERSION=1 \
-              -DTHCUNN_SO_VERSION=1
+              -DTHCUNN_SO_VERSION=1 \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release)
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..

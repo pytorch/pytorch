@@ -18,7 +18,7 @@ long THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim)
   return self->size[dim];
 }
 
-long THCSTensor_(nnz)(THCState *state, const THCSTensor *self) {
+ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self) {
   return self->nnz;
 }
 
@@ -39,22 +39,6 @@ THCTensor *THCSTensor_(values)(THCState *state, const THCSTensor *self) {
   if (!self->indices) return self->values;
   return THCTensor_(newNarrow)(state, self->values, 0, 0, self->nnz);
 }
-
-THCSTensor *THCSTensor_(set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
-  THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 1,
-      "indices must be nDim x nnz");
-  THArgCheck(THCTensor_(nDimension)(state, values) == 1, 2, "values must nnz vector");
-  THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 1,
-      "indices and values must have same nnz");
-  THCIndexTensor_(free)(state, self->indices);
-  THCTensor_(free)(state, self->values);
-  self->indices = THCIndexTensor_(newClone)(state, indices);
-  self->values = THCTensor_(newClone)(state, values);
-  self->nnz = THCTensor_(size)(state, values, 0);
-
-  return self;
-}
-
 
 
 /******************************************************************************
@@ -83,6 +67,21 @@ static void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDim, 
       self->size[nDim_++] = size[d];
   self->nDimension = nDim_;
   self->contiguous = 0;
+}
+
+THCSTensor *THCSTensor_(set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
+  THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 1,
+      "indices must be nDim x nnz");
+  THArgCheck(THCTensor_(nDimension)(state, values) == 1, 2, "values must nnz vector");
+  THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 1,
+      "indices and values must have same nnz");
+  THCIndexTensor_(free)(state, self->indices);
+  THCTensor_(free)(state, self->values);
+  self->indices = THCIndexTensor_(newClone)(state, indices);
+  self->values = THCTensor_(newClone)(state, values);
+  self->nnz = THCTensor_(size)(state, values, 0);
+
+  return self;
 }
 
 /*** end helper methods ***/
