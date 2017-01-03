@@ -46,3 +46,33 @@ To run the tutorials you'll need ipython-notebooks and matplotlib, which can be 
     
     brew install matplotlib --with-python3
     pip install ipython notebook
+
+## Build status (known working)
+
+Ubuntu 14.04 (GCC)
+- [ ] Default CPU build
+- [x] Default GPU build
+
+OS X (Clang)
+- [x] Default CPU build
+- [ ] Default GPU build
+
+Options (both Clang and GCC)
+- [ ] Nervana GPU
+- [ ] ZMQ
+- [ ] RocksDB
+- [ ] MPI
+- [ ] OpenMP
+- [ ] No LMDB
+- [ ] No LevelDB
+- [x] No OpenCV
+
+BLAS
+- [x] OpenBLAS
+- [x] ATLAS
+- [ ] MKL
+
+Other
+- [ ] CMake 2.8 support
+- [ ] List of dependencies for Ubuntu 14.04
+- [ ] List of dependencies for OS X
