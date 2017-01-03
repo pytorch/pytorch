@@ -83,7 +83,7 @@ The shapes of :attr:`input` and :attr:`other` dont need to match. The total numb
 
 .. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
-:math:`out = tensor + (other * value)`
+:math:`out = input + (other * value)`
 
 Args:
     input (Tensor): the first input `Tensor`
@@ -433,6 +433,54 @@ Example::
 
 add_docstr(torch._C.bernoulli,
 """
+bernoulli(input, out=None) -> Tensor
+
+Draws binary random numbers (0 or 1) from a bernoulli distribution.
+
+The :attr:`input` Tensor should be a tensor containing probabilities to be used for drawing the binary random number. 
+Hence, all values in :attr:`input` have to be in the range: :math:`0 <= input_i <= 1`
+
+The `i-th` element of the output tensor will draw a value `1` according to the `i-th` probability value given in :attr:`input`.
+
+The returned :attr:`out` Tensor only has values 0 or 1 and is of the same shape as :attr:`input`
+
+Args:
+    input (Tensor): Probability values for the bernoulli distribution
+    out (Tensor, optional): Output tensor
+
+Example::
+
+    >>> a = torch.Tensor(3, 3).uniform_(0, 1) # generate a uniform random matrix with range [0, 1]
+    >>> a
+    
+     0.7544  0.8140  0.9842
+     0.5282  0.0595  0.6445
+     0.1925  0.9553  0.9732
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.bernoulli(a)
+    
+     1  1  1
+     0  0  1
+     0  1  1
+    [torch.FloatTensor of size 3x3]
+    
+    >>> a = torch.ones(3, 3) # probability of drawing "1" is 1
+    >>> torch.bernoulli(a)
+    
+     1  1  1
+     1  1  1
+     1  1  1
+    [torch.FloatTensor of size 3x3]
+    
+    >>> a = torch.zeros(3, 3) # probability of drawing "1" is 0
+    >>> torch.bernoulli(a)
+    
+     0  0  0
+     0  0  0
+     0  0  0
+    [torch.FloatTensor of size 3x3]
+        
 """)
 
 add_docstr(torch._C.bmm,
@@ -461,10 +509,6 @@ Example::
 """)
 
 add_docstr(torch._C.cat,
-"""
-""")
-
-add_docstr(torch._C.cauchy,
 """
 """)
 
@@ -792,7 +836,7 @@ If :attr:`dim` is not given, it defaults to the first dimension found with the s
 
 Args:
     input (Tensor): the input `Tensor`
-    other  (Tensor): the second input `Tensor`
+    other (Tensor): the second input `Tensor`
     dim  (long, optional): the dimension to take the cross-product in.
     out (Tensor, optional): The result `Tensor`
 
@@ -945,14 +989,201 @@ Example::
 
 add_docstr(torch._C.diag,
 """
+diag(input, diagonal=0, out=None) -> Tensor
+
+- If :attr:`input` is a vector (1D Tensor), then returns a 2D square Tensor with the elements of :attr:`input` as the diagonal.
+- If :attr:`input` is a matrix (2D Tensor), then returns a 1D Tensor with the diagonal elements of :attr:`input`.
+
+The argument :attr:`diagional` controls which diagonal to consider.
+
+- :attr:`diagional` = 0, is the main diagonal.
+- :attr:`diagional` > 0, is above the main diagonal.
+- :attr:`diagional` < 0, is below the main diagonal.
+
+Args:
+    input (Tensor): the input `Tensor`
+    diagonal (long, optional): the diagonal to consider
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+
+Get the square matrix where the input vector is the diagonal::
+
+    >>> a = torch.randn(3)
+    >>> a
+    
+     1.0480
+    -2.3405
+    -1.1138
+    [torch.FloatTensor of size 3]
+    
+    >>> torch.diag(a)
+    
+     1.0480  0.0000  0.0000
+     0.0000 -2.3405  0.0000
+     0.0000  0.0000 -1.1138
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.diag(a, 1)
+    
+     0.0000  1.0480  0.0000  0.0000
+     0.0000  0.0000 -2.3405  0.0000
+     0.0000  0.0000  0.0000 -1.1138
+     0.0000  0.0000  0.0000  0.0000
+    [torch.FloatTensor of size 4x4]
+    
+
+Get the k-th diagonal of a given matrix::
+
+    >>> a = torch.randn(3, 3)
+    >>> a
+    
+    -1.5328 -1.3210 -1.5204
+     0.8596  0.0471 -0.2239
+    -0.6617  0.0146 -1.0817
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.diag(a, 0)
+    
+    -1.5328
+     0.0471
+    -1.0817
+    [torch.FloatTensor of size 3]
+    
+    >>> torch.diag(a, 1)
+    
+    -1.3210
+    -0.2239
+    [torch.FloatTensor of size 2]
+                
 """)
 
 add_docstr(torch._C.dist,
 """
+dist(input, other, p=2, out=None) -> Tensor
+
+Returns the p-norm of (:attr:`input` - :attr:`other`)
+
+Args:
+    input (Tensor): the input `Tensor`
+    other (Tensor): the Right-hand-side input `Tensor`
+    p (float, optional): The norm to be computed.
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> x = torch.randn(4)
+    >>> x
+    
+     0.2505
+    -0.4571
+    -0.3733
+     0.7807
+    [torch.FloatTensor of size 4]
+    
+    >>> y = torch.randn(4)
+    >>> y
+    
+     0.7782
+    -0.5185
+     1.4106
+    -2.4063
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.dist(x, y, 3.5)
+    3.302832063224223
+    >>> torch.dist(x, y, 3)
+    3.3677282206393286
+    >>> torch.dist(x, y, 0)
+    inf
+    >>> torch.dist(x, y, 1)
+    5.560028076171875
+    
+    
 """)
 
 add_docstr(torch._C.div,
 """
+.. function:: div(input, value, out=None)
+
+Divides each element of the input :attr:`input` with the scalar :attr:`value` and returns a new resulting tensor.
+
+:math:`out = tensor / value`
+
+Args:
+    input (Tensor): the input `Tensor`
+    value (float): the number to be divided to each element of :attr:`input`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(5)
+    >>> a
+    
+    -0.6147
+    -1.1237
+    -0.1604
+    -0.6853
+     0.1063
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.div(a, 0.5)
+    
+    -1.2294
+    -2.2474
+    -0.3208
+    -1.3706
+     0.2126
+    [torch.FloatTensor of size 5]
+    
+
+.. function:: div(input, other, out=None)
+
+Each element of the Tensor :attr:`input` is divided by each element of the Tensor :attr:`other`. The resulting Tensor is returned.
+The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+
+.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+
+:math:`out_i = input_i / other_i`
+
+Args:
+    input (Tensor): the numerator `Tensor`
+    other (Tensor): the denominator `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4,4)
+    >>> a
+    
+    -0.1810  0.4017  0.2863 -0.1013
+     0.6183  2.0696  0.9012 -1.5933
+     0.5679  0.4743 -0.0117 -0.1266
+    -0.1213  0.9629  0.2682  1.5968
+    [torch.FloatTensor of size 4x4]
+    
+    >>> b = torch.randn(8, 2)
+    >>> b
+    
+     0.8774  0.7650
+     0.8866  1.4805
+    -0.6490  1.1172
+     1.4259 -0.8146
+     1.4633 -0.1228
+     0.4643 -0.6029
+     0.3492  1.5270
+     1.6103 -0.6291
+    [torch.FloatTensor of size 8x2]
+    
+    >>> torch.div(a, b)
+    
+    -0.2062  0.5251  0.3229 -0.0684
+    -0.9528  1.8525  0.6320  1.9559
+     0.3881 -3.8625 -0.0253  0.2099
+    -0.3473  0.6306  0.1666 -2.5381
+    [torch.FloatTensor of size 4x4]
+        
+    
 """)
 
 add_docstr(torch._C.dot,
@@ -1177,7 +1408,8 @@ Example::
     >>> torch.gather(t, 1, torch.LongTensor([[0,0],[1,0]]))
      1  1
      4  3
-    [torch.FloatTensor of size 2x2]""")
+    [torch.FloatTensor of size 2x2]
+""")
 
 add_docstr(torch._C.ge,
 """
@@ -1387,14 +1619,72 @@ add_docstr(torch._C.linspace,
 
 add_docstr(torch._C.log,
 """
+log(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the natural logarithm of the elements of :attr:`input`.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(5)
+    >>> a
+    
+    -0.4183
+     0.3722
+    -0.3091
+     0.4149
+     0.5857
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.log(a)
+    
+        nan
+    -0.9883
+        nan
+    -0.8797
+    -0.5349
+    [torch.FloatTensor of size 5]
+        
 """)
 
 add_docstr(torch._C.log1p,
 """
-""")
+log1p(input, out=None) -> Tensor
 
-add_docstr(torch._C.log_normal,
-"""
+Returns a new `Tensor` with the natural logarithm of (1 + :attr:`input`).
+
+:math:`y_i = log(x_i + 1)`
+
+.. note:: This function is more accurate than :function:`torch.log` for small values of :attr:`input`
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(5)
+    >>> a
+    
+    -0.4183
+     0.3722
+    -0.3091
+     0.4149
+     0.5857
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.log1p(a)
+    
+    -0.5418
+     0.3164
+    -0.3697
+     0.3471
+     0.4611
+    [torch.FloatTensor of size 5]
+            
 """)
 
 add_docstr(torch._C.logspace,
@@ -1475,6 +1765,75 @@ add_docstr(torch._C.mode,
 
 add_docstr(torch._C.mul,
 """
+.. function:: mul(input, value, out=None)
+
+Multiplies each element of the input :attr:`input` with the scalar :attr:`value` and returns a new resulting tensor.
+
+:math:`out = tensor / value`
+
+Args:
+    input (Tensor): the input `Tensor`
+    value (float): the number to be multiplied to each element of :attr:`input`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(3)
+    >>> a
+    
+    -0.9374
+    -0.5254
+    -0.6069
+    [torch.FloatTensor of size 3]
+    
+    >>> torch.mul(a, 100)
+    
+    -93.7411
+    -52.5374
+    -60.6908
+    [torch.FloatTensor of size 3]
+        
+    
+.. function:: mul(input, other, out=None)
+
+Each element of the Tensor :attr:`input` is multiplied by each element of the Tensor :attr:`other`. The resulting Tensor is returned.
+The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+
+.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+
+:math:`out_i = input_i / other_i`
+
+Args:
+    input (Tensor): the first multiplicand `Tensor`
+    other (Tensor): the second multiplicand `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4,4)
+    >>> a
+    
+    -0.7280  0.0598 -1.4327 -0.5825
+    -0.1427 -0.0690  0.0821 -0.3270
+    -0.9241  0.5110  0.4070 -1.1188
+    -0.8308  0.7426 -0.6240 -1.1582
+    [torch.FloatTensor of size 4x4]
+    
+    >>> b = torch.randn(2, 8)
+    >>> b
+    
+     0.0430 -1.0775  0.6015  1.1647 -0.6549  0.0308 -0.1670  1.0742
+    -1.2593  0.0292 -0.0849  0.4530  1.2404 -0.4659 -0.1840  0.5974
+    [torch.FloatTensor of size 2x8]
+    
+    >>> torch.mul(a, b)
+    
+    -0.0313 -0.0645 -0.8618 -0.6784
+     0.0934 -0.0021 -0.0137 -0.3513
+     1.1638  0.0149 -0.0346 -0.5068
+    -1.0304 -0.3460  0.1148 -0.6919
+    [torch.FloatTensor of size 4x4]        
+    
 """)
 
 add_docstr(torch._C.multinomial,
@@ -1648,10 +2007,64 @@ add_docstr(torch._C.reshape,
 
 add_docstr(torch._C.round,
 """
+round(input, out=None) -> Tensor
+
+Returns a new `Tensor` with each of the elements of :attr:`input` rounded to the closest integer.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.2290
+     1.3409
+    -0.5662
+    -0.0899
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.round(a)
+    
+     1
+     1
+    -1
+    -0
+    [torch.FloatTensor of size 4]
+        
 """)
 
 add_docstr(torch._C.rsqrt,
 """
+rsqrt(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the reciprocal of the square-root of each of the elements of :attr:`input`.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.2290
+     1.3409
+    -0.5662
+    -0.0899
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.rsqrt(a)
+    
+     0.9020
+     0.8636
+        nan
+        nan
+    [torch.FloatTensor of size 4]
+        
 """)
 
 add_docstr(torch._C.scatter,
@@ -1671,6 +2084,32 @@ add_docstr(torch._C.sigmoid,
 
 add_docstr(torch._C.sign,
 """
+sign(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the sign of the elements of :attr:`input`.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    -0.6366
+     0.2718
+     0.4469
+     1.3122
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.sign(a)
+    
+    -1
+     1
+     1
+     1
+    [torch.FloatTensor of size 4]
+    
 """)
 
 add_docstr(torch._C.sin,
@@ -1735,6 +2174,33 @@ add_docstr(torch._C.sort,
 
 add_docstr(torch._C.sqrt,
 """
+sqrt(input, out=None) -> Tensor
+
+Returns a new `Tensor` with the square-root of the elements of :attr:`input`.
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    
+     1.2290
+     1.3409
+    -0.5662
+    -0.0899
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.sqrt(a)
+    
+     1.1086
+     1.1580
+        nan
+        nan
+    [torch.FloatTensor of size 4]
+            
 """)
 
 add_docstr(torch._C.squeeze,
@@ -1854,10 +2320,6 @@ add_docstr(torch._C.uniform,
 """)
 
 add_docstr(torch._C.var,
-"""
-""")
-
-add_docstr(torch._C.zero,
 """
 """)
 
