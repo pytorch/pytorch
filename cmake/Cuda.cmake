@@ -139,10 +139,6 @@ macro(caffe2_cuda_compile objlist_variable)
 
   endforeach()
 
-  if(UNIX OR APPLE)
-    list(APPEND CUDA_NVCC_FLAGS -Xcompiler -fPIC)
-  endif()
-
   if(APPLE)
     list(APPEND CUDA_NVCC_FLAGS -Xcompiler -Wno-unused-function)
   endif()
