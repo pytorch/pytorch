@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, context
+from caffe2.python.task import Task
 
 
 @context.define_context()
@@ -152,19 +153,31 @@ class Operations(object):
         """
         return NetBuilder.current().stop_if(blob)
 
-    def loop(self):
+    def loop(self, iters=None):
         """
         Creates a NetBuilder that will execute in a loop as the next step of
-        the current NetBuilder.
-            Example:
+        the current NetBuilder. If `iters` is provided, the loop will execute
+        for `iters` iterations and then stop. `iters` can be a constant or a
+        BlobReference. If `iters` is not provided, the loop will execute
+        until `ops.stop` or `ops.stop_if` is called.
+            Examples:
                 a = ops.Const(5)
                 with ops.loop():
                     ops.stop_if(ops.LE([a, ops.Const(0)]))
                     ops.Print(a, 0)
                     ops.Add([a, ops.Const(-1)], [a])
-            In the example, 'a' will be printed 5 times, with values 5 to 1.
+            Above, 'a' will be printed 5 times, with values 5 to 1.
+
+                with ops.loop(10) as loop:
+                    ops.LogInfo(loop.iter())
+            This will print the numbers from 0 to 9.
+
+                x = ops.Add([ops.Const(10), ops.Const(10)])
+                with ops.loop(x) as loop:
+                    ops.LogInfo(loop.iter())
+            This will print the numbers from 0 to 19.
         """
-        return NetBuilder.current().add(NetBuilder(_stop_blob_required=True))
+        return NetBuilder.current().add(_Loop(iters))
 
     def stop_guard(self, has_stopped_blob=None):
         """
@@ -201,18 +214,67 @@ class Operations(object):
         """
         return NetBuilder.current().add(_RunIf(cond))
 
+    def task_init(self):
+        """
+        Defines operations that will be executed once at task startup.
+        Useful when implementing processors, that don't have access to the Task
+        top-level structure.
+            Example:
+                def my_processor(rec):
+                    with ops.task_init():
+                        one = ops.Const(1)
+                        two = ops.Const(1)
+                    return Tuple(
+                        ops.Add(rec[0](), zero), ops.Add(rec[1](), two))
+        """
+        setup = _SetupBuilder(_SetupBuilder.INIT)
+        self.net().add_attribute(Task.TASK_SETUP, setup)
+        return NetBuilder.current().add(setup)
+
+    def task_exit(self):
+        """
+        Define operations to be executed at task shutdown.
+        Useful when implementing processors, that don't have access to the Task
+        top-level structure.
+            Example:
+                def read_queue(queue):
+                    with ops.task_exit():
+                        queue.close(ops.net())
+                    return queue.read(ops.net())
+        """
+        setup = _SetupBuilder(_SetupBuilder.EXIT)
+        self.net().add_attribute(Task.TASK_SETUP, setup)
+        return NetBuilder.current().add(setup)
+
 
 ops = Operations()
+
+
+class _SetupBuilder(NetBuilder):
+    INIT = 'init'
+    EXIT = 'exit'
+
+    def __init__(self, type, name=None):
+        NetBuilder.__init__(self, name)
+        self.type = type
+
+    def setup(self, net):
+        if self.type == _SetupBuilder.INIT:
+            return core.to_execution_step(self)
+
+    def exit(self, net):
+        if self.type == _SetupBuilder.EXIT:
+            return core.to_execution_step(self)
 
 
 class _RunOnce(NetBuilder):
     def __init__(self, name=None):
         NetBuilder.__init__(self, name)
 
-    def __exit__(self, *args):
-        if self._stop_blob is not None:
+    def __exit__(self, etype, *args):
+        if etype is None and self._stop_blob is not None:
             ops.stop()
-        NetBuilder.__exit__(self, *args)
+        NetBuilder.__exit__(self, etype, *args)
 
 
 class _StopGuard(_RunOnce):
@@ -226,10 +288,11 @@ class _StopGuard(_RunOnce):
         self._stopped = ops.Const(True, blob_out=self._stopped)
         return r
 
-    def __exit__(self, *args):
-        self._ran = True
-        ops.Const(False, blob_out=self._stopped)
-        _RunOnce.__exit__(self, args)
+    def __exit__(self, etype, *args):
+        if etype is None:
+            self._ran = True
+            ops.Const(False, blob_out=self._stopped)
+        _RunOnce.__exit__(self, etype, *args)
 
     def has_stopped(self):
         """
@@ -240,12 +303,62 @@ class _StopGuard(_RunOnce):
         return self._stopped
 
 
+class _Loop(NetBuilder):
+    def __init__(self, iters=None, name=None):
+        NetBuilder.__init__(self, name, _stop_blob_required=True)
+        if iters is not None:
+            self._inc = ops.Const(1)
+            self._iter = ops.Const(0)
+            self._num_iters = (
+                iters if isinstance(iters, core.BlobReference)
+                else ops.Const(iters))
+        else:
+            self._num_iters = None
+
+    def iter(self):
+        assert self._num_iters is not None, (
+            'This loop does not have a number of iterations.')
+        assert self._iter is not None, (
+            'iter() must be called from inside the loop context')
+        return self._iter
+
+    def __enter__(self):
+        builder = NetBuilder.__enter__(self)
+        if self._num_iters is not None:
+            ops.stop_if(ops.GE([self._iter, self._num_iters]))
+        return builder
+
+    def __exit__(self, type, *args):
+        if type is None and self._num_iters is not None:
+            self.current_net().Add([self._iter, self._inc], [self._iter])
+        NetBuilder.__exit__(self, type, *args)
+
+
 class _RunIf(_RunOnce):
-    def __init__(self, cond_blob, name=None):
+    def __init__(self, cond_blob=None, name=None, _already_ran=None):
         _RunOnce.__init__(self, name)
-        self._cond_blob = cond_blob
+        assert cond_blob or _already_ran
+        self._is_else = cond_blob is None
+        if _already_ran is None:
+            self._else_blob = ops.Not(cond_blob)
+            self._already_ran = ops.Const(False)
+        else:
+            self._already_ran = _already_ran
+            self._else_blob = _already_ran if cond_blob is None else (
+                ops.Or([_already_ran, ops.Not(cond_blob)]))
 
     def __enter__(self):
         r = _RunOnce.__enter__(self)
-        ops.stop_if(self._cond_blob)
+        ops.stop_if(self._else_blob)
+        ops.Const(True, blob_out=self._already_ran)
         return r
+
+    def Elif(self, cond):
+        assert not self._is_else, 'Else not allowed for an Else.'
+        return NetBuilder.current().add(
+            _RunIf(cond, _already_ran=self._already_ran))
+
+    def Else(self):
+        assert not self._is_else, 'Elif not allowed for an Else.'
+        return NetBuilder.current().add(
+            _RunIf(_already_ran=self._already_ran))
