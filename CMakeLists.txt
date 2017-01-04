@@ -41,10 +41,13 @@ option(USE_LEVELDB "Use LMDB" ON)
 option(USE_OPENCV "Use openCV" ON)
 option(USE_ZMQDB "Use ZMQ" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
-option(USE_MPI "Use MPI" OFF)
+option(USE_MPI "Use MPI" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
+
+# options that do not affect the main binaries, but affects testing binaries
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)

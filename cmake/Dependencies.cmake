@@ -60,13 +60,13 @@ if (USE_GFLAGS)
   endif()
 endif()
 
-# ---[ Googletest
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest)
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include)
-
-# ---[ Google benchmark
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/benchmark)
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/benchmark/include)
+# ---[ Googletest and benchmark
+if (BUILD_TEST)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest)
+  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/benchmark)
+  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/benchmark/include)
+endif()
 
 # ---[ LMDB
 if(USE_LMDB)

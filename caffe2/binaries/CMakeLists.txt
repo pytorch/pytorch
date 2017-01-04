@@ -31,7 +31,6 @@ if(USE_ZMQ AND ZMQ_FOUND)
   message(STATUS "Excluding ZMQ binary")
   prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/" "${Caffe2_ZMQ_BINARY_SRCS}")
   list(APPEND Caffe2_CPU_BINARY_SRCS "${tmp}")
-  list(APPEND Caffe2_GPU_BINARY_SRCS "${tmp}")
 endif()
 
 # MPI-based binaries
@@ -43,7 +42,6 @@ if(USE_MPI AND MPI_CXX_FOUND)
   message(STATUS "Including MPI binaries")
   prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/" "${Caffe2_MPI_BINARY_SRCS}")
   list(APPEND Caffe2_CPU_BINARY_SRCS "${tmp}")
-  list(APPEND Caffe2_GPU_BINARY_SRCS "${tmp}")
 endif()
 
 # OpenCV-based binaries
@@ -55,7 +53,6 @@ if(USE_OPENCV AND OpenCV_FOUND)
   message(STATUS "Including OPENCV binaries")
   prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/" "${Caffe2_OPENCV_BINARY_SRCS}")
   list(APPEND Caffe2_CPU_BINARY_SRCS "${tmp}")
-  list(APPEND Caffe2_GPU_BINARY_SRCS "${tmp}")
 endif()
 
 set(Caffe2_CPU_BINARY_SRCS ${Caffe2_CPU_BINARY_SRCS} PARENT_SCOPE)
