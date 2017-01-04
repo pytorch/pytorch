@@ -50,7 +50,6 @@ class ReLU(Threshold):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: relu.png
     Examples:
         >>> m = nn.ReLU()
         >>> input = autograd.Variable(torch.randn(2))
@@ -99,7 +98,6 @@ class Hardtanh(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: htanh.png
     Examples:
         >>> m = nn.HardTanh(-2, 2)
         >>> input = autograd.Variable(torch.randn(2))
@@ -131,7 +129,6 @@ class ReLU6(Hardtanh):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: relu6.png
     Examples:
         >>> m = nn.ReLU6()
         >>> input = autograd.Variable(torch.randn(2))
@@ -152,7 +149,6 @@ class Sigmoid(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: sigmoid.png
     Examples:
         >>> m = nn.Sigmoid()
         >>> input = autograd.Variable(torch.randn(2))
@@ -173,7 +169,6 @@ class Tanh(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: tanh.png
     Examples:
         >>> m = nn.Tanh()
         >>> input = autograd.Variable(torch.randn(2))
@@ -195,7 +190,6 @@ class ELU(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: elu.png
     Examples:
         >>> m = nn.ELU()
         >>> input = autograd.Variable(torch.randn(2))
@@ -228,7 +222,6 @@ class Hardshrink(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: hshrink.png
     Examples:
         >>> m = nn.Hardshrink()
         >>> input = autograd.Variable(torch.randn(2))
@@ -282,7 +275,6 @@ class LogSigmoid(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: logsigmoid.png
     Examples:
         >>> m = nn.LogSigmoid()
         >>> input = autograd.Variable(torch.randn(2))
@@ -308,7 +300,6 @@ class Softplus(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: softplus.png
     Examples:
         >>> m = nn.Softplus()
         >>> input = autograd.Variable(torch.randn(2))
@@ -339,7 +330,6 @@ class Softshrink(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: sshrink.png
     Examples:
         >>> m = nn.Softshrink()
         >>> input = autograd.Variable(torch.randn(2))
@@ -373,7 +363,6 @@ class PReLU(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: prelu.png
     Examples:
         >>> m = nn.PReLU()
         >>> input = autograd.Variable(torch.randn(2))
@@ -399,7 +388,6 @@ class Softsign(Module):
     Output Shape: Same : Output has the same shape as input
     Returns:
         a Tensor of the same dimension and shape as the input
-    Image: softsign.png
     Examples:
         >>> m = nn.Softsign()
         >>> input = autograd.Variable(torch.randn(2))
@@ -442,7 +430,6 @@ class Softmin(Module):
     Returns:
         a Tensor of the same dimension and shape as the input, with
         values in the range [0, 1]
-    Image: softmin.png
     Examples:
         >>> m = nn.Softmin()
         >>> input = autograd.Variable(torch.randn(2, 3))
@@ -468,7 +455,6 @@ class Softmax(Module):
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
-    Image: softmax.png
     Notes:
         Note that this module doesn't work directly with NLLLoss,
         which expects the Log to be computed between the Softmax and itself.
@@ -519,7 +505,6 @@ class LogSoftmax(Module):
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range [-inf, 0)
-    Image: logsoftmax.png
     Examples:
         >>> m = nn.LogSoftmax()
         >>> input = autograd.Variable(torch.randn(2, 3))
