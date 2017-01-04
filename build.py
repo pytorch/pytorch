@@ -94,6 +94,7 @@ class Config(object):
 
     # Additional libraries to link against. This will be appended to each link
     # link command.
+    # ADDITIONAL_LIBS = ['boost_system', 'boost_thread']
     ADDITIONAL_LIBS = []
 
     ###########################################################################

@@ -251,11 +251,11 @@ class MSRAFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws) {}
 
   bool Fill(Tensor<Context>* output) override {
-    const int fan_in = output->size() / output->dim32(0);
-    T scale = std::sqrt(T(2) / fan_in);
-    math::RandUniform<T, Context>(
+    const int fan_out = output->size() / output->dim32(1);
+    T scale = std::sqrt(T(2) / fan_out);
+    math::RandGaussian<T, Context>(
         output->size(),
-        -scale,
+        0.0,
         scale,
         output->template mutable_data<T>(),
         &context_);
