@@ -3,14 +3,25 @@ cc_library(
   srcs = [
       "image_input_op.cc",
   ],
-  hdrs = [
-      "image_input_op.h",
-  ],
+  hdrs = Glob(["*.h"]),
   deps = [
     "//caffe/proto:caffe_proto",
     "//caffe2:core",
     "//caffe2/operators:core_ops",
     "//third_party:opencv",
+  ],
+  whole_archive = True,
+)
+
+cuda_library(
+  name = "image_ops_gpu_cu",
+  srcs = Glob(["*.cu"]),
+  hdrs = [
+      "transform_gpu.h",
+  ],
+  deps = [
+      ":image_ops",
+      "//caffe2:core_gpu",
   ],
   whole_archive = True,
 )
@@ -22,6 +33,7 @@ cc_library(
   ],
   deps = [
       ":image_ops",
+      ":image_ops_gpu_cu",
       "//caffe2:core_gpu",
   ],
   whole_archive = True,

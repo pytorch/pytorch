@@ -64,9 +64,7 @@ class HTraceDAGNet : public DAGNetBase {
     return success;
   }
 
-  htrace::Conf htrace_conf_{FLAGS_caffe2_htrace_conf.empty()
-                                ? defaultHTraceConf(name_)
-                                : FLAGS_caffe2_htrace_conf};
+  htrace::Conf htrace_conf_{defaultHTraceConf(name_)};
   htrace::Tracer htrace_tracer_{"htrace-tracer", htrace_conf_};
   htrace::Sampler htrace_sampler_{&htrace_tracer_, htrace_conf_};
   htrace::Scope htrace_root_scope_{htrace_tracer_,

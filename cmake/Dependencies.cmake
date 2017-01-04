@@ -10,12 +10,13 @@ list(APPEND Caffe2_LINKER_LIBS ${CMAKE_THREAD_LIBS_INIT})
 
 # ---[ BLAS
 set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
-set_property(CACHE BLAS PROPERTY STRINGS "Atlas;OpenBLAS;MKL")
+set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL")
+message(STATUS "The BLAS backend of choice:" ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
   add_definitions(-DCAFFE2_USE_EIGEN_FOR_BLAS)
-elseif(BLAS STREQUAL "Atlas")
+elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
   list(APPEND Caffe2_LINKER_LIBS ${ATLAS_LIBRARIES})
@@ -31,18 +32,29 @@ elseif(BLAS STREQUAL "MKL")
   list(APPEND Caffe2_LINKER_LIBS ${MKL_LIBRARIES})
   list(APPEND Caffe2_LINKER_LIBS cblas)
   add_definitions(-DCAFFE2_USE_MKL)
+else()
+  message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
 endif()
 
 # ---[ Google-glog
-include("cmake/External/glog.cmake")
-add_definitions(-DCAFFE2_USE_GOOGLE_GLOG)
-include_directories(SYSTEM ${GLOG_INCLUDE_DIRS})
-list(APPEND Caffe2_LINKER_LIBS ${GLOG_LIBRARIES})
+if (USE_GLOG)
+  include("cmake/External/glog.cmake")
+  if (GLOG_FOUND)
+    add_definitions(-DCAFFE2_USE_GOOGLE_GLOG)
+    include_directories(SYSTEM ${GLOG_INCLUDE_DIRS})
+    list(APPEND Caffe2_LINKER_LIBS ${GLOG_LIBRARIES})
+  endif()
+endif()
 
 # ---[ Google-gflags
-include("cmake/External/gflags.cmake")
-include_directories(SYSTEM ${GFLAGS_INCLUDE_DIRS})
-list(APPEND Caffe2_LINKER_LIBS ${GFLAGS_LIBRARIES})
+if (USE_GFLAGS)
+  include("cmake/External/gflags.cmake")
+  if (GFLAGS_FOUND)
+    add_definitions(-DCAFFE2_USE_GFLAGS)
+    include_directories(SYSTEM ${GFLAGS_INCLUDE_DIRS})
+    list(APPEND Caffe2_LINKER_LIBS ${GFLAGS_LIBRARIES})
+  endif()
+endif()
 
 # ---[ Googletest
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest)

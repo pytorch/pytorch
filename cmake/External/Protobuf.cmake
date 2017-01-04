@@ -12,7 +12,7 @@ if (NOT __PROTOBUF_INCLUDED)
     # build directory
     set(protobuf_prefix ${CMAKE_SOURCE_DIR}/third_party/protobuf)
 
-    # we build glog statically, but want to link it into the caffe shared library
+    # we build protobuf statically, but want to link it into the caffe shared library
     # this requires position-independent code
     if (UNIX)
       set(PROTOBUF_EXTRA_COMPILER_FLAGS "-fPIC")
