@@ -22,7 +22,7 @@ exclude(Caffe2_DIRS "${Caffe2_DIRS}" ${Caffe2_DIR_EXCLUDES})
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-# add_subdirectory(binaries)
+add_subdirectory(binaries)
 add_subdirectory(contrib)
 add_subdirectory(core)
 add_subdirectory(cuda_rtc)
@@ -34,7 +34,7 @@ add_subdirectory(mkl)
 # add_subdirectory(mpi)
 add_subdirectory(operators)
 # add_subdirectory(proto) # note, proto is processed above already.
-# add_subdirectory(python)
+add_subdirectory(python)
 add_subdirectory(queue)
 add_subdirectory(sgd)
 # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
@@ -71,7 +71,6 @@ add_subdirectory(proto)
 include_directories(BEFORE ${CMAKE_BINARY_DIR})
 list(APPEND Caffe2_MAIN_LIBS Caffe2_PROTO)
 
-
 # Compile exposed libraries.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
@@ -79,7 +78,7 @@ target_link_libraries(Caffe2_CPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
 install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 list(APPEND Caffe2_MAIN_LIBS Caffe2_CPU)
 
-# ---[ CUDA library
+# ---[ CUDA library.
 if(HAVE_CUDA)
   CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
   target_link_libraries(Caffe2_GPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
@@ -88,7 +87,7 @@ if(HAVE_CUDA)
   list(APPEND Caffe2_MAIN_LIBS Caffe2_GPU)
 endif()
 
-# Compile test binaries.
+# ---[ Test binaries.
 foreach(test_src ${Caffe2_CPU_TEST_SRCS})
   get_filename_component(test_name ${test_src} NAME_WE)
   add_executable(${test_name} "${test_src}")
@@ -99,72 +98,20 @@ foreach(test_src ${Caffe2_CPU_TEST_SRCS})
   install(TARGETS ${test_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/test)
 endforeach()
 
-# ---[ Python
-add_subdirectory(python)
+# ---[ Python.
+add_library(caffe2_pybind11_state SHARED ${Caffe2_CPU_PYTHON_SRCS})
+set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
+target_link_libraries(caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
+install(TARGETS caffe2_pybind11_state DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 
-# ---[ Binaries
-set(Caffe2_CPU_BINARY_SRCS
-    "convert_caffe_image_db.cc"
-    "convert_db.cc"
-    "db_throughput.cc"
-    "fb_run_plan_mpi.cc"
-    "make_cifar_db.cc"
-    "make_image_db.cc"
-    "make_mnist_db.cc"
-    "predictor_verifier.cc"
-    "print_registered_core_operators.cc"
-    "run_plan.cc"
-    "run_plan_mpi.cc"
-    "speed_benchmark.cc"
-    "split_db.cc"
-    "zmq_feeder.cc"
-)
-
-set(Caffe2_GPU_BINARY_SRCS
-    "core_overhead_benchmark.cc"
-    "inspect_gpus.cc"
-    "print_core_object_sizes.cc"
-)
-
-prepend(Caffe2_CPU_BINARY_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_CPU_BINARY_SRCS}")
-prepend(Caffe2_GPU_BINARY_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_GPU_BINARY_SRCS}")
-
-# ZMQ src
-set(Caffe2_ZMQ_BINARY_SRCS
-    "zmq_feeder.cc"
-)
-# Prune out ZMQ if no support
-if(NOT USE_ZMQ)
-  message(STATUS "Excluding ZMQ binary")
-  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_ZMQ_BINARY_SRCS}")
-  exclude(Caffe2_CPU_BINARY_SRCS "${Caffe2_CPU_BINARY_SRCS}" "${tmp}")
-  exclude(Caffe2_GPU_BINARY_SRCS "${Caffe2_GPU_BINARY_SRCS}" "${tmp}")
+if(HAVE_CUDA)
+  add_library(caffe2_pybind11_state_gpu SHARED ${Caffe2_GPU_PYTHON_SRCS})
+  set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
+  target_link_libraries(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
+  install(TARGETS caffe2_pybind11_state_gpu DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 endif()
 
-# MPI-based binaries
-set(Caffe2_MPI_BINARY_SRCS
-    "fb_run_plan_mpi.cc"
-    "run_plan_mpi.cc"
-)
-if(NOT USE_MPI)
-  message(STATUS "Excluding MPI binaries")
-  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_MPI_BINARY_SRCS}")
-  exclude(Caffe2_CPU_BINARY_SRCS "${Caffe2_CPU_BINARY_SRCS}" "${tmp}")
-  exclude(Caffe2_GPU_BINARY_SRCS "${Caffe2_GPU_BINARY_SRCS}" "${tmp}")
-endif()
-
-# OpenCV-based binaries
-set(Caffe2_OPENCV_BINARY_SRCS
-    "convert_encoded_to_raw_leveldb.cc"
-    "make_image_db.cc"
-)
-if(NOT USE_OPENCV)
-  message(STATUS "Excluding OPENCV binaries")
-  prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/binaries/" "${Caffe2_OPENCV_BINARY_SRCS}")
-  exclude(Caffe2_CPU_BINARY_SRCS "${Caffe2_CPU_BINARY_SRCS}" "${tmp}")
-  exclude(Caffe2_GPU_BINARY_SRCS "${Caffe2_GPU_BINARY_SRCS}" "${tmp}")
-endif()
-
+# ---[ Binaries.
 foreach(binary_src ${Caffe2_CPU_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
@@ -180,3 +127,4 @@ if(HAVE_CUDA)
     install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
   endforeach()
 endif()
+
