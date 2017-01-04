@@ -1,8 +1,11 @@
-cmake_minimum_required(VERSION 3.1.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
 
 project(Caffe2 CXX C)
 
 # TODO(bwasti): versioning
+
+# We want CMake to GLOB everything every time.
+execute_process(COMMAND find "${PROJECT_SOURCE_DIR}" -name "CMakeLists.txt" -exec touch {} \;)
 
 # Useful functions.
 function (exclude OUTPUT INPUT)

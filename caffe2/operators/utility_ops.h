@@ -1321,7 +1321,11 @@ class GatherOp : public Operator<Context> {
     auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
     for (int i = 0; i < N; ++i) {
-      auto src = src_base + idxs[i] * block_bytesize;
+      auto idx = idxs[i];
+      CAFFE_ENFORCE(
+          0 <= idx && idx < data.dim(0),
+          "INDICES element is out of DATA bounds");
+      auto src = src_base + idx * block_bytesize;
       context_.template CopyItems<Context, Context>(
           data.meta(), block_size, src, out + block_bytesize * i);
     }
