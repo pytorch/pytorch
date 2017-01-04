@@ -16,7 +16,7 @@
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
-#include "sparse.cpp"
+#include "ModuleSparse.cpp"
 
 PyObject* module;
 PyObject* tensor_classes;
@@ -454,10 +454,6 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 
   Py_RETURN_NONE;
 }
-
-/***
- * SPARSE STATELESS FUNCTIONS
- ***/
 
 #ifdef WITH_CUDA
 extern PyObject * THCPModule_initExtension(PyObject *self);

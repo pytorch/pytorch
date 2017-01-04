@@ -86,44 +86,44 @@ class THPPlugin(CWrapPlugin):
     }
 
     TENSOR_METHODS_DECLARATION = Template("""
-    static PyMethodDef TH${sparse}PTensor_$stateless(methods)[] = {
+static PyMethodDef TH${sparse}PTensor_$stateless(methods)[] = {
     $methods
     {NULL}
-    };
-    """)
+};
+""")
 
     WRAPPER_TEMPLATE = Template("""\
-                                PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
-                                {
-                                HANDLE_TH_ERRORS
-                                int __tuplecount = args ? PyTuple_Size(args) : 0;
-                                int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
-                                int __argcount = __tuplecount + __dictcount;
-                                $variables
-                                $init
+PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    HANDLE_TH_ERRORS
+    int __tuplecount = args ? PyTuple_Size(args) : 0;
+    int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+    int __argcount = __tuplecount + __dictcount;
+    $variables
+    $init
 
-                                $options
+    $options
     }
 
-                                THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
-                                return NULL;
-                                END_HANDLE_TH_ERRORS
-                                }
-                                """)
+    THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
+    return NULL;
+    END_HANDLE_TH_ERRORS
+}
+    """)
 
     ALLOCATE_TMPL = Template("""\
-                             THP${type}TensorPtr _${name}_guard = (THP${type}Tensor*) THP${type}Tensor_NewEmpty();
-                             if (!_${name}_guard.get()) return NULL;
-                             THP${type}Tensor* $name = _${name}_guard.get();
-                             """)
+THP${type}TensorPtr _${name}_guard = (THP${type}Tensor*) THP${type}Tensor_NewEmpty();
+if (!_${name}_guard.get()) return NULL;
+THP${type}Tensor* $name = _${name}_guard.get();
+""")
 
     ALLOCATE_CUDA = Template("""\
-                             #if IS_CUDA
-                             ${cuda}
-                             #else
-                             ${cpu}
-                             #endif
-                             """)
+#if IS_CUDA
+${cuda}
+#else
+${cpu}
+#endif
+""")
 
     def _allocate(typename, tmpl, cuda_tmpl=None, sparse=False):
         code = tmpl.safe_substitute(type=typename)
@@ -317,7 +317,7 @@ class THPPlugin(CWrapPlugin):
                 declaration['no_kwargs'] = True
             for option in declaration['options']:
                 option['cname'] = 'TH{}Tensor_({})'.format(
-                    'S' if option['sparse'] else '', option['cname'])
+                    'S' if option.get('sparse', False) else '', option['cname'])
             if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
                 stateless_declaration = self.make_stateless(declaration)
                 new_declarations.append(stateless_declaration)
@@ -327,7 +327,7 @@ class THPPlugin(CWrapPlugin):
 
             self.declarations.append(declaration)
             declaration['name'] = 'TH{}PTensor_({})'.format(
-                'S' if declaration['sparse'] else '', declaration['name'])
+                'S' if declaration.get('sparse', False) else '', declaration['name'])
             for option in declaration['options']:
                 for arg in option['arguments']:
                     if arg['name'] == 'self':
@@ -349,7 +349,7 @@ class THPPlugin(CWrapPlugin):
     def make_stateless(self, declaration):
         declaration = deepcopy(declaration)
         declaration['name'] = 'TH{}PTensor_stateless_({})'.format(
-            'S' if declaration['sparse'] else '', declaration['name'])
+            'S' if declaration.get('sparse', False) else '', declaration['name'])
         for option in declaration['options']:
             for arg in option['arguments']:
                 if arg['name'] == 'self':
@@ -374,7 +374,7 @@ class THPPlugin(CWrapPlugin):
     def declare_methods(self, stateless, sparse):
         tensor_methods = ''
         for declaration in (self.declarations if not stateless else self.stateless_declarations):
-            if declaration['sparse'] != sparse:
+            if declaration.get('sparse', False) != sparse:
                 continue
             flags = 'METH_VARARGS'
             flags += ' | ' + declaration.get('method_flags') if 'method_flags' in declaration else ''
