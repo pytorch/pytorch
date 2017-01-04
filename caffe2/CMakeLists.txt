@@ -11,12 +11,28 @@ set(Caffe2_GPU_SRCS)
 set(Caffe2_CPU_TEST_SRCS)
 set(Caffe2_GPU_TEST_SRCS)
 
+# ---[ Protobuf
+set(Caffe2_LINK_LIBS Caffe_PROTO)
+
+# Compile protobufs.
+add_subdirectory(proto)
+include_directories(BEFORE ${CMAKE_BINARY_DIR})
+list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
+
+
 # ---[ Add respective subdirectories
 # TODO(jiayq): maybe do a simple glob?
 add_subdirectory(core)
 add_subdirectory(image)
 add_subdirectory(operators)
 add_subdirectory(utils)
+# Get appropriate list of DB sources
+add_subdirectory(db)
+# add sources to appropriate lists
+list(APPEND Caffe2_CPU_SRCS ${Caffe2_DB_SRC})
+list(APPEND Caffe2_GPU_SRCS ${Caffe2_DB_GPU_SRC})
+
+
 
 message(STATUS "After core, cpu sources: ")
 foreach(tmp ${Caffe2_CPU_SRCS})
@@ -27,22 +43,6 @@ message(STATUS "After core, gpu sources: ")
 foreach(tmp ${Caffe2_GPU_SRCS})
 message(STATUS "  " ${tmp})
 endforeach()
-
-# ---[ List of libraries to link with
-set(Caffe2_LINK_LIBS Caffe_PROTO)
-
-# Get all source files from remaining directories.
-
-# Compile protobufs.
-add_subdirectory(proto)
-include_directories(BEFORE ${CMAKE_BINARY_DIR})
-list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
-
-# Get appropriate list of DB sources
-add_subdirectory(db)
-# add sources to appropriate lists
-list(APPEND Caffe2_CPU_SRCS ${Caffe2_DB_SRC})
-list(APPEND Caffe2_GPU_SRCS ${Caffe2_DB_GPU_SRC})
 
 # Compile exposed libraries.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")

@@ -1,52 +1,31 @@
 set(Caffe2_DB_COMMON_CPU_SRC
-    "/create_db_op.cc"
-    "/protodb.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/create_db_op.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/protodb.cc"
 )
 set(Caffe2_DB_COMMON_GPU_SRC
-    "/create_db_op_gpu.cc"
-)
-set(Caffe2_DB_LMDB_SRC
-    "/lmdb.cc"
-)
-set(Caffe2_DB_LEVELDB_SRC
-    "/leveldb.cc"
-)
-set(Caffe2_DB_ROCKSDB_SRC
-    "/rocksdb.cc"
-)
-set(Caffe2_DB_ZMQDB_SRC
-    "/zmqdb.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/create_db_op_gpu.cc"
 )
 
-prepend(Caffe2_DB_COMMON_CPU_SRC ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DB_COMMON_CPU_SRC})
-prepend(Caffe2_DB_COMMON_GPU_SRC ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DB_COMMON_GPU_SRC})
-prepend(Caffe2_DB_LMDB_SRC ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DB_LMDB_SRC})
-prepend(Caffe2_DB_LEVELDB_SRC ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DB_LEVELDB_SRC})
-prepend(Caffe2_DB_ROCKSDB_SRC ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DB_ROCKSDB_SRC})
-prepend(Caffe2_DB_ZMQDB_SRC ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DB_ZMQDB_SRC})
+# Common files that are always going to be included.
+list(APPEND Caffe2_CPU_SRCS ${Caffe2_DB_COMMON_CPU_SRC})
+list(APPEND Caffe2_GPU_SRCS ${Caffe2_DB_COMMON_GPU_SRC})
 
-# ----[ Assemble all sources depending on options
-set(Caffe2_DB_SRC_TMP ${Caffe2_DB_COMMON_CPU_SRC} )
-
-if(HAVE_CUDA)
-  set(Caffe2_DB_GPU_SRC ${Caffe2_DB_COMMON_GPU_SRC} PARENT_SCOPE)
+# DB specific files
+if (USE_LMDB)
+  list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lmdb.cc")
 endif()
 
-if(USE_LMDB)
-  list(APPEND Caffe2_DB_SRC_TMP ${Caffe2_DB_LMDB_SRC})
+if (USE_LEVELDB)
+  list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/leveldb.cc")
 endif()
 
-if(USE_LEVELDB)
-  list(APPEND Caffe2_DB_SRC_TMP ${Caffe2_DB_LEVELDB_SRC})
+if (USE_ROCKSDB)
+  list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/rocksdb.cc")
 endif()
 
-if(USE_ROCKSDB)
-  list(APPEND Caffe2_DB_SRC_TMP ${Caffe2_DB_ROCKSDB_SRC})
+if (USE_ZMQDB)
+  list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/zmqdb.cc")
 endif()
 
-if(USE_ZMQDB)
-  list(APPEND Caffe2_DB_SRC_TMP ${Caffe2_DB_ZMQDB_SRC})
-endif()
-
-# ---[ Set final list of db sources
-set(Caffe2_DB_SRC ${Caffe2_DB_SRC_TMP} PARENT_SCOPE)
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
+set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} PARENT_SCOPE)
