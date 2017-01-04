@@ -27,7 +27,7 @@ set(Caffe2_ZMQ_BINARY_SRCS
     "zmq_feeder.cc"
 )
 # Prune out ZMQ if no support
-if(USE_ZMQ)
+if(USE_ZMQ AND ZMQ_FOUND)
   message(STATUS "Excluding ZMQ binary")
   prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/" "${Caffe2_ZMQ_BINARY_SRCS}")
   list(APPEND Caffe2_CPU_BINARY_SRCS "${tmp}")
@@ -39,8 +39,8 @@ set(Caffe2_MPI_BINARY_SRCS
     "fb_run_plan_mpi.cc"
     "run_plan_mpi.cc"
 )
-if(USE_MPI)
-  message(STATUS "Excluding MPI binaries")
+if(USE_MPI AND MPI_CXX_FOUND)
+  message(STATUS "Including MPI binaries")
   prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/" "${Caffe2_MPI_BINARY_SRCS}")
   list(APPEND Caffe2_CPU_BINARY_SRCS "${tmp}")
   list(APPEND Caffe2_GPU_BINARY_SRCS "${tmp}")
@@ -51,8 +51,8 @@ set(Caffe2_OPENCV_BINARY_SRCS
     "convert_encoded_to_raw_leveldb.cc"
     "make_image_db.cc"
 )
-if(USE_OPENCV)
-  message(STATUS "Excluding OPENCV binaries")
+if(USE_OPENCV AND OpenCV_FOUND)
+  message(STATUS "Including OPENCV binaries")
   prepend(tmp "${CMAKE_CURRENT_SOURCE_DIR}/" "${Caffe2_OPENCV_BINARY_SRCS}")
   list(APPEND Caffe2_CPU_BINARY_SRCS "${tmp}")
   list(APPEND Caffe2_GPU_BINARY_SRCS "${tmp}")
