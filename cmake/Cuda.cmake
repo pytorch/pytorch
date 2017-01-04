@@ -180,9 +180,12 @@ list(APPEND Caffe2_LINKER_LIBS ${CUDA_CUDART_LIBRARY}
                               ${CUDA_curand_LIBRARY} ${CUDA_CUBLAS_LIBRARIES})
 
 # find libcuda.so and lbnvrtc.so
+# For libcuda.so, we will find it under lib, lib64, and then the
+# stubs folder, in case we are building on a system that does not
+# have cuda driver installed.
 find_library(CUDA_CUDA_LIB cuda
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64)
+    PATH_SUFFIXES lib lib64 lib/stubs lib64/stubs)
 find_library(CUDA_NVRTC_LIB nvrtc
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64)
@@ -191,13 +194,18 @@ find_library(CUDA_NVRTC_LIB nvrtc
 caffe2_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
+
 if(CUDA_CUDA_LIB)
     message(STATUS "Found libcuda: ${CUDA_CUDA_LIB}")
     list(APPEND Caffe2_LINKER_LIBS ${CUDA_CUDA_LIB})
+else()
+    message(FATAL_ERROR "Cannot find libcuda.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
 endif()
 if(CUDA_NVRTC_LIB)
   message(STATUS "Found libnvrtc: ${CUDA_NVRTC_LIB}")
   list(APPEND Caffe2_LINKER_LIBS ${CUDA_NVRTC_LIB})
+else()
+    message(FATAL_ERROR "Cannot find libnvrtc.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
 endif()
 
 # disable some nvcc diagnostic that apears in boost, glog, glags, opencv, etc.
