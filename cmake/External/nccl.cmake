@@ -9,7 +9,7 @@ if (NOT __NCCL_INCLUDED)
     # build directory
     set(nccl_PREFIX ${CMAKE_SOURCE_DIR}/third_party/nccl)
 
-    # we build glog statically, but want to link it into the caffe shared library
+    # we build nccl statically, but want to link it into the caffe shared library
     # this requires position-independent code
     if (UNIX)
       set(NCCL_EXTRA_COMPILER_FLAGS "-fPIC")

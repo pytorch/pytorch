@@ -2,7 +2,7 @@
 
 #include "caffe2/core/flags.h"
 
-CAFFE2_DECLARE_string(caffe2_htrace_conf);
+CAFFE2_DECLARE_string(caffe2_htrace_span_log_path);
 
 namespace caffe2 {
 

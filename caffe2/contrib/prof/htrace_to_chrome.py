@@ -15,7 +15,7 @@ def stop_display(limit, curr):
     return display_levels.index(limit) <= display_levels.index(curr)
 
 
-def build_trace_dict(f):
+def build_trace_dict(f, start_time, end_time):
     """Creates a python dictionary that has trace ids as keys and the
     corresponding trace objects as values.
 
@@ -39,6 +39,9 @@ def build_trace_dict(f):
     root_list = []
     for line in f:
         h = json.loads(line)
+        if h["e"] < start_time or h["b"] > end_time:
+            continue
+
         entry = {"begin": h["b"], "end": h["e"], "desc": h["d"]}
         if "p" not in h or len(h["p"]) == 0:
             root_list.append(entry)
@@ -81,7 +84,11 @@ def generate_chrome_trace(root_list, display):
             "ts": root["begin"],
             "dur": root["end"] - root["begin"],
             "pid": root_idx,
-            "tid": root_idx
+            "tid": root_idx,
+            "args": {
+                "Start timestamp": root["begin"],
+                "End timestamp": root["end"]
+            }
         })
 
         for _, v in root["children"].items():
@@ -91,7 +98,11 @@ def generate_chrome_trace(root_list, display):
                 "ph": "X",
                 "ts": v["begin"],
                 "dur": v["end"] - v["begin"],
-                "pid": root_idx
+                "pid": root_idx,
+                "args": {
+                    "Start timestamp": v["begin"],
+                    "End timestamp": v["end"]
+                }
             }
 
             if "run-scope" in v["desc"]:
@@ -116,7 +127,11 @@ def generate_chrome_trace(root_list, display):
                         "ts": v_op["begin"],
                         "dur": v_op["end"] - v_op["begin"],
                         "pid": root_idx,
-                        "tid": wid
+                        "tid": wid,
+                        "args": {
+                            "Start timestamp": v_op["begin"],
+                            "End timestamp": v_op["end"]
+                        }
                     })
 
                     if stop_display(display, "operator") or "children" not in v_op:
@@ -134,7 +149,9 @@ def generate_chrome_trace(root_list, display):
                                 "pid": root_idx,
                                 "tid": wid,
                                 "args": {
-                                    "desc": "NEW OPERATOR"
+                                    "desc": "NEW OPERATOR",
+                                    "Start timestamp": v_gpu_op["begin"],
+                                    "End timestamp": v_gpu_op["end"]
                                 }
                             })
 
@@ -159,18 +176,22 @@ def get_argument_parser():
     parser.add_argument("--display",
                         type=str, choices=display_levels, default="operator",
                         help="deepest level of spans to display (default: operator)")
+    parser.add_argument("--start_time", type=int, default=-1,
+                        help="do not display spans occuring before this timestamp")
+    parser.add_argument("--end_time", type=int, default=sys.maxsize,
+                        help="do not display spans occuring after this timestamp")
     return parser
 
 
 def main():
     args = get_argument_parser().parse_args()
     with open(args.htrace_log, "r") as f:
-        trace_dic, root_list = build_trace_dict(f)
+        trace_dic, root_list = build_trace_dict(f, args.start_time, args.end_time)
 
     ct = generate_chrome_trace(root_list, args.display)
-    print("Writing chrome json file to %s.json" % sys.argv[1])
-    print("Now import %s.json in chrome://tracing" % sys.argv[1])
-    with open(sys.argv[1] + ".json", "w") as f:
+    print("Writing chrome json file to %s.json" % args.htrace_log)
+    print("Now import %s.json in chrome://tracing" % args.htrace_log)
+    with open(args.htrace_log + ".json", "w") as f:
         f.write(json.dumps(ct))
 
 
