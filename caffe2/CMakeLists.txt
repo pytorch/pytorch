@@ -1,112 +1,37 @@
-# ---[ Excludes
-set(Caffe2_DIR_EXCLUDES
-        "/binaries"      # handled below
-        "/contrib"       # To be handled
-        "/distributed"   # Exclude for now
-        "/mpi"           # Exclude for now
-        "/experiments"   # Exclude for now
-        "/python"        # handled below
-        # "/image"         # Exclude for now
-        "/db"            # handled below
-)
+# ---[ Declare source file lists
 
-set(Caffe2_FILE_EXCLUDES
-        "/operators/fully_connected_op_sparse.cc"
-        "/test/caffe2_gtest_main.cc"
-        "/db/db_test.cc"
-        "/db/rocksdb.cc"
-        "/db/zmqdb.cc"
-        "/utils/mkl_utils_test.cc"
-        "/mpi/mpi_test.cc"
-)
+# Caffe2_{CPU,GPU}_SRCS is the list that will have all the related source
+# files for CPU and GPU respectively. They will be filled with the
+# CMakeLists.txt files under each folder respectively.
+set(Caffe2_CPU_SRCS)
+set(Caffe2_GPU_SRCS)
 
-set(Caffe2_CPU_TEST_SRCS
-    "/test/caffe2_gtest_main.cc"
-    "/core/parallel_net_test.cc"
-    "/core/timer_test.cc"
-    "/core/workspace_test.cc"
-    "/core/registry_test.cc"
-    "/core/context_test.cc"
-    "/core/init_test.cc"
-    "/core/operator_test.cc"
-    "/core/typeid_test.cc"
-    "/core/predictor_test.cc"
-    "/core/operator_schema_test.cc"
-    "/core/logging_test.cc"
-    "/core/blob_test.cc"
-    "/core/net_test.cc"
-    "/db/db_test.cc"
-    "/operators/utility_ops_test.cc"
-    "/operators/elementwise_op_test.cc"
-    "/operators/fully_connected_op_test.cc"
-    "/operators/text_file_reader_utils_test.cc"
-    "/utils/proto_utils_test.cc"
-    "/utils/math_test.cc"
-    "/utils/simple_queue_test.cc"
-    "/utils/mkl_utils_test.cc"
-    "/utils/fixed_divisor_test.cc"
-)
+# Caffe2_{CPU,GPU}_TEST_SRCS is the list that will have all the related source
+# files for CPU and GPU tests respectively.
+set(Caffe2_CPU_TEST_SRCS)
+set(Caffe2_GPU_TEST_SRCS)
 
-set(Caffe2_GPU_TEST_SRCS
-    "/contrib/nervana/nervana_fc_op_gpu_test.cc"
-    "/core/blob_gpu_test.cc"
-    "/mpi/mpi_gpu_test.cc"
-    "/core/context_gpu_test.cc"
-    "/operators/conv_op_cache_cudnn_test.cc"
-    "/operators/operator_fallback_gpu_test.cc"
-    "/operators/utility_ops_gpu_test.cc"
-    "/operators/fully_connected_op_gpu_test.cc"
-    "/operators/elementwise_op_gpu_test.cc"
-)
+# ---[ Add respective subdirectories
+# TODO(jiayq): maybe do a simple glob?
+add_subdirectory(core)
+add_subdirectory(image)
+add_subdirectory(operators)
+add_subdirectory(utils)
 
-# Expand all the exludes.
-prepend(Caffe2_DIR_EXCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_DIR_EXCLUDES})
-prepend(Caffe2_FILE_EXCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_FILE_EXCLUDES})
-prepend(Caffe2_CPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_CPU_TEST_SRCS})
-prepend(Caffe2_GPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_GPU_TEST_SRCS})
-prepend(Caffe2_LEVELDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LEVELDB_SRCS})
-prepend(Caffe2_LMDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LMDB_SRCS})
+message(STATUS "After core, cpu sources: ")
+foreach(tmp ${Caffe2_CPU_SRCS})
+message(STATUS "  " ${tmp})
+endforeach()
+
+message(STATUS "After core, gpu sources: ")
+foreach(tmp ${Caffe2_GPU_SRCS})
+message(STATUS "  " ${tmp})
+endforeach()
 
 # ---[ List of libraries to link with
 set(Caffe2_LINK_LIBS Caffe_PROTO)
 
-# Get all source directories.
-# TODO(bwasti): GLOB is not considered best practice.
-file(GLOB Caffe2_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/*)
-
-# Exclude all excluded directories.
-exclude(Caffe2_DIRS "${Caffe2_DIRS}" ${Caffe2_DIR_EXCLUDES})
-
 # Get all source files from remaining directories.
-
-# ---[ GPU files
-# ------[ cuDNN
-foreach(dir ${Caffe2_DIRS})
-        file(GLOB tmp ${dir}/*_cudnn.cc)
-        set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
-endforeach()
-# ------[ general GPU
-foreach(dir ${Caffe2_DIRS})
-        file(GLOB tmp ${dir}/*_gpu.cc)
-        set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
-endforeach()
-# ------[ CUDA sources
-foreach(dir ${Caffe2_DIRS})
-        file(GLOB tmp ${dir}/*.cu)
-        set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
-endforeach()
-exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${Caffe2_FILE_EXCLUDES})
-exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
-
-# CPU files.
-foreach(dir ${Caffe2_DIRS})
-        file(GLOB tmp ${dir}/*.cc)
-        set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
-endforeach()
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_FILE_EXCLUDES})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_CPU_TEST_SRCS})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
 
 # Compile protobufs.
 add_subdirectory(proto)
