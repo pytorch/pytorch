@@ -39,11 +39,12 @@ option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_LMDB "Use LMDB" ON)
 option(USE_LEVELDB "Use LMDB" ON)
 option(USE_OPENCV "Use openCV" ON)
-option(USE_ZMQ "Use ZMQ" OFF)
+option(USE_ZMQDB "Use ZMQ" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_MPI "Use MPI" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ON)
+option(USE_OPENMP "Use OpenMP for parallel code" ON)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
