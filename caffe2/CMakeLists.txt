@@ -11,13 +11,6 @@ set(Caffe2_GPU_SRCS)
 set(Caffe2_CPU_TEST_SRCS)
 set(Caffe2_GPU_TEST_SRCS)
 
-# Get all source directories.
-# TODO(bwasti): GLOB is not considered best practice.
-file(GLOB Caffe2_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/*)
-
-# Exclude all excluded directories.
-exclude(Caffe2_DIRS "${Caffe2_DIRS}" ${Caffe2_DIR_EXCLUDES})
-
 # ---[ Add respective subdirectories
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
