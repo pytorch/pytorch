@@ -24,16 +24,16 @@ if (NOT __PROTOBUF_INCLUDED)
     ExternalProject_Add(protobuf_external
       SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/protobuf
       BUILD_IN_SOURCE 1
-      CONFIGURE_COMMAND "./autogen.sh" COMMAND ./configure --prefix=${CMAKE_SOURCE_DIR}/third_party/protobuf/_build
+      CONFIGURE_COMMAND "./autogen.sh" COMMAND ./configure --prefix=${CMAKE_SOURCE_DIR}/third_party/protobuf/build
       BUILD_COMMAND make 
       INSTALL_COMMAND make install
       )
 
     set(PROTOBUF_FOUND TRUE)
-    set(PROTOBUF_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third_party/protobuf/_build/include)
-    set(PROTOBUF_LIBRARIES ${CMAKE_SOURCE_DIR}/third_party/protobuf/_build/lib/libprotobuf.so)
-    set(PROTOBUF_LIBRARY_DIRS ${CMAKE_SOURCE_DIR}/third_party/protobuf/_build/lib)
-    set(PROTOBUF_PROTOC_EXECUTABLE ${CMAKE_SOURCE_DIR}/third_party/protobuf/_build/bin/protoc)
+    set(PROTOBUF_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third_party/protobuf/build/include)
+    set(PROTOBUF_LIBRARIES ${CMAKE_SOURCE_DIR}/third_party/protobuf/build/lib/libprotobuf.so)
+    set(PROTOBUF_LIBRARY_DIRS ${CMAKE_SOURCE_DIR}/third_party/protobuf/build/lib)
+    set(PROTOBUF_PROTOC_EXECUTABLE ${CMAKE_SOURCE_DIR}/third_party/protobuf/build/bin/protoc)
     set(PROTOBUF_EXTERNAL TRUE)
 
     list(APPEND external_project_dependencies protobuf_external)
