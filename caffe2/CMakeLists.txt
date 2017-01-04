@@ -32,7 +32,7 @@ add_subdirectory(db)
 # add_subdirectory(distributed)
 # add_subdirectory(experiments) # note, we may remove this folder at some point
 add_subdirectory(image)
-# add_subdirectory(mkl)
+add_subdirectory(mkl)
 # add_subdirectory(mpi)
 add_subdirectory(operators)
 # add_subdirectory(proto) # note, proto is processed above already.
