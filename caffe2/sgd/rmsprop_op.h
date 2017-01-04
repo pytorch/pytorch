@@ -1,5 +1,6 @@
 #pragma once
 
+#include "caffe2/core/common_omp.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
@@ -18,7 +19,7 @@ void rmsprop_update(
     float epsilon,
     const float* lr,
     Context* context) {
-#pragma omp parallel for
+  CAFFE2_OMP_PARALLEL_FOR()
   for (auto i = 0; i < N; ++i) {
     // Update new mean square estimate
     nms[i] = ms[i] + (1.0f - decay) * (g[i] * g[i] - ms[i]);
