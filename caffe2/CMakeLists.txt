@@ -6,7 +6,8 @@ set(Caffe2_DIR_EXCLUDES
         "/mpi"           # Exclude for now
         "/experiments"   # Exclude for now
         "/python"        # handled below
-        "/image"         # Exclude for now
+        # "/image"         # Exclude for now
+        "/db"            # handled below
 )
 
 set(Caffe2_FILE_EXCLUDES
@@ -17,14 +18,6 @@ set(Caffe2_FILE_EXCLUDES
         "/db/zmqdb.cc"
         "/utils/mkl_utils_test.cc"
         "/mpi/mpi_test.cc"
-)
-
-# ---[ Specific builds
-set(Caffe2_LEVELDB_SRCS
-        "/db/leveldb.cc"
-)
-set(Caffe2_LMDB_SRCS
-        "/db/lmdb.cc"
 )
 
 set(Caffe2_CPU_TEST_SRCS
@@ -114,17 +107,17 @@ exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_FILE_EXCLUDES})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_CPU_TEST_SRCS})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
-if (NOT USE_LEVELDB)
-        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LEVELDB_SRCS})
-endif()
-if (NOT USE_LMDB)
-        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LMDB_SRCS})
-endif()
 
 # Compile protobufs.
 add_subdirectory(proto)
 include_directories(BEFORE ${CMAKE_BINARY_DIR})
 list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
+
+# Get appropriate list of DB sources
+add_subdirectory(db)
+# add sources to appropriate lists
+list(APPEND Caffe2_CPU_SRCS ${Caffe2_DB_SRC})
+list(APPEND Caffe2_GPU_SRCS ${Caffe2_DB_GPU_SRC})
 
 # Compile exposed libraries.
 LIST(APPEND CMAKE_CXX_FLAGS "-std=c++11 -fPIC")
