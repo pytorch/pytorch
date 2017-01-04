@@ -172,7 +172,7 @@ if (${CUDA_VERSION} LESS 8.0)
   list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
 endif()
 include_directories(SYSTEM ${CUDA_INCLUDE_DIRS})
-list(APPEND Caffe2_LINKER_LIBS ${CUDA_CUDART_LIBRARY}
+list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY}
                               ${CUDA_curand_LIBRARY} ${CUDA_CUBLAS_LIBRARIES})
 
 # find libcuda.so and lbnvrtc.so
@@ -193,13 +193,13 @@ message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
 
 if(CUDA_CUDA_LIB)
     message(STATUS "Found libcuda: ${CUDA_CUDA_LIB}")
-    list(APPEND Caffe2_LINKER_LIBS ${CUDA_CUDA_LIB})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDA_LIB})
 else()
     message(FATAL_ERROR "Cannot find libcuda.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
 endif()
 if(CUDA_NVRTC_LIB)
   message(STATUS "Found libnvrtc: ${CUDA_NVRTC_LIB}")
-  list(APPEND Caffe2_LINKER_LIBS ${CUDA_NVRTC_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_NVRTC_LIB})
 else()
     message(FATAL_ERROR "Cannot find libnvrtc.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
 endif()
