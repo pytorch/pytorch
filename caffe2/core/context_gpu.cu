@@ -19,26 +19,26 @@
     CAFFE_ENFORCE_EQ(error, CNMEM_STATUS_SUCCESS, cnmemGetErrorString(error)); \
   } while (0)
 
-DEFINE_string(caffe2_cuda_memory_pool, "",
+CAFFE2_DEFINE_string(caffe2_cuda_memory_pool, "",
               "Sets the memory pool used by caffe2. Possible values are "
               "none, cnmen and cub.");
-DEFINE_double(caffe2_cnmem_reserve, 0.8,
+CAFFE2_DEFINE_double(caffe2_cnmem_reserve, 0.8,
              "Sets the proportion of memory pre-allocated by the memory "
              "pool if you use cnmem.");
-DEFINE_string(caffe2_cnmem_gpus, "",
+CAFFE2_DEFINE_string(caffe2_cnmem_gpus, "",
               "A comma separated list containing the index of gpus that "
               "we will set the memory pool on. If not set, we will set "
               "up the memory pool on all available GPUs. This only applies "
               "to cnmem.");
 // TODO(jiayq): Figure out the best default values for the params below.
 // Currently we are using the setting copied from caffe.
-DEFINE_int32(caffe2_cub_bin_growth, 2,
+CAFFE2_DEFINE_int(caffe2_cub_bin_growth, 2,
              "If using cub as the memory allocator, sets the growth of bins "
              "used by the cub pool.");
-DEFINE_int32(caffe2_cub_min_bin, 6,
+CAFFE2_DEFINE_int(caffe2_cub_min_bin, 6,
              "If using cub as the memory allocator, sets the min number of "
              "bins.");
-DEFINE_int32(caffe2_cub_max_bin, 16,
+CAFFE2_DEFINE_int(caffe2_cub_max_bin, 16,
              "If using cub as the memory allocator, sets the max number of "
              "bins.");
 
