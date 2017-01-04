@@ -7,29 +7,46 @@ from .. import functional as F
 
 
 class MaxPool1d(Module):
-    """Applies a 1D max pooling over an input signal composed of several input
+    r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
-    ```
-    The output value of the layer with input (b x C x W) and output (b x C x oW)
-    can be precisely described as:
-    output[b_i][c_i][w_i] = max_{k=1, K} input[b_i][c_i][stride_w * w_i + k)]
-    ```
+    In the simplest case, the output value of the layer with input size :math:`(N, C, L)`
+    and output :math:`(N, C, L_{out})` can be precisely described as:
+
+    .. math::
+    
+        \begin{array}{ll}
+        out(N_i, C_j, k)  = \max_{{m}=0}^{{kernel\_size}-1} input(N_i, C_j, stride * k + m)
+        \end{array}
+
+    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides 
+      for :attr:`padding` number of points
+    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe, 
+      but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     Args:
         kernel_size: the size of the window to take a max over
-        stride: the stride of the window
-        padding: implicit padding to be added. Default: 0
-        dilation: a parameter that controls the stride of elements in the window. Default: kernel_size
-        return_indices: if True, will return the indices along with the outputs. Useful when Unpooling later. Default: False
-        ceil_mode: when True, will use "ceil" instead of "floor" to compute the output shape
-    Input Shape: [ * , * , * ] : Input is minibatch x channels x iW
-    Output Shape:[ * , * , * ]  : Output shape = minibatch x channels x floor((iW  + 2*padW - kernel_size) / stride + 1)
-    Examples:
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on both sides
+        dilation: a parameter that controls the stride of elements in the window
+        return_indices: if True, will return the max indices along with the outputs. 
+                        Useful when Unpooling later
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, L_{in})`
+        - Output: :math:`(N, C, L_{out})` where 
+          :math:`L_{out} = floor((L_{in}  + 2 * padding - dilation * (kernel\_size - 1) - 1) / stride + 1)`
+
+    Examples::
+
         >>> # pool of size=3, stride=2
         >>> m = nn.MaxPool1d(3, stride=2)
         >>> input = autograd.Variable(torch.randn(20, 16, 50))
         >>> output = m(input)
+
+    .. _link:
+        https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
@@ -55,31 +72,56 @@ class MaxPool1d(Module):
             + ', ceil_mode=' + str(self.ceil_mode) + ')'
 
 class MaxPool2d(Module):
-    """Applies a 2D max pooling over an input signal composed of several input
+    r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
-    ```
-    The output value of the layer with input (b x C x H x W) and output (b x C x oH x oW)
+    In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`, 
+    output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)` 
     can be precisely described as:
-    output[b_i][c_i][h_i][w_i] = max_{{kh=1, KH}, {kw=1, kW}} input[b_i][c_i][stride_h * h_i + kH)][stride_w * w_i + kW)]
-    ```
+
+    .. math::
+    
+        \begin{array}{ll}
+        out(N_i, C_j, h, w)  = \max_{{m}=0}^{kH-1} \max_{{n}=0}^{kW-1} 
+                               input(N_i, C_j, stride[0] * h + m, stride[1] * w + n)
+        \end{array}
+
+    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides 
+      for :attr:`padding` number of points
+    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe, 
+      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
+
+        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension, 
+          and the second `int` for the width dimension
 
     Args:
-        kernel_size: the size of the window to take a max over. Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
-        stride: the stride of the window. Can be a single number s or a tuple (sh x sw). Default: kernel_size
-        padding: implicit padding to be added. Can be a single number or a tuple. Default: 0
-        dilation: a parameter that controls the stride of elements in the window. Can be a single number or a tuple. Default: 1
-        return_indices: if True, will return the indices along with the outputs. Useful to pass to nn.MaxUnpool2d . Default: False
-        ceil_mode: when True, will use "ceil" instead of "floor" to compute the output shape
-    Input Shape: [ * , * , *, * ] : Input is minibatch x channels x iH x iW
-    Output Shape:[ * , * , *, * ]  : Output shape = minibatch x channels x floor((iH  + 2*padH - kH) / sH + 1) x floor((iW  + 2*padW - kW) / sW + 1)
-    Examples:
+        kernel_size: the size of the window to take a max over
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on both sides
+        dilation: a parameter that controls the stride of elements in the window
+        return_indices: if True, will return the max indices along with the outputs. 
+                        Useful when Unpooling later
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})` where 
+          :math:`H_{out} = floor((H_{in}  + 2 * padding[0] - dilation[0] * (kernel\_size[0] - 1) - 1) / stride[0] + 1)`
+          :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
+    Examples::
+
         >>> # pool of square window of size=3, stride=2
         >>> m = nn.MaxPool2d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool2d((3, 2), stride=(2, 1))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
         >>> output = m(input)
+
+    .. _link:
+        https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
@@ -208,25 +250,58 @@ class AvgPool2d(Module):
 
 
 class MaxPool3d(Module):
-    """Applies a 3D max pooling over an input signal composed of several input
+    r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
+    In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`, 
+    output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)` 
+    can be precisely described as:
+
+    .. math::
+    
+        \begin{array}{ll}
+        out(N_i, C_j, d, h, w)  = \max_{{k}=0}^{kD-1} \max_{{m}=0}^{kH-1} \max_{{n}=0}^{kW-1} 
+                         input(N_i, C_j, stride[0] * k + d, stride[1] * h + m, stride[2] * w + n)
+        \end{array}
+
+    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides 
+      for :attr:`padding` number of points
+    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe, 
+      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
+
+        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension, 
+          the second `int` for the width dimension and the third `int` for the width dimension
+
     Args:
-        kernel_size: the size of the window to take a max over. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
-        stride: the stride of the window. Can be a single number s or a tuple (st x sh x sw). Default: kernel_size
-        padding: implicit padding to be added. Can be a single number or a tuple. Default: 0
-        dilation: a parameter that controls the stride of elements in the window. Can be a single number or a tuple. Default: 1
-        return_indices: if True, will return the indices along with the outputs. Useful to pass to nn.MaxUnpool3d . Default: False
-        ceil_mode: when True, will use "ceil" instead of "floor" to compute the output shape
-    Input Shape: [ * , * , *, *, * ] : Input is minibatch x channels x iT x iH x iW
-    Output Shape:[ * , * , *, *, * ]  : Output shape = minibatch x channels x floor((iT  + 2*padT - kT) / sT + 1) x floor((iH  + 2*padH - kH) / sH + 1) x floor((iW  + 2*padW - kW) / sW + 1)
-    Examples:
+        kernel_size: the size of the window to take a max over
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on both sides
+        dilation: a parameter that controls the stride of elements in the window
+        return_indices: if True, will return the max indices along with the outputs. 
+                        Useful when Unpooling later
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where 
+          :math:`D_{out} = floor((D_{in}  + 2 * padding[0] - dilation[0] * (kernel\_size[0] - 1) - 1) / stride[0] + 1)`
+          :math:`H_{out} = floor((H_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
+          :math:`W_{out} = floor((W_{in}  + 2 * padding[2] - dilation[2] * (kernel\_size[2] - 1) - 1) / stride[2] + 1)`
+
+    Examples::
+
         >>> # pool of square window of size=3, stride=2
         >>> m = nn.MaxPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
         >>> input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
         >>> output = m(input)
+
+    .. _link:
+        https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
             return_indices=False, ceil_mode=False):

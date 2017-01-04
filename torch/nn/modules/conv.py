@@ -170,9 +170,10 @@ class Conv2d(_ConvNd):
                  and producing half the output channels, and both subsequently concatenated.
     
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
-      - a single ``int`` -- in which case the same value is used for the height and width dimension
-      - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension, 
-        and the second `int` for the width dimension
+
+        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension, 
+          and the second `int` for the width dimension
 
     .. note::
     
@@ -262,9 +263,10 @@ class Conv3d(_ConvNd):
                  and producing half the output channels, and both subsequently concatenated.
     
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
-      - a single ``int`` -- in which case the same value is used for the height and width dimension
-      - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension, 
-        the second `int` for the width dimension and the third `int` for the width dimension
+
+        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension, 
+          the second `int` for the width dimension and the third `int` for the width dimension
 
     .. note::
     
@@ -371,7 +373,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
     
-    ** This module can be seen as the exact reverse of the ``Conv2d`` module. ** 
+    **This module can be seen as the exact reverse of Conv2d** 
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides 
@@ -388,10 +390,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`, 
     :attr:`dilation` can either be:
-      - a single ``int`` -- in which case the same value is used for the height and width dimension
-      - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension, 
-        and the second `int` for the width dimension
 
+        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension, 
+          and the second `int` for the width dimension
+    
     .. note::
     
          Depending of the size of your kernel, several (of the last)
@@ -465,7 +468,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
     
-    ** This module can be seen as the exact reverse of the ``nn.Conv3d`` module. ** 
+    **This module can be seen as the exact reverse of Conv3d** 
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides 
@@ -482,9 +485,10 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`, 
     :attr:`dilation` can either be:
-      - a single ``int`` -- in which case the same value is used for the height and width dimension
-      - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension, 
-        the second `int` for the width dimension and the third `int` for the width dimension
+
+        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension, 
+          the second `int` for the width dimension and the third `int` for the width dimension
 
     .. note::
     
