@@ -74,6 +74,7 @@ list(APPEND Caffe2_MAIN_LIBS Caffe2_PROTO)
 
 # Compile exposed libraries.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
 target_link_libraries(Caffe2_CPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
 install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
