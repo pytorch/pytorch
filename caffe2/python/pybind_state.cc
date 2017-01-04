@@ -776,7 +776,7 @@ void addGlobalMethods(py::module& m) {
   // Provide a dummy avx2 flag.
   m.def("builtin_cpu_supports_avx2", []() {
     return false;
-  })
+  });
 #else
   CAFFE2_CPU_FEATURE_SUPPORT(avx2);
 #endif
