@@ -38,7 +38,7 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
-  #pragma omp parallel for
+  CAFFE2_OMP_PARALLEL_FOR()
   for (int i = 0; i < Y.size(); ++i) {
     dXdata[i] = Ydata[i] > 0 ? dYdata[i] : 0;
   }
