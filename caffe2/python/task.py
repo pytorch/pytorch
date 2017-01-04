@@ -90,7 +90,7 @@ def get_setup_nets(key, steps, target):
             nets = obj.setup(init_net)
             if isinstance(nets, (list, tuple)):
                 init_nets += nets
-            elif isinstance(nets, core.Net):
+            elif isinstance(nets, (core.Net, core.ExecutionStep)):
                 init_nets.append(nets)
             elif nets is not None:
                 raise TypeError('Unsupported type for setup: %s' % type(nets))
@@ -99,7 +99,7 @@ def get_setup_nets(key, steps, target):
             nets = obj.exit(exit_net)
             if isinstance(nets, (list, tuple)):
                 exit_nets += nets
-            elif isinstance(nets, core.Net):
+            elif isinstance(nets, (core.Net, core.ExecutionStep)):
                 exit_nets.append(nets)
             elif nets is not None:
                 raise TypeError('Unsupported type for setup: %s' % type(nets))
@@ -323,13 +323,16 @@ class TaskOutput(object):
 
 def final_output(blob_or_record):
     """
-    Create a dummy task that returns the given blob or record
+    Adds an output to the current Task, or if no task is active,
+    create a dummy task that returns the given blob or record
     to the client. This will return the value of the blob or record when
     the last task of the TaskGroup for a given node finishes.
     """
-    return Task(outputs=blob_or_record).outputs()[0]
+    cur_task = Task.current(required=False) or Task()
+    return cur_task.add_output(blob_or_record)
 
 
+@context.define_context()
 class Task(object):
     """
     A Task is composed of an execution step and zero or more outputs.
@@ -366,6 +369,20 @@ class Task(object):
         self._is_pipeline_context = False
         self._workspace_type = workspace_type
 
+    def __enter__(self):
+        self._assert_not_used()
+        assert self._step is None, 'This Task already has an execution step.'
+        from caffe2.python import net_builder
+        self._net_builder = net_builder.NetBuilder()
+        self._net_builder.__enter__()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        if type is None:
+            self.set_step(self._net_builder)
+        self._net_builder.__exit__(type, value, traceback)
+        self._net_builder = None
+
     def workspace_type(self):
         return self._workspace_type
 
@@ -375,15 +392,17 @@ class Task(object):
 
     def add_output(self, output):
         self._assert_not_used()
-        self._outputs.append(
+        output = (
             output if isinstance(output, TaskOutput) else TaskOutput(output))
+        self._outputs.append(output)
+        return output
 
     def add_outputs(self, outputs):
         self._assert_not_used()
         if type(outputs) not in (list, tuple):
-            outputs = [outputs]
-        for output in outputs:
-            self.add_output(output)
+            return self.add_output(outputs)
+        else:
+            return [self.add_output(output) for output in outputs]
 
     def set_step(self, step):
         self._assert_not_used()

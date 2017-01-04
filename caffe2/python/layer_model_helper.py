@@ -182,7 +182,7 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         return self.global_constants['ONE']
 
     def Adagrad(self, net, param_init_net,
-                param, grad, alpha, epsilon, dedup_indices=False,
+                param, grad, alpha, epsilon, sparse_dedup_aggregator=None,
                 engine=''):
         if alpha <= 0:
             return
@@ -197,8 +197,9 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         lr = param_init_net.ConstantFill(
             [], core.ScopedBlobReference(param + "_lr"), value=-alpha)
         if isinstance(grad, core.GradientSlice):
-            if dedup_indices:
-                grad = net.DeduplicateGradientSlices(grad)
+            if sparse_dedup_aggregator:
+                grad = net.DeduplicateGradientSlices(
+                    grad, aggregator=sparse_dedup_aggregator)
 
             net.SparseAdagrad(
                 [param, param_square_sum, grad.indices, grad.values, lr],
@@ -217,7 +218,7 @@ class LayerModelHelper(model_helper.ModelHelperBase):
 
     def Ftrl(self, net, param_init_net,
              param, grad, alpha, beta, lambda1, lambda2,
-             dedup_indices=False, engine=''):
+             sparse_dedup_aggregator=None, engine=''):
         if alpha <= 0:
             return
 
@@ -228,8 +229,9 @@ class LayerModelHelper(model_helper.ModelHelperBase):
             value=0.0
         )
         if isinstance(grad, core.GradientSlice):
-            if dedup_indices:
-                grad = net.DeduplicateGradientSlices(grad)
+            if sparse_dedup_aggregator:
+                grad = net.DeduplicateGradientSlices(
+                    grad, aggregator=sparse_dedup_aggregator)
 
             net.SparseFtrl(
                 [param, nz, grad.indices, grad.values],
