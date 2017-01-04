@@ -171,10 +171,12 @@ class LSTM(RNNBase):
         - `input` : A (seq_len x batch x input_size) tensor containing the features of the input sequence.
         - `h_0` : A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
         - `c_0` : A (num_layers x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
+
     Outputs: output, (h_n, c_n)
         - `output` : A (seq_len x batch x hidden_size) tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
         - `h_n` : A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
         - `c_n` : A (num_layers x batch x hidden_size) tensor containing the cell state for t=seq_len
+
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ir|W_ii|W_in)`, of shape `(input_size x 3*hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hr|W_hi|W_hn)`, of shape `(hidden_size x 3*hidden_size)`
@@ -407,6 +409,7 @@ class GRUCell(Module):
         n = tanh(W_in x + resetgate * W_hn h) \\
         h' = (1 - i) * n + i * h
         \end{array}
+
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h

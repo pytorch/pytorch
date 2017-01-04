@@ -111,6 +111,7 @@ class MaxPool2d(Module):
         - Output: :math:`(N, C, H_{out}, W_{out})` where 
           :math:`H_{out} = floor((H_{in}  + 2 * padding[0] - dilation[0] * (kernel\_size[0] - 1) - 1) / stride[0] + 1)`
           :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
+
     Examples::
 
         >>> # pool of square window of size=3, stride=2
@@ -255,6 +256,7 @@ class AvgPool2d(Module):
         - Output: :math:`(N, C, H_{out}, W_{out})` where 
           :math:`H_{out} = floor((H_{in}  + 2 * padding[0] - kernel\_size[0]) / stride[0] + 1)`
           :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - kernel\_size[1]) / stride[1] + 1)`
+
     Examples::
 
         >>> # pool of square window of size=3, stride=2
@@ -530,6 +532,7 @@ class LPPool2d(Module):
         - Output: :math:`(N, C, H_{out}, W_{out})` where 
           :math:`H_{out} = floor((H_{in}  + 2 * padding[0] - dilation[0] * (kernel\_size[0] - 1) - 1) / stride[0] + 1)`
           :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
+
     Examples::
 
         >>> # power-2 pool of square window of size=3, stride=2
