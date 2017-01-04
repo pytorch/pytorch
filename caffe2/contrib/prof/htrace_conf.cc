@@ -4,7 +4,10 @@
 #include <algorithm>
 #include <ctime>
 
-CAFFE2_DEFINE_string(caffe2_htrace_conf, "", "Configuration string for htrace");
+CAFFE2_DEFINE_string(
+    caffe2_htrace_span_log_path,
+    "",
+    "Span log path for htrace");
 
 namespace caffe2 {
 
@@ -29,12 +32,16 @@ const string defaultHTraceConf(const string& net_name) {
   auto datetime = buf.data();
 
   std::stringstream stream;
-  stream << HTRACE_LOG_PATH_KEY << "=/tmp/htrace_" << net_name_copy << "_log_"
-         << datetime << ";";
-  stream << HTRACE_LOCAL_FILE_RCV_PATH_KEY << "=/tmp/htrace_" << net_name_copy
-         << "_span_log_" << datetime << ";";
   stream << HTRACE_SPAN_RECEIVER_KEY << "=local.file;";
   stream << HTRACE_SAMPLER_KEY << "=always;";
+
+  if (FLAGS_caffe2_htrace_span_log_path.empty()) {
+    stream << HTRACE_LOCAL_FILE_RCV_PATH_KEY << "=/tmp/htrace_" << net_name_copy
+           << "_span_log_" << datetime << ";";
+  } else {
+    stream << HTRACE_LOCAL_FILE_RCV_PATH_KEY << "="
+           << FLAGS_caffe2_htrace_span_log_path << ";";
+  }
 
   return stream.str();
 }
