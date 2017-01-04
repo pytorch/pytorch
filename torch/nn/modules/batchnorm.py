@@ -49,13 +49,11 @@ class _BatchNorm(Module):
 
 
 class BatchNorm1d(_BatchNorm):
-    """Applies Batch Normalization over a 2d input that is seen as a mini-batch of 1d inputs
+    r"""Applies Batch Normalization over a 2d input that is seen as a mini-batch of 1d inputs
 
-    ```
-                  x - mean(x)
-    y =  ----------------------------- * gamma + beta
-          standard_deviation(x) + eps
-    ```
+    .. math::
+
+        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta    
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
@@ -70,10 +68,11 @@ class BatchNorm1d(_BatchNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
-    Input Shape: [ * , num_features ] : 2D Tensor of nBatches x num_features
-    Output Shape:     Same : Output has the same shape as input
-    Returns:
-        a normalized tensor in the batch dimension
+
+    Shape:
+        - Input: :math:`(N, L)`
+        - Output: :math:`(N, L)` (same shape as input)
+
     Examples:
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm1d(100)
@@ -86,13 +85,11 @@ class BatchNorm1d(_BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    """Applies Batch Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Batch Normalization over a 4d input that is seen as a mini-batch of 3d inputs
 
-    ```
-                  x - mean(x)
-    y =  ----------------------------- * gamma + beta
-          standard_deviation(x) + eps
-    ```
+    .. math::
+
+        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta    
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
@@ -107,10 +104,11 @@ class BatchNorm2d(_BatchNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
-    Input Shape: [ * , num_features , *, * ] : 4D Tensor of batch_size x num_features x height x width
-    Output Shape:     Same : Output has the same shape as input
-    Returns:
-        a normalized tensor in the batch dimension
+
+    Shape:
+        - Input: :math:`(N, C, H, W)`
+        - Output: :math:`(N, C, H, W)` (same shape as input)
+
     Examples:
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm2d(100)
@@ -123,13 +121,11 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    """Applies Batch Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+    r"""Applies Batch Normalization over a 5d input that is seen as a mini-batch of 4d inputs
 
-    ```
-                  x - mean(x)
-    y =  ----------------------------- * gamma + beta
-          standard_deviation(x) + eps
-    ```
+    .. math::
+
+        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta    
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
@@ -144,10 +140,11 @@ class BatchNorm3d(_BatchNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
-    Input Shape: [ * , num_features , * , * , * ] : 5D Tensor of batch_size x num_features x depth x height x width
-    Output Shape:     Same : Output has the same shape as input
-    Returns:
-        a normalized tensor in the batch dimension
+
+    Shape:
+        - Input: :math:`(N, C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+
     Examples:
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm3d(100)

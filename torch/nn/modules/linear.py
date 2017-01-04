@@ -7,20 +7,23 @@ from .module import Module
 
 
 class Linear(Module):
-    """Applies a linear transformation to the incoming data, y = Ax + b
-    The input is a 2D mini-batch of samples, each of size in_features
-    The output will be a 2D Tensor of size mini-batch x out_features
+    r"""Applies a linear transformation to the incoming data: :math:`y = Ax + b`
 
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias. Default: True
-    Input Shape: [*, in_features] : Input can be of shape minibatch x in_features
-    Output Shape:[*, out_features]  : Output is of shape minibatch x out_features
-    Members:
+
+    Shape:
+        - Input: :math:`(N, in\_features)`
+        - Output: :math:`(N, out\_features)`
+
+    Attributes:
         weight: the learnable weights of the module of shape (out_features x in_features)
         bias:   the learnable bias of the module of shape (out_features)
-    Examples:
+
+    Examples::
+
         >>> m = nn.Linear(20, 30)
         >>> input = autograd.Variable(torch.randn(128, 20))
         >>> output = m(input)
