@@ -2,3 +2,4 @@
 *.pyc
 gen*/
 doxygen/*
+build/*
