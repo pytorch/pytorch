@@ -74,9 +74,6 @@ prepend(Caffe2_GPU_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_GPU_TEST_SRCS}
 prepend(Caffe2_LEVELDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LEVELDB_SRCS})
 prepend(Caffe2_LMDB_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_LMDB_SRCS})
 
-# ---[ List of libraries to link with
-set(Caffe2_LINK_LIBS Caffe_PROTO)
-
 # Get all source directories.
 # TODO(bwasti): GLOB is not considered best practice.
 file(GLOB Caffe2_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/*)
@@ -121,33 +118,35 @@ if (NOT USE_LMDB)
         exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LMDB_SRCS})
 endif()
 
+# ---[ List of libraries to link with
+set(Caffe2_MAIN_LIBS Caffe_PROTO)
+
 # Compile protobufs.
 add_subdirectory(proto)
 include_directories(BEFORE ${CMAKE_BINARY_DIR})
-list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
+list(APPEND Caffe2_MAIN_LIBS Caffe2_PROTO)
 
 # Compile exposed libraries.
 LIST(APPEND CMAKE_CXX_FLAGS "-std=c++11 -fPIC")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
-target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS} ${Caffe2_LINKER_LIBS})
+target_link_libraries(Caffe2_CPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
 install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-list(APPEND Caffe2_LINK_LIBS Caffe2_CPU)
+list(APPEND Caffe2_MAIN_LIBS Caffe2_CPU)
 
 # ---[ CUDA library
 if(HAVE_CUDA)
   CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
-  target_link_libraries(Caffe2_GPU ${Caffe2_LINK_LIBS} ${Caffe2_LINKER_LIBS})
+  target_link_libraries(Caffe2_GPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
   install(TARGETS Caffe2_GPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
   link_directories(${CMAKE_INSTALL_PREFIX}/lib)
-  list(APPEND Caffe2_LINK_LIBS Caffe2_GPU)
-  list(APPEND Caffe2_LINK Caffe2_GPU)
+  list(APPEND Caffe2_MAIN_LIBS Caffe2_GPU)
 endif()
 
 # Compile test binaries.
 foreach(test_src ${Caffe2_CPU_TEST_SRCS})
   get_filename_component(test_name ${test_src} NAME_WE)
   add_executable(${test_name} "${test_src}")
-  target_link_libraries(${test_name} ${Caffe2_LINK} gtest_main)
+  target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} gtest_main)
   if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
     target_compile_features(${test_name} PRIVATE cxx_range_for)
   endif()
@@ -223,7 +222,7 @@ endif()
 foreach(binary_src ${Caffe2_CPU_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} ${Caffe2_LINK} benchmark ${Caffe2_LINKER_LIBS})
+  target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} benchmark ${Caffe2_DEPENDENCY_LIBS})
   install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
 
@@ -231,7 +230,7 @@ if(HAVE_CUDA)
   foreach(binary_src ${Caffe2_GPU_BINARY_SRCS})
     get_filename_component(bin_name ${binary_src} NAME_WE)
     add_executable(${bin_name} ${binary_src})
-    target_link_libraries(${bin_name} ${Caffe2_LINK} cnmem benchmark ${Caffe2_LINKER_LIBS})
+    target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} cnmem benchmark ${Caffe2_DEPENDENCY_LIBS})
     install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
   endforeach()
 endif()
