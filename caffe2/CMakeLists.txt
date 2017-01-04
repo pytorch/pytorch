@@ -120,7 +120,7 @@ list(APPEND Caffe2_CPU_SRCS ${Caffe2_DB_SRC})
 list(APPEND Caffe2_GPU_SRCS ${Caffe2_DB_GPU_SRC})
 
 # Compile exposed libraries.
-LIST(APPEND CMAKE_CXX_FLAGS "-std=c++11 -fPIC")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
 target_link_libraries(Caffe2_CPU ${Caffe2_LINK_LIBS} ${Caffe2_LINKER_LIBS})
 install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
