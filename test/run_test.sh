@@ -17,6 +17,9 @@ $PYCMD test_torch.py
 echo "Running autograd tests"
 $PYCMD test_autograd.py
 
+echo "Running sparse tests"
+$PYCMD test_sparse.py
+
 echo "Running nn tests"
 $PYCMD test_nn.py
 

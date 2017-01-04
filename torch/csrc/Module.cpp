@@ -16,11 +16,16 @@
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
+#include "ModuleSparse.cpp"
+
 PyObject* module;
 PyObject* tensor_classes;
 
 PyObject *THPDefaultTensorClass = NULL;
 THPGenerator *THPDefaultGenerator   = NULL;
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
 static bool THPModule_loadClasses(PyObject *self)
 {
@@ -54,9 +59,6 @@ static bool THPModule_loadClasses(PyObject *self)
 #undef ASSERT_NOT_NULL
 }
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-
 static bool THPModule_assignStateless(PyObject *self)
 {
 #define INIT_STATELESS(type)                                                   \
@@ -81,7 +83,7 @@ static bool THPModule_assignStateless(PyObject *self)
   return true;
 #undef INIT_STATELESS
 }
-
+//
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_path)
 {
@@ -149,6 +151,9 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
 #endif
 }
 
+/**
+ * STATELESS FUNCTIONS
+ **/
 
 #define IMPLEMENT_STATELESS(name)                                              \
 static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
@@ -468,12 +473,15 @@ extern PyObject * THCPModule_cudaHostAllocator(PyObject *_unused);
 extern PyObject * THCPModule_cudaSynchronize(PyObject *_unused);
 extern PyObject * THCPModule_getLibPath(PyObject *_unused);
 extern PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles);
+
+extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
 
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
+  {"_sparse_init",    (PyCFunction)THSPModule_initExtension,    METH_NOARGS,  NULL},
 #ifdef WITH_CUDA
   {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
@@ -491,9 +499,10 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_seedAll",     (PyCFunction)THCPModule_seedAll,          METH_NOARGS,  NULL},
   {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  NULL},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
-  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize,  METH_NOARGS,  NULL},
-  {"_cuda_getLibPath",  (PyCFunction)THCPModule_getLibPath,       METH_NOARGS,  NULL},
-  {"_cuda_sleep",       (PyCFunction)THCPModule_cudaSleep,        METH_O,       NULL},
+  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
+  {"_cuda_getLibPath", (PyCFunction)THCPModule_getLibPath, METH_NOARGS, NULL},
+  {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
+  {"_cuda_sparse_init",  (PyCFunction)THCSPModule_initExtension,    METH_NOARGS,  NULL},
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
@@ -622,6 +631,10 @@ static PyMethodDef TorchMethods[] = {
   {"geqrf",           (PyCFunction)THPModule_geqrf,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS | METH_KEYWORDS, NULL},
+
+  // Sparse functions
+  {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
+  {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -660,6 +673,15 @@ bool THCPCharTensor_init(PyObject *module);
 bool THCPByteTensor_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
+
+bool THCSPDoubleTensor_init(PyObject *module);
+bool THCSPFloatTensor_init(PyObject *module);
+bool THCSPHalfTensor_init(PyObject *module);
+bool THCSPLongTensor_init(PyObject *module);
+bool THCSPIntTensor_init(PyObject *module);
+bool THCSPShortTensor_init(PyObject *module);
+bool THCSPCharTensor_init(PyObject *module);
+bool THCSPByteTensor_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -716,6 +738,14 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPCharTensor_init(module));
   ASSERT_TRUE(THPByteTensor_init(module));
 
+  ASSERT_TRUE(THSPDoubleTensor_init(module));
+  ASSERT_TRUE(THSPFloatTensor_init(module));
+  ASSERT_TRUE(THSPLongTensor_init(module));
+  ASSERT_TRUE(THSPIntTensor_init(module));
+  ASSERT_TRUE(THSPShortTensor_init(module));
+  ASSERT_TRUE(THSPCharTensor_init(module));
+  ASSERT_TRUE(THSPByteTensor_init(module));
+
 #ifdef WITH_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
@@ -740,6 +770,15 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THCPByteTensor_init(module));
 
   ASSERT_TRUE(THCPStream_init(module));
+
+  ASSERT_TRUE(THCSPDoubleTensor_init(module));
+  ASSERT_TRUE(THCSPFloatTensor_init(module));
+  ASSERT_TRUE(THCSPHalfTensor_init(module));
+  ASSERT_TRUE(THCSPLongTensor_init(module));
+  ASSERT_TRUE(THCSPIntTensor_init(module));
+  ASSERT_TRUE(THCSPShortTensor_init(module));
+  ASSERT_TRUE(THCSPCharTensor_init(module));
+  ASSERT_TRUE(THCSPByteTensor_init(module));
 #endif
 
 #ifdef WITH_CUDNN
@@ -765,6 +804,4 @@ PyMODINIT_FUNC PyInit__C()
 #else
   return module;
 #endif
-
-#undef ASSERT_TRUE
 }

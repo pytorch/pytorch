@@ -63,7 +63,8 @@ class Embedding(Module):
         
     """
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
-                 max_norm=None, norm_type=2, scale_grad_by_freq=False):
+                 max_norm=None, norm_type=2, scale_grad_by_freq=False,
+                 sparse=False):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -72,6 +73,8 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+        self.sparse = sparse
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -83,8 +86,10 @@ class Embedding(Module):
         padding_idx = self.padding_idx
         if padding_idx is None:
             padding_idx = -1
-        return self._backend.Embedding(padding_idx, self.max_norm,
-            self.norm_type, self.scale_grad_by_freq)(input, self.weight)
+        return self._backend.Embedding(
+            padding_idx, self.max_norm, self.norm_type,
+            self.scale_grad_by_freq, self.sparse
+            )(input, self.weight)
 
 
 # TODO: SparseLinear

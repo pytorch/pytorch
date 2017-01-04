@@ -33,6 +33,38 @@
 #define THCPTensorStatelessMethods TH_CONCAT_2(CReal,TensorStatelessMethods)
 #endif
 
+#define THCSPTensor TH_CONCAT_3(THCSP,Real,Tensor)
+#define THCSPTensorStr TH_CONCAT_STRING_3(torch.cuda.sparse.,Real,Tensor)
+#define THCSPTensorClass TH_CONCAT_3(THCSP,Real,TensorClass)
+#define THCSPTensor_(NAME) TH_CONCAT_4(THCSP,Real,Tensor_,NAME)
+
+#define THCSPDoubleTensor_Check(obj)  PyObject_IsInstance(obj, THCSPDoubleTensorClass)
+#define THCSPFloatTensor_Check(obj)   PyObject_IsInstance(obj, THCSPFloatTensorClass)
+#define THCSPHalfTensor_Check(obj)    PyObject_IsInstance(obj, THCSPHalfTensorClass)
+#define THCSPLongTensor_Check(obj)    PyObject_IsInstance(obj, THCSPLongTensorClass)
+#define THCSPIntTensor_Check(obj)     PyObject_IsInstance(obj, THCSPIntTensorClass)
+#define THCSPShortTensor_Check(obj)   PyObject_IsInstance(obj, THCSPShortTensorClass)
+#define THCSPCharTensor_Check(obj)    PyObject_IsInstance(obj, THCSPCharTensorClass)
+#define THCSPByteTensor_Check(obj)    PyObject_IsInstance(obj, THCSPByteTensorClass)
+
+#define THCSPDoubleTensor_CData(obj)  (obj)->cdata
+#define THCSPFloatTensor_CData(obj)   (obj)->cdata
+#define THCSPHalfTensor_CData(obj)    (obj)->cdata
+#define THCSPLongTensor_CData(obj)    (obj)->cdata
+#define THCSPIntTensor_CData(obj)     (obj)->cdata
+#define THCSPShortTensor_CData(obj)   (obj)->cdata
+#define THCSPCharTensor_CData(obj)    (obj)->cdata
+#define THCSPByteTensor_CData(obj)    (obj)->cdata
+
+#ifdef _THP_CORE
+#define THCSPTensorType TH_CONCAT_3(THCSP,Real,TensorType)
+#define THCSPTensorBaseStr TH_CONCAT_STRING_3(CudaSparse,Real,TensorBase)
+#define THCSPTensor_stateless_(NAME) TH_CONCAT_4(THCP,Real,Tensor_stateless_,NAME)
+#define THCSPTensorStatelessType TH_CONCAT_3(CudaSparse,Real,TensorStatelessType)
+#define THCSPTensorStateless TH_CONCAT_3(CudaSparse,Real,TensorStateless)
+#define THCSPTensorStatelessMethods TH_CONCAT_3(CudaSparse,Real,TensorStatelessMethods)
+#endif
+
 #include "override_macros.h"
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Tensor.h"

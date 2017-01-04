@@ -2538,6 +2538,8 @@ class TestTorch(TestCase):
 
     def test_print(self):
         for t in torch._tensor_classes:
+            if t in torch.sparse._sparse_tensor_classes:
+                continue
             if t.is_cuda and not torch.cuda.is_available():
                 continue
             obj = t(100, 100).fill_(1)

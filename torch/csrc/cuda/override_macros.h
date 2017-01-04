@@ -28,6 +28,24 @@
 #define THPTensorStatelessType THCPTensorStatelessType
 #define THPTensorStateless THCPTensorStateless
 
+
+#define THSTensorPtr THCSTensorPtr
+#define THSPTensorPtr THCSPTensorPtr
+#define THSTensor THCSTensor
+#define THSTensor_(NAME) THCSTensor_(NAME)
+
+#define THSPTensor_(NAME) TH_CONCAT_4(THCSP,Real,Tensor_,NAME)
+#define THSPTensor_stateless_(NAME) TH_CONCAT_4(THCSP,Real,Tensor_stateless_,NAME)
+#define THSPTensor THCSPTensor
+#define THSPTensorStr THCSPTensorStr
+#define THSPTensorBaseStr THCSPTensorBaseStr
+#define THSPTensorClass THCSPTensorClass
+#define THSPTensorType THCSPTensorType
+
+#define THSPTensorStatelessType THCSPTensorStatelessType
+#define THSPTensorStateless THCSPTensorStateless
+
+
 #define LIBRARY_STATE_NOARGS state
 #define LIBRARY_STATE state,
 #define LIBRARY_STATE_TYPE THCState*,

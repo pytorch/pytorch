@@ -228,6 +228,14 @@ del ShortTensorBase
 del CharTensorBase
 del ByteTensorBase
 
+del SparseDoubleTensorBase
+del SparseFloatTensorBase
+del SparseLongTensorBase
+del SparseIntTensorBase
+del SparseShortTensorBase
+del SparseCharTensorBase
+del SparseByteTensorBase
+
 ################################################################################
 # Import most common subpackages
 ################################################################################

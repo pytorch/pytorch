@@ -66,4 +66,9 @@ PyObject * THPVariable_New(PyObject *data, PyObject *creator, char requires_grad
     (THPVariableClass &&                                                       \
      PyObject_IsInstance(obj, THPVariableClass))
 
+#define THPVariable_CheckType(obj, func)                                       \
+    (THPVariableClass &&                                                       \
+     (PyObject_IsInstance(obj, THPVariableClass) &&                            \
+        func(((THPVariable*)obj)->data)))
+
 #endif

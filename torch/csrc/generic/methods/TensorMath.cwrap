@@ -971,6 +971,15 @@
         - arg: real value
           default: AS_REAL(1)
         - THTensor* other
+    - sparse: True
+      cname: spcadd
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* mat1
+        - arg: real value
+          default: AS_REAL(1)
+        - THSTensor* mat2
 ]]
 
 [[
@@ -989,6 +998,14 @@
         - arg: real value
           default: AS_REAL(1)
         - THTensor* other
+    - sparse: True
+      cname: spcadd
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THSTensor* other
 ]]
 
 
@@ -1302,31 +1319,56 @@
   name: addmm
   with_stateless: True
   return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: real beta
-      default: AS_REAL(1)
-    - THTensor* self
-    - arg: real alpha
-      default: AS_REAL(1)
-    - THTensor* mat1
-    - THTensor* mat2
+  options:
+    - arguments:
+      - arg: THTensor* result
+        output: True
+      - arg: real beta
+        default: AS_REAL(1)
+      - THTensor* self
+      - arg: real alpha
+        default: AS_REAL(1)
+      - THTensor* mat1
+      - THTensor* mat2
+    - cname: spaddmm
+      sparse: yes
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - arg: real beta
+          default: AS_REAL(1)
+        - THTensor* self
+        - arg: real alpha
+          default: AS_REAL(1)
+        - THSTensor* mat1
+        - THTensor* mat2
 ]]
 
 [[
   name: addmm_
-  cname: addmm
   return: self
-  arguments:
-    - THTensor* self
-    - arg: real beta
-      default: AS_REAL(1)
-    - THTensor* self
-    - arg: real alpha
-      default: AS_REAL(1)
-    - THTensor* mat1
-    - THTensor* mat2
+  options:
+    - cname: addmm
+      arguments:
+      - THTensor* self
+      - arg: real beta
+        default: AS_REAL(1)
+      - THTensor* self
+      - arg: real alpha
+        default: AS_REAL(1)
+      - THTensor* mat1
+      - THTensor* mat2
+    - cname: spaddmm
+      sparse: yes
+      arguments:
+        - arg: THTensor* self
+        - arg: real beta
+          default: AS_REAL(1)
+        - THTensor* self
+        - arg: real alpha
+          default: AS_REAL(1)
+        - THSTensor* mat1
+        - THTensor* mat2
 ]]
 
 [[
@@ -1432,22 +1474,38 @@
 
 [[
   name: mm
-  cname: addmm
   with_stateless: True
   return: argument 0
-  before_call: |
-    long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-    long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
-    THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
-    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - CONSTANT AS_REAL(0)
-    - argument 0
-    - CONSTANT AS_REAL(1)
-    - THTensor* self
-    - THTensor* mat2
+  options:
+    - cname: addmm
+      before_call: |
+        long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
+        long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
+        THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+        THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - CONSTANT AS_REAL(0)
+        - argument 0
+        - CONSTANT AS_REAL(1)
+        - THTensor* self
+        - THTensor* mat2
+    - cname: spaddmm
+      sparse: True
+      before_call: |
+        long s1 = THSTensor_(size)(LIBRARY_STATE ((THSPTensor*)$arg4)->cdata, 0);
+        long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
+        THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+        THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - CONSTANT AS_REAL(0)
+        - argument 0
+        - CONSTANT AS_REAL(1)
+        - THSTensor* mat1
+        - THTensor* mat2
 ]]
 
 [[

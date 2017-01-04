@@ -31,6 +31,24 @@
 #undef THTensorPtr
 #undef THPTensorPtr
 
+
+#undef THSPTensor_
+#undef THSPTensor_stateless_
+#undef THSPTensor
+#undef THSPTensorStr
+#undef THSPTensorBaseStr
+#undef THSPTensorClass
+
+#undef THSPTensorStatelessType
+#undef THSPTensorStateless
+#undef THSPTensorType
+
+#undef THSTensor
+#undef THSTensor_
+#undef THSTensorPtr
+#undef THSPTensorPtr
+
+
 #undef THHostTensor
 #undef THHostTensor_
 #undef THHostStorage
