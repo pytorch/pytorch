@@ -5,29 +5,62 @@ from .module import Module
 
 
 class Embedding(Module):
-    """A simple lookup table that stores embeddings of a fixed dictionary and size
+    r"""A simple lookup table that stores embeddings of a fixed dictionary and size.
+
     This module is often used to store word embeddings and retrieve them using indices.
     The input to the module is a list of indices, and the output is the corresponding
     word embeddings.
+
     Args:
-        num_embeddings: size of the dictionary of embeddings
-        embedding_dim: the size of each embedding vector
-        padding_idx: If given, pads the output with zeros whenever it encounters the index. Default: None
-        max_norm: If given, will renormalize the embeddings to always have a norm lesser than this Default: None
-        norm_type: The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq: if given, this will scale gradients by the frequency of the words in the dictionary.
-    Input Shape: [ *, * ] : Input is a 2D mini_batch LongTensor of m x n indices to extract from the Embedding dictionary
-    Output Shape:[ * , *, * ]  : Output shape = m x n x embedding_dim
-    Examples:
+        num_embeddings (int): size of the dictionary of embeddings
+        embedding_dim (int): the size of each embedding vector
+        padding_idx (int, optional): If given, pads the output with zeros whenever it encounters the index.
+        max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
+        norm_type (float, optional): The p of the p-norm to compute for the max_norm option
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of the words in the dictionary.
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
+    
+    Shape:
+        - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
+        - Output: `(N, W, embedding_dim)`
+
+    Examples::
+
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
-        >>> print(embedding(input))
+        >>> input = Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]]))
+        >>> embedding(input)
+
+        Variable containing:
+        (0 ,.,.) =
+         -1.0822  1.2522  0.2434
+          0.8393 -0.6062 -0.3348
+          0.6597  0.0350  0.0837
+          0.5521  0.9447  0.0498
+        
+        (1 ,.,.) =
+          0.6597  0.0350  0.0837
+         -0.1527  0.0877  0.4260
+          0.8393 -0.6062 -0.3348
+         -0.8738 -0.9054  0.4281
+        [torch.FloatTensor of size 2x4x3]
+
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
-        >>> input = torch.LongTensor([[0,2,0,5]])
-        >>> print(embedding(input))
+        >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
+        >>> embedding(input)
+
+        Variable containing:
+        (0 ,.,.) =
+          0.0000  0.0000  0.0000
+          0.3452  0.4937 -0.9361
+          0.0000  0.0000  0.0000
+          0.0706 -2.1962 -0.6276
+        [torch.FloatTensor of size 1x4x3]
+        
     """
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False):
