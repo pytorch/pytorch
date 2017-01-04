@@ -11,13 +11,6 @@ set(Caffe2_GPU_SRCS)
 set(Caffe2_CPU_TEST_SRCS)
 set(Caffe2_GPU_TEST_SRCS)
 
-# Get all source directories.
-# TODO(bwasti): GLOB is not considered best practice.
-file(GLOB Caffe2_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/*)
-
-# Exclude all excluded directories.
-exclude(Caffe2_DIRS "${Caffe2_DIRS}" ${Caffe2_DIR_EXCLUDES})
-
 # ---[ Add respective subdirectories
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
@@ -31,7 +24,7 @@ add_subdirectory(db)
 # add_subdirectory(experiments) # note, we may remove this folder at some point
 add_subdirectory(image)
 add_subdirectory(mkl)
-# add_subdirectory(mpi)
+add_subdirectory(mpi)
 add_subdirectory(operators)
 # add_subdirectory(proto) # note, proto is processed above already.
 add_subdirectory(python)
@@ -40,8 +33,7 @@ add_subdirectory(sgd)
 # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
 add_subdirectory(utils)
 
-
-
+# Debug messages - after cmake is fully tested we should remove these prints.
 message(STATUS "After core, cpu sources: ")
 foreach(tmp ${Caffe2_CPU_SRCS})
 message(STATUS "  " ${tmp})
@@ -51,17 +43,6 @@ message(STATUS "After core, gpu sources: ")
 foreach(tmp ${Caffe2_GPU_SRCS})
 message(STATUS "  " ${tmp})
 endforeach()
-
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_FILE_EXCLUDES})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_CPU_TEST_SRCS})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
-if (NOT USE_LEVELDB)
-        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LEVELDB_SRCS})
-endif()
-if (NOT USE_LMDB)
-        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LMDB_SRCS})
-endif()
 
 # ---[ List of libraries to link with
 set(Caffe2_MAIN_LIBS Caffe_PROTO)
@@ -73,6 +54,7 @@ list(APPEND Caffe2_MAIN_LIBS Caffe2_PROTO)
 
 # Compile exposed libraries.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
 target_link_libraries(Caffe2_CPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
 install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)

@@ -18,6 +18,11 @@ class PackedFCOp final : public Operator<CPUContext> {
   PackedFCOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {
+// Unfortunately, when we compile under mac, some versions of the shipped clang
+// will throw an error about missing symbols, which is a bug reported e.g. here
+// https://llvm.org/bugs/show_bug.cgi?id=25510
+// Thus we will be a bit loose and disable the checks here.
+#ifndef __APPLE__
     OPERATOR_NEEDS_FEATURE(
         __builtin_cpu_supports("avx2") || operator_def.type() == "PackedFC",
         "If you are trying to use PackedFCOp as a FC with PACKED engine on "
@@ -31,6 +36,7 @@ class PackedFCOp final : public Operator<CPUContext> {
         "Do not run PackedFC on a machine that does not have avx2 "
         "right now, as there is an known issue with MKL 2017.0.098 "
         "that produces wrong results on non-avx2 machines.");
+#endif
   }
   ~PackedFCOp() {}
 
