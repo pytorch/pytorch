@@ -71,17 +71,19 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    """Applies a multi-layer Elman RNN with tanh or ReLU non-linearity to an input sequence.
+    r"""Applies a multi-layer Elman RNN with tanh or ReLU non-linearity to an input sequence.
 
 
     For each element in the input sequence, each layer computes the following
     function:
-    ```
-    h_t = tanh(w_ih * x_t + b_ih  +  w_hh * h_(t-1) + b_hh)
-    ```
-    where `h_t` is the hidden state at time t, and `x_t` is the hidden
-    state of the previous layer at time t or `input_t` for the first layer.
-    If nonlinearity='relu', then ReLU is used instead of tanh.
+    
+    .. math::
+    
+        h_t = tanh(w_ih * x_t + b_ih  +  w_hh * h_(t-1) + b_hh)
+
+    where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is the hidden
+    state of the previous layer at time `t` or :math:`input_t` for the first layer.
+    If nonlinearity='relu', then `ReLU` is used instead of `tanh`.
 
     Args:
         input_size: The number of expected features in the input x
@@ -92,18 +94,25 @@ class RNN(RNNBase):
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+
     Inputs: input, h_0
-        input: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        h_0: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        - `input`: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
+        - `h_0`: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+
     Outputs: output, h_n
-        output: A (seq_len x batch x hidden_size) tensor containing the output features (h_k) from the last layer of the RNN, for each k
-        h_n: A (num_layers x batch x hidden_size) tensor containing the hidden state for k=seq_len
-    Members:
-        weight_ih_l[k]: the learnable input-hidden weights of the k-th layer, of shape (input_size x hidden_size)
-        weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer, of shape (hidden_size x hidden_size)
-        bias_ih_l[k]: the learnable input-hidden bias of the k-th layer, of shape (hidden_size)
-        bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer, of shape (hidden_size)
-    Examples:
+        - `output`: A (seq_len x batch x hidden_size) tensor containing the output features (h_k) from the last layer of the RNN, for each k
+        - `h_n`: A (num_layers x batch x hidden_size) tensor containing the hidden state for k=seq_len
+
+    Attributes:
+        weight_ih_l[k]: the learnable input-hidden weights of the k-th layer, 
+                        of shape `(input_size x hidden_size)`
+        weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer, 
+                        of shape `(hidden_size x hidden_size)`
+        bias_ih_l[k]: the learnable input-hidden bias of the k-th layer, of shape `(hidden_size)`
+        bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer, of shape `(hidden_size)`
+
+    Examples::
+
         >>> rnn = nn.RNN(10, 20, 2)
         >>> input = Variable(torch.randn(5, 3, 10))
         >>> h0 = Variable(torch.randn(2, 3, 20))
@@ -127,22 +136,27 @@ class RNN(RNNBase):
 
 
 class LSTM(RNNBase):
-    """Applies a multi-layer long short-term memory (LSTM) RNN to an input sequence.
+    r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input sequence.
 
 
     For each element in the input sequence, each layer computes the following
     function:
-    ```
-            i_t = sigmoid(W_ii x_t + b_ii + W_hi h_(t-1) + b_hi)
-            f_t = sigmoid(W_if x_t + b_if + W_hf h_(t-1) + b_hf)
-            g_t = tanh(W_ig x_t + b_ig + W_hc h_(t-1) + b_hg)
-            o_t = sigmoid(W_io x_t + b_io + W_ho h_(t-1) + b_ho)
-            c_t = f_t * c_(t-1) + i_t * c_t
+
+    .. math::
+
+            \begin{array}{ll}
+            i_t = sigmoid(W_ii x_t + b_ii + W_hi h_(t-1) + b_hi) \\
+            f_t = sigmoid(W_if x_t + b_if + W_hf h_(t-1) + b_hf) \\
+            g_t = tanh(W_ig x_t + b_ig + W_hc h_(t-1) + b_hg) \\
+            o_t = sigmoid(W_io x_t + b_io + W_ho h_(t-1) + b_ho) \\
+            c_t = f_t * c_(t-1) + i_t * c_t \\
             h_t = o_t * tanh(c_t)
-    ```
-    where `h_t` is the hidden state at time t, `c_t` is the cell state at time t,
-    `x_t` is the hidden state of the previous layer at time t or input_t for the first layer,
-    and `i_t`, `f_t`, `g_t`, `o_t` are the input, forget, cell, and out gates, respectively.
+            \end{array}
+
+    where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell state at time `t`,
+    :math:`x_t` is the hidden state of the previous layer at time `t` or :math:`input_t` for the first layer,
+    and :math:`i_t`, :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, 
+    cell, and out gates, respectively.
 
     Args:
         input_size: The number of expected features in the input x
@@ -152,20 +166,23 @@ class LSTM(RNNBase):
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
-    Inputs: input, (h_0, c_0)
-        input: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        h_0: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-        c_0: A (num_layers x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
+
+    Inputs: `input, (h_0, c_0)`
+        - `input` : A (seq_len x batch x input_size) tensor containing the features of the input sequence.
+        - `h_0` : A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        - `c_0` : A (num_layers x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
     Outputs: output, (h_n, c_n)
-        output: A (seq_len x batch x hidden_size) tensor containing the output features (h_t) from the last layer of the RNN, for each t
-        h_n: A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
-        c_n: A (num_layers x batch x hidden_size) tensor containing the cell state for t=seq_len
-    Members:
-        weight_ih_l[k]: the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
-        weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
-        bias_ih_l[k]: the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
-        bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
-    Examples:
+        - `output` : A (seq_len x batch x hidden_size) tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
+        - `h_n` : A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
+        - `c_n` : A (num_layers x batch x hidden_size) tensor containing the cell state for t=seq_len
+    Attributes:
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ir|W_ii|W_in)`, of shape `(input_size x 3*hidden_size)`
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hr|W_hi|W_hn)`, of shape `(hidden_size x 3*hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ir|b_ii|b_in)`, of shape `(3*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(W_hr|W_hi|W_hn)`, of shape `(3*hidden_size)`
+
+    Examples::
+
         >>> rnn = nn.LSTM(10, 20, 2)
         >>> input = Variable(torch.randn(5, 3, 10))
         >>> h0 = Variable(torch.randn(2, 3, 20))
@@ -177,20 +194,24 @@ class LSTM(RNNBase):
 
 
 class GRU(RNNBase):
-    """Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
+    r"""Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
 
 
     For each element in the input sequence, each layer computes the following
     function:
-    ```
-            r_t = sigmoid(W_ir x_t + b_ir + W_hr h_(t-1) + b_hr)
-            i_t = sigmoid(W_ii x_t + b_ii + W_hi h_(t-1) + b_hi)
-            n_t = tanh(W_in x_t + resetgate * W_hn h_(t-1))
-            h_t = (1 - i_t) * n_t + i_t * h_(t-1)
-    ```
-    where `h_t` is the hidden state at time t, `x_t` is the hidden
-    state of the previous layer at time t or input_t for the first layer,
-    and `r_t`, `i_t`, `n_t` are the reset, input, and new gates, respectively.
+
+    .. math::
+
+            \begin{array}{ll}
+            r_t = sigmoid(W_ir x_t + b_ir + W_hr h_(t-1) + b_hr) \\
+            i_t = sigmoid(W_ii x_t + b_ii + W_hi h_(t-1) + b_hi) \\
+            n_t = tanh(W_in x_t + resetgate * W_hn h_(t-1)) \\
+            h_t = (1 - i_t) * n_t + i_t * h_(t-1) \\
+            \end{array}
+
+    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
+    state of the previous layer at time `t` or :math:`input_t` for the first layer,
+    and :math:`r_t`, :math:`i_t`, :math:`n_t` are the reset, input, and new gates, respectively.
 
     Args:
         input_size: The number of expected features in the input x
@@ -200,18 +221,22 @@ class GRU(RNNBase):
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
-    Inputs: input, h_0
-        input: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        h_0: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-    Outputs: output, h_n
-        output: A (seq_len x batch x hidden_size) tensor containing the output features (h_t) from the last layer of the RNN, for each t
-        h_n: A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
-    Members:
-        weight_ih_l[k]: the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
-        weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
-        bias_ih_l[k]: the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
-        bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
-    Examples:
+
+    Inputs: `input, h_0`
+        - `input` : A `(seq_len x batch x input_size)` tensor containing the features of the input sequence.
+        - `h_0` : A `(num_layers x batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+
+    Outputs: `output, h_n`
+        - `output` : A `(seq_len x batch x hidden_size)` tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
+        - `h_n` : A `(num_layers x batch x hidden_size)` tensor containing the hidden state for t=seq_len
+
+    Attributes:
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
+    Examples::
+
         >>> rnn = nn.GRU(10, 20, 2)
         >>> input = Variable(torch.randn(5, 3, 10))
         >>> h0 = Variable(torch.randn(2, 3, 20))
@@ -223,10 +248,12 @@ class GRU(RNNBase):
 
 
 class RNNCell(Module):
-    """An Elman RNN cell with tanh or ReLU non-linearity.
-    ```
-    h' = tanh(w_ih * x + b_ih  +  w_hh * h + b_hh)
-    ```
+    r"""An Elman RNN cell with tanh or ReLU non-linearity.
+
+    .. math::
+
+        h' = tanh(w_ih * x + b_ih  +  w_hh * h + b_hh)
+
     If nonlinearity='relu', then ReLU is used in place of tanh.
 
     Args:
@@ -234,17 +261,22 @@ class RNNCell(Module):
         hidden_size: The number of features in the hidden state h
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
-    Inputs: input, hidden
-        input: A (batch x input_size) tensor containing input features
-        hidden: A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-    Outputs: h'
-        h': A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
-    Members:
-        weight_ih: the learnable input-hidden weights, of shape (input_size x hidden_size)
-        weight_hh: the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
-        bias_ih: the learnable input-hidden bias, of shape (hidden_size)
-        bias_hh: the learnable hidden-hidden bias, of shape (hidden_size)
-    Examples:
+
+    Inputs: `input, hidden`
+        - input: A `(batch x input_size)` tensor containing input features
+        - hidden: A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+
+    Outputs: `h'`
+        - `h'`: A `(batch x hidden_size)` tensor containing the next hidden state for each element in the batch
+
+    Attributes:
+        weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
+        weight_hh: the learnable hidden-hidden weights, of shape `(hidden_size x hidden_size)`
+        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
+        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
+
+    Examples::
+
         >>> rnn = nn.RNNCell(10, 20)
         >>> input = Variable(torch.randn(6, 3, 10))
         >>> hx = Variable(torch.randn(3, 20))
@@ -292,33 +324,41 @@ class RNNCell(Module):
 
 
 class LSTMCell(Module):
-    """A long short-term memory (LSTM) cell.
-    ```
-    i = sigmoid(W_ii x + b_ii + W_hi h + b_hi)
-    f = sigmoid(W_if x + b_if + W_hf h + b_hf)
-    g = tanh(W_ig x + b_ig + W_hc h + b_hg)
-    o = sigmoid(W_io x + b_io + W_ho h + b_ho)
-    c' = f * c + i * c
-    h' = o * tanh(c_t)
-    ```
+    r"""A long short-term memory (LSTM) cell.
+
+    .. math::
+
+        \begin{array}{ll}
+        i = sigmoid(W_ii x + b_ii + W_hi h + b_hi) \\
+        f = sigmoid(W_if x + b_if + W_hf h + b_hf) \\
+        g = tanh(W_ig x + b_ig + W_hc h + b_hg) \\
+        o = sigmoid(W_io x + b_io + W_ho h + b_ho) \\
+        c' = f * c + i * c \\
+        h' = o * tanh(c_t) \\
+        \end{array}
 
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-    Inputs: input, (h_0, c_0)
-        input: A (batch x input_size) tensor containing input features
-        h_0: A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-        c_0: A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-    Outputs: h_1, c_1
-        h_1: A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
-        c_1: A (batch x hidden_size) tensor containing the next cell state for each element in the batch
-    Members:
-        weight_ih: the learnable input-hidden weights, of shape (input_size x hidden_size)
-        weight_hh: the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
-        bias_ih: the learnable input-hidden bias, of shape (hidden_size)
-        bias_hh: the learnable hidden-hidden bias, of shape (hidden_size)
-    Examples:
+        bias: If `False`, then the layer does not use bias weights `b_ih` and `b_hh`. Default: True
+
+    Inputs: `input, (h_0, c_0)`
+        - `input` : A `(batch x input_size)` tensor containing input features
+        - `h_0` : A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+        - `c_0` : A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+
+    Outputs: `h_1, c_1`
+        - h_1: A `(batch x hidden_size)` tensor containing the next hidden state for each element in the batch
+        - c_1: A `(batch x hidden_size)` tensor containing the next cell state for each element in the batch
+
+    Attributes:
+        weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
+        weight_hh: the learnable hidden-hidden weights, of shape `(hidden_size x hidden_size)`
+        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
+        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
+
+    Examples::
+
         >>> rnn = nn.LSTMCell(10, 20)
         >>> input = Variable(torch.randn(3, 10))
         >>> hx = Variable(torch.randn(3, 20))
@@ -358,29 +398,35 @@ class LSTMCell(Module):
 
 
 class GRUCell(Module):
-    """A gated recurrent unit (GRU) cell
-    ```
-    r = sigmoid(W_ir x + b_ir + W_hr h + b_hr)
-    i = sigmoid(W_ii x + b_ii + W_hi h + b_hi)
-    n = tanh(W_in x + resetgate * W_hn h)
-    h' = (1 - i) * n + i * h
-    ```
+    r"""A gated recurrent unit (GRU) cell
+    .. math::
 
+        \begin{array}{ll}
+        r = sigmoid(W_ir x + b_ir + W_hr h + b_hr) \\
+        i = sigmoid(W_ii x + b_ii + W_hi h + b_hi) \\
+        n = tanh(W_in x + resetgate * W_hn h) \\
+        h' = (1 - i) * n + i * h
+        \end{array}
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-    Inputs: input, hidden
-        input: A (batch x input_size) tensor containing input features
-        hidden: A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-    Outputs: h'
-        h': A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
-    Members:
-        weight_ih: the learnable input-hidden weights, of shape (input_size x hidden_size)
-        weight_hh: the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
-        bias_ih: the learnable input-hidden bias, of shape (hidden_size)
-        bias_hh: the learnable hidden-hidden bias, of shape (hidden_size)
-    Examples:
+        bias: If `False`, then the layer does not use bias weights `b_ih` and `b_hh`. Default: `True`
+
+    Inputs: `input, hidden`
+        - `input` : A `(batch x input_size)` tensor containing input features
+        - `hidden` : A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+
+    Outputs: `h'`
+        - `h'`: A `(batch x hidden_size)` tensor containing the next hidden state for each element in the batch
+
+    Attributes:
+        weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
+        weight_hh: the learnable hidden-hidden weights, of shape `(hidden_size x hidden_size)`
+        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
+        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
+
+    Examples::
+
         >>> rnn = nn.RNNCell(10, 20)
         >>> input = Variable(torch.randn(6, 3, 10))
         >>> hx = Variable(torch.randn(3, 20))
