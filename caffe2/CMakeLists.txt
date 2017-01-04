@@ -25,7 +25,7 @@ list(APPEND Caffe2_LINK_LIBS Caffe2_PROTO)
 # addressed yet.
 
 # add_subdirectory(binaries)
-# add_subdirectory(contrib)
+add_subdirectory(contrib)
 add_subdirectory(core)
 add_subdirectory(cuda_rtc)
 add_subdirectory(db)
