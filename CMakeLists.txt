@@ -31,6 +31,8 @@ include(cmake/Utils.cmake)
 
 # options
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
+option(USE_GLOG "Use GLOG" ON)
+option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_LMDB "Use LMDB" ON)
 option(USE_LEVELDB "Use LMDB" ON)
 option(USE_OPENCV "Use openCV" ON)
