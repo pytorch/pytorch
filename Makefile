@@ -1,16 +1,16 @@
 # This makefile does nothing but delegating the actual compilation to build.py.
 
 all:
-	@python build.py build
+	@mkdir -p build && cd build && cmake .. && make
 
 android:
-	@python build_android.py build
+	@python brewtool/build_android.py build
 
 clean:
-	@python build.py clean
+	@rm -r build/
 
 test:
-	@python build.py test
+	@python brewtool/build.py test
 
 lint:
 	@find caffe2 -type f -exec python brewtool/cpplint.py {} \;
