@@ -1519,11 +1519,16 @@ class Net(object):
     def AddExternalOutputs(self, *outputs):
         self.AddExternalOutput(*outputs)
 
-    def DeduplicateGradientSlices(self, g):
+    def DeduplicateGradientSlices(self, g, aggregator='sum'):
         assert isinstance(g, GradientSlice)
         unique, remapping = self.Unique([g.indices], 2, engine='SparseHash')
-        sum_g = self.UnsortedSegmentSum([g.values, remapping], 1)
-        return GradientSlice(indices=unique, values=sum_g)
+        if aggregator.lower() == 'sum':
+            new_g = self.UnsortedSegmentSum([g.values, remapping], 1)
+        elif aggregator.lower() == 'mean':
+            new_g = self.UnsortedSegmentMean([g.values, remapping], 1)
+        else:
+            raise ValueError('{} is not supported'.format(aggregator))
+        return GradientSlice(indices=unique, values=new_g)
 
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""

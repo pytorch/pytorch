@@ -287,6 +287,13 @@ bool SimpleNet::RunAsync() {
   return true;
 }
 
+namespace {
+template <typename A, typename B>
+bool PairLargerThan(const std::pair<A, B>& x, const std::pair<A, B>& y) {
+  return x.second > y.second;
+}
+}
+
 vector<float> SimpleNet::TEST_Benchmark(
     const int warmup_runs,
     const int main_runs,
@@ -351,10 +358,16 @@ vector<float> SimpleNet::TEST_Benchmark(
       ++idx;
     }
     LOG(INFO) << "Time per operator type:";
-    for (const auto& item : time_per_op_type) {
-      LOG(INFO) << std::setw(15) << std::setfill(' ')
-                     << item.second / main_runs
-                     << " " << item.first;
+    // sort by decreasing time spending.
+    std::vector<std::pair<string, float>> time_per_op_type_vec(
+        time_per_op_type.begin(), time_per_op_type.end());
+    std::sort(
+        time_per_op_type_vec.begin(),
+        time_per_op_type_vec.end(),
+        PairLargerThan<string, float>);
+    for (const auto& item : time_per_op_type_vec) {
+      LOG(INFO) << std::setw(15) << std::setfill(' ') << item.second / main_runs
+                << " " << item.first;
     }
   }
   // We will reuse time_per_op to return the result of BenchmarkNet.
