@@ -517,7 +517,7 @@ class Softmax(Module):
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
-    .. notes::
+    .. note::
         This module doesn't work directly with NLLLoss,
         which expects the Log to be computed between the Softmax and itself.
         Use Logsoftmax instead (it's faster).
