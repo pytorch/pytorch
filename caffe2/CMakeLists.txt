@@ -40,8 +40,7 @@ add_subdirectory(sgd)
 # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
 add_subdirectory(utils)
 
-
-
+# Debug messages - after cmake is fully tested we should remove these prints.
 message(STATUS "After core, cpu sources: ")
 foreach(tmp ${Caffe2_CPU_SRCS})
 message(STATUS "  " ${tmp})
@@ -51,17 +50,6 @@ message(STATUS "After core, gpu sources: ")
 foreach(tmp ${Caffe2_GPU_SRCS})
 message(STATUS "  " ${tmp})
 endforeach()
-
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_FILE_EXCLUDES})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_CPU_TEST_SRCS})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_TEST_SRCS})
-if (NOT USE_LEVELDB)
-        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LEVELDB_SRCS})
-endif()
-if (NOT USE_LMDB)
-        exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_LMDB_SRCS})
-endif()
 
 # ---[ List of libraries to link with
 set(Caffe2_MAIN_LIBS Caffe_PROTO)
