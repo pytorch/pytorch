@@ -3,7 +3,7 @@
 
 find_package( Protobuf REQUIRED )
 include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIR})
-list(APPEND Caffe2_LINKER_LIBS ${PROTOBUF_LIBRARIES})
+list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES})
 
 # place where to generate protobuf sources
 set(proto_gen_folder "${PROJECT_BINARY_DIR}/include/caffe/proto")
