@@ -14,7 +14,7 @@ set(Caffe2_CPU_BINARY_SRCS
 )
 
 set(Caffe2_GPU_BINARY_SRCS
-    "core_overhead_benchmark.cc"
+    # "core_overhead_benchmark.cc" # todo: will need to figure out its dependency because it relies on benchmark
     "inspect_gpus.cc"
     "print_core_object_sizes.cc"
 )

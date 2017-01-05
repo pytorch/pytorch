@@ -54,11 +54,11 @@ foreach(tmp ${Caffe2_GPU_TEST_SRCS})
 message(STATUS "  " ${tmp})
 endforeach()
 
-
 # ---[ List of libraries to link with
-set(Caffe2_MAIN_LIBS Caffe_PROTO)
+# The old Caffe proto
+list(APPEND Caffe2_MAIN_LIBS Caffe_PROTO)
 
-# Compile protobufs.
+# The Caffe2 proto
 add_subdirectory(proto)
 include_directories(BEFORE ${CMAKE_BINARY_DIR})
 list(APPEND Caffe2_MAIN_LIBS Caffe2_PROTO)
@@ -122,7 +122,7 @@ endif()
 foreach(binary_src ${Caffe2_CPU_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} benchmark ${Caffe2_DEPENDENCY_LIBS})
+  target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
   install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
 
@@ -130,7 +130,7 @@ if(HAVE_CUDA)
   foreach(binary_src ${Caffe2_GPU_BINARY_SRCS})
     get_filename_component(bin_name ${binary_src} NAME_WE)
     add_executable(${bin_name} ${binary_src})
-    target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} cnmem benchmark ${Caffe2_DEPENDENCY_LIBS})
+    target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} cnmem ${Caffe2_DEPENDENCY_LIBS})
     install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
   endforeach()
 endif()

@@ -31,6 +31,7 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 include(ExternalProject)
 
 include(cmake/Utils.cmake)
+include(cmake/MiscCheck.cmake)
 
 # options
 option(USE_THREADS "Use Threads" ON)
