@@ -1,1 +1,0 @@
-<span class="xml"></span><span class="hljs-variable">{{ "string with spaces"<span class="hljs-filter">|<span class="hljs-keyword">url_encode</span></span> }}</span><span class="xml"></span>

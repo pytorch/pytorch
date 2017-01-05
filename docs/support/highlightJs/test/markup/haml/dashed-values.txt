@@ -1,6 +1,0 @@
-%span.badge.badge--pill.badge--green-light
-%span.badge.badge--pill.badge--red-light
-%span.badge.badge--pill.badge--blue-light
-%span.badge.badge__pill.badge__orange_light
-%span.badge.badge__pill.badge__white_light
-%span.badge.badge__pill.badge__white_dark

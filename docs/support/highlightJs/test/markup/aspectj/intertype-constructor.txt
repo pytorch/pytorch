@@ -1,3 +1,0 @@
-public MyClass.new() throws Exception{
-  // intertype constructor body
-}
