@@ -103,7 +103,7 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   return (PyObject*)self.release();
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, THSPTensorStr " constructor", 6,
+  THPUtils_invalidArguments(args, NULL, THSPTensorStr " constructor", 6,
       "no arguments",
       "(int size)",
       "(torch.Size sizes)",
