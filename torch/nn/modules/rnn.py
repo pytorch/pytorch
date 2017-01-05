@@ -79,7 +79,7 @@ class RNN(RNNBase):
     
     .. math::
     
-        h_t = tanh(w_ih * x_t + b_ih  +  w_hh * h_(t-1) + b_hh)
+        h_t = \tanh(w_{ih} * x_t + b_{ih}  +  w_{hh} * h_{(t-1)} + b_{hh})
 
     where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is the hidden
     state of the previous layer at time `t` or :math:`input_t` for the first layer.
@@ -145,12 +145,12 @@ class LSTM(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            i_t = sigmoid(W_ii x_t + b_ii + W_hi h_(t-1) + b_hi) \\
-            f_t = sigmoid(W_if x_t + b_if + W_hf h_(t-1) + b_hf) \\
-            g_t = tanh(W_ig x_t + b_ig + W_hc h_(t-1) + b_hg) \\
-            o_t = sigmoid(W_io x_t + b_io + W_ho h_(t-1) + b_ho) \\
-            c_t = f_t * c_(t-1) + i_t * c_t \\
-            h_t = o_t * tanh(c_t)
+            i_t = sigmoid(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
+            f_t = sigmoid(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
+            g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
+            o_t = sigmoid(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
+            c_t = f_t * c_{(t-1)} + i_t * c_t \\
+            h_t = o_t * \tanh(c_t)
             \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell state at time `t`,
@@ -205,10 +205,10 @@ class GRU(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            r_t = sigmoid(W_ir x_t + b_ir + W_hr h_(t-1) + b_hr) \\
-            i_t = sigmoid(W_ii x_t + b_ii + W_hi h_(t-1) + b_hi) \\
-            n_t = tanh(W_in x_t + resetgate * W_hn h_(t-1)) \\
-            h_t = (1 - i_t) * n_t + i_t * h_(t-1) \\
+            r_t = sigmoid(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
+            i_t = sigmoid(W_{ii} x_t + b_{ii} + W_hi h_{(t-1)} + b_{hi}) \\
+            n_t = \tanh(W_{in} x_t + resetgate * W_{hn} h_{(t-1)}) \\
+            h_t = (1 - i_t) * n_t + i_t * h_{(t-1)} \\
             \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
@@ -254,7 +254,7 @@ class RNNCell(Module):
 
     .. math::
 
-        h' = tanh(w_ih * x + b_ih  +  w_hh * h + b_hh)
+        h' = \tanh(w_{ih} * x + b_{ih}  +  w_{hh} * h + b_{hh})
 
     If nonlinearity='relu', then ReLU is used in place of tanh.
 
@@ -331,12 +331,12 @@ class LSTMCell(Module):
     .. math::
 
         \begin{array}{ll}
-        i = sigmoid(W_ii x + b_ii + W_hi h + b_hi) \\
-        f = sigmoid(W_if x + b_if + W_hf h + b_hf) \\
-        g = tanh(W_ig x + b_ig + W_hc h + b_hg) \\
-        o = sigmoid(W_io x + b_io + W_ho h + b_ho) \\
+        i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        f = sigmoid(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
+        g = \tanh(W_{ig} x + b_{ig} + W_{hc} h + b_{hg}) \\
+        o = sigmoid(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
         c' = f * c + i * c \\
-        h' = o * tanh(c_t) \\
+        h' = o * \tanh(c_t) \\
         \end{array}
 
     Args:
@@ -404,9 +404,9 @@ class GRUCell(Module):
     .. math::
 
         \begin{array}{ll}
-        r = sigmoid(W_ir x + b_ir + W_hr h + b_hr) \\
-        i = sigmoid(W_ii x + b_ii + W_hi h + b_hi) \\
-        n = tanh(W_in x + resetgate * W_hn h) \\
+        r = sigmoid(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
+        i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        n = \tanh(W_{in} x + r * W_{hn} h) \\
         h' = (1 - i) * n + i * h
         \end{array}
 
