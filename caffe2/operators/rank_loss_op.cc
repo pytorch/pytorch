@@ -15,7 +15,7 @@ inline T logLogit(T x) {
   if (x > -kMinLogDiff) {
     return x;
   }
-  return std::log1p(std::exp(x));
+  return std::log(std::exp(x) + 1);
 }
 }
 
