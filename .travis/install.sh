@@ -9,7 +9,6 @@ if [[ $TRAVIS_OS_NAME == 'osx' ]]; then
   # Install dependencies #
   ########################
 
-  brew install homebrew/science/openblas
   brew install glog automake protobuf leveldb lmdb
   sudo pip install numpy
 

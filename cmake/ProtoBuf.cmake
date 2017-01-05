@@ -1,9 +1,14 @@
 # Finds Google Protocol Buffers library and compilers and extends
 # the standard cmake script with version and python generation support
 
-find_package( Protobuf REQUIRED )
-include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIR})
-list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES})
+if (ANDROID)
+  message(WARNING "Android build is not well supported yet.")
+  include(cmake/ProtoBuf_Android.cmake)
+else()
+  find_package( Protobuf REQUIRED )
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES})
+  include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIR})
+endif()
 
 # place where to generate protobuf sources
 set(proto_gen_folder "${PROJECT_BINARY_DIR}/include/caffe/proto")

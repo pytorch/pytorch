@@ -34,27 +34,36 @@ add_subdirectory(sgd)
 add_subdirectory(utils)
 
 # Debug messages - after cmake is fully tested we should remove these prints.
-message(STATUS "After core, cpu sources: ")
+message(STATUS "CPU sources: ")
 foreach(tmp ${Caffe2_CPU_SRCS})
 message(STATUS "  " ${tmp})
 endforeach()
 
-message(STATUS "After core, gpu sources: ")
+message(STATUS "GPU sources: ")
 foreach(tmp ${Caffe2_GPU_SRCS})
 message(STATUS "  " ${tmp})
 endforeach()
 
-# ---[ List of libraries to link with
-set(Caffe2_MAIN_LIBS Caffe_PROTO)
+message(STATUS "CPU test sources: ")
+foreach(tmp ${Caffe2_CPU_TEST_SRCS})
+message(STATUS "  " ${tmp})
+endforeach()
 
-# Compile protobufs.
+message(STATUS "GPU test sources: ")
+foreach(tmp ${Caffe2_GPU_TEST_SRCS})
+message(STATUS "  " ${tmp})
+endforeach()
+
+# ---[ List of libraries to link with
+# The old Caffe proto
+list(APPEND Caffe2_MAIN_LIBS Caffe_PROTO)
+
+# The Caffe2 proto
 add_subdirectory(proto)
 include_directories(BEFORE ${CMAKE_BINARY_DIR})
 list(APPEND Caffe2_MAIN_LIBS Caffe2_PROTO)
 
 # Compile exposed libraries.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
 add_library(Caffe2_CPU ${Caffe2_CPU_SRCS})
 target_link_libraries(Caffe2_CPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
 install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
@@ -70,34 +79,51 @@ if(USE_CUDA)
 endif()
 
 # ---[ Test binaries.
-foreach(test_src ${Caffe2_CPU_TEST_SRCS})
-  get_filename_component(test_name ${test_src} NAME_WE)
-  add_executable(${test_name} "${test_src}")
-  target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} gtest_main)
-  if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
-    target_compile_features(${test_name} PRIVATE cxx_range_for)
+if (BUILD_TEST)
+  foreach(test_src ${Caffe2_CPU_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} gtest_main)
+    if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
+      target_compile_features(${test_name} PRIVATE cxx_range_for)
+    endif()
+    install(TARGETS ${test_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/test)
+  endforeach()
+
+  if (HAVE_CUDA)
+    foreach(test_src ${Caffe2_GPU_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      add_executable(${test_name} "${test_src}")
+      target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} gtest_main)
+      if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
+        target_compile_features(${test_name} PRIVATE cxx_range_for)
+      endif()
+      install(TARGETS ${test_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/test)
+    endforeach()
   endif()
-  install(TARGETS ${test_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/test)
-endforeach()
+endif()
 
-# ---[ Python.
-add_library(caffe2_pybind11_state SHARED ${Caffe2_CPU_PYTHON_SRCS})
-set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
-target_link_libraries(caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
-install(TARGETS caffe2_pybind11_state DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 
-if(USE_CUDA)
-  add_library(caffe2_pybind11_state_gpu SHARED ${Caffe2_GPU_PYTHON_SRCS})
-  set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
-  target_link_libraries(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
-  install(TARGETS caffe2_pybind11_state_gpu DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
+if (BUILD_PYTHON)
+  # ---[ Python.
+  add_library(caffe2_pybind11_state SHARED ${Caffe2_CPU_PYTHON_SRCS})
+  set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
+  target_link_libraries(caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
+  install(TARGETS caffe2_pybind11_state DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
+
+  if(USE_CUDA)
+    add_library(caffe2_pybind11_state_gpu SHARED ${Caffe2_GPU_PYTHON_SRCS})
+    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
+    target_link_libraries(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
+    install(TARGETS caffe2_pybind11_state_gpu DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
+  endif()
 endif()
 
 # ---[ Binaries.
 foreach(binary_src ${Caffe2_CPU_BINARY_SRCS})
   get_filename_component(bin_name ${binary_src} NAME_WE)
   add_executable(${bin_name} ${binary_src})
-  target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} benchmark ${Caffe2_DEPENDENCY_LIBS})
+  target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
   install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
 
@@ -105,7 +131,7 @@ if(USE_CUDA)
   foreach(binary_src ${Caffe2_GPU_BINARY_SRCS})
     get_filename_component(bin_name ${binary_src} NAME_WE)
     add_executable(${bin_name} ${binary_src})
-    target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} cnmem benchmark ${Caffe2_DEPENDENCY_LIBS})
+    target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} cnmem ${Caffe2_DEPENDENCY_LIBS})
     install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
   endforeach()
 endif()

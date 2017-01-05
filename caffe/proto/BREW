@@ -1,6 +1,0 @@
-# Build file for the old caffe protocol buffers.
-
-proto_library(
-    name = 'caffe_proto',
-    srcs = ['caffe.proto'],
-)

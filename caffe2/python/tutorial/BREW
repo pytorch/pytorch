@@ -1,8 +1,0 @@
-filegroup(
-  name="tutorial_files",
-  srcs=Glob([
-      "*.ipynb",
-      "start_ipython_notebook.sh",
-      "images/cat.jpg",
-  ]),
-)

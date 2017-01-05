@@ -1,12 +1,15 @@
 # This list is required for static linking and exported to Caffe2Config.cmake
 set(Caffe2_DEPENDENCY_LIBS "")
+set(Caffe2_PYTHON_DEPENDENCY_LIBS "")
 
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
 
 # ---[ Threads
-find_package(Threads REQUIRED)
-list(APPEND Caffe2_DEPENDENCY_LIBS ${CMAKE_THREAD_LIBS_INIT})
+if (USE_THREADS)
+  find_package(Threads REQUIRED)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${CMAKE_THREAD_LIBS_INIT})
+endif()
 
 # ---[ BLAS
 set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -66,13 +69,13 @@ if (USE_GFLAGS)
   endif()
 endif()
 
-# ---[ Googletest
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest)
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include)
-
-# ---[ Google benchmark
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/benchmark)
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/benchmark/include)
+# ---[ Googletest and benchmark
+if (BUILD_TEST)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest)
+  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/benchmark)
+  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/benchmark/include)
+endif()
 
 # ---[ LMDB
 if(USE_LMDB)
@@ -133,12 +136,14 @@ endif()
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/eigen)
 
 # ---[ Python + Numpy
-find_package(PythonInterp 2.7)
-find_package(PythonLibs 2.7)
-find_package(NumPy REQUIRED)
+if (BUILD_PYTHON)
+  find_package(PythonInterp 2.7)
+  find_package(PythonLibs 2.7)
+  find_package(NumPy REQUIRED)
 
-include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
-list(APPEND Caffe2_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
+  include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
+  list(APPEND Caffe2_PYTHON_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
+endif()
 
 # ---[ pybind11
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/pybind11/include)
@@ -175,10 +180,16 @@ if(USE_OPENMP)
   endif()
 endif()
 
-# ---[ CUDNN
+
+# ---[ Android specific ones
+if (ANDROID)
+  list(APPEND Caffe2_DEPENDENCY_LIBS log)
+endif()
+
+# ---[ CUDA
 if (USE_CUDA)
-  # ---[ CUDA
   include(cmake/Cuda.cmake)
+  # ---[ CUDNN
   if(HAVE_CUDA)
     find_package(CuDNN REQUIRED)
     if(CUDNN_FOUND)
