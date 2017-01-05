@@ -23,6 +23,12 @@ CAFFE_KNOWN_TYPE(char);
 CAFFE_KNOWN_TYPE(std::unique_ptr<std::mutex>);
 CAFFE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>);
 CAFFE_KNOWN_TYPE(std::vector<int64_t>);
+CAFFE_KNOWN_TYPE(std::vector<unsigned long>);
+
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE_KNOWN_TYPE(long);
+CAFFE_KNOWN_TYPE(std::vector<long>);
+#endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
 TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
   static_assert(sizeof(int) == 4,

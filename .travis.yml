@@ -1,3 +1,49 @@
+dist: trusty
+sudo: required
+language: cpp
+
+matrix:
+  include:
+  - os: linux
+    compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-4.8
+    env: COMPILER=g++-4.8
+  - os: linux
+    compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-4.9
+    env: COMPILER=g++-4.9
+  - os: linux
+    compiler: gcc
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-5
+    env: COMPILER=g++-5
+  - os: osx
+    compiler: clang
+    env: COMPILER=clang++
+
+cache:
+  apt: true
+
+install:
+  - ./.travis/install.sh
+
+script:
+  - export CXX=$COMPILER && ./.travis/build.sh
+
 branches:
   only:
-  - cmake
+  - master
