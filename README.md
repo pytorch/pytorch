@@ -131,7 +131,7 @@ python setup.py install
 Three pointers to get you started:
 - [Tutorials: notebooks to get you started with understanding and using PyTorch](https://github.com/pytorch/tutorials)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
-- The API Reference: [http://pytorch.org/api/](http://pytorch.org/api/)
+- The API Reference: [http://pytorch.org/docs/](http://pytorch.org/docs/)
 
 ## Communication
 * github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
