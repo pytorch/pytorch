@@ -1,4 +1,87 @@
-.DS_Store
+## General
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.cuo
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+
+# Compiled protocol buffers
+*.pb.h
+*.pb.cc
+*_pb2.py
+
+# Compiled python
 *.pyc
-gen*/
-doxygen/*
+
+# Compiled MATLAB
+*.mex*
+
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*~
+
+# Sublime Text settings
+*.sublime-workspace
+*.sublime-project
+
+# Eclipse Project settings
+*.*project
+.settings
+
+# QtCreator files
+*.user
+
+# PyCharm files
+.idea
+
+# Visual Studio Code files
+.vscode
+
+# OSX dir files
+.DS_Store
+
+## Caffe2
+
+# build, distribute, and bins (+ python proto bindings)
+build
+.build_debug/*
+.build_release/*
+distribute/*
+*.testbin
+*.bin
+cmake_build
+.cmake_build
+gen
+
+# Bram
+plsdontbreak
+
+# Generated documentation
+docs/_site
+docs/gathered
+_site
+doxygen
+docs/dev
+
+# LevelDB files
+*.sst
+*.ldb
+LOCK
+LOG*
+CURRENT
+MANIFEST-*

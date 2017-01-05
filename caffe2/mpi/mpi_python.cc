@@ -1,7 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/caffe2/mpi/mpi_common.h"
+#include "caffe2/mpi/mpi_common.h"
 
 namespace caffe2 {
 

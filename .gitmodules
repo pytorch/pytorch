@@ -10,9 +10,6 @@
 [submodule "third_party/cub"]
 	path = third_party/cub
 	url = https://github.com/NVlabs/cub.git
-[submodule "third_party/protobuf"]
-	path = third_party/protobuf
-	url = https://github.com/google/protobuf.git
 [submodule "third_party/eigen"]
 	path = third_party/eigen
 	url = https://github.com/RLovelett/eigen.git
@@ -22,3 +19,9 @@
 [submodule "third_party/nervanagpu"]
 	path = third_party/nervanagpu
 	url = https://github.com/NervanaSystems/nervanagpu.git
+[submodule "third_party/benchmark"]
+	path = third_party/benchmark
+	url = https://github.com/google/benchmark.git
+[submodule "third_party/protobuf"]
+	path = third_party/protobuf
+	url = https://github.com/google/protobuf.git

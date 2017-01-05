@@ -171,7 +171,7 @@ bool DivGradientOp<float, CPUContext>::RunOnDevice() {
   const float* dZdata = dZ.data<float>();
   float* dXdata = dX->mutable_data<float>();
   float* dYdata = dY->mutable_data<float>();
-  #pragma omp parallel for
+  CAFFE2_OMP_PARALLEL_FOR()
   for (int i = 0; i < Y.size(); ++i) {
     dXdata[i] = dZdata[i] / Ydata[i];
     dYdata[i] = - (dZdata[i] * Zdata[i]) / Ydata[i];

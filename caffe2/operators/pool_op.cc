@@ -426,7 +426,7 @@ bool PoolOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
 
   // The main loop
   // TODO: figure out the best location to put the omp parallel for command.
-  #pragma omp parallel for
+  CAFFE2_OMP_PARALLEL_FOR()
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       int hstart = ph * stride_h_ - pad_t_;
