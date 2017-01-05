@@ -43,3 +43,7 @@ install:
 
 script:
   - export CXX=$COMPILER && ./.travis/build.sh
+
+branches:
+  only:
+  - master
