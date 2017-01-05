@@ -1,4 +1,0 @@
-filegroup(
-    name="dockerfile",
-    srcs=Glob(["*"]),
-)
