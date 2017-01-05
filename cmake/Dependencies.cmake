@@ -50,6 +50,9 @@ if (USE_GLOG)
     add_definitions(-DCAFFE2_USE_GOOGLE_GLOG)
     include_directories(SYSTEM ${GLOG_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${GLOG_LIBRARIES})
+  else()
+    message(WARNING "Not compiling with glog. Suppress this warning with -DUSE_GLOG=OFF")
+    set(USE_GLOG OFF)
   endif()
 endif()
 
@@ -60,6 +63,9 @@ if (USE_GFLAGS)
     add_definitions(-DCAFFE2_USE_GFLAGS)
     include_directories(SYSTEM ${GFLAGS_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${GFLAGS_LIBRARIES})
+  else()
+    message(WARNING "Not compiling with gflags. Suppress this warning with -DUSE_GFLAGS=OFF")
+    set(USE_GFLAGS OFF)
   endif()
 endif()
 
@@ -73,23 +79,39 @@ endif()
 
 # ---[ LMDB
 if(USE_LMDB)
-  find_package(LMDB REQUIRED)
-  include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${LMDB_LIBRARIES})
+  find_package(LMDB)
+  if (LMDB_FOUND)
+    include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${LMDB_LIBRARIES})
+  else()
+    message(WARNING "Not compiling with LMDB. Suppress this warning with -DUSE_LMDB=OFF")
+    set(USE_LMDB OFF)
+  endif()
 endif()
 
 # ---[ LevelDB
-if(USE_LEVELDB)
-  find_package(LevelDB REQUIRED)
-  include_directories(SYSTEM ${LevelDB_INCLUDE})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${LevelDB_LIBRARIES})
-endif()
-
 # ---[ Snappy
 if(USE_LEVELDB)
-  find_package(Snappy REQUIRED)
-  include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${Snappy_LIBRARIES})
+
+  find_package(LevelDB)
+  if (LEVELDB_FOUND)
+    include_directories(SYSTEM ${LevelDB_INCLUDE})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${LevelDB_LIBRARIES})
+
+    find_package(Snappy)
+    if (SNAPPY_FOUND)
+      include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${Snappy_LIBRARIES})
+    else()
+      message(WARNING "Not compiling with LevelDB. Suppress this warning with -DUSE_LEVELDB=OFF")
+      set(USE_LEVELDB OFF)
+    endif()
+
+  else()
+    message(WARNING "Not compiling with LevelDB. Suppress this warning with -DUSE_LEVELDB=OFF")
+    set(USE_LEVELDB OFF)
+  endif()
+
 endif()
 
 # ---[ OpenCV
@@ -104,6 +126,9 @@ if(USE_OPENCV)
     include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCV_LIBS})
     message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
+  else()
+    message(WARNING "Not compiling with OpenCV. Suppress this warning with -DUSE_OPENCV=OFF")
+    set(USE_OPENCV OFF)
   endif()
 endif()
 
@@ -135,6 +160,9 @@ if(USE_MPI)
     include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
     set(CMAKE_EXE_LINKER_FLAGS ${MPI_CXX_LINK_FLAGS})
+  else()
+    message(WARNING "Not compiling with MPI. Suppress this warning with -DUSE_MPI=OFF")
+    set(USE_MPI OFF)
   endif()
 endif()
 
@@ -146,8 +174,12 @@ if(USE_OPENMP)
     set(CMAKE_C_FLAGS "{$CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+  else()
+    message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
+    set(USE_OPENMP OFF)
   endif()
 endif()
+
 
 # ---[ Android specific ones
 if (ANDROID)
@@ -155,19 +187,23 @@ if (ANDROID)
 endif()
 
 # ---[ CUDA
-include(cmake/Cuda.cmake)
-
-# ---[ CUDNN
-if(HAVE_CUDA)
-  find_package(CuDNN REQUIRED)
-  if(CUDNN_FOUND)
-    include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
+if (USE_CUDA)
+  include(cmake/Cuda.cmake)
+  # ---[ CUDNN
+  if(HAVE_CUDA)
+    find_package(CuDNN REQUIRED)
+    if(CUDNN_FOUND)
+      include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
+    endif()
+  else()
+    message(WARNING "Not compiling with CUDA. Suppress this warning with -DUSE_CUDA=OFF")
+    set(USE_CUDA OFF)
   endif()
 endif()
 
 # ---[ NCCL
-if(HAVE_CUDA)
+if(USE_CUDA)
   include("cmake/External/nccl.cmake")
   include_directories(SYSTEM ${NCCL_INCLUDE_DIRS})
   message(STATUS "NCCL: ${NCCL_LIBRARIES}")
@@ -175,12 +211,12 @@ if(HAVE_CUDA)
 endif()
 
 # ---[ CUB
-if(HAVE_CUDA)
+if(USE_CUDA)
   include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cub)
 endif()
 
 # ---[ CNMEM
-if(HAVE_CUDA)
+if(USE_CUDA)
   add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/cnmem)
   include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cnmem/include)
   # message(STATUS "cnmem: ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so")

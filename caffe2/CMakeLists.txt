@@ -70,7 +70,7 @@ install(TARGETS Caffe2_CPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 list(APPEND Caffe2_MAIN_LIBS Caffe2_CPU)
 
 # ---[ CUDA library.
-if(HAVE_CUDA)
+if(USE_CUDA)
   CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
   target_link_libraries(Caffe2_GPU ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
   install(TARGETS Caffe2_GPU DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
@@ -103,6 +103,7 @@ if (BUILD_TEST)
   endif()
 endif()
 
+
 if (BUILD_PYTHON)
   # ---[ Python.
   add_library(caffe2_pybind11_state SHARED ${Caffe2_CPU_PYTHON_SRCS})
@@ -110,7 +111,7 @@ if (BUILD_PYTHON)
   target_link_libraries(caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
   install(TARGETS caffe2_pybind11_state DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 
-  if(HAVE_CUDA)
+  if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu SHARED ${Caffe2_GPU_PYTHON_SRCS})
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
     target_link_libraries(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
@@ -126,7 +127,7 @@ foreach(binary_src ${Caffe2_CPU_BINARY_SRCS})
   install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
 
-if(HAVE_CUDA)
+if(USE_CUDA)
   foreach(binary_src ${Caffe2_GPU_BINARY_SRCS})
     get_filename_component(bin_name ${binary_src} NAME_WE)
     add_executable(${bin_name} ${binary_src})

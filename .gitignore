@@ -30,6 +30,8 @@
 .ipynb_checkpoints
 
 # Editor temporaries
+*.swn
+*.swo
 *.swp
 *~
 
