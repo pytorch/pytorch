@@ -44,7 +44,6 @@ option(USE_ZMQDB "Use ZMQ" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_MPI "Use MPI" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(BUILD_PYTHON "Build python binaries" ON)
 
