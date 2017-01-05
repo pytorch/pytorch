@@ -35,6 +35,9 @@ matrix:
     compiler: clang
     env: COMPILER=clang++
 
+cache:
+  apt: true
+
 install:
   - ./.travis/install.sh
 
