@@ -31,6 +31,7 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 include(ExternalProject)
 
 include(cmake/Utils.cmake)
+include(cmake/Summary.cmake)
 
 # options
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
@@ -107,3 +108,4 @@ install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${CMAKE_INSTALL_PREFIX}
 install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
         FILES_MATCHING PATTERN "*.py")
 
+Caffe2_print_configuration_summary()
