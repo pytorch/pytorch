@@ -33,6 +33,7 @@ include(ExternalProject)
 include(cmake/Utils.cmake)
 
 # options
+option(USE_THREADS "Use Threads" ON)
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_GLOG "Use GLOG" ON)
 option(USE_GFLAGS "Use GFLAGS" ON)
@@ -45,6 +46,7 @@ option(USE_MPI "Use MPI" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
+option(BUILD_PYTHON "Build python binaries" ON)
 
 # options that do not affect the main binaries, but affects testing binaries
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
@@ -79,33 +81,33 @@ add_subdirectory(caffe/proto)
 add_subdirectory(caffe2)
 
 # ---[ Copy all python files to build directory
-
-# ---[ Generate and create all needed __init__.py files as they aren't present in source tree
-set(Caffe2_INIT_PY
-        ${CMAKE_BINARY_DIR}/caffe2/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe2/python/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/css/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe2/python/mint/templates/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe2/python/mint/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe2/proto/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe/__init__.py
-        ${CMAKE_BINARY_DIR}/caffe/proto/__init__.py
-)
-foreach(init ${Caffe2_INIT_PY})
-    # create each __init__.py file in build directory
-    file(WRITE ${init} "")
-endforeach()
-
-# Copy the files
-message(STATUS ${CMAKE_BINARY_DIR})
-# Pick up static python files
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
-        FILES_MATCHING PATTERN "*.py")
-# Caffe proto files
-install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${CMAKE_INSTALL_PREFIX}
-        FILES_MATCHING PATTERN "*.py")
-# Caffe2 proto files
-install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
-        FILES_MATCHING PATTERN "*.py")
-
+if (BUILD_PYTHON)
+  # ---[ Generate and create all needed __init__.py files as they aren't present in source tree
+  set(Caffe2_INIT_PY
+          ${CMAKE_BINARY_DIR}/caffe2/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe2/python/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/css/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe2/python/mint/templates/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe2/python/mint/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe2/proto/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe/__init__.py
+          ${CMAKE_BINARY_DIR}/caffe/proto/__init__.py
+  )
+  foreach(init ${Caffe2_INIT_PY})
+      # create each __init__.py file in build directory
+      file(WRITE ${init} "")
+  endforeach()
+  
+  # Copy the files
+  message(STATUS ${CMAKE_BINARY_DIR})
+  # Pick up static python files
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
+          FILES_MATCHING PATTERN "*.py")
+  # Caffe proto files
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${CMAKE_INSTALL_PREFIX}
+          FILES_MATCHING PATTERN "*.py")
+  # Caffe2 proto files
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
+          FILES_MATCHING PATTERN "*.py")
+endif()

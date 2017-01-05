@@ -6,8 +6,10 @@ set(Caffe2_PYTHON_DEPENDENCY_LIBS "")
 include("cmake/ProtoBuf.cmake")
 
 # ---[ Threads
-find_package(Threads REQUIRED)
-list(APPEND Caffe2_DEPENDENCY_LIBS ${CMAKE_THREAD_LIBS_INIT})
+if (USE_THREADS)
+  find_package(Threads REQUIRED)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${CMAKE_THREAD_LIBS_INIT})
+endif()
 
 # ---[ BLAS
 set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -109,12 +111,14 @@ endif()
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/eigen)
 
 # ---[ Python + Numpy
-find_package(PythonInterp 2.7)
-find_package(PythonLibs 2.7)
-find_package(NumPy REQUIRED)
+if (BUILD_PYTHON)
+  find_package(PythonInterp 2.7)
+  find_package(PythonLibs 2.7)
+  find_package(NumPy REQUIRED)
 
-include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
-list(APPEND Caffe2_PYTHON_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
+  include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
+  list(APPEND Caffe2_PYTHON_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
+endif()
 
 # ---[ pybind11
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/pybind11/include)
