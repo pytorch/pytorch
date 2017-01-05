@@ -31,6 +31,7 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 include(ExternalProject)
 
 include(cmake/Utils.cmake)
+include(cmake/Summary.cmake)
 
 # options
 option(USE_THREADS "Use Threads" ON)
@@ -40,6 +41,7 @@ option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_LMDB "Use LMDB" ON)
 option(USE_LEVELDB "Use LMDB" ON)
 option(USE_OPENCV "Use openCV" ON)
+option(USE_CUDA "Use Cuda" ON)
 option(USE_ZMQDB "Use ZMQ" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_MPI "Use MPI" ON)
@@ -117,3 +119,5 @@ if (BUILD_PYTHON)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
           FILES_MATCHING PATTERN "*.py")
 endif()
+
+Caffe2_print_configuration_summary()
