@@ -1,8 +1,0 @@
-# A lazy catch-all binary target generator.
-for src in Glob(["*.cc"]):
-    cc_binary(
-        name=src[:-3],
-        srcs=[src],
-        deps=["//caffe2:caffe2"],
-    )
-
