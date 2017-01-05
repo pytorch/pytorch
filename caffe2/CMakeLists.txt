@@ -97,13 +97,13 @@ endif()
 # ---[ Python.
 add_library(caffe2_pybind11_state SHARED ${Caffe2_CPU_PYTHON_SRCS})
 set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
-target_link_libraries(caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
+target_link_libraries(caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
 install(TARGETS caffe2_pybind11_state DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 
 if(HAVE_CUDA)
   add_library(caffe2_pybind11_state_gpu SHARED ${Caffe2_GPU_PYTHON_SRCS})
   set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
-  target_link_libraries(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
+  target_link_libraries(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
   install(TARGETS caffe2_pybind11_state_gpu DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 endif()
 

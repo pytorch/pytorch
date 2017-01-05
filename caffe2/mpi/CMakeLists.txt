@@ -2,7 +2,8 @@ if(USE_MPI)
     set(Caffe2_MPI_CPU_SRC
         "${CMAKE_CURRENT_SOURCE_DIR}/mpi_common.cc"
         "${CMAKE_CURRENT_SOURCE_DIR}/mpi_ops.cc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/mpi_python.cc"
+        # TODO: properly compile this together with python.
+        # "${CMAKE_CURRENT_SOURCE_DIR}/mpi_python.cc"
     )
     set(Caffe2_MPI_GPU_SRC
         "${CMAKE_CURRENT_SOURCE_DIR}/mpi_ops_gpu.cc"
