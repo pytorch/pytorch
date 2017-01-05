@@ -1,5 +1,0 @@
-str =~ <span class="hljs-regexp">/^(?:foo)$/</span>
-str =~ <span class="hljs-regexp">%r{foo|bar|buz$}</span>
-str =~ <span class="hljs-regexp">%r!foo|bar$!</span>
-str =~ <span class="hljs-regexp">%r[foo|bar$]</span>
-str =~ <span class="hljs-regexp">%r(\(foo|bar\)$)</span>

@@ -1,6 +1,0 @@
-#ifdef DEBUG
-TYPE1 foo(void)
-#else
-int foo(void)
-#endif
-{ }
