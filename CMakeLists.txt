@@ -70,6 +70,10 @@ endif()
 # ---[ Set output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "binaries")
 
+# ---[ Build flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
+
 # ---[ Third party builds.
 include_directories(${CMAKE_SOURCE_DIR})
 
