@@ -10,14 +10,14 @@ Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/
 
 [![Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=cmake)](https://travis-ci.org/caffe2/caffe2)
 
-    git clone https://github.com/bwasti/caffe2.git
+    git clone --recursive https://github.com/bwasti/caffe2.git
     cd caffe2
     
 #### OS X
     
-    brew install openblas glog gtest automake protobuf leveled lmdb
+    brew install gtest automake protobuf
     mkdir build && cd build
-    cmake .. -DBLAS=OpenBLAS -DUSE_OPENCV=off
+    cmake ..
     make
 
 #### Ubuntu
