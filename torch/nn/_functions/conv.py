@@ -224,7 +224,7 @@ def make_update_output(fn):
 def make_grad_input(fn):
     def call_grad_input(self, bufs, input, weight, grad_output):
         backend = type2backend[type(input)]
-        grad_input = input.new().resize_as_(input).zero_()
+        grad_input = input.new().resize_as_(input)
         kernel_size = weight.size()[2:]
         args = parse_arguments(self, fn.arguments[5:], bufs, kernel_size)
         getattr(backend, fn.name)(backend.library_state, input, grad_output,

@@ -29,7 +29,7 @@ class BatchNorm(Function):
     def backward(self, grad_output):
         tensors = self.saved_tensors
         input, params = tensors[0], tensors[1:]
-        grad_input = (input.new().resize_as_(input).zero_()
+        grad_input = (input.new().resize_as_(input)
                 if self.needs_input_grad[0] else None,)
         grad_param = tuple(p.new().resize_as_(p).zero_() if self.needs_input_grad[i+1]
                 else None for i, p in enumerate(params))
