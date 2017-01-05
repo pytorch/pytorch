@@ -52,7 +52,7 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     $options
     }
 
-    THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
+    THPUtils_invalidArguments(args, kwargs, "$readable_name", $num_options, $expected_args);
     return NULL;
     END_HANDLE_TH_ERRORS
 }

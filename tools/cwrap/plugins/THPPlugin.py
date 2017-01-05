@@ -105,7 +105,7 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     $options
     }
 
-    THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
+    THPUtils_invalidArguments(args, kwargs, "$readable_name", $num_options, $expected_args);
     return NULL;
     END_HANDLE_TH_ERRORS
 }
@@ -200,6 +200,18 @@ ${cpu}
                            for arg in args
                            if not arg.get('ignore_check', False)
                            and not arg.get('output')]
+            output_args = list(filter(lambda a: a.get('output'), args))
+            if output_args:
+                if len(output_args) > 1:
+                    out_type = 'tuple['
+                    out_type += ', '.join(
+                            self.TYPE_NAMES[arg['type']] for arg in output_args)
+                    out_type += ']'
+                    option_desc += ['#' + out_type + ' out']
+                else:
+                    arg = output_args[0]
+                    option_desc += ['#' + self.TYPE_NAMES[arg['type']] + ' out']
+
             if option_desc:
                 return '({})'.format(', '.join(option_desc))
             else:

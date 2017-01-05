@@ -682,7 +682,7 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     PyObject *raw_grad_output = PyTuple_GET_ITEM(args, 0);
     PyObject *retain_variables = PyTuple_GET_ITEM(args, 1);
     if (!PyTuple_Check(raw_grad_output) || !PyBool_Check(retain_variables)) {
-      THPUtils_invalidArguments(args, "_do_backward", 1, "(tuple, bool)");
+      THPUtils_invalidArguments(args, NULL, "_do_backward", 1, "(tuple, bool)");
       return NULL;
     }
 
