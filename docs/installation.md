@@ -1,11 +1,3 @@
-# Caffe2
-
-Caffe2 is a deep learning framework made with expression, speed, and modularity in mind. It is an experimental refactoring of Caffe, and allows a more flexible way to organize computation.
-
-## License and Citation
-
-Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/caffe2/blob/master/LICENSE).
-
 ## Building Caffe2
 
 [![Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=cmake)](https://travis-ci.org/caffe2/caffe2)
@@ -47,32 +39,3 @@ To run the tutorials you'll need ipython-notebooks and matplotlib, which can be 
     brew install matplotlib --with-python3
     pip install ipython notebook
 
-## Build status (known working)
-
-Ubuntu 14.04 (GCC)
-- [x] Default CPU build
-- [x] Default GPU build
-
-OS X (Clang)
-- [x] Default CPU build
-- [x] Default GPU build
-
-Options (both Clang and GCC)
-- [ ] Nervana GPU
-- [ ] ZMQ
-- [ ] RocksDB
-- [ ] MPI
-- [ ] OpenMP
-- [x] No LMDB
-- [x] No LevelDB
-- [x] No OpenCV
-
-BLAS
-- [x] OpenBLAS
-- [x] ATLAS
-- [ ] MKL
-
-Other
-- [x] CMake 2.8 support
-- [x] List of dependencies for Ubuntu 14.04
-- [x] List of dependencies for OS X

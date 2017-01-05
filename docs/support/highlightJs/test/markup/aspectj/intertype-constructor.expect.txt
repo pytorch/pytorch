@@ -1,3 +1,0 @@
-<span class="hljs-function"><span class="hljs-keyword">public</span> MyClass.<span class="hljs-title">new</span><span class="hljs-params">()</span> <span class="hljs-keyword">throws</span> Exception</span>{
-  <span class="hljs-comment">// intertype constructor body</span>
-}

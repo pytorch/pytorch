@@ -1,6 +1,0 @@
-<span class="hljs-preprocessor">#<span class="hljs-keyword">ifdef</span> DEBUG</span>
-<span class="hljs-function">TYPE1 <span class="hljs-title">foo</span><span class="hljs-params">(<span class="hljs-keyword">void</span>)</span>
-<span class="hljs-preprocessor">#<span class="hljs-keyword">else</span></span>
-<span class="hljs-keyword">int</span> <span class="hljs-title">foo</span><span class="hljs-params">(<span class="hljs-keyword">void</span>)</span>
-<span class="hljs-preprocessor">#<span class="hljs-keyword">endif</span></span>
-</span>{ }

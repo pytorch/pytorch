@@ -1,3 +1,0 @@
-<span class="hljs-keyword">let</span> foo;
-<span class="hljs-keyword">let</span> <span class="hljs-keyword">mut</span> bar;
-<span class="hljs-keyword">let</span> _foo_bar;
