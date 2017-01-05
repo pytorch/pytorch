@@ -149,6 +149,11 @@ if(USE_OPENMP)
   endif()
 endif()
 
+# ---[ Android specific ones
+if (ANDROID)
+  list(APPEND Caffe2_DEPENDENCY_LIBS log)
+endif()
+
 # ---[ CUDA
 include(cmake/Cuda.cmake)
 
