@@ -1,8 +1,0 @@
-py_library(
-  name = "mint",
-  srcs = [
-      "app.py",
-      "static/css/simple-sidebar.css",
-      "templates/index.html",
-  ],
-)
