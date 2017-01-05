@@ -1,1 +1,0 @@
-&gt;&gt; <span class="hljs-string">'\x41\x42\x43'</span><br><span class="hljs-string">'ABC'</span><br><hr><br>&gt;&gt; <span class="hljs-string">'\x61\x62\x63'</span><br><span class="hljs-string">'abc'</span>

@@ -1,6 +1,0 @@
-<span class="hljs-keyword">namespace</span> <span class="hljs-title">Dotted.Namespace</span>
-{
-    <span class="hljs-keyword">class</span> <span class="hljs-title">MyClass</span>
-    {
-    }
-}

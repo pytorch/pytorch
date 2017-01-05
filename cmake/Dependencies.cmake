@@ -92,26 +92,17 @@ endif()
 # ---[ LevelDB
 # ---[ Snappy
 if(USE_LEVELDB)
-
   find_package(LevelDB)
-  if (LEVELDB_FOUND)
+  find_package(Snappy)
+  if (LEVELDB_FOUND and SNAPPY_FOUND)
     include_directories(SYSTEM ${LevelDB_INCLUDE})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${LevelDB_LIBRARIES})
-
-    find_package(Snappy)
-    if (SNAPPY_FOUND)
-      include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${Snappy_LIBRARIES})
-    else()
-      message(WARNING "Not compiling with LevelDB. Suppress this warning with -DUSE_LEVELDB=OFF")
-      set(USE_LEVELDB OFF)
-    endif()
-
+    include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${Snappy_LIBRARIES})
   else()
     message(WARNING "Not compiling with LevelDB. Suppress this warning with -DUSE_LEVELDB=OFF")
     set(USE_LEVELDB OFF)
   endif()
-
 endif()
 
 # ---[ OpenCV

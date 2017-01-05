@@ -1,3 +1,0 @@
-background-image: url(images/sample.png);
-background-color: red;
-background-blend-mode: multiply;

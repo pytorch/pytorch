@@ -1,2 +1,0 @@
-float_var := <span class="hljs-number">1.0e10f</span>
-complex_var := <span class="hljs-number">1.2e5</span>+<span class="hljs-number">2.3i</span>

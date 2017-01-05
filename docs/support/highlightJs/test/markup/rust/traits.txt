@@ -1,3 +1,0 @@
-fn sqr(i: i32) { i * i }
-trait Minimum : Copy {}
-pub trait Builder where Self: Sized + Iterator<Item=Event> {}

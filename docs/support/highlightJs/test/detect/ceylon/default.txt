@@ -1,8 +1,0 @@
-shared void run() {
-    print("Hello, `` process.arguments.first else "World" ``!");
-}
-class Counter(count=0) {
-    variable Integer count;
-    shared Integer currentValue => count;
-    shared void increment() => count++;
-}

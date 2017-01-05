@@ -1,3 +1,0 @@
-gem "gem_name1", ">= 4.1"
-
-gem "gem_name2", "~> 4.1"

@@ -1,7 +1,0 @@
-var noop = function() {};
-
-var identity = function(foo) {
-  return foo;
-};
-
-function println(value: string);

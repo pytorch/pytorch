@@ -1,1 +1,0 @@
-<span class="hljs-list">(<span class="hljs-keyword"><span class="hljs-built_in">def</span></span> +x <span class="hljs-collection">[<span class="hljs-list">(<span class="hljs-keyword">a</span> <span class="hljs-number">1</span>)</span> <span class="hljs-number">+2</span> <span class="hljs-number">-3.0</span> y-5]</span>)</span>
