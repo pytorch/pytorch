@@ -1,5 +1,6 @@
 # This list is required for static linking and exported to Caffe2Config.cmake
 set(Caffe2_DEPENDENCY_LIBS "")
+set(Caffe2_PYTHON_DEPENDENCY_LIBS "")
 
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
@@ -113,7 +114,7 @@ find_package(PythonLibs 2.7)
 find_package(NumPy REQUIRED)
 
 include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
-list(APPEND Caffe2_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
+list(APPEND Caffe2_PYTHON_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
 
 # ---[ pybind11
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/pybind11/include)
