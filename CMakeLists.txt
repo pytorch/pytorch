@@ -106,7 +106,7 @@ if (BUILD_PYTHON)
       # create each __init__.py file in build directory
       file(WRITE ${init} "")
   endforeach()
-  
+
   # Copy the files
   message(STATUS ${CMAKE_BINARY_DIR})
   # Pick up static python files

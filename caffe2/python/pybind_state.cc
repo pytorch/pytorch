@@ -768,12 +768,10 @@ void addGlobalMethods(py::module& m) {
                   (!__apple_build_version__ &&                        \
                    ((__clang_major__ == 3 && __clang_minor__ < 7) ||  \
                     (__clang_major__ <= 2)))))
-#warning\
-  "Compiling without AVX2. Please consider upgrading your version of Clang."
+#warning \
+    "Compiling without AVX2. Please consider upgrading your version of Clang."
   // Provide a dummy avx2 flag.
-  m.def("builtin_cpu_supports_avx2", []() {
-    return false;
-  });
+  m.def("builtin_cpu_supports_avx2", []() { return false; });
 #else
   CAFFE2_CPU_FEATURE_SUPPORT(avx2);
 #endif

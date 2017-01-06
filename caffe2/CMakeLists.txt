@@ -135,4 +135,3 @@ if(USE_CUDA)
     install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
   endforeach()
 endif()
-

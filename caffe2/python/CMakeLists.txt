@@ -1,4 +1,3 @@
-
 # ---[ CPU files.
 set(Caffe2_CPU_PYTHON_SRCS
     "/pybind_state.cc"
