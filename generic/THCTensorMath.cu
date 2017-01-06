@@ -80,21 +80,33 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   THLongStorage *size;
   int i, j;
   long offset;
-  int ndim = dimension + 1;
+
+  // Even in the case where dimension is negative (i.e. when we want
+  // to cat along the last dimension), this logic still works, as the
+  // loop below will overwrite the value
+  int maxDim = dimension + 1;
+
+  // ldimension is the actual dimension we cat along (minus 1, for 0-based indexing)
   int ldimension = dimension;
 
   for (i = 0; i < numInputs; i++)
   {
-    ndim = THMax(ndim, THCTensor_(nDimension)(state, inputs[i]));
+    maxDim = THMax(maxDim, THCTensor_(nDimension)(state, inputs[i]));
   }
 
-  if (dimension == -2) ldimension = ndim ? (ndim - 1) : 0;
+  // In the event that the user specified -1 as the concat dimension, then
+  // we want to pick the maxDim  as dimension to cat along (and thus maxDim - 1 as the
+  // value due to 0-based indexing). If the maxDim is // 0 (i.e. we are catting all
+  // empty tensors), then we set ldimension to be 0
+  if (dimension + TH_INDEX_BASE == -1) {
+    ldimension = maxDim ? (maxDim - 1) : 0;
+  }
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
   THArgCheck(ldimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
 
-  size = THLongStorage_newWithSize(ndim);
-  for(i = 0; i < ndim; i++)
+  size = THLongStorage_newWithSize(maxDim);
+  for(i = 0; i < maxDim; i++)
   {
     // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
     long dimSize = i < THCTensor_(nDimension)(state, inputs[0])
