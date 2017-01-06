@@ -28,7 +28,7 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
     -0.6366
      0.2718
      0.4469
@@ -79,7 +79,7 @@ Example::
 .. function:: add(input, value=1, other, out=None)
 
 Each element of the Tensor :attr:`other` is multiplied by the scalar :attr:`value` and added to each element of the Tensor :attr:`input`. The resulting Tensor is returned.
-The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
@@ -95,7 +95,7 @@ Example::
 
     >>> import torch
     >>> a = torch.randn(4)
-    >>> a    
+    >>> a
 
     -0.9310
      2.0330
@@ -116,7 +116,7 @@ Example::
     -1.4279
      0.4552
     [torch.FloatTensor of size 4]
-    
+
 
 """)
 
@@ -124,8 +124,8 @@ add_docstr(torch._C.addbmm,
 """
 addbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
 
-Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and :attr:`batch2`, 
-with a reduced add step (all matrix multiplications get accumulated along the first dimension). 
+Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and :attr:`batch2`,
+with a reduced add step (all matrix multiplications get accumulated along the first dimension).
 :attr:`mat` is added to the final result.
 
 :attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
@@ -216,7 +216,7 @@ add_docstr(torch._C.addmm,
 """
 addmm(beta=1, mat, alpha=1, mat1, mat2, out=None) -> Tensor
 
-Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`. 
+Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`mat` is added to the final result.
 
 If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
@@ -334,7 +334,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.asin(a)
     -0.6900
      0.2752
@@ -362,7 +362,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.atan(a)
     -0.5669
      0.2653
@@ -391,7 +391,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.atan2(a, torch.randn(4))
     -2.4167
      2.9755
@@ -404,7 +404,7 @@ add_docstr(torch._C.baddbmm,
 """
 baddbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
 
-Performs a batch matrix-matrix product of matrices in :attr:`batch1` and :attr:`batch2`. 
+Performs a batch matrix-matrix product of matrices in :attr:`batch1` and :attr:`batch2`.
 :attr:`mat` is added to the final result.
 
 :attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
@@ -437,7 +437,7 @@ bernoulli(input, out=None) -> Tensor
 
 Draws binary random numbers (0 or 1) from a bernoulli distribution.
 
-The :attr:`input` Tensor should be a tensor containing probabilities to be used for drawing the binary random number. 
+The :attr:`input` Tensor should be a tensor containing probabilities to be used for drawing the binary random number.
 Hence, all values in :attr:`input` have to be in the range: :math:`0 <= input_i <= 1`
 
 The `i-th` element of the output tensor will draw a value `1` according to the `i-th` probability value given in :attr:`input`.
@@ -452,35 +452,35 @@ Example::
 
     >>> a = torch.Tensor(3, 3).uniform_(0, 1) # generate a uniform random matrix with range [0, 1]
     >>> a
-    
+
      0.7544  0.8140  0.9842
      0.5282  0.0595  0.6445
      0.1925  0.9553  0.9732
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.bernoulli(a)
-    
+
      1  1  1
      0  0  1
      0  1  1
     [torch.FloatTensor of size 3x3]
-    
+
     >>> a = torch.ones(3, 3) # probability of drawing "1" is 1
     >>> torch.bernoulli(a)
-    
+
      1  1  1
      1  1  1
      1  1  1
     [torch.FloatTensor of size 3x3]
-    
+
     >>> a = torch.zeros(3, 3) # probability of drawing "1" is 0
     >>> torch.bernoulli(a)
-    
+
      0  0  0
      0  0  0
      0  0  0
     [torch.FloatTensor of size 3x3]
-        
+
 """)
 
 add_docstr(torch._C.bmm,
@@ -491,7 +491,7 @@ Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and 
 
 :attr:`batch1` and :attr:`batch2` must be 3D Tensors each containing the same number of matrices.
 
-If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor, 
+If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor,
 :attr:`out` will be a `b x n x p` Tensor.
 
 Args:
@@ -526,21 +526,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.ceil(a)
-    
+
      2
      1
     -0
     -0
     [torch.FloatTensor of size 4]
-    
+
 """)
 
 add_docstr(torch._C.cinv,
@@ -557,20 +557,20 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.cinv(a)
-    
+
      0.7210
      2.5565
     -1.1583
     -1.8289
-    [torch.FloatTensor of size 4]    
+    [torch.FloatTensor of size 4]
 
 """)
 
@@ -596,21 +596,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.clamp(a, min=-0.5, max=0.5)
-    
+
      0.5000
      0.3912
     -0.5000
     -0.5000
     [torch.FloatTensor of size 4]
-    
+
 """)
 
 add_docstr(torch._C.cmax,
@@ -628,13 +628,13 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.cmax(a, 0.5)
 
      1.3869
@@ -642,14 +642,14 @@ Example::
      0.5000
      0.5000
     [torch.FloatTensor of size 4]
-    
-    
+
+
 .. function:: cmax(input, other, out=None) -> Tensor
 
-Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input` 
+Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input`
 and an element-wise `max` is taken. The resulting Tensor is returned.
 
-The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
@@ -664,24 +664,24 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> b = torch.randn(4)
     >>> b
-    
+
      1.0067
     -0.8010
      0.6258
      0.3627
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.cmax(a, b)
-    
+
      1.3869
      0.3912
      0.6258
@@ -705,28 +705,28 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.cmin(a, 0.5)
-    
+
      0.5000
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-        
-    
+
+
 .. function:: cmin(input, other, out=None) -> Tensor
 
-Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input` 
+Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input`
 and an element-wise `min` is taken. The resulting Tensor is returned.
 
-The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
@@ -741,30 +741,30 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> b = torch.randn(4)
     >>> b
-    
+
      1.0067
     -0.8010
      0.6258
      0.3627
     [torch.FloatTensor of size 4]
-    
-    >>> torch.cmin(a, b)    
-    
+
+    >>> torch.cmin(a, b)
+
      1.0067
     -0.8010
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
 """)
 
 add_docstr(torch._C.cos,
@@ -786,7 +786,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.cos(a)
      0.8041
      0.9633
@@ -814,7 +814,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.cosh(a)
      1.2095
      1.0372
@@ -844,32 +844,32 @@ Example::
 
     >>> a = torch.randn(4, 3)
     >>> a
-    
+
     -0.6652 -1.0116 -0.6857
      0.2286  0.4446 -0.5272
      0.0476  0.2321  1.9991
      0.6199  1.1924 -0.9397
     [torch.FloatTensor of size 4x3]
-    
+
     >>> b = torch.randn(4, 3)
     >>> b
-    
+
     -0.1042 -1.1156  0.1947
      0.9947  0.1149  0.4701
     -1.0108  0.8319 -0.0750
      0.9045 -1.3754  1.0976
     [torch.FloatTensor of size 4x3]
-    
+
     >>> torch.cross(a, b, dim=1)
-    
+
     -0.9619  0.2009  0.6367
      0.2696 -0.6318 -0.4160
     -1.6805 -2.0171  0.2741
      0.0163 -1.5304 -1.9311
     [torch.FloatTensor of size 4x3]
-    
+
     >>> torch.cross(a, b)
-    
+
     -0.9619  0.2009  0.6367
      0.2696 -0.6318 -0.4160
     -1.6805 -2.0171  0.2741
@@ -888,14 +888,14 @@ For example, if :attr:`input` is a vector of size N, the result will also be a v
 
 Args:
     input (Tensor): the input `Tensor`
-    dim  (long): the dimension to do the operation over
+    dim  (int): the dimension to do the operation over
     out (Tensor, optional): The result `Tensor`
 
 Example::
 
     >>> a = torch.randn(10)
     >>> a
-    
+
      1.1148
      1.8423
      1.4143
@@ -907,9 +907,9 @@ Example::
     -1.6332
     -0.4272
     [torch.FloatTensor of size 10]
-    
+
     >>> torch.cumprod(a, dim=0)
-    
+
      1.1148
      2.0537
      2.9045
@@ -921,10 +921,10 @@ Example::
      1.8726
     -0.8000
     [torch.FloatTensor of size 10]
-    
+
     >>> a[5] = 0.0
     >>> torch.cumprod(a, dim=0)
-    
+
      1.1148
      2.0537
      2.9045
@@ -936,7 +936,7 @@ Example::
     -0.0000
      0.0000
     [torch.FloatTensor of size 10]
-        
+
 """)
 
 add_docstr(torch._C.cumsum,
@@ -950,14 +950,14 @@ For example, if :attr:`input` is a vector of size N, the result will also be a v
 
 Args:
     input (Tensor): the input `Tensor`
-    dim  (long): the dimension to do the operation over
+    dim  (int): the dimension to do the operation over
     out (Tensor, optional): The result `Tensor`
 
 Example::
 
     >>> a = torch.randn(10)
     >>> a
-    
+
     -0.6039
     -0.2214
     -0.3705
@@ -969,9 +969,9 @@ Example::
     -0.1286
      1.0947
     [torch.FloatTensor of size 10]
-    
+
     >>> torch.cumsum(a, dim=0)
-    
+
     -0.6039
     -0.8253
     -1.1958
@@ -983,8 +983,8 @@ Example::
      1.4572
      2.5519
     [torch.FloatTensor of size 10]
-            
-    
+
+
 """)
 
 add_docstr(torch._C.diag,
@@ -1011,51 +1011,51 @@ Get the square matrix where the input vector is the diagonal::
 
     >>> a = torch.randn(3)
     >>> a
-    
+
      1.0480
     -2.3405
     -1.1138
     [torch.FloatTensor of size 3]
-    
+
     >>> torch.diag(a)
-    
+
      1.0480  0.0000  0.0000
      0.0000 -2.3405  0.0000
      0.0000  0.0000 -1.1138
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.diag(a, 1)
-    
+
      0.0000  1.0480  0.0000  0.0000
      0.0000  0.0000 -2.3405  0.0000
      0.0000  0.0000  0.0000 -1.1138
      0.0000  0.0000  0.0000  0.0000
     [torch.FloatTensor of size 4x4]
-    
+
 
 Get the k-th diagonal of a given matrix::
 
     >>> a = torch.randn(3, 3)
     >>> a
-    
+
     -1.5328 -1.3210 -1.5204
      0.8596  0.0471 -0.2239
     -0.6617  0.0146 -1.0817
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.diag(a, 0)
-    
+
     -1.5328
      0.0471
     -1.0817
     [torch.FloatTensor of size 3]
-    
+
     >>> torch.diag(a, 1)
-    
+
     -1.3210
     -0.2239
     [torch.FloatTensor of size 2]
-                
+
 """)
 
 add_docstr(torch._C.dist,
@@ -1074,22 +1074,22 @@ Example::
 
     >>> x = torch.randn(4)
     >>> x
-    
+
      0.2505
     -0.4571
     -0.3733
      0.7807
     [torch.FloatTensor of size 4]
-    
+
     >>> y = torch.randn(4)
     >>> y
-    
+
      0.7782
     -0.5185
      1.4106
     -2.4063
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.dist(x, y, 3.5)
     3.302832063224223
     >>> torch.dist(x, y, 3)
@@ -1098,8 +1098,8 @@ Example::
     inf
     >>> torch.dist(x, y, 1)
     5.560028076171875
-    
-    
+
+
 """)
 
 add_docstr(torch._C.div,
@@ -1119,28 +1119,28 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    
+
     -0.6147
     -1.1237
     -0.1604
     -0.6853
      0.1063
     [torch.FloatTensor of size 5]
-    
+
     >>> torch.div(a, 0.5)
-    
+
     -1.2294
     -2.2474
     -0.3208
     -1.3706
      0.2126
     [torch.FloatTensor of size 5]
-    
+
 
 .. function:: div(input, other, out=None)
 
 Each element of the Tensor :attr:`input` is divided by each element of the Tensor :attr:`other`. The resulting Tensor is returned.
-The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
@@ -1155,16 +1155,16 @@ Example::
 
     >>> a = torch.randn(4,4)
     >>> a
-    
+
     -0.1810  0.4017  0.2863 -0.1013
      0.6183  2.0696  0.9012 -1.5933
      0.5679  0.4743 -0.0117 -0.1266
     -0.1213  0.9629  0.2682  1.5968
     [torch.FloatTensor of size 4x4]
-    
+
     >>> b = torch.randn(8, 2)
     >>> b
-    
+
      0.8774  0.7650
      0.8866  1.4805
     -0.6490  1.1172
@@ -1174,16 +1174,16 @@ Example::
      0.3492  1.5270
      1.6103 -0.6291
     [torch.FloatTensor of size 8x2]
-    
+
     >>> torch.div(a, b)
-    
+
     -0.2062  0.5251  0.3229 -0.0684
     -0.9528  1.8525  0.6320  1.9559
      0.3881 -3.8625 -0.0253  0.2099
     -0.3473  0.6306  0.1666 -2.5381
     [torch.FloatTensor of size 4x4]
-        
-    
+
+
 """)
 
 add_docstr(torch._C.dot,
@@ -1305,21 +1305,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.3869
      0.3912
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.floor(a)
-    
+
      1
      0
     -1
     -1
     [torch.FloatTensor of size 4]
-    
+
 
 """)
 
@@ -1628,75 +1628,75 @@ Example::
     >>> start = torch.range(1, 4)
     >>> end = torch.Tensor(4).fill_(10)
     >>> start
-    
+
      1
      2
      3
      4
     [torch.FloatTensor of size 4]
-    
+
     >>> end
-    
+
      10
      10
      10
      10
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.lerp(start, end, 0.5)
-    
+
      5.5000
      6.0000
      6.5000
      7.0000
     [torch.FloatTensor of size 4]
-    
+
 """)
 
 add_docstr(torch._C.linspace,
 """
 linspace(start, end, steps=100, out=None) -> Tensor
 
-Returns a one-dimensional Tensor of :attr:`steps` 
+Returns a one-dimensional Tensor of :attr:`steps`
 equally spaced points between :attr:`start` and :attr:`end`
 
 The output tensor is 1D of size :attr:`steps`
 
 Args:
     start (float): The starting value for the set of points
-    start (float): The ending value for the set of points
-    steps (long): Number of points to sample between :attr:`start` and :attr:`end`
+    end (float): The ending value for the set of points
+    steps (int): Number of points to sample between :attr:`start` and :attr:`end`
     out (Tensor, optional): The result `Tensor`
 
 Example::
 
     >>> torch.linspace(3, 10, steps=5)
-    
+
       3.0000
       4.7500
       6.5000
       8.2500
      10.0000
     [torch.FloatTensor of size 5]
-    
+
     >>> torch.linspace(-10, 10, steps=5)
-    
+
     -10
      -5
       0
       5
      10
     [torch.FloatTensor of size 5]
-    
+
     >>> torch.linspace(start=-10, end=10, steps=5)
-    
+
     -10
      -5
       0
       5
      10
     [torch.FloatTensor of size 5]
-                
+
 """)
 
 add_docstr(torch._C.log,
@@ -1713,23 +1713,23 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    
+
     -0.4183
      0.3722
     -0.3091
      0.4149
      0.5857
     [torch.FloatTensor of size 5]
-    
+
     >>> torch.log(a)
-    
+
         nan
     -0.9883
         nan
     -0.8797
     -0.5349
     [torch.FloatTensor of size 5]
-        
+
 """)
 
 add_docstr(torch._C.log1p,
@@ -1750,60 +1750,60 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    
+
     -0.4183
      0.3722
     -0.3091
      0.4149
      0.5857
     [torch.FloatTensor of size 5]
-    
+
     >>> torch.log1p(a)
-    
+
     -0.5418
      0.3164
     -0.3697
      0.3471
      0.4611
     [torch.FloatTensor of size 5]
-            
+
 """)
 
 add_docstr(torch._C.logspace,
 """
 logspace(start, end, steps=100, out=None) -> Tensor
 
-Returns a one-dimensional Tensor of :attr:`steps` 
-logirathmically equally spaced points between :math:`10^start` and :math:`10^end`
+Returns a one-dimensional Tensor of :attr:`steps`
+logirathmically equally spaced points between :math:`10^{start}` and :math:`10^{end}`
 
 The output tensor is 1D of size :attr:`steps`
 
 Args:
     start (float): The starting value for the set of points
-    start (float): The ending value for the set of points
-    steps (long): Number of points to sample between :attr:`start` and :attr:`end`
+    end (float): The ending value for the set of points
+    steps (int): Number of points to sample between :attr:`start` and :attr:`end`
     out (Tensor, optional): The result `Tensor`
 
 Example::
 
     >>> torch.logspace(start=-10, end=10, steps=5)
-    
+
      1.0000e-10
      1.0000e-05
      1.0000e+00
      1.0000e+05
      1.0000e+10
     [torch.FloatTensor of size 5]
-    
+
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
-    
+
       1.2589
       2.1135
       3.5481
       5.9566
      10.0000
     [torch.FloatTensor of size 5]
-            
+
 """)
 
 add_docstr(torch._C.lt,
@@ -1848,13 +1848,13 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
      0.4729 -0.2266 -0.2085
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.max(a)
     0.4729
-    
+
 
 .. function:: max(input, dim, max=None, max_indices=None) -> (Tensor, LongTensor)
 
@@ -1865,7 +1865,7 @@ THe output Tensors are of the same size as :attr:`input` except in the dimension
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     max (Tensor, optional): the result Tensor with maximum values in dimension :attr:`dim`
     max_indices (LongTensor, optional): the result Tensor with the index locations of the maximum values in dimension :attr:`dim`
 
@@ -1873,13 +1873,13 @@ Example::
 
     >> a = torch.randn(4, 4)
     >> a
-    
+
     0.0692  0.3142  1.2513 -0.5428
     0.9288  0.8552 -0.2073  0.6409
     1.0695 -0.0101 -2.4507 -1.2230
     0.7426 -0.7666  0.4862 -0.6628
     torch.FloatTensor of size 4x4]
-    
+
     >>> torch.max(a, 1)
     (
      1.2513
@@ -1894,7 +1894,7 @@ Example::
      0
     [torch.LongTensor of size 4x1]
     )
-        
+
 """)
 
 add_docstr(torch._C.mean,
@@ -1910,13 +1910,13 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
     -0.2946 -0.9143  2.1809
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.mean(a)
     0.32398951053619385
-    
+
 
 .. function:: mean(input, dim, out=None) -> Tensor
 
@@ -1926,28 +1926,28 @@ THe output Tensor is of the same size as :attr:`input` except in the dimension :
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     out (Tensor, optional): the result Tensor
 
 Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    
+
     -1.2738 -0.3058  0.1230 -1.9615
      0.8771 -0.5430 -0.9233  0.9879
      1.4107  0.0317 -0.6823  0.2255
     -1.3854  0.4953 -0.2160  0.2435
     [torch.FloatTensor of size 4x4]
-    
+
     >>> torch.mean(a, 1)
-    
+
     -0.8545
      0.0997
      0.2464
     -0.2157
     [torch.FloatTensor of size 4x1]
-            
+
 """)
 
 add_docstr(torch._C.median,
@@ -1965,29 +1965,29 @@ THe output Tensors are of the same size as :attr:`input` except in the dimension
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     values (Tensor, optional): the result Tensor
     indices (Tensor, optional): the result index Tensor
 
 Example::
 
     >>> a
-    
+
      -0.6891 -0.6662
      0.2697  0.7412
      0.5254 -0.7402
      0.5528 -0.2399
     [torch.FloatTensor of size 4x2]
-    
+
     >>> a = torch.randn(4, 5)
     >>> a
-    
+
      0.4056 -0.3372  1.0973 -2.4884  0.4334
      2.1336  0.3841  0.1404 -0.1821 -0.7646
     -0.2403  1.3975 -2.0068  0.1298  0.0212
     -1.5371 -0.7257 -0.4871 -0.2359 -1.1724
     [torch.FloatTensor of size 4x5]
-    
+
     >>> torch.median(a, 1)
     (
      0.4056
@@ -2002,7 +2002,7 @@ Example::
      1
     [torch.LongTensor of size 4x1]
     )
-  
+
 """)
 
 add_docstr(torch._C.min,
@@ -2018,13 +2018,13 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
      0.4729 -0.2266 -0.2085
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.min(a)
     -0.22663167119026184
-    
+
 
 .. function:: min(input, dim, min=None, min_indices=None) -> (Tensor, LongTensor)
 
@@ -2035,7 +2035,7 @@ THe output Tensors are of the same size as :attr:`input` except in the dimension
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     min (Tensor, optional): the result Tensor with minimum values in dimension :attr:`dim`
     min_indices (LongTensor, optional): the result Tensor with the index locations of the minimum values in dimension :attr:`dim`
 
@@ -2043,34 +2043,34 @@ Example::
 
     >> a = torch.randn(4, 4)
     >> a
-    
+
     0.0692  0.3142  1.2513 -0.5428
     0.9288  0.8552 -0.2073  0.6409
     1.0695 -0.0101 -2.4507 -1.2230
     0.7426 -0.7666  0.4862 -0.6628
     torch.FloatTensor of size 4x4]
-    
+
     >> torch.min(a, 1)
-    
+
     0.5428
     0.2073
     2.4507
     0.7666
     torch.FloatTensor of size 4x1]
-    
+
     3
     2
     2
     1
     torch.LongTensor of size 4x1]
-    
+
 """)
 
 add_docstr(torch._C.mm,
 """
 mm(mat1, mat2, out=None) -> Tensor
 
-Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`. 
+Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 
 If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor, :attr:`out` will be a `n x p` Tensor.
 
@@ -2104,29 +2104,29 @@ THe output Tensors are of the same size as :attr:`input` except in the dimension
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     values (Tensor, optional): the result Tensor
     indices (Tensor, optional): the result index Tensor
 
 Example::
 
     >>> a
-    
+
      -0.6891 -0.6662
      0.2697  0.7412
      0.5254 -0.7402
      0.5528 -0.2399
     [torch.FloatTensor of size 4x2]
-    
+
     >>> a = torch.randn(4, 5)
     >>> a
-    
+
      0.4056 -0.3372  1.0973 -2.4884  0.4334
      2.1336  0.3841  0.1404 -0.1821 -0.7646
     -0.2403  1.3975 -2.0068  0.1298  0.0212
     -1.5371 -0.7257 -0.4871 -0.2359 -1.1724
     [torch.FloatTensor of size 4x5]
-        
+
     >>> torch.mode(a, 1)
     (
     -2.4884
@@ -2161,24 +2161,24 @@ Example::
 
     >>> a = torch.randn(3)
     >>> a
-    
+
     -0.9374
     -0.5254
     -0.6069
     [torch.FloatTensor of size 3]
-    
+
     >>> torch.mul(a, 100)
-    
+
     -93.7411
     -52.5374
     -60.6908
     [torch.FloatTensor of size 3]
-        
-    
+
+
 .. function:: mul(input, other, out=None)
 
 Each element of the Tensor :attr:`input` is multiplied by each element of the Tensor :attr:`other`. The resulting Tensor is returned.
-The shapes of :attr:`input` and :attr:`other` dont need to match. The total number of elements in each Tensor need to be the same. 
+The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
@@ -2193,28 +2193,28 @@ Example::
 
     >>> a = torch.randn(4,4)
     >>> a
-    
+
     -0.7280  0.0598 -1.4327 -0.5825
     -0.1427 -0.0690  0.0821 -0.3270
     -0.9241  0.5110  0.4070 -1.1188
     -0.8308  0.7426 -0.6240 -1.1582
     [torch.FloatTensor of size 4x4]
-    
+
     >>> b = torch.randn(2, 8)
     >>> b
-    
+
      0.0430 -1.0775  0.6015  1.1647 -0.6549  0.0308 -0.1670  1.0742
     -1.2593  0.0292 -0.0849  0.4530  1.2404 -0.4659 -0.1840  0.5974
     [torch.FloatTensor of size 2x8]
-    
+
     >>> torch.mul(a, b)
-    
+
     -0.0313 -0.0645 -0.8618 -0.6784
      0.0934 -0.0021 -0.0137 -0.3513
      1.1638  0.0149 -0.0346 -0.5068
     -1.0304 -0.3460  0.1148 -0.6919
-    [torch.FloatTensor of size 4x4]        
-    
+    [torch.FloatTensor of size 4x4]
+
 """)
 
 add_docstr(torch._C.multinomial,
@@ -2286,30 +2286,31 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    
+
     -0.4430
      1.1690
     -0.8836
     -0.4565
      0.2968
     [torch.FloatTensor of size 5]
-    
+
     >>> torch.neg(a)
-    
+
      0.4430
     -1.1690
      0.8836
      0.4565
     -0.2968
     [torch.FloatTensor of size 5]
-    
+
 """)
 
 add_docstr(torch._C.nonzero,
 """
 nonzero(input, out=None) -> LongTensor
 
-Returns a list of indices of all the non-zero elements of the :attr:`input` Tensor. Each row in the result Tensor is one set of indices giving the location of a non-zero element in :attr:`input`
+Returns a tensor containing the indices of all non-zero elements of :attr:`input`.
+Each row in the result contains the indices of a non-zero element in :attr:`input`.
 
 If :attr:`input` has `n` dimensions, then the resulting indices Tensor :attr:`out` is of size `z x n`, where `z` is the total number of non-zero elements in the :attr:`input` Tensor.
 
@@ -2319,41 +2320,25 @@ Args:
 
 Example::
 
-    >>> a = torch.Tensor(5).bernoulli_()
-    >>> a
-    
-     1
-     1
-     1
-     0
-     1
-    [torch.FloatTensor of size 5]
-    
-    >>> torch.nonzero(a)
-    
+    >>> torch.nonzero(torch.Tensor([1, 1, 1, 0, 1]))
+
      0
      1
      2
      4
     [torch.LongTensor of size 4x1]
-    
-    >>> a = torch.diag(torch.randn(4)) # create a matrix where only the diagonal is non-zero
-    >>> a
-    
-     0.6116  0.0000  0.0000  0.0000
-     0.0000  0.4126  0.0000  0.0000
-     0.0000  0.0000 -1.2886  0.0000
-     0.0000  0.0000  0.0000 -0.4112
-    [torch.FloatTensor of size 4x4]
-    
-    >>> torch.nonzero(a)
-    
+
+    >>> torch.nonzero(torch.Tensor([[0.6, 0.0, 0.0, 0.0],
+    ...                             [0.0, 0.4, 0.0, 0.0],
+    ...                             [0.0, 0.0, 1.2, 0.0],
+    ...                             [0.0, 0.0, 0.0,-0.4]]))
+
      0  0
      1  1
      2  2
      3  3
     [torch.LongTensor of size 4x2]
-        
+
 """)
 
 add_docstr(torch._C.norm,
@@ -2369,53 +2354,53 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
     -0.4376 -0.5328  0.9547
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.norm(a, 3)
     1.0338925067372466
-        
+
 
 .. function:: norm(input, p, dim, out=None) -> Tensor
 
 Returns the p-norm of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
     p (float):  the exponent value in the norm formulation
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     out (Tensor, optional): the result Tensor
 
 Example::
 
     >>> a = torch.randn(4, 2)
     >>> a
-    
+
     -0.6891 -0.6662
      0.2697  0.7412
      0.5254 -0.7402
      0.5528 -0.2399
     [torch.FloatTensor of size 4x2]
-    
+
     >>> torch.norm(a, 2, 1)
-    
+
      0.9585
      0.7888
      0.9077
      0.6026
     [torch.FloatTensor of size 4x1]
-    
+
     >>> torch.norm(a, 0, 1)
-    
+
      2
      2
      2
      2
     [torch.FloatTensor of size 4x1]
-            
+
 """)
 
 add_docstr(torch._C.normal,
@@ -2439,7 +2424,7 @@ Example::
     >>> a = torch.zeros(4,4)
     >>> torch.numel(a)
     16
-    
+
 """)
 
 add_docstr(torch._C.ones,
@@ -2472,7 +2457,7 @@ add_docstr(torch._C.pow,
 
 Takes the power of each element in :attr:`input` with :attr:`exponent` and returns a Tensor with the result.
 
-:attr:`exponent` can be either a single ``float`` number or a ``Tensor`` 
+:attr:`exponent` can be either a single ``float`` number or a ``Tensor``
 with the same number of elements as :attr:`input`.
 
 When :attr:`exponent` is a scalar value, the operation applied is:
@@ -2492,59 +2477,59 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
     -0.5274
     -0.8232
     -2.1128
      1.7558
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.pow(a, 2)
-    
+
      0.2781
      0.6776
      4.4640
      3.0829
     [torch.FloatTensor of size 4]
-    
+
     >>> exp = torch.range(1, 4)
     >>> a = torch.range(1, 4)
     >>> a
-    
+
      1
      2
      3
      4
     [torch.FloatTensor of size 4]
-    
+
     >>> exp
-    
+
      1
      2
      3
      4
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.pow(a, exp)
-    
+
        1
        4
       27
      256
     [torch.FloatTensor of size 4]
-    
+
 
 .. function:: pow(base, input, out=None)
 
 :attr:`base` is a scalar ``float`` value, and :attr:`input` is a Tensor. The returned Tensor :attr:`out` is of the same shape as :attr:`input`
 
-The operation applied is: 
+The operation applied is:
 
 :math:`out_i = base ^ {input_i}`
 
 Args:
     base (float): the scalar base value for the power operation
-    input (Tensor): the exponent `Tensor`    
+    input (Tensor): the exponent `Tensor`
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -2552,13 +2537,13 @@ Example::
     >>> exp = torch.range(1, 4)
     >>> base = 2
     >>> torch.pow(base, exp)
-    
+
       2
       4
       8
      16
     [torch.FloatTensor of size 4]
-            
+
 """)
 
 add_docstr(torch._C.prod,
@@ -2574,13 +2559,13 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
      0.6170  0.3546  0.0253
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.prod(a)
     0.005537458061418483
-    
+
 
 .. function:: prod(input, dim, out=None) -> Tensor
 
@@ -2590,28 +2575,28 @@ THe output Tensor is of the same size as :attr:`input` except in the dimension :
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     out (Tensor, optional): the result Tensor
 
 Example::
 
     >>> a = torch.randn(4, 2)
     >>> a
-    
+
      0.1598 -0.6884
     -0.1831 -0.4412
     -0.9925 -0.6244
     -0.2416 -0.8080
     [torch.FloatTensor of size 4x2]
-    
+
     >>> torch.prod(a, 1)
-    
+
     -0.1100
      0.0808
      0.6197
      0.1952
     [torch.FloatTensor of size 4x1]
-        
+
 """)
 
 add_docstr(torch._C.pstrf,
@@ -2632,63 +2617,50 @@ add_docstr(torch._C.randn,
 
 add_docstr(torch._C.randperm,
 """
-randperm(n, out=None) -> long
+randperm(n, out=None) -> LongTensor
 
-Returns a random permutation of integers from `1` to :attr:`n`.
+Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
-    n (long): the last integer in the sequence
+    n (int): the upper bound (exclusive)
 
 Example::
 
     >>> torch.randperm(4)
-    
+
      2
      1
      3
      0
     [torch.LongTensor of size 4]
-    
-    >>> torch.randperm(8)
-    
-     2
-     6
-     5
-     4
-     3
-     1
-     7
-     0
-    [torch.LongTensor of size 8]
-    
 """)
 
 add_docstr(torch._C.range,
 """
 range(start, end, step=1, out=None) -> Tensor
 
-returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values 
+returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
 from :attr:`start` to :attr:`end` with step :attr:`step`. Step is the gap between two values in the tensor.
 :math:`x_{i+1} = x_i + step`
 
 Args:
     start (float): The starting value for the set of points
-    start (float): The ending value for the set of points
+    end (float): The ending value for the set of points
     step (float): The gap between each pair of adjacent points
     out (Tensor, optional): The result `Tensor`
 
 Example::
-    
+
     >>> torch.range(1, 4)
-    
+
      1
      2
      3
      4
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.range(1, 4, 0.5)
-    
+
      1.0000
      1.5000
      2.0000
@@ -2697,7 +2669,7 @@ Example::
      3.5000
      4.0000
     [torch.FloatTensor of size 7]
-                    
+
 """)
 
 add_docstr(torch._C.remainder,
@@ -2750,21 +2722,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.2290
      1.3409
     -0.5662
     -0.0899
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.round(a)
-    
+
      1
      1
     -1
     -0
     [torch.FloatTensor of size 4]
-        
+
 """)
 
 add_docstr(torch._C.rsqrt,
@@ -2781,21 +2753,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.2290
      1.3409
     -0.5662
     -0.0899
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.rsqrt(a)
-    
+
      0.9020
      0.8636
         nan
         nan
     [torch.FloatTensor of size 4]
-        
+
 """)
 
 add_docstr(torch._C.scatter,
@@ -2823,21 +2795,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
     -0.4972
      1.3512
      0.1056
     -0.2650
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.sigmoid(a)
-    
+
      0.3782
      0.7943
      0.5264
      0.4341
     [torch.FloatTensor of size 4]
-        
+
 """)
 
 add_docstr(torch._C.sign,
@@ -2859,15 +2831,15 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.sign(a)
-    
+
     -1
      1
      1
      1
     [torch.FloatTensor of size 4]
-    
+
 """)
 
 add_docstr(torch._C.sin,
@@ -2889,7 +2861,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.sin(a)
     -0.5944
      0.2684
@@ -2917,7 +2889,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.sinh(a)
     -0.6804
      0.2751
@@ -2944,21 +2916,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
      1.2290
      1.3409
     -0.5662
     -0.0899
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.sqrt(a)
-    
+
      1.1086
      1.1580
         nan
         nan
     [torch.FloatTensor of size 4]
-            
+
 """)
 
 add_docstr(torch._C.squeeze,
@@ -2978,13 +2950,13 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
     -1.3063  1.4182 -0.3061
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.std(a)
     1.3782334731508061
-            
+
 
 .. function:: std(input, dim, out=None) -> Tensor
 
@@ -2994,28 +2966,28 @@ THe output Tensor is of the same size as :attr:`input` except in the dimension :
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     out (Tensor, optional): the result Tensor
 
 Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    
+
      0.1889 -2.4856  0.0043  1.8169
     -0.7701 -0.4682 -2.2410  0.4098
      0.1919 -1.1856 -1.0361  0.9085
      0.0173  1.0662  0.2143 -0.5576
     [torch.FloatTensor of size 4x4]
-    
+
     >>> torch.std(a, dim=1)
-    
+
      1.7756
      1.1025
      1.0045
      0.6725
     [torch.FloatTensor of size 4x1]
-    
+
 """)
 
 add_docstr(torch._C.sum,
@@ -3031,13 +3003,13 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
      0.6170  0.3546  0.0253
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.sum(a)
     0.9969287421554327
-    
+
 
 .. function:: sum(input, dim, out=None) -> Tensor
 
@@ -3047,28 +3019,28 @@ THe output Tensor is of the same size as :attr:`input` except in the dimension :
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     out (Tensor, optional): the result Tensor
 
 Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    
+
     -0.4640  0.0609  0.1122  0.4784
     -1.3063  1.6443  0.4714 -0.7396
     -1.3561 -0.1959  1.0609 -1.9855
      2.6833  0.5746 -0.5709 -0.4430
     [torch.FloatTensor of size 4x4]
-    
+
     >>> torch.sum(a, 1)
-    
+
      0.1874
      0.0698
     -2.4767
      2.2440
     [torch.FloatTensor of size 4x1]
-    
+
 """)
 
 add_docstr(torch._C.svd,
@@ -3102,7 +3074,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.tan(a)
     -0.7392
      0.2786
@@ -3130,7 +3102,7 @@ Example::
      0.4469
      1.3122
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.tanh(a)
     -0.5625
      0.2653
@@ -3155,7 +3127,7 @@ add_docstr(torch._C.tril,
 """
 tril(input, k=0, out=None) -> Tensor
 
-Returns the lower triangular part of the matrix (2D Tensor) :attr:`input`, 
+Returns the lower triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
 
 The lower triangular part of the matrix is defined as the elements on and below the diagonal.
@@ -3175,40 +3147,40 @@ Example::
 
     >>> a = torch.randn(3,3)
     >>> a
-    
+
      1.3225  1.7304  1.4573
     -0.3052 -0.3111 -0.1809
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.tril(a)
-    
+
      1.3225  0.0000  0.0000
     -0.3052 -0.3111  0.0000
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.tril(a, k=1)
-    
+
      1.3225  1.7304  0.0000
     -0.3052 -0.3111 -0.1809
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.tril(a, k=-1)
-    
+
      0.0000  0.0000  0.0000
     -0.3052  0.0000  0.0000
      1.2469  0.0064  0.0000
     [torch.FloatTensor of size 3x3]
-    
+
 """)
 
 add_docstr(torch._C.triu,
 """
 triu(input, k=0, out=None) -> Tensor
 
-Returns the upper triangular part of the matrix (2D Tensor) :attr:`input`, 
+Returns the upper triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
 
 The upper triangular part of the matrix is defined as the elements on and above the diagonal.
@@ -3228,33 +3200,33 @@ Example::
 
     >>> a = torch.randn(3,3)
     >>> a
-    
+
      1.3225  1.7304  1.4573
     -0.3052 -0.3111 -0.1809
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.triu(a)
-    
+
      1.3225  1.7304  1.4573
      0.0000 -0.3111 -0.1809
      0.0000  0.0000 -1.6250
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.triu(a, k=1)
-    
+
      0.0000  1.7304  1.4573
      0.0000  0.0000 -0.1809
      0.0000  0.0000  0.0000
     [torch.FloatTensor of size 3x3]
-    
+
     >>> torch.triu(a, k=-1)
-    
+
      1.3225  1.7304  1.4573
     -0.3052 -0.3111 -0.1809
      0.0000  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
-                        
+
 """)
 
 add_docstr(torch._C.trtrs,
@@ -3275,21 +3247,21 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    
+
     -0.4972
      1.3512
      0.1056
     -0.2650
     [torch.FloatTensor of size 4]
-    
+
     >>> torch.trunc(a)
-    
+
     -0
      1
      0
     -0
     [torch.FloatTensor of size 4]
-            
+
 """)
 
 add_docstr(torch._C.unfold,
@@ -3309,13 +3281,13 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    
+
     -1.3063  1.4182 -0.3061
     [torch.FloatTensor of size 1x3]
-    
+
     >>> torch.var(a)
     1.899527506513334
-        
+
 
 .. function:: var(input, dim, out=None) -> Tensor
 
@@ -3325,28 +3297,28 @@ THe output Tensor is of the same size as :attr:`input` except in the dimension :
 
 Args:
     input (Tensor): the input `Tensor`
-    dim (long): the dimension to reduce
+    dim (int): the dimension to reduce
     out (Tensor, optional): the result Tensor
 
 Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    
+
     -1.2738 -0.3058  0.1230 -1.9615
      0.8771 -0.5430 -0.9233  0.9879
      1.4107  0.0317 -0.6823  0.2255
     -1.3854  0.4953 -0.2160  0.2435
     [torch.FloatTensor of size 4x4]
-    
+
     >>> torch.var(a, 1)
-    
+
      0.8859
      0.9509
      0.7548
      0.6949
     [torch.FloatTensor of size 4x1]
-                
+
 """)
 
 add_docstr(torch._C.zeros,
