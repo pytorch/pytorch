@@ -29,8 +29,9 @@ class PackedFCOp final : public Operator<CPUContext> {
                   (!__apple_build_version__ &&                        \
                    ((__clang_major__ == 3 && __clang_minor__ < 7) ||  \
                     (__clang_major__ <= 2)))))
-    CAFFE_THROW("You are building without avx2, in which case you won't be "
-                "able to utilize the speedup of packed sgemm anyway.");
+    CAFFE_THROW(
+        "You are building without avx2, in which case you won't be "
+        "able to utilize the speedup of packed sgemm anyway.");
 #else
     OPERATOR_NEEDS_FEATURE(
         __builtin_cpu_supports("avx2") || operator_def.type() == "PackedFC",

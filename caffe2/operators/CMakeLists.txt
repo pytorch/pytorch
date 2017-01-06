@@ -1,4 +1,3 @@
-
 # ---[ GPU files
 # ------[ cuDNN
 file(GLOB tmp *_cudnn.cc)

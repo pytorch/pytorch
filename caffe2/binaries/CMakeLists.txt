@@ -1,4 +1,3 @@
-
 # ---[ Binaries
 set(Caffe2_CPU_BINARY_SRCS
     "convert_caffe_image_db.cc"
