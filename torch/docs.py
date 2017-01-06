@@ -994,11 +994,11 @@ diag(input, diagonal=0, out=None) -> Tensor
 - If :attr:`input` is a vector (1D Tensor), then returns a 2D square Tensor with the elements of :attr:`input` as the diagonal.
 - If :attr:`input` is a matrix (2D Tensor), then returns a 1D Tensor with the diagonal elements of :attr:`input`.
 
-The argument :attr:`diagional` controls which diagonal to consider.
+The argument :attr:`diagonal` controls which diagonal to consider.
 
-- :attr:`diagional` = 0, is the main diagonal.
-- :attr:`diagional` > 0, is above the main diagonal.
-- :attr:`diagional` < 0, is below the main diagonal.
+- :attr:`diagonal` = 0, is the main diagonal.
+- :attr:`diagonal` > 0, is above the main diagonal.
+- :attr:`diagonal` < 0, is below the main diagonal.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -1861,7 +1861,7 @@ Example::
 Returns the maximum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of each maximum value found.
 
-THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
+The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -1922,7 +1922,7 @@ Example::
 
 Returns the mean value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -1959,7 +1959,7 @@ Also returns the index location of the median value as a `LongTensor`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
 
-THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 .. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
 
@@ -2031,7 +2031,7 @@ Example::
 Returns the minimum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of each minimum value found.
 
-THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
+The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -2098,7 +2098,7 @@ Also returns the index location of the mode value as a `LongTensor`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
 
-THe output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 .. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
 
@@ -2150,7 +2150,7 @@ add_docstr(torch._C.mul,
 
 Multiplies each element of the input :attr:`input` with the scalar :attr:`value` and returns a new resulting tensor.
 
-:math:`out = tensor / value`
+:math:`out = tensor * value`
 
 Args:
     input (Tensor): the input `Tensor`
@@ -2182,7 +2182,7 @@ The shapes of :attr:`input` and :attr:`other` don't need to match. The total num
 
 .. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
 
-:math:`out_i = input_i / other_i`
+:math:`out_i = input_i * other_i`
 
 Args:
     input (Tensor): the first multiplicand `Tensor`
@@ -2571,7 +2571,7 @@ Example::
 
 Returns the product of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -2962,7 +2962,7 @@ Example::
 
 Returns the standard-deviation of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -3015,7 +3015,7 @@ Example::
 
 Returns the sum of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -3293,7 +3293,7 @@ Example::
 
 Returns the variance of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-THe output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
