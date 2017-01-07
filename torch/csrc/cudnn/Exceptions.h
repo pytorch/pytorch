@@ -3,6 +3,11 @@
 
 #include <cudnn.h>
 #include <stdexcept>
+#include <sstream>
+
+
+#define CHECK_ARG(cond) _CHECK_ARG(cond, #cond, __FILE__, __LINE__)
+
 
 namespace torch { namespace cudnn {
 
@@ -24,6 +29,14 @@ inline void CUDA_CHECK(cudaError_t error)
 {
   if (error) {
     throw std::runtime_error("CUDA error");
+  }
+}
+
+inline void _CHECK_ARG(bool cond, const char* code, const char* f, int line) {
+  if (!cond) {
+    std::stringstream ss;
+    ss << "CHECK_ARG(" << code << ") failed at " << f << ":" << line;
+    throw std::runtime_error(ss.str());
   }
 }
 

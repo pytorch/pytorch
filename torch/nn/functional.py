@@ -223,7 +223,7 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
         >>> #TODO
     """
     return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
-                                    ceil_mode, count_include_pad)(input)
+                                     ceil_mode, count_include_pad)(input)
 
 
 def avg_pool3d(input, kernel_size, stride=None):
@@ -358,8 +358,8 @@ def linear(input, weight, bias=None):
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    state = _functions.thnn.BatchNorm(running_mean, running_var,
-                                     training, momentum, eps)
+    state = _functions.batchnorm.BatchNorm(
+        running_mean, running_var, training, momentum, eps)
     return weight and state(input, weight, bias) or state(input)
 
 

@@ -1,41 +1,18 @@
 #include "Conv.h"
 
 #include "THC/THC.h"
+#include "Exceptions.h"
 
 #include <cudnn.h>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <stdint.h>
 #include <unordered_map>
 
 namespace torch { namespace cudnn {
 
 namespace {
-
-union Constant
-{
-  float f;
-  double d;
-  Constant(cudnnDataType_t dataType, double value) {
-    if (dataType == CUDNN_DATA_HALF || dataType == CUDNN_DATA_FLOAT) {
-      f = (float) value;
-    } else {
-      d = value;
-    }
-  }
-};
-
-#define CHECK_ARG(cond) _CHECK_ARG(cond, #cond, __FILE__, __LINE__)
-
-static inline void _CHECK_ARG(bool cond, const char* code, const char* f, int line) {
-  if (!cond) {
-    std::stringstream ss;
-    ss << "CHECK_ARG(" << code << ") failed at " << f << ":" << line;
-    throw std::runtime_error(ss.str());
-  }
-}
 
 void setTensorDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor, int groups)
 {
@@ -178,15 +155,6 @@ cudnnConvolutionBwdFilterAlgo_t chooseBackwardFilterAlgorithm(
   CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(handle, conv.idesc.desc,
       conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, pref, 0, &algo));
   return algo;
-}
-
-int dataSize(cudnnDataType_t dataType)
-{
-  switch (dataType) {
-    case CUDNN_DATA_HALF: return 2;
-    case CUDNN_DATA_FLOAT: return 4;
-    default: return 8;
-  }
 }
 
 void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx, int groups, int dim)

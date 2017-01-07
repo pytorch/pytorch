@@ -13,6 +13,7 @@ class CuDNNPlugin(CWrapPlugin):
         'cudnnHandle_t':    Template('$arg'),
         'Convolution*':     Template('(Convolution*)THPWrapper_get($arg)'),
         'bool':             Template('$arg == Py_True'),
+        'double':           Template('THPDoubleUtils_unpackReal($arg)'),
     }
 
     TYPE_CHECK = {
@@ -21,6 +22,7 @@ class CuDNNPlugin(CWrapPlugin):
         'int':              Template('THPUtils_checkLong($arg)'),
         'std::vector<int>': Template('THPUtils_checkIntTuple($arg)'),
         'bool':             Template('PyBool_Check($arg)'),
+        'double':           Template('THPDoubleUtils_checkReal($arg)'),
     }
 
     RETURN_WRAPPER = {
