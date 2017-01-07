@@ -241,6 +241,7 @@ if WITH_CUDNN:
     extra_link_args.append('-L' + CUDNN_LIB_DIR)
     main_sources += [
         "torch/csrc/cudnn/Module.cpp",
+        "torch/csrc/cudnn/BatchNorm.cpp",
         "torch/csrc/cudnn/Conv.cpp",
         "torch/csrc/cudnn/cuDNN.cpp",
         "torch/csrc/cudnn/Types.cpp",

@@ -69,6 +69,28 @@ struct ConvolutionDescriptor
   }
 };
 
+union Constant
+{
+  float f;
+  double d;
+  Constant(cudnnDataType_t dataType, double value) {
+    if (dataType == CUDNN_DATA_HALF || dataType == CUDNN_DATA_FLOAT) {
+      f = (float) value;
+    } else {
+      d = value;
+    }
+  }
+};
+
+inline int dataSize(cudnnDataType_t dataType)
+{
+  switch (dataType) {
+    case CUDNN_DATA_HALF: return 2;
+    case CUDNN_DATA_FLOAT: return 4;
+    default: return 8;
+  }
+}
+
 }}  // namespace
 
 #endif

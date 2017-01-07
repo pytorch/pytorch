@@ -1,6 +1,7 @@
 #include <cudnn.h>
 #include "Types.h"
 #include "Handles.h"
+#include "BatchNorm.h"
 #include "Conv.h"
 #include "torch/csrc/cuda/THCP.h"
 #include "CppWrapper.h"
@@ -106,4 +107,43 @@ extern THCState* state;
     - THTensor* grad_output
     - THTensor* grad_bias
     - Convolution* info
+]]
+
+[[
+  name: cudnn_batch_norm_forward
+  return: void
+  arguments:
+    - cudnnHandle_t handle
+    - cudnnDataType_t dataType
+    - THTensor* input
+    - THTensor* output
+    - THTensor* weight
+    - THTensor* bias
+    - THTensor* running_mean
+    - THTensor* running_var
+    - THTensor* save_mean
+    - THTensor* save_var
+    - bool training
+    - double exponential_average_factor
+    - double epsilon
+]]
+
+[[
+  name: cudnn_batch_norm_backward
+  return: void
+  arguments:
+    - cudnnHandle_t handle
+    - cudnnDataType_t dataType
+    - THTensor* input
+    - THTensor* grad_output
+    - THTensor* grad_input
+    - THTensor* grad_weight
+    - THTensor* grad_bias
+    - THTensor* weight
+    - THTensor* running_mean
+    - THTensor* running_var
+    - THTensor* save_mean
+    - THTensor* save_var
+    - bool training
+    - double epsilon
 ]]
