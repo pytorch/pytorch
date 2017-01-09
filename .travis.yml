@@ -6,6 +6,9 @@ matrix:
   include:
   - os: linux
     compiler: gcc
+    env: COMPILER=g++
+  - os: linux
+    compiler: gcc
     addons:
       apt:
         sources:
