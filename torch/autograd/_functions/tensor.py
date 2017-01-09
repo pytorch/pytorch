@@ -360,7 +360,7 @@ class Squeeze(Function):
 
     def backward(self, grad_output):
         assert grad_output.numel() == self.numel
-        return grad_output.new(grad_output).resize_(self.input_size)
+        return grad_output.contiguous().view(self.input_size)
 
 
 class Unsqueeze(Function):
