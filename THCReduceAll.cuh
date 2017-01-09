@@ -137,6 +137,11 @@ inline ptrdiff_t getTwoPassBlocks(THCState* state, ptrdiff_t elements) {
     THCState_getCurrentDeviceScratchSpaceSize(state) / sizeof(AccT);
   THAssert(scratchSpace > 0);
 
+  // Limit to 1024 due to dimensionality constraint
+  if (scratchSpace > 1024) {
+    scratchSpace = 1024;
+  }
+
   if (numBlocks > scratchSpace) {
     numBlocks = scratchSpace;
   }
