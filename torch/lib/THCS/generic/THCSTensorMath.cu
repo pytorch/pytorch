@@ -8,6 +8,7 @@
 THCudaLongTensor *THCSTensor_(toCSR)(THCState *state, long const *indices, long dim, long nnz) {
   THError("WARNING: Sparse Cuda Tensor op toCSR is not implemented");
   // TODO hook up with cusparse
+  return NULL;
 }
 
 void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real alpha, THCSTensor *sparse, THCTensor *dense) {
@@ -29,4 +30,3 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 #undef COL_PTR2
 
 #endif
-
