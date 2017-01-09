@@ -1,7 +1,6 @@
 #include "THCGeneral.h"
 #include "TH.h"
 #include "THCAllocator.h"
-#include "THCBlas.h"
 #include "THCCachingHostAllocator.h"
 #include "THCStream.h"
 #include "THCThreadLocal.h"
