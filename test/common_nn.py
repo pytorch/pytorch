@@ -93,52 +93,6 @@ module_tests = [
         reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand_as(i))
     ),
     dict(
-        module_name='BatchNorm1d',
-        constructor_args=(10,),
-        input_size=(4, 10),
-        desc='affine'
-    ),
-    dict(
-        module_name='BatchNorm1d',
-        constructor_args=(10, 1e-3, 0.3, False),
-        input_size=(4, 10),
-        desc='not_affine'
-    ),
-    dict(
-        module_name='BatchNorm2d',
-        constructor_args=(3,),
-        input_size=(2, 3, 6, 6),
-    ),
-    dict(
-        module_name='BatchNorm2d',
-        constructor_args=(3, 1e-3, 0.8),
-        input_size=(2, 3, 6, 6),
-        desc='momentum',
-    ),
-    dict(
-        module_name='BatchNorm2d',
-        constructor_args=(3, 1e-3, 0.8, False),
-        input_size=(2, 3, 6, 6),
-        desc='no_affine',
-    ),
-    dict(
-        module_name='BatchNorm3d',
-        constructor_args=(3,),
-        input_size=(2, 3, 4, 4, 4)
-    ),
-    dict(
-        module_name='BatchNorm3d',
-        constructor_args=(3, 1e-3, 0.7),
-        input_size=(2, 3, 4, 4, 4),
-        desc='momentum'
-    ),
-    dict(
-        module_name='BatchNorm3d',
-        constructor_args=(3, 1e-3, 0.7, False),
-        input_size=(2, 3, 4, 4, 4),
-        desc='no_affine'
-    ),
-    dict(
         module_name='LogSoftmax',
         input_size=(10, 20),
         reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()

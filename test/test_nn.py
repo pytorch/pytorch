@@ -1107,6 +1107,67 @@ def add_test(test):
 
 new_module_tests = [
     dict(
+        module_name='BatchNorm1d',
+        constructor_args=(10,),
+        input_size=(4, 10),
+        cudnn=True,
+        desc='affine'
+    ),
+    dict(
+        module_name='BatchNorm1d',
+        constructor_args=(5,),
+        input_size=(4, 5, 3),
+        cudnn=True,
+        desc='3d_input'
+    ),
+    dict(
+        module_name='BatchNorm1d',
+        constructor_args=(10, 1e-3, 0.3, False),
+        input_size=(4, 10),
+        cudnn=True,
+        desc='not_affine'
+    ),
+    dict(
+        module_name='BatchNorm2d',
+        constructor_args=(3,),
+        input_size=(2, 3, 6, 6),
+        cudnn=True,
+    ),
+    dict(
+        module_name='BatchNorm2d',
+        constructor_args=(3, 1e-3, 0.8),
+        input_size=(2, 3, 6, 6),
+        cudnn=True,
+        desc='momentum',
+    ),
+    dict(
+        module_name='BatchNorm2d',
+        constructor_args=(3, 1e-3, 0.8, False),
+        input_size=(2, 3, 6, 6),
+        cudnn=True,
+        desc='no_affine',
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3,),
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3, 1e-3, 0.7),
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+        desc='momentum'
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3, 1e-3, 0.7, False),
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+        desc='no_affine'
+    ),
+    dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
         input_size=(2, 4, 10),

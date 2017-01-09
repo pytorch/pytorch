@@ -27,6 +27,7 @@ void setInputDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoid
 void setScaleDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor, int nDim)
 {
   CHECK_ARG(tensor->nDimension == 1);
+  CHECK_ARG(tensor->stride[0] == 1);  // scale must be contiguous
   int size = (int) tensor->size[0];
   int stride = (int) tensor->stride[0];
   int inputSize[5] = { 1, size, 1, 1, 1 };
@@ -40,6 +41,15 @@ void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor)
   char* ptr = (char*) tensor->storage->data;
   ptr += elementSize * tensor->storageOffset;
   return ptr;
+}
+
+cudnnDataType_t scaleDataType(cudnnDataType_t dataType)
+{
+  // half inputs still use float data type for scale descriptor
+  if (dataType == CUDNN_DATA_HALF) {
+    return CUDNN_DATA_FLOAT;
+  }
+  return dataType;
 }
 
 }  // namespace
@@ -63,7 +73,7 @@ void cudnn_batch_norm_forward(
   TensorDescriptor wdesc;  // descriptor for weight, bias, running_mean, etc.
   setInputDescriptor(idesc, dataType, input);
   setInputDescriptor(odesc, dataType, output);
-  setScaleDescriptor(wdesc, dataType, running_mean, input->nDimension);
+  setScaleDescriptor(wdesc, scaleDataType(dataType), running_mean, input->nDimension);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -115,7 +125,7 @@ void cudnn_batch_norm_backward(
   setInputDescriptor(idesc, dataType, input);
   setInputDescriptor(odesc, dataType, grad_output);
   setInputDescriptor(gdesc, dataType, grad_input);
-  setScaleDescriptor(wdesc, dataType, weight, input->nDimension);
+  setScaleDescriptor(wdesc, scaleDataType(dataType), weight, input->nDimension);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
