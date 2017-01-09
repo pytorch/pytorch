@@ -16,9 +16,11 @@ class BatchNorm(Function):
     def forward(self, input, weight=None, bias=None):
         self.save_for_backward(input, weight, bias)
 
+        # don't use cuDNN for half inputs because cuDNN requires the weight and
+        # bias tensors to be floats, unlike THCUNN which requires half tensors.
         self.use_cudnn = (cudnn.is_acceptable(input)
-                          and weight is not None and bias is not None)
-        self.use_cudnn = False
+                          and weight is not None and bias is not None
+                          and not isinstance(input, torch.cuda.HalfTensor))
 
         # temporary buffers used in forward and backward
         num_features = input.size(1)
