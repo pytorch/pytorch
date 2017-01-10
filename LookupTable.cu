@@ -1,6 +1,7 @@
 #include "THCUNN.h"
 #include "common.h"
 
+#include "THCThrustAllocator.cuh"
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>

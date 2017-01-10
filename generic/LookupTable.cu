@@ -64,6 +64,7 @@ void THNN_(LookupTable_accGradParameters)(
     THCIndexTensor_(resizeAs)(state, count, input);
     count_data = THCIndexTensor_(data)(state, count);
 
+    THCThrustAllocator thrustAlloc(state);
     thrust::device_ptr<THCIndex_t> sorted_ptr(sorted_data);
     thrust::device_ptr<THCIndex_t> count_ptr(count_data);
 
@@ -72,7 +73,7 @@ void THNN_(LookupTable_accGradParameters)(
     //  count: 1 1 2 3 1 2 1 1 2
     thrust::inclusive_scan_by_key(
 #if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sorted_ptr,
       sorted_ptr + numel,
@@ -85,7 +86,7 @@ void THNN_(LookupTable_accGradParameters)(
     //  count: 1 3 3 3 2 2 1 2 2
     thrust::inclusive_scan_by_key(
 #if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       thrust::make_reverse_iterator(sorted_ptr + numel),
       thrust::make_reverse_iterator(sorted_ptr),
