@@ -229,9 +229,10 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
   thrust::device_ptr<real> src_data(THCTensor_(data)(state, src));
 
+  THCThrustAllocator thrustAlloc(state);
   accreal result = thrust::inner_product(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     self_data, self_data+size, src_data, ScalarConvert<int, accreal>::to(0),
     thrust::plus<accreal>(),

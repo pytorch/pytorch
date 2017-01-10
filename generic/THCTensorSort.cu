@@ -209,6 +209,8 @@ void sortViaThrust(THCState* state,
   THCTensor_(free)(state, trKeys);
   THCudaLongTensor_free(state, trIndices);
 
+  THCThrustAllocator thrustAlloc(state);
+
   thrust::device_ptr<real> keyIter(THCTensor_(data)(state, trContigKey));
 
   // Since we are composing a global index across all segments rather
@@ -223,7 +225,7 @@ void sortViaThrust(THCState* state,
 
   thrust::copy(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     countIter, countIter + totalElements, indexIter);
 
@@ -232,13 +234,13 @@ void sortViaThrust(THCState* state,
   if (dir) {
     thrust::stable_sort_by_key(
 #if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       keyIter, keyIter + totalElements, indexIter, ThrustGTOp<real>());
   } else {
     thrust::stable_sort_by_key(
 #if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       keyIter, keyIter + totalElements, indexIter, ThrustLTOp<real>());
   }
@@ -249,7 +251,7 @@ void sortViaThrust(THCState* state,
   // per each slice
   thrust::stable_sort_by_key(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements, keyIter,
     SliceComp(sliceSize));
@@ -258,7 +260,7 @@ void sortViaThrust(THCState* state,
   // Lua index
   thrust::for_each(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements,
     GlobalIndexToPerSliceIndex(sliceSize));
