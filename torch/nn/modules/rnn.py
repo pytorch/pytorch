@@ -69,6 +69,21 @@ class RNNBase(Module):
         )
         return func(input, self.all_weights, hx)
 
+    def __repr__(self):
+        s = '{name}({input_size}, {hidden_size}'
+        if self.num_layers != 1:
+            s += ', num_layers={num_layers}'
+        if self.bias is not True:
+            s += ', bias={bias}'
+        if self.batch_first is not False:
+            s += ', batch_first={batch_first}'
+        if self.dropout != 0:
+            s += ', dropout={dropout}'
+        if self.bidirectional is not False:
+            s += ', bidirectional={bidirectional}'
+        s += ')'
+        return s.format(name=self.__class__.__name__, **self.__dict__)
+
 
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with tanh or ReLU non-linearity to an input sequence.
@@ -76,9 +91,9 @@ class RNN(RNNBase):
 
     For each element in the input sequence, each layer computes the following
     function:
-    
+
     .. math::
-    
+
         h_t = \tanh(w_{ih} * x_t + b_{ih}  +  w_{hh} * h_{(t-1)} + b_{hh})
 
     where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is the hidden
@@ -104,9 +119,9 @@ class RNN(RNNBase):
         - `h_n`: A (num_layers x batch x hidden_size) tensor containing the hidden state for k=seq_len
 
     Attributes:
-        weight_ih_l[k]: the learnable input-hidden weights of the k-th layer, 
+        weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
                         of shape `(input_size x hidden_size)`
-        weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer, 
+        weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer,
                         of shape `(hidden_size x hidden_size)`
         bias_ih_l[k]: the learnable input-hidden bias of the k-th layer, of shape `(hidden_size)`
         bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer, of shape `(hidden_size)`
@@ -155,7 +170,7 @@ class LSTM(RNNBase):
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell state at time `t`,
     :math:`x_t` is the hidden state of the previous layer at time `t` or :math:`input_t` for the first layer,
-    and :math:`i_t`, :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, 
+    and :math:`i_t`, :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget,
     cell, and out gates, respectively.
 
     Args:
@@ -249,7 +264,19 @@ class GRU(RNNBase):
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
 
-class RNNCell(Module):
+class RNNCellBase(Module):
+
+    def __repr__(self):
+        s = '{name}({input_size}, {hidden_size}'
+        if 'bias' in self.__dict__ and self.bias != True:
+            s += ', bias={bias}}'
+        if 'nonlinearity' in self.__dict__ and self.nonlinearity != "tanh":
+            s += ', nonlinearity={nonlinearity}'
+        s += ')'
+        return s.format(name=self.__class__.__name__, **self.__dict__)
+
+
+class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
 
     .. math::
@@ -325,7 +352,7 @@ class RNNCell(Module):
         )
 
 
-class LSTMCell(Module):
+class LSTMCell(RNNCellBase):
     r"""A long short-term memory (LSTM) cell.
 
     .. math::
@@ -399,7 +426,7 @@ class LSTMCell(Module):
         )
 
 
-class GRUCell(Module):
+class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
     .. math::
 
