@@ -247,7 +247,7 @@ struct WithoutBroadcast {
 };
 
 // Gradient operator for elementwise division.
-template <typename T, class Context>
+template <class Context>
 class DivGradientOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(DivGradientOp);
@@ -266,6 +266,28 @@ class SumReduceLikeOp final : public Operator<Context> {
 
   bool RunOnDevice() override;
 };
+
+template <class Context>
+bool DivGradientOp<Context>::RunOnDevice() {
+  auto& Y = Input(0);
+  auto& Z = Input(1);
+  auto& dZ = Input(2);
+  auto* dX = Output(0);
+  auto* dY = Output(1);
+  DCHECK_GT(Y.size(), 0);
+  DCHECK_GT(Z.size(), 0);
+  dX->ResizeLike(Y);
+  dY->ResizeLike(Y);
+
+  const float* Ydata = Y.template data<float>();
+  const float* Zdata = Z.template data<float>();
+  const float* dZdata = dZ.template data<float>();
+  float* dXdata = dX->template mutable_data<float>();
+  float* dYdata = dY->template mutable_data<float>();
+
+  ElementWiseDivide(context_, Y.size(), dXdata, dYdata, dZdata, Ydata, Zdata);
+  return true;
+}
 
 } // namespace caffe2
 
