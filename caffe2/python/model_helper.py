@@ -292,6 +292,7 @@ class ModelHelperBase(object):
             "CopyCPUToGPU",
             "DequeueBlobs",
             "EnsureCPUOutput",
+            "Flatten",
             "FlattenToVec",
             "LabelCrossEntropy",
             "LearningRate",

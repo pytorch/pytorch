@@ -1,3 +1,4 @@
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -13,12 +14,14 @@ class ResNetBuilder():
     '''
     Helper class for constructing residual blocks.
     '''
-    def __init__(self, model, prev_blob, is_test):
+
+    def __init__(self, model, prev_blob, no_bias, is_test):
         self.model = model
         self.comp_count = 0
         self.comp_idx = 0
         self.prev_blob = prev_blob
         self.is_test = is_test
+        self.no_bias = 1 if no_bias else 0
 
     def add_conv(self, in_filters, out_filters, kernel, stride=1, pad=0):
         self.comp_idx += 1
@@ -30,7 +33,8 @@ class ResNetBuilder():
             weight_init=("MSRAFill", {}),
             kernel=kernel,
             stride=stride,
-            pad=pad
+            pad=pad,
+            no_bias=self.no_bias,
         )
         return self.prev_blob
 
@@ -107,7 +111,8 @@ class ResNetBuilder():
                 output_filters,
                 weight_init=("MSRAFill", {}),
                 kernel=1,
-                stride=(1 if down_sampling is False else 2)
+                stride=(1 if down_sampling is False else 2),
+                no_bias=self.no_bias,
             )
             if spatial_batch_norm:
                 shortcut_blob = self.model.SpatialBN(
@@ -165,6 +170,7 @@ class ResNetBuilder():
                 weight_init=("MSRAFill", {}),
                 kernel=1,
                 stride=(1 if down_sampling is False else 2),
+                no_bias=self.no_bias,
             )
             if spatial_batch_norm:
                 shortcut_blob = self.model.SpatialBN(
@@ -186,16 +192,25 @@ class ResNetBuilder():
         self.comp_count += 1
 
 
-def create_resnet50(model, data, num_input_channels,
-    num_labels, label=None, is_test=False):
+def create_resnet50(
+    model,
+    data,
+    num_input_channels,
+    num_labels,
+    label=None,
+    is_test=False,
+    no_loss=False,
+    no_bias=0,
+):
     # conv1 + maxpool
-    model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}), kernel=7, stride=2, pad=3)
+    model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}), kernel=7, stride=2, pad=3, no_bias=no_bias)
+
     model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3, is_test=is_test)
     model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
     model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
 
     # Residual blocks...
-    builder = ResNetBuilder(model, 'pool1', is_test=is_test)
+    builder = ResNetBuilder(model, 'pool1', no_bias=no_bias, is_test=is_test)
 
     # conv2_x (ref Table 1 in He et al. (2015))
     builder.add_bottleneck(64, 64, 256)
@@ -218,22 +233,28 @@ def create_resnet50(model, data, num_input_channels,
     builder.add_bottleneck(2048, 512, 2048)
 
     # Final layers
-    model.AveragePool(builder.prev_blob, 'final_avg', kernel=7, stride=1)
+    final_avg = model.AveragePool(
+        builder.prev_blob, 'final_avg', kernel=7, stride=1,
+    )
 
     # Final dimension of the "image" is reduced to 7x7
-    model.FC('final_avg', 'pred', 2048, num_labels)
+    last_out = model.FC(final_avg, 'last_out', 2048, num_labels)
+
+    if no_loss:
+        return last_out
 
     # If we create model for training, use softmax-with-loss
     if (label is not None):
         (softmax, loss) = model.SoftmaxWithLoss(
-            ["pred", label],
+            [last_out, label],
             ["softmax", "loss"],
         )
 
         return (softmax, loss)
     else:
         # For inference, we just return softmax
-        return model.Softmax("pred", "softmax")
+        return model.Softmax(last_out, "softmax")
+
 
 def create_resnet_32x32(
     model, data, num_input_channels, num_groups, num_labels, is_test=False
@@ -263,6 +284,6 @@ def create_resnet_32x32(
 
     # Final layers
     model.AveragePool(builder.prev_blob, 'final_avg', kernel=8, stride=1)
-    model.FC('final_avg', 'pred', 64, num_labels)
-    softmax = model.Softmax('pred', 'softmax')
+    model.FC('final_avg', 'last_out', 64, num_labels)
+    softmax = model.Softmax('last_out', 'softmax')
     return softmax
