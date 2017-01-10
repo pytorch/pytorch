@@ -167,6 +167,16 @@ ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   }
 }
 
+ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
+  for (auto& arg : netdef.arg()) {
+    CAFFE_ENFORCE(
+        arg_map_.count(arg.name()) == 0,
+        "Duplicated argument name found in net def: ",
+        ProtoDebugString(netdef));
+    arg_map_[arg.name()] = &arg;
+  }
+}
+
 bool ArgumentHelper::HasArgument(const string& name) const {
   return arg_map_.count(name);
 }

@@ -130,7 +130,9 @@ class DAGNetBase : public NetBase {
   vector<int> initial_frontier_;
   SimpleQueue<int> job_queue_;
   std::vector<std::thread> workers_;
+  int num_workers_;
   int remaining_ops_;
+
   bool success_;
   std::mutex remaining_ops_mutex_;
   std::condition_variable cv_;
