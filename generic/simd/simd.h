@@ -53,7 +53,7 @@ enum SIMDExtensions
 };
 
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__NEON__)
 
  #if defined(__NEON__)
 
