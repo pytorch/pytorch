@@ -39,17 +39,23 @@ def simple_add_ops(self, net):
 _simple_operators = ['Softmax', 'Relu', 'Sigmoid', 'Tanh']
 _first_field_schema_operators = ['Add', 'Sum']
 
+# We need to store refs for all created types, to make sure that they won't be
+# GCed before we actually register them.
+_known_layers = []
+
 for operator in _simple_operators:
     # Generate class instance with name 'operator', that is doing going to use
     # simple_init and simple_add_ops implementations for __init__ and add_ops
     # calls. It'll also get automatically registered in the registry.
-    type(
-        str(operator),
-        (ModelLayer,),
-        {'__init__': simple_init,
-         'add_ops': simple_add_ops,
-         'operator': operator
-         }
+    _known_layers.append(
+        type(
+            str(operator),
+            (ModelLayer,),
+            {'__init__': simple_init,
+             'add_ops': simple_add_ops,
+             'operator': operator
+             }
+        )
     )
 
 for operator in _first_field_schema_operators:
@@ -57,11 +63,13 @@ for operator in _first_field_schema_operators:
     # first_field_schema_init and simple_add_ops implementations for __init__
     # and add_ops calls. It'll also get automatically registered in the
     # registry.
-    type(
-        str(operator),
-        (ModelLayer,),
-        {'__init__': first_field_schema_init,
-         'add_ops': simple_add_ops,
-         'operator': operator
-         }
+    _known_layers.append(
+        type(
+            str(operator),
+            (ModelLayer,),
+            {'__init__': first_field_schema_init,
+             'add_ops': simple_add_ops,
+             'operator': operator
+             }
+        )
     )
