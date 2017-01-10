@@ -203,6 +203,7 @@ def Train(args):
         forward_pass_builder_fun=create_resnet50_model_ops,
         param_update_builder_fun=add_parameter_update_ops,
         devices=gpus,
+        optimize_gradient_memory=True,
     )
 
     # Add test model, if specified

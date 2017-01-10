@@ -165,6 +165,7 @@ inline bool HasArgument(const OperatorDef& def, const string& name) {
 class ArgumentHelper {
  public:
   explicit ArgumentHelper(const OperatorDef& def);
+  explicit ArgumentHelper(const NetDef& netdef);
   bool HasArgument(const string& name) const;
 
   template <typename T>

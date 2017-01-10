@@ -5,7 +5,7 @@ from __future__ import print_function
 from collections import OrderedDict
 import logging
 
-from caffe2.python import model_helper, dyndep, scope, workspace, core
+from caffe2.python import model_helper, dyndep, scope, workspace, core, memonger
 from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
@@ -23,6 +23,7 @@ def Parallelize_GPU(
     rendezvous=None,
     net_type='dag',
     broadcast_computed_params=True,
+    optimize_gradient_memory=False,
 ):
     '''
     Function to create a model that can run on many GPUs.
@@ -136,6 +137,12 @@ def Parallelize_GPU(
 
     _AnalyzeOperators(model_helper_obj)
 
+    # Configure dagnet to run with only one worker on the first iteration,
+    # to prevent concurrency problems with allocs and nccl.
+    arg = model_helper_obj.Proto().arg.add()
+    arg.name = "first_iter_only_one_worker"
+    arg.i = 1
+
     # Add initial parameter syncs
     log.info("Add initial parameter sync")
     if (rendezvous is not None):
@@ -148,6 +155,9 @@ def Parallelize_GPU(
         )
 
     _SyncParams(devices, model_helper_obj, model_helper_obj.param_init_net)
+
+    if optimize_gradient_memory:
+        _OptimizeGradientMemory(model_helper_obj, losses_by_gpu, devices)
 
 
 def _AddGradientOperators(devices, model, losses_by_gpu):
@@ -535,3 +545,14 @@ def _GroupByDevice(devices, params):
         assert(ps[devices[0]] == params[j])
 
     return grouped
+
+
+def _OptimizeGradientMemory(model, losses_by_gpu, devices):
+    for device in devices:
+        namescope = "gpu_{}/".format(device)
+        model.net._net = memonger.share_grad_blobs(
+            model.net,
+            losses_by_gpu[device],
+            set(model.param_to_grad.values()),
+            namescope,
+        )

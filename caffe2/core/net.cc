@@ -8,6 +8,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/utils/proto_utils.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_disable_chaining,
@@ -489,7 +490,22 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
                  << "will be executed sequentially. Did you forget to set "
                  << "num_workers in the NetDef?";
   }
-  for (int i = 0; i < num_workers; ++i) {
+  num_workers_ = num_workers;
+
+  int num_workers_to_start = num_workers_;
+
+  // Option to start only one thread for first iteration. This hack is
+  // needed to prevent deadlocks happening with CUDA and concurrent allocations
+  // that operators do when run the first time.
+  ArgumentHelper arg_helper(net_def);
+  if (arg_helper.HasArgument("first_iter_only_one_worker")) {
+    if (arg_helper.GetSingleArgument<int64_t>(
+            "first_iter_only_one_worker", 0)) {
+      num_workers_to_start = 1;
+    }
+  }
+
+  for (int i = 0; i < num_workers_to_start; ++i) {
     VLOG(1) << "Start worker #" << i;
     workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
   }
@@ -536,6 +552,13 @@ bool DAGNetBase::Run() {
         op.operator_->def().type(),
         ") has some runtime parents left.");
   }
+
+  // Ensure the number of workers matches the defined
+  for (auto i = workers_.size(); i < num_workers_; ++i) {
+    VLOG(1) << "Start worker #" << i;
+    workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
+  }
+
   // If the above while loop finished, we know that the current run finished.
   return success_;
 }
