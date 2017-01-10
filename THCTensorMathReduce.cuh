@@ -6,6 +6,7 @@
 #include "THCNumerics.cuh"
 #include "THCReduce.cuh"
 #include "THCReduceAll.cuh"
+#include "THCThrustAllocator.cuh"
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/transform_reduce.h>

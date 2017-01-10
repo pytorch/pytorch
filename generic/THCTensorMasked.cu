@@ -68,6 +68,7 @@ THCTensor_(maskedCopy)(THCState* state,
   THCudaLongTensor_resize(state, maskPrefixSum, maskSizes, NULL);
   THLongStorage_free(maskSizes);
 
+  THCThrustAllocator thrustAlloc(state);
   thrust::device_ptr<long>
     maskData(THCudaLongTensor_data(state, maskLong));
   thrust::device_ptr<long>
@@ -75,7 +76,7 @@ THCTensor_(maskedCopy)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -142,6 +143,7 @@ THCTensor_(maskedSelect)(THCState* state,
   THCudaLongTensor_resize(state, maskPrefixSum, maskSizes, NULL);
   THLongStorage_free(maskSizes);
 
+  THCThrustAllocator thrustAlloc(state);
   thrust::device_ptr<long>
     maskData(THCudaLongTensor_data(state, maskLong));
   thrust::device_ptr<long>
@@ -149,7 +151,7 @@ THCTensor_(maskedSelect)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),

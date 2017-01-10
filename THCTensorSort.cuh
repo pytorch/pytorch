@@ -6,6 +6,7 @@
 #include "THCTensorCopy.h"
 #include "THCTensorTypeUtils.cuh"
 
+#include "THCThrustAllocator.cuh"
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #if CUDA_VERSION >= 7000

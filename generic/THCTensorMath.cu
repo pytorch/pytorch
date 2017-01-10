@@ -173,8 +173,9 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   THAssert(THCTensor_(checkGPU)(state, 1, self  ));
   THAssert(THCudaLongTensor_checkGPU(state, 1, tensor));
 
-  using namespace thrust::placeholders;
 
+  using namespace thrust::placeholders;
+  THCThrustAllocator thrustAlloc(state);
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
@@ -198,7 +199,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
   strided_range<Iter>::iterator dend = thrust::copy_if(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(stream),
+    thrust::cuda::par(thrustAlloc).on(stream),
 #endif
     idxfirst,
     idxlast,
@@ -215,7 +216,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
                                    tensor_data+N*num_dim, num_dim);
     thrust::transform(
 #if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(stream),
+      thrust::cuda::par(thrustAlloc).on(stream),
 #endif
       strided_tensor.begin(),
       strided_tensor.end(),

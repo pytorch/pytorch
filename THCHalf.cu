@@ -1,4 +1,5 @@
 #include "THCHalf.h"
+#include "THCThrustAllocator.cuh"
 #include <thrust/transform.h>
 #include <thrust/execution_policy.h>
 
@@ -11,9 +12,10 @@ struct __float2halfOp {
 };
 
 void THCFloat2Half(THCState *state, half *out, float *in, ptrdiff_t len) {
+  THCThrustAllocator thrustAlloc(state);
   thrust::transform(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
 #endif
@@ -21,9 +23,10 @@ void THCFloat2Half(THCState *state, half *out, float *in, ptrdiff_t len) {
 }
 
 void THCHalf2Float(THCState *state, float *out, half *in, ptrdiff_t len) {
+  THCThrustAllocator thrustAlloc(state);
   thrust::transform(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
 #endif

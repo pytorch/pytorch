@@ -5,6 +5,7 @@
 #include "THCTensorCopy.h"
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
+#include "THCThrustAllocator.cuh"
 
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>
