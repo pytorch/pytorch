@@ -154,31 +154,21 @@ REGISTER_CPU_OPERATOR(
     Not,
     UnaryElementwiseOp<BoolTypes, CPUContext, NotFunctor>);
 
-template <>
-bool DivGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& Z = Input(1);
-  auto& dZ = Input(2);
-  auto* dX = Output(0);
-  auto* dY = Output(1);
-  DCHECK_GT(Y.size(), 0);
-  DCHECK_GT(Z.size(), 0);
-  dX->ResizeLike(Y);
-  dY->ResizeLike(Y);
-
-  const float* Ydata = Y.data<float>();
-  const float* Zdata = Z.data<float>();
-  const float* dZdata = dZ.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  float* dYdata = dY->mutable_data<float>();
+void ElementWiseDivide(
+    CPUContext& context,
+    const int n,
+    float* dXdata,
+    float* dYdata,
+    const float* dZdata,
+    const float* Ydata,
+    const float* Zdata) {
   CAFFE2_OMP_PARALLEL_FOR()
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < n; ++i) {
     dXdata[i] = dZdata[i] / Ydata[i];
     dYdata[i] = - (dZdata[i] * Zdata[i]) / Ydata[i];
   }
-  return true;
 }
 
-REGISTER_CPU_OPERATOR(DivGradient, DivGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(DivGradient, DivGradientOp<CPUContext>);
 
 }  // namespace caffe2

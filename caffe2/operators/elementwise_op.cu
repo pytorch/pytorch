@@ -109,4 +109,24 @@ struct CudaNotFunctor {
 };
 REGISTER_CUDA_OPERATOR(Not, UnaryElementwiseOp<BoolTypes, CUDAContext, CudaNotFunctor>);
 
+
+__global__ void DivKernel(const int n, float *dXdata, float *dYdata,
+                          const float *dZdata, const float *Ydata,
+                          const float *Zdata) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    dXdata[i] = dZdata[i] / Ydata[i];
+    dYdata[i] = - (dZdata[i] * Zdata[i]) / Ydata[i];
+  }
+}
+
+
+void ElementWiseDivide(CUDAContext &context, const int n, float *dXdata, float *dYdata,
+                            const float *dZdata, const float *Ydata,
+                            const float *Zdata) {
+  DivKernel<<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS, 0,
+              context.cuda_stream()>>>(n, dXdata, dYdata, dZdata, Ydata, Zdata);
+}
+
+REGISTER_CUDA_OPERATOR(DivGradient, DivGradientOp<CUDAContext>);
+
 }  // namespace caffe2
