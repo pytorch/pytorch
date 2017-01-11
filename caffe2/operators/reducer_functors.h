@@ -320,18 +320,10 @@ struct MaxRangeReducerDef {
 // Incremental reducers: consume elements one by one
 ////////////////////////////////////////////////////////////////////////////////
 
-// Put forward and backward in the same template?
-template <typename T, class Context>
-class SumReducer;
-template <typename T, class Context>
-class SumReducerGradient;
-
-template <typename T>
-class SumReducer<T, CPUContext> {
+// Base implementation, everything can be overwritten
+class BaseReducer {
  public:
   static constexpr int kInputCount = 1;
-
-  using FixedDispatch = FixedValues<1>;
 
   struct Meta {
     TIndex block_size;
@@ -351,25 +343,11 @@ class SumReducer<T, CPUContext> {
     }
   };
 
-  SumReducer(const Meta& meta, T* out, CPUContext* context) : out_(out) {
-    // add a wrapper in Context for it
-    memset(out, 0, sizeof(T) * meta.block_size);
-  }
-  template <int FixedSize>
-  void
-  process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::Axpy<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
-  }
-
   template <int FixedSize>
   void finish(const Meta& meta, CPUContext* context) {}
-
- private:
-  T* out_;
 };
 
-template <typename T, class Context>
-class SumReducerGradient {
+class BaseReducerGradient {
  public:
   // which of the original inputs are required for gradient computation
   static constexpr std::array<int, 0> originalInputs() {
@@ -379,8 +357,6 @@ class SumReducerGradient {
   static constexpr bool computeLength() {
     return false;
   }
-
-  using FixedDispatch = FixedValues<1>;
 
   struct Meta {
     TIndex block_size;
@@ -402,6 +378,37 @@ class SumReducerGradient {
           output_shape->end(), block_shape.begin(), block_shape.end());
     }
   };
+};
+
+// Put forward and backward in the same template?
+template <typename T, class Context>
+class SumReducer;
+template <typename T, class Context>
+class SumReducerGradient;
+
+template <typename T>
+class SumReducer<T, CPUContext> : public BaseReducer {
+ public:
+  using FixedDispatch = FixedValues<1>;
+
+  SumReducer(const Meta& meta, T* out, CPUContext* context) : out_(out) {
+    // add a wrapper in Context for it
+    memset(out, 0, sizeof(T) * meta.block_size);
+  }
+  template <int FixedSize>
+  void
+  process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
+    math::Axpy<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
+  }
+
+ private:
+  T* out_;
+};
+
+template <typename T, class Context>
+class SumReducerGradient : public BaseReducerGradient {
+ public:
+  using FixedDispatch = FixedValues<1>;
 
   SumReducerGradient(const Meta& meta, const T* s_grad, CPUContext* context)
       : s_grad_(s_grad) {}
@@ -444,15 +451,13 @@ template <typename T, class Context>
 class WeightedSumReducerGradient;
 
 template <typename T>
-class WeightedSumReducer<T, CPUContext> {
+class WeightedSumReducer<T, CPUContext> : public BaseReducer {
  public:
   static constexpr int kInputCount = 2;
 
   using FixedDispatch = FixedValues<1>;
 
-  struct Meta {
-    TIndex block_size;
-    vector<TIndex> block_shape;
+  struct Meta : BaseReducer::Meta {
     const T* scalars;
 
     void
@@ -463,15 +468,7 @@ class WeightedSumReducer<T, CPUContext> {
         scalars = value.data<T>();
         return;
       }
-      DCHECK_EQ(0, input);
-      auto& dims = value.dims();
-      block_shape.assign(dims.begin() + skip_dims, dims.end());
-      block_size = value.size_from_dim(skip_dims);
-    }
-
-    void appendOutputShape(vector<TIndex>* output_shape) {
-      output_shape->insert(
-          output_shape->end(), block_shape.begin(), block_shape.end());
+      BaseReducer::Meta::observeInput(input, value, skip_dims);
     }
   };
 
@@ -487,37 +484,24 @@ class WeightedSumReducer<T, CPUContext> {
         meta.block_size, meta.scalars[offset], in, out_, context);
   }
 
-  template <int FixedSize>
-  void finish(const Meta& meta, CPUContext* context) {}
-
  private:
   T* out_;
 };
 
 template <typename T, class Context>
-class WeightedSumReducerGradient {
+class WeightedSumReducerGradient : public BaseReducerGradient {
  public:
   // which of the original inputs are required for gradient computation
   static constexpr std::array<int, 1> originalInputs() {
     return {1};
   }
 
-  static constexpr bool computeLength() {
-    return false;
-  }
-
   using FixedDispatch = FixedValues<1>;
 
-  struct Meta {
-    TIndex block_size;
-    vector<TIndex> block_shape;
+  struct Meta : public BaseReducerGradient::Meta {
     const T* scalars;
 
-    Meta(const Tensor<CPUContext>& out_grad, int skip_dims) {
-      auto& dims = out_grad.dims();
-      block_shape.assign(dims.begin() + skip_dims, dims.end());
-      block_size = out_grad.size_from_dim(skip_dims);
-    }
+    using BaseReducerGradient::Meta::Meta;
 
     void observeOriginalInput(
         int original_input,
@@ -525,11 +509,6 @@ class WeightedSumReducerGradient {
         int skip_dims) {
       CAFFE_ENFORCE_EQ(1, original_input);
       scalars = value.data<T>();
-    }
-
-    void appendGradShape(vector<TIndex>* output_shape) {
-      output_shape->insert(
-          output_shape->end(), block_shape.begin(), block_shape.end());
     }
   };
 
@@ -579,29 +558,9 @@ template <typename T, class Context>
 class MeanReducerGradient;
 
 template <typename T>
-class MeanReducer<T, CPUContext> {
+class MeanReducer<T, CPUContext> : public BaseReducer {
  public:
-  static constexpr int kInputCount = 1;
-
   using FixedDispatch = FixedValues<1>;
-
-  struct Meta {
-    TIndex block_size;
-    vector<TIndex> block_shape;
-
-    void
-    observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
-      DCHECK_EQ(0, input);
-      auto& dims = value.dims();
-      block_shape.assign(dims.begin() + skip_dims, dims.end());
-      block_size = value.size_from_dim(skip_dims);
-    }
-
-    void appendOutputShape(vector<TIndex>* output_shape) {
-      output_shape->insert(
-          output_shape->end(), block_shape.begin(), block_shape.end());
-    }
-  };
 
   MeanReducer(const Meta& meta, T* out, CPUContext* context)
       : out_(out), current_size_(0) {
@@ -629,38 +588,13 @@ class MeanReducer<T, CPUContext> {
 };
 
 template <typename T, class Context>
-class MeanReducerGradient {
+class MeanReducerGradient : public BaseReducerGradient {
  public:
-  static constexpr std::array<int, 0> originalInputs() {
-    return std::array<int, 0>();
-  }
-
   static constexpr bool computeLength() {
     return true;
   }
 
   using FixedDispatch = FixedValues<1>;
-
-  struct Meta {
-    TIndex block_size;
-    vector<TIndex> block_shape;
-
-    Meta(const Tensor<CPUContext>& out_grad, int skip_dims) {
-      auto& dims = out_grad.dims();
-      block_shape.assign(dims.begin() + skip_dims, dims.end());
-      block_size = out_grad.size_from_dim(skip_dims);
-    }
-
-    void observeOriginalInput(
-        int original_input,
-        const Tensor<CPUContext>& value,
-        int skip_dims) {}
-
-    void appendGradShape(vector<TIndex>* output_shape) {
-      output_shape->insert(
-          output_shape->end(), block_shape.begin(), block_shape.end());
-    }
-  };
 
   MeanReducerGradient(const Meta& meta, const T* s_grad, CPUContext* context)
       : s_grad_(s_grad) {}
