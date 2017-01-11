@@ -358,6 +358,14 @@ class BaseReducerGradient {
     return false;
   }
 
+  static int numAuxInputsWithGrads(const OperatorDef& def) {
+    return 0;
+  }
+
+  static bool requiresDataInput(const OperatorDef& def) {
+    return false;
+  }
+
   struct Meta {
     TIndex block_size;
     vector<TIndex> block_shape;
@@ -371,6 +379,7 @@ class BaseReducerGradient {
     void observeOriginalInput(
         int original_input,
         const Tensor<CPUContext>& value,
+        Tensor<CPUContext>* input_grad, // optional grad to populate
         int skip_dims) {}
 
     void appendGradShape(vector<TIndex>* output_shape) {
@@ -496,19 +505,33 @@ class WeightedSumReducerGradient : public BaseReducerGradient {
     return {1};
   }
 
+  static int numAuxInputsWithGrads(const OperatorDef& def) {
+    return GetFlagArgument(def, "grad_on_weights");
+  }
+
+  static bool requiresDataInput(const OperatorDef& def) {
+    return numAuxInputsWithGrads(def) > 0;
+  }
+
   using FixedDispatch = FixedValues<1>;
 
   struct Meta : public BaseReducerGradient::Meta {
     const T* scalars;
+    T* scalars_grad;
 
     using BaseReducerGradient::Meta::Meta;
 
     void observeOriginalInput(
         int original_input,
         const Tensor<CPUContext>& value,
+        Tensor<CPUContext>* input_grad, // optional grad to populate
         int skip_dims) {
       CAFFE_ENFORCE_EQ(1, original_input);
       scalars = value.data<T>();
+      if (input_grad) {
+        input_grad->ResizeLike(value);
+        scalars_grad = input_grad->mutable_data<T>();
+      }
     }
   };
 
@@ -527,6 +550,22 @@ class WeightedSumReducerGradient : public BaseReducerGradient {
       const int length) {
     math::Scale<T, CPUContext, FixedSize>(
         meta.block_size, meta.scalars[offset], s_grad_, data_grad, context);
+  }
+
+  // Special version which is called with the main input too, used only if
+  // additional input grad is requested
+  template <int FixedSize>
+  void fillGradWithMainInput(
+      const Meta& meta,
+      const T* data,
+      T* data_grad,
+      TIndex offset,
+      Context* context,
+      const int length) {
+    math::Scale<T, CPUContext, FixedSize>(
+        meta.block_size, meta.scalars[offset], s_grad_, data_grad, context);
+    math::Dot(
+        meta.block_size, s_grad_, data, meta.scalars_grad + offset, context);
   }
 
  private:
@@ -549,6 +588,10 @@ struct WeightedSumReducerDef {
         "SCALARS",
         "Scalar multipliers for the input slices. Must be a vector with the "
         "length matching the first dimension of DATA");
+    schema.Arg(
+        "grad_on_weights",
+        "Produce also gradient for `weights`. For now it's only supported in "
+        "`Lengths`-based operators");
   }
 };
 

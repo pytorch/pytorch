@@ -323,7 +323,10 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       ctx.observeOriginalInput(
-          ReducerGradient::originalInputs()[i], aux_in, num_reduce_dims_);
+          ReducerGradient::originalInputs()[i],
+          aux_in,
+          nullptr, /*no grad*/
+          num_reduce_dims_);
     }
 
     const T* r_grad = reduction_grad.template data<T>();
@@ -585,7 +588,8 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
           "Input ",
           i,
           " must have have the same first dim as SEGMENT_IDS");
-      ctx.observeOriginalInput(ReducerGradient::originalInputs()[i], aux_in, 1);
+      ctx.observeOriginalInput(
+          ReducerGradient::originalInputs()[i], aux_in, nullptr /*no grad*/, 1);
     }
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
@@ -658,6 +662,9 @@ template <
 struct SegmentOpGetGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    CAFFE_ENFORCE(
+        !ReducerGradient::requiresDataInput(Def()),
+        "grads on aux inputs are not yet implemented for Segment operators.");
     vector<string> grad_ins;
     for (const int i : ReducerGradient::originalInputs()) {
       grad_ins.push_back(I(i));
@@ -980,7 +987,8 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
           "Input ",
           i,
           " must have have the same first dim as SEGMENT_IDS");
-      ctx.observeOriginalInput(ReducerGradient::originalInputs()[i], aux_in, 1);
+      ctx.observeOriginalInput(
+          ReducerGradient::originalInputs()[i], aux_in, nullptr /*no grad*/, 1);
     }
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
@@ -1339,7 +1347,8 @@ class AbstractLengthsGradientOp : public Operator<Context> {
           "Input ",
           i,
           " must have have the same first dim as SEGMENT_IDS");
-      ctx.observeOriginalInput(ReducerGradient::originalInputs()[i], aux_in, 1);
+      ctx.observeOriginalInput(
+          ReducerGradient::originalInputs()[i], aux_in, nullptr /*no grad*/, 1);
     }
 
     const T* segmentGrads = segmentGradsInput.template data<T>();
@@ -1384,6 +1393,112 @@ class AbstractLengthsGradientOp : public Operator<Context> {
   };
 };
 
+// Version of gradient that requires the main input and thus needs to receive
+// length, indices and other stuff
+template <
+    typename T,
+    typename TLengths,
+    class Context,
+    class ReducerGradient,
+    bool SparseFused = true>
+class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(AbstractLengthsWithMainInputGradientOp);
+
+  bool RunOnDevice() override {
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex gradBlockSize = Input(SEGMENT_GRADS).size_from_dim(1);
+    return DispatchHelper<typename ReducerGradient::FixedDispatch>::call(
+        this, gradBlockSize);
+  }
+
+  template <int FixedSize>
+  bool DoRunWithValue() {
+    auto& dataInput = Input(DATA_INPUT);
+    auto& segmentGradsInput = Input(SEGMENT_GRADS);
+    auto& lengthsInput = Input(LENGTHS);
+    auto* dataGradsOutput = Output(0);
+
+    CAFFE_ENFORCE(lengthsInput.ndim() == 1, "LENGTHS must be a vector");
+    TIndex numSegments = lengthsInput.dim(0);
+    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(numSegments == segmentGradsInput.dim(0));
+    const TLengths* lengths = lengthsInput.template data<TLengths>();
+
+    typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
+    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+      int aux_num = ReducerGradient::originalInputs()[i];
+      auto& aux_in = Input(i);
+      auto* aux_grad = aux_num < OutputSize() ? Output(aux_num) : nullptr;
+      ctx.observeOriginalInput(aux_num, aux_in, aux_grad, 1);
+    }
+
+    // Either first dim the data or how much we pull in indexies from it
+    TIndex dataToReduceSize;
+    const TIndex* indicies = nullptr;
+    if (SparseFused) { // static if
+      auto& indicesInput = Input(INDICES);
+      indicies = indicesInput.template data<TIndex>();
+      dataToReduceSize = indicesInput.dim(0);
+    } else {
+      dataToReduceSize = dataInput.dim(0);
+    }
+
+    const T* segmentGrads = segmentGradsInput.template data<T>();
+
+    vector<TIndex> shape;
+    shape.push_back(dataToReduceSize);
+    ctx.appendGradShape(&shape);
+    dataGradsOutput->Resize(shape);
+
+    TIndex dataGradsBlockSize = dataGradsOutput->size_from_dim(1);
+    TIndex segmentBlockSize = segmentGradsInput.size_from_dim(1);
+    T* dataGrads = dataGradsOutput->template mutable_data<T>();
+
+    const T* data = dataInput.template data<T>();
+
+    TIndex dataIndex = 0;
+    for (TIndex rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+      ReducerGradient reducer(
+          ctx, segmentGrads + segmentBlockSize * rangeIndex, &context_);
+      for (TIndex start = dataIndex; dataIndex < start + lengths[rangeIndex];
+           ++dataIndex) {
+        TIndex data_pos;
+        // No range checking, should've been verified in forward pass
+        if (SparseFused) { // static if
+          data_pos = indicies[dataIndex];
+        } else {
+          data_pos = dataIndex;
+        }
+        reducer.template fillGradWithMainInput<FixedSize>(
+            ctx,
+            data + dataGradsBlockSize * data_pos,
+            dataGrads + dataGradsBlockSize * dataIndex,
+            dataIndex,
+            &context_,
+            lengths[rangeIndex]);
+      }
+    }
+    return true;
+  }
+
+  // Input layout:
+  //   orig_arg1, orig_arg2, ..., orig_argN, DATA_INPUT, SEGMENT_GRADS,
+  //      SEGMENT_LEGNTHS, [INDICES]
+  // orig_argXs represent original op's inputs and will be passed to the reducer
+  // directly
+  static constexpr int kNumInputs =
+      ReducerGradient::originalInputs().size() + 3 + (SparseFused ? 1 : 0);
+  enum _InputTags {
+    SEGMENT_GRADS = ReducerGradient::originalInputs().size(),
+    LENGTHS,
+    DATA_INPUT,
+    INDICES,
+  };
+};
+
 // base implementation of sparse/non-sparse gradient computation
 template <
     typename ForwardOp,
@@ -1399,12 +1514,26 @@ struct LengthsOpGetGradient : public GradientMakerBase {
     }
     grad_ins.push_back(GO(0));
     grad_ins.push_back(I(ForwardOp::LENGTHS));
+    string suffix = "Gradient";
+    if (ReducerGradient::requiresDataInput(Def())) {
+      grad_ins.push_back(I(0));
+      if (SparseFused) {
+        grad_ins.push_back(I(ForwardOp::INDICES));
+      }
+      suffix = "WithMainInput" + suffix;
+    }
+    vector<string> grad_outs;
+    grad_outs.push_back({SparseFused ? GI_V(0) : GI(0)});
+    int aux_grads = ReducerGradient::numAuxInputsWithGrads(Def());
+    for (int i = 1; i <= aux_grads; ++i) {
+      grad_outs.push_back(GI(i));
+    }
     vector<OperatorDef> r{CreateOperatorDef(
-        string("Lengths") + ReducerDef::name + "Gradient",
+        string(SparseFused ? "SparseLengths" : "Lengths") + ReducerDef::name +
+            suffix,
         "",
         grad_ins,
-        // no gradient on segment_ids or auxiliary inputs for now
-        vector<string>{SparseFused ? GI_V(0) : GI(0)})};
+        grad_outs)};
     if (SparseFused) {
       SetSparse(0, I(ForwardOp::INDICES), GI_V(0));
     }
@@ -1449,6 +1578,12 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
   using ForwardOp = AbstractLengthsOp<T, SIndex, Context, Reducer, false>;
   using BackwardOp =
       AbstractLengthsGradientOp<T, SIndex, Context, ReducerGradient>;
+  using WithMainInputBackwardOp = AbstractLengthsWithMainInputGradientOp<
+      T,
+      SIndex,
+      Context,
+      ReducerGradient,
+      false>;
   using GetGradient = LengthsOpGetGradient<
       ForwardOp,
       ReducerDef,
@@ -1504,6 +1639,11 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
   // consider avoiding op duplication here
   using BackwardOp =
       AbstractLengthsGradientOp<T, SIndex, Context, ReducerGradient>;
+  using WithMainInputBackwardOp = AbstractLengthsWithMainInputGradientOp<
+      T,
+      SIndex,
+      Context,
+      ReducerGradient>;
   using GetGradient = LengthsOpGetGradient<
       ForwardOp,
       ReducerDef,
@@ -1579,5 +1719,21 @@ REGISTER_SEGMENT_DEF(
 REGISTER_REDUCER_WITH_ALL_OPS(SumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(WeightedSumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(MeanReducerDef);
+
+// Auxiliary output gradients are currently implemented only for Lengths version
+#define REGISTER_GRADIENT_WITH_MAIN_INPUT(...)                     \
+  REGISTER_CPU_OPERATOR_STR(                                       \
+      string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name) + \
+          "WithMainInputGradient",                                 \
+      __VA_ARGS__::WithMainInputBackwardOp);                       \
+  OPERATOR_SCHEMA_STR(                                             \
+      string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name) + \
+      "WithMainInputGradient")                                     \
+      .NumInputs(__VA_ARGS__::WithMainInputBackwardOp::kNumInputs) \
+      .NumOutputs(1, INT_MAX)
+REGISTER_GRADIENT_WITH_MAIN_INPUT(
+    AbstractLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
+REGISTER_GRADIENT_WITH_MAIN_INPUT(
+    AbstractSparseLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
 }
 }
