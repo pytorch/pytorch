@@ -206,9 +206,15 @@ class ArgumentHelper {
 };
 
 const Argument& GetArgument(const OperatorDef& def, const string& name);
+bool GetFlagArgument(
+    const OperatorDef& def,
+    const string& name,
+    bool def_value = false);
 
 Argument* GetMutableArgument(
-    const string& name, const bool create_if_missing, OperatorDef* def);
+    const string& name,
+    const bool create_if_missing,
+    OperatorDef* def);
 
 template <typename T>
 Argument MakeArgument(const string& name, const T& value);
