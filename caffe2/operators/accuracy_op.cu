@@ -30,6 +30,8 @@ __global__ void AccuracyDivideKernel(const int N, float* accuracy) {
 
 template <>
 bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
+  CAFFE_ENFORCE_EQ(
+      top_k_, 1, "Currently only top-1 accuracy supported");
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
   auto* Y = Output(0);

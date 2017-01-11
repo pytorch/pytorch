@@ -9,11 +9,15 @@ namespace caffe2 {
 template <typename T, class Context>
 class AccuracyOp final : public Operator<Context> {
  public:
-  USE_SIMPLE_CTOR_DTOR(AccuracyOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+  AccuracyOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        top_k_(OperatorBase::GetSingleArgument<int>("top_k", 1)) {}
+        
   bool RunOnDevice() override;
 
  protected:
+  int top_k_; 
   INPUT_TAGS(PREDICTION, LABEL);
 };
 

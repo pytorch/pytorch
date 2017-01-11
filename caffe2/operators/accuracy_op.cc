@@ -14,21 +14,43 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   DCHECK_EQ(label.dim32(0), N);
   Y->Resize(vector<TIndex>());
   const auto* Xdata = X.data<float>();
-  const auto* labeldata = label.data<int>();
+  const auto* labelData = label.data<int>();
+  const int top_k = top_k_;
   int correct = 0;
   for (int i = 0; i < N; ++i) {
-    float maxval = std::numeric_limits<float>::lowest();
-    int maxid = 0;
+    // Make a vector of pairs(prediction, index) so that 
+    // the index of elements can be extracted after sort.
+    // top-k algorithm rewritten based on algorithm in 
+    // Caffe accuracy layer
+    std::vector<std::pair<float, int> > Xdata_pairs;
     for (int j = 0; j < D; ++j) {
-      if (Xdata[i * D + j] > maxval) {
-        maxval = Xdata[i * D + j];
-        maxid = j;
+      Xdata_pairs.push_back(std::make_pair(Xdata[i * D + j], j));
+    }
+    // Sort so that the k maximum predictions appear 
+    // at the beginning of vector.
+    std::partial_sort(
+        Xdata_pairs.begin(),
+        Xdata_pairs.begin() + top_k,
+        Xdata_pairs.end(),
+        [](std::pair<float, int> lhs, std::pair<float, int> rhs) {
+            if(lhs.first == rhs.first) {
+                return lhs.second < rhs.second;
+            }   
+            else {
+                return lhs.first > rhs.first;
+            }   
+        });
+    // Increment accuracy if any of the top k predictions 
+    // are equal to the expected label.
+    for (int k = 0; k < top_k; k++) { 
+      if (Xdata_pairs[k].second == labelData[i]) {                                               
+        ++correct;
+        break;
       }
     }
-    if (maxid == labeldata[i]) {
-      ++correct;
-    }
   }
+
+
   DCHECK_LE(correct, N);
   *(Y->mutable_data<float>()) = static_cast<float>(correct) / N;
   return true;
