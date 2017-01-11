@@ -434,7 +434,7 @@ bool ImageInputOp<Context>::CopyPrefetched() {
     label_output->CopyFrom(prefetched_label_, &context_);
   } else {
     if (gpu_transform_) {
-      TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_, image_output, mean_, std_, &context_);
+      TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_, image_output, std_, mean_, &context_);
     } else {
       image_output->CopyFrom(prefetched_image_on_device_, &context_);
     }
