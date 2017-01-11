@@ -3,40 +3,45 @@ sudo: required
 language: cpp
 
 matrix:
+  fast_finish: true
   include:
-  - os: linux
-    compiler: gcc
-    env: COMPILER=g++
-  - os: linux
-    compiler: gcc
-    addons:
-      apt:
-        sources:
-        - ubuntu-toolchain-r-test
-        packages:
-        - g++-4.8
-    env: COMPILER=g++-4.8
-  - os: linux
-    compiler: gcc
-    addons:
-      apt:
-        sources:
-        - ubuntu-toolchain-r-test
-        packages:
-        - g++-4.9
-    env: COMPILER=g++-4.9
-  - os: linux
-    compiler: gcc
-    addons:
-      apt:
-        sources:
-        - ubuntu-toolchain-r-test
-        packages:
-        - g++-5
-    env: COMPILER=g++-5
-  - os: osx
-    compiler: clang
-    env: COMPILER=clang++
+    - os: linux
+      compiler: gcc
+      env: COMPILER=g++
+    - os: osx
+      compiler: clang
+      env: COMPILER=clang++
+    - os: linux
+      compiler: gcc
+      addons:
+        apt:
+          sources:
+          - ubuntu-toolchain-r-test
+          packages:
+          - g++-4.8
+      env: COMPILER=g++-4.8
+    - os: linux
+      compiler: gcc
+      addons:
+        apt:
+          sources:
+          - ubuntu-toolchain-r-test
+          packages:
+          - g++-4.9
+      env: COMPILER=g++-4.9
+    - os: linux
+      compiler: gcc
+      addons:
+        apt:
+          sources:
+          - ubuntu-toolchain-r-test
+          packages:
+          - g++-5
+      env: COMPILER=g++-5
+  allow_failures:
+    - env: COMPILER=g++-5
+    - env: COMPILER=g++-4.9
+    - env: COMPILER=g++-4.8
 
 cache:
   apt: true
