@@ -255,7 +255,6 @@ IMPLEMENT_STATELESS(histc)
 IMPLEMENT_STATELESS(atan2)
 IMPLEMENT_STATELESS(pow)
 IMPLEMENT_STATELESS(lerp)
-IMPLEMENT_STATELESS(reshape)
 IMPLEMENT_STATELESS(zeros)
 IMPLEMENT_STATELESS(ones)
 IMPLEMENT_STATELESS(index_select)
@@ -585,7 +584,6 @@ static PyMethodDef TorchMethods[] = {
   {"atan2",           (PyCFunction)THPModule_atan2,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"reshape",         (PyCFunction)THPModule_reshape,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS | METH_KEYWORDS, NULL},
