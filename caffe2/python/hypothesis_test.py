@@ -836,28 +836,37 @@ class TestOperators(hu.HypothesisTestCase):
                             dtype=np.int32,
                             elements=st.integers(min_value=0,
                                                  max_value=3 - 1)),
-            **hu.gcs)
-    def test_accuracy(self, prediction, labels, gc, dc):
+           top_k=st.integers(min_value=1, max_value=3),
+           **hu.gcs)
+    def test_accuracy(self, prediction, labels, top_k, gc, dc):
+        if(top_k > 1):
+            gc = hu.cpu_do
+
         op = core.CreateOperator(
             "Accuracy",
             ["prediction", "labels"],
-            ["accuracy"]
+            ["accuracy"],
+            top_k=top_k,
+            device_option=gc
         )
 
-        def op_ref(prediction, labels):
+        def op_ref(prediction, labels, top_k):
             N = prediction.shape[0]
             correct = 0
-            max_ids = np.argmax(prediction, axis=1)
-            for i in range(0, N):
-                if max_ids[i] == labels[i]:
-                    correct += 1
+            for i in range(0, len(prediction)):
+                pred_sorted = sorted([[item,j] for j,item in enumerate(prediction[i])], 
+                    cmp=lambda x,y: cmp(y[0], x[0]))
+                max_ids = [x[1] for x in pred_sorted[0:top_k]]
+                for m in max_ids:
+                    if m == labels[i]:
+                        correct += 1
             accuracy = correct / N
             return (accuracy,)
 
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[prediction, labels],
+            inputs=[prediction, labels, top_k],
             reference=op_ref)
 
     @given(target_probabilities=hu.arrays(
