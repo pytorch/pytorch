@@ -510,6 +510,43 @@ Example::
 
 add_docstr(torch._C.cat,
 """
+cat(inputs, dimension=0) -> Tensor
+
+Concatenates the given sequence of :attr:`inputs` Tensors in the given dimension.
+
+:func:`torch.cat` can be seen as an inverse operation for :func:`torch.split` and :func:`torch.chunk`
+
+:func:`cat` can be best understood via examples.
+
+Args:
+    inputs (sequence of Tensors): Can be any python sequence of `Tensor` of the same type.
+    dimension (int, optional): The dimension over which the tensors are concatenated
+
+Example::
+
+    >>> x = torch.randn(2, 3)
+    >>> x
+    
+     0.5983 -0.0341  2.4918
+     1.5981 -0.5265 -0.8735
+    [torch.FloatTensor of size 2x3]
+    
+    >>> torch.cat((x, x, x), 0)
+    
+     0.5983 -0.0341  2.4918
+     1.5981 -0.5265 -0.8735
+     0.5983 -0.0341  2.4918
+     1.5981 -0.5265 -0.8735
+     0.5983 -0.0341  2.4918
+     1.5981 -0.5265 -0.8735
+    [torch.FloatTensor of size 6x3]
+    
+    >>> torch.cat((x, x, x), 1)
+    
+     0.5983 -0.0341  2.4918  0.5983 -0.0341  2.4918  0.5983 -0.0341  2.4918
+     1.5981 -0.5265 -0.8735  1.5981 -0.5265 -0.8735  1.5981 -0.5265 -0.8735
+    [torch.FloatTensor of size 2x9]
+    
 """)
 
 add_docstr(torch._C.ceil,
@@ -1574,6 +1611,45 @@ Example::
 
 add_docstr(torch._C.index_select,
 """
+index_select(input, dim, index, out=None) -> Tensor
+
+Returns a new `Tensor` which indexes the :attr:`input` `Tensor` along dimension :attr:`dim`
+using the entries in :attr:`index` which is a `LongTensor`.
+
+The returned `Tensor` has the same number of dimensions as the original `Tensor`.
+
+.. note:: The returned `Tensor` does **not** use the same storage as the original `Tensor`
+
+Args:
+    input (Tensor): Input data
+    dim (int): the dimension in which we index
+    index (LongTensor): the 1D tensor containing the indices to index 
+    out (Tensor, optional): Output argument
+
+Example::
+
+    >>> x = torch.randn(3, 4)
+    >>> x
+    
+     1.2045  2.4084  0.4001  1.1372
+     0.5596  1.5677  0.6219 -0.7954
+     1.3635 -1.2313 -0.5414 -1.8478
+    [torch.FloatTensor of size 3x4]
+    
+    >>> indices = torch.LongTensor([0, 2])
+    >>> torch.index_select(x, 0, indices)
+    
+     1.2045  2.4084  0.4001  1.1372
+     1.3635 -1.2313 -0.5414 -1.8478
+    [torch.FloatTensor of size 2x4]
+    
+    >>> torch.index_select(x, 1, indices)
+    
+     1.2045  0.4001
+     0.5596  0.6219
+     1.3635 -0.5414
+    [torch.FloatTensor of size 3x2]
+    
 """)
 
 add_docstr(torch._C.inverse,
@@ -1582,6 +1658,43 @@ add_docstr(torch._C.inverse,
 
 add_docstr(torch._C.kthvalue,
 """
+kthvalue(input, k, dim=None, out=None) -> (Tensor, LongTensor)
+
+Returns the :attr:`k`th smallest element of the given :attr:`input` Tensor along a given dimension.
+
+If :attr:`dim` is not given, the last dimension of the `input` is chosen.
+
+A tuple of `(values, indices)` is returned, where the `indices` is the indices of 
+the kth-smallest element in the original `input` Tensor in dimention `dim`.
+
+Args:
+    input (Tensor): the input `Tensor`
+    k (int): k for the k-th smallest element
+    dim (int, optional): The dimension to sort along
+    out (tuple, optional): The output tuple of (Tensor, LongTensor) 
+                           can be optionally given to be used as output buffers
+
+Example::
+
+    >>> x = torch.range(1, 5)
+    >>> x
+    
+     1
+     2
+     3
+     4
+     5
+    [torch.FloatTensor of size 5]
+    
+    >>> torch.kthvalue(x, 4)
+    (
+     4
+    [torch.FloatTensor of size 1]
+    ,
+     3
+    [torch.LongTensor of size 1]
+    )
+    
 """)
 
 add_docstr(torch._C.le,
@@ -1833,6 +1946,48 @@ Example::
 
 add_docstr(torch._C.masked_select,
 """
+index_select(input, mask, out=None) -> Tensor
+
+Returns a new 1D `Tensor` which indexes the :attr:`input` `Tensor` according to the binary mask :attr:`mask` which is a `ByteTensor`. 
+
+The :attr:`mask` tensor needs to have the same number of elements as :attr:`input`, but it's shape or dimensionality are irrelevant.
+
+.. note:: The returned `Tensor` does **not** use the same storage as the original `Tensor`
+
+Args:
+    input (Tensor): Input data
+    mask  (ByteTensor): the tensor containing the binary mask to index with
+    out (Tensor, optional): Output argument
+
+Example::
+
+    >>> x = torch.randn(3, 4)
+    >>> x
+    
+     1.2045  2.4084  0.4001  1.1372
+     0.5596  1.5677  0.6219 -0.7954
+     1.3635 -1.2313 -0.5414 -1.8478
+    [torch.FloatTensor of size 3x4]
+    
+    >>> mask = x.ge(0.5)
+    >>> mask
+    
+     1  1  0  1
+     1  1  1  0
+     1  0  0  0
+    [torch.ByteTensor of size 3x4]
+    
+    >>> torch.masked_select(x, mask)
+    
+     1.2045
+     2.4084
+     1.1372
+     0.5596
+     1.5677
+     0.6219
+     1.3635
+    [torch.FloatTensor of size 7]
+    
 """)
 
 add_docstr(torch._C.max,
@@ -2702,10 +2857,37 @@ Example::
 
 add_docstr(torch._C.renorm,
 """
-""")
+renorm(input, p, dim, maxnorm, out=None) -> Tensor
 
-add_docstr(torch._C.reshape,
-"""
+Returns a Tensor where each sub-tensor of :attr:`input` along dimension :attr:`dim` 
+is normalized such that the `p`-norm of the sub-tensor is lower than the value :attr:`maxnorm`
+
+Args:
+    input (Tensor): The input Tensor
+    p (float): The power for the norm computation
+    dim (int): The dimension to slice over to get the sub-tensors
+    maxnorm (float): The maximum norm to keep each sub-tensor under
+    out (Tensor, optional): Output tensor
+
+Example::
+
+    >>> x = torch.ones(3, 3)
+    >>> x[1].fill_(2)
+    >>> x[2].fill_(3)
+    >>> x
+    
+     1  1  1
+     2  2  2
+     3  3  3
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.renorm(x, 1, 0, 5)
+    
+     1.0000  1.0000  1.0000
+     1.6667  1.6667  1.6667
+     1.6667  1.6667  1.6667
+    [torch.FloatTensor of size 3x3]
+    
 """)
 
 add_docstr(torch._C.round,
@@ -2900,6 +3082,56 @@ Example::
 
 add_docstr(torch._C.sort,
 """
+sort(input, dim=None, descending=False, out=None) -> (Tensor, LongTensor)
+
+Sorts the elements of the :attr:`input` Tensor along a given dimension in ascending order by value.
+
+If :attr:`dim` is not given, the last dimension of the `input` is chosen.
+
+If :attr:`descending` is `True` then the elements are sorted in descending order by value. 
+
+A tuple of (sorted_tensor, sorted_indices) is returned, where the sorted_indices are the indices of the elements in the original `input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (int, optional): The dimension to sort along
+    descending (bool, optional): Controls the sorting order (ascending or descending)
+    out (tuple, optional): The output tuple of (Tensor, LongTensor) 
+                           can be optionally given to be used as output buffers
+
+Example::
+
+    >>> x = torch.randn(3, 4)
+    >>> sorted, indices = torch.sort(x)
+    >>> sorted
+    
+    -1.6747  0.0610  0.1190  1.4137
+    -1.4782  0.7159  1.0341  1.3678
+    -0.3324 -0.0782  0.3518  0.4763
+    [torch.FloatTensor of size 3x4]
+    
+    >>> indices
+    
+     0  1  3  2
+     2  1  0  3
+     3  1  0  2
+    [torch.LongTensor of size 3x4]
+    
+    >>> sorted, indices = torch.sort(x, 0)
+    >>> sorted
+    
+    -1.6747 -0.0782 -1.4782 -0.3324
+     0.3518  0.0610  0.4763  0.1190
+     1.0341  0.7159  1.4137  1.3678
+    [torch.FloatTensor of size 3x4]
+    
+    >>> indices
+    
+     0  2  1  2
+     2  0  2  0
+     1  1  0  1
+    [torch.LongTensor of size 3x4]
+        
 """)
 
 add_docstr(torch._C.sqrt,
@@ -2935,6 +3167,39 @@ Example::
 
 add_docstr(torch._C.squeeze,
 """
+squeeze(input, dim=None, out=None)
+
+Returns a `Tensor` with all the dimensions of :attr:`input` of size `1`.
+If `input` is of shape: :math:`(A x 1 x B x C x 1 x D)` then the `out` Tensor 
+will be of shape: :math:`(A x B x C x D)`
+
+When :attr:`dim` is given, a squeeze operation is done only in the given dimension.
+If `input` is of shape: :math:`(A x 1 x B)`, `squeeze(input, 0)` leaves the Tensor unchanged,
+but `squeeze(input, 1)` will squeeze the tensor to the shape :math:`(A x B)`.
+
+.. note:: The returned Tensor shares the storage with the input Tensor, 
+          so changing the contents of one will change the contents of the other.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (int, optional): if given, the input will be squeezed only in this dimension
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> x = torch.zeros(2,1,2,1,2)
+    >>> x.size()
+    (2L, 1L, 2L, 1L, 2L)
+    >>> y = torch.squeeze(x)
+    >>> y.size()
+    (2L, 2L, 2L)
+    >>> y = torch.squeeze(x, 0)
+    >>> y.size()
+    (2L, 1L, 2L, 1L, 2L)
+    >>> y = torch.squeeze(x, 1)
+    >>> y.size()
+    (2L, 2L, 1L, 2L)
+    
 """)
 
 add_docstr(torch._C.std,
@@ -3053,6 +3318,32 @@ add_docstr(torch._C.symeig,
 
 add_docstr(torch._C.t,
 """
+t(input, out=None) -> Tensor
+
+Expects :attr:`input` to be a matrix (2D Tensor) and transposes dimensions 0 and 1.
+
+Can be seen as a short-hand function for `transpose(input, 0, 1)`
+
+Args:
+    input (Tensor): the input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> x = torch.randn(2, 3)
+    >>> x
+    
+     0.4834  0.6907  1.3417
+    -0.1300  0.5295  0.2321
+    [torch.FloatTensor of size 2x3]
+    
+    >>> torch.t(x)
+    
+     0.4834 -0.1300
+     0.6907  0.5295
+     1.3417  0.2321
+    [torch.FloatTensor of size 3x2]
+    
 """)
 
 add_docstr(torch._C.tan,
@@ -3113,14 +3404,127 @@ Example::
 
 add_docstr(torch._C.topk,
 """
+topk(input, k, dim=None, largest=False, sorted=True, out=None) -> (Tensor, LongTensor)
+
+Returns the :attr:`k` smallest elements of the given :attr:`input` Tensor along a given dimension.
+
+If :attr:`dim` is not given, the last dimension of the `input` is chosen.
+
+If :attr:`largest` is `True` then the `k` largest elements are returned.
+
+A tuple of `(values, indices)` is returned, where the `indices` are the indices of 
+the elements in the original `input` Tensor.
+
+The boolean option :attr:`sorted` if `True`, will make sure that the returned `k` 
+elements are themselves sorted
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (int, optional): The dimension to sort along
+    largest (bool, optional): Controls whether to return largest or smallest elements
+    sorted (bool, optional): Controls whether to return the elements in sorted order
+    out (tuple, optional): The output tuple of (Tensor, LongTensor) 
+                           can be optionally given to be used as output buffers
+
+Example::
+
+    >>> x = torch.range(1, 10)
+    >>> x
+    
+      1
+      2
+      3
+      4
+      5
+      6
+      7
+      8
+      9
+     10
+    [torch.FloatTensor of size 10]
+    
+    >>> torch.topk(x, 4)
+    (
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 4]
+    ,
+     0
+     1
+     2
+     3
+    [torch.LongTensor of size 4]
+    )
+    
+    >>> torch.topk(x, 4, 0, largest=True)
+    (
+     10
+      9
+      8
+      7
+    [torch.FloatTensor of size 4]
+    ,
+     9
+     8
+     7
+     6
+    [torch.LongTensor of size 4]
+    )
+           
 """)
 
 add_docstr(torch._C.trace,
 """
+trace(input) -> float
+
+Returns the sum of the elements of the diagonal of the input 2D matrix.
+
+Example::
+
+    >>> x = torch.range(1, 9).view(3, 3)
+    >>> x
+    
+     1  2  3
+     4  5  6
+     7  8  9
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.trace(x)
+    15.0
+    
 """)
 
 add_docstr(torch._C.transpose,
 """
+transpose(input, dim0, dim1, out=None) -> Tensor
+
+Returns a `Tensor` that is a transposed version of :attr:`input`. The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
+
+The resulting :attr:`out` Tensor shares it's underlying storage with the :attr:`input` Tensor, so changing the content of one would change the content of the other.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim0 (int): The first dimension to be transposed
+    dim1 (int): The second dimension to be transposed
+
+Example::
+
+    >>> x = torch.randn(2, 3)
+    >>> x
+    
+     0.5983 -0.0341  2.4918
+     1.5981 -0.5265 -0.8735
+    [torch.FloatTensor of size 2x3]
+    
+    >>> torch.transpose(x, 0, 1)
+    
+     0.5983  1.5981
+    -0.0341 -0.5265
+     2.4918 -0.8735
+    [torch.FloatTensor of size 3x2]
+    
 """)
 
 add_docstr(torch._C.tril,
