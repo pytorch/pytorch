@@ -248,7 +248,6 @@ TYPED_TEST(TensorCPUTest, TensorShareData) {
   }
 }
 
-
 TYPED_TEST(TensorCPUTest, TensorShareDataRawPointer) {
   vector<int> dims(3);
   dims[0] = 2;
@@ -257,6 +256,24 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointer) {
   std::unique_ptr<TypeParam[]> raw_buffer(new TypeParam[2*3*5]);
   TensorCPU tensor(dims);
   tensor.ShareExternalPointer(raw_buffer.get());
+  EXPECT_EQ(tensor.mutable_data<TypeParam>(), raw_buffer.get());
+  EXPECT_EQ(tensor.data<TypeParam>(), raw_buffer.get());
+  // Set one value, check the other
+  for (int i = 0; i < tensor.size(); ++i) {
+    raw_buffer.get()[i] = i;
+    EXPECT_EQ(tensor.data<TypeParam>()[i], i);
+  }
+}
+
+TYPED_TEST(TensorCPUTest, TensorShareDataRawPointerWithMeta) {
+  vector<int> dims(3);
+  dims[0] = 2;
+  dims[1] = 3;
+  dims[2] = 5;
+  std::unique_ptr<TypeParam[]> raw_buffer(new TypeParam[2 * 3 * 5]);
+  TensorCPU tensor(dims);
+  TypeMeta meta = TypeMeta::Make<TypeParam>();
+  tensor.ShareExternalPointer(raw_buffer.get(), meta);
   EXPECT_EQ(tensor.mutable_data<TypeParam>(), raw_buffer.get());
   EXPECT_EQ(tensor.data<TypeParam>(), raw_buffer.get());
   // Set one value, check the other
