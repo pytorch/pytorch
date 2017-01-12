@@ -27,6 +27,8 @@ endfunction(prepend)
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
+enable_testing()
+
 # External projects
 include(ExternalProject)
 
@@ -42,8 +44,9 @@ option(USE_LMDB "Use LMDB" ON)
 option(USE_LEVELDB "Use LMDB" ON)
 option(USE_OPENCV "Use openCV" ON)
 option(USE_CUDA "Use Cuda" ON)
-option(USE_ZMQDB "Use ZMQ" OFF)
-option(USE_ROCKSDB "Use RocksDB" OFF)
+option(USE_ZMQ "Use ZMQ" OFF)
+option(USE_ROCKSDB "Use RocksDB" ON)
+option(USE_REDIS "Use Redis" OFF)
 option(USE_MPI "Use MPI" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
@@ -65,17 +68,9 @@ include(cmake/Dependencies.cmake)
 include(cmake/MiscCheck.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 5.x
-if(BUILD_SHARED_LIBS)
-    if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0.0)
-      message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
-      list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
-    endif()
-else()
-    if(CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0)
-        list(APPEND Caffe2_DEPENDENCY_LIBS -Wl,--whole-archive gcc_s gcc)
-    else()
-        list(APPEND Caffe2_DEPENDENCY_LIBS -Wl,--whole-archive)
-    endif()
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0.0)
+  message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
+  list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
 endif()
 
 # ---[ Set output directories
@@ -84,6 +79,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "binaries")
 # ---[ Build flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
+
+# ---[ Include path needed for proto
+include_directories(BEFORE ${CMAKE_BINARY_DIR})
 
 # ---[ Third party builds.
 include_directories(${CMAKE_SOURCE_DIR})

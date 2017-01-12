@@ -1,16 +1,10 @@
 #include "file_store_handler_op.h"
 
-#include <caffe2/core/context_gpu.h>
-
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(
     FileStoreHandlerCreate,
     FileStoreHandlerCreateOp<CPUContext>);
-
-REGISTER_CUDA_OPERATOR(
-    FileStoreHandlerCreate,
-    FileStoreHandlerCreateOp<CUDAContext>);
 
 OPERATOR_SCHEMA(FileStoreHandlerCreate)
     .NumInputs(0)
