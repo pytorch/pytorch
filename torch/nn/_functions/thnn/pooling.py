@@ -43,7 +43,7 @@ class MaxPool1d(Function):
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
         backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
-                input, grad_output, grad_input, indices, 
+                input, grad_output, grad_input, indices,
                 self.kernel_size, 1,
                 self.stride, 1,
                 self.pad, 0,
@@ -89,7 +89,7 @@ class MaxPool2d(Function):
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
         backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
-                input, grad_output, grad_input, indices, 
+                input, grad_output, grad_input, indices,
                 self.kernel_size[1], self.kernel_size[0],
                 self.stride[1], self.stride[0],
                 self.padding[1], self.padding[0],
@@ -136,7 +136,7 @@ class MaxPool3d(Function):
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
         backend.VolumetricDilatedMaxPooling_updateGradInput(backend.library_state,
-                input, grad_output, grad_input, indices, 
+                input, grad_output, grad_input, indices,
                 self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
                 self.stride[0], self.stride[2], self.stride[1],
                 self.padding[0], self.padding[2], self.padding[1],
@@ -278,9 +278,10 @@ class FractionalMaxPool2d(Function):
 
         return grad_input
 
+
 class AvgPool2d(Function):
     def __init__(self, kernel_size, stride=None, padding=0,
-            ceil_mode=False, count_include_pad=True):
+                 ceil_mode=False, count_include_pad=True):
         self.kernel_size = _pair(kernel_size)
         self.stride = _pair(stride if stride is not None else kernel_size)
         self.padding = _pair(padding)
@@ -292,24 +293,26 @@ class AvgPool2d(Function):
         output = input.new()
         # can avoid this with cudnn
         self.save_for_backward(input)
-        backend.SpatialAveragePooling_updateOutput(backend.library_state,
-                input, output,
-                self.kernel_size[1], self.kernel_size[0],
-                self.stride[1], self.stride[0],
-                self.padding[1], self.padding[0],
-                self.ceil_mode, self.count_include_pad)
+        backend.SpatialAveragePooling_updateOutput(
+            backend.library_state,
+            input, output,
+            self.kernel_size[1], self.kernel_size[0],
+            self.stride[1], self.stride[0],
+            self.padding[1], self.padding[0],
+            self.ceil_mode, self.count_include_pad)
         return output
 
     def backward(self, grad_output):
         backend = type2backend[type(grad_output)]
         input, = self.saved_tensors
         grad_input = grad_output.new()
-        backend.SpatialAveragePooling_updateGradInput(backend.library_state,
-                input, grad_output, grad_input,
-                self.kernel_size[1], self.kernel_size[0],
-                self.stride[1], self.stride[0],
-                self.padding[1], self.padding[0],
-                self.ceil_mode, self.count_include_pad)
+        backend.SpatialAveragePooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input,
+            self.kernel_size[1], self.kernel_size[0],
+            self.stride[1], self.stride[0],
+            self.padding[1], self.padding[0],
+            self.ceil_mode, self.count_include_pad)
         return grad_input
 
 class AvgPool3d(Function):

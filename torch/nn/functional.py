@@ -188,6 +188,60 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
 
 
 # Pooling
+def avg_pool1d(input, kernel_size, stride=None, padding=0,
+               ceil_mode=False, count_include_pad=True):
+    r"""Applies a 1D average pooling over an input signal composed of several
+    input planes.
+
+    In the simplest case, the output value of the layer with input size :math:`(N, C, L)`,
+    output :math:`(N, C, L_{out})` and :attr:`kernel_size` :math:`k`
+    can be precisely described as:
+
+    .. math::
+
+        \begin{array}{ll}
+        out(N_i, C_j, l)  = 1 / k * \sum_{{m}=0}^{k}
+                               input(N_i, C_j, stride * l + m)
+        \end{array}
+
+    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+      for :attr:`padding` number of points
+
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can each be
+    an ``int`` or a one-element tuple.
+
+    Args:
+        kernel_size: the size of the window
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on both sides
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        count_include_pad: when True, will include the zero-padding in the averaging calculation
+
+    Shape:
+        - Input: :math:`(N, C, L_{in})`
+        - Output: :math:`(N, C, L_{out})` where
+          :math:`L_{out} = floor((L_{in}  + 2 * padding - kernel\_size) / stride + 1)`
+
+    Examples::
+
+        >>> # pool of square window of size=3, stride=2
+        >>> input = Variable(torch.Tensor([[[1,2,3,4,5,6,7]]]))
+        >>> F.avg_pool1d(input, kernel_size=3, stride=2)
+        Variable containing:
+        (0 ,.,.) =
+          2  4  6
+        [torch.FloatTensor of size 1x1x3]
+    """
+    if input.dim() != 3:
+        raise ValueError('expected 3D input (got {} dimensions)'
+                         .format(input.dim()))
+    kernel_size = _single(kernel_size) + (1,)
+    stride = _single(stride) + (1,)
+    padding = _single(padding) + (0,)
+    f = _functions.thnn.AvgPool2d(kernel_size, stride, padding,
+                                  ceil_mode, count_include_pad)
+    return f(input.unsqueeze(3)).squeeze(3)
+
 
 def avg_pool2d(input, kernel_size, stride=None, padding=0,
                ceil_mode=False, count_include_pad=True):

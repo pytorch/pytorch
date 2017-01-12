@@ -1267,6 +1267,23 @@ new_module_tests = [
         input_size=(1, 3, 7, 7)
     ),
     dict(
+        module_name='AvgPool1d',
+        constructor_args=(2,),
+        input_size=(2, 3, 6),
+    ),
+    dict(
+        module_name='AvgPool1d',
+        constructor_args=((2,), (2,)),
+        input_size=(2, 3, 6),
+        desc='stride',
+    ),
+    dict(
+        module_name='AvgPool1d',
+        constructor_args=(2, 2, 1),
+        input_size=(2, 3, 6),
+        desc='stride_pad',
+    ),
+    dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
         input_size=(2, 3, 6, 6),

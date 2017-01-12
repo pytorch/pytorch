@@ -17,7 +17,7 @@ Convolution Layers
 
 .. autoclass:: Conv1d
     :members:
-    
+
 .. autoclass:: Conv2d
     :members:
 
@@ -47,6 +47,9 @@ Pooling Layers
     :members:
 
 .. autoclass:: MaxUnpool3d
+    :members:
+
+.. autoclass:: AvgPool1d
     :members:
 
 .. autoclass:: AvgPool2d
