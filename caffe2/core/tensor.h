@@ -336,7 +336,16 @@ class Tensor {
    */
   template <typename T>
   void ShareExternalPointer(T* src, size_t capacity = 0) {
-    meta_ = TypeMeta::Make<T>();
+    ShareExternalPointer(src, TypeMeta::Make<T>(), capacity);
+  }
+
+  void
+  ShareExternalPointer(void* src, const TypeMeta& meta, size_t capacity = 0) {
+    meta_ = meta;
+    CAFFE_ENFORCE(
+        meta_.id(),
+        "To share with a raw external pointer you need to have meta "
+        "already set.");
     CAFFE_ENFORCE(
         size_ > 0,
         "To share data with a raw pointer, you need to set shape first.");
