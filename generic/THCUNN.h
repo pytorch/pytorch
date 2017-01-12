@@ -54,7 +54,7 @@ TH_API void THNN_(BatchNormalization_backward)(
                   THCTensor *saveMean_,
                   THCTensor *saveStd_,
                   bool train,
-                  float scale,
+                  double scale,
                   double eps);
 
 TH_API void THNN_(BCECriterion_updateOutput)(
@@ -109,7 +109,7 @@ TH_API void THNN_(ELU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  real alpha,
+                  accreal alpha,
                   bool inplace);
 
 TH_API void THNN_(ELU_updateGradInput)(
@@ -118,15 +118,15 @@ TH_API void THNN_(ELU_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *output,
-                  real alpha,
+                  accreal alpha,
                   bool inplace);
 
 TH_API void THNN_(HardTanh_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  real min_val,
-                  real max_val,
+                  accreal min_val,
+                  accreal max_val,
                   bool inplace);
 
 TH_API void THNN_(HardTanh_updateGradInput)(
@@ -134,15 +134,15 @@ TH_API void THNN_(HardTanh_updateGradInput)(
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  real min_val,
-                  real max_val,
+                  accreal min_val,
+                  accreal max_val,
                   bool inplace);
 
 TH_API void THNN_(LeakyReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  real negval,
+                  accreal negval,
                   bool inplace);
 
 TH_API void THNN_(LeakyReLU_updateGradInput)(
@@ -150,7 +150,7 @@ TH_API void THNN_(LeakyReLU_updateGradInput)(
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  real negval,
+                  accreal negval,
                   bool inplace);
 
 TH_API void THNN_(LogSigmoid_updateOutput)(
@@ -188,14 +188,14 @@ TH_API void THNN_(LookupTable_accGradParameters)(
                   THCIndexTensor *indices,      // [OPTIONAL]
                   bool scaleGradByFreq,
                   int paddingValue,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(LookupTable_renorm)(
                   THCState *state,
                   THCIndexTensor *idx,
                   THCTensor *weight,
-                  real maxNorm,
-                  real normType);
+                  accreal maxNorm,
+                  accreal normType);
 
 TH_API void THNN_(L1Cost_updateOutput)(
                   THCState *state,
@@ -214,7 +214,7 @@ TH_API void THNN_(MarginCriterion_updateOutput)(
                   THCTensor *target,
                   THCTensor *output,
                   bool sizeAverage,
-                  real margin);
+                  accreal margin);
 
 TH_API void THNN_(MarginCriterion_updateGradInput)(
                   THCState *state,
@@ -222,7 +222,7 @@ TH_API void THNN_(MarginCriterion_updateGradInput)(
                   THCTensor *target,
                   THCTensor *gradInput,
                   bool sizeAverage,
-                  real margin);
+                  accreal margin);
 
 TH_API void THNN_(MSECriterion_updateOutput)(
                   THCState *state,
@@ -262,7 +262,7 @@ TH_API void THNN_(MultiMarginCriterion_updateOutput)(
                   bool sizeAverage,
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
-                  real margin);
+                  accreal margin);
 
 TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   THCState *state,
@@ -272,7 +272,7 @@ TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   bool sizeAverage,
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
-                  real margin);
+                  accreal margin);
 
 TH_API void THNN_(PReLU_updateOutput)(
                   THCState *state,
@@ -299,7 +299,7 @@ TH_API void THNN_(PReLU_accGradParameters)(
                   THCTensor *gradWeightBuf,
                   THCTensor *gradWeightBuf2,
                   long nOutputPlane,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(SmoothL1Criterion_updateOutput)(
                   THCState *state,
@@ -330,8 +330,8 @@ TH_API void THNN_(SparseLinear_accGradParameters)(
                   THCTensor *gradBias,
                   THCTensor *weight,
                   THCTensor *bias,
-                  double weightDecay,
-                  double scale);
+                  accreal weightDecay,
+                  accreal scale);
 
 TH_API void THNN_(SparseLinear_legacyUpdateOutput)(
                   THCState *state,
@@ -348,8 +348,8 @@ TH_API void THNN_(SparseLinear_legacyAccGradParameters)(
                   THCTensor *gradBias,
                   THCTensor *weight,
                   THCTensor *bias,
-                  double weightDecay,
-                  double scale);
+                  accreal weightDecay,
+                  accreal scale);
 
 TH_API void THNN_(SparseLinear_zeroGradParameters)(
                   THCState *state,
@@ -364,7 +364,7 @@ TH_API void THNN_(SparseLinear_updateParameters)(
                   THCTensor *gradWeight,
                   THCTensor *gradBias,
                   THCTensor *lastInput,
-                  double learningRate);
+                  accreal learningRate);
 
 TH_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
                   THCState *state,
@@ -461,7 +461,7 @@ TH_API void THNN_(SpatialConvolutionLocal_accGradParameters)(
                   int padW, int padH,
                   long inputWidth, long inputHeight,
                   long outputWidth, long outputHeight,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
                   THCState *state,
@@ -498,7 +498,7 @@ TH_API void THNN_(SpatialConvolutionMM_accGradParameters)(
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(SpatialCrossMapLRN_updateOutput)(
                   THCState *state,
@@ -506,9 +506,9 @@ TH_API void THNN_(SpatialCrossMapLRN_updateOutput)(
                   THCTensor *output,
                   THCTensor *scale,
                   int size,
-                  real alpha,
-                  real beta,
-                  real k);
+                  accreal alpha,
+                  accreal beta,
+                  accreal k);
 
 TH_API void THNN_(SpatialCrossMapLRN_updateGradInput)(
                   THCState *state,
@@ -518,9 +518,9 @@ TH_API void THNN_(SpatialCrossMapLRN_updateGradInput)(
                   THCTensor *scale,
                   THCTensor *output,
                   int size,
-                  real alpha,
-                  real beta,
-                  real k);
+                  accreal alpha,
+                  accreal beta,
+                  accreal k);
 
 TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
                   THCState *state,
@@ -559,7 +559,7 @@ TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
                   int dW, int dH,
                   int padW, int padH,
                   int dilationW, int dilationH,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
                   THCState *state,
@@ -639,7 +639,7 @@ TH_API void THNN_(SpatialFullConvolution_accGradParameters)(
                   int dW, int dH,
                   int padW, int padH,
                   int adjW, int adjH,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(SpatialMaxPooling_updateOutput)(
                   THCState *state,
@@ -733,7 +733,7 @@ TH_API void THNN_(SpatialSubSampling_accGradParameters)(
                   THCTensor *gradBias,
                   int kW, int kH,
                   int dW, int dH,
-                  float scale);
+                  accreal scale);
 
 TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
                   THCState *state,
@@ -830,8 +830,8 @@ TH_API void THNN_(SoftPlus_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  real beta,
-                  real threshold);
+                  accreal beta,
+                  accreal threshold);
 
 TH_API void THNN_(SoftPlus_updateGradInput)(
                   THCState *state,
@@ -839,21 +839,21 @@ TH_API void THNN_(SoftPlus_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *output,
-                  real beta,
-                  real threshold);
+                  accreal beta,
+                  accreal threshold);
 
 TH_API void THNN_(SoftShrink_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  real lambda);
+                  accreal lambda);
 
 TH_API void THNN_(SoftShrink_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  real lambda);
+                  accreal lambda);
 
 TH_API void THNN_(Square_updateOutput)(
                   THCState *state,
@@ -870,7 +870,7 @@ TH_API void THNN_(Sqrt_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  real eps);
+                  accreal eps);
 
 TH_API void THNN_(Sqrt_updateGradInput)(
                   THCState *state,
@@ -916,7 +916,7 @@ TH_API void THNN_(TemporalConvolution_accGradParameters)(
                   THCTensor *gradWeight,
                   THCTensor *gradBias,
                   int kW, int dW,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(TemporalMaxPooling_updateOutput)(
                   THCState *state,
@@ -937,8 +937,8 @@ TH_API void THNN_(Threshold_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  real threshold,
-                  real val,
+                  accreal threshold,
+                  accreal val,
                   bool inplace);
 
 TH_API void THNN_(Threshold_updateGradInput)(
@@ -946,8 +946,8 @@ TH_API void THNN_(Threshold_updateGradInput)(
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  real threshold,
-                  real val,
+                  accreal threshold,
+                  accreal val,
                   bool inplace);
 
 TH_API void THNN_(VolumetricAveragePooling_updateOutput)(
@@ -996,7 +996,7 @@ TH_API void THNN_(VolumetricConvolution_accGradParameters)(
                   THCTensor *fgradInput,
                   int dT, int dW, int dH,
                   int padT, int padW, int padH,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(VolumetricDilatedConvolution_updateOutput)(
                   THCState *state,
@@ -1035,7 +1035,7 @@ TH_API void THNN_(VolumetricDilatedConvolution_accGradParameters)(
                   int dT, int dW, int dH,
                   int padT, int padW, int padH,
                   int dilationT, int dilationW, int dilationH,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
                   THCState *state,
@@ -1095,7 +1095,7 @@ TH_API void THNN_(VolumetricFullConvolution_accGradParameters)(
                   int dT, int dW, int dH,
                   int padT, int padW, int padH,
                   int adjT, int adjW, int adjH,
-                  real scale);
+                  accreal scale);
 
 TH_API void THNN_(VolumetricMaxPooling_updateOutput)(
                   THCState *state,

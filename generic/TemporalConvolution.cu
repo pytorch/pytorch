@@ -273,8 +273,9 @@ void THNN_(TemporalConvolution_accGradParameters)(
            THCTensor *gradWeight,
            THCTensor *gradBias,
            int kW, int dW,
-           real scale) {
+           accreal scale_) {
 
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   long nInputFrame;
   long nOutputFrame;
 
