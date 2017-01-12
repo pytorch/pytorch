@@ -32,13 +32,13 @@ class ImageInputOp final
 
  private:
   bool GetImageAndLabelFromDBValue(
-      const string& value, cv::Mat* img, int* label);
+      const string& value, cv::Mat* img, int item_id);
   void DecodeAndTransform(
-      const std::string value, float *image_data, int *label,
+      const std::string value, float *image_data, int item_id,
       const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image);
   void DecodeAndTransposeOnly(
-      const std::string value, uint8_t *image_data, int *label,
+      const std::string value, uint8_t *image_data, int item_id,
       const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image);
 
@@ -131,12 +131,19 @@ ImageInputOp<Context>::ImageInputOp(
 
 template <class Context>
 bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
-      const string& value, cv::Mat* img, int* label) {
+      const string& value, cv::Mat* img, int item_id) {
+
+  //
+  // recommend using --caffe2_use_fatal_for_enforce=1 when using ImageInputOp
+  // as this function runs on a worker thread and the exceptions from
+  // CAFFE_ENFORCE are silently dropped by the thread worker functions
+  //
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
     caffe::Datum datum;
     CAFFE_ENFORCE(datum.ParseFromString(value));
-    *label = datum.label();
+
+    prefetched_label_.mutable_data<int>()[item_id] = datum.label();
     if (datum.encoded()) {
       // encoded image in datum.
       *img = cv::imdecode(
@@ -170,10 +177,12 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
     }
   } else {
     // The input is a caffe2 format.
+
     TensorProtos protos;
     CAFFE_ENFORCE(protos.ParseFromString(value));
     const TensorProto& image_proto = protos.protos(0);
     const TensorProto& label_proto = protos.protos(1);
+
     if (image_proto.data_type() == TensorProto::STRING) {
       // encoded image string.
       DCHECK_EQ(image_proto.string_data_size(), 1);
@@ -192,6 +201,7 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
       CAFFE_ENFORCE_GE(
           image_proto.dims(1), crop_, "Image width must be bigger than crop.");
       CAFFE_ENFORCE(!color_ || image_proto.dims(2) == 3);
+
       *img = cv::Mat(
           image_proto.dims(0), image_proto.dims(1), color_ ? CV_8UC3 : CV_8UC1);
       memcpy(img->ptr<uchar>(0), image_proto.byte_data().data(),
@@ -199,9 +209,20 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
     } else {
       LOG(FATAL) << "Unknown image data type.";
     }
-    DCHECK_EQ(label_proto.data_type(), TensorProto::INT32);
-    DCHECK_EQ(label_proto.int32_data_size(), 1);
-    *label = label_proto.int32_data(0);
+
+    if (label_proto.data_type() == TensorProto::FLOAT) {
+      DCHECK_EQ(label_proto.float_data_size(), 1);
+
+      prefetched_label_.mutable_data<float>()[item_id] =
+          label_proto.float_data(0);
+    } else if( label_proto.data_type() == TensorProto::INT32 ) {
+      DCHECK_EQ(label_proto.int32_data_size(), 1);
+
+      prefetched_label_.mutable_data<int>()[item_id] =
+          label_proto.int32_data(0);
+    } else {
+      LOG(FATAL) << "Unsupported label type.";
+    }
   }
   // TODO(Yangqing): return false if any error happens.
   return true;
@@ -286,12 +307,12 @@ void CropTransposeImage(const cv::Mat& scaled_img, const int channels,
 // Intended as entry point for binding to thread pool
 template <class Context>
 void ImageInputOp<Context>::DecodeAndTransform(
-      const std::string value, float *image_data, int *label,
+      const std::string value, float *image_data, int item_id,
       const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image) {
   cv::Mat img;
   // Decode the image
-  CHECK(GetImageAndLabelFromDBValue(value, &img, label));
+  CHECK(GetImageAndLabelFromDBValue(value, &img, item_id));
 
   int scaled_width, scaled_height;
   cv::Mat scaled_img;
@@ -320,13 +341,13 @@ void ImageInputOp<Context>::DecodeAndTransform(
 
 template <class Context>
 void ImageInputOp<Context>::DecodeAndTransposeOnly(
-    const std::string value, uint8_t *image_data, int *label,
+    const std::string value, uint8_t *image_data, int item_id,
     const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image) {
 
   cv::Mat img;
   // Decode the image
-  CHECK(GetImageAndLabelFromDBValue(value, &img, label));
+  CHECK(GetImageAndLabelFromDBValue(value, &img, item_id));
 
   int scaled_width, scaled_height;
   cv::Mat scaled_img;
@@ -370,7 +391,7 @@ bool ImageInputOp<Context>::Prefetch() {
   } else {
     prefetched_image_.mutable_data<float>();
   }
-  prefetched_label_.mutable_data<int>();
+
   // Prefetching handled with a thread pool of "decode_threads" threads.
   std::mt19937 meta_randgen(time(nullptr));
   std::vector<std::mt19937> randgen_per_thread;
@@ -380,35 +401,57 @@ bool ImageInputOp<Context>::Prefetch() {
 
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
     std::bernoulli_distribution mirror_this_image(0.5);
+    std::mt19937* randgen = &randgen_per_thread[item_id % num_decode_threads_];
     std::string key, value;
     cv::Mat img;
-    int label;
-    cv::Mat scaled_img;
 
     // read data
     reader_->Read(&key, &value);
 
+    // determine label type based on first item
+    if( item_id == 0 ) {
+      if( use_caffe_datum_ ) {
+        prefetched_label_.mutable_data<int>();
+      } else {
+        TensorProtos protos;
+        CAFFE_ENFORCE(protos.ParseFromString(value));
+        TensorProto_DataType labeldt = protos.protos(1).data_type();
+        if( labeldt == TensorProto::INT32 ) {
+          prefetched_label_.mutable_data<int>();
+        } else if ( labeldt == TensorProto::FLOAT) {
+          prefetched_label_.mutable_data<float>();
+        } else {
+          LOG(FATAL) << "Unsupported label type.";
+        }
+      }
+    }
+
     // launch into thread pool for processing
     if (gpu_transform_) {
       // output of decode will still be int8
-      uint8_t* image_data = prefetched_image_.mutable_data<uint8_t>()
-          + crop_ * crop_ * channels * item_id;
-      thread_pool_->runTask(
-            // only decode, crop, run transpose later
-            std::bind(&ImageInputOp<Context>::DecodeAndTransposeOnly, this,
-                        std::string(value), image_data,
-                        &prefetched_label_.mutable_data<int>()[item_id], channels,
-                        &randgen_per_thread[item_id % num_decode_threads_],
-                        &mirror_this_image));
+      uint8_t* image_data = prefetched_image_.mutable_data<uint8_t>() +
+          crop_ * crop_ * channels * item_id;
+      thread_pool_->runTask(std::bind(
+          &ImageInputOp<Context>::DecodeAndTransposeOnly,
+          this,
+          std::string(value),
+          image_data,
+          item_id,
+          channels,
+          randgen,
+          &mirror_this_image));
     } else {
-      float* image_data = prefetched_image_.mutable_data<float>()
-          + crop_ * crop_ * channels * item_id;
-      thread_pool_->runTask(
-            std::bind(&ImageInputOp<Context>::DecodeAndTransform, this,
-                        std::string(value), image_data,
-                        &prefetched_label_.mutable_data<int>()[item_id], channels,
-                        &randgen_per_thread[item_id % num_decode_threads_],
-                        &mirror_this_image));
+      float* image_data = prefetched_image_.mutable_data<float>() +
+          crop_ * crop_ * channels * item_id;
+      thread_pool_->runTask(std::bind(
+          &ImageInputOp<Context>::DecodeAndTransform,
+          this,
+          std::string(value),
+          image_data,
+          item_id,
+          channels,
+          randgen,
+          &mirror_this_image));
     }
   }
   thread_pool_->waitWorkComplete();
@@ -444,4 +487,3 @@ bool ImageInputOp<Context>::CopyPrefetched() {
 }  // namespace caffe2
 
 #endif  // CAFFE2_IMAGE_IMAGE_INPUT_OP_H_
-
