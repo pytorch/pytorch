@@ -380,7 +380,6 @@ bool ImageInputOp<Context>::Prefetch() {
 
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
     std::bernoulli_distribution mirror_this_image(0.5);
-    std::mt19937& randgen = randgen_per_thread[num_decode_threads_];
     std::string key, value;
     cv::Mat img;
     int label;
