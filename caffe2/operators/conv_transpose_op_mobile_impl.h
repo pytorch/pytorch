@@ -37,23 +37,21 @@ void runTileContiguous(int tileId,
   auto currentTileStart = tileSize * tileId;
 
   // gemm tile
-  math::Gemm<T, Context>(
-    CblasTrans,
-    CblasNoTrans,
-    kernelDataSize,
-    tileSize,
-    M,
-    1,
-    filterData,
-    kernelDataSize,
-    Xdata + currentTileStart,
-    // TODO(jiayq): when the gemm change is landed, change this order to
-    // the proper one.
-    0, // beta
-    H * W, // ldb
-    colBufferData,
-    tileSize,
-    context);
+  math::GemmEx<T, Context>(
+      CblasTrans,
+      CblasNoTrans,
+      kernelDataSize,
+      tileSize,
+      M,
+      1,
+      filterData,
+      kernelDataSize,
+      Xdata + currentTileStart,
+      H * W,
+      0,
+      colBufferData,
+      tileSize,
+      context);
 
   // col2im tile
   // We assume that there is no padding in the columns (padL and padR

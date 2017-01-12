@@ -23,7 +23,7 @@ if (USE_ROCKSDB)
   list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/rocksdb.cc")
 endif()
 
-if (USE_ZMQDB)
+if (USE_ZMQ)
   list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/zmqdb.cc")
 endif()
 
