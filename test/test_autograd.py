@@ -72,28 +72,28 @@ class TestAutograd(TestCase):
             counter[0] += inc
 
         z = x ** 2 + x * 2 + x * y + y
-        z.register_hook('test', lambda *args: bw_hook(1, *args))
+        test = z.register_hook(lambda *args: bw_hook(1, *args))
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 1)
 
-        z.register_hook('test2', lambda *args: bw_hook(2, *args))
+        test2 = z.register_hook(lambda *args: bw_hook(2, *args))
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 4)
 
-        z.remove_hook('test2')
+        test2.remove()
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 5)
 
         def bw_hook_modify(grad):
             return grad.mul(2)
 
-        z.remove_hook('test')
-        z.register_hook('test', bw_hook_modify)
+        test.remove()
+        z.register_hook(bw_hook_modify)
         y.grad.zero_()
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(y.grad, (x.data + 1) * 2)
 
-        y.register_hook('test', bw_hook_modify)
+        y.register_hook(bw_hook_modify)
         y.grad.zero_()
         z.backward(torch.ones(5, 5))
         self.assertEqual(y.grad, (x.data + 1) * 4)
@@ -420,8 +420,7 @@ class TestAutograd(TestCase):
 
         q, p = Identity()(x, y)
         # Make sure hooks only receive grad from usage of q, not x.
-        q.register_hook(
-                'test', lambda grad: self.assertEqual(grad, torch.ones(5, 5)))
+        q.register_hook(lambda grad: self.assertEqual(grad, torch.ones(5, 5)))
         (q + p + x).sum().backward()
         self.assertEqual(x.grad, torch.ones(5, 5) * 3)
         self.assertEqual(y.grad, torch.ones(5, 5))

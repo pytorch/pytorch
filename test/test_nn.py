@@ -227,14 +227,14 @@ class TestNN(NNTestCase):
             self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
             counter['backwards'] += inc
 
-        module.register_forward_hook('test', lambda *args: fw_hook(1, *args))
+        test_fwd = module.register_forward_hook(lambda *args: fw_hook(1, *args))
 
         module(input)
         module(input)
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
-        module.register_backward_hook('test', lambda *args: bw_hook(1, *args))
+        test_bwd = module.register_backward_hook(lambda *args: bw_hook(1, *args))
 
         output = module(input)
         self.assertEqual(counter['forwards'], 3)
@@ -248,32 +248,32 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 2)
 
-        module.register_forward_hook('test2', lambda *args: fw_hook(2, *args))
+        test2_fwd = module.register_forward_hook(lambda *args: fw_hook(2, *args))
 
         output = module(input)
         self.assertEqual(counter['forwards'], 6)
         self.assertEqual(counter['backwards'], 2)
 
-        module.register_backward_hook('test2', lambda *args: bw_hook(2, *args))
+        test2_bwd = module.register_backward_hook(lambda *args: bw_hook(2, *args))
 
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 9)
         self.assertEqual(counter['backwards'], 5)
 
-        module.remove_backward_hook('test2')
+        test2_bwd.remove()
 
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 12)
         self.assertEqual(counter['backwards'], 6)
 
-        module.remove_forward_hook('test2')
+        test2_fwd.remove()
 
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 13)
         self.assertEqual(counter['backwards'], 7)
 
-        module.remove_forward_hook('test')
-        module.remove_backward_hook('test')
+        test_fwd.remove()
+        test_bwd.remove()
 
     def test_hook_fail(self):
         module = nn.Sigmoid()
@@ -291,33 +291,29 @@ class TestNN(NNTestCase):
         def bw_fail2(self, grad_input, grad_output):
             return grad_input + (torch.randn(2, 2),)
 
-        module.register_forward_hook('fw_fail', fw_fail1)
-        with self.assertRaises(RuntimeError) as err:
-            module(input)
-        self.assertIn("fw_fail", err.exception.args[0])
-        self.assertIn("didn't return None", err.exception.args[0])
-        module.remove_forward_hook('fw_fail')
+        with module.register_forward_hook(fw_fail1):
+            with self.assertRaises(RuntimeError) as err:
+                module(input)
+            self.assertIn("fw_fail", err.exception.args[0])
+            self.assertIn("didn't return None", err.exception.args[0])
 
-        module.register_forward_hook('fw_fail2', fw_fail2)
-        with self.assertRaises(RuntimeError) as err:
-            module(input)
-        self.assertIn("fw_fail2", err.exception.args[0])
-        self.assertIn("didn't return None", err.exception.args[0])
-        module.remove_forward_hook('fw_fail2')
+        with module.register_forward_hook(fw_fail2):
+            with self.assertRaises(RuntimeError) as err:
+                module(input)
+            self.assertIn("fw_fail2", err.exception.args[0])
+            self.assertIn("didn't return None", err.exception.args[0])
 
-        module.register_backward_hook('bw_fail', bw_fail1)
-        with self.assertRaises(RuntimeError) as err:
-            module(input).sum().backward()
-        self.assertIn("bw_fail", err.exception.args[0])
-        self.assertIn("got 0, but expected 1", err.exception.args[0])
-        module.remove_backward_hook('bw_fail')
+        with module.register_backward_hook(bw_fail1):
+            with self.assertRaises(RuntimeError) as err:
+                module(input).sum().backward()
+            self.assertIn("bw_fail", err.exception.args[0])
+            self.assertIn("got 0, but expected 1", err.exception.args[0])
 
-        module.register_backward_hook('bw_fail2', bw_fail2)
-        with self.assertRaises(RuntimeError) as err:
-            module(input).sum().backward()
-        self.assertIn("bw_fail2", err.exception.args[0])
-        self.assertIn("got 2, but expected 1", err.exception.args[0])
-        module.remove_backward_hook('bw_fail2')
+        with module.register_backward_hook(bw_fail2):
+            with self.assertRaises(RuntimeError) as err:
+                module(input).sum().backward()
+            self.assertIn("bw_fail2", err.exception.args[0])
+            self.assertIn("got 2, but expected 1", err.exception.args[0])
 
     def test_hook_writeable(self):
         module = nn.Linear(5, 5)
@@ -326,7 +322,7 @@ class TestNN(NNTestCase):
         def bw_hook(self, grad_input, grad_output):
             return tuple(gi * 2 for gi in grad_input)
 
-        module.register_backward_hook('test', bw_hook)
+        module.register_backward_hook(bw_hook)
         module(input).backward(torch.ones(5, 5))
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
         self.assertEqual(input.grad, expected_grad)
