@@ -21,10 +21,13 @@ Convolution Layers
 .. autoclass:: Conv2d
     :members:
 
-.. autoclass:: ConvTranspose2d
+.. autoclass:: Conv3d
     :members:
 
-.. autoclass:: Conv3d
+.. autoclass:: ConvTranspose1d
+    :members:
+
+.. autoclass:: ConvTranspose2d
     :members:
 
 .. autoclass:: ConvTranspose3d
