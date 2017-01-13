@@ -1,4 +1,5 @@
 #include "THCHalf.h"
+#include "THCThrustAllocator.cuh"
 #include <thrust/transform.h>
 #include <thrust/execution_policy.h>
 
@@ -11,9 +12,10 @@ struct __float2halfOp {
 };
 
 void THCFloat2Half(THCState *state, half *out, float *in, ptrdiff_t len) {
+  THCThrustAllocator thrustAlloc(state);
   thrust::transform(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
 #endif
@@ -21,9 +23,10 @@ void THCFloat2Half(THCState *state, half *out, float *in, ptrdiff_t len) {
 }
 
 void THCHalf2Float(THCState *state, float *out, half *in, ptrdiff_t len) {
+  THCThrustAllocator thrustAlloc(state);
   thrust::transform(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
 #endif
@@ -58,14 +61,17 @@ float THC_half2float(half h)
 
   int temp = ((sign << 31) | (exponent << 23) | mantissa);
 
-  return *((float*)((void*)&temp));
+  float x;
+  memcpy(&x,&temp,sizeof(float));
+  return x;
 }
 
 half THC_float2half(float f)
 {
   half ret;
 
-  unsigned x = *((int*)(void*)(&f));
+  unsigned x;
+  memcpy(&x,&f,sizeof(f));
   unsigned u = (x & 0x7fffffff), remainder, shift, lsb, lsb_s1, lsb_m1;
   unsigned sign, exponent, mantissa;
 

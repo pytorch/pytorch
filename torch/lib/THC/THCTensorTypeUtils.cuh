@@ -55,7 +55,9 @@ struct TensorUtils {
     static long getStride(THCState* state, TENSOR_TYPE* t, int dim);    \
     static int getDims(THCState* state, TENSOR_TYPE* t);                \
     static bool isContiguous(THCState* state, TENSOR_TYPE* t);          \
+    static bool allContiguous(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
     static int getDevice(THCState* state, TENSOR_TYPE* t);              \
+    static bool allSameDevice(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
     static void copyIgnoringOverlaps(THCState* state,                   \
                                      TENSOR_TYPE* dst, TENSOR_TYPE* src); \
     /* Determines if the given tensor has overlapping data points (i.e., */ \
@@ -64,6 +66,8 @@ struct TensorUtils {
     static bool overlappingIndices(THCState* state, TENSOR_TYPE* t);    \
     /* Can we use 32 bit math for indexing? */                          \
     static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t);  \
+    /* Are all tensors 32-bit indexable? */                             \
+    static bool all32BitIndexable(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
   }
 
 TENSOR_UTILS(THCudaByteTensor, unsigned char, long);

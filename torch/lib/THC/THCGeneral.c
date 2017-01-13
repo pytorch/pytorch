@@ -1,7 +1,6 @@
 #include "THCGeneral.h"
 #include "TH.h"
 #include "THCAllocator.h"
-#include "THCBlas.h"
 #include "THCCachingHostAllocator.h"
 #include "THCStream.h"
 #include "THCThreadLocal.h"
@@ -10,7 +9,12 @@
 #include <stdint.h>
 
 /* Size of scratch space available in global memory per each SM + stream */
-#define GLOBAL_SCRATCH_SPACE_PER_SM_STREAM 4 * sizeof(float)
+#define MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM 4 * sizeof(float)
+
+/* Minimum amount of scratch space per device. Total scratch memory per
+ * device is either this amount, or the # of SMs * the space per SM defined
+ * above, whichever is greater.*/
+#define MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE 32768 * sizeof(float)
 
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
@@ -108,9 +112,15 @@ void THCudaInit(THCState* state)
     res->streams[0] = NULL;
 
     /* The scratch space that we want to have available per each device is
-       based on the number of SMs available per device */
+       based on the number of SMs available per device. We guarantee a
+       minimum of 128kb of space per device, but to future-proof against
+       future architectures that may have huge #s of SMs, we guarantee that
+       we have at least 16 bytes for each SM. */
     int numSM = state->deviceProperties[i].multiProcessorCount;
-    size_t sizePerStream = numSM * GLOBAL_SCRATCH_SPACE_PER_SM_STREAM;
+    size_t sizePerStream =
+      MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE >= numSM * MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM ?
+      MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE :
+      numSM * MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM;
     res->scratchSpacePerStream = sizePerStream;
   }
 
@@ -753,7 +763,8 @@ void THCHeapUpdate(THCState *state, ptrdiff_t size) {
   }
 }
 
-#undef GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
+#undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
+#undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
 #include "THCStorage.c"
 #include "THCAllocator.c"

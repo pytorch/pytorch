@@ -78,23 +78,38 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 			  THCTensor **inputs, int numInputs, int dimension)
 {
   THLongStorage *size;
-  int i, j;
+  int i, j, cohortMax;
   long offset;
-  int ndim = dimension + 1;
+  bool hasEmptyInput = false;
+
+  // Even in the case where dimension is negative (i.e. when we want
+  // to cat along the last dimension), this logic still works, as the
+  // loop below will overwrite the value
+  int maxDim = dimension + 1;
+
+  // ldimension is the actual dimension we cat along (minus 1, for 0-based indexing)
   int ldimension = dimension;
 
   for (i = 0; i < numInputs; i++)
   {
-    ndim = THMax(ndim, THCTensor_(nDimension)(state, inputs[i]));
+    int inputDim = THCTensor_(nDimension)(state, inputs[i]);
+    hasEmptyInput |= !inputDim;
+    maxDim = THMax(maxDim, inputDim);
   }
 
-  if (dimension == -2) ldimension = ndim ? (ndim - 1) : 0;
+  // In the event that the user specified -1 as the concat dimension, then
+  // we want to pick the maxDim  as dimension to cat along (and thus maxDim - 1 as the
+  // value due to 0-based indexing). If the maxDim is // 0 (i.e. we are catting all
+  // empty tensors), then we set ldimension to be 0
+  if (dimension + TH_INDEX_BASE == -1) {
+    ldimension = maxDim ? (maxDim - 1) : 0;
+  }
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
   THArgCheck(ldimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
 
-  size = THLongStorage_newWithSize(ndim);
-  for(i = 0; i < ndim; i++)
+  size = THLongStorage_newWithSize(maxDim);
+  for(i = 0; i < maxDim; i++)
   {
     // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
     long dimSize = i < THCTensor_(nDimension)(state, inputs[0])
@@ -137,21 +152,131 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   THCTensor_(resize)(state, result, size, NULL);
   THLongStorage_free(size);
 
-  offset = 0;
-  for (j = 0; j < numInputs; j++)
-  {
-    // No reason to copy when input is empty
-    if (!THCTensor_(nDimension)(state, inputs[j])) continue;
+  // We parallelize the copy if all 6 conditions pass:
+  //
+  // 1. There is more than one input tensor
+  // 2. No empty inputs
+  // 3. The result tensor is 32-bit indexable
+  // 4. The number of dimensions is <= 4
+  // 5. All input tensors are contiguous (output tensor may be non-contig)
+  // 6. All input tensors can use 32-bit indexing
+  // 7. All input tensors are on the same device
 
-    long dimSize = ldimension < THCTensor_(nDimension)(state, inputs[j])
-			       ? THCTensor_(size)(state, inputs[j], ldimension)
-			       : 1;
+  if (numInputs > 1 &&
+      !hasEmptyInput &&
+      THCTensor_(nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
+      TensorUtils<THCTensor>::canUse32BitIndexMath(state, result) &&
+      TensorUtils<THCTensor>::allContiguous(state, inputs, numInputs) &&
+      TensorUtils<THCTensor>::all32BitIndexable(state, inputs, numInputs) &&
+      TensorUtils<THCTensor>::allSameDevice(state, inputs, numInputs)) {
 
-    THCTensor *nt = THCTensor_(newWithTensor)(state, result);
-    THCTensor_(narrow)(state, nt, NULL, ldimension, offset, dimSize);
-    THCTensor_(copy)(state, nt, inputs[j]);
-    THCTensor_(free)(state, nt);
-    offset += dimSize;
+    // First, let's set up our kernel parameters. We start with a raw pointer to the storage
+    // for the output Tensor.
+    real *data = THCTensor_(data)(state, result);
+
+    // Kernel Parameter
+    CatArrInputTensor<real, unsigned int> stackInputs[CAT_ARRAY_BATCH_SIZE];
+    CatArrInputTensor<real, unsigned int> *d_inputs;
+
+    // Attempt to re-use stream's scratch space for the input metadata
+    bool usedScratch = false;
+    size_t tensorMetadataSize = sizeof(CatArrInputTensor<real, unsigned int>) * CAT_ARRAY_BATCH_SIZE;
+    if (THCState_getCurrentDeviceScratchSpaceSize(state) > tensorMetadataSize) {
+      void* space = THCState_getCurrentDeviceScratchSpace(state);
+      if (space) {
+        d_inputs = (CatArrInputTensor<real, unsigned int> *) space;
+        usedScratch = true;
+      }
+    }
+    if (!usedScratch) {
+      // Fallback to allocating GPU memory
+      THCudaCheck(THCudaMalloc(state, (void**) &d_inputs, tensorMetadataSize));
+    }
+
+    OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
+
+    // Next, let's initialize the size, stride arrays for the output Tensor.
+    for (i = 0; i < maxDim; ++i) {
+      param.outputSize[i] = THCTensor_(size)(state, result, i);
+      param.outputStride[i] = THCTensor_(stride)(state, result, i);
+    }
+
+    // Template Declarations for dim = 1, 2, 3, 4
+#define HANDLE_CASE(DIMS) \
+  CatArrayBatchedCopy<real, unsigned int, DIMS><<<applyGrid, applyBlock>>>(data, d_inputs, param, ldimension, param.outputStride[dimension]);
+
+    // Now we loop
+    offset = 0;
+    for (i = 0; i < numInputs; i += CAT_ARRAY_BATCH_SIZE) {
+      cohortMax = 0;
+      for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
+        long dimSize = ldimension < THCTensor_(nDimension)(state, inputs[i+j])
+          ? THCTensor_(size)(state, inputs[i+j], ldimension)
+          : 1;
+
+        stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
+        stackInputs[j].offset = offset;
+        stackInputs[j].dimSize = dimSize;
+        stackInputs[j].nElements = THCTensor_(nElement)(state, inputs[i+j]);
+        cohortMax = cohortMax > stackInputs[j].nElements ? cohortMax : stackInputs[j].nElements;
+
+        // update offset
+        offset += dimSize;
+      }
+      cudaMemcpy(d_inputs, stackInputs, j * sizeof(CatArrInputTensor<real, unsigned int>), cudaMemcpyHostToDevice);
+
+      // Next, let's consider how we set our kernel launch parameters.
+      // We borrow from THCApply, which the kernel's internal indexing
+      // is based on.
+      dim3 applyBlock = getApplyBlock();
+
+      // We also re-use the applyGrid - but note that we use the maximum number of
+      // elements for a given tensor in this grouping to determine the count
+      dim3 applyGrid;
+      getApplyGrid(state, cohortMax, applyGrid);
+
+      // Next, we set our grid's y component to be the number of tensors in
+      // the batch. This will allow the kernel to determine which input
+      // tensor it is responsible for copying
+      applyGrid.y = j;
+
+      switch (maxDim) {
+        case 1:
+          HANDLE_CASE(1);
+          break;
+        case 2:
+          HANDLE_CASE(2);
+          break;
+        case 3:
+          HANDLE_CASE(3);
+          break;
+        case 4:
+          HANDLE_CASE(4);
+          break;
+      }
+      THCudaCheck(cudaGetLastError());
+    }
+    if (!usedScratch) {
+      THCudaCheck(THCudaFree(state, (void *)d_inputs));
+    }
+#undef HANDLE_CASE
+  } else {
+    offset = 0;
+    for (j = 0; j < numInputs; j++)
+    {
+      // No reason to copy when input is empty
+      if (!THCTensor_(nDimension)(state, inputs[j])) continue;
+
+      long dimSize = ldimension < THCTensor_(nDimension)(state, inputs[j])
+               ? THCTensor_(size)(state, inputs[j], ldimension)
+               : 1;
+
+      THCTensor *nt = THCTensor_(newWithTensor)(state, result);
+      THCTensor_(narrow)(state, nt, NULL, ldimension, offset, dimSize);
+      THCTensor_(copy)(state, nt, inputs[j]);
+      THCTensor_(free)(state, nt);
+      offset += dimSize;
+    }
   }
 }
 
@@ -161,8 +286,9 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   THAssert(THCTensor_(checkGPU)(state, 1, self  ));
   THAssert(THCudaLongTensor_checkGPU(state, 1, tensor));
 
-  using namespace thrust::placeholders;
 
+  using namespace thrust::placeholders;
+  THCThrustAllocator thrustAlloc(state);
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
@@ -186,7 +312,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
   strided_range<Iter>::iterator dend = thrust::copy_if(
 #if CUDA_VERSION >= 7000
-    thrust::cuda::par.on(stream),
+    thrust::cuda::par(thrustAlloc).on(stream),
 #endif
     idxfirst,
     idxlast,
@@ -203,7 +329,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
                                    tensor_data+N*num_dim, num_dim);
     thrust::transform(
 #if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(stream),
+      thrust::cuda::par(thrustAlloc).on(stream),
 #endif
       strided_tensor.begin(),
       strided_tensor.end(),
