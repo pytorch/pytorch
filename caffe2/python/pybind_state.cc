@@ -7,6 +7,8 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/predictor.h"
 #include "caffe2/utils/mkl_utils.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 
 namespace caffe2 {
 namespace python {
@@ -659,8 +661,14 @@ void addGlobalMethods(py::module& m) {
   });
   m.def("run_plan", [](const py::bytes& plan_def) {
     CAFFE_ENFORCE(gWorkspace);
+    const std::string& msg = std::move(plan_def);
+    ::google::protobuf::io::ArrayInputStream input_stream(
+        msg.data(), msg.size());
+    ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
+    // Set PlanDef message size limit to 1G.
+    coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
     PlanDef def;
-    CAFFE_ENFORCE(def.ParseFromString(plan_def));
+    CAFFE_ENFORCE(def.ParseFromCodedStream(&coded_stream));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;
