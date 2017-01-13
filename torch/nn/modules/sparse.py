@@ -21,7 +21,7 @@ class Embedding(Module):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
-    
+
     Shape:
         - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
         - Output: `(N, W, embedding_dim)`
@@ -40,7 +40,7 @@ class Embedding(Module):
           0.8393 -0.6062 -0.3348
           0.6597  0.0350  0.0837
           0.5521  0.9447  0.0498
-        
+
         (1 ,.,.) =
           0.6597  0.0350  0.0837
          -0.1527  0.0877  0.4260
@@ -60,7 +60,7 @@ class Embedding(Module):
           0.0000  0.0000  0.0000
           0.0706 -2.1962 -0.6276
         [torch.FloatTensor of size 1x4x3]
-        
+
     """
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
@@ -90,6 +90,21 @@ class Embedding(Module):
             padding_idx, self.max_norm, self.norm_type,
             self.scale_grad_by_freq, self.sparse
             )(input, self.weight)
+
+    def __repr__(self):
+        s = '{name}({num_embeddings}, {embedding_dim}'
+        if self.padding_idx is not None:
+            s += ', padding_idx={padding_idx}'
+        if self.max_norm is not None:
+            s += ', max_norm={max_norm}'
+        if self.norm_type != 2:
+            s += ', norm_type={norm_type}'
+        if self.scale_grad_by_freq is not False:
+            s += ', scale_grad_by_freq={scale_grad_by_freq}'
+        if self.sparse is not False:
+            s += ', sparse=True'
+        s += ')'
+        return s.format(name=self.__class__.__name__, **self.__dict__)
 
 
 # TODO: SparseLinear
