@@ -17,22 +17,3 @@ class RemovableHandle(object):
 
     def __exit__(self, type, value, tb):
         self.remove()
-
-
-def partial_apply_hook(hook, module):
-    """Computes the partial application hook(module)
-
-    Given a hook with the signature::
-
-        hook(module, grad_input, grad_output) -> Tensor
-
-    This binds the first argument `module` and returns a new function with the
-    signature::
-
-        wrapper(grad_input, grad_output) -> Tensor
-    """
-    def wrapper(grad_input, grad_output):
-        return hook(module, grad_input, grad_output)
-    # preserve the name for debugging
-    wrapper.__name__ = hook.__name__
-    return wrapper
