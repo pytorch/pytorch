@@ -53,7 +53,7 @@ enum SIMDExtensions
 };
 
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__aarch64__) // incl. armel, armhf, arm64
 
  #if defined(__NEON__)
 
@@ -80,7 +80,7 @@ static inline uint32_t detectHostSIMDExtensions()
   return SIMDExtension_VSX;
 }
 
- #else
+ #else //PPC64 without VSX
 
 static inline uint32_t detectHostSIMDExtensions()
 {

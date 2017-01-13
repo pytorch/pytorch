@@ -77,15 +77,17 @@ float TH_half2float(THHalf h)
     }
 
     int temp = ((sign << 31) | (exponent << 23) | mantissa);
-
-    return *((float*)((void*)&temp));
+    float x;
+    memcpy(&x,&temp,sizeof(float));
+    return x;
 }
 
 THHalf TH_float2half(float f)
 {
     THHalf ret;
 
-    unsigned x = *((int*)(void*)(&f));
+    unsigned x;
+    memcpy(&x,&f,sizeof(f));
     unsigned u = (x & 0x7fffffff), remainder, shift, lsb, lsb_s1, lsb_m1;
     unsigned sign, exponent, mantissa;
 
