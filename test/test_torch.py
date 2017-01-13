@@ -2759,6 +2759,12 @@ class TestTorch(TestCase):
         x_clone ^= y
         self.assertEqual(x_clone, xor_result)
 
+    def test_apply(self):
+        x = torch.range(1, 5)
+        res = x.clone().apply_(lambda k: k + k)
+        self.assertEqual(res, x * 2)
+        self.assertRaises(RuntimeError, lambda: x.apply_(lambda k: "str"))
+
 
 if __name__ == '__main__':
     unittest.main()
