@@ -642,6 +642,32 @@ class TestAutograd(TestCase):
             assert_strict_equal(yc, y)
             assert_strict_equal(zc, z)
 
+    def test_dep_nograd(self):
+        class F1(Function):
+            def forward(self, input):
+                out = torch.randn(input.size())
+                self.mark_non_differentiable(out)
+                return input, out
+
+            def backward(self, grad_output, ignored):
+                return grad_output
+
+        class F2(Function):
+            def forward(self, input, ignored):
+                return input
+
+            def backward(self, grad_output):
+                return grad_output, None
+
+        x = Variable(torch.randn(5), requires_grad=True)
+        a, b = F1()(x)
+        b = b + 1  # separate F1 from F2 by another op
+        self.assertTrue(a.requires_grad)
+        self.assertFalse(b.requires_grad)
+        c = F2()(a, b)
+        c.backward(torch.ones(c.size()))
+        self.assertEqual(x.grad, torch.ones(x.size()))
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
