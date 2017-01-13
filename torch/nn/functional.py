@@ -124,6 +124,13 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
+def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
+                     output_padding=0, groups=1):
+    f = ConvNd(_single(stride), _single(padding), _single(1), True,
+               _single(output_padding), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
+
+
 def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1):
     """Applies a 2D transposed convolution operator over an input image

@@ -1,6 +1,7 @@
 from .module import Module
 from .linear import Linear
-from .conv import Conv1d, Conv2d, ConvTranspose2d, Conv3d, ConvTranspose3d
+from .conv import Conv1d, Conv2d, Conv3d, \
+    ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
     Softmax, Softmax2d, LogSoftmax, ELU, Hardshrink, LeakyReLU, LogSigmoid, \
     Softplus, Softshrink, PReLU, Softsign, Softmin, Tanhshrink, RReLU

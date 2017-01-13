@@ -962,7 +962,7 @@ class TestNN(NNTestCase):
                 for bidirectional in (False, True):
                     for dropout in (0, 1): # Because of dropout randomness, can only compare 0 and 1
                         for batch_first in (False, True):
-                            num_directions = 2 if bidirectional else 1                            
+                            num_directions = 2 if bidirectional else 1
                             if batch_first:
                                 input_val = torch.randn(batch, seq_length, input_size)
                             else:
@@ -1210,6 +1210,19 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
+    ),
+    dict(
+        module_name='ConvTranspose1d',
+        constructor_args=(3, 4, 3, (3,), 1, (1,)),
+        cudnn=True,
+        input_size=(1, 3, 7)
+    ),
+    dict(
+        module_name='ConvTranspose1d',
+        constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
+        input_size=(1, 3, 6),
+        cudnn=True,
+        desc='no_bias'
     ),
     dict(
         module_name='MaxPool1d',
