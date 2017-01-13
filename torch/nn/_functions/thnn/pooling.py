@@ -25,6 +25,9 @@ class MaxPool1d(Function):
                 self.pad, 0,
                 self.dilation, 1,
                 self.ceil_mode)
+        if indices.dim() == 4:
+            # TODO: fix when THCUNN handles 3D indices properly
+            indices = indices.squeeze(0)
         if self.return_indices:
             self.save_for_backward(input, indices)
             self.mark_non_differentiable(indices)
@@ -40,6 +43,9 @@ class MaxPool1d(Function):
         else:
             input, = self.saved_tensors
             indices = self.indices
+        if indices.is_cuda and indices.dim() == 3:
+            # TODO: fix when THCUNN handles 3D indices properly
+            indices = indices.unsqueeze(0)
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
         backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
