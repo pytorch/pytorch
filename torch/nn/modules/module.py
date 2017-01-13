@@ -5,6 +5,7 @@ import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 from torch.autograd import Variable
+import torch.utils.hooks as hooks
 
 
 class Module(object):
@@ -45,7 +46,7 @@ class Module(object):
         Buffers can be accessed as attributes using given names.
 
         Example:
-            self.register_buffer('running_mean', torch.zeros(num_features))
+            >>> self.register_buffer('running_mean', torch.zeros(num_features))
         """
         self._buffers[name] = tensor
 
@@ -118,63 +119,61 @@ class Module(object):
         """Casts all parameters and buffers to half datatype."""
         return self._apply(lambda t: t.half())
 
-    def register_backward_hook(self, name, hook):
-        """Registers a backward hook on the module, under a given name.
+    def register_backward_hook(self, hook):
+        """Registers a backward hook on the module.
 
-        The hook will be called every time the gradient w.r.t. module inputs
-        is computed. The callable should accept two arguments - gradient w.r.t.
-        the input and gradient w.r.t. the output, where both arguments can be
-        tuples if the module had multiple inputs or outputs.
-        The hook should never modify its arguments in-place, but it can
-        optionally return a new gradient w.r.t. the input, that will be used
-        in subsequent computation.
+        The hook will be called every time the gradients with respect to module
+        inputs are computed. The hook should have the following signature::
+
+            hook(module, grad_input, grad_output) -> Tensor or None
+
+        The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
+        module has multiple inputs or outputs. The hook should not modify its
+        arguments, but it can optionally return a new gradient with respect to
+        input that will be used in place of :attr:`grad_input` in subsequent
+        computations.
+
+        This function returns a handle with a method ``handle.remove()``
+        that removes the hook from the module.
         """
-        assert name not in self._backward_hooks, \
-            "Trying to register a second backward hook with name {}".format(name)
-        self._backward_hooks[name] = lambda gi, go: hook(self, gi, go)
+        handle = hooks.RemovableHandle(self._backward_hooks)
+        self._backward_hooks[id(handle)] = hook
+        return handle
 
-    def remove_backward_hook(self, name):
-        """Removes a backward hook with a given name.
-
-        If no such hook exists, a RuntimeError is raised.
-        """
-        assert name in self._backward_hooks, \
-            "Trying to remove an inexistent backward hook with name {}".format(name)
-        del self._backward_hooks[name]
-
-    def register_forward_hook(self, name, hook):
-        """Registers a forward hook on the module, under a given name.
+    def register_forward_hook(self, hook):
+        """Registers a forward hook on the module.
 
         The hook will be called every time :func:`forward` computes an output.
-        The callable should accept two arguments - module's input and output.
-        Both should not be modified by the hook.
-        """
-        assert name not in self._forward_hooks, \
-            "Trying to register a second forward hook with name {}".format(name)
-        self._forward_hooks[name] = hook
+        It should have the following signature::
 
-    def remove_forward_hook(self, name):
-        """Removes a forward hook with a given name.
+            hook(module, input, output) -> None
 
-        If no such hook exists, a RuntimeError is raised.
+        The hook should not modify the input or output.
+        This function returns a handle with a method ``handle.remove()``
+        that removes the hook from the module.
         """
-        assert name in self._forward_hooks, \
-            "Trying to remove an inexistent forward hook with name {}".format(name)
-        del self._forward_hooks[name]
+        handle = hooks.RemovableHandle(self._forward_hooks)
+        self._forward_hooks[id(handle)] = hook
+        return handle
 
     def __call__(self, *input, **kwargs):
         result = self.forward(*input, **kwargs)
-        for name, hook in self._forward_hooks.items():
+        for hook in self._forward_hooks.values():
             hook_result = hook(self, input, result)
             if hook_result is not None:
-                raise RuntimeError("forward hooks should never return any "
-                        "values, but '{}' didn't return None".format(name))
+                raise RuntimeError(
+                    "forward hooks should never return any values, but '{}'"
+                    "didn't return None".format(hook))
         var = result
         while not isinstance(var, Variable):
             var = var[0]
         creator = var.creator
-        if creator is not None:
-            creator._backward_hooks = self._backward_hooks
+        if creator is not None and len(self._backward_hooks) > 0:
+            if creator._backward_hooks is None:
+                creator._backward_hooks = OrderedDict()
+            for hook in self._backward_hooks.values():
+                wrapper = hooks.partial_apply_hook(hook, self)
+                creator._backward_hooks[id(wrapper)] = wrapper
         return result
 
     def __getattr__(self, name):

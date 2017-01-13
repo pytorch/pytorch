@@ -1,6 +1,7 @@
 import sys
 import torch._C as _C
 from collections import OrderedDict
+import torch.utils.hooks as hooks
 
 from ._functions import *
 
@@ -155,54 +156,43 @@ class Variable(_C._VariableBase):
             gradient = self.data.new().resize_as_(self.data).fill_(1)
         self._execution_engine.run_backward((self,), (gradient,), retain_variables)
 
-    def register_hook(self, name, hook):
-        """Registers a named backward hook.
+    def register_hook(self, hook):
+        """Registers a backward hook.
 
-        Given hook will be saved and called with the gradient w.r.t. the
-        variable at every backward pass. To remove a hook use
-        :func:`remove_hook`. Saved hooks are called in the same order
-        in which they were registered.
+        The hook will be called every time a gradient with respect to the
+        variable is computed. The hook should have the following signature::
 
-        You should never modify the data of gradient tensor given to your hook,
-        but you can use it in out-of-place operations and return a new tensor::
+            hook(grad) -> Tensor or None
 
-            variable.register_hook('double_grad', lambda grad: grad * 2)
+        The hook should not modify its argument, but it can optionally return
+        a new gradient which will be used in place of :attr:`grad`.
 
-        The returned value will replace the original tensor. Note that you
-        don't need to return anything from the hook, in which case it won't
-        change the gradient.
+        This function returns a handle with a method ``handle.remove()``
+        that removes the hook from the module.
 
-
-        Parameters:
-            name(str): Name of the hook.
-            hook(callable): Hook callable. It will be given a single argument
-                that's gradient w.r.t. the variable its registered on.
+        Example:
+            >>> v = Variable(torch.Tensor([0, 0, 0]), requires_grad=True)
+            >>> h = v.register_hook(lambda grad: grad * 2)  # double the gradient
+            >>> v.backward(torch.Tensor([1, 1, 1]))
+            >>> v.grad
+             2
+             2
+             2
+            [torch.FloatTensor of size 3]
+            >>> h.remove()  # removes the hook
         """
         if self.volatile:
-            raise RuntimeError("registering hook on a volatile variable")
+            raise RuntimeError("cannot register a hook on a volatile variable")
         if not self.requires_grad:
-            raise RuntimeError("registering hook on a variable that doesn't require gradient")
+            raise RuntimeError("cannot register a hook on a variable that "
+                               "doesn't require gradient")
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
             if self.creator is not None:
                 self.creator._register_hook_dict(self)
-        assert name not in self._backward_hooks, \
-            "Trying to register a second hook with name {}".format(name)
-        self._backward_hooks[name] = hook
-
-    def remove_hook(self, name):
-        """Removes a previously registered backward hook.
-
-        Raises RuntimeError if there's no hook registered under a given name.
-
-        Parameters:
-            name(str): Name of the hook.
-        """
-        if self.volatile:
-            raise RuntimeError("volatile variables don't support hooks")
-        assert self._backward_hooks and name in self._backward_hooks, \
-            "Trying to remove an inexistent hook with name {}".format(name)
-        del self._backward_hooks[name]
+        handle = hooks.RemovableHandle(self._backward_hooks)
+        self._backward_hooks[id(handle)] = hook
+        return handle
 
     def _do_backward(self, grad_output, retain_variables):
         assert len(grad_output) == 1

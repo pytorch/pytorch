@@ -1,5 +1,6 @@
 import torch
 import torch._C as _C
+import torch.utils.hooks as hooks
 from collections import OrderedDict
 from itertools import chain
 
@@ -106,16 +107,12 @@ class Function(_C._FunctionBase):
         """
         self.non_differentiable = args
 
-    def register_hook(self, name, hook):
-        self._backward_hooks = self._backward_hooks or OrderedDict()
-        assert name not in self._backward_hooks, \
-            "Trying to register a second hook with name {}".format(name)
-        self._backward_hooks[name] = hook
-
-    def remove_hook(self, name):
-        assert self._backward_hooks and name in self._backward_hooks, \
-            "Trying to remove an inexistent hook with name {}".format(name)
-        del self._backward_hooks[name]
+    def register_hook(self, hook):
+        if self._backward_hooks is None:
+            self._backward_hooks = OrderedDict()
+        handle = hooks.RemovableHandle(self._backward_hooks)
+        self._backward_hooks[id(handle)] = hook
+        return handle
 
     def forward(self, *input):
         """Performs the operation.

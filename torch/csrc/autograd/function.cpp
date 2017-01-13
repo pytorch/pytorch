@@ -461,14 +461,15 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
 
 // We need a reference to a smart pointer that will outlive the duration of
 // a function call, so that the char* pointer is valid even after it returns
-static char* _try_get_name(PyObject *key, THPObjectPtr& tmp) {
+static char* _try_get_name(PyObject *hook, THPObjectPtr& tmp) {
+  tmp = PyObject_GetAttrString(hook, "__name__");
 #if PY_MAJOR_VERSION == 2
-  if (PyString_Check(key)) {
-    return PyString_AS_STRING(key);
+  if (tmp && PyString_Check(tmp.get())) {
+    return PyString_AS_STRING(tmp.get());
   }
 #else
-  if (PyUnicode_Check(key)) {
-    tmp = PyUnicode_AsASCIIString(key);
+  if (tmp && PyUnicode_Check(tmp.get())) {
+    tmp = PyUnicode_AsASCIIString(tmp.get());
     return PyBytes_AS_STRING(tmp.get());
   }
 #endif
@@ -481,7 +482,7 @@ static char* _try_get_name(PyObject *key, THPObjectPtr& tmp) {
   hook_name ? "' " : ""
 
 static void _ensure_correct_hook_result_single(PyObject *original,
-    PyObject *returned, PyObject *key)
+    PyObject *returned, PyObject *hook)
 {
 #if PY_MAJOR_VERSION == 2
   static PyObject *IS_SAME_SIZE_NAME = PyString_FromString("is_same_size");
@@ -491,7 +492,7 @@ static void _ensure_correct_hook_result_single(PyObject *original,
   THPObjectPtr tmp;
   // Check that the type matches
   if(Py_TYPE(original) != Py_TYPE(returned)) {
-    char *hook_name = _try_get_name(key, tmp);
+    char *hook_name = _try_get_name(hook, tmp);
     THPUtils_setError("backward hook %s%s%shas changed the type of "
         "grad_input (was %s, but got %s)",
         OPTIONAL_HOOK_NAME,
@@ -505,7 +506,7 @@ static void _ensure_correct_hook_result_single(PyObject *original,
   THPObjectPtr is_same_size = PyObject_CallMethodObjArgs(original,
       IS_SAME_SIZE_NAME, returned, NULL);
   if(is_same_size.get() != Py_True) {
-    char *hook_name = _try_get_name(key, tmp);
+    char *hook_name = _try_get_name(hook, tmp);
     THPUtils_setError("backward hook %s%s%shas changed the size of "
         "grad_input",
         OPTIONAL_HOOK_NAME
@@ -515,12 +516,12 @@ static void _ensure_correct_hook_result_single(PyObject *original,
 }
 
 static void _ensure_correct_hook_result(THPObjectPtr& grad_input,
-    THPObjectPtr& result, PyObject *key)
+    THPObjectPtr& result, PyObject *hook)
 {
   THPObjectPtr tmp;
   // Check that the tuple sizes match
   if (PyTuple_GET_SIZE(result.get()) != PyTuple_GET_SIZE(grad_input.get())) {
-    char *hook_name = _try_get_name(key, tmp);
+    char *hook_name = _try_get_name(hook, tmp);
     THPUtils_setError("backward hook %s%s%sreturned an incorrect number "
         "of gradients (got %ld, but expected %ld)",
         OPTIONAL_HOOK_NAME,
@@ -534,7 +535,7 @@ static void _ensure_correct_hook_result(THPObjectPtr& grad_input,
   for (int i = 0; i < size; i++) {
     PyObject *original = PyTuple_GET_ITEM(grad_input.get(), i);
     PyObject *returned = PyTuple_GET_ITEM(result.get(), i);
-    _ensure_correct_hook_result_single(original, returned, key);
+    _ensure_correct_hook_result_single(original, returned, hook);
   }
 }
 
@@ -570,7 +571,7 @@ static void _call_output_hooks(THPFunction *self, THPObjectPtr& grad_output)
       if (result.get() != Py_None) {
         // Check all possible inconsistencies of the output that we can detect
         // (sizes, types, etc.)
-        _ensure_correct_hook_result_single(old_grad, result, key);
+        _ensure_correct_hook_result_single(old_grad, result, value);
 
         // Replace the old gradient
         PyTuple_SET_ITEM(new_grad_output.get(), i, result.release());
@@ -603,7 +604,7 @@ static void _call_function_hooks(THPFunction *self, THPObjectPtr& grad_input, TH
       _ensure_tuple(result);
       // Check all possible inconsistencies of the output that we can detect
       // (sizes, types, etc.)
-      _ensure_correct_hook_result(grad_input, result, key);
+      _ensure_correct_hook_result(grad_input, result, value);
       grad_input = result.release();
     }
   }
