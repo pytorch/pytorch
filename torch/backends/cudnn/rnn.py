@@ -293,6 +293,10 @@ def forward(fn, input, hx, weight, output, hy):
 
         if fn.batch_first:
             output = output.transpose(0, 1)
+        if fn.mode == cudnn.CUDNN_LSTM:
+            hy = (hy, cy)
+        return output, hy
+
 
 
 def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_input, grad_hx):
@@ -368,6 +372,9 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
 
         if fn.batch_first:
             grad_input = grad_input.transpose(0, 1)
+        if fn.mode == cudnn.CUDNN_LSTM:
+            grad_hx = (grad_hx, grad_cx)
+        return grad_input, grad_hx
 
 
 def _num_linear_layers(fn):
@@ -391,11 +398,9 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
             hx, cx = hx
         else:
             cx = None
-
         if fn.batch_first:
-            input = input.transpose(1, 2)
-            output = output.transpose(1, 2)
-
+            input = input.transpose(0, 1)
+            output = output.transpose(0, 1)
         input_size = _input_size(fn)
         hidden_size = _hidden_size(fn)
         if not fn.train:
