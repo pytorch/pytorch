@@ -10,6 +10,7 @@
   python_name: apply_
   defined_if: "!IS_CUDA"
   only_register: True
+  override_method_flags: METH_O
 ]]
 static PyObject * THPTensor_(apply)(THPTensor *self, PyObject *arg)
 {
@@ -112,4 +113,3 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 #endif /* !IS_CUDA */
 
 #undef BUILD_REAL_FMT
-
