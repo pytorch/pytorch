@@ -485,7 +485,7 @@ class TestNN(NNTestCase):
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, input)
 
-    def _test_maxpool_indices(self, num_dim):
+    def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
             if dim == 1:
                 return torch.DoubleTensor([1, 3])
@@ -502,9 +502,9 @@ class TestNN(NNTestCase):
             return torch.cat((zero, grad, zero, grad), 0)
 
         module_cls = getattr(nn, 'MaxPool{}d'.format(num_dim))
-        module = module_cls(2, return_indices=True)
+        module = module_cls(2, return_indices=True).type(type)
         numel = 4 ** num_dim
-        input = torch.range(1, numel).view(1, 1, *repeat(4, num_dim))
+        input = torch.range(1, numel).view(1, 1, *repeat(4, num_dim)).type(type)
         input_var = Variable(input, requires_grad=True)
 
         # Check forward
@@ -512,13 +512,14 @@ class TestNN(NNTestCase):
         if num_dim != 3:
             expected_indices = expected_indices(num_dim)
             expected_output = expected_indices + 1
+            self.assertEqual(indices.dim(), input.dim())
             self.assertEqual(indices.data.squeeze(), expected_indices)
             self.assertEqual(output.data.squeeze(), expected_output)
         self.assertTrue(output.requires_grad)
         self.assertFalse(indices.requires_grad)
 
         # Make sure backward works
-        grad_output = torch.DoubleTensor(output.size()).fill_(1)
+        grad_output = torch.ones(output.size()).type(type)
         output.backward(grad_output, retain_variables=True)
         expected_grad = expected_grad(num_dim)
         self.assertEqual(input_var.grad, expected_grad.view_as(input))
@@ -530,11 +531,23 @@ class TestNN(NNTestCase):
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_MaxPool1d_indices_cuda(self):
+        self._test_maxpool_indices(1, torch.cuda.FloatTensor)
+
     def test_MaxPool2d_indices(self):
         self._test_maxpool_indices(2)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_MaxPool2d_indices_cuda(self):
+        self._test_maxpool_indices(2, torch.cuda.FloatTensor)
+
     def test_MaxPool3d_indices(self):
         self._test_maxpool_indices(3)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_MaxPool3d_indices_cuda(self):
+        self._test_maxpool_indices(3, torch.cuda.FloatTensor)
 
     def _test_scatter(self, tensor):
         x = Variable(tensor, requires_grad=True)
