@@ -1,5 +1,6 @@
 from itertools import chain
 from collections import OrderedDict
+import functools
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -172,7 +173,8 @@ class Module(object):
             if creator._backward_hooks is None:
                 creator._backward_hooks = OrderedDict()
             for hook in self._backward_hooks.values():
-                wrapper = hooks.partial_apply_hook(hook, self)
+                wrapper = functools.partial(hook, self)
+                functools.update_wrapper(wrapper, hook)
                 creator._backward_hooks[id(wrapper)] = wrapper
         return result
 
