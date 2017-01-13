@@ -45,16 +45,16 @@ void THPEngine_compute_dependencies(std::vector<THPFunction*> queue,
     THPFunction *fn = queue.back(); queue.pop_back();
     for (int i = 0; i < fn->num_inputs; i++) {
       THPFunction *prev_fn = (THPFunction*)fn->previous_functions[i].get();
-      // Stochastic functions are ready for backward immediately
       // We can ignore variables (their backprop is called every time we have
       // gradient ready).
       if (THPVariable_Check((PyObject*)prev_fn))
         continue;
+      // Stochastic functions are ready for backward immediately
       if (PyObject_IsInstance((PyObject*)prev_fn, THPStochasticFunctionClass) &&
           prev_fn->requires_grad &&
           seen.count(prev_fn) == 0) {
         ready.emplace_back(prev_fn, grad_buffer_type(0));
-      } else {
+      } else if (fn->requires_grad && prev_fn->requires_grad) {
         dependencies[prev_fn] += 1;
       }
       if (seen.count(prev_fn) == 0) {
@@ -69,7 +69,13 @@ void THPEngine_compute_dependencies(std::vector<THPFunction*> queue,
 bool THPEngine_free_backward_dependency(dependencies_type &dependencies,
     THPFunction *prev_fn)
 {
-  if (--dependencies[prev_fn] == 0) {
+  int deps = --dependencies[prev_fn];
+  if (deps < 0) {
+    std::string msg = "dependencies is negative: ";
+    msg += Py_TYPE((PyObject*)prev_fn)->tp_name;
+    throw std::runtime_error(msg);
+  }
+  if (deps == 0) {
     dependencies.erase(prev_fn);
     return true;
   }
@@ -143,11 +149,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check((PyObject*)variable), "element %d of variables "
         "tuple is not a Variable", i);
     // If someone calls .backward() on a leaf, it's simple...
-    if (variable->creator == NULL && variable->requires_grad) {
-      THPObjectPtr result = PyObject_CallMethod((PyObject*)variable,
-              "_do_backward", "(O)O", grad, retain_variables_obj);
-      if (!result) return NULL;
-      did_leaf_backward = true;
+    if (variable->creator == NULL) {
+      if (variable->requires_grad) {
+        THPObjectPtr result = PyObject_CallMethod((PyObject*)variable,
+                "_do_backward", "(O)O", grad, retain_variables_obj);
+        if (!result) return NULL;
+        did_leaf_backward = true;
+      }
       continue;
     }
     THPFunction *creator = (THPFunction*)variable->creator;
@@ -217,6 +225,9 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       THPFunction *prev_fn = (THPFunction*)prev_obj;
       if (!prev_fn->requires_grad)
         continue;
+      // Stochastic functions are immediately ready
+      if (PyObject_IsInstance((PyObject*)prev_fn, THPStochasticFunctionClass))
+        continue;
 
       // Check if the function is ready for backward and see if it has any
       // buffers allocated
@@ -253,6 +264,16 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
             return NULL;
       }
     }
+  }
+
+  if (!not_ready.empty()) {
+    std::string names;
+    for (auto &it : not_ready) {
+      if (!names.empty()) names += ", ";
+      names += Py_TYPE((PyObject *)it.first)->tp_name;
+    }
+    THPUtils_assert(not_ready.empty(),
+        "could not compute gradients for some functions (%s)", names.c_str());
   }
 
   Py_RETURN_NONE;
@@ -319,4 +340,3 @@ bool THPEngine_initModule(PyObject *module)
   PyModule_AddObject(module, "_ImperativeEngine", (PyObject *)&THPEngineType);
   return true;
 }
-
