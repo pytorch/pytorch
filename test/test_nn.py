@@ -1454,37 +1454,33 @@ for test_params in criterion_tests:
     add_test(test)
 
 
-class UnpoolingNet2d(nn.Container):
-
-    def __init__(self):
-        super(UnpoolingNet2d, self).__init__(
-            pool=nn.MaxPool2d(2, return_indices=True),
-            unpool=nn.MaxUnpool2d(2)
-        )
-
-    def forward(self, input):
-        return self.unpool(*self.pool(input))
-
-
-class UnpoolingNet3d(nn.Container):
-
-    def __init__(self):
-        super(UnpoolingNet3d, self).__init__(
-            pool=nn.MaxPool3d(2, return_indices=True),
-            unpool=nn.MaxUnpool3d(2)
-        )
+class UnpoolingNet(nn.Container):
+    def __init__(self, pool, unpool):
+        super(UnpoolingNet, self).__init__()
+        self.pool = pool
+        self.unpool = unpool
 
     def forward(self, input):
         return self.unpool(*self.pool(input))
 
 
 add_test(NewModuleTest(
-    constructor=UnpoolingNet2d,
-    input_size=(1, 1, 8, 8),
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool1d(2, return_indices=True),
+        nn.MaxUnpool1d(2)),
+    input_size=(1, 1, 4),
+    fullname='MaxUnpool1d_net'))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d(2, return_indices=True),
+        nn.MaxUnpool2d(2)),
+    input_size=(1, 1, 2, 4),
     fullname='MaxUnpool2d_net'))
 add_test(NewModuleTest(
-    constructor=UnpoolingNet3d,
-    input_size=(1, 1, 8, 8, 8),
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool3d(2, return_indices=True),
+        nn.MaxUnpool3d(2)),
+    input_size=(1, 1, 2, 4, 6),
     fullname='MaxUnpool3d_net'))
 
 

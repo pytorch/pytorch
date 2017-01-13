@@ -9,8 +9,8 @@ from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, NLLLoss2d, \
         MultiLabelMarginLoss, MultiLabelSoftMarginLoss, MultiMarginLoss, \
         SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss
 from .container import Container, Sequential
-from .pooling import AvgPool1d, MaxPool1d, MaxPool2d, MaxUnpool2d, AvgPool2d, MaxPool3d, \
-        AvgPool3d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d
+from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxPool3d, \
+    MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d
 from .dropout import Dropout, Dropout2d, Dropout3d
 from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d

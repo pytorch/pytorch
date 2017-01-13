@@ -40,10 +40,13 @@ Pooling Layers
 .. autoclass:: MaxPool2d
     :members:
 
-.. autoclass:: MaxUnpool2d
+.. autoclass:: MaxPool3d
     :members:
 
-.. autoclass:: MaxPool3d
+.. autoclass:: MaxUnpool1d
+    :members:
+
+.. autoclass:: MaxUnpool2d
     :members:
 
 .. autoclass:: MaxUnpool3d
