@@ -292,7 +292,8 @@ def forward(fn, input, hx, weight, output, hy):
             ))
 
         if fn.batch_first:
-            output = output.transpose(0, 1)
+            output = output.transpose_(0, 1)
+
 
 
 def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_input, grad_hx):
@@ -367,7 +368,7 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         ))
 
         if fn.batch_first:
-            grad_input = grad_input.transpose(0, 1)
+            grad_input = grad_input.transpose_(0, 1)
 
 
 def _num_linear_layers(fn):
@@ -391,11 +392,9 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
             hx, cx = hx
         else:
             cx = None
-
         if fn.batch_first:
-            input = input.transpose(1, 2)
-            output = output.transpose(1, 2)
-
+            input = input.transpose(0, 1)
+            output = output.transpose(0, 1)
         input_size = _input_size(fn)
         hidden_size = _hidden_size(fn)
         if not fn.train:

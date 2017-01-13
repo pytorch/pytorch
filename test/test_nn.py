@@ -957,38 +957,45 @@ class TestNN(NNTestCase):
                     self.assertEqual(cpu_weight.grad, gpu_weight.grad, prec=5e-5)
 
 
-        input_val = torch.randn(seq_length, batch, input_size)
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias in (True, False):
                 for bidirectional in (False, True):
                     for dropout in (0, 1): # Because of dropout randomness, can only compare 0 and 1
-                        num_directions = 2 if bidirectional else 1
-                        hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
+                        for batch_first in (False, True):
+                            num_directions = 2 if bidirectional else 1                            
+                            if batch_first:
+                                input_val = torch.randn(batch, seq_length, input_size)
+                            else:
+                                input_val = torch.randn(seq_length, batch, input_size)
+                            hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
 
-                        rnn = module(input_size,
-                                     hidden_size,
-                                     num_layers,
-                                     bias=bias,
-                                     dropout=dropout,
-                                     bidirectional=bidirectional)
-
-                        outputs_cpu = forward_backward(
-                            False, rnn, input_val, hx_val, rnn.all_weights)
-
-                        rnn_gpu = module(input_size,
+                            rnn = module(input_size,
                                          hidden_size,
                                          num_layers,
                                          bias=bias,
                                          dropout=dropout,
-                                         bidirectional=bidirectional)
+                                         bidirectional=bidirectional,
+                                         batch_first = batch_first)
 
-                        outputs_gpu = forward_backward(
-                            True, rnn_gpu, input_val, hx_val, rnn.all_weights)
+                            outputs_cpu = forward_backward(
+                                False, rnn, input_val, hx_val, rnn.all_weights)
 
-                        compare_cpu_gpu(outputs_cpu, outputs_gpu)
+                            rnn_gpu = module(input_size,
+                                             hidden_size,
+                                             num_layers,
+                                             bias=bias,
+                                             dropout=dropout,
+                                             bidirectional=bidirectional,
+                                             batch_first = batch_first)
+
+                            outputs_gpu = forward_backward(
+                                True, rnn_gpu, input_val, hx_val, rnn.all_weights)
+
+                            compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
         for nonlinearity in ('tanh', 'relu'):
             hx_val = torch.randn(num_layers, batch, hidden_size)
+            input_val = torch.randn(seq_length, batch, input_size)
 
             rnn = nn.rnn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
             outputs_cpu = forward_backward(False, rnn, input_val, hx_val, rnn.all_weights)
