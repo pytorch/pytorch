@@ -31,7 +31,6 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: nonzero
-.. autofunction:: reshape
 .. autofunction:: scatter
 .. autofunction:: squeeze
 .. autofunction:: t
@@ -178,4 +177,3 @@ BLAS and LAPACK Operations
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trtrs
-
