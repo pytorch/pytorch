@@ -154,71 +154,138 @@ class MaxPool2d(Module):
             + padding_str + dilation_str + ')'
 
 
+class MaxUnpool1d(Module):
+    r"""Computes a partial inverse of :class:`MaxPool1d`.
 
-class MaxUnpool2d(Module):
-    """Computes the inverse operation of `MaxPool2d`
-    `MaxPool2d` is not invertible, as the locations of the max locations are lost.
-    :func:`MaxUnpool2d` takes in as input the output of `MaxPool2d` and the indices of the max locations
-    and computes the inverse.
+    :class:`MaxPool1d` is not fully invertible, since the non-maximal values are lost.
+    :class:`MaxUnpool1d` takes in as input the output of :class:`MaxPool1d`
+    including the indices of the maximal values and computes a partial inverse
+    in which all non-maximal values are set to zero.
 
     Args:
-        kernel_size: the size of the max window.
-                     Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
-        stride: the stride of the window. Can be a single number s or a tuple (sh x sw). Default: kernel_size
-        padding: implicit padding that was added to the input. Can be a single number or a tuple. Default: 0
+        kernel_size (int or tuple): Size of the max pooling window.
+        stride (int or tuple): Stride of the max pooling window.
+            It is set to ``kernel_size`` by default.
+        padding (int or tuple): Padding that was added to the input
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = padding[0] * (H_{in} - 1) * stride[0] + kernel_size[0]`
-          :math:`W_{out} = padding[1] * (W_{in} - 1) * stride[1] + kernel_size[1]`
+          :math:`H_{out} = padding[0] * (H_{in} - 1) * stride[0] + kernel\_size[0]`
+          :math:`W_{out} = padding[1] * (W_{in} - 1) * stride[1] + kernel\_size[1]`
           or as given by :attr:`output_size` in the call operator
 
-    Examples::
+    Example:
+        >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
+        >>> unpool = nn.MaxUnpool1d(2, stride=2)
+        >>> input = Variable(torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8]]]))
+        >>> output, indices = pool(input)
+        >>> unpool(output, indices)
+        Variable containing:
+        (0 ,.,.) =
+           0   2   0   4   0   6   0   8
+        [torch.FloatTensor of size 1x1x8]
+    """
+    def __init__(self, kernel_size, stride=None, padding=0):
+        super(MaxUnpool1d, self).__init__()
+        self.kernel_size = _single(kernel_size)
+        self.stride = _single(stride if stride is not None else kernel_size)
+        self.padding = _single(padding)
 
-        >>> # pool of square window of size=3, stride=2
-        >>> m = nn.MaxPool2d(2, stride=2, return_indices = True)
-        >>> mu = nn.MaxUnpool2d(2, stride=2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
-        >>> output, indices = m(input)
-        >>> unpooled_output = mu.forward(output, indices)
-        >>> # exact output size can be also specified as an argument
-        >>> input = autograd.Variable(torch.randn(1, 16, 11, 11))
-        >>> downsample = nn.MaxPool2d(3, 3, return_indices=True)
-        >>> upsample = nn.MaxUnpool2d(3, 3)
-        >>> h, indices = downsample(input)
-        >>> output = upsample(h, indices, output_size=input.size())
+    def forward(self, input, indices, output_size=None):
+        return F.max_unpool1d(input, indices, self.kernel_size, self.stride,
+                              self.padding, output_size)
 
+
+class MaxUnpool2d(Module):
+    r"""Computes a partial inverse of :class:`MaxPool2d`.
+
+    :class:`MaxPool2d` is not fully invertible, since the non-maximal values are lost.
+    :class:`MaxUnpool2d` takes in as input the output of :class:`MaxPool2d`
+    including the indices of the maximal values and computes a partial inverse
+    in which all non-maximal values are set to zero.
+
+    Args:
+        kernel_size (int or tuple): Size of the max pooling window.
+        stride (int or tuple): Stride of the max pooling window.
+            It is set to ``kernel_size`` by default.
+        padding (int or tuple): Padding that was added to the input
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})` where
+          :math:`H_{out} = padding[0] * (H_{in} - 1) * stride[0] + kernel\_size[0]`
+          :math:`W_{out} = padding[1] * (W_{in} - 1) * stride[1] + kernel\_size[1]`
+          or as given by :attr:`output_size` in the call operator
+
+    Example:
+        >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
+        >>> unpool = nn.MaxUnpool2d(2, stride=2)
+        >>> input = Variable(torch.Tensor([[[[ 1,  2,  3,  4],
+        ...                                  [ 5,  6,  7,  8],
+        ...                                  [ 9, 10, 11, 12],
+        ...                                  [13, 14, 15, 16]]]]))
+        >>> output, indices = pool(input)
+        >>> unpool(output, indices)
+        Variable containing:
+        (0 ,0 ,.,.) =
+           0   0   0   0
+           0   6   0   8
+           0   0   0   0
+           0  14   0  16
+        [torch.FloatTensor of size 1x1x4x4]
     """
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool2d, self).__init__()
-        self.kh, self.kw = _pair(kernel_size)
-        self.dh, self.dw = _pair(stride or kernel_size)
-        self.padh, self.padw = _pair(padding)
+        self.kernel_size = _pair(kernel_size)
+        self.stride = _pair(stride if stride is not None else kernel_size)
+        self.padding = _pair(padding)
 
     def forward(self, input, indices, output_size=None):
-        out_height = (input.size(2) - 1) * self.dh + self.kh - 2*self.padh
-        out_width = (input.size(3) - 1) * self.dw + self.kw - 2*self.padw
-        if output_size:
-            output_size = list(output_size)
-            if len(output_size) == 4:
-                output_size = output_size[-2:]
-            if len(output_size) != 2:
-                raise ValueError("output_size should be a sequence containing "
-                        "2 or 4 elements, but it has a length of {}".format(
-                            len(output_size)))
-            h, w = output_size
-            h_ok = out_height - self.dh < h < out_height + self.dh
-            w_ok = out_width - self.dw < w < out_width + self.dw
-            if not h_ok or not w_ok:
-                raise ValueError(("specified incorrect output size. Got {}x{}, "
-                        "but valid sizes range from {}x{} to {}x{}").format(
-                            h, w,
-                            out_height - self.dh + 1, out_width - self.dw + 1,
-                            out_height + self.dh - 1, out_width + self.dw - 1))
-            out_height, out_width = h, w
-        return self._backend.MaxUnpool2d(out_width,
-                out_height)(input, indices)
+        return F.max_unpool2d(input, indices, self.kernel_size, self.stride,
+                              self.padding, output_size)
+
+
+class MaxUnpool3d(Module):
+    r"""Computes a partial inverse of :class:`MaxPool3d`.
+
+    :class:`MaxPool3d` is not fully invertible, since the non-maximal values are lost.
+    :class:`MaxUnpool3d` takes in as input the output of :class:`MaxPool3d`
+    including the indices of the maximal values and computes a partial inverse
+    in which all non-maximal values are set to zero.
+
+    Args:
+        kernel_size (int or tuple): Size of the max pooling window.
+        stride (int or tuple): Stride of the max pooling window.
+            It is set to ``kernel_size`` by default.
+        padding (int or tuple): Padding that was added to the input
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+          :math:`D_{out} = padding[0] * (D_{in} - 1) * stride[0] + kernel\_size[0]`
+          :math:`H_{out} = padding[1] * (H_{in} - 1) * stride[1] + kernel\_size[1]`
+          :math:`W_{out} = padding[2] * (W_{in} - 1) * stride[2] + kernel\_size[2]`
+          or as given by :attr:`output_size` in the call operator
+
+    Example::
+        >>> # pool of square window of size=3, stride=2
+        >>> pool = nn.MaxPool3d(3, stride=2, return_indices=True)
+        >>> unpool = nn.MaxUnpool3d(3, stride=2)
+        >>> output, indices = pool(Variable(torch.randn(20, 16, 51, 33, 15)))
+        >>> unpooled_output = unpool(output, indices)
+        >>> unpooled_output.size()
+        torch.Size([20, 16, 51, 33, 15])
+    """
+    def __init__(self, kernel_size, stride=None, padding=0):
+        super(MaxUnpool3d, self).__init__()
+        self.kernel_size = _triple(kernel_size)
+        self.stride = _triple(stride if stride is not None else kernel_size)
+        self.padding = _triple(padding)
+
+    def forward(self, input, indices, output_size=None):
+        return F.max_unpool3d(input, indices, self.kernel_size, self.stride,
+                              self.padding, output_size)
 
 
 class AvgPool1d(Module):
@@ -518,51 +585,6 @@ class FractionalMaxPool2d(Module):
                 return_indices=self.return_indices,
                 _random_samples=self._random_samples, **kwargs)
         return func(input)
-
-
-class MaxUnpool3d(Module):
-    """Computes the inverse operation of `MaxPool3d`
-    `MaxPool3d` is not invertible, as the locations of the max locations are lost.
-    :func:`MaxUnpool3d` takes in as input the output of `MaxPool3d` and the indices of the max locations
-    and computes the inverse.
-
-    Args:
-        kernel_size: the size of the max window.
-                     Can be a single number k (for a square kernel of k x k x k) or a tuple (kd x kh x kw)
-        stride: the stride of the window. Can be a single number s or a tuple (sd x sh x sw). Default: kernel_size
-        padding: implicit padding that was added to the input. Can be a single number or a tuple. Default: 0
-
-    Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = padding[0] * (D_{in} - 1) * stride[0] + kernel_size[0]`
-          :math:`H_{out} = padding[1] * (H_{in} - 1) * stride[1] + kernel_size[1]`
-          :math:`W_{out} = padding[2] * (W_{in} - 1) * stride[2] + kernel_size[2]`
-          or as given by :attr:`output_size` in the call operator
-
-    Examples::
-
-        >>> # pool of square window of size=3, stride=2
-        >>> m = nn.MaxPool3d(3, stride=2, return_indices = True)
-        >>> mu = nn.MaxUnpool3d(3, stride=2)
-        >>> input, indices = autograd.Variable(torch.randn(20, 16, 50, 32, 15))
-        >>> output = m(input)
-        >>> unpooled_output = m2.forward(output, indices)
-
-    """
-    def __init__(self, kernel_size, stride=None, padding=0):
-        super(MaxUnpool3d, self).__init__()
-        self.kt, self.kh, self.kw = _triple(kernel_size)
-        self.dt, self.dh, self.dw = _triple(stride or kernel_size)
-        self.padt, self.padh, self.padw = _triple(padding)
-
-    def forward(self, input, indices):
-        out_depth = (input.size(2) - 1) * self.dt + self.kt - 2*self.padt
-        out_height = (input.size(3) - 1) * self.dh + self.kh - 2*self.padh
-        out_width = (input.size(4) - 1) * self.dw + self.kw - 2*self.padw
-        return self._backend.MaxUnpool3d(out_depth, out_width, out_height,
-                self.dt, self.dw, self.dh,
-                self.padt, self.padw, self.padh)(input, indices)
 
 
 class LPPool2d(Module):

@@ -152,53 +152,54 @@ class MaxPool3d(Function):
 
 
 class MaxUnpool2d(Function):
-    def __init__(self, out_w, out_h):
+    def __init__(self, output_size):
         super(MaxUnpool2d, self).__init__()
-        self.out_w = out_w
-        self.out_h = out_h
+        self.output_size = output_size
 
     def forward(self, input, indices):
         self.save_for_backward(input, indices)
         self._backend = type2backend[type(input)]
         output = input.new()
         self._backend.SpatialMaxUnpooling_updateOutput(
-                self._backend.library_state, input, output, indices,
-                self.out_w, self.out_h)
+            self._backend.library_state, input, output, indices,
+            self.output_size[1], self.output_size[0])
         return output
 
     def backward(self, grad_output):
         input, indices = self.saved_tensors
         grad_input = grad_output.new()
         self._backend.SpatialMaxUnpooling_updateGradInput(
-                self._backend.library_state, input, grad_output, grad_input,
-                indices, self.out_w, self.out_h)
+            self._backend.library_state, input, grad_output, grad_input,
+            indices, self.output_size[1], self.output_size[0])
         return grad_input, None
 
 
 class MaxUnpool3d(Function):
-    def __init__(self, out_t, out_w, out_h, *args):
+    def __init__(self, output_size, stride, padding):
         super(MaxUnpool3d, self).__init__()
-        self.out_t = out_t
-        self.out_w = out_w
-        self.out_h = out_h
-        self.args = args
-        assert len(args) == 6
+        self.output_size = output_size
+        self.stride = stride
+        self.padding = padding
 
     def forward(self, input, indices):
         self.save_for_backward(input, indices)
         self._backend = type2backend[type(input)]
         output = input.new()
         self._backend.VolumetricMaxUnpooling_updateOutput(
-                self._backend.library_state, input, output, indices,
-                self.out_t, self.out_w, self.out_h, *self.args)
+            self._backend.library_state, input, output, indices,
+            self.output_size[0], self.output_size[2], self.output_size[1],
+            self.stride[0], self.stride[2], self.stride[1],
+            self.padding[0], self.padding[2], self.padding[1])
         return output
 
     def backward(self, grad_output):
         input, indices = self.saved_tensors
         grad_input = grad_output.new()
         self._backend.VolumetricMaxUnpooling_updateGradInput(
-                self._backend.library_state, input, grad_output, grad_input,
-                indices, self.out_t, self.out_w, self.out_h, *self.args)
+            self._backend.library_state, input, grad_output, grad_input, indices,
+            self.output_size[0], self.output_size[2], self.output_size[1],
+            self.stride[0], self.stride[2], self.stride[1],
+            self.padding[0], self.padding[2], self.padding[1])
         return grad_input, None
 
 
