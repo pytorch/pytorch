@@ -110,7 +110,7 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 }
 #endif
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
 static inline  __device__  void atomicAdd(double *address, double val) {
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
