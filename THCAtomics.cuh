@@ -126,6 +126,9 @@ static inline  __device__  void atomicAdd(double *address, double val) {
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);
 }
+#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000)
+// This needs to be defined for the host side pass
+static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif
 
 #endif // THC_ATOMICS_INC
