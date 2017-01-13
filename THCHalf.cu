@@ -61,14 +61,17 @@ float THC_half2float(half h)
 
   int temp = ((sign << 31) | (exponent << 23) | mantissa);
 
-  return *((float*)((void*)&temp));
+  float x;
+  memcpy(&x,&temp,sizeof(float));
+  return x;
 }
 
 half THC_float2half(float f)
 {
   half ret;
 
-  unsigned x = *((int*)(void*)(&f));
+  unsigned x;
+  memcpy(&x,&f,sizeof(f));
   unsigned u = (x & 0x7fffffff), remainder, shift, lsb, lsb_s1, lsb_m1;
   unsigned sign, exponent, mantissa;
 
