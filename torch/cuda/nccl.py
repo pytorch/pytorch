@@ -12,10 +12,16 @@ __all__ = ['all_reduce', 'reduce', 'broadcast', 'all_gather', 'reduce_scatter']
 
 def _loadlib():
     global lib
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(current_dir, '..', 'lib', libname)
-    lib = ctypes.cdll.LoadLibrary(path)
-    lib.ncclCommDestroy.restype = None
+    thisdir = os.path.dirname(os.path.abspath(__file__))
+    paths = ['', os.path.join(thisdir, '../lib')]
+    for path in paths:
+        try:
+            lib = ctypes.cdll.LoadLibrary(os.path.join(path, libname))
+            break
+        except OSError:
+            continue
+    if lib is not None:
+        lib.ncclCommDestroy.restype = None
 
 
 def is_available(tensors):

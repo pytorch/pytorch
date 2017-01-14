@@ -71,8 +71,10 @@ if [[ "$1" == "--with-cuda" ]]; then
     build THC
     build THCS
     build THCUNN
-    if [[ $(uname) != 'Darwin' ]]; then
-        build_nccl
+    if [[ $(uname) != 'Darwin' ]]; then 
+        if [[ `ldconfig -p | grep libnccl` == '' ]]; then
+          build_nccl
+        fi 
     fi
 fi
 
