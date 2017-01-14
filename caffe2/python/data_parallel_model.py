@@ -501,6 +501,11 @@ def _AnalyzeOperators(model):
             continue
         op_dev = op.device_option
         op_gpu = op_dev.cuda_gpu_id
+
+        # This avoids failing on operators that are only for CPU
+        if op_dev.device_type == caffe2_pb2.CPU:
+            continue
+
         namescope = "gpu_{}/".format(op_gpu)
         for inp in list(op.input) + list(op.output):
             if inp.startswith("gpu_") and not inp.startswith(namescope):
