@@ -1,4 +1,4 @@
-# pytorch [alpha-5]
+# pytorch [alpha-6]
 
 - [About PyTorch?](#about-pytorch)
 - [Installation](#installation)
@@ -148,9 +148,10 @@ After that, we will reevaluate progress, and if we are ready, we will hit beta-0
 * ~~alpha-2: sharing tensors across processes for hogwild training or data-loading processes. a rewritten optim package for this new nn.~~
 * ~~alpha-3: binary installs, contbuilds, etc.~~
 * ~~alpha-4: multi-GPU support, cudnn integration, imagenet / resnet example~~
-* alpha-5: a ton of examples across vision, nlp, speech, RL -- this phase might make us rethink parts of the APIs, and hence want to do this in alpha than beta
-* alpha-6: Putting a simple and efficient story around multi-machine training. Probably simplistic like torch-distlearn. Building the website, release scripts, more documentation, etc.
+* ~~alpha-5: a ton of examples across vision, nlp, speech, RL -- this phase might make us rethink parts of the APIs, and hence want to do this in alpha than beta~~
+* alpha-6: Building the website, release scripts, more documentation, etc.
 * beta-0: First public release
+* beta-1: Putting a simple and efficient story around multi-machine training. See: https://github.com/pytorch/pytorch/issues/241 and https://github.com/apaszke/pytorch-dist for current progress.
 
 The beta phases will be leaning more towards working with all of you, convering your use-cases, active development on non-core aspects.
 
@@ -239,7 +240,7 @@ queue = multiprocessing.Queue()
 buffers = [torch.Tensor(2, 2) for i in range(4)]
 for b in buffers:
   queue.put(b)
-  processes = [multiprocessing.Process(target=fill, args=(queue,)).start() for i in range(10)]
+processes = [multiprocessing.Process(target=fill, args=(queue,)).start() for i in range(10)]
 ```
 
 ```python
