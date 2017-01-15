@@ -166,7 +166,9 @@ class TestNN(NNTestCase):
 
     def _backward(self, module, input, output, grad_output):
         output.backward(grad_output, retain_variables=True)
-        return input.grad
+        if input.grad is None:
+            return None
+        return input.grad.data
 
     def _forward_criterion(self, criterion, input, target):
         if isinstance(input, tuple):
@@ -179,29 +181,29 @@ class TestNN(NNTestCase):
     def _backward_criterion(self, criterion, input, target):
         input_tuple = input if isinstance(input, tuple) else (input,)
         for i in input_tuple:
-            i.grad.zero_()
+            i.grad.data.zero_()
         args = input_tuple + (target,)
         criterion(*args).backward()
         if isinstance(input, tuple):
-            return tuple(map(lambda i: i.grad, input))
+            return tuple(map(lambda i: i.grad.data, input))
         else:
-            return input.grad
+            return input.grad.data
 
     def _zero_grad_parameters(self, module):
         if hasattr(module, 'weight') and module.weight is not None:
-            module.weight.grad.zero_()
+            module.weight.grad.data.zero_()
         if hasattr(module, 'bias') and module.bias is not None:
-            module.bias.grad.zero_()
+            module.bias.grad.data.zero_()
 
     def _get_parameters(self, module):
         params = []
         d_params = []
         if hasattr(module, 'weight') and module.weight is not None:
             params += [module.weight.data]
-            d_params += [module.weight.grad]
+            d_params += [module.weight.grad.data]
         if hasattr(module, 'bias') and module.bias is not None:
             params += [module.bias.data]
-            d_params += [module.bias.grad]
+            d_params += [module.bias.grad.data]
         return params, d_params
 
     def test_hooks(self):
@@ -225,7 +227,7 @@ class TestNN(NNTestCase):
             self.assertIsInstance(grad_input, tuple)
             self.assertIsInstance(grad_output, tuple)
             self.assertTrue(h_module is module)
-            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
+            self.assertEqual(grad_output[0].data, torch.ones(5, 5) * 2)
             counter['backwards'] += inc
 
         test_fwd = module.register_forward_hook(lambda *args: fw_hook(1, *args))
@@ -320,13 +322,17 @@ class TestNN(NNTestCase):
         module = nn.Linear(5, 5)
         input = Variable(torch.randn(5, 5), requires_grad=True)
 
-        def bw_hook(self, grad_input, grad_output):
+        def bw_hook(module, grad_input, grad_output):
+            for grad in grad_input:
+                self.assertIsInstance(grad, Variable)
+            for grad in grad_output:
+                self.assertIsInstance(grad, Variable)
             return tuple(gi * 2 for gi in grad_input)
 
         module.register_backward_hook(bw_hook)
         module(input).backward(torch.ones(5, 5))
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
-        self.assertEqual(input.grad, expected_grad)
+        self.assertEqual(input.grad.data, expected_grad)
 
     def test_volatile(self):
         module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
@@ -353,14 +359,14 @@ class TestNN(NNTestCase):
         output = module(input_var)
         self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
         output.backward(input)
-        self.assertLess(abs(input_var.grad.mean() - (1-p)), 0.05)
+        self.assertLess(abs(input_var.grad.data.mean() - (1-p)), 0.05)
 
         module = cls(p, True)
         input_var = Variable(input.clone(), requires_grad=True)
         output = module(input_var + 0)
         self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
         output.backward(input)
-        self.assertLess(abs(input_var.grad.mean() - (1-p)), 0.05)
+        self.assertLess(abs(input_var.grad.data.mean() - (1-p)), 0.05)
 
         # Check that these don't raise errors
         module.__repr__()
@@ -519,7 +525,7 @@ class TestNN(NNTestCase):
         grad_output = torch.ones(output.size()).type(type)
         output.backward(grad_output, retain_variables=True)
         expected_grad = expected_grad(num_dim)
-        self.assertEqual(input_var.grad, expected_grad.view_as(input))
+        self.assertEqual(input_var.grad.data, expected_grad.view_as(input))
 
         # Make sure backward after changing indices will result in an error
         indices.add_(1)
@@ -556,8 +562,8 @@ class TestNN(NNTestCase):
         self.assertEqual(result[1].get_device(), 1)
         grad = result[0].data.clone().fill_(2)
         result[0].backward(grad)
-        self.assertEqual(x.grad[:2], grad)
-        self.assertEqual(x.grad[2:], grad.clone().zero_())
+        self.assertEqual(x.grad.data[:2], grad)
+        self.assertEqual(x.grad.data[2:], grad.clone().zero_())
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_cpu(self):
@@ -584,8 +590,8 @@ class TestNN(NNTestCase):
         if output_device != -1:
             grad = grad.cuda(output_device)
         result.backward(grad)
-        self.assertEqual(inputs[0].grad, grad[:2])
-        self.assertEqual(inputs[1].grad, grad[2:])
+        self.assertEqual(inputs[0].grad.data, grad[:2])
+        self.assertEqual(inputs[1].grad.data, grad[2:])
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_cpu(self):
@@ -834,9 +840,12 @@ class TestNN(NNTestCase):
         output2.backward(grad_output[:, 2:].contiguous())
 
         self.assertEqual(output, torch.cat([output1, output2], 1))
-        self.assertEqual(i.grad, torch.cat([i1.grad, i2.grad], 1))
-        self.assertEqual(m.bias.grad, torch.cat([m1.bias.grad, m2.bias.grad], 0))
-        self.assertEqual(m.weight.grad, torch.cat([m1.weight.grad, m2.weight.grad], 0))
+        self.assertEqual(i.grad.data,
+                         torch.cat([i1.grad.data, i2.grad.data], 1))
+        self.assertEqual(m.bias.grad.data,
+                         torch.cat([m1.bias.grad.data, m2.bias.grad.data], 0))
+        self.assertEqual(m.weight.grad.data,
+                         torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
@@ -959,10 +968,10 @@ class TestNN(NNTestCase):
             return {'output': output.data,
                     'hy': hy[0].data if is_lstm else hy.data,
                     'weights': rnn.all_weights,
-                    'grad_input': input.grad,
-                    'grad_hx': hx[0].grad if is_lstm else hx.grad,
+                    'grad_input': input.grad.data,
+                    'grad_hx': hx[0].grad.data if is_lstm else hx.grad.data,
                     'cy': hy[1].data if is_lstm else None,
-                    'grad_cx': hx[1].grad if is_lstm else None}
+                    'grad_cx': hx[1].grad.data if is_lstm else None}
 
         input_size = 10
         hidden_size = 6
@@ -979,7 +988,7 @@ class TestNN(NNTestCase):
             # check grad weights separately, as nested dict
             for cpu_layer_weight, gpu_layer_weight in zip(outputs_cpu['weights'], outputs_gpu['weights']):
                 for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
-                    self.assertEqual(cpu_weight.grad, gpu_weight.grad, prec=5e-5)
+                    self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
@@ -1137,7 +1146,7 @@ class TestNN(NNTestCase):
         output = ps(input)
         self._verify_pixel_shuffle(input.data, output.data, upscale_factor)
         output.backward(output.data)
-        self.assertEqual(input.data, input.grad)
+        self.assertEqual(input.data, input.grad.data)
 
 def add_test(test):
     test_name = test.get_name()

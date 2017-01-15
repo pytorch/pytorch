@@ -31,7 +31,7 @@ class RMSprop(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                grad = p.grad
+                grad = p.grad.data
                 state = self.state[id(p)]
 
                 # State initialization

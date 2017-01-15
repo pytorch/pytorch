@@ -329,7 +329,7 @@ class NNTestCase(TestCase):
 
     def _zero_grad_input(self, input):
         if isinstance(input, Variable):
-            input.grad.zero_()
+            input.grad.data.zero_()
         elif torch.is_tensor(input):
             return
         else:

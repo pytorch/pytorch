@@ -178,7 +178,7 @@ class TestTrainer(TestCase):
         self.trainer.run(epochs=self.num_epochs)
         output_var = self.trainer.model.output
         expected_grad = torch.ones(1, 1) * 2 * self.optimizer.num_evals
-        self.assertEqual(output_var.grad, expected_grad)
+        self.assertEqual(output_var.grad.data, expected_grad)
 
 
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
