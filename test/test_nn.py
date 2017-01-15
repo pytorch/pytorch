@@ -8,6 +8,7 @@ from itertools import repeat
 from functools import wraps
 
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.parallel as dp
 from torch.autograd import Variable
 from torch.nn import Parameter
@@ -876,6 +877,17 @@ class TestNN(NNTestCase):
                     hx = cell(input, hx)
 
                 hx.sum().backward()
+
+    def test_invalid_dropout_p(self):
+        v = Variable(torch.ones(1))
+        self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))
+        self.assertRaises(ValueError, lambda: nn.Dropout(1.1))
+        self.assertRaises(ValueError, lambda: nn.Dropout2d(-0.1))
+        self.assertRaises(ValueError, lambda: nn.Dropout2d(1.1))
+        self.assertRaises(ValueError, lambda: nn.Dropout3d(-0.1))
+        self.assertRaises(ValueError, lambda: nn.Dropout3d(1.1))
+        self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
+        self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
 
     def test_LSTM_cell(self):
         # this is just a smoke test; these modules are implemented through
