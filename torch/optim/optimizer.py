@@ -4,6 +4,14 @@ required = object()
 
 
 class Optimizer(object):
+    """Base class for all optimizers.
+
+    Arguments:
+        params (iterable): an iterable of :class:`Variable` s or
+            :class:`dict` s. Specifies what Variables should be optimized.
+        defaults: (dict): a dict containing default values of optimization
+            options (used when a parameter group doesn't specify them).
+    """
 
     def __init__(self, params, defaults):
         self.state = defaultdict(dict)
@@ -42,12 +50,27 @@ class Optimizer(object):
         }
 
     def state_dict(self):
+        """Returns the state of the optimizer as a :class:`dict`.
+
+        It contains two entries:
+
+        * state - a dict holding current optimization state. Its content
+            differs between optimizer classes.
+        * param_groups - a dict containig all parameter groups
+        """
         return self.__getstate__()
 
     def zero_grad(self):
+        """Clears the gradients of all optimized :class:`Variable` s."""
         for group in self.param_groups:
             for param in group['params']:
                 param.grad.zero_()
 
-    def step(self, forward_closure):
+    def step(self, closure):
+        """Performs a single optimization step (parameter update).
+
+        Arguments:
+            closure (callable): A closure that reevaluates the model and
+                returns the loss. Optional for most optimizers.
+        """
         raise NotImplementedError

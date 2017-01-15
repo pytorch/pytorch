@@ -3,6 +3,22 @@ from .optimizer import Optimizer
 
 
 class ASGD(Optimizer):
+    """Implements Averaged Stochastic Gradient Descent.
+
+    It has been proposed in `Acceleration of stochastic approximation by averaging`_.
+
+    Arguments:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-2)
+        lambd (float, optional): decay term (default: 1e-4)
+        alpha (float, optional): power for eta update (default: 0.75)
+        t0 (float, optional): point at which to start averaging (default: 1e6)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+
+    .. _Acceleration of stochastic approximation by averaging:
+        http://dl.acm.org/citation.cfm?id=131098
+    """
 
     def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0):
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
@@ -10,6 +26,12 @@ class ASGD(Optimizer):
         super(ASGD, self).__init__(params, defaults)
 
     def step(self, closure=None):
+        """Performs a single optimization step.
+
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
         loss = None
         if closure is not None:
             loss = closure()

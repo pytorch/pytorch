@@ -2,12 +2,29 @@ import math
 from .optimizer import Optimizer
 
 class Rprop(Optimizer):
+    """Implements the resilient backpropagation algorithm.
+
+    Arguments:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-2)
+        etas (Tuple[float, float], optional): pair of (etaminus, etaplis), that
+            are multiplicative increase and decrease factors (default: (0.5, 1.2))
+        step_sizes (Tuple[float, float], optional): a pair of minimal and
+            maximal allowed step sizes (default: (1e-6, 50))
+    """
 
     def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50)):
         defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes)
         super(Rprop, self).__init__(params, defaults)
 
     def step(self, closure=None):
+        """Performs a single optimization step.
+
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
         loss = None
         if closure is not None:
             loss = closure()
