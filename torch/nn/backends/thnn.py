@@ -5,6 +5,13 @@ class THNNFunctionBackend(FunctionBackend):
     def __reduce__(self):
         return (_get_thnn_function_backend, ())
 
+    def __deepcopy__(self, memo):
+        memo[id(self)] = self
+        return self
+
+    def __copy__(self):
+        return self
+
 
 def _get_thnn_function_backend():
     return backend
