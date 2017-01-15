@@ -22,18 +22,37 @@ class OptionalArguments(CWrapPlugin):
                             # PyYAML interprets NULL as None...
                             arg['name'] = 'NULL' if arg['default'] is None else arg['default']
                     new_options.append(option_copy)
-            declaration['options'] = self.filter_unique_options(declaration['options'] + new_options)
+            declaration['options'] = self.filter_unique_options(new_options)
         return declarations
 
     def filter_unique_options(self, options):
-        def signature(option):
-            return '#'.join(arg['type'] for arg in option['arguments'] if not 'ignore_check' in arg or not arg['ignore_check'])
+        def signature(option, kwarg_only_count):
+            if kwarg_only_count == 0:
+                kwarg_only_count = None
+            else:
+                kwarg_only_count = -kwarg_only_count
+            arg_signature = '#'.join(
+                    arg['type']
+                    for arg in option['arguments'][:kwarg_only_count]
+                    if not arg.get('ignore_check'))
+            if kwarg_only_count is None:
+                return arg_signature
+            kwarg_only_signature = '#'.join(
+                    arg['name'] + '#' + arg['type']
+                    for arg in option['arguments'][kwarg_only_count:]
+                    if not arg.get('ignore_check'))
+            return arg_signature + "#-#" + kwarg_only_signature
         seen_signatures = set()
         unique = []
         for option in options:
-            sig = signature(option)
-            if sig not in seen_signatures:
-                unique.append(option)
-                seen_signatures.add(sig)
+            for num_kwarg_only in range(0, len(option['arguments'])+1):
+                sig = signature(option, num_kwarg_only)
+                if sig not in seen_signatures:
+                    if num_kwarg_only > 0:
+                        for arg in option['arguments'][-num_kwarg_only:]:
+                            arg['kwarg_only'] = True
+                    unique.append(option)
+                    seen_signatures.add(sig)
+                    break
         return unique
 

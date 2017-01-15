@@ -4,7 +4,9 @@ from string import Template
 class KwargsPlugin(CWrapPlugin):
 
     ACCESSOR_TEMPLATE = Template('(__tuplecount > $idx ? PyTuple_GET_ITEM(args, $idx) : __kw_$name)')
+    KWARG_ONLY_ACCESSOR_TEMPLATE = Template('__kw_$name')
     CHECK_TEMPLATE = Template('(__tuplecount > $idx || __kw_$name) && $code')
+    KWARG_ONLY_CHECK_TEMPLATE = Template('__kw_$name && $code')
     WRAPPER_TEMPLATE = Template("""
     $declarations
     if (kwargs) {
@@ -24,13 +26,18 @@ class KwargsPlugin(CWrapPlugin):
         return declarations
 
     def get_arg_accessor(self, arg, option):
-        if not arg.get('no_kwargs'):
-            return self.ACCESSOR_TEMPLATE.substitute(idx=arg['idx'], name=arg['name'])
+        if arg.get('no_kwargs'):
+            return
+        if arg.get('kwarg_only'):
+            return self.KWARG_ONLY_ACCESSOR_TEMPLATE.substitute(name=arg['name'])
+        return self.ACCESSOR_TEMPLATE.substitute(idx=arg['idx'], name=arg['name'])
 
     def process_single_check(self, code, arg, arg_accessor):
-        if not arg.get('no_kwargs'):
-            return self.CHECK_TEMPLATE.substitute(idx=arg['idx'], name=arg['name'], code=code)
-        return code
+        if arg.get('no_kwargs'):
+            return code
+        if arg.get('kwarg_only'):
+            return self.KWARG_ONLY_CHECK_TEMPLATE.substitute(name=arg['name'], code=code)
+        return self.CHECK_TEMPLATE.substitute(idx=arg['idx'], name=arg['name'], code=code)
 
     def process_wrapper(self, code, declaration):
         if declaration.get('no_kwargs'):
