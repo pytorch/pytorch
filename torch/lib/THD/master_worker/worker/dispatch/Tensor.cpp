@@ -214,7 +214,7 @@ static void tensorSelect(rpc::RPCMessage& raw_message) {
   Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   long sliceIndex = unpackInteger(raw_message);
-  finalize(raw_message);  
+  finalize(raw_message);
   tensor->select(*src, dimension, sliceIndex);
 }
 
@@ -238,17 +238,660 @@ static void tensorUnfold(rpc::RPCMessage& raw_message) {
   tensor->unfold(*src, dimension, size, step);
 }
 
-static void tensorAdd(rpc::RPCMessage& raw_message) {
-  throw std::runtime_error("addition is not yet available");
-  //THTensor& result = parse_tensor(raw_message);
-  //THTensor& source = parse_tensor(raw_message);
-  //double x = parse_scalar(raw_message);
-  //assert_end(raw_message);
-  //result.add(source, x);
-}
-
 static void tensorFree(rpc::RPCMessage& raw_message) {
   object_id_type tensor_id = unpackInteger(raw_message);
   (void)workerTensors.erase(tensor_id);
 }
 
+static void tensorGather(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dim = unpackInteger(raw_message);
+  Tensor *index = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->gather(*src, dim, *index);
+}
+
+static void tensorScatter(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  int dim = unpackInteger(raw_message);
+  Tensor *index = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->scatter(dim, *index, *src);
+}
+
+static void tensorScatterFill(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  int dim = unpackInteger(raw_message);
+  Tensor *index = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->scatterFill(dim, *index, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->scatterFill(dim, *index, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorDot(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (isInteger(tensor->type())) {
+    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
+    long long value = int_tensor->dot(*src);
+    sendValueToMaster(int_tensor, value);
+  } else if (isFloat(tensor->type())) {
+    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
+    double value = float_tensor->dot(*src);
+    sendValueToMaster(float_tensor, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorMinall(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (isInteger(tensor->type())) {
+    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
+    long long value = int_tensor->minall();
+    sendValueToMaster(int_tensor, value);
+  } else if (isFloat(tensor->type())) {
+    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
+    double value = float_tensor->minall();
+    sendValueToMaster(float_tensor, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorMaxall(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (isInteger(tensor->type())) {
+    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
+    long long value = int_tensor->maxall();
+    sendValueToMaster(int_tensor, value);
+  } else if (isFloat(tensor->type())) {
+    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
+    double value = float_tensor->maxall();
+    sendValueToMaster(float_tensor, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorSumall(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (isInteger(tensor->type())) {
+    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
+    long long value = int_tensor->sumall();
+    sendValueToMaster(int_tensor, value);
+  } else if (isFloat(tensor->type())) {
+    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
+    double value = float_tensor->sumall();
+    sendValueToMaster(float_tensor, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorProdall(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (isInteger(tensor->type())) {
+    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
+    long long value = int_tensor->prodall();
+    sendValueToMaster(int_tensor, value);
+  } else if (isFloat(tensor->type())) {
+    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
+    double value = float_tensor->prodall();
+    sendValueToMaster(float_tensor, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorNeg(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->neg(*src);
+}
+
+static void tensorCinv(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cinv(*src);
+}
+
+static void tensorAdd(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->add(*src, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->add(*src, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorSub(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->sub(*src, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->sub(*src, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorMul(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->mul(*src, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->mul(*src, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorDiv(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->div(*src, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->div(*src, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorFmod(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->fmod(*src, value);
+  } else {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->fmod(*src, value);
+  }
+}
+
+static void tensorRemainder(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->remainder(*src, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->remainder(*src, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorClamp(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long min_value = unpackInteger(raw_message);
+    long long max_value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->clamp(*src, min_value, max_value);
+  } else if (isFloat(tensor->type())) {
+    double min_value = unpackFloat(raw_message);
+    double max_value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->clamp(*src, min_value, max_value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorCadd(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->cadd(*src1, value, *src2);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->cadd(*src1, value, *src2);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorCsub(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->csub(*src1, value, *src2);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->csub(*src1, value, *src2);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorCmul(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cmul(*src1, *src2);
+}
+
+static void tensorCpow(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cpow(*src1, *src2);
+}
+
+static void tensorCdiv(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cdiv(*src1, *src2);
+}
+
+static void tensorCfmod(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cfmod(*src1, *src2);
+}
+
+static void tensorCremainder(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cremainder(*src1, *src2);
+}
+
+static void tensorAddcmul(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  Tensor *src3 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->addcmul(*src1, value, *src2, *src3);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->addcmul(*src1, value, *src2, *src3);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorAddcdiv(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  Tensor *src3 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->addcdiv(*src1, value, *src2, *src3);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->addcdiv(*src1, value, *src2, *src3);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorAddmv(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  Tensor *mat = unpackRetrieveTensor(raw_message);
+  Tensor *vec = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long beta = unpackInteger(raw_message);
+    long long alpha = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->addmv(beta, *src, alpha, *mat, *vec);
+  } else if (isFloat(tensor->type())) {
+    double beta = unpackFloat(raw_message);
+    double alpha = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->addmv(beta, *src, alpha, *mat, *vec);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorAddmm(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  Tensor *mat1 = unpackRetrieveTensor(raw_message);
+  Tensor *mat2 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long beta = unpackInteger(raw_message);
+    long long alpha = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->addmm(beta, *src, alpha, *mat1, *mat2);
+  } else if (isFloat(tensor->type())) {
+    double beta = unpackFloat(raw_message);
+    double alpha = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->addmm(beta, *src, alpha, *mat1, *mat2);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorAddr(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  Tensor *vec1 = unpackRetrieveTensor(raw_message);
+  Tensor *vec2 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long beta = unpackInteger(raw_message);
+    long long alpha = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->addr(beta, *src, alpha, *vec1, *vec2);
+  } else if (isFloat(tensor->type())) {
+    double beta = unpackFloat(raw_message);
+    double alpha = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->addr(beta, *src, alpha, *vec1, *vec2);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorAddbmm(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  Tensor *batch1 = unpackRetrieveTensor(raw_message);
+  Tensor *batch2 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long beta = unpackInteger(raw_message);
+    long long alpha = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->addbmm(beta, *src, alpha, *batch1, *batch2);
+  } else if (isFloat(tensor->type())) {
+    double beta = unpackFloat(raw_message);
+    double alpha = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->addbmm(beta, *src, alpha, *batch1, *batch2);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorBaddbmm(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  Tensor *batch1 = unpackRetrieveTensor(raw_message);
+  Tensor *batch2 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long beta = unpackInteger(raw_message);
+    long long alpha = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->baddbmm(beta, *src, alpha, *batch1, *batch2);
+  } else if (isFloat(tensor->type())) {
+    double beta = unpackFloat(raw_message);
+    double alpha = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->baddbmm(beta, *src, alpha, *batch1, *batch2);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorMatch(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *m1 = unpackRetrieveTensor(raw_message);
+  Tensor *m2 = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long gain = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->match(*m1, *m2, gain);
+  } else if (isFloat(tensor->type())) {
+    double gain = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->match(*m1, *m2, gain);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorMax(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *indices_ = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->max(*indices_, *src, dimension);
+}
+
+static void tensorMin(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *indices_ = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->min(*indices_, *src, dimension);
+}
+
+static void tensorKthvalue(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *indices_ = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int k = unpackInteger(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->kthvalue(*indices_, *src, k, dimension);
+}
+
+static void tensorMode(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *indices_ = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->mode(*indices_, *src, dimension);
+}
+
+static void tensorMedian(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *indices_ = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->median(*indices_, *src, dimension);
+}
+
+static void tensorSum(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->sum(*src, dimension);
+}
+
+static void tensorProd(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->prod(*src, dimension);
+}
+
+static void tensorCumsum(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->cumsum(*src, dimension);
+}
+
+static void tensorCumprod(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->cumprod(*src, dimension);
+}
+
+static void tensorSign(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->sign(*src);
+}
+
+static void tensorTrace(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (isInteger(tensor->type())) {
+    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
+    long long value = int_tensor->trace();
+    sendValueToMaster(int_tensor, value);
+  } else if (isFloat(tensor->type())) {
+    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
+    double value = float_tensor->trace();
+    sendValueToMaster(float_tensor, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorCross(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->cross(*src1, *src2, dimension);
+}
+
+static void tensorCmax(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cmax(*src1, *src2);
+}
+
+static void tensorCmin(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src1 = unpackRetrieveTensor(raw_message);
+  Tensor *src2 = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->cmin(*src1, *src2);
+}
+
+static void tensorCmaxValue(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->cmaxValue(*src, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->cmaxValue(*src, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
+static void tensorCminValue(rpc::RPCMessage& raw_message) {
+  Tensor *tensor = unpackRetrieveTensor(raw_message);
+  Tensor *src = unpackRetrieveTensor(raw_message);
+
+  if (isInteger(tensor->type())) {
+    long long value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<IntTensor*>(tensor)->cminValue(*src, value);
+  } else if (isFloat(tensor->type())) {
+    double value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<FloatTensor*>(tensor)->cminValue(*src, value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
