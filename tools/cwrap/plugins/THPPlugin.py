@@ -291,7 +291,7 @@ ${cpu}
                         arg['no_kwargs'] = True
                         arg['no_idx'] = True
                 new_options.append(option_copy)
-        declaration['options'] = self.filter_unique_options(new_options)
+        declaration['options'] = new_options
 
     def process_declarations(self, declarations):
         new_declarations = []
@@ -344,9 +344,6 @@ ${cpu}
                 for arg in option['arguments']:
                     if arg['name'] == 'self':
                         arg['ignore_check'] = True
-            # TODO: we can probably allow duplicate signatures once we implement
-            # keyword arguments
-            declaration['options'] = self.filter_unique_options(declaration['options'])
 
 
         declarations = [d for d in declarations if not d.get('only_stateless', False)]
@@ -367,21 +364,6 @@ ${cpu}
                 if arg['name'] == 'self':
                     arg['name'] = 'source'
         return declaration
-
-    def filter_unique_options(self, options):
-        def signature(option):
-            return '#'.join(
-                    arg['type'] + str(arg.get('output', False))
-                    for arg in option['arguments']
-                    if not arg.get('ignore_check'))
-        seen_signatures = set()
-        unique = []
-        for option in options:
-            sig = signature(option)
-            if sig not in seen_signatures:
-                unique.append(option)
-                seen_signatures.add(sig)
-        return unique
 
     def declare_methods(self, stateless, sparse):
         tensor_methods = ''
