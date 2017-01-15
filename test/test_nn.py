@@ -864,6 +864,23 @@ class TestNN(NNTestCase):
                     self.assertRaises(ValueError, lambda:
                             mu(output_small, indices_small, (h, w)))
 
+    def test_container_copy(self):
+        class Model(nn.Container):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(4, 5)
+
+            def forward(self, input):
+                return self.linear(input)
+
+        input = Variable(torch.randn(2, 4))
+
+        model = Model()
+        model_cp = deepcopy(model)
+        self.assertEqual(model(input).data, model_cp(input).data)
+
+        model_cp.linear.weight[:] = 2
+        self.assertNotEqual(model(input).data, model_cp(input).data)
 
     def test_RNN_cell(self):
         # this is just a smoke test; these modules are implemented through
