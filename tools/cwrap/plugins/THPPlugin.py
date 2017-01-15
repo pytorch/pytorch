@@ -424,8 +424,12 @@ ${cpu}
                 code = checks + code
             else:
                 code = "__out == NULL &&\n" + indent + code
+
         if any(arg.get('long_args', False) for arg in option['arguments']):
             code = code.replace('__argcount ==', '__argcount >=')
+            expected = str(int(option.get('output_provided', False)))
+            code = '__dictcount == ' + expected + ' &&\n          ' + code
+
         return code
 
     def process_option_code_template(self, template, option):
