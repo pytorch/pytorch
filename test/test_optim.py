@@ -275,6 +275,10 @@ class TestOptim(TestCase):
                 lr=1e-3)
         )
 
+    def test_invalid_param_type(self):
+        with self.assertRaises(TypeError):
+            optim.SGD(Variable(torch.randn(5, 5)), lr=3)
+
 
 if __name__ == '__main__':
     unittest.main()
