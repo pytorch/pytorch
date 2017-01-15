@@ -25,6 +25,14 @@ namespace thd {
 
 template<typename real>
 struct THTensor : public interface_traits<real>::tensor_interface_type {
+  friend class THTensor<unsigned char>;
+  friend class THTensor<char>;
+  friend class THTensor<short>;
+  friend class THTensor<int>;
+  friend class THTensor<long>;
+  friend class THTensor<float>;
+  friend class THTensor<double>;
+
 private:
   using interface_type = typename interface_traits<real>::tensor_interface_type;
 public:
@@ -74,9 +82,58 @@ public:
                            long size, long step) override;
 
   virtual THTensor& fill(scalar_type value) override;
-  virtual THTensor& add(const Tensor& source, scalar_type scalar) override;
+
+  virtual THTensor& gather(const Tensor& src, int dimension, const Tensor& index) override;
+  virtual THTensor& scatter(int dimension, const Tensor& index, const Tensor& src) override;
+  virtual THTensor& scatterFill(int dimension, const Tensor& index, scalar_type value) override;
+  virtual scalar_type dot(const Tensor& source) override;
+  virtual scalar_type minall() override;
+  virtual scalar_type maxall() override;
+  virtual scalar_type sumall() override;
+  virtual scalar_type prodall() override;
+  virtual THTensor& neg(const Tensor& src) override;
+  virtual THTensor& cinv(const Tensor& src) override;
+  virtual THTensor& add(const Tensor& src, scalar_type value) override;
+  virtual THTensor& sub(const Tensor& src, scalar_type value) override;
+  virtual THTensor& mul(const Tensor& src, scalar_type value) override;
+  virtual THTensor& div(const Tensor& src, scalar_type value) override;
+  virtual THTensor& fmod(const Tensor& src, scalar_type value) override;
+  virtual THTensor& remainder(const Tensor& src, scalar_type value) override;
+  virtual THTensor& clamp(const Tensor& src, scalar_type min_value, scalar_type max_value) override;
+  virtual THTensor& cadd(const Tensor& src1, scalar_type value, const Tensor& src2) override;
+  virtual THTensor& csub(const Tensor& src1, scalar_type value, const Tensor& src2) override;
+  virtual THTensor& cmul(const Tensor& src1, const Tensor& src2) override;
+  virtual THTensor& cpow(const Tensor& src1, const Tensor& src2) override;
+  virtual THTensor& cdiv(const Tensor& src1, const Tensor& src2) override;
+  virtual THTensor& cfmod(const Tensor& src1, const Tensor& src2) override;
+  virtual THTensor& cremainder(const Tensor& src1, const Tensor& src2) override;
+  virtual THTensor& addcmul(const Tensor& src1, scalar_type value, const Tensor& src2, const Tensor& src3) override;
+  virtual THTensor& addcdiv(const Tensor& src1, scalar_type value, const Tensor& src2, const Tensor& src3) override;
+  virtual THTensor& addmv(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& mat, const Tensor& vec) override;
+  virtual THTensor& addmm(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& mat1, const Tensor& mat2) override;
+  virtual THTensor& addr(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& vec1, const Tensor& vec2) override;
+  virtual THTensor& addbmm(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& batch1, const Tensor& batch2) override;
+  virtual THTensor& baddbmm(scalar_type beta, const Tensor& src, scalar_type alpha, const Tensor& batch1, const Tensor& batch2) override;
+  virtual THTensor& match(const Tensor& m1, const Tensor& m2, scalar_type gain) override;
+  virtual THTensor& max(const Tensor& indices_, const Tensor& src, int dimension) override;
+  virtual THTensor& min(const Tensor& indices_, const Tensor& src, int dimension) override;
+  virtual THTensor& kthvalue(const Tensor& indices_, const Tensor& src, long k, int dimension) override;
+  virtual THTensor& mode(const Tensor& indices_, const Tensor& src, int dimension) override;
+  virtual THTensor& median(const Tensor& indices_, const Tensor& src, int dimension) override;
+  virtual THTensor& sum(const Tensor& src, int dimension) override;
+  virtual THTensor& prod(const Tensor& src, int dimension) override;
+  virtual THTensor& cumsum(const Tensor& src, int dimension) override;
+  virtual THTensor& cumprod(const Tensor& src, int dimension) override;
+  virtual THTensor& sign(const Tensor& source) override;
+  virtual scalar_type trace() override;
+  virtual THTensor& cross(const Tensor& src1, const Tensor& src2, int dimension) override;
+  virtual THTensor& cmax(const Tensor& src1, const Tensor& src2) override;
+  virtual THTensor& cmin(const Tensor& src1, const Tensor& src2) override;
+  virtual THTensor& cmaxValue(const Tensor& src, scalar_type value) override;
+  virtual THTensor& cminValue(const Tensor& src, scalar_type value) override;
 
   virtual thd::Type type() const override;
+  virtual std::unique_ptr<Tensor> newTensor() const override;
 
 private:
   template<typename iterator>

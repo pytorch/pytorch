@@ -35,6 +35,20 @@ void sendValueToMaster(FloatStorage *from, double value) {
   dataChannel->send(*wrapped_value, 0);
 }
 
+void sendValueToMaster(IntTensor *from, long long value) {
+  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
+  wrapped_value->resize({1});
+  dynamic_cast<IntTensor *>(wrapped_value.get())->fill(value);
+  dataChannel->send(*wrapped_value, 0);
+}
+
+void sendValueToMaster(FloatTensor *from, double value) {
+  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
+  wrapped_value->resize({1});
+  dynamic_cast<FloatTensor *>(wrapped_value.get())->fill(value);
+  dataChannel->send(*wrapped_value, 0);
+}
+
 Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {
   return workerTensors.at(unpackTensor(message)).get();
 }
@@ -75,8 +89,55 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorSelect, tensorSelect},
     {Functions::tensorTranspose, tensorTranspose},
     {Functions::tensorUnfold, tensorUnfold},
-    {Functions::tensorAdd, tensorAdd},
     {Functions::tensorFree, tensorFree},
+    {Functions::tensorGather, tensorGather},
+    {Functions::tensorScatter, tensorScatter},
+    {Functions::tensorScatterFill, tensorScatterFill},
+    {Functions::tensorDot, tensorDot},
+    {Functions::tensorMinall, tensorMinall},
+    {Functions::tensorMaxall, tensorMaxall},
+    {Functions::tensorSumall, tensorSumall},
+    {Functions::tensorProdall, tensorProdall},
+    {Functions::tensorNeg, tensorNeg},
+    {Functions::tensorCinv, tensorCinv},
+    {Functions::tensorAdd, tensorAdd},
+    {Functions::tensorSub, tensorSub},
+    {Functions::tensorMul, tensorMul},
+    {Functions::tensorDiv, tensorDiv},
+    {Functions::tensorFmod, tensorFmod},
+    {Functions::tensorRemainder, tensorRemainder},
+    {Functions::tensorClamp, tensorClamp},
+    {Functions::tensorCadd, tensorCadd},
+    {Functions::tensorCsub, tensorCsub},
+    {Functions::tensorCmul, tensorCmul},
+    {Functions::tensorCpow, tensorCpow},
+    {Functions::tensorCdiv, tensorCdiv},
+    {Functions::tensorCfmod, tensorCfmod},
+    {Functions::tensorCremainder, tensorCremainder},
+    {Functions::tensorAddcmul, tensorAddcmul},
+    {Functions::tensorAddcdiv, tensorAddcdiv},
+    {Functions::tensorAddmv, tensorAddmv},
+    {Functions::tensorAddmm, tensorAddmm},
+    {Functions::tensorAddr, tensorAddr},
+    {Functions::tensorAddbmm, tensorAddbmm},
+    {Functions::tensorBaddbmm, tensorBaddbmm},
+    {Functions::tensorMatch, tensorMatch},
+    {Functions::tensorMax, tensorMax},
+    {Functions::tensorMin, tensorMin},
+    {Functions::tensorKthvalue, tensorKthvalue},
+    {Functions::tensorMode, tensorMode},
+    {Functions::tensorMedian, tensorMedian},
+    {Functions::tensorSum, tensorSum},
+    {Functions::tensorProd, tensorProd},
+    {Functions::tensorCumsum, tensorCumsum},
+    {Functions::tensorCumprod, tensorCumprod},
+    {Functions::tensorSign, tensorSign},
+    {Functions::tensorTrace, tensorTrace},
+    {Functions::tensorCross, tensorCross},
+    {Functions::tensorCmax, tensorCmax},
+    {Functions::tensorCmin, tensorCmin},
+    {Functions::tensorCmaxValue, tensorCmaxValue},
+    {Functions::tensorCminValue, tensorCminValue},
 
     {Functions::storageConstruct, storageConstruct},
     {Functions::storageConstructWithSize, storageConstructWithSize},
@@ -85,11 +146,11 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::storageConstructWithSize3, storageConstructWithSize3},
     {Functions::storageConstructWithSize4, storageConstructWithSize4},
     {Functions::storageFree, storageFree},
-    {Functions::storageFree, storageResize},
+    {Functions::storageResize, storageResize},
     {Functions::storageFill, storageFill},
 
     {Functions::sendTensor, sendTensor},
-    {Functions::sendStorage, sendStorage}
+    {Functions::sendStorage, sendStorage},
 };
 
 } // namespace detail

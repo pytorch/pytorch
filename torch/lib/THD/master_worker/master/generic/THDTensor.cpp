@@ -6,6 +6,42 @@ using namespace thd;
 using namespace rpc;
 using namespace master;
 
+template<typename T>
+T THDTensor_(receiveValueFromWorker)(int worker_id) {
+  std::unique_ptr<THTensor<T>> wrapped_value(new THTensor<T>);
+  if (isInteger(wrapped_value->type())) {
+    dataChannel->receive(*dynamic_cast<IntTensor*>(wrapped_value.get()), worker_id);
+  } else if (isFloat(wrapped_value->type())) {
+    dataChannel->receive(*dynamic_cast<FloatTensor*>(wrapped_value.get()), worker_id);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+  return *static_cast<T *>(wrapped_value->data());
+}
+
+// taken from TH (generic/THTensor.c)
+THDDescBuff THDTensor_(sizeDesc)(const THDTensor *tensor) {
+  const int L = THD_DESC_BUFF_LEN;
+  THDDescBuff buf;
+  char *str = buf.str;
+  int n = 0;
+  n += snprintf(str, L-n, "[");
+  int i;
+  for(i = 0; i < tensor->nDimension; i++) {
+    if(n >= L) break;
+    n += snprintf(str+n, L-n, "%ld", tensor->size[i]);
+    if(i < tensor->nDimension-1) {
+      n += snprintf(str+n, L-n, " x ");
+    }
+  }
+  if(n < L - 2) {
+    snprintf(str+n, L-n, "]");
+  } else {
+    snprintf(str+L-5, 5, "...]");
+  }
+  return buf;
+}
+
 THDStorage *THDTensor_(storage)(const THDTensor *self) {
   return self->storage;
 }
@@ -541,12 +577,12 @@ void THDTensor_(transpose)(THDTensor *self, THDTensor *src, int dimension1,
     "out of range");
   THArgCheck((dimension2 >= 0) && dimension2 < src->nDimension, 1,
     "out of range");
-  
+
   THDTensor_(set)(self, src);
 
   if (dimension1 == dimension2)
     return;
-  
+
   std::swap(self->stride[dimension1], self->stride[dimension2]);
   std::swap(self->size[dimension1], self->size[dimension2]);
 
@@ -645,8 +681,617 @@ void THDTensor_(ones)(THDTensor *tensor, THLongStorage *size) {
   THDTensor_(fill)(tensor, 0);
 }
 
-ptrdiff_t THDTensor_(numel)(THDTensor *t) {
-  return THDTensor_(nElement)(t);
+ptrdiff_t THDTensor_(numel)(THDTensor *self) {
+  return THDTensor_(nElement)(self);
+}
+
+void THDTensor_(gather)(THDTensor *self, THDTensor *src, int dim, THDLongTensor *index) {
+  THArgCheck(dim < self->nDimension, 2, "Index dimension is out of bounds");
+  THArgCheck(THDLongTensor_nDimension(index) == self->nDimension, 3,
+             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(src->nDimension == self->nDimension, 4,
+             "Input tensor must have same dimensions as output tensor");
+
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorGather,
+      self,
+      src,
+      dim,
+      index
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(scatter)(THDTensor *self, int dim, THDLongTensor *index, THDTensor *src) {
+  THArgCheck(dim < self->nDimension, 2, "Index dimension is out of bounds");
+  THArgCheck(THDLongTensor_nDimension(index) == self->nDimension, 3,
+             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(src->nDimension == self->nDimension, 4,
+             "Input tensor must have same dimensions as output tensor");
+
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorScatter,
+      self,
+      dim,
+      index,
+      src
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(scatterFill)(THDTensor *self, int dim, THDLongTensor *index, real val) {
+  THArgCheck(dim < self->nDimension, 2, "Index dimension is out of bounds");
+  THArgCheck(THDLongTensor_nDimension(index) == self->nDimension, 3,
+             "Index tensor must have same dimensions as output tensor");
+
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorScatterFill,
+      self,
+      dim,
+      index,
+      val
+    ),
+    THDState::s_current_worker
+  );
+}
+
+accreal THDTensor_(dot)(THDTensor *self, THDTensor *src) {
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorDot, self, src),
+    THDState::s_current_worker
+  );
+
+  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
+}
+
+real THDTensor_(minall)(THDTensor *self) {
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMinall, self),
+    THDState::s_current_worker
+  );
+
+  return THDTensor_(receiveValueFromWorker)<real>(THDState::s_current_worker);
+}
+
+real THDTensor_(maxall)(THDTensor *self) {
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMaxall, self),
+    THDState::s_current_worker
+  );
+
+  return THDTensor_(receiveValueFromWorker)<real>(THDState::s_current_worker);
+}
+
+accreal THDTensor_(sumall)(THDTensor *self) {
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorSumall, self),
+    THDState::s_current_worker
+  );
+
+  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
+}
+
+accreal THDTensor_(prodall)(THDTensor *self) {
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorProdall, self),
+    THDState::s_current_worker
+  );
+
+  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
+}
+
+void THDTensor_(neg)(THDTensor *self, THDTensor *src) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorNeg, self, src),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cinv)(THDTensor *self, THDTensor *src) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCinv, self, src),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(add)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorAdd, self, src, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(sub)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorSub, self, src, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(mul)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMul, self, src, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(div)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorDiv, self, src, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(fmod)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorFmod, self, src, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(remainder)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorRemainder, self, src, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(clamp)(THDTensor *self, THDTensor *src, real min_value, real max_value) {
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorClamp, self, src, min_value, max_value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cadd)(THDTensor *self, THDTensor *src1, real value, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCadd, self, src1, src2, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(csub)(THDTensor *self, THDTensor *src1, real value, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCsub, self, src1, src2, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cmul)(THDTensor *self, THDTensor *src1, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCmul, self, src1, src2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cpow)(THDTensor *self, THDTensor *src1, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCpow, self, src1, src2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cdiv)(THDTensor *self, THDTensor *src1, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCdiv, self, src1, src2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cfmod)(THDTensor *self, THDTensor *src1, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCfmod, self, src1, src2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cremainder)(THDTensor *self, THDTensor *src1, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCremainder, self, src1, src2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(addcmul)(THDTensor *self, THDTensor *src1, real value, THDTensor *src2, THDTensor *src3) {
+  if (self != src1) {
+    THDTensor_(resizeAs)(self, src1);
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorAddcmul, self, src1, src2, src3, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(addcdiv)(THDTensor *self, THDTensor *src1, real value, THDTensor *src2, THDTensor *src3) {
+  if (self != src1) {
+    THDTensor_(resizeAs)(self, src1);
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorAddcdiv, self, src1, src2, src3, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *mat,  THDTensor *vec) {
+  if ((mat->nDimension != 2) || (vec->nDimension != 1))
+    THError("matrix and vector expected, got %dD, %dD", mat->nDimension, vec->nDimension);
+
+  if (mat->size[1] != vec->size[0]) {
+    THDDescBuff bm = THDTensor_(sizeDesc)(mat);
+    THDDescBuff bv = THDTensor_(sizeDesc)(vec);
+    THError("size mismatch, %s, %s", bm.str, bv.str);
+  }
+
+  if (src->nDimension != 1)
+    THError("vector expected, got src: %dD", src->nDimension);
+
+  if (src->size[0] != mat->size[0]) {
+    THDDescBuff bt = THDTensor_(sizeDesc)(src);
+    THDDescBuff bm = THDTensor_(sizeDesc)(mat);
+    THError("size mismatch, src: %s, mat: %s", bt.str, bm.str);
+  }
+
+  if (self != src) {
+    THDTensor_(resizeAs)(self, src);
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorAddmv, self, src, mat, vec, beta, alpha),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(addmm)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *mat1, THDTensor *mat2) {
+  if ((mat1->nDimension != 2) || (mat2->nDimension != 2))
+    THError("matrices expected, got %dD, %dD tensors", mat1->nDimension, mat2->nDimension);
+
+  if (mat1->size[1] != mat2->size[0]) {
+    THDDescBuff bm1 = THDTensor_(sizeDesc)(mat1);
+    THDDescBuff bm2 = THDTensor_(sizeDesc)(mat2);
+    THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
+  }
+
+  if (src->nDimension != 2)
+    THError("matrix expected, got %dD tensor for t", src->nDimension);
+
+  if ((src->size[0] != mat1->size[0]) || (src->size[1] != mat2->size[1])) {
+    THDDescBuff bt  = THDTensor_(sizeDesc)(src);
+    THDDescBuff bm1 = THDTensor_(sizeDesc)(mat1);
+    THDDescBuff bm2 = THDTensor_(sizeDesc)(mat2);
+    THError("size mismatch, t: %s, m1: %s, m2: %s", bt.str, bm1.str, bm2.str);
+  }
+
+  if (self != src) {
+    THDTensor_(resizeAs)(self, src);
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorAddmm, self, src, mat1, mat2, beta, alpha),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(addr)(THDTensor *self,  real beta, THDTensor *src, real alpha, THDTensor *vec1, THDTensor *vec2) {
+  if ((vec1->nDimension != 1) || (vec2->nDimension != 1))
+    THError("vector and vector expected, got %dD, %dD tensors", vec1->nDimension, vec2->nDimension);
+
+  if (src->nDimension != 2)
+    THError("expected matrix, got %dD tensor for t", src->nDimension);
+
+  if ((src->size[0] != vec1->size[0]) || (src->size[1] != vec2->size[0])) {
+    THDDescBuff bt  = THDTensor_(sizeDesc)(src);
+    THDDescBuff bv1 = THDTensor_(sizeDesc)(vec1);
+    THDDescBuff bv2 = THDTensor_(sizeDesc)(vec2);
+    THError("size mismatch, src: %s, vec1: %s, vec2: %s", bt.str, bv1.str, bv2.str);
+  }
+
+  if (self != src) {
+    THDTensor_(resizeAs)(self, src);
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorAddr, self, src, vec1, vec2, beta, alpha),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(addbmm)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *batch1, THDTensor *batch2) {
+  THArgCheck(batch1->nDimension == 3, 1, "expected 3D tensor");
+  THArgCheck(batch2->nDimension == 3, 2, "expected 3D tensor");
+  THArgCheck(batch1->size[0] == batch2->size[0], 2,
+             "equal number of batches expected, got %d, %d",
+             batch1->size[0], batch2->size[0]);
+  THArgCheck(batch1->size[2] == batch2->size[1], 2,
+             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
+             batch1->size[1], batch1->size[2], batch2->size[1], batch2->size[2]);
+
+  THArgCheck(src->size[0] == batch1->size[1], 1, "output tensor of incorrect size");
+  THArgCheck(src->size[1] == batch2->size[2], 1, "output tensor of incorrect size");
+
+  if (self != src) {
+    THDTensor_(resizeAs)(self, src);
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorAddbmm, self, src, batch1, batch2, beta, alpha),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(baddbmm)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *batch1, THDTensor *batch2) {
+  THArgCheck(batch1->nDimension == 3, 1, "expected 3D tensor");
+  THArgCheck(batch2->nDimension == 3, 2, "expected 3D tensor");
+  THArgCheck(batch1->size[0] == batch2->size[0], 2,
+             "equal number of batches expected, got %d, %d",
+             batch1->size[0], batch2->size[0]);
+  THArgCheck(batch1->size[2] == batch2->size[1], 2,
+             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
+             batch1->size[1], batch1->size[2], batch2->size[1], batch2->size[2]);
+
+  THArgCheck(src->size[0] == batch1->size[0], 1, "output tensor of incorrect size");
+  THArgCheck(src->size[1] == batch1->size[1], 1, "output tensor of incorrect size");
+  THArgCheck(src->size[2] == batch2->size[2], 1, "output tensor of incorrect size");
+
+  if (self != src) {
+    THDTensor_(resizeAs)(self, src);
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorBaddbmm, self, beta, src, alpha, batch1, batch2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(match)(THDTensor *self, THDTensor *m1, THDTensor *m2, real gain) {
+  THDTensor_(resize2d)(self, m1->size[0], m2->size[0]);
+  THArgCheck(m1->size[1] == m2->size[1], 3, "m1 and m2 must have the same inner vector dim");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMatch, self, m1, m2, gain),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(max)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMax, self, indices_, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMin, self, indices_, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, long k, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
+  THArgCheck(k > 0 && k <= src->size[dimension], 2, "selected index out of range");
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorKthvalue, self, indices_, src, k, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMode, self, indices_, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(median)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
+
+  long t_size_dim = src->size[dimension];
+  long k = (t_size_dim - 1) >> 1; /* take middle or one-before-middle element */
+
+  THDTensor_(kthvalue)(self, indices_, src, k + 1, dimension);
+}
+
+void THDTensor_(sum)(THDTensor *self, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorSum, self, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(prod)(THDTensor *self, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorProd, self, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cumsum)(THDTensor *self, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCumsum, self, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cumprod)(THDTensor *self, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THDTensor_(resizeAs)(self, src);
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCumprod, self, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(sign)(THDTensor *self, THDTensor *src) {
+  THDTensor_(resizeAs)(self, src);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorSign, self, src),
+    THDState::s_current_worker
+  );
+}
+
+accreal THDTensor_(trace)(THDTensor *self) {
+  THArgCheck(self->nDimension == 2, 1, "expected a matrix");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorTrace, self),
+    THDState::s_current_worker
+  );
+
+  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
+}
+
+void THDTensor_(cross)(THDTensor *self, THDTensor *src1, THDTensor *src2, int dimension) {
+  if (src1->nDimension != src2->nDimension)
+    THError("inconsistent tensor dimension %dD, %dD", src1->nDimension, src2->nDimension);
+
+  for (int i = 0; i < src1->nDimension; i++) {
+    if (src1->size[i] != src2->size[i]) {
+      THDDescBuff ba = THDTensor_(sizeDesc)(src1);
+      THDDescBuff bb = THDTensor_(sizeDesc)(src2);
+      THError("inconsistent tensor sizes %s, %s", ba.str, bb.str);
+    }
+  }
+
+  if (dimension < 0) {
+    for (int i = 0; i < src1->nDimension; i++) {
+      if (src1->size[i] == 3) {
+        dimension = i;
+        break;
+      }
+    }
+
+    if (dimension < 0) {
+      THDDescBuff ba = THDTensor_(sizeDesc)(src1);
+      THError("no dimension of size 3 in a: %s", ba.str);
+    }
+  }
+
+  THArgCheck(dimension >= 0 && dimension < src1->nDimension, 3, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+  THArgCheck(src1->size[dimension] == 3, 3, "dimension %d does not have size 3",
+      dimension + TH_INDEX_BASE);
+
+  THDTensor_(resizeAs)(self, src1);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorTrace, self, src1, src2, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cmax)(THDTensor *self, THDTensor *src1, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCmax, self, src1, src2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cmin)(THDTensor *self, THDTensor *src1, THDTensor *src2) {
+  THDTensor_(resizeAs)(self, src1);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCmin, self, src1, src2),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cmaxValue)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCmaxValue, self, src, value),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(cminValue)(THDTensor *self, THDTensor *src, real value) {
+  THDTensor_(resizeAs)(self, src);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorCminValue, self, src, value),
+    THDState::s_current_worker
+  );
 }
 
 
