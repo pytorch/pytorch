@@ -21,7 +21,7 @@ class Variable(_C._VariableBase):
 
     Attributes:
         data: Wrapped tensor of any type.
-        grad: Tensor holding the gradient of type and location matching
+        grad: Variable holding the gradient of type and location matching
             the ``.data``.  This attribute is lazily allocated and can't
             be reassigned.
         requires_grad: Boolean indicating whether the Variable has been
@@ -48,7 +48,6 @@ class Variable(_C._VariableBase):
         'ndimension',
         'element_size',
         'is_contiguous',
-        'is_same_size',
         'is_set_to',
         'is_signed',
         'numel',
@@ -61,7 +60,7 @@ class Variable(_C._VariableBase):
     def grad(self):
         if self.requires_grad and self._grad is None:
             # TODO: this won't have to be zeroed in the future
-            self._grad = self.data.new(self.data.size()).zero_()
+            self._grad = Variable(self.data.new(self.data.size()).zero_())
         return self._grad
 
     @property
@@ -174,7 +173,7 @@ class Variable(_C._VariableBase):
             >>> v = Variable(torch.Tensor([0, 0, 0]), requires_grad=True)
             >>> h = v.register_hook(lambda grad: grad * 2)  # double the gradient
             >>> v.backward(torch.Tensor([1, 1, 1]))
-            >>> v.grad
+            >>> v.grad.data
              2
              2
              2
@@ -204,7 +203,7 @@ class Variable(_C._VariableBase):
                 result = hook(unpacked_grad)
                 if result is not None:
                     unpacked_grad = result
-        self.grad.add_(unpacked_grad)
+        self.grad.data.add_(unpacked_grad)
         return tuple()
 
     def reinforce(self, reward):
@@ -272,6 +271,9 @@ class Variable(_C._VariableBase):
 
     def byte(self):
         return self.type(self._get_type('ByteTensor'))
+
+    def is_same_size(self, other_var):
+        return self.data.is_same_size(other_var.data)
 
     def _add(self, other, inplace):
         if isinstance(other, Variable):

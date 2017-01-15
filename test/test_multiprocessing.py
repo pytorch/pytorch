@@ -70,8 +70,8 @@ def autograd_sharing(queue, ready, master_modified):
     var.data[:] = torch.ones(5, 5)
 
     if var.grad is not None:
-        is_ok &= var.grad.equal(torch.ones(5, 5) * 4)
-        var.grad[:] = torch.ones(5, 5)
+        is_ok &= var.grad.data.equal(torch.ones(5, 5) * 4)
+        var.grad.data[:] = torch.ones(5, 5)
 
     queue.put(is_ok)
 
@@ -324,7 +324,7 @@ class TestMultiprocessing(TestCase):
         ready.wait()
         var.data[0,0] = 1000
         if var.grad is not None:
-            var.grad[:] = torch.ones(5, 5) * 4
+            var.grad.data[:] = torch.ones(5, 5) * 4
         master_modified.set()
 
         worker_ok = queue.get()
@@ -332,7 +332,7 @@ class TestMultiprocessing(TestCase):
 
         self.assertEqual(var.data, torch.ones(5, 5))
         if var.grad is not None:
-            self.assertEqual(var.grad, torch.ones(5, 5))
+            self.assertEqual(var.grad.data, torch.ones(5, 5))
         p.join()
 
     def test_variable_sharing(self):

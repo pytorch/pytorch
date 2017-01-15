@@ -42,7 +42,7 @@ class SGD(Optimizer):
             dampening = group['dampening']
 
             for p in group['params']:
-                d_p = p.grad
+                d_p = p.grad.data
                 if weight_decay != 0:
                     d_p.add_(weight_decay, p.data)
                 if momentum != 0:

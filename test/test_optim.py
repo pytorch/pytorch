@@ -63,8 +63,8 @@ class TestOptim(TestCase):
 
         initial_value = fn().data[0]
         for i in range(200):
-            weight.grad.zero_()
-            bias.grad.zero_()
+            weight.grad.data.zero_()
+            bias.grad.data.zero_()
             fn().backward()
             optimizer.step()
 
