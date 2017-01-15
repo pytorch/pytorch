@@ -51,10 +51,10 @@ public:
   virtual thd::Type type() const override;
 
   virtual std::unique_ptr<Tensor> newTensor() const override;
+  virtual storage_type *getRaw() const;
 
 protected:
   storage_type *storage;
 };
 
 } // namespace thd
-

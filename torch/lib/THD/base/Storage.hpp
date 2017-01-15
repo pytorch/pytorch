@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Tensor.hpp"
 #include "Type.hpp"
 
 #include <cstddef>
@@ -12,6 +11,8 @@
 #include <vector>
 
 namespace thd {
+
+class Tensor;
 
 struct Storage {
   Storage() {};
@@ -48,3 +49,4 @@ using IntStorage = StorageScalarInterface<long long>;
 
 } // namespace thd
 
+#include "Tensor.hpp"

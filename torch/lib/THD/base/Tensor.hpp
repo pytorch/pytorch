@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Storage.hpp"
 #include "Type.hpp"
 
+#include <TH/TH.h>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -38,6 +40,21 @@ struct Tensor {
 
   virtual Tensor& resize(const std::initializer_list<long>& new_size) = 0;
   virtual Tensor& resize(const std::vector<long>& new_size) = 0;
+  virtual Tensor& resize(THLongStorage *size,
+                         THLongStorage *stride) = 0;
+  virtual Tensor& resizeAs(const Tensor& src) = 0;
+  virtual Tensor& set(const Tensor& src) = 0;
+  virtual Tensor& setStorage(const Storage& storage,
+                             ptrdiff_t storageOffset,
+                             THLongStorage *size,
+                             THLongStorage *stride) = 0;
+  virtual Tensor& narrow(const Tensor& src,
+                         int dimension,
+                         long firstIndex,
+                         long size) = 0;
+  virtual Tensor& select(const Tensor& src, int dimension, long sliceIndex) = 0;
+  virtual Tensor& transpose(const Tensor& src, int dimension1, int dimension2) = 0;
+  virtual Tensor& unfold(const Tensor& src, int dimension, long size, long step) = 0;
 
   virtual thd::Type type() const = 0;
 };

@@ -1,7 +1,6 @@
 #include "THTensor.hpp"
 #include "../Traits.hpp"
 
-
 namespace thd {
 
 #include "generic/THTensor.cpp"

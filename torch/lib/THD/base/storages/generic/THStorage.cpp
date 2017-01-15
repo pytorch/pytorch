@@ -93,4 +93,9 @@ std::unique_ptr<Tensor> THStorage<real>::newTensor() const {
   return std::unique_ptr<Tensor>(new THTensor<real>());
 }
 
+template<>
+THStorage<real>::storage_type *THStorage<real>::getRaw() const {
+  return storage;
+}
+
 #endif

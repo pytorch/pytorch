@@ -95,13 +95,99 @@ auto THTensor<real>::resize(const std::vector<long> &new_size) -> THTensor& {
 }
 
 template<>
+auto THTensor<real>::resize(THLongStorage *size,
+                            THLongStorage *stride) -> THTensor& {
+  THTensor_(resize)(tensor, size, stride);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::resizeAs(const Tensor& src) -> THTensor& {
+  THTensor_(resizeAs)(tensor, dynamic_cast<const THTensor<real>&>(src).tensor);
+  return *this;
+}
+
+template<>
 template<typename iterator>
 auto THTensor<real>::resize(const iterator& begin, const iterator& end) -> THTensor& {
   THLongStorage *sizes = THLongStorage_newWithSize(std::distance(begin, end));
   long *sizes_d = sizes->data;
   for (auto it = begin; it != end; ++it)
     *sizes_d++ = *it;
+  // TODO this might leak on error
   THTensor_(resize)(tensor, sizes, nullptr);
+  THLongStorage_free(sizes);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::set(const Tensor& src) -> THTensor& {
+  THTensor_(set)(
+    tensor,
+    (dynamic_cast<const THTensor<real>&>(src)).tensor
+  );
+  return *this;
+}
+
+template<>
+auto THTensor<real>::setStorage(const Storage& storage,
+                                ptrdiff_t storageOffset,
+                                THLongStorage *size,
+                                THLongStorage *stride) -> THTensor& {
+  THTensor_(setStorage)(
+    tensor,
+    (dynamic_cast<const THStorage<real>&>(storage)).getRaw(),
+    storageOffset,
+    size,
+    stride
+  );
+  return *this;
+}
+
+template<>
+auto THTensor<real>::narrow(const Tensor& src,
+                            int dimension,
+                            long firstIndex,
+                            long size) -> THTensor& {
+  THTensor_(narrow)(
+    tensor,
+    (dynamic_cast<const THTensor<real>&>(src)).tensor,
+    dimension,
+    firstIndex,
+    size
+  );
+  return *this;
+}
+
+template<>
+auto THTensor<real>::select(const Tensor& src, int dimension,
+                            long sliceIndex) -> THTensor& {
+  THTensor_(select)(
+    tensor,
+    (dynamic_cast<const THTensor<real>&>(src)).tensor,
+    dimension,
+    sliceIndex
+  );
+  return *this;
+}
+
+template<>
+auto THTensor<real>::transpose(const Tensor& src, int dimension1,
+                               int dimension2) -> THTensor& {
+  auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
+  if (tensor != src_raw)
+    set(src);
+  THTensor_(transpose)(tensor, src_raw, dimension1, dimension2);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::unfold(const Tensor& src, int dimension,
+                            long size, long step) ->THTensor& {
+  auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
+  if (tensor != src_raw)
+    set(src);
+  THTensor_(unfold)(tensor, src_raw, dimension, size, step);
   return *this;
 }
 
