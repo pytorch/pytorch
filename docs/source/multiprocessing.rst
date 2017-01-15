@@ -4,6 +4,14 @@ Multiprocessing package - torch.multiprocessing
 .. automodule:: torch.multiprocessing
 .. currentmodule:: torch.multiprocessing
 
+.. warning::
+
+    If the main process exits abruptly (e.g. because of an incoming signal),
+    Python's ``multiprocessing`` sometimes fails to clean up its children.
+    It's a known caveat, so if you're seeing any resource leaks after
+    interrupting the interpreter, it probably means that this has just happened
+    to you.
+
 Strategy management
 -------------------
 
@@ -17,6 +25,15 @@ Sharing strategies
 This section provides a brief overview into how different sharing strategies
 work. Note that it applies only to CPU tensor - CUDA tensors will always use
 the CUDA API, as that's the only way they can be shared.
+
+.. warning::
+
+    CUDA API requires that the allocation exported to other processes remains
+    valid as long as it's used by them. You should be careful and ensure that
+    CUDA tensors you shared don't go out of scope as long as it's necessary.
+    This shouldn't be a problem for sharing model parameters, but passing other
+    kinds of data should be done with care. Note that this restriction doesn't
+    apply to shared CPU memory.
 
 File descriptor - ``file_descriptor``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
