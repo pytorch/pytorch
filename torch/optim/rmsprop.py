@@ -1,12 +1,30 @@
 from .optimizer import Optimizer
 
 class RMSprop(Optimizer):
+    """Implements RMSprop algorithm.
+
+    Arguments:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-2)
+        alpha (float, optional): smoothing constant (default: 0.99)
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+
+    """
 
     def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0):
         defaults = dict(lr=lr, alpha=alpha, eps=eps, weight_decay=weight_decay)
         super(RMSprop, self).__init__(params, defaults)
 
     def step(self, closure=None):
+        """Performs a single optimization step.
+
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
         loss = None
         if closure is not None:
             loss = closure()

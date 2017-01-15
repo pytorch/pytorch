@@ -5,18 +5,18 @@ class SGD(Optimizer):
     """Implements stochastic gradient descent (optionally with momentum).
 
     Args:
-        params (sequence): parameters to optimize
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
         lr (float): learning rate
-        momentum (float): momentum factor (default: 0)
-        weight_decay (float): weight decay (L2 penalty) (default: 0)
+        momentum (float, optional): momentum factor (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+
     Example:
+
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> def closure():
-        ...     output = model(input)
-        ...     loss = criterion(output, target)
-        ...     loss.backward()
         >>> optimizer.zero_grad()
-        >>> optimizer.step(closure)
+        >>> loss_fn(model(input), target).backward()
+        >>> optimizer.step()
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
@@ -26,6 +26,12 @@ class SGD(Optimizer):
         super(SGD, self).__init__(params, defaults)
 
     def step(self, closure=None):
+        """Performs a single optimization step.
+
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
         loss = None
         if closure is not None:
             loss = closure()

@@ -1,12 +1,32 @@
 from .optimizer import Optimizer
 
 class Adagrad(Optimizer):
+    """Implements Adagrad algorithm.
+
+    It has been proposed in `Adaptive Subgradient Methods for Online Learning and Stochastic Optimization`_.
+
+    Arguments:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-2)
+        lr_decay (float, optional): learning rate decay (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+
+    .. _Adaptive Subgradient Methods for Online Learning and Stochastic Optimization:
+        http://jmlr.org/papers/v12/duchi11a.html
+    """
 
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0):
         defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay)
         super(Adagrad, self).__init__(params, defaults)
 
     def step(self, closure=None):
+        """Performs a single optimization step.
+
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
         loss = None
         if closure is not None:
             loss = closure()
