@@ -2595,6 +2595,20 @@ class TestTorch(TestCase):
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_numpy_unresizable(self):
+        x = np.zeros((2, 2))
+        y = torch.from_numpy(x)
+        with self.assertRaises(ValueError):
+            x.resize((5, 5))
+
+        z = torch.randn(5, 5)
+        w = z.numpy()
+        with self.assertRaises(RuntimeError):
+            z.resize_(10, 10)
+        with self.assertRaises(ValueError):
+            w.resize((10, 10))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_toNumpy(self):
         types = [
             'torch.ByteTensor',
