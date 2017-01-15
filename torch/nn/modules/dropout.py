@@ -11,7 +11,7 @@ class Dropout(Module):
 
     Shape:
         - Input: `Any`. Input can be of any shape
-        - Output: `Same`. Output is of the same shape as input 
+        - Output: `Same`. Output is of the same shape as input
 
     Examples::
 
@@ -21,6 +21,9 @@ class Dropout(Module):
     """
     def __init__(self, p=0.5, inplace=False):
         super(Dropout, self).__init__()
+        if p < 0 or p > 1:
+            raise ValueError("dropout probability has to be between 0 and 1, "
+                    "but got {}".format(p))
         self.p = p
         self.inplace = inplace
 
@@ -40,11 +43,11 @@ class Dropout2d(Module):
 
     *Usually the input comes from Conv2d modules.*
 
-    As described in the paper 
-    `Efficient Object Localization Using Convolutional Networks`_ , 
-    if adjacent pixels within feature maps are strongly correlated 
-    (as is normally the case in early convolution layers) then iid dropout 
-    will not regularize the activations and will otherwise just result 
+    As described in the paper
+    `Efficient Object Localization Using Convolutional Networks`_ ,
+    if adjacent pixels within feature maps are strongly correlated
+    (as is normally the case in early convolution layers) then iid dropout
+    will not regularize the activations and will otherwise just result
     in an effective learning rate decrease.
 
     In this case, :func:`nn.Dropout2d` will help promote independence between
@@ -69,6 +72,9 @@ class Dropout2d(Module):
     """
     def __init__(self, p=0.5, inplace=False):
         super(Dropout2d, self).__init__()
+        if p < 0 or p > 1:
+            raise ValueError("dropout probability has to be between 0 and 1, "
+                    "but got {}".format(p))
         self.p = p
         self.inplace = inplace
 
@@ -87,11 +93,11 @@ class Dropout3d(Module):
 
     *Usually the input comes from Conv3d modules.*
 
-    As described in the paper 
-    `Efficient Object Localization Using Convolutional Networks`_ , 
-    if adjacent pixels within feature maps are strongly correlated 
-    (as is normally the case in early convolution layers) then iid dropout 
-    will not regularize the activations and will otherwise just result 
+    As described in the paper
+    `Efficient Object Localization Using Convolutional Networks`_ ,
+    if adjacent pixels within feature maps are strongly correlated
+    (as is normally the case in early convolution layers) then iid dropout
+    will not regularize the activations and will otherwise just result
     in an effective learning rate decrease.
 
     In this case, :func:`nn.Dropout3d` will help promote independence between
@@ -116,6 +122,9 @@ class Dropout3d(Module):
     """
     def __init__(self, p=0.5, inplace=False):
         super(Dropout3d, self).__init__()
+        if p < 0 or p > 1:
+            raise ValueError("dropout probability has to be between 0 and 1, "
+                    "but got {}".format(p))
         self.p = p
         self.inplace = inplace
 
