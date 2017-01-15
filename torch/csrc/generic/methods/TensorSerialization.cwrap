@@ -98,6 +98,9 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
     return NULL;
   }
 
+  // The storage should never be resized again.
+  THStorage_(clearFlag)(self->cdata->storage, TH_STORAGE_RESIZABLE);
+
   return array.release();
 }
 #endif
