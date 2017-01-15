@@ -1,5 +1,8 @@
 from collections import defaultdict
 
+import torch
+from torch.autograd import Variable
+
 required = object()
 
 
@@ -14,6 +17,11 @@ class Optimizer(object):
     """
 
     def __init__(self, params, defaults):
+        if isinstance(params, Variable) or torch.is_tensor(params):
+            raise TypeError("params argument given to the optimizer should be "
+                "an iterable of Variables or dicts, but got " +
+                torch.typename(params))
+
         self.state = defaultdict(dict)
         self.param_groups = list(params)
         if not isinstance(self.param_groups[0], dict):
