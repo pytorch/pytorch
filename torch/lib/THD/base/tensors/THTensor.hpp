@@ -17,6 +17,11 @@ struct th_tensor_traits {};
 #include "base/tensors/generic/THTensor.hpp"
 #include <TH/THGenerateAllTypes.h>
 
+} // namespace thd
+
+#include "../storages/THStorage.hpp"
+
+namespace thd {
 
 template<typename real>
 struct THTensor : public interface_traits<real>::tensor_interface_type {
@@ -50,6 +55,23 @@ public:
 
   virtual THTensor& resize(const std::initializer_list<long>& new_size) override;
   virtual THTensor& resize(const std::vector<long>& new_size) override;
+  virtual THTensor& resize(THLongStorage *size,
+                           THLongStorage *stride) override;
+  virtual THTensor& resizeAs(const Tensor& src) override;
+  virtual THTensor& set(const Tensor& src) override;
+  virtual THTensor& setStorage(const Storage& storage,
+                             ptrdiff_t storageOffset,
+                             THLongStorage *size,
+                             THLongStorage *stride) override;
+
+  virtual THTensor& narrow(const Tensor& src, int dimension,
+                           long firstIndex, long size) override;
+  virtual THTensor& select(const Tensor& src, int dimension,
+                           long sliceIndex) override;
+  virtual THTensor& transpose(const Tensor& src, int dimension1,
+                              int dimension2) override;
+  virtual THTensor& unfold(const Tensor& src, int dimension,
+                           long size, long step) override;
 
   virtual THTensor& fill(scalar_type value) override;
   virtual THTensor& add(const Tensor& source, scalar_type scalar) override;
@@ -59,6 +81,9 @@ public:
 private:
   template<typename iterator>
   THTensor& resize(const iterator& begin, const iterator& end);
+  template<typename iterator>
+  THTensor& resize(const iterator& size_begin, const iterator& size_end,
+                   const iterator& stride_begin, const iterator& stride_end);
 
 protected:
   tensor_type *tensor;

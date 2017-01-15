@@ -43,24 +43,6 @@ Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
   return workerStorages.at(unpackStorage(message)).get();
 }
 
-static std::unique_ptr<Tensor> createTensor(Type type) {
-  if (type == Type::UCHAR)
-    return std::unique_ptr<Tensor>(new THTensor<unsigned char>());
-  else if (type == Type::CHAR)
-    return std::unique_ptr<Tensor>(new THTensor<char>());
-  else if (type == Type::SHORT)
-    return std::unique_ptr<Tensor>(new THTensor<short>());
-  else if (type == Type::INT)
-    return std::unique_ptr<Tensor>(new THTensor<int>());
-  else if (type == Type::LONG)
-    return std::unique_ptr<Tensor>(new THTensor<long>());
-  else if (type == Type::FLOAT)
-    return std::unique_ptr<Tensor>(new THTensor<float>());
-  else if (type == Type::DOUBLE)
-    return std::unique_ptr<Tensor>(new THTensor<double>());
-  throw std::invalid_argument("passed character doesn't represent a tensor type");
-}
-
 static void finalize(rpc::RPCMessage& raw_message) {
   if (raw_message.remaining() > 0)
     throw std::invalid_argument("message is too long");
@@ -75,12 +57,27 @@ using Functions = thd::Functions;
 
 
 static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
-    {Functions::construct, construct},
-    {Functions::constructWithSize, constructWithSize},
-    {Functions::add, add},
-    {Functions::free, free},
-    {Functions::storageSet, storageSet},
-    {Functions::storageGet, storageGet},
+    {Functions::tensorConstruct, tensorConstruct},
+    {Functions::tensorConstructWithSize, tensorConstructWithSize},
+    {Functions::tensorResize, tensorResize},
+    {Functions::tensorResizeAs, tensorResizeAs},
+    {Functions::tensorResize1d, tensorResize1d},
+    {Functions::tensorResize2d, tensorResize2d},
+    {Functions::tensorResize3d, tensorResize2d},
+    {Functions::tensorResize4d, tensorResize2d},
+    {Functions::tensorResize5d, tensorResize2d},
+    {Functions::tensorSetStorage, tensorSetStorage},
+    {Functions::tensorSetStorage1d, tensorSetStorage1d},
+    {Functions::tensorSetStorage2d, tensorSetStorage2d},
+    {Functions::tensorSetStorage3d, tensorSetStorage3d},
+    {Functions::tensorSetStorage4d, tensorSetStorage4d},
+    {Functions::tensorNarrow, tensorNarrow},
+    {Functions::tensorSelect, tensorSelect},
+    {Functions::tensorTranspose, tensorTranspose},
+    {Functions::tensorUnfold, tensorUnfold},
+    {Functions::tensorAdd, tensorAdd},
+    {Functions::tensorFree, tensorFree},
+
     {Functions::storageConstruct, storageConstruct},
     {Functions::storageConstructWithSize, storageConstructWithSize},
     {Functions::storageConstructWithSize1, storageConstructWithSize1},
@@ -90,6 +87,7 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::storageFree, storageFree},
     {Functions::storageFree, storageResize},
     {Functions::storageFill, storageFill},
+
     {Functions::sendTensor, sendTensor},
     {Functions::sendStorage, sendStorage}
 };
