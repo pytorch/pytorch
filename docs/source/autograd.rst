@@ -60,10 +60,10 @@ under heavy memory pressure, you might never need to use them.
 There are two reasons that limit the applicability of in-place operations:
 
 1. Overwriting values required to compute gradients. This is the main reason
-   why variables don't support ``exp_`` and ``log_``. Their gradient formulas
-   require the original input, and while it could be possible to recreate it
-   by taking the inverse operation, it is numerically unstable, and requires
-   additional work that often defeats the purpose of using these functions.
+   why variables don't support ``log_``. Its gradient formula requires the
+   original input, and while it is possible to recreate it by doing the
+   inverse operation, it is numerically unstable, and requires additional
+   work that often defeats the purpose of using these functions.
 
 2. Every in-place operation actually requires the implementation to rewrite the
    computational graph. Out-of-places version simply allocate new objects and
