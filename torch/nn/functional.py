@@ -496,6 +496,11 @@ def cross_entropy(input, target, weight=None, size_average=True):
 def binary_cross_entropy(input, target, weight=None, size_average=True):
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
 
+
+def smooth_l1_loss(input, target, size_average=True):
+    return _functions.thnn.SmoothL1Loss(size_average)(input, target)
+
+
 def pixel_shuffle(input, upscale_factor):
     """Rearranges elements in a tensor of shape [*, C*r^2, H, W] to a
     tensor of shape [C, H*r, W*r]. This is useful for implementing
