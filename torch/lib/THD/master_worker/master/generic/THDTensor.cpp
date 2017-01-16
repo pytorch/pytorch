@@ -8,15 +8,18 @@ using namespace master;
 
 template<typename T>
 T THDTensor_(receiveValueFromWorker)(int worker_id) {
-  std::unique_ptr<THTensor<T>> wrapped_value(new THTensor<T>);
-  if (isInteger(wrapped_value->type())) {
-    dataChannel->receive(*dynamic_cast<IntTensor*>(wrapped_value.get()), worker_id);
-  } else if (isFloat(wrapped_value->type())) {
-    dataChannel->receive(*dynamic_cast<FloatTensor*>(wrapped_value.get()), worker_id);
+  Type type = type_traits<real>::type;
+  if (isInteger(type)) {
+    IntScalar wrapped_value;
+    dataChannel->receive(wrapped_value, worker_id);
+    return static_cast<T>(wrapped_value.value());
+  } else if (isFloat(type)) {
+    FloatScalar wrapped_value;
+    dataChannel->receive(wrapped_value, worker_id);
+    return static_cast<T>(wrapped_value.value());
   } else {
     throw std::invalid_argument("expected scalar type");
   }
-  return *static_cast<T *>(wrapped_value->data());
 }
 
 // taken from TH (generic/THTensor.c)

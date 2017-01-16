@@ -649,9 +649,25 @@ void DataChannelTCP::broadcast(Tensor& data, int src_rank, THDGroup group_id) {
 }
 
 
+void DataChannelTCP::send(const Scalar& data, int dst_rank) {
+  auto request = _send_worker.push([this, &data, dst_rank]{
+    this->_send(data, dst_rank);
+  });
+  request.wait();
+}
+
+
 void DataChannelTCP::send(Tensor& data, int dst_rank) {
   auto request = _send_worker.push([this, &data, dst_rank]{
     this->_send(data, dst_rank);
+  });
+  request.wait();
+}
+
+
+void DataChannelTCP::receive(Scalar& data, int src_rank) {
+  auto request = _receive_worker.push([this, &data, src_rank]{
+    this->_receive(data, src_rank);
   });
   request.wait();
 }
@@ -728,6 +744,32 @@ THDGroup DataChannelTCP::newGroup(const std::vector<int>& ranks) {
 }
 
 
+void DataChannelTCP::_send(const Scalar& data, int dst_rank) {
+  /*
+   * We have to check if dst_rank is positive to properly use `.at` function in vector.
+   * Not checking that can result in int overflow and strange errors.
+   */
+
+  if (dst_rank < 0)
+    throw std::out_of_range("destination rank is invalid (< 0)");
+
+  const auto& process_dst = _processes.at(dst_rank);
+  if (process_dst.rank == _rank)
+    throw std::logic_error("cannot send scalar to process with same rank");
+
+  // send size of scalar in bytes
+  std::uint64_t scalar_bytes = data.elementSize();
+  send_bytes<std::uint64_t>(process_dst.socket, &scalar_bytes, 1);
+
+  // send data (bytes)
+  send_bytes<std::uint8_t>(
+    process_dst.socket,
+    reinterpret_cast<const std::uint8_t*>(data.data()),
+    scalar_bytes
+  );
+}
+
+
 void DataChannelTCP::_send(Tensor& data, int dst_rank) {
   /*
    * We have to check if dst_rank is positive to properly use `.at` function in vector.
@@ -754,6 +796,35 @@ void DataChannelTCP::_send(Tensor& data, int dst_rank) {
     reinterpret_cast<const std::uint8_t*>(data.data()),
     tensor_bytes
   );
+}
+
+
+void DataChannelTCP::_receive(Scalar& data, int src_rank) {
+  /*
+   * We have to check if src_rank is positive to properly use `.at` function in vector.
+   * Not checking that can result in int overflow and strange errors.
+   */
+
+  if (src_rank < 0)
+    throw std::out_of_range("source rank is invalid (< 0)");
+
+  const auto& process_src = _processes.at(src_rank);
+  if (process_src.rank == _rank)
+    throw std::logic_error("cannot receive scalar from process with same rank");
+
+  // get size of scalar in bytes
+  std::uint64_t scalar_bytes;
+  recv_bytes<std::uint64_t>(process_src.socket, &scalar_bytes, 1);
+
+  // recv data (bytes)
+  std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[scalar_bytes]);
+  recv_bytes<std::uint8_t>(process_src.socket, bytes.get(), scalar_bytes);
+
+  std::uint64_t actual_scalar_bytes = data.elementSize();
+  if (actual_scalar_bytes != scalar_bytes)
+    throw std::logic_error("scalar sizes do not match");
+
+  std::memcpy(data.data(), bytes.get(), scalar_bytes);
 }
 
 

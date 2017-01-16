@@ -7,9 +7,18 @@ using namespace rpc;
 using namespace master;
 
 real THDStorage_(receiveValueFromWorker)(int worker_id) {
-  std::unique_ptr<THTensor<real>> wrapped_value(new THTensor<real>);
-  dataChannel->receive(*wrapped_value, worker_id);
-  return *static_cast<real *>(wrapped_value->data());
+  Type type = type_traits<real>::type;
+  if (isInteger(type)) {
+    IntScalar wrapped_value;
+    dataChannel->receive(wrapped_value, worker_id);
+    return static_cast<real>(wrapped_value.value());
+  } else if (isFloat(type)) {
+    FloatScalar wrapped_value;
+    dataChannel->receive(wrapped_value, worker_id);
+    return static_cast<real>(wrapped_value.value());
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
 }
 
 static THDStorage* THDStorage_(_alloc)() {
