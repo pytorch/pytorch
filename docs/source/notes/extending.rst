@@ -37,7 +37,7 @@ methods:
   :attr:`~Variable.needs_input_grad`), or it was non-differentiable, you
   can return :class:`None`. Also, if you have optional arguments to
   :meth:`~Variable.forward` you can return more gradients than there were
-  inputs, as long as they're all :ref:`None`.
+  inputs, as long as they're all :any:`python:None`.
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
 additional comments::
