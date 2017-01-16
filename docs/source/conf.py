@@ -185,7 +185,7 @@ texinfo_documents = [
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    'https://docs.python.org/': None,
+    'python': ('https://docs.python.org/', None),
     'numpy': ('http://docs.scipy.org/doc/numpy/', None),
 }
 
@@ -211,6 +211,8 @@ def patched_make_field(self, types, domain, items):
             fieldtype = types.pop(fieldarg)
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
                 typename = u''.join(n.astext() for n in fieldtype)
+                typename = typename.replace('int', 'python:int')
+                typename = typename.replace('float', 'python:float')
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis))
             else:
