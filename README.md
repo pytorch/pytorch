@@ -50,6 +50,8 @@ Elaborating further:
 
 If you use numpy, then you have used Tensors (a.k.a ndarray).
 
+<p align=center><img width="30%" src="docs/source/_static/img/tensor_illustration.png" /></p>
+
 PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
 compute by a huge amount.
 
@@ -74,6 +76,8 @@ from several research papers on this topic, as well as current and past work suc
 
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
+
+<p align=center><img width="80%" src="docs/source/_static/img/dynamic_graph.gif" /></p>
 
 ### Python first
 
