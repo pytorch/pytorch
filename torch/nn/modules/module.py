@@ -209,35 +209,42 @@ class Module(object):
         included. Keys are corresponding parameter and buffer names.
 
         Example:
-            >>> print(module.state_dict().keys())
+            >>> module.state_dict().keys()
             ['bias', 'weight']
         """
         if destination is None:
             destination = OrderedDict()
-        for name, param in chain(self._buffers.items(), self._parameters.items()):
+        for name, param in self._parameters.items():
             if param is not None:
-                destination[prefix + name] = param
+                destination[prefix + name] = param.data
+        for name, buf in self._buffers.items():
+            if buf is not None:
+                destination[prefix + name] = buf
         return destination
 
-    def load_state_dict(self, state_dict, prefix=''):
-        """Replaces module parameters using values from a given state_dict.
-
-        This will load all values from the state dict (including such that
-        weren't registered before loading).
+    def load_state_dict(self, state_dict):
+        """Copies parameters and buffers from :attr:`state_dict` into
+        this module and its descendants. The keys of :attr:`state_dict` must
+        exactly match the keys returned by this module's :func:`state_dict()`
+        fuction.
 
         Arguments:
-            state_dict (dict): A dict containing loaded parameters and
+            state_dict (dict): A dict containing parameters and
                 persistent buffers.
         """
-        for name, param in self._parameters.items():
-            new_param = state_dict.get(prefix + name, param)
-            if not isinstance(new_param, Parameter) and new_param is not None:
-                raise TypeError(
-                    "expected torch.autograd.Parameter for key '{}' (got {})"
-                    .format(prefix + name, torch.typename(new_param)))
-            self._parameters[name] = new_param
-        for name, buf in self._buffers.items():
-            self._buffers[name] = state_dict.get(prefix + name, buf)
+        own_state = self.state_dict()
+        for name, param in state_dict.items():
+            if name not in own_state:
+                raise KeyError('unexpected key "{}" in state_dict'
+                               .format(name))
+            if isinstance(param, Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            own_state[name].copy_(param)
+
+        missing = set(own_state.keys()) - set(state_dict.keys())
+        if len(missing) > 0:
+            raise KeyError('missing keys in state_dict: "{}"'.format(missing))
 
     def parameters(self, memo=None):
         """Returns an iterator over module parameters.

@@ -738,18 +738,20 @@ class TestNN(NNTestCase):
             param = net
             for component in k.split('.'):
                 param = getattr(param, component)
+                if isinstance(param, Parameter):
+                    param = param.data
             self.assertIs(v, param)
 
         l = nn.Linear(5, 5)
         state_dict = l.state_dict()
         self.assertEqual(len(state_dict), 2)
-        self.assertIs(state_dict['weight'], l.weight)
-        self.assertIs(state_dict['bias'], l.bias)
+        self.assertIs(state_dict['weight'], l.weight.data)
+        self.assertIs(state_dict['bias'], l.bias.data)
 
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Container(
-            conv1=nn.Conv2d(3, 3, 3, bias=False),
+            conv1=nn.Conv2d(3, 3, 3, bias=True),
             conv2=nn.Conv2d(3, 3, 3, bias=False),
         )
         net = nn.Container(
@@ -759,22 +761,24 @@ class TestNN(NNTestCase):
             block=block,
             empty=None,
         )
-        state_dict = {
-            'linear1.weight': Parameter(torch.ones(5, 5)),
-            'block.conv1.bias': Parameter(torch.range(1, 3)),
-            'block.conv2.bias': None,
+        state_dict = net.state_dict()
+        state_dict.update({
+            'linear1.weight': torch.ones(5, 5),
+            'block.conv1.bias': torch.range(1, 3),
             'bn.running_mean': torch.randn(2),
-        }
+        })
         net.load_state_dict(state_dict)
-        self.assertIs(net.linear1.weight, state_dict['linear1.weight'])
-        self.assertIs(net.block.conv1.bias, state_dict['block.conv1.bias'])
-        self.assertIs(net.block.conv2.bias, state_dict['block.conv2.bias'])
-        self.assertIs(net.bn.running_mean, state_dict['bn.running_mean'])
+        self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
+        self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
+        self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
 
-        state_dict = {
-            'linear1.weight': torch.ones(5, 5)
-        }
-        self.assertRaises(TypeError, lambda: net.load_state_dict(state_dict))
+        state_dict = net.state_dict()
+        state_dict.update({'extra': torch.ones(5)})
+        self.assertRaises(KeyError, lambda: net.load_state_dict(state_dict))
+
+        state_dict = net.state_dict()
+        del state_dict['linear1.weight']
+        self.assertRaises(KeyError, lambda: net.load_state_dict(state_dict))
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)

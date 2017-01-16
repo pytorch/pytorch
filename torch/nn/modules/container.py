@@ -93,40 +93,11 @@ class Container(Module):
             Module.__delattr__(self, name)
 
     def state_dict(self, destination=None, prefix=''):
-        """Returns a dictionary containing a whole state of the model.
-
-        Both parameters and persistent buffers (e.g. running averages) are
-        included. Keys are computed using a natural Python's indexing syntax
-        (e.g. 'subcontainer.module.weight'), excluding ``self``.
-
-        Example:
-            >>> print(model.state_dict().keys())
-            ['conv1.bias', 'conv1.weight']
-        """
         result = super(Container, self).state_dict(destination, prefix)
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(result, prefix + name + '.')
         return result
-
-    def load_state_dict(self, state_dict, prefix=''):
-        """Replaces model parameters using values from a given state_dict.
-
-        Copies all state_dict entries, where keys match any of the submodules.
-        For example, if the state_dict has an entry ``'conv44.weight'``, but
-        if the container does not have any submodule named ``'conv44'``, then
-        such entry will be ignored. However, once a module is found, this will
-        load all values from the state dict (including such that weren't
-        registered before loading).
-
-        Arguments:
-            state_dict (dict): A dict containing loaded parameters and
-                persistent buffers.
-        """
-        super(Container, self).load_state_dict(state_dict)
-        for name, module in self._modules.items():
-            if module is not None:
-                module.load_state_dict(state_dict, prefix + name + '.')
 
     def parameters(self, memo=None):
         """Returns an iterator over model parameters (including submodules).
