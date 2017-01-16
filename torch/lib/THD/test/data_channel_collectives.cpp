@@ -22,7 +22,7 @@ std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
 std::string g_data_channel_type;
 
-void test_send_recv(std::shared_ptr<thd::DataChannel> data_channel) {
+void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
   if (data_channel->getRank() == 0) {
     auto float_tensor = buildTensor<float>({1, 2, 3}, 4.2);
     data_channel->send(*float_tensor, 1);
@@ -30,6 +30,17 @@ void test_send_recv(std::shared_ptr<thd::DataChannel> data_channel) {
     auto float_tensor = buildTensor<float>({1, 2, 3}, -1.0);
     data_channel->receive(*float_tensor, 0);
     ASSERT_TENSOR_VALUE(float, *float_tensor, 4.2);
+  }
+}
+
+void test_send_recv_scalar(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (data_channel->getRank() == 0) {
+    thd::ScalarWrapper<int> scalar((int)1232);
+    data_channel->send(scalar, 1);
+  } else if (data_channel->getRank() == 1) {
+    thd::ScalarWrapper<int> scalar((int)-1);
+    data_channel->receive(scalar, 0);
+    assert(scalar.value() == 1232);
   }
 }
 
@@ -518,7 +529,8 @@ void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channe
 }
 
 void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel) {
-  test_send_recv(data_channel);
+  test_send_recv_tensor(data_channel);
+  test_send_recv_scalar(data_channel);
   test_broadcast(data_channel);
   test_reduce(data_channel);
   test_allReduce(data_channel);

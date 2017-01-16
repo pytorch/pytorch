@@ -21,32 +21,12 @@ namespace worker {
 
 namespace detail {
 
-void sendValueToMaster(IntStorage *from, long long value) {
-  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
-  wrapped_value->resize({1});
-  dynamic_cast<IntTensor *>(wrapped_value.get())->fill(value);
-  dataChannel->send(*wrapped_value, 0);
+void sendValueToMaster(long long value) {
+  dataChannel->send(IntScalar(value), 0);
 }
 
-void sendValueToMaster(FloatStorage *from, double value) {
-  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
-  wrapped_value->resize({1});
-  dynamic_cast<FloatTensor *>(wrapped_value.get())->fill(value);
-  dataChannel->send(*wrapped_value, 0);
-}
-
-void sendValueToMaster(IntTensor *from, long long value) {
-  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
-  wrapped_value->resize({1});
-  dynamic_cast<IntTensor *>(wrapped_value.get())->fill(value);
-  dataChannel->send(*wrapped_value, 0);
-}
-
-void sendValueToMaster(FloatTensor *from, double value) {
-  std::unique_ptr<Tensor> wrapped_value = from->newTensor();
-  wrapped_value->resize({1});
-  dynamic_cast<FloatTensor *>(wrapped_value.get())->fill(value);
-  dataChannel->send(*wrapped_value, 0);
+void sendValueToMaster(double value) {
+  dataChannel->send(FloatScalar(value), 0);
 }
 
 Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {

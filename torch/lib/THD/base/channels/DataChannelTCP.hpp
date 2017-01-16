@@ -43,7 +43,9 @@ struct DataChannelTCP : DataChannel {
   void reduce(Tensor& data, THDReduceOp operation, int dst_rank,
               THDGroup group_id = THDGroupWORLD) override;
   void broadcast(Tensor& data, int src_id, THDGroup group_id = THDGroupWORLD) override;
+  void send(const Scalar& data, int dst_id) override;
   void send(Tensor& data, int dst_id) override;
+  void receive(Scalar& data, int src_id) override;
   void receive(Tensor& data, int src_id) override;
   RequestTCP* isend(Tensor& data, int dst_rank) override;
   RequestTCP* ireceive(Tensor& data, int src_rank) override;
@@ -69,8 +71,10 @@ private:
   bool initMaster();
   bool initWorker();
 
+  void _send(const Scalar& data, int dst_id);
   void _send(Tensor& data, int dst_id);
-  void _receive(Tensor& data, int dst_id);
+  void _receive(Scalar& data, int src_id);
+  void _receive(Tensor& data, int src_id);
   void _reduce(Tensor& result, Tensor& data, THDReduceOp operation) const;
   template<typename T>
   void _reduce(Tensor& result, Tensor& data, THDReduceOp operation) const;

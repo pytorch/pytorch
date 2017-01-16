@@ -46,10 +46,10 @@ static void storageGet(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
   if (isInteger(type)) {
     long long value = dynamic_cast<IntStorage *>(storage)->get(offset);
-    sendValueToMaster(dynamic_cast<IntStorage *>(storage), value);
+    sendValueToMaster(value);
   } else if (isFloat(type)) {
     double value = dynamic_cast<FloatStorage *>(storage)->get(offset);
-    sendValueToMaster(dynamic_cast<FloatStorage *>(storage), value);
+    sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }

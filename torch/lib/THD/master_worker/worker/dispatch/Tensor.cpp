@@ -285,13 +285,11 @@ static void tensorDot(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (isInteger(tensor->type())) {
-    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
-    long long value = int_tensor->dot(*src);
-    sendValueToMaster(int_tensor, value);
+    long long value = dynamic_cast<IntTensor*>(tensor)->dot(*src);
+    sendValueToMaster(value);
   } else if (isFloat(tensor->type())) {
-    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
-    double value = float_tensor->dot(*src);
-    sendValueToMaster(float_tensor, value);
+    double value = dynamic_cast<FloatTensor*>(tensor)->dot(*src);
+    sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -302,13 +300,11 @@ static void tensorMinall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (isInteger(tensor->type())) {
-    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
-    long long value = int_tensor->minall();
-    sendValueToMaster(int_tensor, value);
+    long long value = dynamic_cast<IntTensor*>(tensor)->minall();
+    sendValueToMaster(value);
   } else if (isFloat(tensor->type())) {
-    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
-    double value = float_tensor->minall();
-    sendValueToMaster(float_tensor, value);
+    double value = dynamic_cast<FloatTensor*>(tensor)->minall();
+    sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -319,13 +315,11 @@ static void tensorMaxall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (isInteger(tensor->type())) {
-    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
-    long long value = int_tensor->maxall();
-    sendValueToMaster(int_tensor, value);
+    long long value = dynamic_cast<IntTensor*>(tensor)->maxall();
+    sendValueToMaster(value);
   } else if (isFloat(tensor->type())) {
-    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
-    double value = float_tensor->maxall();
-    sendValueToMaster(float_tensor, value);
+    double value = dynamic_cast<FloatTensor*>(tensor)->maxall();
+    sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -336,13 +330,11 @@ static void tensorSumall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (isInteger(tensor->type())) {
-    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
-    long long value = int_tensor->sumall();
-    sendValueToMaster(int_tensor, value);
+    long long value = dynamic_cast<IntTensor*>(tensor)->sumall();
+    sendValueToMaster(value);
   } else if (isFloat(tensor->type())) {
-    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
-    double value = float_tensor->sumall();
-    sendValueToMaster(float_tensor, value);
+    double value = dynamic_cast<FloatTensor*>(tensor)->sumall();
+    sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -353,13 +345,11 @@ static void tensorProdall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (isInteger(tensor->type())) {
-    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
-    long long value = int_tensor->prodall();
-    sendValueToMaster(int_tensor, value);
+    long long value = dynamic_cast<IntTensor*>(tensor)->prodall();
+    sendValueToMaster(value);
   } else if (isFloat(tensor->type())) {
-    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
-    double value = float_tensor->prodall();
-    sendValueToMaster(float_tensor, value);
+    double value = dynamic_cast<FloatTensor*>(tensor)->prodall();
+    sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -825,13 +815,11 @@ static void tensorTrace(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (isInteger(tensor->type())) {
-    IntTensor* int_tensor = dynamic_cast<IntTensor*>(tensor);
-    long long value = int_tensor->trace();
-    sendValueToMaster(int_tensor, value);
+    long long value = dynamic_cast<IntTensor*>(tensor)->trace();
+    sendValueToMaster(value);
   } else if (isFloat(tensor->type())) {
-    FloatTensor* float_tensor = dynamic_cast<FloatTensor*>(tensor);
-    double value = float_tensor->trace();
-    sendValueToMaster(float_tensor, value);
+    double value = dynamic_cast<FloatTensor*>(tensor)->trace();
+    sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }

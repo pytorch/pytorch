@@ -311,6 +311,14 @@ void DataChannelMPI::broadcast(Tensor& data, int src_rank, THDGroup group_id) {
 }
 
 
+void DataChannelMPI::send(const Scalar& data, int dst_rank) {
+  std::uint64_t scalar_bytes = data.elementSize();
+  MPI_Send(&scalar_bytes, 1, MPI_UINT64_T, dst_rank, 0, MPI_COMM_WORLD);
+  MPI_Send(reinterpret_cast<const std::uint8_t*>(data.data()), scalar_bytes,
+           MPI_UINT8_T, dst_rank, 0, MPI_COMM_WORLD);
+}
+
+
 void DataChannelMPI::send(Tensor& data, int dst_rank) {
   if (!data.isContiguous())
     throw std::logic_error("tensor to send is not contiguous");
@@ -319,6 +327,21 @@ void DataChannelMPI::send(Tensor& data, int dst_rank) {
   MPI_Send(&tensor_bytes, 1, MPI_UINT64_T, dst_rank, 0, MPI_COMM_WORLD);
   MPI_Send(reinterpret_cast<const std::uint8_t*>(data.data()), tensor_bytes,
            MPI_UINT8_T, dst_rank, 0, MPI_COMM_WORLD);
+}
+
+
+void DataChannelMPI::receive(Scalar& data, int src_rank) {
+  std::uint64_t scalar_bytes;
+  MPI_Recv(&scalar_bytes, 1, MPI_UINT64_T, src_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+  std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[scalar_bytes]);
+  MPI_Recv(bytes.get(), scalar_bytes, MPI_UINT8_T, src_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+  std::uint64_t actual_scalar_bytes = data.elementSize();
+  if (actual_scalar_bytes != scalar_bytes)
+    throw std::logic_error("scalar sizes does not match");
+
+  memcpy(data.data(), bytes.get(), scalar_bytes);
 }
 
 
