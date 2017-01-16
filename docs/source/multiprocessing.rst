@@ -19,12 +19,13 @@ Strategy management
 .. autofunction:: get_sharing_strategy
 .. autofunction:: set_sharing_strategy
 
-Sharing strategies
-------------------
+Sharing CUDA tensors
+--------------------
 
-This section provides a brief overview into how different sharing strategies
-work. Note that it applies only to CPU tensor - CUDA tensors will always use
-the CUDA API, as that's the only way they can be shared.
+Sharing CUDA tensors between processes is supported only in Python 3, using
+a ``spawn`` or ``forkserver`` start methods. :mod:`python:multiprocessing` in
+Python 2 can only create subprocesses using ``fork``, and it's not supported
+by the CUDA runtime.
 
 .. warning::
 
@@ -34,6 +35,14 @@ the CUDA API, as that's the only way they can be shared.
     This shouldn't be a problem for sharing model parameters, but passing other
     kinds of data should be done with care. Note that this restriction doesn't
     apply to shared CPU memory.
+
+
+Sharing strategies
+------------------
+
+This section provides a brief overview into how different sharing strategies
+work. Note that it applies only to CPU tensor - CUDA tensors will always use
+the CUDA API, as that's the only way they can be shared.
 
 File descriptor - ``file_descriptor``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
