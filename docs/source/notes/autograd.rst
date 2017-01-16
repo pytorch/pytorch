@@ -15,6 +15,8 @@ Every Variable has two flags: :attr:`requires_grad` and :attr:`volatile`.
 They both allow for fine grained exclusion of subgraphs from gradient
 computation and can increase efficiency.
 
+.. _excluding-requires_grad:
+
 ``requires_grad``
 ~~~~~~~~~~~~~~~~~
 
@@ -63,8 +65,8 @@ be even calling `.backward()`. It's more efficient than any other autograd
 setting - it will use the absolute minimal amount of memory to evaluate the
 model. ``volatile`` also determines that ``requires_grad is False``.
 
-Volatile differs from :ref:`requires_grad` in how the flag propagates. If
-there's even a single volatile input to an operation, its output is also
+Volatile differs from :ref:`excluding-requires_grad` in how the flag propagates.
+If there's even a single volatile input to an operation, its output is also
 going to be volatile. Volatility spreads accross the graph much easier than
 non-requiring gradient - you only need a **single** volatile leaf to have a
 volatile output, while you need **all** leaves to not require gradient to

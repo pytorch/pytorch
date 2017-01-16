@@ -1,3 +1,11 @@
+"""
+This package adds support for CUDA tensor types, that implement the same
+function as CPU tensors, but they utilize GPUs for computation.
+
+It is lazily initialized, so you can always import it, and use
+:func:`is_available()` to determine if your system supports CUDA.
+"""
+
 import contextlib
 import platform
 import ctypes
@@ -12,6 +20,7 @@ _cudart = None
 
 
 def is_available():
+    """Returns a bool indicating if CUDA is currently available."""
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
             not torch._C._cuda_isDriverSufficient()):
         return False
@@ -107,6 +116,13 @@ def cudart():
 
 
 class device(object):
+    """Context-manager that changes the selected device.
+
+    Arguments:
+        idx (int): device index to select. It's a no-op if this argument
+            is negative.
+    """
+
     def __init__(self, idx):
         self.idx = idx
         self.prev_idx = -1
@@ -126,18 +142,45 @@ class device(object):
 
 
 class device_of(device):
-    def __init__(self, tensor):
-        idx = tensor.get_device() if tensor.is_cuda else -1
+    """Context-manager that changes the current device to that of given object.
+
+    You can use both tensors and storages as arguments. If a given object is
+    not allocated on a GPU, this is a no-op.
+
+    Arguments:
+        obj (Tensor or Storage): object allocated on the selected device.
+    """
+
+    def __init__(self, obj):
+        idx = obj.get_device() if obj.is_cuda else -1
         super(device_of, self).__init__(idx)
 
 
 def set_device(device):
+    """Sets the current device.
+
+    Usage of this function is discouraged in favor of :any:`device`. In most
+    cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
+
+    Arguments:
+        device (int): selected device. This function is a no-op if this
+            argument is negative.
+    """
     if device >= 0:
         torch._C._cuda_setDevice(device)
 
 
 @contextlib.contextmanager
 def stream(stream):
+    """Context-manager that selects a given stream.
+
+    All CUDA kernels queued within its context will be enqueued on a selected
+    stream.
+
+    Arguments:
+        stream (Stream): selected stream. This manager is a no-op if it's
+            ``None``.
+    """
     if stream is None:
         yield
         return
@@ -150,21 +193,25 @@ def stream(stream):
 
 
 def device_count():
+    """Returns the number of GPUs available."""
     _lazy_init()
     return torch._C._cuda_getDeviceCount()
 
 
 def current_device():
+    """Returns the index of a currently selected device."""
     _lazy_init()
     return torch._C._cuda_getDevice()
 
 
 def synchronize():
+    """Waits for all kernels in all streams on current device to complete."""
     _lazy_init()
     return torch._C._cuda_synchronize()
 
 
 def current_stream():
+    """Returns a currently selected :class:`Stream`."""
     _lazy_init()
     return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream())
 
