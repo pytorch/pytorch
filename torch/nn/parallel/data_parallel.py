@@ -1,11 +1,11 @@
 import torch
-from torch.nn.modules import Container
+from ..modules import Module
 from .scatter_gather import scatter, gather
 from .replicate import replicate
 from .parallel_apply import parallel_apply
 
 
-class DataParallel(Container):
+class DataParallel(Module):
     """Implements data parallelism at the module level.
 
     This container parallelizes the application of the given module by

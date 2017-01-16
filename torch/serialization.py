@@ -133,7 +133,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
     serialized_container_types = {}
 
     def persistent_id(obj):
-        if isinstance(obj, type) and issubclass(obj, nn.Container):
+        if isinstance(obj, type) and issubclass(obj, nn.Module):
             if obj in serialized_container_types:
                 return None
             serialized_container_types[obj] = True
@@ -297,7 +297,7 @@ def _load(f, map_location, pickle_module):
             else:
                 msg = ("you can retrieve the original source code by "
                        "accessing the object's source attribute or set "
-                       "`torch.nn.Container.dump_patches = True` and use the "
+                       "`torch.nn.Module.dump_patches = True` and use the "
                        "patch tool to revert the changes.")
             msg = ("source code of class '{}' has changed. {}"
                    .format(torch.typename(container_type), msg))

@@ -9,17 +9,49 @@ from torch.autograd import Variable
 import torch.utils.hooks as hooks
 
 
-class Module(object):
-    """Base class for all Modules defined in the nn package.
+def _addindent(s_, numSpaces):
+    s = s_.split('\n')
+    # dont do anything for single-line stuff
+    if len(s) == 1:
+        return s_
+    first = s.pop(0)
+    s = [(numSpaces * ' ') + line for line in s]
+    s = '\n'.join(s)
+    s = first + '\n' + s
+    return s
 
-    Even the Container class derives from it.
+
+class Module(object):
+    """Base class for all neural network modules.
+
+    Your models should also subclass this class.
+
+    Modules can also contain other Modules, allowing to nest them in
+    a tree structure. You can assign the submodules as regular attributes::
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5)
+                self.conv2 = nn.Conv2d(20, 20, 5)
+
+            def forward(self, x):
+               x = F.relu(self.conv1(x))
+               return F.relu(self.conv2(x))
+
+    Submodules assigned in this way will be registered, and will have their
+    parameters converted too when you call .cuda(), etc.
     """
+
+    dump_patches = False
+
     def __init__(self):
         self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
+        self._modules = OrderedDict()
         self.training = True
         for name, param in self._parameters.items():
             if not isinstance(param, Parameter):
@@ -74,7 +106,18 @@ class Module(object):
         else:
             self._parameters[name] = param
 
+    def add_module(self, name, module):
+        if hasattr(self, name):
+            raise KeyError("attribute already exists '{}'".format(name))
+        if not isinstance(module, Module) and module is not None:
+            raise TypeError("{} is not a Module subclass".format(
+                torch.typename(module)))
+        self._modules[name] = module
+
     def _apply(self, fn):
+        for module in self.children():
+            module._apply(fn)
+
         for param in self._parameters.values():
             if param is not None:
                 # Variables stored in modules are graph leaves, and we don't
@@ -86,9 +129,12 @@ class Module(object):
         for key, buf in self._buffers.items():
             if buf is not None:
                 self._buffers[key] = fn(buf)
+
         return self
 
     def apply(self, fn):
+        for module in self.children():
+            module.apply(fn)
         fn(self)
         return self
 
@@ -187,18 +233,46 @@ class Module(object):
             _buffers = self.__dict__['_buffers']
             if name in _buffers:
                 return _buffers[name]
+        if '_modules' in self.__dict__:
+            modules = self.__dict__['_modules']
+            if name in modules:
+                return modules[name]
         return object.__getattribute__(self, name)
 
     def __setattr__(self, name, value):
         params = self.__dict__.get('_parameters')
-        if isinstance(value, Parameter) or (params and name in params):
+        if isinstance(value, Parameter):
+            if params is None:
+                raise AttributeError(
+                    "cannot assign parameters before Module.__init__() call")
+            self.register_parameter(name, value)
+        elif params is not None and name in params:
+            if value is not None:
+                raise TypeError("cannot assign '{}' as parameter '{}' "
+                                "(torch.nn.Parameter or None expected)"
+                                .format(torch.typename(value), name))
             self.register_parameter(name, value)
         else:
-            object.__setattr__(self, name, value)
+            modules = self.__dict__.get('_modules')
+            if isinstance(value, Module):
+                if modules is None:
+                    raise AttributeError(
+                        "cannot assign module before Module.__init__() call")
+                modules[name] = value
+            elif modules is not None and name in modules:
+                if value is not None:
+                    raise TypeError("cannot assign '{}' as child module '{}' "
+                                    "(torch.nn.Module or None expected)"
+                                    .format(torch.typename(value), name))
+                modules[name] = value
+            else:
+                object.__setattr__(self, name, value)
 
     def __delattr__(self, name):
         if name in self._parameters:
             del self._parameters[name]
+        elif name in self._modules:
+            del self._modules[name]
         else:
             object.__delattr__(self, name)
 
@@ -220,6 +294,9 @@ class Module(object):
         for name, buf in self._buffers.items():
             if buf is not None:
                 destination[prefix + name] = buf
+        for name, module in self._modules.items():
+            if module is not None:
+                module.state_dict(destination, prefix + name + '.')
         return destination
 
     def load_state_dict(self, state_dict):
@@ -263,11 +340,17 @@ class Module(object):
             if p is not None and p not in memo:
                 memo.add(p)
                 yield p
+        for module in self.children():
+            for p in module.parameters(memo):
+                yield p
 
     def children(self):
         """Returns an iterator over children modules."""
-        if False:
-            yield
+        memo = set()
+        for module in self._modules.values():
+            if module is not None and module not in memo:
+                memo.add(module)
+                yield module
 
     def modules(self, memo=None):
         if memo is None:
@@ -275,6 +358,9 @@ class Module(object):
         if self not in memo:
             memo.add(self)
             yield self
+            for module in self.children():
+                for m in module.modules(memo):
+                    yield m
 
     def train(self):
         """Sets the module in training mode.
@@ -282,6 +368,8 @@ class Module(object):
         This has any effect only on modules such as Dropout or BatchNorm.
         """
         self.training = True
+        for module in self.children():
+            module.train()
         return self
 
     def eval(self):
@@ -290,6 +378,8 @@ class Module(object):
         This has any effect only on modules such as Dropout or BatchNorm.
         """
         self.training = False
+        for module in self.children():
+            module.eval()
         return self
 
     def zero_grad(self):
@@ -299,3 +389,12 @@ class Module(object):
 
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())
+
+    def __repr__(self):
+        tmpstr = self.__class__.__name__ + ' (\n'
+        for key, module in self._modules.items():
+            modstr = module.__repr__()
+            modstr = _addindent(modstr, 2)
+            tmpstr = tmpstr + '  ('  + key + '): ' + modstr + '\n'
+        tmpstr = tmpstr + ')'
+        return tmpstr
