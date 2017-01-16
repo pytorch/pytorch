@@ -1,4 +1,6 @@
-<center style="padding: 40px"><img width="30%" src="docs/source/_static/img/pytorch-logo-dark.png" /></center>
+<p align="center"><img width="40%" src="docs/source/_static/img/pytorch-logo-dark.png" /></p>
+
+--------------------------------------------------------------------------------
 
 PyTorch is a python package that provides two high-level features:
 - Tensor computation (like numpy) with strong GPU acceleration
@@ -48,13 +50,11 @@ Elaborating further:
 
 If you use numpy, then you have used Tensors (a.k.a ndarray).
 
-![tensor_illustration](docs/source/_static/img/tensor_illustration.png)
-
 PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
 compute by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
-such as slicing, indexing, math operations, linear algebra, reductions.  
+such as slicing, indexing, math operations, linear algebra, reductions.
 And they are fast!
 
 ### Dynamic Neural Networks: Tape based Autograd
@@ -72,16 +72,16 @@ from several research papers on this topic, as well as current and past work suc
 [autograd](https://github.com/HIPS/autograd),
 [Chainer](http://chainer.org), etc.
 
-While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.  
+While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
 
 ### Python first
 
-PyTorch is not a Python binding into a monolothic C++ framework.  
-It is built to be deeply integrated into Python.  
-You can use it naturally like you would use numpy / scipy / scikit-learn etc.  
+PyTorch is not a Python binding into a monolothic C++ framework.
+It is built to be deeply integrated into Python.
+You can use it naturally like you would use numpy / scipy / scikit-learn etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as Cython and Numba.  
+and use packages such as Cython and Numba.
 Our goal is to not reinvent the wheel, but to reuse wheels.
 
 ### Imperative experiences
@@ -94,8 +94,8 @@ We hope you never spend hours debugging your code because of bad stack traces or
 
 ### Fast and Lean
 
-PyTorch is as fast as the fastest deep learning framework out there, with minimal overhead.  
-We integrate acceleration libraries such as Intel MKL and NVIDIA (CuDNN, NCCL) for maximum speed.  
+PyTorch is as fast as the fastest deep learning framework out there, with minimal overhead.
+We integrate acceleration libraries such as Intel MKL and NVIDIA (CuDNN, NCCL) for maximum speed.
 
 The memory usage in PyTorch is extremely efficient compared to Torch or some of the alternatives.
 We've written custom memory allocators for the GPU to make sure that
@@ -111,8 +111,8 @@ You can write new neural network layers in Python itself, that use the torch API
 [or your favorite numpy derivatives](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb)
 
 If you want to write your layers in C/C++, we provide an extension API based on
-[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and easy to use.  
-There is no wrapper code that needs to be written. [You can see an example here](https://github.com/pytorch/extension-ffi).  
+[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and easy to use.
+There is no wrapper code that needs to be written. [You can see an example here](https://github.com/pytorch/extension-ffi).
 
 At the core, all the value of PyTorch -- it's CPU and GPU Tensor and Neural Network backends
 -- are written in simple libraries with a C99 API.
