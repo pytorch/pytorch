@@ -50,7 +50,7 @@ Elaborating further:
 
 If you use numpy, then you have used Tensors (a.k.a ndarray).
 
-![tensor_illustration](docs/image/tensor_illustration.png)
+![tensor_illustration](docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
 compute by a huge amount.
