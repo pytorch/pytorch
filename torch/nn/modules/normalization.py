@@ -1,5 +1,4 @@
 from .module import Module
-from .container import Container
 
 
 class CrossMapLRN2d(Module):

@@ -375,12 +375,11 @@ class TestNN(NNTestCase):
     def test_parameters(self):
         def num_params(module):
             return len(list(module.parameters()))
-        class Net(nn.Container):
+        class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__(
-                    l1=l,
-                    l2=l
-                )
+                super(Net, self).__init__()
+                self.l1 = l
+                self.l2 = l
                 self.param = Parameter(torch.Tensor(3, 5))
         l = nn.Linear(10, 20)
         n = Net()
@@ -390,7 +389,7 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(s), 3)
 
     def test_modules(self):
-        class Net(nn.Container):
+        class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
                 self.l1 = l
@@ -414,11 +413,10 @@ class TestNN(NNTestCase):
 
     def test_add_module(self):
         l = nn.Linear(10, 20)
-        net = nn.Container(
-            l=l,
-            l2=l,
-            empty=None,
-        )
+        net = nn.Module()
+        net.l = l
+        net.l2 = l
+        net.add_module('empty', None)
         self.assertEqual(net.l, l)
         self.assertEqual(net.l2, l)
         self.assertEqual(net.empty, None)
@@ -429,11 +427,10 @@ class TestNN(NNTestCase):
 
     def test_type(self):
         l = nn.Linear(10, 20)
-        net = nn.Container(
-            l=l,
-            l2=l,
-            empty=None,
-        )
+        net = nn.Module()
+        net.l = l
+        net.l2 = l
+        net.add_module('empty', None)
         net.float()
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
@@ -615,7 +612,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_buffers(self):
-        net = nn.Container()
+        net = nn.Module()
         net.bn = nn.BatchNorm2d(10)
         net.cuda()
         replicas = dp.replicate(net, (0, 1))
@@ -670,7 +667,7 @@ class TestNN(NNTestCase):
     def test_data_parallel_nested_output(self):
         def fn(input):
             return [input, (input.sin(), input.cos(), [input.add(1)]), input]
-        class Net(nn.Container):
+        class Net(nn.Module):
             def forward(self, input):
                 return fn(input)
         i = Variable(torch.randn(2, 2).float().cuda(1))
@@ -689,7 +686,7 @@ class TestNN(NNTestCase):
     def test_data_parallel_nested_input(self):
         def fn(input):
             return input[1][0]
-        class Net(nn.Container):
+        class Net(nn.Module):
             def forward(self, input):
                 return fn(input)
         i = Variable(torch.randn(20, 3).float().cuda(1))
@@ -710,17 +707,18 @@ class TestNN(NNTestCase):
 
     def test_state_dict(self):
         l = nn.Linear(5, 5)
-        block = nn.Container(
-            conv=nn.Conv2d(3, 3, 3, bias=False)
-        )
-        net = nn.Container(
-            linear1=l,
-            linear2=l,
-            bn=nn.BatchNorm2d(2),
-            block=block,
-            empty=None,
-        )
+        block = nn.Module()
+        block.conv=nn.Conv2d(3, 3, 3, bias=False)
+        net = nn.Module()
+        net.linear1 = l
+        net.linear2 = l
+        net.bn = nn.BatchNorm2d(2)
+        net.block = block
+        net.add_module('empty', None)
+
         state_dict = net.state_dict()
+        from pprint import pprint
+        pprint(state_dict.keys())
         self.assertEqual(len(state_dict), 9)
         self.assertIn('linear1.weight', state_dict)
         self.assertIn('linear1.bias', state_dict)
@@ -750,17 +748,16 @@ class TestNN(NNTestCase):
 
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
-        block = nn.Container(
-            conv1=nn.Conv2d(3, 3, 3, bias=True),
-            conv2=nn.Conv2d(3, 3, 3, bias=False),
-        )
-        net = nn.Container(
-            linear1=l,
-            linear2=l,
-            bn=nn.BatchNorm2d(2),
-            block=block,
-            empty=None,
-        )
+        block = nn.Module()
+        block.conv1 = nn.Conv2d(3, 3, 3, bias=True)
+        block.conv2 = nn.Conv2d(3, 3, 3, bias=False)
+        net = nn.Module()
+        net.linear1 = l
+        net.linear2 = l
+        net.bn = nn.BatchNorm2d(2)
+        net.block = block
+        net.add_module('empty', None)
+
         state_dict = net.state_dict()
         state_dict.update({
             'linear1.weight': torch.ones(5, 5),
@@ -878,7 +875,7 @@ class TestNN(NNTestCase):
                             mu(output_small, indices_small, (h, w)))
 
     def test_container_copy(self):
-        class Model(nn.Container):
+        class Model(nn.Module):
             def __init__(self):
                 super(Model, self).__init__()
                 self.linear = nn.Linear(4, 5)
@@ -1505,7 +1502,7 @@ for test_params in criterion_tests:
     add_test(test)
 
 
-class UnpoolingNet(nn.Container):
+class UnpoolingNet(nn.Module):
     def __init__(self, pool, unpool):
         super(UnpoolingNet, self).__init__()
         self.pool = pool

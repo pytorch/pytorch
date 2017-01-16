@@ -1,7 +1,7 @@
 from copy import copy
 from collections import OrderedDict
 
-from ..modules.container import Container
+from ..modules import Module
 import torch.cuda.comm as comm
 
 
@@ -15,7 +15,7 @@ def _replicate_module(module, gpu, param_remap):
     replica._buffers = {}
     for key, buffer in module._buffers.items():
         replica._buffers[key] = param_remap.get(buffer)
-    if isinstance(replica, Container):
+    if replica._modules:
         replica._modules = OrderedDict()
         for name, child in module._modules.items():
             replica._modules[name] = _replicate_module(child, gpu, param_remap)
