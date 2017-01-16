@@ -203,17 +203,11 @@ class TestTorch(TestCase):
         expected_c.map2_(a, b, lambda _, a, b: mathfn(a, b))
         self.assertEqual(expected_c, c, 0)
 
-        # Tensor and scalar
-        v = random.random()
-        c = torchfn(a, v)
-        expected_c.map_(a, lambda _, a: mathfn(a, v))
-        self.assertEqual(expected_c, c, 0)
+    def test_max_elementwise(self):
+        self._testCSelection(torch.max, max)
 
-    def test_cmax(self):
-        self._testCSelection(torch.cmax, max)
-
-    def test_cmin(self):
-        self._testCSelection(torch.cmin, min)
+    def test_min_elementwise(self):
+        self._testCSelection(torch.min, min)
 
     def test_lerp(self):
         def TH_lerp(a, b, weight):
@@ -332,14 +326,14 @@ class TestTorch(TestCase):
         res_neg.neg_()
         self.assertEqual(res_neg, res_add)
 
-    def test_cinv(self):
+    def test_reciprocal(self):
         a = torch.randn(100,89)
         zeros = torch.Tensor().resize_as_(a).zero_()
 
         res_pow = torch.pow(a, -1)
-        res_inv = a.clone()
-        res_inv.cinv_()
-        self.assertEqual(res_inv, res_pow)
+        res_reciprocal = a.clone()
+        res_reciprocal.reciprocal_()
+        self.assertEqual(res_reciprocal, res_pow)
 
     def test_mul(self):
         m1 = torch.randn(10,10)
@@ -518,6 +512,18 @@ class TestTorch(TestCase):
         res2 = m1.clone()
         for i in iter_indices(res2):
             res2[i] = max(min_val, min(max_val, res2[i]))
+        self.assertEqual(res1, res2)
+
+        res1 = torch.clamp(m1, min=min_val)
+        res2 = m1.clone()
+        for i in iter_indices(res2):
+            res2[i] = max(min_val, res2[i])
+        self.assertEqual(res1, res2)
+
+        res1 = torch.clamp(m1, max=max_val)
+        res2 = m1.clone()
+        for i in iter_indices(res2):
+            res2[i] = min(max_val, res2[i])
         self.assertEqual(res1, res2)
 
     def test_pow(self):

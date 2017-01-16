@@ -389,23 +389,19 @@ class Variable(_C._VariableBase):
     def abs(self):
         return Abs()(self)
 
-    def clamp(self, min_val, max_val):
-        return Clamp(min_val, max_val)(self)
-
-    def cinv(self):
-        return Cinv()(self)
-
-    def cmax(self, other):
-        if isinstance(other, Variable):
-            return Cmax()(self, other)
+    def clamp(self, min=None, max=None):
+        if min is None and max is None:
+            raise ValueError("clamp requires specifying at least one of "
+                "min and max arguments")
+        elif min is None and max is not None:
+            return CminConstant(max)(self)
+        elif min is not None and max is None:
+            return CmaxConstant(min)(self)
         else:
-            return CmaxConstant(other)(self)
+            return Clamp(min, max)(self)
 
-    def cmin(self, other):
-        if isinstance(other, Variable):
-            return Cmin()(self, other)
-        else:
-            return CminConstant(other)(self)
+    def reciprocal(self):
+        return Reciprocal()(self)
 
     def floor(self):
         return Floor()(self)
@@ -456,9 +452,13 @@ class Variable(_C._VariableBase):
         return Mean(dim)(self)
 
     def max(self, dim=None):
+        if isinstance(dim, Variable):
+            return Cmax()(self, dim)
         return Max(dim)(self)
 
     def min(self, dim=None):
+        if isinstance(dim, Variable):
+            return Cmin()(self, dim)
         return Min(dim)(self)
 
     def mode(self, dim):

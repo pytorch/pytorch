@@ -17,7 +17,7 @@ class HingeEmbeddingCriterion(Criterion):
         self.output = self.buffer.sum()
 
         self.buffer.fill_(self.margin).add_(-1, input)
-        self.buffer.cmax_(0)
+        self.buffer.clamp_(min=0)
         self.buffer[torch.eq(y, 1.)] = 0
         self.output = self.output + self.buffer.sum()
 

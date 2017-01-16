@@ -77,10 +77,8 @@ Pointwise Ops
 .. autofunction:: atan
 .. autofunction:: atan2
 .. autofunction:: ceil
-.. autofunction:: cinv
+.. autofunction:: inv
 .. autofunction:: clamp
-.. autofunction:: cmax
-.. autofunction:: cmin
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div

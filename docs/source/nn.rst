@@ -9,8 +9,6 @@ Containers
 
 .. autoclass:: Module
     :members:
-.. autoclass:: Container
-    :members:
 
 Convolution Layers
 ----------------------------------

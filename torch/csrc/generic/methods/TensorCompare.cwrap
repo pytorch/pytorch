@@ -401,6 +401,13 @@
       return: real
       arguments:
         - THTensor* self
+    - cname: cmin
+      return: argument 0
+      arguments:
+      - arg: THTensor* result
+        output: True
+      - THTensor* self
+      - THTensor* other
     - cname: min
       return: argument 0,1
       arguments:
@@ -420,6 +427,13 @@
       return: real
       arguments:
         - THTensor* self
+    - cname: cmax
+      return: argument 0
+      arguments:
+      - arg: THTensor* result
+        output: True
+      - THTensor* self
+      - THTensor* other
     - cname: max
       return: argument 0,1
       arguments:

@@ -725,7 +725,7 @@ function_tests = [
     (Asin,          (),                 (torch.randn(S, S, S).clamp(-0.9, 0.9),)    ),
     (Acos,          (),                 (torch.randn(S, S, S).clamp(-0.9, 0.9),)    ),
     (Atan,          (),                 ((S, S, S),)                                ),
-    (Cinv,          (),                 (torch.rand(S, S, S) + 0.1,)                ),
+    (Reciprocal,    (),                 (torch.rand(S, S, S) + 0.1,)                ),
     (Cmax,          (),                 ((S, S, S), (S, S, S))                      ),
     (Cmin,          (),                 ((S, S, S), (S, S, S))                      ),
     (Round,         (),                 ((S, S, S),)                                ),
@@ -841,7 +841,7 @@ method_tests = [
     ('asin',        (S, S, S),          ()                                          ),
     ('acos',        (S, S, S),          ()                                          ),
     ('atan',        (S, S, S),          ()                                          ),
-    ('cinv',        (S, S, S),          ()                                          ),
+    ('reciprocal',  (S, S, S),          ()                                          ),
     ('round',       (S, S, S),          ()                                          ),
     ('sign',        (S, S, S),          ()                                          ),
     ('trunc',       (S, S, S),          ()                                          ),
@@ -851,10 +851,10 @@ method_tests = [
     ('fmod',        (S, S, S),          (1.5,)                                      ),
     ('remainder',   (S, S, S),          (1.5,)                                      ),
     ('lerp',        (S, S, S),          ((S, S, S), 0.4)                            ),
-    ('cmax',        (S, S, S),          ((S, S, S),)                                ),
-    ('cmax',        (S, S, S),          (0.5,),                     'constant'      ),
-    ('cmin',        (S, S, S),          ((S, S, S),)                                ),
-    ('cmin',        (S, S, S),          (0.5,),                     'constant'      ),
+    ('max',         (S, S, S),          ()                                          ),
+    ('max',         (S, S, S),          ((S, S, S),),               'elementwise'   ),
+    ('min',         (S, S, S),          ()                                          ),
+    ('min',         (S, S, S),          ((S, S, S),),               'elementwise'   ),
     ('mean',        (S, S, S),          ()                                          ),
     ('mean',        (S, S, S),          (1,),                       'dim'           ),
     ('sum',         (S, S, S),          ()                                          ),
@@ -872,8 +872,6 @@ method_tests = [
     ('addr',        (S, M),             ((S,), (M,)),                               ),
     ('addr',        (S, M),             (0.2, 0.6, (S,), (M,)),     'coef'          ),
     ('dot',         (L,),               ((L,),),                                    ),
-    ('max',         (S, S, S),          ()                                          ),
-    ('min',         (S, S, S),          ()                                          ),
     ('addcmul',     (S, S),             ((S, S), (S, S))                            ),
     ('addcmul',     (S, S),             (0.5, (S, S), (S, S)),      'scale'         ),
     ('addcdiv',     (S, S),             ((S, S), (S, S))                            ),
@@ -906,6 +904,7 @@ method_tests = [
 # TODO: mode, median, sort, kthvalue, topk (problem with indices)
 # TODO: indexAdd, indexCopy, indexFill
 # TODO: resize, resize_as (tensors only have resize_ and resize_as_)
+# TODO: clamp with min/max
 
 
 def create_input(call_args):

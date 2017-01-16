@@ -212,7 +212,7 @@ IMPLEMENT_STATELESS(mean)
 IMPLEMENT_STATELESS(std)
 IMPLEMENT_STATELESS(var)
 IMPLEMENT_STATELESS(norm)
-IMPLEMENT_STATELESS(cinv)
+IMPLEMENT_STATELESS(reciprocal)
 IMPLEMENT_STATELESS(neg)
 IMPLEMENT_STATELESS(add)
 IMPLEMENT_STATELESS(mul)
@@ -220,8 +220,6 @@ IMPLEMENT_STATELESS(div)
 IMPLEMENT_STATELESS(fmod)
 IMPLEMENT_STATELESS(min)
 IMPLEMENT_STATELESS(max)
-IMPLEMENT_STATELESS(cmax)
-IMPLEMENT_STATELESS(cmin)
 IMPLEMENT_STATELESS(dot)
 IMPLEMENT_STATELESS(sum)
 IMPLEMENT_STATELESS(prod)
@@ -534,7 +532,7 @@ static PyMethodDef TorchMethods[] = {
   {"std",             (PyCFunction)THPModule_std,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"var",             (PyCFunction)THPModule_var,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"norm",            (PyCFunction)THPModule_norm,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cinv",            (PyCFunction)THPModule_cinv,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"reciprocal",      (PyCFunction)THPModule_reciprocal,        METH_VARARGS | METH_KEYWORDS, NULL},
   {"neg",             (PyCFunction)THPModule_neg,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"add",             (PyCFunction)THPModule_add,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"mul",             (PyCFunction)THPModule_mul,               METH_VARARGS | METH_KEYWORDS, NULL},
@@ -542,8 +540,6 @@ static PyMethodDef TorchMethods[] = {
   {"fmod",            (PyCFunction)THPModule_fmod,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"min",             (PyCFunction)THPModule_min,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"max",             (PyCFunction)THPModule_max,               METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cmax",            (PyCFunction)THPModule_cmax,              METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cmin",            (PyCFunction)THPModule_cmin,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"dot",             (PyCFunction)THPModule_dot,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"sum",             (PyCFunction)THPModule_sum,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"prod",            (PyCFunction)THPModule_prod,              METH_VARARGS | METH_KEYWORDS, NULL},

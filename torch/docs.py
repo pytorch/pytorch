@@ -527,7 +527,7 @@ Example::
 
     >>> batch1 = torch.randn(10, 3, 4)
     >>> batch2 = torch.randn(10, 4, 5)
-    >>> res = torch.bmm(M, batch1, batch2)
+    >>> res = torch.bmm(batch1, batch2)
     >>> res.size()
     torch.Size([10, 3, 5])
 """)
@@ -604,11 +604,11 @@ Example::
 
 """)
 
-add_docstr(torch._C.cinv,
+add_docstr(torch._C.reciprocal,
 """
-cinv(input, out=None) -> Tensor
+reciprocal(input, out=None) -> Tensor
 
-Returns a new `Tensor` with the scalar inverse of the elements of :attr:`input`, i.e. :math:`1.0 / x`
+Returns a new `Tensor` with the reciprocal of the elements of :attr:`input`, i.e. :math:`1.0 / x`
 
 Args:
     input (Tensor): the input `Tensor`
@@ -625,7 +625,7 @@ Example::
     -0.5468
     [torch.FloatTensor of size 4]
 
-    >>> torch.cinv(a)
+    >>> torch.reciprocal(a)
 
      0.7210
      2.5565
@@ -672,17 +672,13 @@ Example::
     -0.5000
     [torch.FloatTensor of size 4]
 
-""")
+.. function:: clamp(input, *, min, out=None) -> Tensor
 
-add_docstr(torch._C.cmax,
-"""
-.. function:: cmax(input, value, out=None) -> Tensor
-
-Takes the element-wise `max` of the scalar :attr:`value` and each element of the input :attr:`input` and returns a new tensor with the result.
+Clamps all elements in :attr:`input` to be larger or equal :attr:`min`.
 
 Args:
     input (Tensor): the input `Tensor`
-    value (float): the scalar to be compared with
+    value (float): minimal value of each element in the output
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -696,7 +692,7 @@ Example::
     -0.5468
     [torch.FloatTensor of size 4]
 
-    >>> torch.cmax(a, 0.5)
+    >>> torch.clamp(a, min=0.5)
 
      1.3869
      0.5000
@@ -704,21 +700,13 @@ Example::
      0.5000
     [torch.FloatTensor of size 4]
 
+.. function:: clamp(input, *, max, out=None) -> Tensor
 
-.. function:: cmax(input, other, out=None) -> Tensor
-
-Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input`
-and an element-wise `max` is taken. The resulting Tensor is returned.
-
-The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
-
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
-
-:math:`out_i = max(tensor_i, other_i)`
+Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
 
 Args:
     input (Tensor): the input `Tensor`
-    other (Tensor): the second input `Tensor`
+    value (float): maximal value of each element in the output
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -732,96 +720,10 @@ Example::
     -0.5468
     [torch.FloatTensor of size 4]
 
-    >>> b = torch.randn(4)
-    >>> b
-
-     1.0067
-    -0.8010
-     0.6258
-     0.3627
-    [torch.FloatTensor of size 4]
-
-    >>> torch.cmax(a, b)
-
-     1.3869
-     0.3912
-     0.6258
-     0.3627
-    [torch.FloatTensor of size 4]
-
-""")
-
-add_docstr(torch._C.cmin,
-"""
-.. function:: cmin(input, value, out=None) -> Tensor
-
-Takes the element-wise `min` of the scalar :attr:`value` and each element of the input :attr:`input` and returns a new tensor with the result.
-
-Args:
-    input (Tensor): the input `Tensor`
-    value (float): the scalar to be compared with
-    out (Tensor, optional): The result `Tensor`
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size 4]
-
-    >>> torch.cmin(a, 0.5)
+    >>> torch.clamp(a, max=0.5)
 
      0.5000
      0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size 4]
-
-
-.. function:: cmin(input, other, out=None) -> Tensor
-
-Each element of the Tensor :attr:`other` is compared with the corresponding element of the Tensor :attr:`input`
-and an element-wise `min` is taken. The resulting Tensor is returned.
-
-The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
-
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
-
-:math:`out_i = min(tensor_i, other_i)`
-
-Args:
-    input (Tensor): the input `Tensor`
-    other (Tensor): the second input `Tensor`
-    out (Tensor, optional): The result `Tensor`
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size 4]
-
-    >>> b = torch.randn(4)
-    >>> b
-
-     1.0067
-    -0.8010
-     0.6258
-     0.3627
-    [torch.FloatTensor of size 4]
-
-    >>> torch.cmin(a, b)
-
-     1.0067
-    -0.8010
     -0.8634
     -0.5468
     [torch.FloatTensor of size 4]
@@ -2074,6 +1976,50 @@ Example::
     [torch.LongTensor of size 4x1]
     )
 
+.. function:: max(input, other, out=None) -> Tensor
+
+Each element of the Tensor :attr:`input` is compared with the corresponding element of the Tensor :attr:`other`
+and an element-wise `max` is taken.
+
+The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
+
+.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+
+:math:`out_i = max(tensor_i, other_i)`
+
+Args:
+    input (Tensor): the input `Tensor`
+    other (Tensor): the second input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+
+    >>> b = torch.randn(4)
+    >>> b
+
+     1.0067
+    -0.8010
+     0.6258
+     0.3627
+    [torch.FloatTensor of size 4]
+
+    >>> torch.max(a, b)
+
+     1.3869
+     0.3912
+     0.6258
+     0.3627
+    [torch.FloatTensor of size 4]
+
 """)
 
 add_docstr(torch._C.mean,
@@ -2242,6 +2188,50 @@ Example::
     2
     1
     torch.LongTensor of size 4x1]
+
+.. function:: min(input, other, out=None) -> Tensor
+
+Each element of the Tensor :attr:`input` is compared with the corresponding element of the Tensor :attr:`other`
+and an element-wise `min` is taken. The resulting Tensor is returned.
+
+The shapes of :attr:`input` and :attr:`other` don't need to match. The total number of elements in each Tensor need to be the same.
+
+.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+
+:math:`out_i = min(tensor_i, other_i)`
+
+Args:
+    input (Tensor): the input `Tensor`
+    other (Tensor): the second input `Tensor`
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+
+     1.3869
+     0.3912
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
+
+    >>> b = torch.randn(4)
+    >>> b
+
+     1.0067
+    -0.8010
+     0.6258
+     0.3627
+    [torch.FloatTensor of size 4]
+
+    >>> torch.min(a, b)
+
+     1.0067
+    -0.8010
+    -0.8634
+    -0.5468
+    [torch.FloatTensor of size 4]
 
 """)
 
