@@ -45,7 +45,7 @@ class CosineEmbeddingLoss(Function):
         self._outputs = self._outputs.select(1, 0)
 
         torch.eq(y, -1, out=_idx)
-        self._outputs[_idx] = self._outputs[_idx].add_(-self.margin).cmax_(0)
+        self._outputs[_idx] = self._outputs[_idx].add_(-self.margin).clamp_(min=0)
         torch.eq(y, 1, out=_idx)
         self._outputs[_idx] = self._outputs[_idx].mul_(-1).add_(1)
 
@@ -110,7 +110,7 @@ class HingeEmbeddingLoss(Function):
         output = buffer.sum()
 
         buffer.fill_(self.margin).add_(-1, input)
-        buffer.cmax_(0)
+        buffer.clamp_(min=0)
         buffer[torch.eq(target, 1.)] = 0
         output += buffer.sum()
 
@@ -146,7 +146,7 @@ class MarginRankingLoss(Function):
         _output.add_(-1, input2)
         _output.mul_(-1).mul_(y)
         _output.add_(self.margin)
-        _output.cmax_(0)
+        _output.clamp_(min=0)
         output = _output.sum()
 
         if self.size_average:

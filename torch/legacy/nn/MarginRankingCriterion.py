@@ -26,7 +26,7 @@ class MarginRankingCriterion(Criterion):
            self._output.mul_(-1).mul_(y)
            self._output.add_(self.margin)
 
-           self._output.cmax_(0)
+           self._output.clamp_(min=0)
 
            self.output = self._output.sum()
 

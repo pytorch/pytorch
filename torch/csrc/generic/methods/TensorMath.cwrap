@@ -582,7 +582,7 @@
 ]]
 
 [[
-  name: cinv
+  name: reciprocal
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   options:
@@ -595,7 +595,7 @@
 ]]
 
 [[
-  name: cinv_
+  name: reciprocal_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   options:
     - cname: cinv
@@ -797,76 +797,6 @@
   return: self
   arguments:
     - THTensor* self
-]]
-
-[[
-  name: cmax
-  return: argument 0
-  with_stateless: True
-  options:
-    - cname: cmax
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - THTensor* self
-      - THTensor* other
-    - cname: cmaxValue
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real value
-]]
-
-[[
-  name: cmax_
-  return: self
-  options:
-    - cname: cmax
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - THTensor* other
-    - cname: cmaxValue
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real value
-]]
-
-[[
-  name: cmin
-  return: argument 0
-  with_stateless: True
-  options:
-    - cname: cmin
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - THTensor* self
-      - THTensor* other
-    - cname: cminValue
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real value
-]]
-
-[[
-  name: cmin_
-  return: self
-  options:
-    - cname: cmin
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - THTensor* other
-    - cname: cminValue
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real value
 ]]
 
 [[
@@ -1196,23 +1126,53 @@
   name: clamp
   with_stateless: True
   return: argument 0
-  arguments:
-    - arg: THTensor* destination
-      output: True
-    - THTensor* self
-    - real min
-    - real max
+  options:
+    - cname: clamp
+      arguments:
+      - arg: THTensor* destination
+        output: True
+      - THTensor* self
+      - real min
+      - real max
+    - cname: cmaxValue
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: real min
+          kwarg_only: True
+    - cname: cminValue
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: real max
+          kwarg_only: True
 ]]
 
 [[
   name: clamp_
   cname: clamp
   return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - real min
-    - real max
+  options:
+    - cname: clamp
+      arguments:
+      - THTensor* self
+      - THTensor* self
+      - real min
+      - real max
+    - cname: cmaxValue
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real min
+          kwarg_only: True
+    - cname: cminValue
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real max
+          kwarg_only: True
 ]]
 
 [[

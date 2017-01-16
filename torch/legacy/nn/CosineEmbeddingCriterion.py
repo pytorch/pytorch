@@ -57,7 +57,7 @@ class CosineEmbeddingCriterion(Criterion):
         self._outputs = self._outputs.select(1, 0)
 
         torch.eq(y, -1, out=self._idx)
-        self._outputs[self._idx] = self._outputs[self._idx].add_(-self.margin).cmax_(0)
+        self._outputs[self._idx] = self._outputs[self._idx].add_(-self.margin).clamp_(min=0)
         torch.eq(y, 1, out=self._idx)
         self._outputs[self._idx] = self._outputs[self._idx].mul_(-1).add_(1)
 

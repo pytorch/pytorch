@@ -27,7 +27,7 @@ class Multinomial(StochasticFunction):
         probs /= probs.sum(1).expand_as(probs)
         grad_probs = probs.new().resize_as_(probs).zero_()
         output_probs = probs.gather(1, samples)
-        output_probs.add_(1e-6).cinv_()
+        output_probs.add_(1e-6).reciprocal_()
         output_probs.neg_().mul_(reward)
         # TODO: add batched index_add
         for i in range(probs.size(0)):

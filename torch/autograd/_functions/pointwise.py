@@ -171,7 +171,7 @@ class Asin(Function):
 
     def backward(self, grad_output):
         i, = self.saved_tensors
-        return grad_output * (1 - i.mul(i)).sqrt_().cinv_()
+        return grad_output * (1 - i.mul(i)).sqrt_().reciprocal_()
 
 
 class Acos(Function):
@@ -181,7 +181,7 @@ class Acos(Function):
 
     def backward(self, grad_output):
         i, = self.saved_tensors
-        return grad_output.mul((1 - i.mul(i)).sqrt_().cinv_()).neg_()
+        return grad_output.mul((1 - i.mul(i)).sqrt_().reciprocal_()).neg_()
 
 
 class Atan(Function):
@@ -191,13 +191,13 @@ class Atan(Function):
 
     def backward(self, grad_output):
         i, = self.saved_tensors
-        return grad_output * i.mul(i).add_(1).cinv_()
+        return grad_output * i.mul(i).add_(1).reciprocal_()
 
 
-class Cinv(Function):
+class Reciprocal(Function):
 
     def forward(self, i):
-        result = i.cinv()
+        result = i.reciprocal()
         self.save_for_backward(result)
         return result
 
@@ -210,7 +210,7 @@ class Cmax(Function):
 
     def forward(self, a, b):
         self._max_buffer = a.gt(b).type_as(a)
-        return a.cmax(b)
+        return a.max(b)
 
     def backward(self, grad_output):
         return (
@@ -227,7 +227,7 @@ class CmaxConstant(Function):
 
     def forward(self, i):
         self._max_buffer = i.gt(self.constant).type_as(i)
-        return i.cmax(self.constant)
+        return i.clamp(min=self.constant)
 
     def backward(self, grad_output):
         return grad_output * self._max_buffer
@@ -237,7 +237,7 @@ class Cmin(Function):
 
     def forward(self, a, b):
         self._min_buffer = a.lt(b).type_as(a)
-        return a.cmin(b)
+        return a.min(b)
 
     def backward(self, grad_output):
         return (
@@ -254,7 +254,7 @@ class CminConstant(Function):
 
     def forward(self, i):
         self._min_buffer = i.lt(self.constant).type_as(i)
-        return i.cmin(self.constant)
+        return i.clamp(max=self.constant)
 
     def backward(self, grad_output):
         return grad_output * self._min_buffer

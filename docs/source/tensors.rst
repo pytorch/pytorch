@@ -117,15 +117,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: chunk
-   .. automethod:: cinv
-   .. automethod:: cinv_
+   .. automethod:: inv
+   .. automethod:: inv_
    .. automethod:: clamp
    .. automethod:: clamp_
    .. automethod:: clone
-   .. automethod:: cmax
-   .. automethod:: cmax_
-   .. automethod:: cmin
-   .. automethod:: cmin_
    .. automethod:: contiguous
    .. automethod:: copy_
    .. automethod:: cos
