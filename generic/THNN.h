@@ -1131,6 +1131,23 @@ TH_API void THNN_(VolumetricConvolutionMM_accGradParameters)(
           int pT, int pW, int pH,
           real scale);
 
+TH_API void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int outputT, int outputW, int outputH,
+          int poolSizeT, int poolSizeW, int poolSizeH,
+          THIndexTensor *indices,
+          THTensor *randomSamples);
+TH_API void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int outputT, int outputW, int outputH,
+          int poolSizeT, int poolSizeW, int poolSizeH,
+          THIndexTensor *indices);
+
 TH_API void THNN_(VolumetricFullConvolution_updateOutput)(
           THNNState *state,         // library state
           THTensor *input,          // 4D or 5D (batch) tensor
