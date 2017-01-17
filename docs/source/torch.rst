@@ -77,7 +77,6 @@ Pointwise Ops
 .. autofunction:: atan
 .. autofunction:: atan2
 .. autofunction:: ceil
-.. autofunction:: inv
 .. autofunction:: clamp
 .. autofunction:: cos
 .. autofunction:: cosh
@@ -89,6 +88,7 @@ Pointwise Ops
 .. autofunction:: mul
 .. autofunction:: neg
 .. autofunction:: pow
+.. autofunction:: reciprocal
 .. autofunction:: remainder
 .. autofunction:: round
 .. autofunction:: rsqrt

@@ -117,8 +117,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: chunk
-   .. automethod:: inv
-   .. automethod:: inv_
    .. automethod:: clamp
    .. automethod:: clamp_
    .. automethod:: clone
@@ -240,6 +238,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: qr
    .. automethod:: random_
+   .. automethod:: reciprocal
+   .. automethod:: reciprocal_
    .. automethod:: remainder
    .. automethod:: remainder_
    .. automethod:: renorm
