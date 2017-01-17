@@ -44,7 +44,7 @@ There are a lot of things that can go wrong when a new process is spawned, with
 the most common cause of deadlocks being background threads. If there's any
 thread that holds a lock or imports a module, and ``fork`` is called, it's very
 likely that the subprocess will be in a corrupted state and will deadlock or
-fail in a different way. Note that even if you don't threads, Python built in
+fail in a different way. Note that even if you don't, Python built in
 libraries do - no need to look further than :mod:`python:multiprocessing`.
 :class:`python:multiprocessing.Queue` is actually a very complex class, that
 spawns multiple threads used to serialize, send and receive objects, and they
