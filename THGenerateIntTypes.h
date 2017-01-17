@@ -67,4 +67,6 @@
 #undef THInf
 #undef TH_REAL_IS_LONG
 
+#ifndef THGenerateAllTypes
 #undef TH_GENERIC_FILE
+#endif

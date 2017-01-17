@@ -28,4 +28,6 @@
 #undef THInf
 #undef TH_REAL_IS_DOUBLE
 
+#ifndef THGenerateAllTypes
 #undef TH_GENERIC_FILE
+#endif

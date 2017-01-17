@@ -16,4 +16,6 @@
 #undef THInf
 #undef TH_REAL_IS_HALF
 
+#ifndef THGenerateAllTypes
 #undef TH_GENERIC_FILE
+#endif
