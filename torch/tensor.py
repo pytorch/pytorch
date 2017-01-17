@@ -25,46 +25,69 @@ def _infer_sizes(sizes, total):
 
 
 class _TensorBase(object):
+    #: bool: True if this is a CUDA tensor
     is_cuda = False
 
     def new(self, *args, **kwargs):
+        """Constructs a new tensor of the same data type."""
         return self.__class__(*args, **kwargs)
 
-    def type_as(self, t, async=False):
-        return self.type(t.type())
+    def type_as(self, tensor):
+        """Returns this tensor cast to the type of the given tensor.
+
+        This is a no-op if the tensor is already of the correct type. This is
+        equivalent to::
+
+            self.type(tensor.type())
+
+        Params:
+            tensor (Tensor): the tensor which has the desired type
+        """
+        return self.type(tensor.type())
 
     def cpu(self):
+        """Returns a CPU copy of this tensor if it's not already on the CPU"""
         return self.type(getattr(torch, self.__class__.__name__))
 
-    def double(self, async=False):
+    def double(self):
+        """Casts this tensor to double type"""
         return self.type(type(self).__module__ + '.DoubleTensor')
 
-    def float(self, async=False):
+    def float(self):
+        """Casts this tensor to float type"""
         return self.type(type(self).__module__ + '.FloatTensor')
 
-    def half(self, async=False):
+    def half(self):
+        """Casts this tensor to half-precision float type"""
         return self.type(type(self).__module__ + '.HalfTensor')
 
-    def long(self, async=False):
+    def long(self):
+        """Casts this tensor to long type"""
         return self.type(type(self).__module__ + '.LongTensor')
 
-    def int(self, async=False):
+    def int(self):
+        """Casts this tensor to int type"""
         return self.type(type(self).__module__ + '.IntTensor')
 
-    def short(self, async=False):
+    def short(self):
+        """Casts this tensor to short type"""
         return self.type(type(self).__module__ + '.ShortTensor')
 
-    def char(self, async=False):
+    def char(self):
+        """Casts this tensor to char type"""
         return self.type(type(self).__module__ + '.CharTensor')
 
-    def byte(self, async=False):
+    def byte(self):
+        """Casts this tensor to byte type"""
         return self.type(type(self).__module__ + '.ByteTensor')
 
     def is_pinned(self):
+        """Returns true if this tensor resides in pinned memory"""
         storage = self.storage()
         return storage.is_pinned() if storage else False
 
     def pin_memory(self):
+        """Copies the tensor to pinned memory, if it's not already pinned."""
         if self.is_cuda:
             raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
                             .format(self.type()))
@@ -122,7 +145,7 @@ class _TensorBase(object):
         if self.numel() == 0:
             return False
         raise RuntimeError("bool value of non-empty " + torch.typename(self) +
-                " objects is ambiguous")
+                           " objects is ambiguous")
 
     __nonzero__ = __bool__
 
@@ -130,12 +153,21 @@ class _TensorBase(object):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
     def split(self, split_size, dim=0):
+        """Splits this tensor into a list of tensors.
+
+        See :func:`torch.split`.
+        """
         return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
+        """Splits this tensor into a list of tensors.
+
+        See :func:`torch.chunk`.
+        """
         return torch.chunk(self, n_chunks, dim)
 
     def tolist(self):
+        """Returns a nested list represenation of this tensor."""
         dim = self.dim()
         if dim == 1:
             return [v for v in self]
@@ -144,6 +176,26 @@ class _TensorBase(object):
         return []
 
     def view(self, *args):
+        """Returns a new tensor with the same data but different size.
+
+        The returned tensor shares the same data and must have the same number
+        of elements, but may have a different size. A tensor must be
+        :func:`contiguous` to be viewed.
+
+        Args:
+            args (torch.Size or int...): Desired size
+
+        Example:
+            >>> x = torch.randn(4, 4)
+            >>> x.size()
+            torch.Size([4, 4])
+            >>> y = x.view(16)
+            >>> y.size()
+            torch.Size([16])
+            >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
+            >>> z.size()
+            torch.Size([2, 8])
+        """
         dst = self.new()
         if len(args) == 1 and isinstance(args[0], torch.Size):
             sizes = args[0]
@@ -165,10 +217,28 @@ class _TensorBase(object):
         return dst
 
     def view_as(self, tensor):
+        """Returns this tensor viewed as the size as the specified tensor.
+
+        This is equivalent to::
+
+                self.view(tensor.size())
+        """
         return self.view(tensor.size())
 
-    def permute(self, *args):
-        perm = list(args)
+    def permute(self, *dims):
+        """Permute the dimensions of this tensor.
+
+        Args:
+            *dims (int...): The desired ordering of dimensions
+
+        Example:
+            >>> x = torch.randn(2, 3, 5)
+            >>> x.size()
+            torch.Size([2, 3, 5])
+            >>> x.permute(2, 0, 1).size()
+            torch.Size([5, 2, 3])
+        """
+        perm = list(dims)
         tensor = self
         n_dims = tensor.dim()
         assert len(perm) == n_dims, 'Invalid permutation'
@@ -184,15 +254,34 @@ class _TensorBase(object):
                 perm[j] = -1
         return tensor
 
-    def expand_as(self, tensor):
-        return self.expand(tensor.size())
+    def expand(self, *sizes):
+        """Returns a new view of the tensor with singleton dimension expanded
+        to a larger size.
 
-    def expand(self, *args):
+        Expanding a tensor does not allocate new memory, but only creates a
+        new view on the existing tensor where a dimension of size one is
+        expanded to a larger size by setting the ``stride`` to 0. Any dimension
+        of size 1 can be expanded to an arbitrary value without allocating new
+        memory.
+
+        Args:
+            *sizes (torch.Size or int...): The desired expanded size
+
+        Example:
+            >>> x = torch.Tensor([[1], [2], [3]])
+            >>> x.size()
+            torch.Size([3, 1])
+            >>> x.expand(3, 4)
+             1  1  1  1
+             2  2  2  2
+             3  3  3  3
+            [torch.FloatTensor of size 3x4]
+        """
         result = self.new()
-        if len(args) == 1 and isinstance(args[0], torch.Size):
-            sizes = args[0]
+        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
+            sizes = sizes[0]
         else:
-            sizes = torch.Size(args)
+            sizes = torch.Size(sizes)
         src = self
 
         src_dim = src.dim()
@@ -214,11 +303,38 @@ class _TensorBase(object):
                     tuple(src_stride))
         return result
 
-    def repeat(self, *args):
+    def expand_as(self, tensor):
+        """Expands this tensor to the size of the specified tensor.
+
+        This is equivalent to::
+
+            self.expand(tensor.size())
+        """
+        return self.expand(tensor.size())
+
+    def repeat(self, *sizes):
+        """Repeats this tensor along the specified dimensions.
+
+        Unlike :meth:`expand`, this function copies the tensor's data.
+
+        Args:
+            *sizes (torch.Size or int...): The number of times to repeat this tensor along each dimension
+
+        Example:
+            >>> x = torch.Tensor([1, 2, 3])
+            >>> x.repeat(4, 2)
+             1  2  3  1  2  3
+             1  2  3  1  2  3
+             1  2  3  1  2  3
+             1  2  3  1  2  3
+            [torch.FloatTensor of size 4x6]
+            >>> x.repeat(4, 2, 1).size()
+            torch.Size([4, 2, 3])
+        """
         # If args == (torch.Size,), then we need to unpack the tuple
-        if len(args) == 1 and isinstance(args[0], torch.Size):
-            args = args[0]
-        repeats = list(args)
+        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
+            sizes = sizes[0]
+        repeats = list(sizes)
         result = self.new()
         src = self.contiguous()
 
@@ -244,9 +360,30 @@ class _TensorBase(object):
         return result
 
     def unsqueeze(self, dim):
+        """Returns a new tensor with a dimension of size one inserted at the
+        specified position.
+
+        The returned tensor shares the same underlying data with this tensor.
+
+        Args:
+            dim (int): The index at which to insert the singleton dimension
+
+        Example:
+            >>> x = torch.Tensor([1, 2, 3, 4])
+            >>> x.unsqueeze(0)
+             1  2  3  4
+            [torch.FloatTensor of size 1x4]
+            >>> x.unsqueeze(1)
+             1
+             2
+             3
+             4
+            [torch.FloatTensor of size 4x1]
+        """
         return self.new(self).unsqueeze_(dim)
 
     def unsqueeze_(self, dim):
+        """In-place version of :meth:`unsqueeze`."""
         sizes = list(self.size())
         sizes.insert(dim, 1)
         strides = list(self.stride())

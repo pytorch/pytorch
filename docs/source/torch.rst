@@ -27,12 +27,15 @@ Creation Ops
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cat
+.. autofunction:: chunk
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: nonzero
 .. autofunction:: scatter
+.. autofunction:: split
 .. autofunction:: squeeze
+.. autofunction:: stack
 .. autofunction:: t
 .. autofunction:: transpose
 .. autofunction:: unfold

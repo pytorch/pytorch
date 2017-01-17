@@ -179,6 +179,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: inverse
    .. automethod:: is_contiguous
    .. autoattribute:: is_cuda
+      :annotation:
    .. automethod:: is_pinned
    .. automethod:: is_same_size
    .. automethod:: is_set_to
