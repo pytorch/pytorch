@@ -157,7 +157,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fmod_
    .. automethod:: frac
    .. automethod:: frac_
-   .. automethod:: free
    .. automethod:: gather
    .. automethod:: ge
    .. automethod:: ge_
@@ -248,7 +247,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: repeat
    .. automethod:: resize_
    .. automethod:: resize_as_
-   .. automethod:: retain
    .. automethod:: round
    .. automethod:: round_
    .. automethod:: rsqrt

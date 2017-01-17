@@ -51,20 +51,6 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 ]]
 
 [[
-  name: free
-  return: self
-  arguments:
-    - THTensor* self
-]]
-
-[[
-  name: retain
-  return: self
-  arguments:
-    - THTensor* self
-]]
-
-[[
   python_name: index
   name: THPTensor_(getValue)<true>
   only_register: True
