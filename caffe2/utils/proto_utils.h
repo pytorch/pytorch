@@ -34,7 +34,7 @@ inline void WriteProtoToBinaryFile(const MessageLite& proto,
 #ifdef CAFFE2_USE_LITE_PROTO
 
 inline string ProtoDebugString(const MessageLite& proto) {
-  return "(cannot show debug string for MessageLite)";
+  return proto.SerializeAsString();
 }
 
 // Text format MessageLite wrappers: these functions do nothing but just
