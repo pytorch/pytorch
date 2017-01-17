@@ -82,6 +82,9 @@ Pointwise Ops
 .. autofunction:: cosh
 .. autofunction:: div
 .. autofunction:: exp
+.. autofunction:: floor
+.. autofunction:: fmod
+.. autofunction:: frac
 .. autofunction:: lerp
 .. autofunction:: log
 .. autofunction:: log1p
@@ -121,9 +124,6 @@ Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: eq
 .. autofunction:: equal
-.. autofunction:: floor
-.. autofunction:: fmod
-.. autofunction:: frac
 .. autofunction:: ge
 .. autofunction:: gt
 .. autofunction:: kthvalue
