@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 set -e
 
 cd "$(dirname "$0")/../.."
@@ -88,13 +90,12 @@ cp THCUNN/generic/THCUNN.h .
 cp -r tmp_install/include .
 cp $INSTALL_DIR/bin/* .
 
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    if [ "$PYTORCH_BINARY_BUILD" ]
-    then
-        echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
-        # copy over dependency libraries into the current dir
-        cp -P $PYTORCH_SO_DEPS .
-    else
-        echo "Not binary build"
-    fi
+# this is for binary builds
+if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]
+then
+    echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
+    # copy over dependency libraries into the current dir
+    cp -P $PYTORCH_SO_DEPS .
+else
+    echo "Not binary build"
 fi
