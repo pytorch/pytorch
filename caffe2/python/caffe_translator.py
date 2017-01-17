@@ -473,6 +473,14 @@ def TranslateScale(layer, pretrained_blobs, is_test):
         # the scale parameter is in pretrained blobs
         if scale_param.num_axes != 1:
             raise RuntimeError("This path has not been verified yet.")
+        if len(pretrained_blobs) != 1:
+            # Caffe Scale layer supports a bias term such that it computes
+            # (scale_param * X + bias), whereas Caffe2 Mul op doesn't.
+            # If the Scale layer follows a Conv, it can be removed altogether
+            # by fusing its params into the Conv weights before running the
+            # translator. We could also include a separate Add op for the bias,
+            # but the former approach saves two operators.
+            raise RuntimeError("Bias term in Scale is not yet supported.")
         output = caffe_op.output[0]
         caffe_op.input.append(output + '_w')
         weight = utils.NumpyArrayToCaffe2Tensor(
