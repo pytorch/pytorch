@@ -34,6 +34,17 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    data
    model_zoo
 
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: torchvision Reference
+
+   torchvision/torchvision
+   torchvision/datasets
+   torchvision/models
+   torchvision/transforms
+   torchvision/utils
+
 
 Indices and tables
 ==================
