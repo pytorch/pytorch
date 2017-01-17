@@ -21,6 +21,11 @@
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 import torch
+try:
+    import torchvision
+except ImportError:
+    import warnings
+    warnings.warn('unable to load "torchvision" package')
 import sphinx_rtd_theme
 
 
@@ -61,7 +66,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2016, Torch Contributors'
+copyright = '2017, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
