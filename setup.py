@@ -312,7 +312,12 @@ if WITH_CUDA:
     )
     extensions.append(THCUNN)
 
-setup(name="torch", version="0.1",
+version="0.1"
+if os.getenv('PYTORCH_BINARY_VERSION'):
+    version = os.getenv('PYTORCH_BINARY_VERSION') \
+              + '_' + os.getenv('PYTORCH_BINARY_NUMBER')
+
+setup(name="torch", version=version,
     ext_modules=extensions,
     cmdclass = {
         'build': build,
