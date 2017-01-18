@@ -2,6 +2,18 @@ import torch
 
 
 def _type(self, new_type=None, async=False):
+    """Casts this object to the specified type.
+
+    If this is already of the correct type, no copy is performed and the
+    original object is returned.
+
+    Args:
+        new_type (type or string): The desired type
+        async (bool): If True, and the source is in pinned memory and
+                      destination is on the GPU or vice versa, the copy is
+                      performed asynchronously with respect to the host.
+                      Otherwise, the argument has no effect.
+    """
     if new_type is None:
         return self.__module__ + '.' + self.__class__.__name__
 
