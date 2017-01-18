@@ -11,6 +11,14 @@ PyTorch documentation
 PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
 .. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: Notes
+
+   notes/*
+
+
+.. toctree::
    :maxdepth: 1
    :caption: Package Reference
 
@@ -25,6 +33,17 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    cuda
    data
    model_zoo
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: torchvision Reference
+
+   torchvision/torchvision
+   torchvision/datasets
+   torchvision/models
+   torchvision/transforms
+   torchvision/utils
 
 
 Indices and tables

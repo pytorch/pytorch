@@ -27,12 +27,15 @@ Creation Ops
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cat
+.. autofunction:: chunk
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: nonzero
 .. autofunction:: scatter
+.. autofunction:: split
 .. autofunction:: squeeze
+.. autofunction:: stack
 .. autofunction:: t
 .. autofunction:: transpose
 .. autofunction:: unfold
@@ -77,18 +80,21 @@ Pointwise Ops
 .. autofunction:: atan
 .. autofunction:: atan2
 .. autofunction:: ceil
-.. autofunction:: inv
 .. autofunction:: clamp
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
 .. autofunction:: exp
+.. autofunction:: floor
+.. autofunction:: fmod
+.. autofunction:: frac
 .. autofunction:: lerp
 .. autofunction:: log
 .. autofunction:: log1p
 .. autofunction:: mul
 .. autofunction:: neg
 .. autofunction:: pow
+.. autofunction:: reciprocal
 .. autofunction:: remainder
 .. autofunction:: round
 .. autofunction:: rsqrt
@@ -121,9 +127,6 @@ Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: eq
 .. autofunction:: equal
-.. autofunction:: floor
-.. autofunction:: fmod
-.. autofunction:: frac
 .. autofunction:: ge
 .. autofunction:: gt
 .. autofunction:: kthvalue

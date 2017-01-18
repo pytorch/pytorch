@@ -14,7 +14,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     planes.
 
     ```
-    The output value of the layer with input (b x iC x H x W) and filters
+    The output value of the function with input (b x iC x H x W) and filters
     (oC x iC x kH x kW) can be precisely described as:
     output[b_i][oc_i][h_i][w_i] = bias[oc_i]
                 + sum_iC sum_{oh = 0, oH-1} sum_{ow = 0, oW-1} \
@@ -60,7 +60,7 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     planes.
 
     ```
-    The output value of the layer with input (b x iC x W) and filters
+    The output value of the function with input (b x iC x W) and filters
     (oC x oC x kw) can be precisely described as:
     output[b_i][oc_i][w_i] = bias[oc_i]
                + sum_iC sum_{ow = 0, oW-1} sum_{kw = 0 to kW-1}
@@ -485,15 +485,160 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     return weight and state(input, weight, bias) or state(input)
 
 
+# loss
+
 def nll_loss(input, target, weight=None, size_average=True):
+    r"""The negative log likelihood loss.
+
+    It is useful to train a classication problem with n classes.
+    If provided, the argument `weights` should be a 1D Tensor
+    assigning weight to each of the classes.
+    This is particularly useful when you have an unbalanced training set.
+
+    The input given to a forward call is expected to contain
+    log-probabilities of each class. It has to be a 2D Tensor of size
+    `(minibatch, n)`
+
+    Obtaining log-probabilities in a neural network is easily achieved by
+    calling `log_softmax` on input. You may use `cross_entropy` function
+    instead which applies `log_softmax` internally.
+
+    The target that this loss expects is a class index
+    `(0 to N-1, where N = number of classes)`
+
+    The loss can be described as::
+
+        loss(x, class) = -x[class]
+
+    or in the case of the weights argument it is specified as follows::
+
+        loss(x, class) = -weights[class] * x[class]
+
+    Args:
+        input: :math:`(N, C)` where `C = number of classes`
+        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        weight (Tensor, optional): a manual rescaling weight given to each
+                class. If given, has to be a Tensor of size "nclasses"
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+
+    Attributes:
+        weight: the class-weights given as input to the constructor
+
+    Examples::
+
+        >>> # input is of size nBatch x nClasses = 3 x 5
+        >>> input = autograd.Variable(torch.randn(3, 5))
+        >>> # each element in target has to have 0 <= value < nclasses
+        >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
+        >>> output = F.nll_loss(F.log_softmax(input), target)
+        >>> output.backward()
+    """
     return _functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
 
 
+def kl_div(input, target, size_average=True):
+    r"""The `Kullback-Leibler divergence`_ Loss.
+
+    KL divergence is a useful distance measure for continuous distributions
+    and is often useful when performing direct regression over the space of
+    (discretely sampled) continuous output distributions.
+
+    As with `nll_loss`, the `input` given is expected to contain
+    *log-probabilities*, however unlike `class_nll_loss`, `input` is not
+    restricted to a 2D Tensor, because the criterion is applied element-wise.
+
+    This function expects a `target` `Tensor` of the same size as the
+    `input` `Tensor`.
+
+    The loss can be described as:
+    :math:`loss(x, target) = 1/n \sum(target_i * (log(target_i) - x_i))`
+
+    By default, the losses are averaged for each minibatch over observations
+    **as well as** over dimensions. However, if the field
+    `sizeAverage` is set to `False`, the losses are instead summed.
+
+    .. _Kullback-Leibler divergence:
+        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+
+    Args:
+        input: Tensor of arbitrary shape
+        target: Tensor of the same shape as input
+        size_average: if True the output is divided by the number of elements
+          in input tensor
+    """
+    return _functions.thnn.KLDivLoss(size_average)(input, target)
+
+
 def cross_entropy(input, target, weight=None, size_average=True):
+    r"""This criterion combines `log_softmax` and `nll_loss` in one single class.
+
+    It is useful when training a classification problem with `n` classes.
+    If provided, the optional argument `weights` should be a 1D `Tensor`
+    assigning weight to each of the classes.
+    This is particularly useful when you have an unbalanced training set.
+
+    The `input` is expected to contain scores for each class.
+
+    `input` has to be a 2D `Tensor` of size `batch x n`.
+
+    This criterion expects a class index (0 to nClasses-1) as the
+    `target` for each value of a 1D tensor of size `n`
+
+    The loss can be described as::
+
+        loss(x, class) = -log(exp(x[class]) / (\sum_j exp(x[j])))
+                       = -x[class] + log(\sum_j exp(x[j]))
+
+    or in the case of the `weights` argument being specified::
+
+        loss(x, class) = weights[class] * (-x[class] + log(\sum_j exp(x[j])))
+
+    Args:
+        input: Tensor :math:`(N, C)` where `C = number of classes`
+        target: Tensor :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        weight (Tensor, optional): a manual rescaling weight given to each
+                class. If given, has to be a Tensor of size "nclasses"
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+
+    """
     return nll_loss(log_softmax(input), target, weight, size_average)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
+    r"""Function that measures the Binary Cross Entropy
+    between the target and the output:
+
+    :math:`loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))`
+
+    or in the case of the weights argument being specified:
+
+    :math:`loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))`
+
+    This is used for measuring the error of a reconstruction in for example
+    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1,
+    for instance, the output of an `nn.Sigmoid` layer.
+
+    By default, the losses are averaged for each minibatch over observations
+    *as well as* over dimensions. However, if the field `sizeAverage` is set
+    to `False`, the losses are instead summed.
+
+    Args:
+        input: Tensor of arbitrary shape
+        target: Tensor of the same shape as input
+        weight (Tensor, optional): a manual rescaling weight
+                if provided it's repeated to match input tensor shape
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+
+    """
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
 
 

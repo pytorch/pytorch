@@ -6,8 +6,7 @@ PyTorch is a python package that provides two high-level features:
 - Tensor computation (like numpy) with strong GPU acceleration
 - Deep Neural Networks built on a tape-based autograd system
 
-You can reuse your favorite python packages such as numpy, scipy and Cython to extend PyTorch to your own needs,
-or use a simple extension API that we provide.
+You can reuse your favorite python packages such as numpy, scipy and Cython to extend PyTorch when needed.
 
 - [More About PyTorch](#more-about-pytorch)
 - [Installation](#installation)
@@ -15,8 +14,7 @@ or use a simple extension API that we provide.
   - [From source](#from-source)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
-- [Timeline](#timeline)
-- [pytorch vs torch: important changes](#pytorch-vs-torch-important-changes)
+- [Releases and Contributing](#releases-and-contributing)
 
 | Python |  **`Linux CPU`**   |  **`Linux GPU`** |
 |--------|--------------------|------------------|
@@ -86,7 +84,7 @@ It is built to be deeply integrated into Python.
 You can use it naturally like you would use numpy / scipy / scikit-learn etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
 and use packages such as Cython and Numba.
-Our goal is to not reinvent the wheel, but to reuse wheels.
+Our goal is to not reinvent the wheel where appropriate.
 
 ### Imperative experiences
 
@@ -98,8 +96,13 @@ We hope you never spend hours debugging your code because of bad stack traces or
 
 ### Fast and Lean
 
-PyTorch is as fast as the fastest deep learning framework out there, with minimal overhead.
-We integrate acceleration libraries such as Intel MKL and NVIDIA (CuDNN, NCCL) for maximum speed.
+PyTorch has minimal framework overhead. We integrate acceleration libraries 
+such as Intel MKL and NVIDIA (CuDNN, NCCL) to maximize speed. 
+At the core, it's CPU and GPU Tensor and Neural Network backends 
+(TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.  
+They are mature and have been tested for years.
+
+Hence, PyTorch is quite fast -- whether you run small or large neural networks.
 
 The memory usage in PyTorch is extremely efficient compared to Torch or some of the alternatives.
 We've written custom memory allocators for the GPU to make sure that
@@ -111,16 +114,13 @@ This enables you to train bigger deep learning models than before.
 Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straight-forward
 and with minimal abstractions.
 
-You can write new neural network layers in Python itself, that use the torch API,
-[or your favorite numpy derivatives](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb)
+You can write new neural network layers in Python using the torch API
+[or your favorite numpy based libraries such as SciPy](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb)
 
 If you want to write your layers in C/C++, we provide an extension API based on
-[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and easy to use.
+[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.  
 There is no wrapper code that needs to be written. [You can see an example here](https://github.com/pytorch/extension-ffi).
 
-At the core, all the value of PyTorch -- it's CPU and GPU Tensor and Neural Network backends
--- are written in simple libraries with a C99 API.
-They are mature and have been tested for years.
 
 ## Installation
 
@@ -161,16 +161,17 @@ Three pointers to get you started:
 - The API Reference: [http://pytorch.org/docs/](http://pytorch.org/docs/)
 
 ## Communication
-* github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * forums: discuss implementations, research, etc. http://discuss.pytorch.org
+* github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . If you need a slack invite, ping us at soumith@pytorch.org
 * newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: http://eepurl.com/cbG0rv
 
-## Release Model and Contributions
+## Releases and Contributing
 
-PyTorch has a 90 day release cycle. It's current state is Beta, we expect no obvious bugs but subtle bugs might be encountered.
+PyTorch has a 90 day release cycle (major releases). 
+It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues)
 
-If you are planning to contribute back bug-fixes, please do so without any further discussion.
+We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 
 If you plan to contribute new features, utility functions or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR, because we might be taking the core in a different direction than you might be aware of.

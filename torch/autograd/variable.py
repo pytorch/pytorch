@@ -26,11 +26,11 @@ class Variable(_C._VariableBase):
             be reassigned.
         requires_grad: Boolean indicating whether the Variable has been
             created by a subgraph containing any Variable, that requires it.
-            See `Excluding subgraphs from backward`_ for more details.
+            See :ref:`excluding-subgraphs` for more details.
             Can be changed only on leaf Variables.
         volatile: Boolean indicating that the Variable should be used in
             inference mode, i.e. don't save the history. See
-            `Excluding subgraphs from backward`_ for more details.
+            :ref:`excluding-subgraphs` for more details.
             Can be changed only on leaf Variables.
         creator: Function of which the variable was an output. For leaf
             (user created) variables it's ``None``. Read-only attribute.

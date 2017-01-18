@@ -234,3 +234,8 @@ Vision layers
 ----------------
 .. autoclass:: PixelShuffle
     :members:
+
+Multi-GPU layers
+----------------
+.. autoclass:: DataParallel
+    :members:

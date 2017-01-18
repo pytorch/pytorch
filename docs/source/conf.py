@@ -21,6 +21,11 @@
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 import torch
+try:
+    import torchvision
+except ImportError:
+    import warnings
+    warnings.warn('unable to load "torchvision" package')
 import sphinx_rtd_theme
 
 
@@ -61,7 +66,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2016, Torch Contributors'
+copyright = '2017, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -185,7 +190,7 @@ texinfo_documents = [
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    'https://docs.python.org/': None,
+    'python': ('https://docs.python.org/', None),
     'numpy': ('http://docs.scipy.org/doc/numpy/', None),
 }
 
@@ -211,6 +216,8 @@ def patched_make_field(self, types, domain, items):
             fieldtype = types.pop(fieldarg)
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
                 typename = u''.join(n.astext() for n in fieldtype)
+                typename = typename.replace('int', 'python:int')
+                typename = typename.replace('float', 'python:float')
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis))
             else:

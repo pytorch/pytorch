@@ -216,6 +216,20 @@ class DataLoader(object):
     """
     Data loader. Combines a dataset and a sampler, and provides
     single- or multi-process iterators over the dataset.
+
+    Arguments:
+        dataset (Dataset): dataset from which to load the data.
+        batch_size (int, optional): how many samples per batch to load
+            (default: 1).
+        shuffle (bool, optional): set to ``True`` to have the data reshuffled
+            at every epoch (default: False).
+        sampler (Sampler, optional): defines the strategy to draw samples from
+            the dataset. If specified, the ``shuffle`` argument is ignored.
+        num_workers (int, optional): how many subprocesses to use for data
+            loading. 0 means that the data will be loaded in the main process
+            (default: 0)
+        collate_fn (callable, optional)
+        pin_memory (bool, optional)
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,

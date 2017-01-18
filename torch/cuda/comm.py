@@ -1,11 +1,20 @@
 import torch
-import torch.cuda.nccl as nccl
+from . import nccl
 from torch._utils import _accumulate
 
 # TODO: sync streams when implemented
 
 def broadcast(tensor, devices):
-    "Broadcasts a tensor to a number of GPUs"
+    """Broadcasts a tensor to a number of GPUs.
+
+    Arguments:
+        tensor (Tensor): tensor to broadcast.
+        devices (Iterable): an iterable of devices to which to broadcast.
+
+    Returns:
+        A tuple containing copies of the ``tensor``, placed on devices
+        corresponding to indices from ``devices``.
+    """
     if nccl.is_available([tensor]) and len(set(devices)) == len(devices):
         tensors = [tensor]
         for device in devices[1:]:
@@ -19,7 +28,19 @@ def broadcast(tensor, devices):
 
 
 def reduce_add(inputs, destination=None):
-    "Reduces tensors from multiple GPUs and returns a result a specified device"
+    """Sums tensors from multiple GPUs.
+
+    All inputs should have matching shapes.
+
+    Arguments:
+        inputs (Iterable[Tensor]): an iterable of tensors to add.
+        destination (int, optional): a device on which the output will be
+            placed (default: current device).
+
+    Returns:
+        A tensor containing an elementwise sum of all inputs, placed on the
+        ``destination`` device.
+    """
     # TODO: try to find an input on another gpu, copy it,
     # and accumulate into the copy
     input_size = inputs[0].size()
@@ -47,7 +68,22 @@ def reduce_add(inputs, destination=None):
 
 
 def scatter(tensor, devices, chunk_sizes=None, dim=0):
-    "Scatters tensor across multiple GPUs"
+    """Scatters tensor across multiple GPUs.
+
+    Arguments:
+        tensor (Tensor): tensor to scatter.
+        devices (Iterable[int]): iterable of ints, specifying among which
+            devices the tensor should be scattered.
+        chunk_sizes (Iterable[int], optional): sizes of chunks to be placed on
+            each device. It should match ``devices`` in length and sum to
+            ``tensor.size(dim)``. If not specified, the tensor will be divided
+            into equal chunks.
+        dim (int, optional): A dimension along which to chunk the tensor.
+
+    Returns:
+        A tuple containing chunks of the ``tensor``, spread accross given
+        ``devices``.
+    """
     if chunk_sizes is None:
         chunks = tensor.chunk(len(devices), dim)
     else:
@@ -63,8 +99,19 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0):
 
 
 def gather(tensors, dim=0, destination=None):
-    """Gathers tensors from multiple GPUs (destination == -1, places the result
-       on CPU)
+    """Gathers tensors from multiple GPUs.
+
+    Tensor sizes in all dimension different than ``dim`` have to match.
+
+    Arguments:
+        tensors (Iterable[Tensor]): iterable of tensors to gather.
+        dim (int): a dimension along which the tensors will be concatenated.
+        destination (int, optional): output device (-1 means CPU, default:
+            current device)
+
+    Returns:
+        A tensor located on ``destination`` device, that is a result of
+        concatenating ``tensors`` along ``dim``.
     """
     total_size = 0
     expected_size = list(tensors[0].size())

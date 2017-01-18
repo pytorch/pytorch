@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 set -e
 
 cd "$(dirname "$0")/../.."
@@ -71,10 +73,10 @@ if [[ "$1" == "--with-cuda" ]]; then
     build THC
     build THCS
     build THCUNN
-    if [[ $(uname) != 'Darwin' ]]; then 
+    if [[ $(uname) != 'Darwin' ]]; then
         if [[ `ldconfig -p | grep libnccl` == '' ]]; then
           build_nccl
-        fi 
+        fi
     fi
 fi
 
@@ -87,3 +89,13 @@ cp THNN/generic/THNN.h .
 cp THCUNN/generic/THCUNN.h .
 cp -r tmp_install/include .
 cp $INSTALL_DIR/bin/* .
+
+# this is for binary builds
+if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]
+then
+    echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
+    # copy over dependency libraries into the current dir
+    cp $PYTORCH_SO_DEPS .
+else
+    echo "Not binary build"
+fi

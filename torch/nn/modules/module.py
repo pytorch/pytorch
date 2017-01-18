@@ -29,9 +29,12 @@ class Module(object):
     Modules can also contain other Modules, allowing to nest them in
     a tree structure. You can assign the submodules as regular attributes::
 
+        import torch.nn as nn
+        import torch.nn.functional as F
+
         class Model(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super(Model, self).__init__()
                 self.conv1 = nn.Conv2d(1, 20, 5)
                 self.conv2 = nn.Conv2d(20, 20, 5)
 
