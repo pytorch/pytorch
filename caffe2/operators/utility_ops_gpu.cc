@@ -35,5 +35,7 @@ REGISTER_CUDA_OPERATOR(
 // involving different GPUs.
 REGISTER_CUDA_OPERATOR(Copy, CopyOp<CUDAContext, CUDAContext, CUDAContext>);
 
+REGISTER_CUDA_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CUDAContext>);
+
 }  // namespace
 }  // namespace caffe2
