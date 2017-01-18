@@ -775,7 +775,7 @@ function_tests = [
     (Addcdiv,       (),                 ((S, S), (S, S), torch.rand(S, S) + 1e-2)   ),
     (Addcdiv,       (0.6,),             ((S, S), (S, S), torch.rand(S, S) + 1e-2), 'scale'),
     (IndexAdd,      (0,),               ((S, S), index_variable(2, S), (2, S))      ),
-    (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
+    # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill,     (0, 2),             ((S, S), index_variable(2, S))              ),
     (IndexSelect,   (0,),               ((S, S), index_variable(2, S))              ),
     (Gather,        (0,),               ((M, S), gather_variable((S, S), 1, M))     ),
