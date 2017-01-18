@@ -222,85 +222,30 @@ def _TranslateStridePadKernelHelper(param, caffe_op):
 @TranslatorRegistry.Register("Convolution")
 def TranslateConv(layer, pretrained_blobs, is_test):
     param = layer.convolution_param
-    if param.group > 1:
-        return TranslateConvWithGroups(layer, pretrained_blobs, is_test)
-
-    # Caffe2 conv operator requires bias. Add zero bias if missing.
-    if len(pretrained_blobs) == 1:
-        num_kernels = pretrained_blobs[0].shape[0]
-        bias_blob = caffe_pb2.BlobProto()
-        bias_blob.data.extend(np.zeros(num_kernels))
-        bias_blob.shape.dim.extend([1, 1, 1, num_kernels])
-        pretrained_blobs.append(utils.CaffeBlobToNumpyArray(bias_blob))
-
-    # If there is no odd things, we will basically translate it to a standard
-    # caffe2 op.
     caffe_op = BaseTranslate(layer, "Conv")
     output = caffe_op.output[0]
     caffe_op.input.extend([output + '_w', output + '_b'])
     _TranslateStridePadKernelHelper(param, caffe_op)
-    weight = utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')
-    bias = utils.NumpyArrayToCaffe2Tensor(
-        pretrained_blobs[1].flatten(), output + '_b'
-    )
-    return caffe_op, [weight, bias]
-
-
-def TranslateConvWithGroups(layer, pretrained_blobs, is_test):
-    log.warn(
-        "Legacy warning: convolution with groups seem to be less and less " +
-        "popular, so we no longer have it as a first-class citizen op. " +
-        "Instead, we will simulate it with depth split followed by conv " +
-        "followed by depth concat."
-    )
-    caffe_ops = []
-    caffe_params = []
-    param = layer.convolution_param
-    weight, bias = pretrained_blobs
-    bias = bias.flatten()
-    n, c, h, w = weight.shape
-    g = param.group  # group
-    od = int(n / g)  # output dimension
-    if (od * g != n):
-        # This should not happen: n should always be divisible by g.
-        raise ValueError("This should not happen.")
-    output = layer.top[0]
-    # first, depth_split
-    depth_split_op = core.CreateOperator(
-        "DepthSplit",
-        str(layer.bottom[0]),
-        ['_' + output + '_gconv_split_' + str(i) for i in range(g)],
-        split=[c for i in range(g)],
-        order="NCHW"
-    )
-    caffe_ops.append(depth_split_op)
-    # second, convolutions
-    for i in range(g):
-        # convolution layer i
-        this_weight = utils.NumpyArrayToCaffe2Tensor(
-            weight[i * od:(i + 1) * od], output + '_gconv_' + str(i) + '_w'
-        )
-        this_bias = utils.NumpyArrayToCaffe2Tensor(
-            bias[i * od:(i + 1) * od], output + '_gconv_' + str(i) + '_b'
-        )
-        conv_op = core.CreateOperator(
-            "Conv",
-            [depth_split_op.output[i], this_weight.name, this_bias.name],
-            ['_' + output + '_gconv_conv_' + str(i)],
-            order="NCHW"
-        )
-        _TranslateStridePadKernelHelper(param, conv_op)
-        caffe_ops.append(conv_op)
-        caffe_params.extend([this_weight, this_bias])
-    # third, depth concat
-    depth_concat_op = core.CreateOperator(
-        "Concat",
-        ['_' + output + '_gconv_conv_' + str(i) for i in range(g)],
-        [output, '_' + output + '_gconv_concat_dims'],
-        order="NCHW"
-    )
-    caffe_ops.append(depth_concat_op)
-    return caffe_ops, caffe_params
+    # weight
+    params = [
+        utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')]
+    # bias
+    if len(pretrained_blobs) == 2:
+        params.append(
+            utils.NumpyArrayToCaffe2Tensor(
+                pretrained_blobs[1].flatten(), output + '_b'))
+    # Group convolution option
+    if param.group != 1:
+        AddArgument(caffe_op, "group", param.group)
+    # Get dilation - not tested. If you have a model and this checks out,
+    # please provide a test and uncomment this.
+    if len(param.dilation) > 0:
+        if len(param.dilation) == 1:
+            AddArgument(caffe_op, "dilation", param.dilation[0])
+        elif len(param.dilation) == 2:
+            AddArgument(caffe_op, "dilation_h", param.dilation[0])
+            AddArgument(caffe_op, "dilation_w", param.dilation[1])
+    return caffe_op, params
 
 
 @TranslatorRegistry.Register("Deconvolution")
