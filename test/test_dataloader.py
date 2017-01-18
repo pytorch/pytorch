@@ -78,8 +78,6 @@ class TestDataLoader(TestCase):
             try:
                 it.next()
             except NotImplementedError:
-                msg = "".join(traceback.format_exception(*sys.exc_info()))
-                self.assertTrue("collate_fn" in msg)
                 errors += 1
             except StopIteration:
                 self.assertEqual(errors,
