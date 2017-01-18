@@ -1,5 +1,6 @@
 import torch
 
+
 def _type(self, new_type=None, async=False):
     if new_type is None:
         return self.__module__ + '.' + self.__class__.__name__
@@ -10,18 +11,33 @@ def _type(self, new_type=None, async=False):
         return self
     return new_type(self.size()).copy_(self, async)
 
-def _cuda(self, idx=None, async=False):
+
+def _cuda(self, device=None, async=False):
+    """Returns a copy of this object in CUDA memory.
+
+    If this object is already in CUDA memory and on the correct device, then
+    no copy is performed and the original object is returned.
+
+    Args:
+        device (int): The destination GPU id. Defaults to the current device.
+        async (bool): If True and the source is in pinned memory, the copy will
+                      be asynchronous with respect to the host. Otherwise, the
+                      argument has no effect.
+    """
     if self.is_cuda:
-        target_device = idx if idx else torch.cuda.current_device()
-        if self.get_device() != target_device:
-            with torch.cuda.device(target_device):
+        if device is None:
+            device = torch.cuda.current_device()
+        if self.get_device() != device:
+            with torch.cuda.device(device):
                 return type(self)(self.size()).copy_(self, async)
         else:
             return self
     else:
-        ctx = torch.cuda.device(idx if idx else -1)
-        with ctx:
+        if device is None:
+            device = -1
+        with torch.cuda.device(device):
             return self.type(getattr(torch.cuda, self.__class__.__name__), async)
+
 
 def _range(*args, **kwargs):
     return __builtins__['range'](*args, **kwargs)
@@ -49,4 +65,3 @@ def _accumulate(iterable, fn=lambda x, y: x + y):
     for element in it:
         total = fn(total, element)
         yield total
-
