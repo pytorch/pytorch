@@ -1488,6 +1488,62 @@ class UniqueOp : public Operator<Context> {
   OUTPUT_TAGS(UNIQUE, REMAPPING);
 };
 
+template <class Context>
+class UnsafeCoalesceOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  using Operator<Context>::Operator;
+
+  bool RunOnDevice() override {
+    size_t coalesced_size = 0;
+    for (int i = 0; i < InputSize(); ++i) {
+      CAFFE_ENFORCE(
+          !Input(i).meta().ctor(),
+          "Must only coalesce fundamental types, error at input: ",
+          i);
+    }
+
+    auto roundToAlignment = [](size_t bytes) -> size_t {
+      return ((bytes + gCaffe2Alignment - 1) / gCaffe2Alignment) *
+          gCaffe2Alignment;
+    };
+
+    for (int i = 0; i < InputSize(); ++i) {
+      coalesced_size += roundToAlignment(Input(i).nbytes());
+    }
+
+    auto* coalesced = Output(OutputSize() - 1);
+    coalesced->Resize(coalesced_size);
+    math::Set<uint8_t, Context>(
+        coalesced_size,
+        0.0,
+        coalesced->template mutable_data<uint8_t>(),
+        &context_);
+
+    size_t coalesced_offset = 0;
+    for (auto i = 0; i < InputSize(); ++i) {
+      const auto input_nbytes = Input(i).nbytes();
+      context_.template CopyBytes<Context, Context>(
+          input_nbytes,
+          (const uint8_t*)Input(i).raw_data(),
+          coalesced->template mutable_data<uint8_t>() + coalesced_offset);
+
+      // Note: this could cause Input(i) to free it's data if
+      // Output(i) and Input(i) alias each other. This is safe on a
+      // GPU (as the copy will happen-before the free), but it's
+      // worth mentioning.
+
+      Output(i)->ResizeLike(Input(i));
+      Output(i)->ShareExternalPointer(
+          coalesced->template mutable_data<uint8_t>() + coalesced_offset,
+          Input(i).meta(),
+          input_nbytes);
+      coalesced_offset += roundToAlignment(input_nbytes);
+    }
+    return true;
+  }
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_UTILITY_OPS_H_
