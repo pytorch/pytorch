@@ -180,9 +180,9 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - THTensor* self
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
-    - arg: real location
+    - arg: real mean
       default: 1
-    - arg: real scale
+    - arg: real stdv
       default: 2
 ]]
 
@@ -349,9 +349,9 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   return: self
   arguments:
     - THTensor* self
-    - arg: double location
+    - arg: double mean
       default: 1
-    - arg: double scale
+    - arg: double stdv
       default: 2
 ]]
 
