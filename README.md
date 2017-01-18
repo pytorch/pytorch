@@ -8,6 +8,8 @@ PyTorch is a python package that provides two high-level features:
 
 You can reuse your favorite python packages such as numpy, scipy and Cython to extend PyTorch when needed.
 
+We are in an early-release Beta. Expect some adventures and rough edges.
+
 - [More About PyTorch](#more-about-pytorch)
 - [Installation](#installation)
   - [Binaries](#binaries)
