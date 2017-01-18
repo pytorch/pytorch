@@ -180,7 +180,6 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_cuda
       :annotation:
    .. automethod:: is_pinned
-   .. automethod:: is_same_size
    .. automethod:: is_set_to
    .. automethod:: is_signed
    .. automethod:: kthvalue
@@ -310,4 +309,3 @@ view of a storage and defines numeric operations on it.
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: zero_
-   .. automethod:: zeros_
