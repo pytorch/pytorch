@@ -127,7 +127,7 @@ There is no wrapper code that needs to be written. [You can see an example here]
 ### Binaries
 - Anaconda
 ```bash
-conda install pytorch -c https://conda.anaconda.org/t/6N-MsQ4WZ7jo/soumith
+conda install pytorch torchvision -c soumith
 ```
 
 ### From source
