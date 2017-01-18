@@ -62,8 +62,8 @@ struct ConvolutionDescriptor
   ~ConvolutionDescriptor() {
     cudnnDestroyConvolutionDescriptor(desc);
   }
-  void set(cudnnDataType_t dataType, int dim, int* pad, int* stride) {
-    int upscale[3] = {1, 1, 1};
+  void set(cudnnDataType_t dataType, int dim, int* pad, int* stride, int * upscale) {
+//    int upscale[3] = {1, 1, 1};
     CHECK(cudnnSetConvolutionNdDescriptor(desc, dim, pad, stride, upscale,
           CUDNN_CROSS_CORRELATION, dataType));
   }
