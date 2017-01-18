@@ -301,8 +301,11 @@ std::pair<Option, std::string> _parseOption(const std::string& _option_str,
       printable_option.erase(out_pos);
       printable_option += "*, ";
       printable_option += kwonly_part;
-    } else {
+    } else if (out_pos >= 2) {
       printable_option.erase(out_pos-2);
+      printable_option += ")";
+    } else {
+      printable_option.erase(out_pos);
       printable_option += ")";
     }
     has_out = true;
