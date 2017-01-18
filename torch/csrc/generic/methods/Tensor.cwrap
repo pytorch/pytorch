@@ -94,16 +94,6 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 ]]
 
 [[
-  name: zeros_
-  cname: zeros
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THSize* size
-      long_args: True
-]]
-
-[[
   name: ones
   only_stateless: True
   return: argument 0
