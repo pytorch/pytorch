@@ -306,7 +306,7 @@ class Module(object):
         """Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. The keys of :attr:`state_dict` must
         exactly match the keys returned by this module's :func:`state_dict()`
-        fuction.
+        function.
 
         Arguments:
             state_dict (dict): A dict containing parameters and
