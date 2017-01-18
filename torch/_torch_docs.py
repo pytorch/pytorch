@@ -2388,6 +2388,55 @@ Example::
 
 add_docstr(torch._C.multinomial,
 """
+multinomial(input, num_samples, replacement=False, out=None) -> LongTensor
+
+Returns a Tensor where each row
+contains :attr:`num_samples` indices sampled from the multinomial probability distribution
+located in the corresponding row of Tensor :attr:`input`.
+
+.. note:: The rows of :attr:`input` do not need to sum to one (in which case we use the values
+as weights), but must be non-negative and have a non-zero sum.
+
+Indices are ordered from left to right according to when each was sampled
+(first samples are placed in first column).
+
+If :attr:`input` is a vector, :attr:`out` is a matrix of size `num_samples`.
+
+If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape `m × n`.
+
+If replacement is `True`, samples are drawn with replacement.
+
+If not, they are drawn without replacement, which means that when a
+sample index is drawn for a row, it cannot be drawn again for that row.
+
+This implies the constraint that :attr:`num_samples` must be lower than :attr:`input` length 
+(or number of columns of :attr:`input` if it is a matrix).
+
+Args:
+    input (Tensor): Tensor containing probabilities
+    num_samples (int): number of samples to draw
+    replacement (bool, optional): Whether to draw with replacement or not
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> weights = torch.Tensor([0, 10, 3, 0]) # create a Tensor of weights
+    >>> torch.multinomial(weights, 4)
+    
+     1
+     2
+     0
+     0
+    [torch.LongTensor of size 4]
+    
+    >>> torch.multinomial(weights, 4, replacement=True)
+    
+     1
+     2
+     1
+     2
+    [torch.LongTensor of size 4]
+    
 """)
 
 add_docstr(torch._C.mv,
@@ -2573,6 +2622,84 @@ Example::
 
 add_docstr(torch._C.normal,
 """
+.. function:: normal(means, stddevs, out=None)
+
+Returns a Tensor of random numbers drawn from separate normal distributions
+who's mean and standard deviation are given.
+
+The :attr:`means` is a Tensor with the mean of 
+each output element's normal distribution
+
+The :attr:`stddevs` is a Tensor with the standard deviation of 
+each output element's normal distribution
+
+The shapes of :attr:`means` and :attr:`stddevs` don't need to match.
+The total number of elements in each Tensor need to be the same.
+
+.. note:: When the shapes do not match, the shape of :attr:`means`
+          is used as the shape for the returned output Tensor
+
+Args:
+    means (Tensor): the Tensor of per-element means
+    stddevs (Tensor): the Tensor of per-element standard deviations
+    out (Tensor): the optional result Tensor
+
+Example::
+
+    torch.normal(means=torch.range(1, 10), stddevs=torch.range(1, 0.1, -0.1))
+    
+     1.5104
+     1.6955
+     2.4895
+     4.9185
+     4.9895
+     6.9155
+     7.3683
+     8.1836
+     8.7164
+     9.8916
+    [torch.FloatTensor of size 10]
+
+.. function:: normal(mean=0.0, stddevs, out=None)
+
+Similar to the function above, but the means are shared among all drawn elements.
+
+Args:
+    means (float, optional): the mean for all distributions
+    stddevs (Tensor): the Tensor of per-element standard deviations
+    out (Tensor): the optional result Tensor
+
+Example::
+
+    >>> torch.normal(mean=0.5, stddevs=torch.range(1, 5))
+    
+      0.5723
+      0.0871
+     -0.3783
+     -2.5689
+     10.7893
+    [torch.FloatTensor of size 5]
+
+.. function:: normal(means, stddev=1.0, out=None)
+
+Similar to the function above, but the standard-deviations are shared among all drawn elements.
+
+Args:
+    means (Tensor): the Tensor of per-element means 
+    stddevs (float, optional): the standard deviation for all distributions
+    out (Tensor): the optional result Tensor
+
+Example::
+
+    >>> torch.normal(means=torch.range(1, 5))
+    
+     1.1681
+     2.8884
+     3.7718
+     2.5616
+     4.2500
+    [torch.FloatTensor of size 5]
+    
 """)
 
 add_docstr(torch._C.numel,
@@ -2597,6 +2724,32 @@ Example::
 
 add_docstr(torch._C.ones,
 """
+ones(*sizes, out=None) -> Tensor
+
+Returns a Tensor filled with the scalar value `1`, with the shape defined
+by the varargs :attr:`sizes`.
+
+Args:
+    sizes (*int): a set of ints defining the shape of the output Tensor.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> torch.ones(2, 3)
+    
+     1  1  1
+     1  1  1
+    [torch.FloatTensor of size 2x3]
+    
+    >>> torch.ones(5)
+    
+     1
+     1
+     1
+     1
+     1
+    [torch.FloatTensor of size 5]
+    
 """)
 
 add_docstr(torch._C.orgqr,
@@ -2777,10 +2930,64 @@ add_docstr(torch._C.qr,
 
 add_docstr(torch._C.rand,
 """
+rand(*sizes, out=None) -> Tensor
+
+Returns a Tensor filled with random numbers from a uniform distribution
+on the interval :math:`[0, 1)`
+
+The shape of the Tensor is defined by the varargs :attr:`sizes`.
+
+Args:
+    sizes (*int): a set of ints defining the shape of the output Tensor.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> torch.rand(4)
+    
+     0.9193
+     0.3347
+     0.3232
+     0.7715
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.rand(2, 3)
+    
+     0.5010  0.5140  0.0719
+     0.1435  0.5636  0.0538
+    [torch.FloatTensor of size 2x3]
+    
 """)
 
 add_docstr(torch._C.randn,
 """
+randn(*sizes, out=None) -> Tensor
+
+Returns a Tensor filled with random numbers from a normal distribution
+with zero mean and variance of one.
+
+The shape of the Tensor is defined by the varargs :attr:`sizes`.
+
+Args:
+    sizes (*int): a set of ints defining the shape of the output Tensor.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> torch.randn(4)
+    
+    -0.1145
+     0.0094
+    -1.1717
+     0.9846
+    [torch.FloatTensor of size 4]
+    
+    >>> torch.randn(2, 3)
+    
+     1.4339  0.3351 -1.0999
+     1.5458 -0.9643 -0.3558
+    [torch.FloatTensor of size 2x3]
+    
 """)
 
 add_docstr(torch._C.randperm,
@@ -2965,10 +3172,6 @@ Example::
         nan
     [torch.FloatTensor of size 4]
 
-""")
-
-add_docstr(torch._C.scatter,
-"""
 """)
 
 add_docstr(torch._C.set_num_threads,
@@ -3675,10 +3878,6 @@ Example::
 
 """)
 
-add_docstr(torch._C.unfold,
-"""
-""")
-
 add_docstr(torch._C.var,
 """
 .. function:: var(input) -> float
@@ -3734,4 +3933,30 @@ Example::
 
 add_docstr(torch._C.zeros,
 """
+zeros(*sizes, out=None) -> Tensor
+
+Returns a Tensor filled with the scalar value `0`, with the shape defined
+by the varargs :attr:`sizes`.
+
+Args:
+    sizes (*int): a set of ints defining the shape of the output Tensor.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> torch.zeros(2, 3)
+    
+     0  0  0
+     0  0  0
+    [torch.FloatTensor of size 2x3]
+    
+    >>> torch.zeros(5)
+    
+     0
+     0
+     0
+     0
+     0
+    [torch.FloatTensor of size 5]
+    
 """)

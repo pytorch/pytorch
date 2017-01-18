@@ -1196,9 +1196,44 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr(torch._C.FloatTensorBase.scatter_,
 """
-scatter_(dim, index, value)
+scatter_(input, dim, index, src) -> Tensor
 
-See :func:`torch.scatter`
+Writes all values from the Tensor :attr:`src` into self at the indices specified
+in the :attr:`index` Tensor. The indices are specified with respect to the 
+given dimension, dim, in the manner described in :meth:`~Tensor.gather`. 
+
+Note that, as for gather, the values of index must be between `0` and `(self.size(dim) -1)`
+inclusive and all values in a row along the specified dimension must be unique.
+
+Args:
+    input (Tensor): The source tensor
+    dim (int): The axis along which to index
+    index (LongTensor): The indices of elements to scatter
+    src (Tensor or float): The source element(s) to scatter
+
+Example::
+
+    >>> x = torch.rand(2, 5)
+    >>> x
+    
+     0.4319  0.6500  0.4080  0.8760  0.2355
+     0.2609  0.4711  0.8486  0.8573  0.1029
+    [torch.FloatTensor of size 2x5]
+    
+    >>> torch.zeros(3, 5).scatter_(0, torch.LongTensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
+    
+     0.4319  0.4711  0.8486  0.8760  0.2355
+     0.0000  0.6500  0.0000  0.8573  0.0000
+     0.2609  0.0000  0.4080  0.0000  0.1029
+    [torch.FloatTensor of size 3x5]
+    
+    >>> z = torch.zeros(2, 4).scatter_(1, torch.LongTensor([[2], [3]]), 1.23)
+    >>> z
+    
+     0.0000  0.0000  1.2300  0.0000
+     0.0000  0.0000  0.0000  1.2300
+    [torch.FloatTensor of size 2x4]
+    
 """)
 
 add_docstr(torch._C.FloatTensorBase.select,
@@ -1545,7 +1580,52 @@ add_docstr(torch._C.FloatTensorBase.unfold,
 """
 unfold(dim, size, step) -> Tensor
 
-See :func:`torch.unfold`
+Returns a tensor which contains all slices of size :attr:`size` in 
+the dimension :attr:`dim`. 
+
+Step between two slices is given by :attr:`step`.
+
+If `sizedim` is the original size of dimension dim, the size of dimension `dim` 
+in the returned tensor will be `(sizedim - size) / step + 1`
+
+An additional dimension of size size is appended in the returned tensor.
+
+Args:
+    dim (int): dimension in which unfolding happens
+    size (int): size of each slice that is unfolded
+    step (int): the step between each slice
+
+Example::
+
+    >>> x = torch.range(1, 7)
+    >>> x
+    
+     1
+     2
+     3
+     4
+     5
+     6
+     7
+    [torch.FloatTensor of size 7]
+    
+    >>> x.unfold(0, 2, 1)
+    
+     1  2
+     2  3
+     3  4
+     4  5
+     5  6
+     6  7
+    [torch.FloatTensor of size 6x2]
+    
+    >>> x.unfold(0, 2, 2)
+    
+     1  2
+     3  4
+     5  6
+    [torch.FloatTensor of size 3x2]
+    
 """)
 
 add_docstr(torch._C.FloatTensorBase.uniform_,

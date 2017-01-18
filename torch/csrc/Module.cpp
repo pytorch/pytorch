@@ -275,10 +275,8 @@ IMPLEMENT_STATELESS(cauchy)
 IMPLEMENT_STATELESS(log_normal)
 IMPLEMENT_STATELESS(random)
 IMPLEMENT_STATELESS(bernoulli)
-IMPLEMENT_STATELESS(unfold)
 IMPLEMENT_STATELESS(range)
 IMPLEMENT_STATELESS(gather)
-IMPLEMENT_STATELESS(scatter)
 IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
 IMPLEMENT_STATELESS(masked_select)
@@ -612,10 +610,8 @@ static PyMethodDef TorchMethods[] = {
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS | METH_KEYWORDS, NULL},
-  {"unfold",          (PyCFunction)THPModule_unfold,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"scatter",         (PyCFunction)THPModule_scatter,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
   {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS | METH_KEYWORDS, NULL},
