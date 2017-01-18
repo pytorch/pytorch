@@ -95,7 +95,7 @@ if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]
 then
     echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
     # copy over dependency libraries into the current dir
-    cp -P $PYTORCH_SO_DEPS .
+    cp $PYTORCH_SO_DEPS .
 else
     echo "Not binary build"
 fi
