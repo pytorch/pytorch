@@ -30,39 +30,51 @@ class _StorageBase(object):
         return type(self), (self.tolist(),)
 
     def clone(self):
+        """Returns a copy of this storage"""
         return type(self)(self.size()).copy_(self)
 
     def tolist(self):
+        """Returns a list containing the elements of this storage"""
         return [v for v in self]
 
     def cpu(self):
+        """Returns a CPU copy of this storage if it's not already on the CPU"""
         return self.type(getattr(torch, self.__class__.__name__))
 
-    def double(self, async=False):
-        return self.type(type(self).__module__ + '.DoubleStorage', async)
+    def double(self):
+        """Casts this storage to double type"""
+        return self.type(type(self).__module__ + '.DoubleStorage')
 
-    def float(self, async=False):
-        return self.type(type(self).__module__ + '.FloatStorage', async)
+    def float(self):
+        """Casts this storage to float type"""
+        return self.type(type(self).__module__ + '.FloatStorage')
 
-    def half(self, async=False):
-        return self.type(type(self).__module__ + '.HalfStorage', async)
+    def half(self):
+        """Casts this storage to half type"""
+        return self.type(type(self).__module__ + '.HalfStorage')
 
-    def long(self, async=False):
-        return self.type(type(self).__module__ + '.LongStorage', async)
+    def long(self):
+        """Casts this storage to long type"""
+        return self.type(type(self).__module__ + '.LongStorage')
 
-    def int(self, async=False):
-        return self.type(type(self).__module__ + '.IntStorage', async)
+    def int(self):
+        """Casts this storage to int type"""
+        return self.type(type(self).__module__ + '.IntStorage')
 
-    def short(self, async=False):
-        return self.type(type(self).__module__ + '.ShortStorage', async)
+    def short(self):
+        """Casts this storage to short type"""
+        return self.type(type(self).__module__ + '.ShortStorage')
 
-    def char(self, async=False):
-        return self.type(type(self).__module__ + '.CharStorage', async)
+    def char(self):
+        """Casts this storage to char type"""
+        return self.type(type(self).__module__ + '.CharStorage')
 
-    def byte(self, async=False):
-        return self.type(type(self).__module__ + '.ByteStorage', async)
+    def byte(self):
+        """Casts this storage to byte type"""
+        return self.type(type(self).__module__ + '.ByteStorage')
 
     def pin_memory(self):
+        """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:
             raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
                             .format(self.type()))
