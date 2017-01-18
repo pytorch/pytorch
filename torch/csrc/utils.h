@@ -27,14 +27,10 @@
 #define THPUtils_bytesFromString(c_string)   PyString_FromString(c_string)
 #define THPUtils_checkBytes(obj)             PyString_Check(obj)
 #define THPUtils_bytesAsString(obj)          PyString_AS_STRING(obj)
-#define THPUtils_stringType                  PyString_Type
-#define THPUtils_stringAsString(obj)         PyString_AS_STRING(obj)
 #else
 #define THPUtils_bytesFromString(c_string)   PyBytes_FromString(c_string)
 #define THPUtils_checkBytes(obj)             PyBytes_Check(obj)
 #define THPUtils_bytesAsString(obj)          PyBytes_AS_STRING(obj)
-#define THPUtils_stringType                  PyUnicode_Type
-#define THPUtils_stringAsString(obj)         PyBytes_AS_STRING(PyUnicode_AsUTF8String(obj))
 #endif
 
 #if PY_MAJOR_VERSION == 2
