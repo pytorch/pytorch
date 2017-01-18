@@ -147,10 +147,18 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
 }
 
 void THNN_(SpatialFullConvolutionMap_accGradParameters)(
-  THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradWeight, THTensor *gradBias,
-  THTensor *connTable, int nInputPlane, int nOutputPlane,
-  int dW, int dH, real scale)
+  THNNState *state,
+  THTensor *input,
+  THTensor *gradOutput,
+  THTensor *gradWeight,
+  THTensor *gradBias,
+  THTensor *connTable,
+  int nInputPlane,
+  int nOutputPlane,
+  int dW, int dH,
+  accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THArgCheck(
     gradWeight != NULL && gradWeight->nDimension == 3
     && connTable != NULL && connTable->size[0] == gradWeight->size[0], 5,

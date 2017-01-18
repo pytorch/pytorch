@@ -6,10 +6,11 @@ void THNN_(SoftShrink_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          real lambda)
+          accreal lambda_)
 {
+  real lambda = TH_CONVERT_ACCREAL_TO_REAL(lambda_);
   THTensor_(resizeAs)(output, input);
-  
+
   TH_TENSOR_APPLY2(real, output, real, input,
     if ((*input_data) > lambda)
      *output_data = *input_data - lambda;
@@ -25,8 +26,9 @@ void THNN_(SoftShrink_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          real lambda)
+          accreal lambda_)
 {
+  real lambda = TH_CONVERT_ACCREAL_TO_REAL(lambda_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,

@@ -6,9 +6,10 @@ void THNN_(ELU_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          real alpha,
+          accreal alpha_,
           bool inplace)
-{  
+{
+  real alpha = TH_CONVERT_ACCREAL_TO_REAL(alpha_);
   if(inplace) {
     TH_TENSOR_APPLY(real, input,
       if(*input_data <= 0) {
@@ -30,9 +31,10 @@ void THNN_(ELU_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *output,
-          real alpha,
+          accreal alpha_,
           bool inplace)
 {
+  real alpha = TH_CONVERT_ACCREAL_TO_REAL(alpha_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   if(inplace) {
     TH_TENSOR_APPLY2(real, gradOutput, real, output,
