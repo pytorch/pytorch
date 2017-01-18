@@ -225,13 +225,14 @@ def TranslateConv(layer, pretrained_blobs, is_test):
     param = layer.convolution_param
     caffe_op = BaseTranslate(layer, "Conv")
     output = caffe_op.output[0]
-    caffe_op.input.extend([output + '_w', output + '_b'])
+    caffe_op.input.append(output + '_w')
     _TranslateStridePadKernelHelper(param, caffe_op)
     # weight
     params = [
         utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')]
     # bias
     if len(pretrained_blobs) == 2:
+        caffe_op.input.append(output + '_b')
         params.append(
             utils.NumpyArrayToCaffe2Tensor(
                 pretrained_blobs[1].flatten(), output + '_b'))
