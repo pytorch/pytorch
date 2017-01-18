@@ -442,6 +442,14 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
     }
     f->m_ml->ml_doc = THPUtils_stringAsString(doc);
     Py_INCREF(doc);
+  } else if (strcmp(Py_TYPE(obj)->tp_name, "method_descriptor") == 0) {
+    PyMethodDescrObject* m = (PyMethodDescrObject *)obj;
+    if (m->d_method->ml_doc) {
+      return PyErr_Format(PyExc_RuntimeError,
+          "method '%s' already has a docstring", m->d_method->ml_name);
+    }
+    m->d_method->ml_doc = THPUtils_stringAsString(doc);
+    Py_INCREF(doc);
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
