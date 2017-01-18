@@ -114,7 +114,7 @@ def _make_python_wrapper(name, cffi_wrapper_name, target_dir):
 
 def create_extension(name, headers, sources, verbose=True, with_cuda=False,
         package=False, relative_to='.', **kwargs):
-    """Creates and configures a cffi.FFI object, that builds PyTorch extesnsion.
+    """Creates and configures a cffi.FFI object, that builds PyTorch extension.
 
     Arguments:
         name (str): package name. Can be a nested module e.g. ``.ext.my_lib``.
