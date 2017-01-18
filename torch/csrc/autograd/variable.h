@@ -1,8 +1,57 @@
-#ifndef THP_VARIABLE_H
-#define THP_VARIABLE_H
+#pragma once
 
-struct THPVariableVersion {
-  THPVariableVersion() {
+#include <memory>
+#include <functional>
+#include <THPP/THPP.h>
+
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/Types.h"
+
+namespace torch { namespace autograd {
+
+struct VariableHook;
+struct VariableVersion;
+
+struct Variable : public Function {
+  Variable(
+      std::unique_ptr<thpp::Tensor> data,
+      std::shared_ptr<Function> creator);
+  Variable(
+      std::unique_ptr<thpp::Tensor> data,
+      bool requires_grad,
+      bool is_volatile);
+
+  bool is_cuda();
+  bool is_sparse();
+  void backward(std::shared_ptr<Variable> gradOutput);
+  virtual variable_list apply(const variable_list& gradOutputs) override;
+
+  SavedVariable save() const;
+  static SavedVariable save_opt(Variable* var);
+
+  static inline std::shared_ptr<Variable> of(std::unique_ptr<thpp::Tensor> data) {
+    if (!data) {
+      return std::shared_ptr<Variable>();
+    }
+    return std::make_shared<Variable>(std::move(data), 0, 0);
+  }
+
+  std::unique_ptr<thpp::Tensor> data;
+  std::shared_ptr<Function> creator;
+  std::shared_ptr<Variable> grad;
+  std::unique_ptr<VariableVersion> version_counter;
+  int output_nr;
+  std::unique_ptr<VariableHook> backward_hook;
+  PyObject *pyobj;  // weak reference
+};
+
+struct VariableHook {
+  virtual std::shared_ptr<Variable> operator()(const std::shared_ptr<Variable>& grad) = 0;
+};
+
+struct VariableVersion {
+  VariableVersion() {
     saved_ref = false;
     version_block = new int[3];
     version_block[0] = 0; // version
@@ -16,15 +65,15 @@ struct THPVariableVersion {
 
   int var_refcnt() { return version_block[2]; }
 
-  void join_with(THPVariableVersion &other) {
+  void join_with(VariableVersion &other) {
     cleanup();
     version_block = other.version_block;
     version_block[1]++;
     version_block[2]++;
   }
 
-  THPVariableVersion* new_saved_ref() {
-    auto new_ver = new THPVariableVersion();
+  VariableVersion* new_saved_ref() {
+    auto new_ver = new VariableVersion();
     new_ver->cleanup();
     new_ver->version_block = version_block;
     version_block[1]++;
@@ -39,36 +88,10 @@ struct THPVariableVersion {
     version_block = nullptr;
   }
 
-  ~THPVariableVersion() { cleanup(); }
+  ~VariableVersion() { cleanup(); }
 
   int *version_block;
   bool saved_ref;
 };
 
-struct THPVariable {
-    PyObject_HEAD
-    PyObject *creator;
-    PyObject *data;
-    PyObject *grad;
-    PyObject *backward_hooks;
-    THPVariableVersion *version_counter;
-    int output_nr;
-    char is_volatile;
-    char requires_grad;
-};
-
-bool THPVariable_initModule(PyObject *module);
-extern PyObject *THPVariableClass;
-PyObject * THPVariable_NewVolatile(PyObject *data);
-PyObject * THPVariable_New(PyObject *data, PyObject *creator, char requires_grad);
-
-#define THPVariable_Check(obj)                                                 \
-    (THPVariableClass &&                                                       \
-     PyObject_IsInstance(obj, THPVariableClass))
-
-#define THPVariable_CheckType(obj, func)                                       \
-    (THPVariableClass &&                                                       \
-     (PyObject_IsInstance(obj, THPVariableClass) &&                            \
-        func(((THPVariable*)obj)->data)))
-
-#endif
+}} // namespace torch::autograd

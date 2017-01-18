@@ -1,6 +1,4 @@
 import torch
-from torch.autograd import Variable
-from torch.nn import Parameter
 import os
 import weakref
 import multiprocessing
@@ -125,33 +123,6 @@ def reduce_storage(storage):
     return (rebuild, (type(storage),) + metadata)
 
 
-def reduce_variable(variable):
-    if variable.creator is not None:
-        raise RuntimeError("only leaf Variables can be sent to other processes")
-    rebuild = rebuild_variable
-    if isinstance(variable, Parameter):
-        rebuild = rebuid_parameter
-    variable.grad  # make sure the grad is allocated
-    return rebuild, variable.__getstate__()
-
-
-def rebuild_variable(data, grad, backward_hooks, requires_grad, volatile):
-    var = Variable(data, requires_grad=requires_grad, volatile=volatile)
-    var._grad = grad
-    if backward_hooks is not None:
-        var._backward_hooks = backward_hooks
-    return var
-
-
-def rebuid_parameter(data, grad, backward_hooks, requires_grad, volatile):
-    assert volatile is False
-    param = Parameter(data, requires_grad=requires_grad)
-    param._grad = grad
-    if backward_hooks is not None:
-        param._backward_hooks = backward_hooks
-    return param
-
-
 def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
@@ -160,6 +131,3 @@ def init_reductions():
 
     for t in torch._tensor_classes:
         ForkingPickler.register(t, reduce_tensor)
-
-    ForkingPickler.register(Variable, reduce_variable)
-    ForkingPickler.register(Parameter, reduce_variable)

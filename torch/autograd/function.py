@@ -2,7 +2,6 @@ import torch
 import torch._C as _C
 import torch.utils.hooks as hooks
 from collections import OrderedDict
-from itertools import chain
 
 
 class Function(_C._FunctionBase):
@@ -98,9 +97,9 @@ class Function(_C._FunctionBase):
         **This should be called at most once, only from inside the**
         :func:`forward` **method, and all arguments should be outputs.**
 
-        This will mark outputs as non requiring gradient, increasing the
+        This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
-        for this output in :meth:`~Function.backward`, but it's always going to
+        for each output in :meth:`~Function.backward`, but it's always going to
         be ``None``.
 
         This is used e.g. for indices returned from a max :class:`Function`.

@@ -577,11 +577,4 @@ void THPPointer<THPGenerator>::free() {
     Py_DECREF(ptr);
 }
 
-template<>
-void THPPointer<PyObject>::free() {
-  if (ptr)
-    Py_DECREF(ptr);
-}
-
 template class THPPointer<THPGenerator>;
-template class THPPointer<PyObject>;

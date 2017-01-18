@@ -74,6 +74,7 @@ class TestAutograd(TestCase):
             counter[0] += inc
 
         z = x ** 2 + x * 2 + x * y + y
+        x.register_hook(lambda *args: bw_hook(0, *args))
         test = z.register_hook(lambda *args: bw_hook(1, *args))
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 1)
