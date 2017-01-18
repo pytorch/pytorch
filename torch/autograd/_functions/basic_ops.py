@@ -1,5 +1,6 @@
 import torch
 from ..function import Function, InplaceFunction
+import math
 
 
 class Add(InplaceFunction):
@@ -163,7 +164,7 @@ class PowConstant(Function):
     def forward(self, a):
         if self.tensor_power:
             self.fw_result = torch.pow(self.constant, a)
-            return result
+            return self.fw_result
         else:
             self.save_for_backward(a)
             return a.pow(self.constant)
@@ -186,4 +187,3 @@ class Negate(InplaceFunction):
 
     def backward(self, grad_output):
         return grad_output.neg()
-
