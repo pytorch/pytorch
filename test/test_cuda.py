@@ -332,6 +332,26 @@ class TestCuda(TestCase):
             z = z.cuda()
             self.assertEqual(z.get_device(), 0)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_copy_device(self):
+        x = torch.randn(5, 5).cuda()
+        with torch.cuda.device(1):
+            y = x.cuda()
+            self.assertEqual(y.get_device(), 1)
+            self.assertIs(y.cuda(), y)
+            z = y.cuda(0)
+            self.assertEqual(z.get_device(), 0)
+            self.assertIs(z.cuda(0), z)
+
+        x = torch.randn(5, 5)
+        with torch.cuda.device(1):
+            y = x.cuda()
+            self.assertEqual(y.get_device(), 1)
+            self.assertIs(y.cuda(), y)
+            z = y.cuda(0)
+            self.assertEqual(z.get_device(), 0)
+            self.assertIs(z.cuda(0), z)
+
     def test_serialization(self):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()
