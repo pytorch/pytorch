@@ -2706,6 +2706,26 @@ class TestTorch(TestCase):
             array = np.array([1, 2, 3, 4], dtype=dtype)
             self.assertEqual(torch.from_numpy(array), torch.Tensor([1, 2, 3, 4]))
 
+        # check storage offset
+        x = np.linspace(1, 125, 125)
+        x.shape = (5, 5, 5)
+        x = x[1]
+        expected = torch.range(1, 125).view(5, 5, 5)[1]
+        self.assertEqual(torch.from_numpy(x), expected)
+
+        # check noncontiguous
+        x = np.linspace(1, 25, 25)
+        x.shape = (5, 5)
+        expected = torch.range(1, 25).view(5, 5).t()
+        self.assertEqual(torch.from_numpy(x.T), expected)
+
+        # check noncontiguous with holes
+        x = np.linspace(1, 125, 125)
+        x.shape = (5, 5, 5)
+        x = x[:, 1]
+        expected = torch.range(1, 125).view(5, 5, 5)[:, 1]
+        self.assertEqual(torch.from_numpy(x), expected)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
