@@ -11,8 +11,6 @@
 #include "cudnn/Module.h"
 #endif
 
-#include "TensorDocstrings.h"
-
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
