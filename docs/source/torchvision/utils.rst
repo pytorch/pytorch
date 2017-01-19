@@ -1,15 +1,9 @@
 torchvision.utils
 ===================
 
-make\_grid(tensor, nrow=8, padding=2)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. currentmodule:: torchvision.utils
 
-Given a 4D mini-batch Tensor of shape (B x C x H x W), makes a grid of
-images
+.. autofunction:: make_grid
 
-save\_image(tensor, filename, nrow=8, padding=2)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: save_image
 
-Saves a given Tensor into an image file.
-
-If given a mini-batch tensor, will save the tensor as a grid of images.

@@ -2,7 +2,6 @@ import os
 import glob
 import tempfile
 import shutil
-import collections.abc
 from functools import wraps, reduce
 from string import Template
 import torch
