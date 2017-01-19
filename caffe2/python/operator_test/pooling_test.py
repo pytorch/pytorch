@@ -6,6 +6,8 @@ import numpy as np
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 import collections
+import os
+import unittest
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -55,6 +57,27 @@ class TestPooling(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         if method not in ('MaxPool'):
             self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    # This test is to check if CUDNN works for bigger batch size or not
+    @unittest.skipIf(not os.getenv('CAFFE2_DEBUG'),
+                     "This is a test that reproduces a cudnn error. If you "
+                     "want to run it, set env variable CAFFE2_DEBUG=1.")
+    @given(**hu.gcs_gpu_only)
+    def test_pooling_big_batch(self, gc, dc):
+        op = core.CreateOperator(
+            "AveragePool",
+            ["X"],
+            ["Y"],
+            stride=1,
+            kernel=7,
+            pad=0,
+            order="NHWC",
+            engine="CUDNN",
+        )
+        X = np.random.rand(70000, 7, 7, 81).astype(np.float32)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -114,6 +137,7 @@ class TestPooling(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         if method not in ('MaxPool'):
             self.assertGradientChecks(gc, op, [X], 0, [0])
+
 
 if __name__ == "__main__":
     import unittest
