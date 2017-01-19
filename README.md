@@ -145,7 +145,11 @@ If you want to compile with CUDA support, install
 
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
+
+# Install basic dependencies
 conda install numpy mkl setuptools cmake gcc cffi
+
+# On Linux, add LAPACK support for the GPU
 conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
 ```
 
