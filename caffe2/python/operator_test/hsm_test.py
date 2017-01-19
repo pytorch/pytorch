@@ -207,7 +207,7 @@ class TestHsm(hu.HypothesisTestCase):
 
     def test_huffman_tree_hierarchy(self):
         workspace.GlobalInit(['caffe2'])
-        labelSet = range(1, 7)
+        labelSet = range(0, 6)
         counts = [2, 4, 10, 15, 25, 40]
         labels = sum([[l] * c for (l, c) in zip(labelSet, counts)], [])
         Y = np.array(labels).astype(np.int64)
@@ -234,12 +234,12 @@ class TestHsm(hu.HypothesisTestCase):
                     zip(path.path_nodes, indices, code):
                 self.assertEqual(path_node.index, index)
                 self.assertEqual(path_node.target, target)
-        checkPath(1, treePathOutput.paths[0], [4, 3, 2, 1, 0], [1, 1, 1, 0, 0])
-        checkPath(2, treePathOutput.paths[1], [4, 3, 2, 1, 0], [1, 1, 1, 0, 1])
-        checkPath(3, treePathOutput.paths[2], [4, 3, 2, 1], [1, 1, 1, 1])
-        checkPath(4, treePathOutput.paths[3], [4, 3, 2], [1, 1, 0])
-        checkPath(5, treePathOutput.paths[4], [4, 3], [1, 0])
-        checkPath(6, treePathOutput.paths[5], [4], [0])
+        checkPath(0, treePathOutput.paths[0], [4, 3, 2, 1, 0], [1, 1, 1, 0, 0])
+        checkPath(1, treePathOutput.paths[1], [4, 3, 2, 1, 0], [1, 1, 1, 0, 1])
+        checkPath(2, treePathOutput.paths[2], [4, 3, 2, 1], [1, 1, 1, 1])
+        checkPath(3, treePathOutput.paths[3], [4, 3, 2], [1, 1, 0])
+        checkPath(4, treePathOutput.paths[4], [4, 3], [1, 0])
+        checkPath(5, treePathOutput.paths[5], [4], [0])
 
 if __name__ == '__main__':
     unittest.main()

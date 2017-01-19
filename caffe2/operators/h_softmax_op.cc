@@ -423,8 +423,8 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
   std::vector<int> labelCounts;
   labelCounts.resize(num_classes_, 0);
   for (int i = 0; i < Y.dim32(0); ++i) {
-    const int label_index =
-        y_data[i] - 1; // Labels are in range [1, num_classes]
+    // Labels are in range [0, num_classes]
+    const int label_index = y_data[i];
     CAFFE_ENFORCE_LT(
         label_index,
         num_classes_,
@@ -445,8 +445,7 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
 
   int current_node_index = 0;
   for (int i = 0; i < num_classes_; ++i) {
-    const int label = i + 1;
-    Node node(label, labelCounts[i]);
+    Node node(i, labelCounts[i]);
     nodes.push(node);
   }
 
@@ -455,8 +454,7 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
     auto node = nodes.top();
     int node_index = huffmanTree.size();
     if (node.label != -1) {
-      int label_index = node.label - 1;
-      labelIndices[label_index] = node_index;
+      labelIndices[node.label] = node_index;
     }
     nodes.pop();
     huffmanTree.push_back(node);
@@ -491,7 +489,6 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
   auto get_node_path = [&huffmanTree, &labelIndices](const int label_index) {
     std::stack<int> path;
     std::stack<int> pathCode;
-    const int label = label_index + 1;
     int index = labelIndices[label_index];
     while (huffmanTree[index].parent_index != -1) {
       int parentIndex = huffmanTree[index].parent_index;
@@ -503,7 +500,7 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
     }
 
     PathProto pathProto;
-    pathProto.set_word_id(label);
+    pathProto.set_word_id(label_index);
     while (!path.empty()) {
       auto pathNode = pathProto.add_path_nodes();
       pathNode->set_length(2); // nodes are always binary
