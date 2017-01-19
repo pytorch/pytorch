@@ -34,7 +34,7 @@ class PrefetchOperator : public OperatorBase {
 
   virtual ~PrefetchOperator() {
     CAFFE_ENFORCE(
-        finalize_,
+        finalize_ || !prefetch_thread_.get(),
         "Your derived class should call Finalize() in its destructor "
         "so the prefetching thread is joined. ");
   }
