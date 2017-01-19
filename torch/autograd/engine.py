@@ -1,5 +1,6 @@
 from collections import deque, defaultdict
 from torch._C import _ImperativeEngine as ImperativeEngine
+from .variable import Variable
 
 
 class BasicEngine(object):
@@ -82,7 +83,3 @@ class BasicEngine(object):
 
                     self._add_grad(need_copy, prev_grad, output_nr, d_prev_fn)
                     not_ready[prev_fn] = prev_grad
-
-
-from .variable import Variable
-
