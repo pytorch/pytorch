@@ -85,6 +85,12 @@ static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
     #endif
   #endif
 
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(add_VSX), SIMDExtension_VSX),
+    #endif
+  #endif
+
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(add_AVX), SIMDExtension_AVX),
@@ -113,12 +119,6 @@ static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(__PPC64__)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(mul_VSX), SIMDExtension_VSX),
-    #endif
-  #endif
-
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cmul_AVX), SIMDExtension_AVX),
@@ -143,6 +143,12 @@ static FunctionDescription THVector_(mul_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(mul_NEON), SIMDExtension_NEON),
+    #endif
+  #endif
+
+  #if defined(__PPC64__)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(mul_VSX), SIMDExtension_VSX),
     #endif
   #endif
 
