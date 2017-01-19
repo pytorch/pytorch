@@ -1142,10 +1142,13 @@ class ReshapeOp : public Operator<Context> {
 
     auto* output = Output(0);
     output->Resize(actual_new_shape);
-    context_.template CopyBytes<Context, Context>(
-        input.nbytes(),
-        input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+    if (output != &input) {
+      // If we are not doing in-place computation, a copy is needed.
+      context_.template CopyBytes<Context, Context>(
+          input.nbytes(),
+          input.raw_data(),
+          output->raw_mutable_data(input.meta()));
+    }
 
     return true;
   }
