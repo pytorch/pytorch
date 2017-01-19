@@ -75,10 +75,20 @@ def typename(o):
 
 
 def is_tensor(obj):
+    r"""Returns True if `obj` is a pytorch tensor.
+
+    Args:
+        obj (Object): Object to test
+    """
     return obj.__class__ in _tensor_classes
 
 
 def is_storage(obj):
+    r"""Returns True if `obj` is a pytorch storage object.
+
+    Args:
+        obj (Object): Object to test
+    """
     return obj.__class__ in _storage_classes
 
 
