@@ -90,10 +90,16 @@ def set_default_tensor_type(t):
 
 
 def set_rng_state(new_state):
+    r"""Sets the random number generator state.
+    
+    Args:
+        new_state (torch.ByteTensor): The desired state
+    """
     default_generator.set_state(new_state)
 
 
 def get_rng_state():
+    r"""Returns the random number generator state as a ByteTensor."""
     return default_generator.get_state()
 
 
