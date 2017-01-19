@@ -1,3 +1,5 @@
+#include <cfloat>
+
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
@@ -20,12 +22,12 @@ class CudnnSpatialBNOp final : public SpatialBNOp<CUDAContext> {
       : SpatialBNOp<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
-    if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
+    if (epsilon_ <= CUDNN_BN_MIN_EPSILON - FLT_EPSILON) {
       LOG(ERROR) << "Provided epsilon is smaller than "
-                      << "CUDNN_BN_MIN_EPSILON. Setting it to "
-                      << "CUDNN_BN_MIN_EPSILON instead.";
-      epsilon_ = CUDNN_BN_MIN_EPSILON;
+                 << "CUDNN_BN_MIN_EPSILON. Setting it to "
+                 << "CUDNN_BN_MIN_EPSILON instead.";
     }
+    epsilon_ = std::max(epsilon_, CUDNN_BN_MIN_EPSILON);
   }
 
   ~CudnnSpatialBNOp() {
@@ -51,12 +53,12 @@ class CudnnSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
         cudnn_wrapper_(&context_) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
-    if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
+    if (epsilon_ <= CUDNN_BN_MIN_EPSILON - FLT_EPSILON) {
       LOG(ERROR) << "Provided epsilon is smaller than "
-                      << "CUDNN_BN_MIN_EPSILON. Setting it to "
-                      << "CUDNN_BN_MIN_EPSILON instead.";
-      epsilon_ = CUDNN_BN_MIN_EPSILON;
+                 << "CUDNN_BN_MIN_EPSILON. Setting it to "
+                 << "CUDNN_BN_MIN_EPSILON instead.";
     }
+    epsilon_ = std::max(epsilon_, CUDNN_BN_MIN_EPSILON);
   }
 
   ~CudnnSpatialBNGradientOp() {
