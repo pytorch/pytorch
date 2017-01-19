@@ -111,7 +111,7 @@ if (BUILD_TEST)
       target_compile_features(${test_name} PRIVATE cxx_range_for)
     endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-    # install(TARGETS ${test_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/test)
+    install(TARGETS ${test_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/test)
   endforeach()
 endif()
 
