@@ -1460,7 +1460,7 @@ class Net(object):
         refs = []
         for input in inputs:
             input_name = str(input)
-            assert str(input) not in self._net.external_input, (
+            assert str(input) not in self._external_input_map, (
                 'Net already contains an input named %s' % input_name)
         for input in inputs:
             input_name = str(input)
