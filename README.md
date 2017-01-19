@@ -179,7 +179,7 @@ We appreciate all contributions. If you are planning to contribute back bug-fixe
 If you plan to contribute new features, utility functions or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR, because we might be taking the core in a different direction than you might be aware of.
 
-**For the next release cycle, these are the 3 big features were are planning to add:**
+**For the next release cycle, these are the 3 big features we are planning to add:**
 
 1. [Distributed PyTorch](https://github.com/pytorch/pytorch/issues/241) (a draft implementation is present in this [branch](https://github.com/apaszke/pytorch-dist) )
 2. Backward of Backward - Backpropagating through the optimization process itself. Some past and recent papers such as
