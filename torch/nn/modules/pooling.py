@@ -169,10 +169,9 @@ class MaxUnpool1d(Module):
         padding (int or tuple): Padding that was added to the input
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = padding[0] * (H_{in} - 1) * stride[0] + kernel\_size[0]`
-          :math:`W_{out} = padding[1] * (W_{in} - 1) * stride[1] + kernel\_size[1]`
+        - Input: :math:`(N, C, H_{in})`
+        - Output: :math:`(N, C, H_{out})` where
+          :math:`H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]`          
           or as given by :attr:`output_size` in the call operator
 
     Example:
@@ -214,8 +213,8 @@ class MaxUnpool2d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = padding[0] * (H_{in} - 1) * stride[0] + kernel\_size[0]`
-          :math:`W_{out} = padding[1] * (W_{in} - 1) * stride[1] + kernel\_size[1]`
+          :math:`H_{out} = (H_{in} - 1) * stride[0] -2 * padding[0] + kernel\_size[0]`
+          :math:`W_{out} = (W_{in} - 1) * stride[1] -2 * padding[1] + kernel\_size[1]`
           or as given by :attr:`output_size` in the call operator
 
     Example:
@@ -263,9 +262,9 @@ class MaxUnpool3d(Module):
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = padding[0] * (D_{in} - 1) * stride[0] + kernel\_size[0]`
-          :math:`H_{out} = padding[1] * (H_{in} - 1) * stride[1] + kernel\_size[1]`
-          :math:`W_{out} = padding[2] * (W_{in} - 1) * stride[2] + kernel\_size[2]`
+          :math:`D_{out} = (D_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]`
+          :math:`H_{out} = (H_{in} - 1) * stride[1] - 2 * padding[1] + kernel\_size[1]`
+          :math:`W_{out} = (W_{in} - 1) * stride[2] - 2 * padding[2] + kernel\_size[2]`
           or as given by :attr:`output_size` in the call operator
 
     Example::
