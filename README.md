@@ -118,7 +118,7 @@ Writing new neural network modules, or interfacing with PyTorch's Tensor API was
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
-[or your favorite numpy based libraries such as SciPy](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb)
+[or your favorite numpy based libraries such as SciPy](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb).
 
 If you want to write your layers in C/C++, we provide an extension API based on
 [cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.  
@@ -172,7 +172,7 @@ Three pointers to get you started:
 ## Releases and Contributing
 
 PyTorch has a 90 day release cycle (major releases). 
-It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues)
+It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 
@@ -191,6 +191,6 @@ Sending a PR without discussion might end up resulting in a rejected PR, because
 
 PyTorch is a community driven project with several skillful engineers and researchers contributing to it.
 
-PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury) and [Soumith Chintala](http://soumith.ch) with major contributions coming from 10s of talented individuals in various forms and means. A non-exhaustive but growing list needs to mention: Sergey Zagoruyko, Adam Lerer, Francisco Massa, Andreas Kopf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein
+PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury) and [Soumith Chintala](http://soumith.ch) with major contributions coming from 10s of talented individuals in various forms and means. A non-exhaustive but growing list needs to mention: Sergey Zagoruyko, Adam Lerer, Francisco Massa, Andreas Kopf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein.
 
 Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.
