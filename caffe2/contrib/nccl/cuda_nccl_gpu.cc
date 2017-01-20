@@ -126,19 +126,23 @@ void runNCCL(const NCCLExecution& ex, F&& f) {
     CUDA_CHECK(cudaEventRecord(context->master_event_, ex.stream));
   }
 
-  for (auto i = 0; i < ex.elements.size(); ++i) {
-    auto& ctx = ex.elements[i];
-    DeviceGuard g(ctx.device);
-    auto& comm = comms[i];
-    auto& stream = streams[i];
-    auto& event = events[i];
+  {
+    // lock out alloc / free while NCCL launches
+    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+    for (auto i = 0; i < ex.elements.size(); ++i) {
+      auto& ctx = ex.elements[i];
+      DeviceGuard g(ctx.device);
+      auto& comm = comms[i];
+      auto& stream = streams[i];
+      auto& event = events[i];
 
-    DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
-    CUDA_CHECK(cudaStreamWaitEvent(stream, context->master_event_, 0));
-    f(ctx, comm, stream);
-    // Record an event on each children stream that we have finished
-    // our computation
-    CUDA_CHECK(cudaEventRecord(event, stream));
+      DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
+      CUDA_CHECK(cudaStreamWaitEvent(stream, context->master_event_, 0));
+      f(ctx, comm, stream);
+      // Record an event on each children stream that we have finished
+      // our computation
+      CUDA_CHECK(cudaEventRecord(event, stream));
+    }
   }
 
   // Now, wait on all the events in the original stream.
