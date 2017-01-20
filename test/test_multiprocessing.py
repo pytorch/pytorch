@@ -38,7 +38,16 @@ def send_tensor(queue, event, tp):
     event.wait()
 
 
+def sum_tensors(inq, outq):
+    with torch.cuda.device(1):
+        tensors = inq.get()
+        for tensor in tensors:
+            outq.put((tensor.sum(), tensor.get_device(),
+                      tensor.numel(), tensor.storage().size()))
+
+
 def queue_get_exception(inqueue, outqueue):
+    os.close(2)  # hide expected error message
     try:
         torch.zeros(5, 5).cuda()
     except Exception as e:
@@ -276,6 +285,34 @@ class TestMultiprocessing(TestCase):
     def test_cuda(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
+
+
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_small_tensors(self):
+        # Check multiple small tensors which will likely use the same
+        # underlying cached allocation
+        ctx = mp.get_context('spawn')
+        tensors = []
+        for i in range(5):
+            tensors += [torch.range(i * 5, (i * 5) + 4).cuda()]
+
+        inq = ctx.Queue()
+        outq = ctx.Queue()
+        inq.put(tensors)
+        p = ctx.Process(target=sum_tensors, args=(inq, outq))
+        p.start()
+
+        results = []
+        for i in range(5):
+            results.append(outq.get())
+        p.join()
+
+        for i, tensor in enumerate(tensors):
+            v, device, tensor_size, storage_size = results[i]
+            self.assertEqual(v, torch.range(i * 5, (i * 5) + 4).sum())
+            self.assertEqual(device, 0)
+            self.assertEqual(tensor_size, 5)
+            self.assertEqual(storage_size, 5)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_cuda_bad_call(self):
