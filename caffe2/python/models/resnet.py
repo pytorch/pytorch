@@ -244,7 +244,8 @@ def create_resnet50(
     )
 
     # Final dimension of the "image" is reduced to 7x7
-    last_out = model.FC(final_avg, 'last_out', 2048, num_labels)
+    last_out = model.FC(final_avg, 'last_out_L{}'.format(num_labels),
+                        2048, num_labels)
 
     if no_loss:
         return last_out
