@@ -1465,18 +1465,91 @@ Example::
     [torch.FloatTensor of size 3x2]
 """)
 
-# TODO
-# add_docstr(torch._C.geqrf,
-# """
-# """)
+add_docstr(torch._C.geqrf,
+r"""
+geqrf(input, out=None) -> (Tensor, Tensor)
 
-# add_docstr(torch._C.ger,
-# """
-# """)
+This is a low-level function for calling LAPACK directly. 
 
-# add_docstr(torch._C.gesv,
-# """
-# """)
+You'll generally want to use :func:`torch.qr` instead.
+
+Computes a QR decomposition of :attr:`input`, but without constructing `Q` and `R` as explicit separate matrices. 
+
+Rather, this directly calls the underlying LAPACK function `?geqrf` which produces a sequence of 'elementary reflectors'. 
+
+See `LAPACK documentation`_ for further details.
+
+Args:
+    input (Tensor): the input matrix
+    out (tuple, optional): The result tuple of (Tensor, Tensor)
+
+.. _LAPACK documentation:
+    https://software.intel.com/en-us/node/521004
+
+""")
+
+add_docstr(torch._C.ger,
+"""
+ger(vec1, vec2, out=None) -> Tensor
+Outer product of :attr:`vec1` and :attr:`vec2`. If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`, then :attr:`out` must be a matrix of size `n x m`.
+
+Args:
+    vec1 (Tensor): 1D input vector
+    vec2 (Tensor): 1D input vector
+    out (Tensor, optional): optional output matrix
+
+Example::
+
+    >>> v1 = torch.range(1, 4)
+    >>> v2 = torch.range(1, 3)
+    >>> torch.ger(v1, v2)
+    
+      1   2   3
+      2   4   6
+      3   6   9
+      4   8  12
+    [torch.FloatTensor of size 4x3]
+    
+""")
+
+add_docstr(torch._C.gesv,
+"""
+gesv(B, A, out=None) -> (Tensor, Tensor)
+
+`X, LU = torch.gesv(B, A)` returns the solution to the system of linear
+equations represented by :math:`AX = B` 
+
+`LU` contains `L` and `U` factors for LU factorization of `A`.
+
+:attr:`A` has to be a square and non-singular matrix (2D Tensor).
+
+If `A` is an `m x m` matrix and `B` is `m x k`, 
+the result `LU` is `m x m` and `X` is `m x k` .
+
+.. note:: Irrespective of the original strides, the returned matrices 
+          `X` and `LU` will be transposed, i.e. with strides `(1, m)` 
+           instead of `(m, 1)`.
+
+Args:
+    B (Tensor): input matrix of `m x k` dimensions
+    A (Tensor): input square matrix of `m x m` dimensions
+    out (Tensor, optional): optional output matrix
+
+Example::
+
+    >>> A = torch.Tensor([[6.80, -2.11,  5.66,  5.97,  8.23],
+    ...                   [-6.05, -3.30,  5.36, -4.44,  1.08],
+    ...                   [-0.45,  2.58, -2.70,  0.27,  9.04],
+    ...                   [8.32,  2.71,  4.35,  -7.17,  2.14],
+    ...                   [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
+    >>> B = torch.Tensor([[4.02,  6.19, -8.22, -7.57, -3.03],
+    ...                   [-1.56,  4.00, -8.67,  1.75,  2.86],
+    ...                   [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
+    >>> X, LU = torch.gesv(B, A)
+    >>> torch.dist(B, torch.mm(A, X))
+    9.250057093890353e-06
+    
+""")
 
 add_docstr(torch._C.get_num_threads,
 """
@@ -1579,10 +1652,56 @@ Example::
 
 """)
 
-# TODO
-# add_docstr(torch._C.inverse,
-# """
-# """)
+add_docstr(torch._C.inverse,
+"""
+inverse(input, out=None) -> Tensor
+
+Takes the inverse of the square matrix :attr:`input`.
+
+.. note:: Irrespective of the original strides, the returned matrix will be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`
+
+Args:
+    input (Tensor): the input 2D square `Tensor`
+    out (Tensor, optional): the optional output `Tensor`
+
+Example::
+
+    >>> x = torch.rand(10, 10)
+    >>> x
+    
+     0.7800  0.2267  0.7855  0.9479  0.5914  0.7119  0.4437  0.9131  0.1289  0.1982
+     0.0045  0.0425  0.2229  0.4626  0.6210  0.0207  0.6338  0.7067  0.6381  0.8196
+     0.8350  0.7810  0.8526  0.9364  0.7504  0.2737  0.0694  0.5899  0.8516  0.3883
+     0.6280  0.6016  0.5357  0.2936  0.7827  0.2772  0.0744  0.2627  0.6326  0.9153
+     0.7897  0.0226  0.3102  0.0198  0.9415  0.9896  0.3528  0.9397  0.2074  0.6980
+     0.5235  0.6119  0.6522  0.3399  0.3205  0.5555  0.8454  0.3792  0.4927  0.6086
+     0.1048  0.0328  0.5734  0.6318  0.9802  0.4458  0.0979  0.3320  0.3701  0.0909
+     0.2616  0.3485  0.4370  0.5620  0.5291  0.8295  0.7693  0.1807  0.0650  0.8497
+     0.1655  0.2192  0.6913  0.0093  0.0178  0.3064  0.6715  0.5101  0.2561  0.3396
+     0.4370  0.4695  0.8333  0.1180  0.4266  0.4161  0.0699  0.4263  0.8865  0.2578
+    [torch.FloatTensor of size 10x10]
+    
+    >>> x = torch.rand(10, 10)
+    >>> y = torch.inverse(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    
+     1.0000  0.0000  0.0000 -0.0000  0.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000
+     0.0000  1.0000 -0.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000 -0.0000 -0.0000
+     0.0000  0.0000  1.0000 -0.0000 -0.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000
+     0.0000  0.0000  0.0000  1.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000  0.0000
+     0.0000  0.0000 -0.0000 -0.0000  1.0000  0.0000  0.0000 -0.0000 -0.0000 -0.0000
+     0.0000  0.0000  0.0000 -0.0000  0.0000  1.0000 -0.0000 -0.0000 -0.0000 -0.0000
+     0.0000  0.0000  0.0000 -0.0000  0.0000  0.0000  1.0000  0.0000 -0.0000  0.0000
+     0.0000  0.0000 -0.0000 -0.0000  0.0000  0.0000 -0.0000  1.0000 -0.0000  0.0000
+    -0.0000  0.0000 -0.0000 -0.0000  0.0000  0.0000 -0.0000 -0.0000  1.0000 -0.0000
+    -0.0000  0.0000 -0.0000 -0.0000 -0.0000  0.0000 -0.0000 -0.0000  0.0000  1.0000
+    [torch.FloatTensor of size 10x10]
+    
+    >>> torch.max(torch.abs(z - torch.eye(10))) # Max nonzero
+    5.096662789583206e-07
+    
+""")
 
 add_docstr(torch._C.kthvalue,
 """
@@ -2930,7 +3049,60 @@ Example::
 # """)
 
 add_docstr(torch._C.qr,
-"""Computes the QR decomposition of a matrix.
+"""
+qr(input, out=None) -> (Tensor, Tensor)
+
+Computes the QR decomposition of a matrix :attr:`input`: returns matrices 
+`q` and `r` such that :math:`x = q * r`, with `q` being an orthogonal matrix 
+and `r` being an upper triangular matrix. 
+
+This returns the thin (reduced) QR factorization.
+
+.. note:: precision may be lost if the magnitudes of the elements of `input` are large
+
+.. note:: while it should always give you a valid decomposition, it may not 
+          give you the same one across platforms - it will depend on your 
+          LAPACK implementation.
+
+.. note:: Irrespective of the original strides, the returned matrix `q` will be 
+          transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+
+Args:
+    input (Tensor): the input 2D `Tensor`
+    out (tuple, optional): A tuple of Q and R Tensors
+
+Example::
+
+    >>> a = torch.Tensor([[12, -51, 4], [6, 167, -68], [-4, 24, -41]])
+    >>> q, r = torch.qr(a)
+    >>> q
+    
+    -0.8571  0.3943  0.3314
+    -0.4286 -0.9029 -0.0343
+     0.2857 -0.1714  0.9429
+    [torch.FloatTensor of size 3x3]
+    
+    >>> r
+    
+     -14.0000  -21.0000   14.0000
+       0.0000 -175.0000   70.0000
+       0.0000    0.0000  -35.0000
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.mm(q, r).round()
+    
+      12  -51    4
+       6  167  -68
+      -4   24  -41
+    [torch.FloatTensor of size 3x3]
+    
+    >>> torch.mm(q.t(), q).round()
+    
+     1 -0  0
+    -0  1  0
+     0  0  1
+    [torch.FloatTensor of size 3x3]
+
 """)
 
 add_docstr(torch._C.rand,
@@ -3532,14 +3704,142 @@ Example::
 
 """)
 
-# TODO
-# add_docstr(torch._C.svd,
-# """
-# """)
+add_docstr(torch._C.svd,
+"""
+svd(input, some=True, out=None) -> (Tensor, Tensor, Tensor)
 
-# add_docstr(torch._C.symeig,
-# """
-# """)
+`U, S, V = torch.svd(A)` returns the singular value decomposition of a 
+real matrix `A` of size `(n x m)` such that :math:`A = USV'*`.
+
+`U` is of shape `n x n`
+
+`S` is of shape `n x m`
+
+`V` is of shape `m x m`.
+
+:attr:`some` represents the number of singular values to be computed. 
+If `some=True`, it computes some and `some=False` computes all.
+
+.. note:: Irrespective of the original strides, the returned matrix `U` 
+          will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.
+
+Args:
+    input (Tensor): the input 2D Tensor
+    some (bool, optional): controls the number of singular values to be computed
+    out (tuple, optional): the result tuple
+
+Example::
+
+    >>> a = torch.Tensor([[8.79,  6.11, -9.15,  9.57, -3.49,  9.84],
+    ...                   [9.93,  6.91, -7.93,  1.64,  4.02,  0.15],
+    ...                   [9.83,  5.04,  4.86,  8.83,  9.80, -8.99],
+    ...                   [5.45, -0.27,  4.85,  0.74, 10.00, -6.02],
+    ...                   [3.16,  7.98,  3.01,  5.80,  4.27, -5.31]]).t()
+    >>> a
+    
+      8.7900   9.9300   9.8300   5.4500   3.1600
+      6.1100   6.9100   5.0400  -0.2700   7.9800
+     -9.1500  -7.9300   4.8600   4.8500   3.0100
+      9.5700   1.6400   8.8300   0.7400   5.8000
+     -3.4900   4.0200   9.8000  10.0000   4.2700
+      9.8400   0.1500  -8.9900  -6.0200  -5.3100
+    [torch.FloatTensor of size 6x5]
+    
+    >>> u, s, v = torch.svd(a)
+    >>> u
+    
+    -0.5911  0.2632  0.3554  0.3143  0.2299
+    -0.3976  0.2438 -0.2224 -0.7535 -0.3636
+    -0.0335 -0.6003 -0.4508  0.2334 -0.3055
+    -0.4297  0.2362 -0.6859  0.3319  0.1649
+    -0.4697 -0.3509  0.3874  0.1587 -0.5183
+     0.2934  0.5763 -0.0209  0.3791 -0.6526
+    [torch.FloatTensor of size 6x5]
+    
+    >>> s
+    
+     27.4687
+     22.6432
+      8.5584
+      5.9857
+      2.0149
+    [torch.FloatTensor of size 5]
+    
+    >>> v
+    
+    -0.2514  0.8148 -0.2606  0.3967 -0.2180
+    -0.3968  0.3587  0.7008 -0.4507  0.1402
+    -0.6922 -0.2489 -0.2208  0.2513  0.5891
+    -0.3662 -0.3686  0.3859  0.4342 -0.6265
+    -0.4076 -0.0980 -0.4932 -0.6227 -0.4396
+    [torch.FloatTensor of size 5x5]
+    
+    >>> torch.dist(a, torch.mm(torch.mm(u, torch.diag(s)), v.t()))
+    8.934150226306685e-06
+    
+""")
+
+add_docstr(torch._C.symeig,
+"""
+symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
+
+`e, V = torch.symeig(input)` returns eigenvalues and eigenvectors 
+of a symmetric real matrix :attr:`input`.
+
+`input` and `V` are `m x m` matrices and `e` is a `m` dimensional vector.
+
+This function calculates all eigenvalues (and vectors) of `input` 
+such that `input = V diag(e) V'`
+
+The boolean argument :attr:`eigenvectors` defines computation of 
+eigenvectors or eigenvalues only.
+
+If it is `False`, only eigenvalues are computed. If it is `True`, 
+both eigenvalues and eigenvectors are computed.
+
+Since the input matrix `input` is supposed to be symmetric, 
+only the upper triangular portion is used by default. 
+
+If :attr:`upper` is `False`, then lower triangular portion is used.
+
+Note: Irrespective of the original strides, the returned matrix `V` will 
+be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+
+Args:
+    input (Tensor): the input symmetric matrix
+    eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
+    upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
+    out (tuple, optional): The result tuple of (Tensor, Tensor)
+
+Examples::
+
+
+    >>> a = torch.Tensor([[ 1.96,  0.00,  0.00,  0.00,  0.00],
+    ...                   [-6.49,  3.80,  0.00,  0.00,  0.00],
+    ...                   [-0.47, -6.39,  4.17,  0.00,  0.00],
+    ...                   [-7.20,  1.50, -1.51,  5.70,  0.00],
+    ...                   [-0.65, -6.34,  2.67,  1.80, -7.10]]).t()
+    
+    >>> e, v = torch.symeig(a, eigenvectors=True)
+    >>> e
+    
+    -11.0656
+     -6.2287
+      0.8640
+      8.8655
+     16.0948
+    [torch.FloatTensor of size 5]
+    
+    >>> v
+    
+    -0.2981 -0.6075  0.4026 -0.3745  0.4896
+    -0.5078 -0.2880 -0.4066 -0.3572 -0.6053
+    -0.0816 -0.3843 -0.6600  0.5008  0.3991
+    -0.0036 -0.4467  0.4553  0.6204 -0.4564
+    -0.8041  0.4480  0.1725  0.3108  0.1622
+    [torch.FloatTensor of size 5x5]
+    
+""")
 
 add_docstr(torch._C.t,
 """
