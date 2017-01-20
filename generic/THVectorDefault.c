@@ -2,6 +2,21 @@
 #define TH_GENERIC_FILE "generic/THVectorDefault.c"
 #else
 
+void THVector_(copy_DEFAULT)(real *x, const real *y, const ptrdiff_t n) {
+  ptrdiff_t i = 0;
+
+  for(; i < n-4; i += 4)
+  {
+    x[i] = y[i];
+    x[i+1] = y[i+1];
+    x[i+2] = y[i+2];
+    x[i+3] = y[i+3];
+  }
+
+  for(; i < n; i++)
+    x[i] = y[i];
+}
+
 void THVector_(fill_DEFAULT)(real *x, const real c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
 

@@ -225,6 +225,20 @@ void THVector_(div)(real *y, const real *x, const real c, const ptrdiff_t n) {
   THVector_(div_DISPATCHPTR)(y, x, c, n);
 }
 
+static void (*THVector_(copy_DISPATCHPTR))(real *, const real *, const ptrdiff_t) = &THVector_(copy_DEFAULT);
+static FunctionDescription THVector_(copy_DISPATCHTABLE)[] = {
+  #if defined(USE_AVX)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(copy_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+
+  FUNCTION_IMPL(THVector_(copy_DEFAULT), SIMDExtension_DEFAULT)
+};
+void THVector_(copy)(real *y, const real *x, const ptrdiff_t n) {
+  THVector_(copy_DISPATCHPTR)(y, x, n);
+}
+
 /* This needs to be called in order to initialize the dispatch pointers at runtime.
  * This function simply checks what SIMD extensions are available, and then walks the dispatch table
  * to choose the best function.
@@ -242,6 +256,7 @@ void THVector_(vectorDispatchInit)(void)
   INIT_DISPATCH_PTR(mul);
   INIT_DISPATCH_PTR(cdiv);
   INIT_DISPATCH_PTR(div);
+  INIT_DISPATCH_PTR(copy);
 }
 
 #endif
