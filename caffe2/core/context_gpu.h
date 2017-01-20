@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_CONTEXT_GPU_H_
 
 #include <ctime>
+#include <mutex>
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
@@ -176,6 +177,12 @@ class CUDAContext final {
   static void* New(size_t nbytes);
 
   static void Delete(void* data);
+
+
+  // Get a mutex to lock out cudaMalloc / cudaFree calls when
+  // NCCL kernels are being launched. Should remove threat of
+  // deadlocks
+  static std::mutex& mutex();
 
   template <class SrcContext, class DstContext>
   inline void CopyBytes(size_t nbytes, const void* src, void* dst) {
