@@ -152,17 +152,10 @@ class HuffmanTreeHierarchyOp : public Operator<Context> {
  private:
   // Internal huffman tree data.
   struct Node {
-    Node(int l, int count)
-        : label(l),
-          count(count),
-          index(-1),
-          parent_index(-1),
-          left_ch_index(-1),
-          right_ch_index(-1) {}
+    Node(T l, int count)
+        : label(l), count(count), left_ch_index(-1), right_ch_index(-1) {}
     T label;
     int count;
-    int index;
-    int parent_index;
     int left_ch_index;
     int right_ch_index;
   };
