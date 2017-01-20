@@ -14,6 +14,8 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 DEBUG = check_env_flag('DEBUG')
 
+readme = open('README.rst').read()
+
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
 ################################################################################
@@ -313,6 +315,10 @@ if os.getenv('PYTORCH_BUILD_VERSION'):
               + '_' + os.getenv('PYTORCH_BUILD_NUMBER')
 
 setup(name="torch", version=version,
+    author='PyTorch Core Team',
+    author_email='soumith@pytorch.org',
+    url='http://pytorch.org',
+    long_description=readme,
     ext_modules=extensions,
     cmdclass = {
         'build': build,
