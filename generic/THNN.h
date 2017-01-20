@@ -102,6 +102,18 @@ TH_API void THNN_(DistKLDivCriterion_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           bool sizeAverage);           // if true, the loss will be normalized **by total number of elements**
 
+TH_API void THNN_(GatedLinear_updateOutput)(
+          THNNState *state,            // library's state
+          THTensor *input,             // input tensor
+          THTensor *output,            // [OUT] output tensor, half size of input along dimension dim
+          int dim);                    // dimension for halving operation
+TH_API void THNN_(GatedLinear_updateGradInput)(
+          THNNState *state,            // library's state
+          THTensor *input,             // input tensor
+          THTensor *gradOutput,        // gradient w.r.t module's output
+          THTensor *gradInput,         // [OUT] gradient w.r.t input
+          int dim);                    // dimension for halving operation
+
 // HardShink outputs 0 on interval of (-lambda; lambda) or original value otherwise.
 TH_API void THNN_(HardShrink_updateOutput)(
           THNNState *state,            // library's state
