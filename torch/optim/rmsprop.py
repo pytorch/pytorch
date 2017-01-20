@@ -37,7 +37,7 @@ class RMSprop(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['square_avg'] = grad.new().resize_as_(grad).fill_(1)
+                    state['square_avg'] = grad.new().resize_as_(grad).zero_()
 
                 square_avg = state['square_avg']
                 alpha = group['alpha']

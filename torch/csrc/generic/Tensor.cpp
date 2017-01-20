@@ -95,11 +95,6 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
 #ifdef NUMPY_TYPE_ENUM
 THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
   PyArrayObject *array = (PyArrayObject*)numpy_array;
-  THStoragePtr storage = THStorage_(newWithDataAndAllocator)(
-      (real*)PyArray_DATA(array),
-      PyArray_NBYTES(array) / sizeof(real),
-      &THNumpyArrayAllocator,
-      new NumpyArrayAllocator(numpy_array));
 
   // Numpy and Torch disagree on empty tensors. In Torch, an empty
   // tensor is a tensor with zero dimensions. In Numpy, an empty tensor
@@ -107,6 +102,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
   // So we'll convert all Numpy tensors of 0 elements to empty Torch tensors.
   if (PyArray_SIZE(array) != 0) {
     auto ndim = PyArray_NDIM(array);
+    size_t storage_size = 1;
     THLongStoragePtr sizes = THLongStorage_newWithSize(ndim);
     long *sizes_data = sizes->data;
     for (int i = 0; i < ndim; ++i) {
@@ -126,11 +122,19 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
             "future releases.");
         return NULL;
       }
+      // XXX: this won't work for negative strides
+      storage_size += strides_data[i] * (sizes_data[i] - 1);
     }
 
+    THStoragePtr storage = THStorage_(newWithDataAndAllocator)(
+        (real*)PyArray_DATA(array),
+        storage_size,
+        &THNumpyArrayAllocator,
+        new NumpyArrayAllocator(numpy_array));
     THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
     return result;
   } else {
+    THStoragePtr storage = THStorage_(new)();
     THTensor *result = THTensor_(newWithStorage)(storage, 0, NULL, NULL);
     return result;
   }

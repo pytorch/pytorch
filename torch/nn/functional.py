@@ -13,19 +13,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     """Applies a 2D convolution over an input image composed of several input
     planes.
 
-    ```
-    The output value of the function with input (b x iC x H x W) and filters
-    (oC x iC x kH x kW) can be precisely described as:
-    output[b_i][oc_i][h_i][w_i] = bias[oc_i]
-                + sum_iC sum_{oh = 0, oH-1} sum_{ow = 0, oW-1} \
-                                    sum_{kh = 0 to kH-1} sum_{kw = 0 to kW-1}
-                   weight[oc_i][ic_i][kh][kw]
-                   * input[b_i][ic_i][stride_h * oh + kh)][stride_w * ow + kw)]
-    ```
-
-    Note that depending of the size of your kernel, several (of the last)
-    columns or rows of the input image might be lost. It is up to the user
-    to add proper padding in images.
+    See :class:`~torch.nn.Conv2d` for details and output shape.
 
     Args:
         input: input tensor (minibatch x in_channels x iH x iW)
@@ -38,11 +26,6 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         groups: split input into groups, in_channels should be divisible by
           the number of groups
 
-    Output Shape: [ * , out_channels , * , * ]  : Output shape is precisely
-                        minibatch
-                        x out_channels
-                        x floor((iH  + 2*padH - kH) / dH + 1)
-                        x floor((iW  + 2*padW - kW) / dW + 1)
     Examples:
         >>> # With square kernels and equal stride
         >>> filters = autograd.Variable(torch.randn(8,4,3,3))
@@ -59,27 +42,14 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     """Applies a 1D convolution over an input signal composed of several input
     planes.
 
-    ```
-    The output value of the function with input (b x iC x W) and filters
-    (oC x oC x kw) can be precisely described as:
-    output[b_i][oc_i][w_i] = bias[oc_i]
-               + sum_iC sum_{ow = 0, oW-1} sum_{kw = 0 to kW-1}
-                 weight[oc_i][ic_i][kw] * input[b_i][ic_i][stride_w * ow + kw)]
-    ```
-
-    Note that depending on the size of your kernel, several (of the last)
-    columns of the input might be lost. It is up to the user
-    to add proper padding.
+    See :class:`~torch.nn.Conv1d` for details and output shape.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iW)
         weight: filters of shape (out_channels, in_channels, kW)
         bias: optional bias of shape (out_channels)
         stride: the stride of the convolving kernel, default 1
-    Output Shape:[ * , out_channels , * ]  : Output shape is precisely
-                 minibatch
-                 x out_channels
-                 x floor((iW  + 2*padW - kW) / dW + 1)
+
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
@@ -93,12 +63,9 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
            groups=1):
     """Applies a 3D convolution over an input image composed of several input
-    planes.
+        planes.
 
-
-    Note that depending of the size of your kernel, several (of the last)
-    columns or rows of the input image might be lost. It is up to the user
-    to add proper padding in images.
+    See :class:`~torch.nn.Conv3d` for details and output shape.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
@@ -108,11 +75,6 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
           a tuple (st x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
-    Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely
-                minibatch
-                x out_channels x floor((iT  + 2*padT - kT) / dT + 1)
-                x floor((iH  + 2*padH - kH) / dH + 1)
-                x floor((iW  + 2*padW - kW) / dW + 1)
 
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
@@ -134,10 +96,9 @@ def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
 def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1):
     """Applies a 2D transposed convolution operator over an input image
-    composed of several input planes, sometimes also called "deconvolution"
-    The operator multiplies each input value element-wise by a
-    kernel, and sums over the outputs from all input feature planes.
-    This module can be seen as the exact reverse of the conv2d function
+    composed of several input planes, sometimes also called "deconvolution".
+
+    See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iH x iW)
@@ -151,13 +112,6 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           the number of groups
         output_padding: A zero-padding of 0 <= padding < stride that should be
           added to the output. Can be a single number or a tuple. Default: 0
-    Output Shape:[ * , out_channels , * , * ]  : Output shape is
-                        minibatch x
-                        out_channels x
-                        (iH - 1) * sH - 2*padH + kH + output_paddingH x
-                        (iW - 1) * sW - 2*padW + kW + output_paddingW
-    Examples:
-        >>> #TODO
     """
     f = ConvNd(_pair(stride), _pair(padding), _pair(1), True,
                _pair(output_padding), groups)
@@ -168,9 +122,8 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1):
     """Applies a 3D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution"
-    The operator multiplies each input value element-wise by a
-    kernel, and sums over the outputs from all input feature planes.
-    This module can be seen as the exact reverse of the conv3d function
+
+    See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
@@ -180,14 +133,6 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input, a single number or a
           tuple (padh x padw). Default: 0
-    Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely
-                        minibatch
-                        x out_channels
-                        x (iT - 1) * sT - 2*padT + kT
-                        x (iH - 1) * sH - 2*padH + kH
-                        x (iW - 1) * sW - 2*padW + kW
-    Examples:
-        >>> #TODO
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(1), True,
                _triple(output_padding), groups)
@@ -200,22 +145,7 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
     r"""Applies a 1D average pooling over an input signal composed of several
     input planes.
 
-    In the simplest case, the output value of the layer with input size :math:`(N, C, L)`,
-    output :math:`(N, C, L_{out})` and :attr:`kernel_size` :math:`k`
-    can be precisely described as:
-
-    .. math::
-
-        \begin{array}{ll}
-        out(N_i, C_j, l)  = 1 / k * \sum_{{m}=0}^{k}
-                               input(N_i, C_j, stride * l + m)
-        \end{array}
-
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
-
-    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can each be
-    an ``int`` or a one-element tuple.
+    See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
     Args:
         kernel_size: the size of the window
@@ -224,13 +154,7 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
 
-    Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})` where
-          :math:`L_{out} = floor((L_{in}  + 2 * padding - kernel\_size) / stride + 1)`
-
-    Examples::
-
+    Example:
         >>> # pool of square window of size=3, stride=2
         >>> input = Variable(torch.Tensor([[[1,2,3,4,5,6,7]]]))
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
@@ -256,32 +180,19 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
     dh x dw steps. The number of output features is equal to the number of
     input planes.
 
-    By default, the output of each pooling region is divided by the number of
-    elements inside the padded image (which is usually kh x kw, except in some
-    corner cases in which it can be smaller). You can also divide by the number
-    of elements inside the original non-padded image.
-    To switch between different division factors, set count_include_pad to
-    True or False. If padW=padH=0, both options give the same results.
+    See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
     Args:
-        :param input: input tensor (minibatch x in_channels x iH x iW)
-        :param kernel_size: size of the pooling region, a single number or a
+        input: input tensor (minibatch x in_channels x iH x iW)
+        kernel_size: size of the pooling region, a single number or a
           tuple (kh x kw)
-        :param stride: stride of the pooling operation, a single number or a
+        stride: stride of the pooling operation, a single number or a
           tuple (sh x sw). Default is equal to kernel size
-        :param padding: implicit zero padding on the input, a single number or
+        padding: implicit zero padding on the input, a single number or
           a tuple (padh x padw), Default: 0
-        :param ceil_mode: operation that defines spatial output shape
-        :param count_include_pad: divide by the number of elements inside the
+        ceil_mode: operation that defines spatial output shape
+        count_include_pad: divide by the number of elements inside the
           original non-padded image or kh * kw
-        :return: output tensor of shape
-    Output Shape: [ * , in_channels, * , * ] : Output shape is precisely
-                        minibatch
-                        x in_channels
-                        x op((iH + 2*padh - kh) / dh + 1)
-                        x op((iW + 2*padw - kw) / dw + 1)
-    Examples:
-        >>> #TODO
     """
     return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                      ceil_mode, count_include_pad)(input)
@@ -291,14 +202,6 @@ def avg_pool3d(input, kernel_size, stride=None):
     """Applies 3D average-pooling operation in kt x kh x kw regions by step
     size kt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
-
-    Args:
-        :param input:
-        :param kernel_size:
-        :param stride:
-        :return:
-    Examples:
-        >>> #TODO
     """
     return _functions.thnn.AvgPool3d(kernel_size, stride)(input)
 
@@ -490,29 +393,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 def nll_loss(input, target, weight=None, size_average=True):
     r"""The negative log likelihood loss.
 
-    It is useful to train a classication problem with n classes.
-    If provided, the argument `weights` should be a 1D Tensor
-    assigning weight to each of the classes.
-    This is particularly useful when you have an unbalanced training set.
-
-    The input given to a forward call is expected to contain
-    log-probabilities of each class. It has to be a 2D Tensor of size
-    `(minibatch, n)`
-
-    Obtaining log-probabilities in a neural network is easily achieved by
-    calling `log_softmax` on input. You may use `cross_entropy` function
-    instead which applies `log_softmax` internally.
-
-    The target that this loss expects is a class index
-    `(0 to N-1, where N = number of classes)`
-
-    The loss can be described as::
-
-        loss(x, class) = -x[class]
-
-    or in the case of the weights argument it is specified as follows::
-
-        loss(x, class) = -weights[class] * x[class]
+    See :class:`~torch.nn.NLLLoss` for details.
 
     Args:
         input: :math:`(N, C)` where `C = number of classes`
@@ -527,8 +408,7 @@ def nll_loss(input, target, weight=None, size_average=True):
     Attributes:
         weight: the class-weights given as input to the constructor
 
-    Examples::
-
+    Example:
         >>> # input is of size nBatch x nClasses = 3 x 5
         >>> input = autograd.Variable(torch.randn(3, 5))
         >>> # each element in target has to have 0 <= value < nclasses
@@ -542,26 +422,7 @@ def nll_loss(input, target, weight=None, size_average=True):
 def kl_div(input, target, size_average=True):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
-    KL divergence is a useful distance measure for continuous distributions
-    and is often useful when performing direct regression over the space of
-    (discretely sampled) continuous output distributions.
-
-    As with `nll_loss`, the `input` given is expected to contain
-    *log-probabilities*, however unlike `class_nll_loss`, `input` is not
-    restricted to a 2D Tensor, because the criterion is applied element-wise.
-
-    This function expects a `target` `Tensor` of the same size as the
-    `input` `Tensor`.
-
-    The loss can be described as:
-    :math:`loss(x, target) = 1/n \sum(target_i * (log(target_i) - x_i))`
-
-    By default, the losses are averaged for each minibatch over observations
-    **as well as** over dimensions. However, if the field
-    `sizeAverage` is set to `False`, the losses are instead summed.
-
-    .. _Kullback-Leibler divergence:
-        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+    See :class:`~torch.nn.KLDivLoss` for details.
 
     Args:
         input: Tensor of arbitrary shape
@@ -575,26 +436,7 @@ def kl_div(input, target, size_average=True):
 def cross_entropy(input, target, weight=None, size_average=True):
     r"""This criterion combines `log_softmax` and `nll_loss` in one single class.
 
-    It is useful when training a classification problem with `n` classes.
-    If provided, the optional argument `weights` should be a 1D `Tensor`
-    assigning weight to each of the classes.
-    This is particularly useful when you have an unbalanced training set.
-
-    The `input` is expected to contain scores for each class.
-
-    `input` has to be a 2D `Tensor` of size `batch x n`.
-
-    This criterion expects a class index (0 to nClasses-1) as the
-    `target` for each value of a 1D tensor of size `n`
-
-    The loss can be described as::
-
-        loss(x, class) = -log(exp(x[class]) / (\sum_j exp(x[j])))
-                       = -x[class] + log(\sum_j exp(x[j]))
-
-    or in the case of the `weights` argument being specified::
-
-        loss(x, class) = weights[class] * (-x[class] + log(\sum_j exp(x[j])))
+    See :class:`torch.nn.CrossEntropyLoss` for details.
 
     Args:
         input: Tensor :math:`(N, C)` where `C = number of classes`
@@ -605,7 +447,6 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
-
     """
     return nll_loss(log_softmax(input), target, weight, size_average)
 
@@ -614,19 +455,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
     r"""Function that measures the Binary Cross Entropy
     between the target and the output:
 
-    :math:`loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))`
-
-    or in the case of the weights argument being specified:
-
-    :math:`loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))`
-
-    This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1,
-    for instance, the output of an `nn.Sigmoid` layer.
-
-    By default, the losses are averaged for each minibatch over observations
-    *as well as* over dimensions. However, if the field `sizeAverage` is set
-    to `False`, the losses are instead summed.
+    See :class:`~torch.nn.BCELoss` for details.
 
     Args:
         input: Tensor of arbitrary shape
@@ -637,7 +466,6 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
-
     """
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
 
@@ -647,16 +475,15 @@ def smooth_l1_loss(input, target, size_average=True):
 
 
 def pixel_shuffle(input, upscale_factor):
-    """Rearranges elements in a tensor of shape [*, C*r^2, H, W] to a
-    tensor of shape [C, H*r, W*r]. This is useful for implementing
-    efficient sub-pixel convolution with a stride of 1/r.
-    "Real-Time Single Image and Video Super-Resolution Using an Efficient
-    Sub-Pixel Convolutional Neural Network" - Shi et. al (2016) for more details
+    r"""Rearranges elements in a tensor of shape ``[*, C*r^2, H, W]`` to a
+    tensor of shape ``[C, H*r, W*r]``.
+
+    See :class:`~torch.nn.PixelShuffle` for details.
+
     Args:
         input (Tensor): Input
         upscale_factor (int): factor to increase spatial resolution by
-    Input Shape: [*, channels*upscale_factor^2, height, width]
-    Output Shape:[*, channels, height*upscale_factor, width*upscale_factor]
+
     Examples:
         >>> ps = nn.PixelShuffle(3)
         >>> input = autograd.Variable(torch.Tensor(1, 9, 4, 4))

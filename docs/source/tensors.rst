@@ -180,7 +180,6 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_cuda
       :annotation:
    .. automethod:: is_pinned
-   .. automethod:: is_same_size
    .. automethod:: is_set_to
    .. automethod:: is_signed
    .. automethod:: kthvalue
@@ -196,7 +195,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: long
    .. automethod:: lt
    .. automethod:: lt_
-   .. automethod:: map2_
    .. automethod:: map_
    .. automethod:: masked_copy_
    .. automethod:: masked_fill_
@@ -224,7 +222,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: normal_
    .. automethod:: numel
    .. automethod:: numpy
-   .. automethod:: ones_
    .. automethod:: orgqr
    .. automethod:: ormqr
    .. automethod:: permute
@@ -310,4 +307,3 @@ view of a storage and defines numeric operations on it.
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: zero_
-   .. automethod:: zeros_

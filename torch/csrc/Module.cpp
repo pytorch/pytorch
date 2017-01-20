@@ -11,8 +11,6 @@
 #include "cudnn/Module.h"
 #endif
 
-#include "TensorDocstrings.h"
-
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
@@ -275,10 +273,8 @@ IMPLEMENT_STATELESS(cauchy)
 IMPLEMENT_STATELESS(log_normal)
 IMPLEMENT_STATELESS(random)
 IMPLEMENT_STATELESS(bernoulli)
-IMPLEMENT_STATELESS(unfold)
 IMPLEMENT_STATELESS(range)
 IMPLEMENT_STATELESS(gather)
-IMPLEMENT_STATELESS(scatter)
 IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
 IMPLEMENT_STATELESS(masked_select)
@@ -425,14 +421,34 @@ PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs
   return result;
 }
 
+static std::string parseString(PyObject *obj)
+{
+  if (PyBytes_Check(obj)) {
+    return std::string(PyBytes_AS_STRING(obj));
+#if PY_MAJOR_VERSION == 3
+  } else if (PyUnicode_Check(obj)) {
+    return std::string(PyUnicode_AsUTF8(obj));
+#else
+  } else if (PyUnicode_Check(obj)) {
+    THPObjectPtr utf8 = PyUnicode_AsUTF8String(obj);
+    return std::string(PyBytes_AS_STRING(utf8.get()));
+#endif
+  }
+  return "<invalid string>";
+}
+
 PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
+  static std::vector<std::string> all_docs;
   PyObject *obj;
-  PyObject *doc;
-  if (!PyArg_ParseTuple(args, "OO!", &obj, &THPUtils_stringType, &doc)) {
+  PyObject *doc_obj;
+  if (!PyArg_ParseTuple(args, "OO", &obj, &doc_obj)) {
     return NULL;
   }
+
+  all_docs.push_back(parseString(doc_obj));
+  const char* doc_str = all_docs.back().c_str();
 
   if (Py_TYPE(obj) == &PyCFunction_Type) {
     PyCFunctionObject* f = (PyCFunctionObject *)obj;
@@ -440,16 +456,14 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
       return PyErr_Format(PyExc_RuntimeError,
           "function '%s' already has a docstring", f->m_ml->ml_name);
     }
-    f->m_ml->ml_doc = THPUtils_stringAsString(doc);
-    Py_INCREF(doc);
+    f->m_ml->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "method_descriptor") == 0) {
     PyMethodDescrObject* m = (PyMethodDescrObject *)obj;
     if (m->d_method->ml_doc) {
       return PyErr_Format(PyExc_RuntimeError,
           "method '%s' already has a docstring", m->d_method->ml_name);
     }
-    m->d_method->ml_doc = THPUtils_stringAsString(doc);
-    Py_INCREF(doc);
+    m->d_method->ml_doc = doc_str;
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
@@ -612,10 +626,8 @@ static PyMethodDef TorchMethods[] = {
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS | METH_KEYWORDS, NULL},
-  {"unfold",          (PyCFunction)THPModule_unfold,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"scatter",         (PyCFunction)THPModule_scatter,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
   {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS | METH_KEYWORDS, NULL},

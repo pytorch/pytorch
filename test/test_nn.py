@@ -717,8 +717,6 @@ class TestNN(NNTestCase):
         net.add_module('empty', None)
 
         state_dict = net.state_dict()
-        from pprint import pprint
-        pprint(state_dict.keys())
         self.assertEqual(len(state_dict), 9)
         self.assertIn('linear1.weight', state_dict)
         self.assertIn('linear1.bias', state_dict)

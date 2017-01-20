@@ -8,6 +8,8 @@ PyTorch is a python package that provides two high-level features:
 
 You can reuse your favorite python packages such as numpy, scipy and Cython to extend PyTorch when needed.
 
+We are in an early-release Beta. Expect some adventures and rough edges.
+
 - [More About PyTorch](#more-about-pytorch)
 - [Installation](#installation)
   - [Binaries](#binaries)
@@ -15,6 +17,7 @@ You can reuse your favorite python packages such as numpy, scipy and Cython to e
 - [Getting Started](#getting-started)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
+- [The Team](#the-team)
 
 | Python |  **`Linux CPU`**   |  **`Linux GPU`** |
 |--------|--------------------|------------------|
@@ -115,7 +118,7 @@ Writing new neural network modules, or interfacing with PyTorch's Tensor API was
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
-[or your favorite numpy based libraries such as SciPy](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb)
+[or your favorite numpy based libraries such as SciPy](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb).
 
 If you want to write your layers in C/C++, we provide an extension API based on
 [cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.  
@@ -127,7 +130,7 @@ There is no wrapper code that needs to be written. [You can see an example here]
 ### Binaries
 - Anaconda
 ```bash
-conda install pytorch -c https://conda.anaconda.org/t/6N-MsQ4WZ7jo/soumith
+conda install pytorch torchvision -c soumith
 ```
 
 ### From source
@@ -142,7 +145,11 @@ If you want to compile with CUDA support, install
 
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
+
+# Install basic dependencies
 conda install numpy mkl setuptools cmake gcc cffi
+
+# On Linux, add LAPACK support for the GPU
 conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
 ```
 
@@ -169,17 +176,25 @@ Three pointers to get you started:
 ## Releases and Contributing
 
 PyTorch has a 90 day release cycle (major releases). 
-It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues)
+It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 
 If you plan to contribute new features, utility functions or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR, because we might be taking the core in a different direction than you might be aware of.
 
-**For the next release cycle, these are the 3 big features were are planning to add:**
+**For the next release cycle, these are the 3 big features we are planning to add:**
 
-1. [Distributed PyTorch](https://github.com/pytorch/pytorch/issues/241) (a draft implementation is present in this [branch](https://github.com/apaszke/pytorch-dist)
+1. [Distributed PyTorch](https://github.com/pytorch/pytorch/issues/241) (a draft implementation is present in this [branch](https://github.com/apaszke/pytorch-dist) )
 2. Backward of Backward - Backpropagating through the optimization process itself. Some past and recent papers such as
    [Double Backprop](http://yann.lecun.com/exdb/publis/pdf/drucker-lecun-91.pdf) and [Unrolled GANs](https://arxiv.org/abs/1611.02163) need this.
 3. Lazy Execution Engine for autograd - This will enable us to optionally introduce caching and JIT compilers to optimize autograd code.
 
+
+## The Team
+
+PyTorch is a community driven project with several skillful engineers and researchers contributing to it.
+
+PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury) and [Soumith Chintala](http://soumith.ch) with major contributions coming from 10s of talented individuals in various forms and means. A non-exhaustive but growing list needs to mention: Sergey Zagoruyko, Adam Lerer, Francisco Massa, Andreas Kopf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein.
+
+Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.

@@ -60,7 +60,8 @@ class BatchNorm1d(_BatchNorm):
     of size N (where N is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1
+    and variance. The running sum is kept with a default momentum of 0.1.
+    
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -100,7 +101,8 @@ class BatchNorm2d(_BatchNorm):
     of size N (where N is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1
+    and variance. The running sum is kept with a default momentum of 0.1.
+    
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -140,7 +142,8 @@ class BatchNorm3d(_BatchNorm):
     of size N (where N is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1
+    and variance. The running sum is kept with a default momentum of 0.1.
+    
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
