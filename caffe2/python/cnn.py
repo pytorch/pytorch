@@ -563,6 +563,34 @@ class CNNModelHelper(ModelHelperBase):
         """Sum"""
         return self.net.Sum(blob_in, blob_out, **kwargs)
 
+    def InstanceNorm(self, blob_in, blob_out, dim_in, **kwargs):
+        blob_out = blob_out or self.net.NextName()
+        # Input: input, scale, bias
+        # Output: output, saved_mean, saved_inv_std
+        # scale: initialize with ones
+        # bias: initialize with zeros
+
+        def init_blob(value, suffix):
+            return self.param_init_net.ConstantFill(
+                [], blob_out + "_" + suffix, shape=[dim_in], value=value)
+        scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
+
+        self.params.extend([scale, bias])
+        self.weights.append(scale)
+        self.biases.append(bias)
+        blob_outs = [blob_out, blob_out + "_sm", blob_out + "_siv"]
+        if 'is_test' in kwargs and kwargs['is_test']:
+            blob_outputs = self.net.InstanceNorm(
+                [blob_in, scale, bias], [blob_out],
+                order=self.order, **kwargs)
+            return blob_outputs
+        else:
+            blob_outputs = self.net.InstanceNorm(
+                [blob_in, scale, bias], blob_outs,
+                order=self.order, **kwargs)
+            # Return the output
+            return blob_outputs[0]
+
     def SpatialBN(self, blob_in, blob_out, dim_in, **kwargs):
         blob_out = blob_out or self.net.NextName()
         # Input: input, scale, bias, est_mean, est_inv_var
