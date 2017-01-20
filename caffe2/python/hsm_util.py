@@ -54,7 +54,7 @@ def create_hierarchy(tree_proto):
             max_index = recursive_path_builder(node, path, hierarchy_proto,
                                                max_index)
         for target, word in enumerate(node_proto.word_ids):
-            path[-1][2] = target
+            path[-1][2] = target + len(node_proto.children)
             path_entry = create_path(path, word)
             new_path_entry = hierarchy_proto.paths.add()
             new_path_entry.MergeFrom(path_entry)
