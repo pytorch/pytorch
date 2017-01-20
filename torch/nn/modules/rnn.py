@@ -222,7 +222,7 @@ class GRU(RNNBase):
             \begin{array}{ll}
             r_t = sigmoid(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             i_t = sigmoid(W_{ii} x_t + b_{ii} + W_hi h_{(t-1)} + b_{hi}) \\
-            n_t = \tanh(W_{in} x_t + resetgate * W_{hn} h_{(t-1)}) \\
+            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
             h_t = (1 - i_t) * n_t + i_t * h_{(t-1)} \\
             \end{array}
 
@@ -433,7 +433,7 @@ class GRUCell(RNNCellBase):
         \begin{array}{ll}
         r = sigmoid(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
         i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
-        n = \tanh(W_{in} x + r * W_{hn} h) \\
+        n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
         h' = (1 - i) * n + i * h
         \end{array}
 
