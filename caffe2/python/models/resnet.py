@@ -15,12 +15,13 @@ class ResNetBuilder():
     Helper class for constructing residual blocks.
     '''
 
-    def __init__(self, model, prev_blob, no_bias, is_test):
+    def __init__(self, model, prev_blob, no_bias, is_test, spatial_bn_mom=0.9):
         self.model = model
         self.comp_count = 0
         self.comp_idx = 0
         self.prev_blob = prev_blob
         self.is_test = is_test
+        self.spatial_bn_mom = spatial_bn_mom
         self.no_bias = 1 if no_bias else 0
 
     def add_conv(self, in_filters, out_filters, kernel, stride=1, pad=0):
@@ -51,6 +52,7 @@ class ResNetBuilder():
             'comp_%d_spatbn_%d' % (self.comp_count, self.comp_idx),
             num_filters,
             epsilon=1e-3,
+            momentum=self.spatial_bn_mom,
             is_test=self.is_test,
         )
         return self.prev_blob
@@ -120,6 +122,7 @@ class ResNetBuilder():
                     'shortcut_projection_%d_spatbn' % self.comp_count,
                     output_filters,
                     epsilon=1e-3,
+                    momentum=self.spatial_bn_mom,
                     is_test=self.is_test,
                 )
 
@@ -203,14 +206,17 @@ def create_resnet50(
     no_bias=0,
 ):
     # conv1 + maxpool
-    model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}), kernel=7, stride=2, pad=3, no_bias=no_bias)
+    model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}),
+               kernel=7, stride=2, pad=3, no_bias=no_bias)
 
-    model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3, is_test=is_test)
+    model.SpatialBN('conv1', 'conv1_spatbn_relu', 64,
+                    epsilon=1e-3, momentum=0.1, is_test=is_test)
     model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
     model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
 
     # Residual blocks...
-    builder = ResNetBuilder(model, 'pool1', no_bias=no_bias, is_test=is_test)
+    builder = ResNetBuilder(model, 'pool1', no_bias=no_bias,
+                            is_test=is_test, spatial_bn_mom=0.1)
 
     # conv2_x (ref Table 1 in He et al. (2015))
     builder.add_bottleneck(64, 64, 256)
