@@ -122,3 +122,51 @@ def ConvertProtoToBinary(proto_class, filename, out_filename):
     proto = TryReadProtoWithClass(proto_class, open(filename).read())
     with open(out_filename, 'w') as fid:
         fid.write(proto.SerializeToString())
+
+
+class DebugMode(object):
+    '''
+    This class allows to drop you into an interactive debugger
+    if there is an unhandled exception in your python script
+
+    Example of usage:
+
+    def main():
+        # your code here
+        pass
+
+    if __name__ == '__main__':
+        from caffe2.python.utils import DebugMode
+        DebugMode.enable()
+        DebugMode.run(main)
+    '''
+
+    _enabled = False
+
+    @classmethod
+    def enable(cls):
+        cls._enabled = True
+
+    @classmethod
+    def disable(cls):
+        cls._enabled = False
+
+    @classmethod
+    def run(cls, func):
+        try:
+            return func()
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            if cls._enabled:
+                import pdb
+
+                print(
+                    'Entering interactive debugger. Type "bt" to print '
+                    'the full stacktrace. Type "help" to see command listing.')
+                print(sys.exc_info()[1])
+                print
+
+                pdb.post_mortem()
+                sys.exit(1)
+            raise
