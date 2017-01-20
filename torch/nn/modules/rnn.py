@@ -164,7 +164,7 @@ class LSTM(RNNBase):
             f_t = sigmoid(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
             o_t = sigmoid(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
-            c_t = f_t * c_{(t-1)} + i_t * c_t \\
+            c_t = f_t * c_{(t-1)} + i_t * g_t \\
             h_t = o_t * \tanh(c_t)
             \end{array}
 
@@ -362,7 +362,7 @@ class LSTMCell(RNNCellBase):
         f = sigmoid(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
         g = \tanh(W_{ig} x + b_{ig} + W_{hc} h + b_{hg}) \\
         o = sigmoid(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
-        c' = f * c + i * c \\
+        c' = f * c + i * g \\
         h' = o * \tanh(c_t) \\
         \end{array}
 
