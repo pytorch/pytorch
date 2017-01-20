@@ -283,6 +283,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   } else {
     DCHECK_EQ(X.ndim(), 4);
     DCHECK_EQ(T.ndim(), 3);
+    DCHECK_EQ(T.dim32(0), N);
 
     int H = X.dim32(2);
     int W = X.dim32(3);
@@ -321,10 +322,11 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     cudaFree(total_weight_ptr);
 
     // Final scaling
-    math::Scale<float, CUDAContext>(
-        1, scale_ / h_total_weight,
-        avg_loss_data, avg_loss_data, &context_);
-
+    if (h_total_weight > 0) {
+      math::Scale<float, CUDAContext>(
+          1, scale_ / h_total_weight,
+          avg_loss_data, avg_loss_data, &context_);
+    }
   }
   return true;
 }
@@ -367,7 +369,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
         cudaMemcpyDeviceToHost, context_.cuda_stream());
       cudaFree(total_weight_ptr);
     }
-        
+
     // Scale by d_avg_loss / N
     math::Scale<float, CUDAContext>(
         dX->size(), scale_ / total_weight, dX->data<float>(),
@@ -414,16 +416,20 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     cudaFree(total_weight_ptr);
 
     // Final scaling
-    math::Scale<float, CUDAContext>(
-        dX->size(),
-        scale_ / h_total_weight,
-        dX->data<float>(),
-        dX->mutable_data<float>(), &context_);
+    if (h_total_weight > 0) {
+      math::Scale<float, CUDAContext>(
+          dX->size(),
+          scale_ / h_total_weight,
+          dX->data<float>(),
+          dX->mutable_data<float>(),
+          &context_);
+    }
     math::Scale<float, CUDAContext>(
         dX->size(),
         d_avg_loss.data<float>(),
         dX->data<float>(),
-        dX->mutable_data<float>(), &context_);
+        dX->mutable_data<float>(),
+        &context_);
   }
   return true;
 }

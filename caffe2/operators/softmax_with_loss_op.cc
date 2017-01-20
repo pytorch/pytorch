@@ -89,6 +89,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     // Spatial mode, compute softmax for each x, y location
     DCHECK_EQ(X.ndim(), 4);
     DCHECK_EQ(T.ndim(), 3);
+    DCHECK_EQ(T.dim32(0), N);
 
     int H = X.dim32(2);
     int W = X.dim32(3);
@@ -146,7 +147,11 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
         }
       }
     }
-    *avg_loss_data = sum_label_xent / total_weight;
+    if (total_weight != 0.0) {
+      *avg_loss_data = sum_label_xent / total_weight;
+    } else {
+      *avg_loss_data = 0.0;
+    }
   } // if spatial
   return true;
 }
@@ -248,7 +253,6 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
               total_weight += 1.0;
             }
           } else {
-
             // Set gradient to zero for coordinates where we have dont care
             for (int c = 0; c < D; ++c) {
               int idx = i * (H * W * D) + c * (H * W) + y * W + x;
@@ -259,12 +263,14 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
       }
     }
 
-    math::Scale<float, CPUContext>(
-        dX->size(),
-        scale_ / total_weight,
-        dX->data<float>(),
-        dX_data,
-        &context_);
+    if (total_weight > 0) {
+      math::Scale<float, CPUContext>(
+          dX->size(),
+          scale_ / total_weight,
+          dX->data<float>(),
+          dX_data,
+          &context_);
+    }
     math::Scale<float, CPUContext>(
         dX->size(),
         d_avg_loss.data<float>(),

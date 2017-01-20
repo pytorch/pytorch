@@ -255,6 +255,59 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, inputs, 0, [1], stepsize=1e-4, threshold=1e-2)
 
+    @given(n=st.integers(4, 5), D=st.integers(3, 4),
+           weighted=st.booleans(), **hu.gcs)
+    def test_spatial_softmax_with_loss_allignore(self, n, D, weighted, gc, dc):
+        # n = number of examples, D = |labels|
+        # Initialize X and add 1e-2 for numerical stability
+        W = 18
+        H = 12
+        X = np.random.rand(n, D, H, W).astype(np.float32)
+        X = X + 1e-2
+
+        weighted = True
+        weights = None
+        if weighted:
+            weights = np.random.rand(n, H, W).astype(np.float32)
+
+        # Initialize label. All labels as "DONT CARE"
+        label = np.zeros((n, H, W)).astype(np.int32) - 1
+        print(label)
+
+        def label_softmax_crossent_spatial(X, label, weights=None):
+            probs = np.zeros((n, D, H, W))
+            rowmax = np.zeros((n, H, W))
+            label_xent = np.zeros((n, H, W))
+            for i in range(n):
+                for x in range(W):
+                    for y in range(H):
+                        rowmax[i, y, x] = max(X[i, :, y, x])
+                        # We need to subtract the max to avoid numerical issues
+                        probs[i, :, y, x] = X[i, :, y, x] - rowmax[i, y, x]
+                        exps = np.exp(probs[i, :, y, x])
+                        probs[i, :, y, x] = exps / sum(exps)
+
+                        label_xent[:, y, x] = \
+                            [-np.log(max(probs[j, label[i, y, x], y, x], 1e-20))
+                            for j in range(n)]
+
+            return (probs, 0.0)
+
+        op = core.CreateOperator(
+            "SoftmaxWithLoss",
+            ["X", "label"] + ([] if weights is None else ["weights"]),
+            ["probs", "avgloss"],
+            spatial=1
+        )
+
+        inputs = [X, label] + ([] if weights is None else [weights])
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=label_softmax_crossent_spatial,
+        )
+
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def test_compare_cpugpu(self):
         '''
