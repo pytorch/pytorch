@@ -7,20 +7,20 @@
 
 namespace caffe2 {
 
-template <class Context>
+template <typename T, class Context>
 class InstanceNormOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   InstanceNormOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
+        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(epsilon_ >= 0, "Must pass a nonnegative epsilon.");
   }
   ~InstanceNormOp() {}
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     switch (order_) {
       case StorageOrder::NHWC:
         return RunOnDeviceWithOrderNHWC();
@@ -37,12 +37,59 @@ class InstanceNormOp : public Operator<Context> {
   bool RunOnDeviceWithOrderNCHW();
 
  protected:
-  float epsilon_;
+  // parameters
+  T epsilon_;
   StorageOrder order_;
+
+  // temp results that get passed to the gradient, but are otherwise stored here
   Tensor<Context> mean_;
-  Tensor<Context> inv_var_;
+  Tensor<Context> inv_stdev_;
+
   INPUT_TAGS(INPUT, SCALE, BIAS);
-  OUTPUT_TAGS(OUTPUT, MEAN, INV_VAR);
+  OUTPUT_TAGS(OUTPUT, MEAN, INV_STDEV);
+};
+
+template <typename T, class Context>
+class InstanceNormGradientOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  InstanceNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5)),
+        order_(StringToStorageOrder(
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+    CAFFE_ENFORCE(epsilon_ >= 0, "Must pass a nonnegative epsilon.");
+  }
+  ~InstanceNormGradientOp() {}
+
+  bool RunOnDevice() {
+    switch (order_) {
+      case StorageOrder::NHWC:
+        return RunOnDeviceWithOrderNHWC();
+      case StorageOrder::NCHW:
+        return RunOnDeviceWithOrderNCHW();
+      default:
+        CAFFE_THROW("Unknown storage order: ", order_);
+    }
+    // To suppress old compiler warnings
+    return true;
+  }
+
+  bool RunOnDeviceWithOrderNHWC();
+  bool RunOnDeviceWithOrderNCHW();
+
+ protected:
+  // parameters
+  T epsilon_;
+  StorageOrder order_;
+
+  // temp results that could get passed through to this gradient, but if not,
+  // are stored here
+  Tensor<Context> mean_;
+  Tensor<Context> inv_stdev_;
+
+  INPUT_TAGS(INPUT, SCALE, BIAS, OUTPUT_GRAD, MEAN, INV_STDEV);
+  OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);
 };
 
 } // namespace caffe2
