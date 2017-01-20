@@ -617,4 +617,209 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 #endif
 }
 
+// TODO: add support for pivoting
+THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  THAssert(THCTensor_(checkGPU)(state, 2, ra_, a));
+  THArgCheck(THCTensor_(nDimension)(state, a) == 3, 3, "expected 3D tensor");
+  THArgCheck(THCTensor_(size)(state, a, 1) == 
+             THCTensor_(size)(state, a, 2), 3, "matrices must be square");
+
+  if (ra_ != a) {
+    THCTensor_(resizeAs)(state, ra_, a);
+    // not sure if this is kosher, but things are nicer if we return in column major
+    if (ra_->stride[0] == 1) {
+      THCTensor_(transpose)(state, ra_, NULL, 1, 0);  
+    } else if (ra_->stride[2] == 1) {
+      THCTensor_(transpose)(state, ra_, NULL, 1, 2);  
+    }
+    THCTensor_(copy)(state, ra_, a);
+  }
+
+
+  int n = a->size[1];
+  int lda;
+  THCTensor *ra__;
+
+  if (ra_->stride[1] == 1) {
+    // column ordered, what BLAS wants
+    lda = ra_->stride[2];
+    ra__ = ra_;
+  } else {
+    // not column ordered, need to make it such (requires copy)
+    THCTensor *transp_r_ = THCTensor_(newTranspose)(state, ra_, 1, 2);
+    ra__ = THCTensor_(newClone)(state, transp_r_);
+    THCTensor_(free)(state, transp_r_);
+    THCTensor_(transpose)(state, ra__, NULL, 1, 2);
+    lda = ra__->stride[2];
+  }
+
+
+  long num_batches = ra__->size[0];
+  size_t matrices_size = num_batches * sizeof(real*);
+
+  // Copy pointers to device.
+  real **d_result;
+  THCudaCheck(THCudaMalloc(state, (void**)&d_result, matrices_size));
+
+  const long block = 512;
+  const long grid = (num_batches + block - 1) / block;
+  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+    (const real**)d_result, THCTensor_(data)(state, ra__), 
+    ra__->stride[0], num_batches);
+
+  int info[num_batches];
+  int *info_gpu;
+  THCudaCheck(THCudaMalloc(state, (void**)&info_gpu, sizeof(int)*num_batches));
+
+#ifdef THC_REAL_IS_FLOAT
+  THCudaBlas_Sgetrf(state, n, d_result, lda, NULL, info_gpu, num_batches);
+#elif defined(THC_REAL_IS_DOUBLE)
+  THCudaBlas_Dgetrf(state, n, d_result, lda, NULL, info_gpu, num_batches);
+#endif
+
+  THCudaCheck(cudaMemcpy(info, info_gpu, sizeof(int)*num_batches, cudaMemcpyDeviceToHost));
+
+  for (int i = 0; i < num_batches; i++) {
+    if (info[i] > 0) {
+      THError("Error U[%d,%d] is zero for A[%d]", info[i], info[i], i);
+    } else if (info[i] < 0) {
+      THError("Illegal arg %d is zero for A[%d]", -info[i], i);
+    }
+  }
+
+  THCudaFree(state, d_result);
+  THCudaFree(state, info_gpu);
+
+  
+  if (ra__ != ra_) {
+    THCTensor_(freeCopyTo)(state, ra__, ra_);
+  }
+
+#else
+  THError("unimplemented data type");
+#endif
+}
+
+
+THC_API void THCTensor_(btrs)(THCState *state, THCTensor *rb_, THCTensor *atf,
+                              THCTensor *b)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  THAssert(THCTensor_(checkGPU)(state, 3, rb_, atf, b));
+  THArgCheck(THCTensor_(nDimension)(state, atf) == 3, 3, "expected 3D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, b) == 3 ||
+             THCTensor_(nDimension)(state, b) == 2, 4, "expected 2D or 3D tensor");
+  THArgCheck(THCTensor_(size)(state, atf, 0) == 
+             THCTensor_(size)(state, b, 0), 3, "number of batches must be equal");
+  THArgCheck(THCTensor_(size)(state, atf, 1) == 
+             THCTensor_(size)(state, atf, 2), 3, "A matrices must be square");
+  THArgCheck(THCTensor_(size)(state, atf, 1) == 
+             THCTensor_(size)(state, b, 1), 3, "dimensions of A and b must be equal");
+  
+  if (rb_ != b) {
+    THCTensor_(resizeAs)(state, rb_, b);
+    THCTensor_(copy)(state, rb_, b);
+  }
+
+
+  int n = atf->size[1];
+  int nrhs = rb_->nDimension > 2 ? rb_->size[2] : 1;
+  THCTensor *atf_;
+  THCTensor *rb__;
+  int lda, ldb;
+
+  // correct ordering of A_tf
+  if (atf->stride[1] == 1) {
+    // column ordered, what BLAS wants
+    lda = atf->stride[2];
+    atf_ = atf;
+  } else {
+    // not column ordered, need to make it such (requires copy)
+    // it would be nice if we could use the op(A) flags to automatically
+    // transpose A if needed, but this leads to unpredictable behavior if the
+    // user clones A_tf later with a different ordering
+    THCTensor *transp_r_ = THCTensor_(newTranspose)(state, atf, 1, 2);
+    atf_ = THCTensor_(newClone)(state, transp_r_);
+    THCTensor_(free)(state, transp_r_);
+    THCTensor_(transpose)(state, atf_, NULL, 1, 2);
+    lda = atf_->stride[2];
+  }
+
+  // correct ordering of B
+  if (rb_->stride[1] == 1) {
+    // column ordered
+    if (rb_->nDimension == 2 || rb_->size[2] == 1) {
+      ldb = n;
+    } else {
+      ldb = rb_->stride[2];
+    }
+    rb__ = rb_;
+  } else {
+    // make column ordered
+    if (rb_->nDimension > 2) {
+      THCTensor *transp_r_ = THCTensor_(newTranspose)(state, rb_, 1, 2);
+      rb__ = THCTensor_(newClone)(state, transp_r_);
+      THCTensor_(free)(state, transp_r_);
+      THCTensor_(transpose)(state, rb__, NULL, 1, 2);
+      ldb = rb__->stride[2];
+    } else {
+      rb__ = THCTensor_(newClone)(state, rb_);
+      ldb = n;
+    }
+  }
+
+  long num_batches = rb_->size[0];
+  size_t matrices_size = num_batches * sizeof(real*);
+
+  // Copy pointers to device.
+  real **d_result;
+  const real **d_atf;
+  THCudaCheck(THCudaMalloc(state, (void**)&d_result, matrices_size));
+  THCudaCheck(THCudaMalloc(state, (void**)&d_atf, matrices_size));
+
+  const long block = 512;
+  const long grid = (num_batches + block - 1) / block;
+  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+    (const real**)d_result, THCTensor_(data)(state, rb__), 
+    rb__->stride[0], num_batches);
+  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+    d_atf, THCTensor_(data)(state, atf_), 
+    atf_->stride[0], num_batches);
+
+  int info;
+
+#ifdef THC_REAL_IS_FLOAT
+  THCudaBlas_Sgetrs(state, 'n', n, nrhs, d_atf, lda, NULL, d_result, ldb, &info, num_batches);
+#elif defined(THC_REAL_IS_DOUBLE)
+  THCudaBlas_Dgetrs(state, 'n', n, nrhs, d_atf, lda, NULL, d_result, ldb, &info, num_batches);
+#endif
+
+  if (info < 0) {
+    THError("Illegal arg %d", -info);
+  }
+
+  THCudaFree(state, d_result);
+  THCudaFree(state, d_atf);
+
+  if (atf_ != atf) {
+    THCTensor_(free)(state, atf_);
+  }
+
+  if (rb__ != rb_) {
+    THCTensor_(freeCopyTo)(state, rb__, rb_);
+  }
+
+#else
+  THError("unimplemented data type");
+#endif
+}
+
+
+/*
+THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a);
+THC_API void THCTensor_(btrs)(THCState *state, THCTensor *rb_, THCTensor *a, THCTensor *b);
+*/
+
 #endif

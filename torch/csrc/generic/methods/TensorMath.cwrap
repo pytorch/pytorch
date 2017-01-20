@@ -1552,6 +1552,50 @@
 ]]
 
 [[
+  name: btrf
+  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  with_stateless: true
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+
+[[
+  name: btrf_
+  cname: btrf
+  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+
+[[
+  name: btrs
+  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  with_stateless: true
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* Atf
+    - THTensor* self
+]]
+
+[[
+  name: btrs_
+  cname: btrs
+  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THTensor* Atf
+    - THTensor* self
+]]
+
+[[
   name: addcmul
   with_stateless: True
   return: argument 0

@@ -389,6 +389,39 @@ void THCudaBlas_Dgetrf(THCState *state, int n, double **a, int lda, int *pivot, 
   THCublasCheck(cublasDgetrfBatched(handle, n, a, lda, pivot, info, batchSize));
 }
 
+THC_API void THCudaBlas_Sgetrs(THCState *state, char transa, int n, int nrhs, const float **a, int lda, int *pivot, float **b, int ldb, int *info, int batchSize)
+{
+  if( (n >= INT_MAX) || (nrhs >= INT_MAX) || (lda >= INT_MAX) || (ldb >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Cublas_Dgetrs only supports n, nrhs, lda, ldb, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  // no need to adjust leading dimensions, since matrices are square
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+
+  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  cublasSetStream(handle, THCState_getCurrentStream(state));
+  THCublasCheck(cublasSgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+}
+
+
+THC_API void THCudaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, const double **a, int lda, int *pivot, double **b, int ldb, int *info, int batchSize)
+{
+  if( (n >= INT_MAX) || (nrhs >= INT_MAX) || (lda >= INT_MAX) || (ldb >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Cublas_Dgetrs only supports n, nrhs, lda, ldb, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  // no need to adjust leading dimensions, since matrices are square
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+
+  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  cublasSetStream(handle, THCState_getCurrentStream(state));
+  THCublasCheck(cublasDgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+}
+
 void THCudaBlas_Sgetri(THCState *state, int n, const float **a, int lda, int *pivot, float **c, int ldc, int *info, int batchSize) {
 
   if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
