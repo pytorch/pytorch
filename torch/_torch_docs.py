@@ -1465,17 +1465,18 @@ Example::
     [torch.FloatTensor of size 3x2]
 """)
 
-add_docstr(torch._C.geqrf,
-"""
-""")
+# TODO
+# add_docstr(torch._C.geqrf,
+# """
+# """)
 
-add_docstr(torch._C.ger,
-"""
-""")
+# add_docstr(torch._C.ger,
+# """
+# """)
 
-add_docstr(torch._C.gesv,
-"""
-""")
+# add_docstr(torch._C.gesv,
+# """
+# """)
 
 add_docstr(torch._C.get_num_threads,
 """
@@ -1578,9 +1579,10 @@ Example::
 
 """)
 
-add_docstr(torch._C.inverse,
-"""
-""")
+# TODO
+# add_docstr(torch._C.inverse,
+# """
+# """)
 
 add_docstr(torch._C.kthvalue,
 """
@@ -2753,25 +2755,26 @@ Example::
 
 """)
 
-add_docstr(torch._C.orgqr,
-"""
-""")
+# TODO
+# add_docstr(torch._C.orgqr,
+# """
+# """)
 
-add_docstr(torch._C.ormqr,
-"""
-""")
+# add_docstr(torch._C.ormqr,
+# """
+# """)
 
-add_docstr(torch._C.potrf,
-"""
-""")
+# add_docstr(torch._C.potrf,
+# """
+# """)
 
-add_docstr(torch._C.potri,
-"""
-""")
+# add_docstr(torch._C.potri,
+# """
+# """)
 
-add_docstr(torch._C.potrs,
-"""
-""")
+# add_docstr(torch._C.potrs,
+# """
+# """)
 
 add_docstr(torch._C.pow,
 """
@@ -2921,12 +2924,13 @@ Example::
 
 """)
 
-add_docstr(torch._C.pstrf,
-"""
-""")
+# TODO
+# add_docstr(torch._C.pstrf,
+# """
+# """)
 
 add_docstr(torch._C.qr,
-"""
+"""Computes the QR decomposition of a matrix.
 """)
 
 add_docstr(torch._C.rand,
@@ -3528,13 +3532,14 @@ Example::
 
 """)
 
-add_docstr(torch._C.svd,
-"""
-""")
+# TODO
+# add_docstr(torch._C.svd,
+# """
+# """)
 
-add_docstr(torch._C.symeig,
-"""
-""")
+# add_docstr(torch._C.symeig,
+# """
+# """)
 
 add_docstr(torch._C.t,
 """
@@ -3844,9 +3849,10 @@ Example::
 
 """)
 
-add_docstr(torch._C.trtrs,
-"""
-""")
+# TODO
+# add_docstr(torch._C.trtrs,
+# """
+# """)
 
 add_docstr(torch._C.trunc,
 """

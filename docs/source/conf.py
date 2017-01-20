@@ -217,7 +217,9 @@ def patched_make_field(self, types, domain, items):
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
                 typename = u''.join(n.astext() for n in fieldtype)
                 typename = typename.replace('int', 'python:int')
+                typename = typename.replace('long', 'python:long')
                 typename = typename.replace('float', 'python:float')
+                typename = typename.replace('type', 'python:type')
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis))
             else:
