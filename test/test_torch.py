@@ -419,6 +419,52 @@ class TestTorch(TestCase):
         res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
+    @skipIfNoLapack
+    def test_btrifact(self):
+        a = torch.FloatTensor((((1.3722, -0.9020),
+                                (1.8849, 1.9169)),
+                               ((0.7187, -1.1695),
+                                (-0.0139, 1.3572)),
+                               ((-1.6181, 0.7148),
+                                (1.3728, 0.1319))))
+        LU_data, pivots, info = a.btrifact()
+        self.assertEqual(info.abs().sum(), 0)
+        I_U = torch.triu(torch.ones(2, 2)).unsqueeze(0).expand(3, 2, 2).type_as(a).byte()
+        I_L = 1 - I_U
+        a_L = torch.zeros(a.size()).type_as(a)
+        a_U = a_L.clone()
+        a_L[torch.eye(2).unsqueeze(0).expand(3, 2, 2).type_as(a).byte()] = 1.0
+        a_L[I_L] = LU_data[I_L]
+        a_U[I_U] = LU_data[I_U]
+
+        P = torch.eye(2).unsqueeze(0).expand(3, 2, 2).type_as(a)
+        for i in range(3):
+            for j in range(2):
+                k = pivots[i, j] - 1
+                t = P[i, j, :].clone()
+                P[i, j, :] = P[i, k, :]
+                P[i, k, :] = t
+
+        a_ = torch.bmm(P, torch.bmm(a_L, a_U))
+        self.assertEqual(a_, a)
+
+    @skipIfNoLapack
+    def test_btrisolve(self):
+        a = torch.FloatTensor((((1.3722, -0.9020),
+                                (1.8849, 1.9169)),
+                               ((0.7187, -1.1695),
+                                (-0.0139, 1.3572)),
+                               ((-1.6181, 0.7148),
+                                (1.3728, 0.1319))))
+        b = torch.FloatTensor(((4.02, 6.19),
+                               (-1.56, 4.00),
+                               (9.81, -4.09)))
+        LU_data, pivots, info = a.btrifact()
+        self.assertEqual(info.abs().sum(), 0)
+        x = b.btrisolve(LU_data, pivots)
+        b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
+        self.assertEqual(b_, b)
+
     def test_bmm(self):
         num_batches = 10
         M, N, O = 23, 8, 12

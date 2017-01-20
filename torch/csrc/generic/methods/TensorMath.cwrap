@@ -1891,3 +1891,33 @@ static const char *R = &__R;
       if_false: N
       default: N
 ]]
+
+[[
+  name: btrifact
+  cname: btrifact
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  with_stateless: true
+  return: argument 0,1,2
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - arg: THIntegerTensor* pivots
+      output: True
+    - arg: THIntegerTensor* info
+      output: True
+    - THTensor* self
+]]
+
+[[
+  name: btrisolve
+  cname: btrisolve
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  with_stateless: true
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* A_LU_data
+    - THTensor* self
+    - THIntegerTensor* A_LU_pivots
+]]
