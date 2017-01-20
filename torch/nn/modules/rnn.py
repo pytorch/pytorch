@@ -112,7 +112,7 @@ class RNN(RNNBase):
 
     Inputs: input, h_0
         - `input`: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0`: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        - `h_0`: A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
 
     Outputs: output, h_n
         - `output`: A (seq_len x batch x hidden_size) tensor containing the output features (h_k) from the last layer of the RNN, for each k
@@ -184,8 +184,8 @@ class LSTM(RNNBase):
 
     Inputs: `input, (h_0, c_0)`
         - `input` : A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0` : A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-        - `c_0` : A (num_layers x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
+        - `h_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        - `c_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
 
     Outputs: output, (h_n, c_n)
         - `output` : A (seq_len x batch x hidden_size) tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
@@ -241,7 +241,7 @@ class GRU(RNNBase):
 
     Inputs: `input, h_0`
         - `input` : A `(seq_len x batch x input_size)` tensor containing the features of the input sequence.
-        - `h_0` : A `(num_layers x batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+        - `h_0` : A `((num_layers * num_directions) x batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
 
     Outputs: `output, h_n`
         - `output` : A `(seq_len x batch x hidden_size)` tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
