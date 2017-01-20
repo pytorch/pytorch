@@ -80,6 +80,7 @@ if [[ "$1" == "--with-cuda" ]]; then
     fi
 fi
 
+build THPP
 CPP_FLAGS=" -std=c++11 "
 build libshm
 
@@ -87,7 +88,7 @@ build libshm
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .
 cp THCUNN/generic/THCUNN.h .
-cp -r tmp_install/include .
+cp -r $INSTALL_DIR/include .
 cp $INSTALL_DIR/bin/* .
 
 # this is for binary builds
@@ -96,6 +97,4 @@ then
     echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
     # copy over dependency libraries into the current dir
     cp $PYTORCH_SO_DEPS .
-else
-    echo "Not binary build"
 fi
