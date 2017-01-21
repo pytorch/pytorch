@@ -4,7 +4,7 @@
 #include "BatchNorm.h"
 #include "Conv.h"
 #include "torch/csrc/cuda/THCP.h"
-#include "CppWrapper.h"
+#include "../PtrWrapper.h"
 
 
 using namespace torch::cudnn;
