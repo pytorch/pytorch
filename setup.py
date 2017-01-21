@@ -15,6 +15,7 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = check_env_flag('WITH_DISTRIBUTED')
+WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -72,6 +73,8 @@ class build_deps(Command):
         build_all_cmd = ['bash', 'torch/lib/build_all.sh']
         if WITH_CUDA:
             build_all_cmd += ['--with-cuda']
+        if WITH_DISTRIBUTED:
+            build_all_cmd += ['--with-distributed']
         if subprocess.call(build_all_cmd) != 0:
             sys.exit(1)
         generate_nn_wrappers()
@@ -194,6 +197,7 @@ THCS_LIB = os.path.join(lib_path, 'libTHCS.so.1')
 THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
 THPP_LIB = os.path.join(lib_path, 'libTHPP.so.1')
+THD_LIB = os.path.join(lib_path, 'libTHD.so.1')
 if platform.system() == 'Darwin':
     TH_LIB = os.path.join(lib_path, 'libTH.1.dylib')
     THS_LIB = os.path.join(lib_path, 'libTHS.1.dylib')
@@ -202,6 +206,7 @@ if platform.system() == 'Darwin':
     THNN_LIB = os.path.join(lib_path, 'libTHNN.1.dylib')
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
     THPP_LIB = os.path.join(lib_path, 'libTHPP.1.dylib')
+    THD_LIB = os.path.join(lib_path, 'libTHD.1.dylib')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
@@ -236,12 +241,15 @@ if WITH_DISTRIBUTED:
     extra_compile_args += ['-DWITH_DISTRIBUTED']
     main_sources += [
         "torch/csrc/distributed/Module.cpp",
-        "torch/csrc/distributed/Tensor.cpp",
-        "torch/csrc/distributed/Storage.cpp",
-        "torch/csrc/distributed/utils.cpp"
+        "torch/csrc/distributed/utils.cpp",
     ]
+    if WITH_DISTRIBUTED_MW:
+        main_sources += [
+            "torch/csrc/distributed/Tensor.cpp",
+            "torch/csrc/distributed/Storage.cpp",
+        ]
     include_dirs += [tmp_install_path + "/include/THD"]
-    main_libraries += ['THD']
+    main_link_args += [THD_LIB]
 
 if WITH_CUDA:
     cuda_lib_dirs = ['lib64', 'lib']
@@ -271,7 +279,6 @@ if WITH_CUDNN:
     include_dirs.append(CUDNN_INCLUDE_DIR)
     extra_link_args.append('-L' + CUDNN_LIB_DIR)
     main_sources += [
-        "torch/csrc/cudnn/Module.cpp",
         "torch/csrc/cudnn/BatchNorm.cpp",
         "torch/csrc/cudnn/Conv.cpp",
         "torch/csrc/cudnn/cuDNN.cpp",

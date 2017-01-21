@@ -14,6 +14,8 @@ static std::unordered_map<std::string, THDChannelType> name2channel_type = {
 static bool THDPModule_loadClasses(PyObject *module_dict)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
+// TODO THD: enable once master-worker is implemented
+#if 0
   ASSERT_NOT_NULL(THDPDoubleStorageClass = PyMapping_GetItemString(module_dict, (char*)"DoubleStorage"));
   ASSERT_NOT_NULL(THDPFloatStorageClass  = PyMapping_GetItemString(module_dict, (char*)"FloatStorage"));
   //ASSERT_NOT_NULL(THDPHalfStorageClass   = PyMapping_GetItemString(module_dict, (char*)"HalfStorage"));
@@ -31,6 +33,7 @@ static bool THDPModule_loadClasses(PyObject *module_dict)
   ASSERT_NOT_NULL(THDPShortTensorClass   = PyMapping_GetItemString(module_dict, (char*)"ShortTensor"));
   ASSERT_NOT_NULL(THDPCharTensorClass    = PyMapping_GetItemString(module_dict, (char*)"CharTensor"));
   ASSERT_NOT_NULL(THDPByteTensorClass    = PyMapping_GetItemString(module_dict, (char*)"ByteTensor"));
+#endif
 
   return true;
 #undef ASSERT_NOT_NULL
@@ -147,7 +150,7 @@ PyObject* THDPModule_isend(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "isend", 1, "(tensor input, int dst_rank)");
+    THPUtils_invalidArguments(args, NULL, "isend", 1, "(tensor input, int dst_rank)");
     return NULL;
   }
 
@@ -162,7 +165,7 @@ PyObject* THDPModule_irecv(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "irecv", 1, "(tensor output, int src_rank)");
+    THPUtils_invalidArguments(args, NULL, "irecv", 1, "(tensor output, int src_rank)");
     return NULL;
   }
 
@@ -177,7 +180,7 @@ PyObject* THDPModule_send(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "send", 1, "(tensor input, int dst_rank)");
+    THPUtils_invalidArguments(args, NULL, "send", 1, "(tensor input, int dst_rank)");
     return NULL;
   }
 
@@ -192,7 +195,7 @@ PyObject* THDPModule_recvAnySource(PyObject *_unused, PyObject *_tensor)
 {
   HANDLE_TH_ERRORS
   if (!THPModule_isTensor(_tensor)) {
-    THPUtils_invalidArguments(_tensor, "recv", 1, "(tensor output)");
+    THPUtils_invalidArguments(_tensor, NULL, "recv", 1, "(tensor output)");
     return NULL;
   }
 
@@ -207,7 +210,7 @@ PyObject* THDPModule_recv(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "recv", 1, "(tensor output, int src_rank)");
+    THPUtils_invalidArguments(args, NULL, "recv", 1, "(tensor output, int src_rank)");
     return NULL;
   }
 
@@ -222,7 +225,7 @@ PyObject* THDPModule_allReduce(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0))) {
-    THPUtils_invalidArguments(args, "all_reduce", 1, "(tensor in_out, reduce_op op, group gr)");
+    THPUtils_invalidArguments(args, NULL, "all_reduce", 1, "(tensor in_out, reduce_op op, group gr)");
     return NULL;
   }
 
@@ -239,7 +242,7 @@ PyObject* THDPModule_reduce(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 4 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "reduce", 1,
+    THPUtils_invalidArguments(args, NULL, "reduce", 1,
         "(tensor reduced, int dst_rank, reduce_op op, group gr)");
     return NULL;
   }
@@ -258,7 +261,7 @@ PyObject* THDPModule_broadcast(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "broadcast", 1,
+    THPUtils_invalidArguments(args, NULL, "broadcast", 1,
         "(tensor src_dst, int src_rank, group gr)");
     return NULL;
   }
@@ -309,7 +312,7 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, "allGather", 1,
+  THPUtils_invalidArguments(args, NULL, "allGather", 1,
       "(list[tensor] output, tensor input, group gr)");
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -319,7 +322,7 @@ PyObject* THDPModule_gatherSend(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0))) {
-    THPUtils_invalidArguments(args, "gatherSend", 1,
+    THPUtils_invalidArguments(args, NULL, "gatherSend", 1,
         "(tensor input, int dst_rank, group gr)");
     return NULL;
   }
@@ -370,7 +373,7 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, "gatherRecv", 1,
+  THPUtils_invalidArguments(args, NULL, "gatherRecv", 1,
       "(list[tensor] output, tensor input, group gr)");
   return NULL;
   END_HANDLE_TH_ERRORS
@@ -414,7 +417,7 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, "scatterSend", 1,
+  THPUtils_invalidArguments(args, NULL, "scatterSend", 1,
       "(list[tensor] input, tensor output, group gr)");
   return NULL;
   END_HANDLE_TH_ERRORS
@@ -425,7 +428,7 @@ PyObject* THDPModule_scatterRecv(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "scatterRecv", 1,
+    THPUtils_invalidArguments(args, NULL, "scatterRecv", 1,
         "(tensor output, int src_rank, group gr)");
     return NULL;
   }
@@ -475,7 +478,7 @@ PyObject* THDPModule_newGroup(PyObject *_unused, PyObject *args)
   return PyInt_FromLong(THDNewGroup(ranks.data(), length));
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, "newGroup", 1, "(list[int] ranks)");
+  THPUtils_invalidArguments(args, NULL, "newGroup", 1, "(list[int] ranks)");
   return NULL;
   END_HANDLE_TH_ERRORS
 }
@@ -484,7 +487,7 @@ PyObject* THDPModule_requestIsCompleted(PyObject *_unused, PyObject *_req)
 {
   HANDLE_TH_ERRORS
   if (!THPWrapper_check(_req)) {
-    THPUtils_invalidArguments(_req, "requestIsCompleted", 1, "(request req)");
+    THPUtils_invalidArguments(_req, NULL, "requestIsCompleted", 1, "(request req)");
     return NULL;
   }
 
@@ -496,7 +499,7 @@ PyObject* THDPModule_requestWait(PyObject *_unused, PyObject *_req)
 {
   HANDLE_TH_ERRORS
   if (!THPWrapper_check(_req)) {
-    THPUtils_invalidArguments(_req, "requestWait", 1, "(request req)");
+    THPUtils_invalidArguments(_req, NULL, "requestWait", 1, "(request req)");
     return NULL;
   }
 
@@ -507,7 +510,7 @@ PyObject* THDPModule_requestWait(PyObject *_unused, PyObject *_req)
 
 PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
   if (PyTuple_GET_SIZE(args) != 3) {
-    THPUtils_invalidArguments(args, "initExtension", 1, "(bool is_master_worker, reduce_op obj, group obj)");
+    THPUtils_invalidArguments(args, NULL, "initExtension", 1, "(bool is_master_worker, reduce_op obj, group obj)");
     return NULL;
   }
 

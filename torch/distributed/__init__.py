@@ -1,4 +1,14 @@
 import torch
+import warnings
+
+warnings.warn("""
+================================================================================
+                                    WARNING
+================================================================================
+torch.distributed is a highly experimental package. The API will change without
+notice and we're can't guarantee full correctness and expected performance yet.
+We'll announce it once it's ready.
+""")
 
 
 _initialized = False

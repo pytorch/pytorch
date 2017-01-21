@@ -2,6 +2,18 @@
 
 set -e
 
+WITH_CUDA=0
+WITH_DISTRIBUTED=0
+for arg in "$@"; do
+    if [[ "$arg" == "--with-cuda" ]]; then
+        WITH_CUDA=1
+    elif [[ "$arg" == "--with-distributed" ]]; then
+        WITH_DISTRIBUTED=1
+    else
+        echo "Unknown argument: $arg"
+    fi
+done
+
 cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
@@ -36,6 +48,7 @@ function build() {
               -DTHC_SO_VERSION=1 \
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1 \
+              -DTHD_SO_VERSION=1 \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release)
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
@@ -68,9 +81,11 @@ mkdir -p tmp_install
 build TH
 build THS
 build THNN
-build THD
+if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
+    build THD
+fi
 
-if [[ "$1" == "--with-cuda" ]]; then
+if [[ $WITH_CUDA -eq 1 ]]; then
     build THC
     build THCS
     build THCUNN
