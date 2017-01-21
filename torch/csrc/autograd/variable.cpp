@@ -37,7 +37,7 @@ PyObject * THPVariable_NewVolatile(PyObject *data)
   } else {
     variable = (THPVariable*)PyObject_CallFunctionObjArgs(THPVariableClass, data, NULL);
   }
-  ((THPVariable*)variable)->is_volatile = 1;
+  if (variable) ((THPVariable*)variable)->is_volatile = 1;
   return (PyObject*)variable;
 }
 

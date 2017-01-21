@@ -98,6 +98,36 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5))
         self.assertEqual(y.grad.data, (x.data + 1) * 4)
 
+    def test_hook_none(self):
+        # WARNING: this is a test for autograd internals.
+        # You should never have to use such things in your code.
+        class NoneGradientFunction(Function):
+            def forward(self, x, y):
+                assert self.needs_input_grad[0]
+                assert not self.needs_input_grad[1]
+                return x, y
+
+            def backward(self, grad_x, grad_y):
+                return grad_x, None
+
+        fn = NoneGradientFunction()
+        fn._backward_hooks = OrderedDict()
+        was_called = [False]
+        def hook(grad_input, grad_output):
+            self.assertIsInstance(grad_input, tuple)
+            self.assertIsInstance(grad_output, tuple)
+            self.assertIsNotNone(grad_input[0])
+            self.assertIsNone(grad_input[1])
+            self.assertIsNotNone(grad_output[0])
+            self.assertIsNotNone(grad_output[1])
+            was_called[0] = True
+        fn._backward_hooks[id(hook)] = hook
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5))
+        sum(fn(x, y)).sum().backward()
+        self.assertTrue(was_called[0])
+
     def _test_backward(self):
         v_t = torch.randn(5, 5)
         x_t = torch.randn(5, 5)

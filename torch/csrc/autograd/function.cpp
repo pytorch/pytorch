@@ -490,19 +490,33 @@ static void _ensure_correct_hook_result_single(PyObject *original,
   static PyObject *IS_SAME_SIZE_NAME = PyUnicode_FromString("is_same_size");
 #endif
   THPObjectPtr tmp;
-  // XXX: don't use them before the first type check! There's no guarantee
-  // they're both Variables.
-  THPVariable *original_var = (THPVariable*)original;
-  THPVariable *returned_var = (THPVariable*)returned;
   // Check that the type matches
-  if(Py_TYPE(original) != Py_TYPE(returned) ||
-      Py_TYPE(original_var->data) != Py_TYPE(returned_var->data)) {
+  if(Py_TYPE(original) != Py_TYPE(returned)) {
     char *hook_name = _try_get_name(hook, tmp);
     THPUtils_setError("backward hook %s%s%shas changed the type of "
         "grad_input (was %s, but got %s)",
         OPTIONAL_HOOK_NAME,
         THPUtils_typename(original),
         THPUtils_typename(returned)
+    );
+    throw python_error();
+  }
+
+  // Special case - None gradient. The type matches so it's everything we
+  // had to check.
+  if (original == Py_None) return;
+
+  THPVariable *original_var = (THPVariable*)original;
+  THPVariable *returned_var = (THPVariable*)returned;
+
+  // Check that data types match
+  if (Py_TYPE(original_var->data) != Py_TYPE(returned_var->data)) {
+    char *hook_name = _try_get_name(hook, tmp);
+    THPUtils_setError("backward hook %s%s%shas changed the type of "
+        "grad_input data (was %s, but got %s)",
+        OPTIONAL_HOOK_NAME,
+        THPUtils_typename(original_var->data),
+        THPUtils_typename(returned_var->data)
     );
     throw python_error();
   }
@@ -560,8 +574,14 @@ static void _call_output_hooks(THPFunction *self, THPObjectPtr& grad_output)
     // Copy grad to a new tuple
     PyObject *old_grad = PyTuple_GET_ITEM(grad_output.get(), i);
     // FIXME: no need to pack them again after changing grads to Variables
-    PyObject *old_grad_var = THPVariable_NewVolatile(old_grad);
-    if (!old_grad_var) throw python_error();
+    PyObject *old_grad_var;
+    if (old_grad == Py_None) {
+      old_grad_var = Py_None;
+      Py_INCREF(Py_None);
+    } else {
+      old_grad_var = THPVariable_NewVolatile(old_grad);
+      if (!old_grad_var) throw python_error();
+    }
     PyTuple_SET_ITEM(new_grad_output.get(), i, old_grad_var);
 
     // Make sure that we're really going to operate on a dict
@@ -597,9 +617,15 @@ static void _call_output_hooks(THPFunction *self, THPObjectPtr& grad_output)
     THPObjectPtr unpacked_grad_output = PyTuple_New(self->num_outputs);
     if (!unpacked_grad_output) throw python_error();
     for (int i = 0; i < self->num_outputs; i++) {
-      THPVariable *var = (THPVariable*)PyTuple_GET_ITEM(new_grad_output.get(), i);
-      Py_INCREF(var->data);
-      PyTuple_SET_ITEM(unpacked_grad_output.get(), i, var->data);
+      PyObject *grad = PyTuple_GET_ITEM(new_grad_output.get(), i);
+      if (grad == Py_None) {
+        Py_INCREF(Py_None);
+        PyTuple_SET_ITEM(unpacked_grad_output.get(), i, Py_None);
+      } else {
+        THPVariable *var = (THPVariable*)grad;
+        Py_INCREF(var->data);
+        PyTuple_SET_ITEM(unpacked_grad_output.get(), i, var->data);
+      }
     }
     grad_output = unpacked_grad_output.release();
   }
@@ -621,7 +647,13 @@ static void _call_function_hooks(THPFunction *self, THPObjectPtr& grad_input, TH
   if (!packed_grad_input.get()) throw python_error();
   for (int i = 0; i < self->num_inputs; i++) {
     PyObject *tensor = PyTuple_GET_ITEM(grad_input.get(), i);
-    PyObject *var = THPVariable_NewVolatile(tensor);
+    PyObject *var;
+    if (tensor == Py_None) {
+      var = Py_None;
+      Py_INCREF(Py_None);
+    } else {
+      var = THPVariable_NewVolatile(tensor);
+    }
     if (!var) throw python_error();
     PyTuple_SET_ITEM(packed_grad_input.get(), i, var);
   }
@@ -629,7 +661,13 @@ static void _call_function_hooks(THPFunction *self, THPObjectPtr& grad_input, TH
   if (!packed_grad_output.get()) throw python_error();
   for (int i = 0; i < self->num_outputs; i++) {
     PyObject *tensor = PyTuple_GET_ITEM(grad_output.get(), i);
-    PyObject *var = THPVariable_NewVolatile(tensor);
+    PyObject *var;
+    if (tensor == Py_None) {
+      var = Py_None;
+      Py_INCREF(Py_None);
+    } else {
+      var = THPVariable_NewVolatile(tensor);
+    }
     if (!var) throw python_error();
     PyTuple_SET_ITEM(packed_grad_output.get(), i, var);
   }
@@ -657,9 +695,15 @@ static void _call_function_hooks(THPFunction *self, THPObjectPtr& grad_input, TH
     THPObjectPtr unpacked_grad_input = PyTuple_New(self->num_inputs);
     if (!unpacked_grad_input) throw python_error();
     for (int i = 0; i < self->num_inputs; i++) {
-      THPVariable *var = (THPVariable*)PyTuple_GET_ITEM(packed_grad_input.get(), i);
-      Py_INCREF(var->data);
-      PyTuple_SET_ITEM(unpacked_grad_input.get(), i, var->data);
+      PyObject *grad = PyTuple_GET_ITEM(packed_grad_input.get(), i);
+      if (grad == Py_None) {
+        Py_INCREF(Py_None);
+        PyTuple_SET_ITEM(unpacked_grad_input.get(), i, Py_None);
+      } else {
+        THPVariable *var = (THPVariable*)grad;
+        Py_INCREF(var->data);
+        PyTuple_SET_ITEM(unpacked_grad_input.get(), i, var->data);
+      }
     }
     grad_input = unpacked_grad_input.release();
   }
