@@ -106,6 +106,8 @@ Algorithms
     :members:
 .. autoclass:: ASGD
     :members:
+.. autoclass:: LBFGS
+    :members:
 .. autoclass:: RMSprop
     :members:
 .. autoclass:: Rprop
