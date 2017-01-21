@@ -125,6 +125,7 @@ DataChannelTCP::DataChannelTCP(int timeout)
   : _socket(-1)
   , _port(0)
   , _timeout(timeout)
+  , _poll_events(nullptr)
 {
   auto rank_env = std::getenv(RANK_ENV);
   if (!rank_env)
@@ -669,6 +670,41 @@ void DataChannelTCP::receive(Scalar& data, int src_rank) {
   auto request = _receive_worker.push([this, &data, src_rank]{
     this->_receive(data, src_rank);
   });
+  request.wait();
+}
+
+
+void DataChannelTCP::receive(Tensor& data) {
+  auto request = _receive_worker.push([this, &data]{
+    if (!this->_poll_events) {
+      // cache poll events array, it will be reused in another `receive` calls
+      this->_poll_events.reset(new struct pollfd[this->_processes.size()]);
+      for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
+        this->_poll_events[rank] = {
+          .fd = this->_processes[rank].socket,
+          .events = POLLIN
+        };
+      }
+    }
+
+    // cleanup
+    for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
+      this->_poll_events[rank].revents = 0;
+    }
+
+    SYSCHECK(::poll(this->_poll_events.get(), this->_processes.size(), -1)) // infinite timeout
+    for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
+      if (this->_poll_events[rank].revents == 0)
+        continue;
+
+      if (!(this->_poll_events[rank].revents & POLLIN))
+        throw std::system_error(ECONNABORTED, std::system_category());
+
+      this->_receive(data, rank);
+      break;
+    }
+  });
+
   request.wait();
 }
 

@@ -12,6 +12,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 
 constexpr int WORKERS_NUM = 2;
@@ -30,6 +31,22 @@ void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
     auto float_tensor = buildTensor<float>({1, 2, 3}, -1.0);
     data_channel->receive(*float_tensor, 0);
     ASSERT_TENSOR_VALUE(float, *float_tensor, 4.2);
+  }
+}
+
+void test_send_recv_tensor_any_source(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (data_channel->getRank() == 0) {
+    std::set<int> ranks;
+    for (int i = 0; i < WORKERS_NUM; i++) {
+      auto int_tensor = buildTensor<int>({1, 2, 3}, -1);
+      data_channel->receive(*int_tensor);
+      ranks.insert(static_cast<int*>(int_tensor->data())[0]);
+    }
+
+    assert(ranks.size() == WORKERS_NUM);
+  } else {
+    auto int_tensor = buildTensor<int>({1, 2, 3}, data_channel->getRank());
+    data_channel->send(*int_tensor, 0);
   }
 }
 
@@ -530,6 +547,7 @@ void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channe
 
 void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel) {
   test_send_recv_tensor(data_channel);
+  test_send_recv_tensor_any_source(data_channel);
   test_send_recv_scalar(data_channel);
   test_broadcast(data_channel);
   test_reduce(data_channel);

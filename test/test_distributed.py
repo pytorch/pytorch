@@ -135,6 +135,26 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    # SEND RECV ANY SOURCE
+    def test_send_recv_any_source(self):
+        rank = dist.get_rank()
+        tensor = _build_tensor(10, rank)
+        for dest in range(0, dist.get_num_processes()):
+            if dest == rank:
+                continue
+            dist.send(tensor, dest)
+
+        recv_ranks = set()
+        for src in range(0, dist.get_num_processes()):
+            if src == rank:
+                continue
+            tensor = _build_tensor(10, value=-1)
+            dist.recv(tensor)
+            recv_ranks.add(tensor.resize_(1)[0])
+
+        self.assertEqual(len(recv_ranks), dist.get_num_processes() - 1)
+        self._barrier()
+
     # ISEND
     def test_isend(self):
         rank = dist.get_rank()

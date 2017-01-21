@@ -147,7 +147,7 @@ PyObject* THDPModule_isend(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "send", 1, "(tensor input, int dst_rank)");
+    THPUtils_invalidArguments(args, "isend", 1, "(tensor input, int dst_rank)");
     return NULL;
   }
 
@@ -162,7 +162,7 @@ PyObject* THDPModule_irecv(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPModule_isTensor(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, "recv", 1, "(tensor output, int src_rank)");
+    THPUtils_invalidArguments(args, "irecv", 1, "(tensor output, int src_rank)");
     return NULL;
   }
 
@@ -184,6 +184,20 @@ PyObject* THDPModule_send(PyObject *_unused, PyObject *args)
   THDPTensorDesc desc = _makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int dst_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   THDSend(desc, dst_rank);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THDPModule_recvAnySource(PyObject *_unused, PyObject *_tensor)
+{
+  HANDLE_TH_ERRORS
+  if (!THPModule_isTensor(_tensor)) {
+    THPUtils_invalidArguments(_tensor, "recv", 1, "(tensor output)");
+    return NULL;
+  }
+
+  THDPTensorDesc desc = _makeDescriptor(_tensor);
+  THDRecvAnySource(desc);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -541,6 +555,7 @@ static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_isend", (PyCFunction)THDPModule_isend, METH_VARARGS, NULL},
   {"_dist_irecv", (PyCFunction)THDPModule_irecv, METH_VARARGS, NULL},
   {"_dist_send", (PyCFunction)THDPModule_send, METH_VARARGS, NULL},
+  {"_dist_recv_any_source", (PyCFunction)THDPModule_recvAnySource, METH_O, NULL},
   {"_dist_recv", (PyCFunction)THDPModule_recv, METH_VARARGS, NULL},
   {"_dist_all_reduce", (PyCFunction)THDPModule_allReduce, METH_VARARGS, NULL},
   {"_dist_reduce", (PyCFunction)THDPModule_reduce, METH_VARARGS, NULL},

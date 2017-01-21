@@ -43,7 +43,9 @@ def send(tensor, dst_rank):
     return torch._C._dist_send(tensor, dst_rank)
 
 
-def recv(tensor, src_rank):
+def recv(tensor, src_rank=None):
+    if src_rank is None:
+        return torch._C._dist_recv_any_source(tensor)
     return torch._C._dist_recv(tensor, src_rank)
 
 

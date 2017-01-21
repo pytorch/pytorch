@@ -49,6 +49,7 @@ struct DataChannelMPI : DataChannel {
   void send(const Scalar& data, int dst_rank) override;
   void send(Tensor& data, int dst_rank) override;
   void receive(Scalar& data, int src_rank) override;
+  void receive(Tensor& data) override;
   void receive(Tensor& data, int src_rank) override;
   RequestMPI* isend(Tensor& data, int dst_rank) override;
   RequestMPI* ireceive(Tensor& data, int src_rank) override;
