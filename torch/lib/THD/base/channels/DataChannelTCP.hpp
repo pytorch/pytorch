@@ -4,8 +4,10 @@
 #include "../ChannelEnvVars.hpp"
 #include "DataChannelUtils.hpp"
 
+#include <sys/poll.h>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include <utility>
@@ -46,6 +48,7 @@ struct DataChannelTCP : DataChannel {
   void send(const Scalar& data, int dst_id) override;
   void send(Tensor& data, int dst_id) override;
   void receive(Scalar& data, int src_id) override;
+  void receive(Tensor& data) override;
   void receive(Tensor& data, int src_id) override;
   RequestTCP* isend(Tensor& data, int dst_rank) override;
   RequestTCP* ireceive(Tensor& data, int src_rank) override;
@@ -86,6 +89,7 @@ private:
   int _timeout; // Accept waiting timeout in milliseconds (it is optional, default = infinity)
 
   std::vector<Process> _processes; // Other processes in network
+  std::unique_ptr<struct pollfd[]> _poll_events; // Events array for `poll`
 
   // Existing groups of processes and corresponding group ids
   std::unordered_map<THDGroup, DataChannel::Group> _groups;

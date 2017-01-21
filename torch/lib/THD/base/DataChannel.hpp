@@ -42,6 +42,7 @@ struct DataChannel {
   virtual void send(const Scalar& value, int src_rank) = 0;
   virtual void send(Tensor& data, int dst_rank) = 0;
   virtual void receive(Scalar& value, int src_rank) = 0;
+  virtual void receive(Tensor& data) = 0; // receive from any source
   virtual void receive(Tensor& data, int src_rank) = 0;
   virtual Request* isend(Tensor& data, int dst_rank) = 0;
   virtual Request* ireceive(Tensor& data, int src_rank) = 0;
