@@ -117,8 +117,8 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
     ConstEigenVectorMap<float> Xvec(Xdata, X.size());
     EigenVectorMap<float> Yvec(Ydata, Y->size());
     Yvec = Xvec.cwiseMax(0.f) + Xvec.cwiseMin(0.f) * Wdata[0];
-    return true;
 #endif // __ARM_NEON__
+    return true;
   }
 
   // non-shared case.
