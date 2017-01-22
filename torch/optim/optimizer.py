@@ -24,6 +24,8 @@ class Optimizer(object):
 
         self.state = defaultdict(dict)
         self.param_groups = list(params)
+        if len(self.param_groups) == 0:
+            raise ValueError("optimizer got an empty parameter list")
         if not isinstance(self.param_groups[0], dict):
             self.param_groups = [{'params': self.param_groups}]
 
@@ -50,6 +52,8 @@ class Optimizer(object):
                 if not param.requires_grad:
                     raise ValueError("optimizing a parameter that doesn't "
                         "require gradients")
+                if param.creator is not None:
+                    raise ValueError("can't optimize a non-leaf Variable")
 
     def __getstate__(self):
         return {
