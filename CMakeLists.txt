@@ -94,27 +94,14 @@ add_subdirectory(caffe2)
 
 # ---[ Copy all python files to build directory
 if (BUILD_PYTHON)
-  # ---[ Generate and create all needed __init__.py files as they aren't present in source tree
-  set(Caffe2_INIT_PY
-          ${CMAKE_BINARY_DIR}/caffe2/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe2/python/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe2/python/mint/static/css/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe2/python/mint/templates/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe2/python/mint/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe2/proto/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe/__init__.py
-          ${CMAKE_BINARY_DIR}/caffe/proto/__init__.py
-  )
-  foreach(init ${Caffe2_INIT_PY})
-      # create each __init__.py file in build directory
-      file(WRITE ${init} "")
-  endforeach()
+  # Generate and create all needed __init__.py files, if they aren't already
+  # present in the current source tree.
+  message(STATUS "Automatically generating missing __init__.py files.")
+  caffe_autogen_init_py_files()
 
-  # Copy the files
-  message(STATUS ${CMAKE_BINARY_DIR})
+  # Install commands
   # Pick up static python files
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
           FILES_MATCHING PATTERN "*.py")
   # Caffe proto files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${CMAKE_INSTALL_PREFIX}
