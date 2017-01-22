@@ -599,6 +599,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   THPByteTensor *mask = THPByteTensor_Check(index) ? (THPByteTensor*)index : NULL;
 #else
   THCPByteTensor *mask = THCPByteTensor_Check(index) ? (THCPByteTensor*)index : NULL;
+  THCPAutoGPU __gpu_guard(NULL, (PyObject*)self);
 #endif
   if (mask) {
     THTensorPtr t = THTensor_(new)(LIBRARY_STATE_NOARGS);
@@ -636,6 +637,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
   THPByteTensor *mask = THPByteTensor_Check(index) ? (THPByteTensor*)index : NULL;
 #else
   THCPByteTensor *mask = THCPByteTensor_Check(index) ? (THCPByteTensor*)index : NULL;
+  THCPAutoGPU __gpu_guard(NULL, (PyObject*)self);
 #endif
   if (mask) {
     if (THPUtils_(checkReal)(value)) {
