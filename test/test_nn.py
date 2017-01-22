@@ -1309,6 +1309,11 @@ new_module_tests = [
         cudnn=True,
     ),
     dict(
+        fullname='Conv2d_groups_thnn',
+        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
+        input_size=(2, 4, 6, 5),
+    ),
+    dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
