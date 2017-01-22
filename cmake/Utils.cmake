@@ -389,3 +389,32 @@ function(caffe_add_whole_archive_flag lib output_var)
     set(${output_var} -Wl,--whole-archive ${lib} -Wl,--no-whole-archive PARENT_SCOPE)
   endif()
 endfunction()
+
+##############################################################################
+# Helper function to automatically generate __init__.py files where python
+# sources reside but there are no __init__.py present.
+function(caffe_autogen_init_py_files)
+  file(GLOB_RECURSE all_python_files RELATIVE ${CMAKE_BINARY_DIR} "${CMAKE_BINARY_DIR}/*.py")
+  set(python_paths_need_init_py)
+  foreach(python_file ${all_python_files})
+    get_filename_component(python_path ${python_file} PATH)
+    string(REPLACE "/" ";" path_parts ${python_path})
+    set(rebuilt_path ${CMAKE_BINARY_DIR})
+    foreach(path_part ${path_parts})
+      set(rebuilt_path "${rebuilt_path}/${path_part}")
+      list(APPEND python_paths_need_init_py ${rebuilt_path})
+    endforeach()
+  endforeach()
+  list(REMOVE_DUPLICATES python_paths_need_init_py)
+  # Since the _pb2.py files are yet to be created, we will need to manually
+  # add them to the list.
+  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe/proto)
+  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
+
+  foreach(tmp ${python_paths_need_init_py})
+    if(NOT EXISTS ${tmp}/__init__.py)
+      # message(STATUS "Generate " ${tmp}/__init__.py)
+      file(WRITE ${tmp}/__init__.py "")
+    endif()
+  endforeach()
+endfunction()

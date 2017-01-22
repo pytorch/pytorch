@@ -121,15 +121,29 @@ if (BUILD_PYTHON)
   add_library(caffe2_pybind11_state SHARED ${Caffe2_CPU_PYTHON_SRCS})
   add_dependencies(caffe2_pybind11_state ${Caffe2_MAIN_LIBS_ORDER})
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
-  target_link_libraries(caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
-  install(TARGETS caffe2_pybind11_state DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
+  set_target_properties(
+      caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+      ${CMAKE_BINARY_DIR}/caffe2/python)
+  target_link_libraries(
+      caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS}
+      ${Caffe2_PYTHON_DEPENDENCY_LIBS})
+  install(
+      TARGETS caffe2_pybind11_state DESTINATION
+      ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 
   if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu SHARED ${Caffe2_GPU_PYTHON_SRCS})
-    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
     add_dependencies(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS_ORDER})
-    target_link_libraries(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
-    install(TARGETS caffe2_pybind11_state_gpu DESTINATION ${CMAKE_INSTALL_PREFIX}/caffe2/python)
+    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
+    set_target_properties(
+        caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+        ${CMAKE_BINARY_DIR}/caffe2/python)
+    target_link_libraries(
+        caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS}
+        ${Caffe2_PYTHON_DEPENDENCY_LIBS})
+    install(
+        TARGETS caffe2_pybind11_state_gpu DESTINATION
+        ${CMAKE_INSTALL_PREFIX}/caffe2/python)
   endif()
 endif()
 
@@ -146,3 +160,14 @@ foreach(binary_src ${Caffe2_ALL_BINARY_SRCS})
   target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
   install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
+
+
+# ---[ Python files
+if (BUILD_PYTHON)
+  file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *.py)
+  foreach(python_src ${PYTHON_SRCS})
+    get_filename_component(dir ${python_src} DIRECTORY)
+    file(COPY ${python_src} DESTINATION ${CMAKE_BINARY_DIR}/caffe2/${dir})
+  endforeach()
+endif()
+
