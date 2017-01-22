@@ -7,6 +7,12 @@ torch.nn
 .. automodule:: torch.nn
 .. currentmodule:: torch.nn
 
+Parameters
+----------
+
+.. autoclass:: Parameter
+    :members:
+
 Containers
 ----------------------------------
 
