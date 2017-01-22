@@ -16,7 +16,7 @@ class LBFGS(Optimizer):
 
     .. note::
         This is a very memory intensive optimizer (it requires additional
-        ``param_bytes * history_size`` bytes). If it doesn't fit in memory
+        ``param_bytes * (history_size + 1)`` bytes). If it doesn't fit in memory
         try reducing the history size, or use a different algorithm.
 
     Arguments:
@@ -73,7 +73,6 @@ class LBFGS(Optimizer):
             closure (callable): A closure that reevaluates the model
                 and returns the loss.
         """
-        # TODO: backward after closure?
         assert len(self.param_groups) == 1
 
         group = self.param_groups[0]
@@ -156,7 +155,7 @@ class LBFGS(Optimizer):
                 al = state['al']
 
                 for i in range(num_old):
-                    ro[i] = 1 / old_stps[i].dot(old_dirs[i])
+                    ro[i] = 1. / old_stps[i].dot(old_dirs[i])
 
                 # iteration in L-BFGS loop collapsed to use just one buffer
                 q = flat_grad.neg()
@@ -189,7 +188,7 @@ class LBFGS(Optimizer):
 
             # reset initial guess for step size
             if state['n_iter'] == 1:
-                t = min(1, 1 / abs_grad_sum) * lr
+                t = min(1., 1. / abs_grad_sum) * lr
             else:
                 t = lr
 
