@@ -5,7 +5,6 @@
 
 namespace caffe2 {
 
-template <typename T>
 class CuDNNReluOp final : public Operator<CUDAContext> {
  public:
   CuDNNReluOp(const OperatorDef& operator_def, Workspace* ws)
@@ -17,6 +16,20 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
     CUDNN_CHECK(cudnnCreateActivationDescriptor(&activ_desc_));
     CUDNN_CHECK(cudnnSetActivationDescriptor(
         activ_desc_, CUDNN_ACTIVATION_RELU, CUDNN_PROPAGATE_NAN, 0.0));
+
+    // Choose function body for given math type
+    TensorProto_DataType math = TensorProto_DataType_FLOAT; // hardcode for now
+
+    switch (math) {
+      case TensorProto_DataType_FLOAT:
+        body_ = &CuDNNReluOp::DoRunWithMathType<float>;
+        break;
+      case TensorProto_DataType_FLOAT16:
+        body_ = &CuDNNReluOp::DoRunWithMathType<float16>;
+        break;
+      default:
+        CAFFE_THROW("Invalid math type specified");
+    }
   }
 
   ~CuDNNReluOp() {
@@ -24,10 +37,19 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
     CUDNN_CHECK(cudnnDestroyActivationDescriptor(activ_desc_));
   }
 
-  bool RunOnDevice() override {
+  template <typename M>
+  bool DoRunWithMathType() {
+    return DispatchHelper<
+      TensorTypes<
+        float,
+        float16>,
+      M>::call(this, Input(0));
+  }
+
+  template <typename T, typename M>
+  bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    Y->ResizeLike(X);
     // See if we need to reshape.
     if (X.dims() != cudnn_input_dims_) {
       VLOG(1) << "Setting descriptors.";
@@ -54,12 +76,22 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
     return true;
   }
 
+  bool RunOnDevice() override {
+    // dispatch based on contents of tensor(s)
+    const auto& X = Input(0);
+    auto* Y = Output(0);
+    Y->ResizeLike(X);
+
+    return (this->*body_)();
+  }
+
  protected:
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t data_desc_;
   cudnnActivationDescriptor_t activ_desc_;
   vector<TIndex> cudnn_input_dims_;
   StorageOrder order_;
+  bool (CuDNNReluOp::*body_)();
 };
 
 
@@ -69,7 +101,6 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
 // data, or it treats input=0 the same way as input<0. This is of course not
 // very safe, but we have been running in this way in Caffe for a while so it
 // *might* be safe to assume so.
-template <typename T>
 class CuDNNReluGradientOp final : public Operator<CUDAContext> {
  public:
   CuDNNReluGradientOp(const OperatorDef& operator_def, Workspace* ws)
@@ -81,6 +112,20 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
     CUDNN_CHECK(cudnnCreateActivationDescriptor(&activ_desc_));
     CUDNN_CHECK(cudnnSetActivationDescriptor(
         activ_desc_, CUDNN_ACTIVATION_RELU, CUDNN_PROPAGATE_NAN, 0.0));
+
+    // Choose function body for given math type
+    TensorProto_DataType math = TensorProto_DataType_FLOAT; // hardcode for now
+
+    switch (math) {
+      case TensorProto_DataType_FLOAT:
+        body_ = &CuDNNReluGradientOp::DoRunWithMathType<float>;
+        break;
+      case TensorProto_DataType_FLOAT16:
+        body_ = &CuDNNReluGradientOp::DoRunWithMathType<float16>;
+        break;
+      default:
+        CAFFE_THROW("Invalid math type specified");
+    }
   }
 
   ~CuDNNReluGradientOp() {
@@ -88,11 +133,20 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
     CUDNN_CHECK(cudnnDestroyActivationDescriptor(activ_desc_));
   }
 
-  bool RunOnDevice() override {
+  template <typename M>
+  bool DoRunWithMathType() {
+    return DispatchHelper<
+      TensorTypes<
+        float,
+        float16>,
+      M>::call(this, Input(0));
+  }
+
+  template <typename T, typename M>
+  bool DoRunWithType() {
     const auto& Y = Input(0);
     const auto& dY = Input(1);
     auto* dX = Output(0);
-    dX->ResizeLike(Y);
     // See if we need to reshape.
     if (Y.dims() != cudnn_input_dims_) {
       VLOG(1) << "Setting descriptors.";
@@ -121,6 +175,15 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
     return true;
   }
 
+  bool RunOnDevice() override {
+    const auto& Y = Input(0);
+    const auto& dY = Input(1);
+    auto* dX = Output(0);
+    dX->ResizeLike(Y);
+
+    return (this->*body_)();
+  }
+
  protected:
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t data_desc_;
@@ -128,12 +191,12 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
   vector<TIndex> cudnn_input_dims_;
   StorageOrder order_;
   // Input: Y, dY; Output: dX
+ private:
+  bool (CuDNNReluGradientOp::*body_)();
 };
 
 namespace {
-REGISTER_CUDNN_OPERATOR(Relu, CuDNNReluOp<float>);
-REGISTER_CUDNN_OPERATOR(ReluGradient, CuDNNReluGradientOp<float>);
-REGISTER_CUDNN_OPERATOR(ReluFp16, CuDNNReluOp<float16>);
-REGISTER_CUDNN_OPERATOR(ReluFp16Gradient, CuDNNReluGradientOp<float16>);
+REGISTER_CUDNN_OPERATOR(Relu, CuDNNReluOp);
+REGISTER_CUDNN_OPERATOR(ReluGradient, CuDNNReluGradientOp);
 }  // namespace
 }  // namespace caffe2
