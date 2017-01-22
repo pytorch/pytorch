@@ -4,7 +4,6 @@
 
 namespace caffe2 {
 
-template <typename T>
 class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
  public:
   CuDNNPoolOp(const OperatorDef& operator_def, Workspace* ws)
@@ -21,6 +20,20 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << def().type();
     }
+
+    // Choose function body for given math type
+    TensorProto_DataType math = TensorProto_DataType_FLOAT; // hardcode for now
+
+    switch (math) {
+      case TensorProto_DataType_FLOAT:
+         body_ = &CuDNNPoolOp::DoRunWithMathType<float>;
+         break;
+      case TensorProto_DataType_FLOAT16:
+        body_ = &CuDNNPoolOp::DoRunWithMathType<float16>;
+        break;
+      default:
+        CAFFE_THROW("Invalid math type specified");
+    }
   }
 
   ~CuDNNPoolOp() {
@@ -29,7 +42,17 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     CUDNN_CHECK(cudnnDestroyPoolingDescriptor(pooling_desc_));
   }
 
-  bool RunOnDevice() final {
+  template <typename M>
+  bool DoRunWithMathType() {
+    return DispatchHelper<
+      TensorTypes<
+        float,
+        float16>,
+      M>::call(this, Input(0));
+  }
+
+  template <typename T, typename M>
+  bool DoRunWithType() {
     auto& X = Input(0);
     auto* Y = Output(0);
     int N = 0, C = 0, H = 0, W = 0;
@@ -84,6 +107,13 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     return true;
   }
 
+  bool RunOnDevice() final {
+    auto& X = Input(0);
+    auto* Y = Output(0);
+
+    return (this->*body_)();
+  }
+
  protected:
   vector<TIndex> cudnn_input_dims_;
 
@@ -92,9 +122,10 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   cudnnTensorDescriptor_t top_desc_;
   cudnnPoolingDescriptor_t pooling_desc_;
   cudnnPoolingMode_t mode_;
+ private:
+  bool (CuDNNPoolOp::*body_)();
 };
 
-template <typename T>
 class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
  public:
   CuDNNPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
@@ -111,6 +142,20 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << def().type();
     }
+    //
+    // Choose function body for given math type
+    TensorProto_DataType math = TensorProto_DataType_FLOAT; // hardcode for now
+
+    switch (math) {
+      case TensorProto_DataType_FLOAT:
+         body_ = &CuDNNPoolGradientOp::DoRunWithMathType<float>;
+         break;
+      case TensorProto_DataType_FLOAT16:
+        body_ = &CuDNNPoolGradientOp::DoRunWithMathType<float16>;
+        break;
+      default:
+        CAFFE_THROW("Invalid math type specified");
+    }
   }
 
   ~CuDNNPoolGradientOp() {
@@ -119,7 +164,17 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     CUDNN_CHECK(cudnnDestroyPoolingDescriptor(pooling_desc_));
   }
 
-  bool RunOnDevice() final {
+  template <typename M>
+  bool DoRunWithMathType() {
+    return DispatchHelper<
+      TensorTypes<
+        float,
+        float16>,
+      M>::call(this, Input(0));
+  }
+
+  template <typename T, typename M>
+  bool DoRunWithType() {
     auto& X = Input(0);
     auto& Y = Input(1);
     auto& dY = Input(2);
@@ -178,6 +233,16 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     return true;
   }
 
+  bool RunOnDevice() final {
+    auto& X = Input(0);
+    auto& Y = Input(1);
+    auto& dY = Input(2);
+    auto* dX = Output(0);
+    dX->ResizeLike(X);
+
+    return (this->*body_)();
+  }
+
  protected:
   vector<TIndex> cudnn_input_dims_;
 
@@ -190,18 +255,15 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
   // Input: X, Y, dY
   // Output: dX
   INPUT_TAGS(IN, OUT, OUT_GRAD);
+ private:
+  bool (CuDNNPoolGradientOp::*body_)();
 };
 
 namespace {
-REGISTER_CUDNN_OPERATOR(AveragePool, CuDNNPoolOp<float>);
-REGISTER_CUDNN_OPERATOR(AveragePoolGradient, CuDNNPoolGradientOp<float>);
-REGISTER_CUDNN_OPERATOR(MaxPool, CuDNNPoolOp<float>);
-REGISTER_CUDNN_OPERATOR(MaxPoolGradient, CuDNNPoolGradientOp<float>);
-
-REGISTER_CUDNN_OPERATOR(AveragePoolFp16, CuDNNPoolOp<float16>);
-REGISTER_CUDNN_OPERATOR(AveragePoolFp16Gradient, CuDNNPoolGradientOp<float16>);
-REGISTER_CUDNN_OPERATOR(MaxPoolFp16, CuDNNPoolOp<float16>);
-REGISTER_CUDNN_OPERATOR(MaxPoolFp16Gradient, CuDNNPoolGradientOp<float16>);
+REGISTER_CUDNN_OPERATOR(AveragePool, CuDNNPoolOp);
+REGISTER_CUDNN_OPERATOR(AveragePoolGradient, CuDNNPoolGradientOp);
+REGISTER_CUDNN_OPERATOR(MaxPool, CuDNNPoolOp);
+REGISTER_CUDNN_OPERATOR(MaxPoolGradient, CuDNNPoolGradientOp);
 
 }  // namespace
 }  // namespace caffe2
