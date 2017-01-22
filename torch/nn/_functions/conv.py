@@ -178,8 +178,11 @@ def _view3d(*tensors):
     # view 4d tensor as 3d
     output = []
     for t in tensors:
-        assert t.dim() == 4 and t.size(2) == 1
-        output += [t.squeeze(2)]
+        if t is None:
+            output += [None]
+        else:
+            assert t.dim() == 4 and t.size(2) == 1
+            output += [t.squeeze(2)]
     return output
 
 
