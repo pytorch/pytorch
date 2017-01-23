@@ -225,6 +225,11 @@ void cudnn_convolution_forward(
   size_t workspaceSize;
   CHECK(cudnnGetConvolutionForwardWorkspaceSize(handle, idesc.desc, wdesc.desc,
       cdesc.desc, odesc.desc, fwdAlg, &workspaceSize));
+  if (workspaceSize > 1024*1024*1024) {
+    fwdAlg = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+    CHECK(cudnnGetConvolutionForwardWorkspaceSize(handle, idesc.desc, wdesc.desc,
+        cdesc.desc, odesc.desc, fwdAlg, &workspaceSize));
+  }
 
   Workspace workspace(state, workspaceSize);
 
