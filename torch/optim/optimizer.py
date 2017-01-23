@@ -1,6 +1,8 @@
 from collections import defaultdict
 
 import torch
+from copy import deepcopy
+from itertools import chain
 from torch.autograd import Variable
 
 required = object()
@@ -49,6 +51,9 @@ class Optimizer(object):
 
         for group in self.param_groups:
             for param in group['params']:
+                if not isinstance(param, Variable):
+                    raise TypeError("optimizer can only optimize Variables, "
+                        "but one of the params is " + torch.typename(param))
                 if not param.requires_grad:
                     raise ValueError("optimizing a parameter that doesn't "
                         "require gradients")
@@ -70,7 +75,54 @@ class Optimizer(object):
             differs between optimizer classes.
         * param_groups - a dict containig all parameter groups
         """
-        return self.__getstate__()
+        # Save ids instead of Variables
+        def pack_group(group):
+            packed = {k: v for k, v in group.items() if k != 'params'}
+            packed['params'] = [id(p) for p in group['params']]
+            return packed
+        param_groups = [pack_group(g) for g in self.param_groups]
+        # Remap state to use ids as keys
+        packed_state = {(id(k) if isinstance(k, Variable) else k): v
+                        for k, v in self.state.items()}
+        return {
+            'state': packed_state,
+            'param_groups': param_groups,
+        }
+
+    def load_state_dict(self, state_dict):
+        """Loads the optimizer state.
+
+        Arguments:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        # deepcopy, to be consistent with module API
+        state_dict = deepcopy(state_dict)
+        # Validate the state_dict
+        groups = self.param_groups
+        saved_groups = state_dict['param_groups']
+
+        if len(groups) != len(saved_groups):
+            raise ValueError("loaded state dict has a different number of "
+                    "parameter groups")
+        param_lens = (len(g['params']) for g in groups)
+        saved_lens = (len(g['params']) for g in saved_groups)
+        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+            raise ValueError("loaded state dict contains a parameter group "
+                "that doesn't match the size of optimizer's group")
+
+        # Update the state
+        id_map = {old_id: p for old_id, p in
+                    zip(chain(*(g['params'] for g in saved_groups)),
+                        chain(*(g['params'] for g in groups)))}
+        self.state = {id_map.get(k, k): v for k, v in state_dict['state'].items()}
+
+        # Update parameter groups, setting their 'params' value
+        def update_group(group, new_group):
+            new_group['params'] = group['params']
+            return new_group
+        self.param_groups = [
+            update_group(g, ng) for g, ng in zip(groups, saved_groups)]
 
     def zero_grad(self):
         """Clears the gradients of all optimized :class:`Variable` s."""
