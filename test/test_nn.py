@@ -73,7 +73,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             module.float().cuda()
             module(input)
             for p in module.parameters():
-                test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                test_case.assertEqual(type(p.data), torch.cuda.FloatTenLr)
                 test_case.assertEqual(p.get_device(), 0)
 
             if torch.cuda.device_count() > 1:
