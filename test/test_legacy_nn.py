@@ -580,7 +580,7 @@ def prepare_tests():
         'Softmax': 'SoftMax',
         'Softmax2d': 'SpatialSoftMax',
         'LogSoftmax': 'LogSoftMax',
-        'LogSoftmax2d': 'SpatialLogSoftMax',
+        'LogSoftmax2d': 'SpatialSoftMax',
         'BatchNorm1d': 'BatchNormalization',
         'BatchNorm2d': 'SpatialBatchNormalization',
         'BatchNorm3d': 'VolumetricBatchNormalization',

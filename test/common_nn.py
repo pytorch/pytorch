@@ -94,7 +94,7 @@ module_tests = [
     ),
     dict(
         module_name='LogSoftmax',
-        input_size=(10,20),
+        input_size=(10, 20),
         reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
     ),
     dict(
