@@ -368,7 +368,7 @@ def TranslateSoftmaxWithLoss(layer, pretrained_blobs, is_test):
 def TranslateAccuracy(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Accuracy")
     if layer.accuracy_param.top_k != 1:
-        log.warn("Translation does not support Accuracy layers top_k >1.")
+        AddArgument(caffe_op, "top_k", layer.accuracy_param.top_k)
     return caffe_op, []
 
 
