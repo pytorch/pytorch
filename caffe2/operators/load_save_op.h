@@ -5,6 +5,7 @@
 #include <map>
 #include <unordered_set>
 
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/logging.h"
@@ -75,7 +76,8 @@ class LoadOp final : public Operator<Context> {
     CAFFE_ENFORCE(cursor, "cursor is not valid");
     std::unordered_set<string> seen_blobs;
     for (; cursor->Valid(); cursor->Next()) {
-      const string& key = cursor->key();
+      const string& dbKey = cursor->key();
+      auto key = dbKey.substr(0, dbKey.find(kChunkIdSeparator));
       BlobProto proto;
       CAFFE_ENFORCE(
           proto.ParseFromString(cursor->value()), "Couldn't parse Proto");
@@ -109,7 +111,8 @@ class LoadOp final : public Operator<Context> {
     std::map<int, size_t> blobSizes;
     std::unordered_set<string> loaded;
     for (; cursor->Valid(); cursor->Next()) {
-      const string& key = cursor->key();
+      const string& dbKey = cursor->key();
+      auto key = dbKey.substr(0, dbKey.find(kChunkIdSeparator));
       if (!output_indices_.count(key)) {
         VLOG(1) << "Key " << key << " not used. Skipping.";
       } else {
@@ -160,10 +163,12 @@ class LoadOp final : public Operator<Context> {
         }
 
         if (loaded.size() >= OutputSize()) {
+          VLOG(1) << "Read all required blobs";
           break;
         }
       }
     }
+    VLOG(1) << "Fully loaded " << loaded.size() << " blobs";
 
     for (const auto& blobSize : blobSizes) {
       Blob* blob = outputs.at(blobSize.first);
@@ -171,7 +176,9 @@ class LoadOp final : public Operator<Context> {
         size_t tensorSize = blob->Get<Tensor<Context>>().size();
         CAFFE_ENFORCE(
             tensorSize == blobSize.second,
-            "Expected: ",
+            "Data size mistmatch for blob ",
+            def().output(blobSize.first),
+            ". Expected: ",
             tensorSize,
             " Read: ",
             blobSize.second);
@@ -225,7 +232,9 @@ class SaveOp final : public Operator<Context> {
     BlobSerializerBase::SerializationAcceptor acceptor = [&](
         const std::string& blobName, const std::string& data) {
       // transaction should take care of locking
-      std::unique_ptr<Transaction> transaction(out_db->NewTransaction());
+      VLOG(2) << "Sending " << blobName << " blob's data of size "
+              << data.size() << " to db";
+      auto transaction = out_db->NewTransaction();
       transaction->Put(blobName, data);
       transaction->Commit();
     };
