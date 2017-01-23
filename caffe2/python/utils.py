@@ -2,6 +2,7 @@ from caffe2.proto import caffe2_pb2
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 import collections
+import functools
 import numpy as np
 import sys
 
@@ -137,19 +138,8 @@ class DebugMode(object):
 
     if __name__ == '__main__':
         from caffe2.python.utils import DebugMode
-        DebugMode.enable()
         DebugMode.run(main)
     '''
-
-    _enabled = False
-
-    @classmethod
-    def enable(cls):
-        cls._enabled = True
-
-    @classmethod
-    def disable(cls):
-        cls._enabled = False
 
     @classmethod
     def run(cls, func):
@@ -158,15 +148,35 @@ class DebugMode(object):
         except KeyboardInterrupt:
             raise
         except Exception:
-            if cls._enabled:
-                import pdb
+            import pdb
 
-                print(
-                    'Entering interactive debugger. Type "bt" to print '
-                    'the full stacktrace. Type "help" to see command listing.')
-                print(sys.exc_info()[1])
-                print
+            print(
+                'Entering interactive debugger. Type "bt" to print '
+                'the full stacktrace. Type "help" to see command listing.')
+            print(sys.exc_info()[1])
+            print
 
-                pdb.post_mortem()
-                sys.exit(1)
+            pdb.post_mortem()
+            sys.exit(1)
             raise
+
+
+def debug(f):
+    '''
+    Use this method to decorate your function with DebugMode's functionality
+
+    Example:
+
+    @debug
+    def test_foo(self):
+        raise Exception("Bar")
+
+    '''
+
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        def func():
+            return f(*args, **kwargs)
+        DebugMode.run(func)
+
+    return wrapper
