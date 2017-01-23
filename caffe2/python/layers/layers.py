@@ -57,7 +57,7 @@ def _is_request_only_scalar(scalar):
 class ModelLayer(object):
 
     def __init__(self, model, prefix, input_record, tags=set(), **kwargs):
-        self.name = model.next_block_name(prefix)
+        self.name = model.next_layer_name(prefix)
         self.model = model
         self.kwargs = kwargs
         self.input_record = input_record

@@ -52,37 +52,44 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         self._init_global_constants()
         self.param_init_net = self.create_init_net('param_init_net')
 
-    def add_global_constant(self, name, array, dtype=None):
+    def add_global_constant(self, name, array=None, dtype=None,
+                            initializer=None):
         # This is global namescope for constants. They will be created in all
         # init_nets and there should be very few of them.
         assert name not in self.global_constants
         self.global_constants[name] = core.BlobReference(
             self.net.NextName(name))
+        if array is not None:
+            assert initializer is None,\
+                "Only one from array and initializer should be specified"
+            if dtype is None:
+                array = np.array(array)
+            else:
+                array = np.array(array, dtype=dtype)
 
-        if dtype is None:
-            array = np.array(array)
-        else:
-            array = np.array(array, dtype=dtype)
+            # TODO: make GivenTensor generic
+            op_name = None
+            if array.dtype == np.int32:
+                op_name = 'GivenTensorIntFill'
+            elif array.dtype == np.int64:
+                op_name = 'GivenTensorInt64Fill'
+            elif array.dtype == np.str:
+                op_name = 'GivenTensorStringFill'
+            else:
+                op_name = 'GivenTensorFill'
 
-        # TODO: make GivenTensor generic
-        op_name = None
-        if array.dtype == np.int32:
-            op_name = 'GivenTensorIntFill'
-        elif array.dtype == np.int64:
-            op_name = 'GivenTensorInt64Fill'
-        elif array.dtype == np.str:
-            op_name = 'GivenTensorStringFill'
+            def initializer(blob_name):
+                return core.CreateOperator(op_name,
+                                           [],
+                                           blob_name,
+                                           shape=array.shape,
+                                           values=array.flatten().tolist()
+                                           )
         else:
-            op_name = 'GivenTensorFill'
+            assert initializer is not None
 
         self.global_constant_initializers.append(
-            core.CreateOperator(op_name,
-                                [],
-                                self.global_constants[name],
-                                shape=array.shape,
-                                values=array.flatten().tolist()
-                                )
-        )
+            initializer(self.global_constants[name]))
         return self.global_constants[name]
 
     def _init_global_constants(self):
@@ -101,9 +108,11 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         self._add_global_constants(init_net)
         return init_net
 
-    def next_block_name(self, prefix):
-        return prefix + "_{}".format(
+    def next_layer_name(self, prefix):
+        name = prefix + "_{}".format(
             len(filter(lambda x: x.startswith(prefix), self._layer_names)))
+        self._layer_names.add(name)
+        return name
 
     def add_layer(self, layer):
         self._layers.append(layer)
