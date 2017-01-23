@@ -94,8 +94,13 @@ module_tests = [
     ),
     dict(
         module_name='LogSoftmax',
-        input_size=(10, 20),
+        input_size=(10,20),
         reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
+    ),
+    dict(
+        module_name='LogSoftmax2d',
+        input_size=(1, 3, 10, 20),
+        reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand_as(i)).log_()
     ),
     dict(
         module_name='ELU',

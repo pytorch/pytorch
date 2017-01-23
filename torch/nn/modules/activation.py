@@ -29,6 +29,7 @@ class Threshold(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, threshold, value, inplace=False):
         super(Threshold, self).__init__()
         self.threshold = threshold
@@ -40,7 +41,7 @@ class Threshold(Module):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
+        inplace_str = ', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + str(self.threshold) \
             + ', ' + str(self.value) \
@@ -64,17 +65,18 @@ class ReLU(Threshold):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(0, 0, inplace)
 
     def __repr__(self):
-        inplace_str='inplace' if self.inplace else ''
+        inplace_str = 'inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + inplace_str + ')'
 
 
 class RReLU(Module):
-    def __init__(self, lower=1./8, upper=1./3, inplace=False):
+    def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
         self.lower = lower
         self.upper = upper
@@ -84,7 +86,7 @@ class RReLU(Module):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
+        inplace_str = ', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + str(self.lower) \
             + ', ' + str(self.upper) \
@@ -118,6 +120,7 @@ class Hardtanh(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, min_value=-1, max_value=1, inplace=False):
         super(Hardtanh, self).__init__()
         self.min_val = min_value
@@ -129,11 +132,12 @@ class Hardtanh(Module):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
+        inplace_str = ', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + 'min_val=' + str(self.min_val) \
             + ', max_val=' + str(self.max_val) \
             + inplace_str + ')'
+
 
 class ReLU6(Hardtanh):
     """Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
@@ -152,13 +156,15 @@ class ReLU6(Hardtanh):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(0, 6, inplace)
 
     def __repr__(self):
-        inplace_str='inplace' if self.inplace else ''
+        inplace_str = 'inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + inplace_str + ')'
+
 
 class Sigmoid(Module):
     """Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
@@ -174,12 +180,12 @@ class Sigmoid(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         return torch.sigmoid(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
-
 
 
 class Tanh(Module):
@@ -196,11 +202,13 @@ class Tanh(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         return torch.tanh(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
+
 
 class ELU(Module):
     """Applies element-wise, :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
@@ -220,6 +228,7 @@ class ELU(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, alpha=1., inplace=False):
         super(ELU, self).__init__()
         self.alpha = alpha
@@ -229,7 +238,7 @@ class ELU(Module):
         return F.elu(input, self.alpha, self.inplace)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
+        inplace_str = ', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + 'alpha=' + str(self.alpha) \
             + inplace_str + ')'
@@ -256,6 +265,7 @@ class Hardshrink(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, lambd=0.5):
         super(Hardshrink, self).__init__()
         self.lambd = lambd
@@ -286,6 +296,7 @@ class LeakyReLU(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, negative_slope=1e-2, inplace=False):
         super(LeakyReLU, self).__init__()
         self.negative_slope = negative_slope
@@ -295,10 +306,11 @@ class LeakyReLU(Module):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
+        inplace_str = ', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + str(self.negative_slope) \
             + inplace_str + ')'
+
 
 class LogSigmoid(Module):
     """Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
@@ -314,11 +326,13 @@ class LogSigmoid(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         return F.logsigmoid(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
+
 
 class Softplus(Module):
     """Applies element-wise :math:`f(x) = 1/beta * log(1 + exp(beta * x_i))`
@@ -344,6 +358,7 @@ class Softplus(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
         self.beta = beta
@@ -356,6 +371,7 @@ class Softplus(Module):
         return self.__class__.__name__ + ' (' \
             + 'beta=' + str(self.beta) \
             + ', threshold=' + str(self.threshold) + ')'
+
 
 class Softshrink(Module):
     """Applies the soft shrinkage function elementwise
@@ -379,6 +395,7 @@ class Softshrink(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, lambd=0.5):
         super(Softshrink, self).__init__()
         self.lambd = lambd
@@ -417,6 +434,7 @@ class PReLU(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters
         super(PReLU, self).__init__()
@@ -444,6 +462,7 @@ class Softsign(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         return F.softsign(input)
 
@@ -465,11 +484,13 @@ class Tanhshrink(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         return F.tanhshrink(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
+
 
 class Softmin(Module):
     """Applies the Softmin function to an n-dimensional input Tensor
@@ -495,11 +516,13 @@ class Softmin(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         return F.softmin(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
+
 
 class Softmax(Module):
     """Applies the Softmax function to an n-dimensional input Tensor
@@ -529,12 +552,14 @@ class Softmax(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
         return F.softmax(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
+
 
 class Softmax2d(Module):
     """Applies SoftMax over features to each spatial location
@@ -559,12 +584,14 @@ class Softmax2d(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
+
 
 class LogSoftmax(Module):
     """Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
@@ -587,9 +614,29 @@ class LogSoftmax(Module):
         >>> print(input)
         >>> print(m(input))
     """
+
     def forward(self, input):
         return F.log_softmax(input)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
 
+
+class LogSoftmax2d(Module):
+    """Applies the Log(Softmax(x)) over features to each spatial location.
+
+
+    Shape:
+        - Input: :math:`(N, L, H, W)`
+        - Output: :math:`(N, L, H, W)`
+
+    Returns:
+        a Tensor of the same dimension and shape as the input with
+        values in the range [-inf, 0)
+    """
+
+    def forward(self, input):
+        return F.log_softmax(input)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
