@@ -67,7 +67,7 @@ class PackedFCTest(hu.HypothesisTestCase):
         def ref(X, W, b):
             output_axes = list(X.shape[:axis]) + [N]
             return (
-                np.dot(X.reshape(X.size / K, K), W.T).reshape(output_axes) + b,)
+                np.dot(X.reshape(int(X.size / K), K), W.T).reshape(output_axes) + b,)
 
         self.assertReferenceChecks(gc, op, [X, W, b], ref)
 

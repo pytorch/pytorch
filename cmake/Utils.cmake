@@ -394,7 +394,8 @@ endfunction()
 # Helper function to automatically generate __init__.py files where python
 # sources reside but there are no __init__.py present.
 function(caffe_autogen_init_py_files)
-  file(GLOB_RECURSE all_python_files RELATIVE ${CMAKE_BINARY_DIR} "${CMAKE_BINARY_DIR}/*.py")
+  file(GLOB_RECURSE all_python_files RELATIVE ${PROJECT_SOURCE_DIR}
+       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
   set(python_paths_need_init_py)
   foreach(python_file ${all_python_files})
     get_filename_component(python_path ${python_file} PATH)
@@ -408,6 +409,7 @@ function(caffe_autogen_init_py_files)
   list(REMOVE_DUPLICATES python_paths_need_init_py)
   # Since the _pb2.py files are yet to be created, we will need to manually
   # add them to the list.
+  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe)
   list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe/proto)
   list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
 

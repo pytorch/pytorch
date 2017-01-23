@@ -22,8 +22,9 @@ class MKLReluOp : public MKLOperator<T> {
       Y->Reset(X.dims(), primitive_, dnnResourceDst);
       buffer_.Reset(X.dims(), primitive_, dnnResourceDst, true);
     }
-    // Try to share from the output: this will save a copy if the output is
-    // already allocated and is having the same layout as the buffer has.
+    // Try to share from the output: this allows us to avoid unnecessary copy
+    // operations, if the output is already allocated and is having the same
+    // layout as the buffer has.
     buffer_.ShareFrom(*Y);
     resources_[dnnResourceSrc] = X.buffer();
     resources_[dnnResourceDst] = buffer_.buffer();
