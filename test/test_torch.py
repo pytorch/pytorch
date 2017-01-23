@@ -2805,6 +2805,14 @@ class TestTorch(TestCase):
         self.assertEqual(res, x * 2)
         self.assertRaises(RuntimeError, lambda: x.apply_(lambda k: "str"))
 
+    def test_Size(self):
+        x = torch.Size([1, 2, 3])
+        self.assertIsInstance(x, tuple)
+        self.assertEqual(x[0], 1)
+        self.assertEqual(x[1], 2)
+        self.assertEqual(x[2], 3)
+        self.assertRaises(TypeError, lambda: torch.Size(torch.ones(3)))
+
 
 if __name__ == '__main__':
     unittest.main()
