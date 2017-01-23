@@ -320,7 +320,9 @@ class Tensor {
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
-    CAFFE_ENFORCE(src.data_.get(), "Source tensor has no content yet.");
+    CAFFE_ENFORCE(
+        src.data_.get() || src.size_ == 0,
+        "Source tensor has no content and has size > 0");
     // Finally, do sharing.
     data_ = src.data_;
     capacity_ = src.capacity_;
