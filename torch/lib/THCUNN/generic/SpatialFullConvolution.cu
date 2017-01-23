@@ -15,6 +15,10 @@ static inline void THNN_(SpatialFullConvolution_shapeCheck)(
   THArgCheck(adjW < dW && adjH < dH, 15,
              "output adjustment must be smaller than stride, but got adjH: %d adjW: %d dH: %d dW: %d",
              adjH, adjW, dH, dW);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
+             "bias tensor has to be contiguous");
   THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
                   "2D or 4D weight tensor expected, but got: %s");
 
