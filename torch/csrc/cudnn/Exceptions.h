@@ -28,7 +28,9 @@ inline void CHECK(cudnnStatus_t status)
 inline void CUDA_CHECK(cudaError_t error)
 {
   if (error) {
-    throw std::runtime_error("CUDA error");
+    std::stringstream ss;
+    ss << cudaGetErrorString(error);
+    throw std::runtime_error(ss.str());
   }
 }
 
