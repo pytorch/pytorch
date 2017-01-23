@@ -2,6 +2,7 @@
 #define THP_CUDNN_EXCEPTIONS_INC
 
 #include <cudnn.h>
+#include <string>
 #include <stdexcept>
 #include <sstream>
 
@@ -14,13 +15,21 @@ namespace torch { namespace cudnn {
 class cudnn_exception : public std::runtime_error {
 public:
   cudnnStatus_t status;
-  cudnn_exception(cudnnStatus_t status, const char* msg) : std::runtime_error(msg), status(status) {
-  }
+  cudnn_exception(cudnnStatus_t status, const char* msg)
+      : std::runtime_error(msg)
+      , status(status) {}
+  cudnn_exception(cudnnStatus_t status, const std::string& msg)
+      : std::runtime_error(msg)
+      , status(status) {}
 };
 
 inline void CHECK(cudnnStatus_t status)
 {
   if (status != CUDNN_STATUS_SUCCESS) {
+    if (status == CUDNN_STATUS_NOT_SUPPORTED) {
+        throw cudnn_exception(status, std::string(cudnnGetErrorString(status)) +
+                ". This error may appear if you passed in a non-contiguous input.");
+    }
     throw cudnn_exception(status, cudnnGetErrorString(status));
   }
 }
