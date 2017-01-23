@@ -990,9 +990,10 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
         o = queue.pop()
         if (o not in inputs_set) and (o in producers):
             op_id = producers[o]
-            used_op_ids |= {op_id}
-            inputs, _ = ssa[op_id]
-            queue.extend(inputs)
+            if op_id not in used_op_ids:
+                used_op_ids |= {op_id}
+                inputs, _ = ssa[op_id]
+                queue.extend(inputs)
     return sorted(used_op_ids)
 
 
