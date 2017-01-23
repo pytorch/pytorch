@@ -31,4 +31,16 @@ PyObject * getTensorClass(PyObject *args)
   return NULL;
 }
 
+void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& name)
+{
+  static const std::string error_str = "cuDNN requires contiguous ";
+  // Contiguity check
+  long long expectedStride = 1;
+  for (int i = tensor->nDimension-1; i >= 0; --i) {
+    if (tensor->stride[i] != expectedStride)
+      throw std::invalid_argument(error_str + name);
+    expectedStride *= tensor->size[i];
+  }
+}
+
 }}  // namespace torch::cudnn

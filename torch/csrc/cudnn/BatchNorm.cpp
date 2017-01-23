@@ -1,6 +1,7 @@
 #include "BatchNorm.h"
 
 #include "Descriptors.h"
+#include "Types.h"
 
 
 namespace torch { namespace cudnn {
@@ -78,6 +79,11 @@ void cudnn_batch_norm_forward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   if (training) {
+    THVoidTensor_assertContiguous(bias);
+    THVoidTensor_assertContiguous(running_mean);
+    THVoidTensor_assertContiguous(running_var);
+    THVoidTensor_assertContiguous(save_mean);
+    THVoidTensor_assertContiguous(save_var);
     CHECK(cudnnBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
       idesc.desc, tensorPointer(dataType, input),
@@ -91,6 +97,9 @@ void cudnn_batch_norm_forward(
       tensorPointer(dataType, save_mean),
       tensorPointer(dataType, save_var)));
   } else {
+    THVoidTensor_assertContiguous(bias);
+    THVoidTensor_assertContiguous(running_mean);
+    THVoidTensor_assertContiguous(running_var);
     CHECK(cudnnBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
       idesc.desc, tensorPointer(dataType, input),
@@ -129,6 +138,10 @@ void cudnn_batch_norm_backward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+  THVoidTensor_assertContiguous(grad_weight);
+  THVoidTensor_assertContiguous(grad_bias);
+  THVoidTensor_assertContiguous(save_mean);
+  THVoidTensor_assertContiguous(save_var);
   CHECK(cudnnBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &one,
     idesc.desc, tensorPointer(dataType, input),
