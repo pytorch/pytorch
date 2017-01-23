@@ -24,18 +24,17 @@ PyObject * THPSize_New(int dim, long *sizes)
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-  PyObject *self = PyTuple_Type.tp_new(type, args, kwargs);
+  THPObjectPtr self = PyTuple_Type.tp_new(type, args, kwargs);
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
-      PyObject *item = PyTuple_GET_ITEM(self, i);
+      PyObject *item = PyTuple_GET_ITEM(self.get(), i);
       if (!THPUtils_checkLong(item)) {
-        Py_DECREF(self);
         return PyErr_Format(PyExc_TypeError, "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
             i, Py_TYPE(item)->tp_name);
       }
     }
   }
-  return self;
+  return self.release();
 }
 
 static PyObject * THPSize_repr(THPSize *self)
