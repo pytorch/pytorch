@@ -17,6 +17,8 @@ CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
 namespace caffe2 {
 
 constexpr auto kTensorBlobType = "Tensor";
+// String used to separate chunk id from the blob name when storing in DB
+constexpr auto kChunkIdSeparator = "#%";
 
 // The Blob serialization registry and serializer creator functions.
 CAFFE_DECLARE_TYPED_REGISTRY(
@@ -199,11 +201,13 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
   std::vector<std::future<void>> futures;
 #endif
 
+  VLOG(1) << "Serializing blob " << name;
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
        chunkBegin < std::max(tensor.size(), static_cast<TIndex>(1));
        chunkBegin += chunk_size) {
+    VLOG(2) << "Starting a chunk at " << chunkBegin;
     auto task = [&](size_t chunkStart) {
       BlobProto blob_proto;
       blob_proto.set_name(name);
@@ -212,7 +216,10 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
       proto.set_name(name);
       this->Serialize(
           tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
-      acceptor(name, blob_proto.SerializeAsString());
+      acceptor(
+          MakeString(
+              name, kChunkIdSeparator, chunkStart / chunk_size),
+          blob_proto.SerializeAsString());
     };
 #ifndef __ANDROID__
     if (tensor.size() > chunk_size) {
@@ -223,7 +230,6 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
     }
 #else
     // Since Android does not have std::future, we will always do sync mode
-    //
     task(chunkBegin);
 #endif
   }
