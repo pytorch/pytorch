@@ -99,6 +99,19 @@ if (BUILD_PYTHON)
   message(STATUS "Automatically generating missing __init__.py files.")
   caffe_autogen_init_py_files()
 
+  # Create a custom target that copies all python files.
+  file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
+       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
+  add_custom_target(python_copy_files ALL)
+  foreach(python_src ${PYTHON_SRCS})
+    get_filename_component(dir ${python_src} DIRECTORY)
+    add_custom_command(
+        TARGET python_copy_files PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
+    # file(COPY ${python_src} DESTINATION ${CMAKE_BINARY_DIR}/caffe2/${dir})
+  endforeach()
+
   # Install commands
   # Pick up static python files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}

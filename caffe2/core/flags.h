@@ -1,12 +1,24 @@
+/**
+ * @file flags.h
+ * @brief Commandline flags support for Caffe2.
+ *
+ * This is a portable commandline flags tool for caffe2, so we can optionally
+ * choose to use gflags or a lightweighted custom implementation if gflags is
+ * not possible on a certain platform. If you have gflags installed, set the
+ * macro CAFFE2_USE_GFLAGS will seamlessly route everything to gflags.
+ *
+ * To define a flag foo of type bool default to true, do the following in the
+ * *global* namespace:
+ *     CAFFE2_DEFINE_bool(foo, true, "An example.");
+ *
+ * To use it in another .cc file, you can use CAFFE2_DECLARE_* as follows:
+ *     CAFFE2_DECLARE_bool(foo);
+ *
+ * In both cases, you can then access the flag via caffe2::FLAGS_foo.
+ */
+
 #ifndef CAFFE2_CORE_FLAGS_H_
 #define CAFFE2_CORE_FLAGS_H_
-// A lightweighted commandline flags tool for caffe2, so we do not need to rely
-// on gflags. If you have gflags installed, set the macro CAFFE2_USE_GFLAGS will
-// seamlessly route everything to gflags.
-
-#ifdef CAFFE2_USE_GFLAGS
-#include <gflags/gflags.h>
-#endif
 
 #include "caffe2/core/registry.h"
 
@@ -43,6 +55,8 @@ bool CommandLineFlagsHasBeenParsed();
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef CAFFE2_USE_GFLAGS
+
+#include <gflags/gflags.h>
 
 #define CAFFE2_GFLAGS_DEF_WRAPPER(type, name, default_value, help_str)         \
   DEFINE_##type(name, default_value, help_str);                                \

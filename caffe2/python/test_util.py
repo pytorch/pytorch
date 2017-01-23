@@ -20,7 +20,6 @@ class TestCase(unittest.TestCase):
         workspace.GlobalInit([
             'caffe2',
             '--caffe2_log_level=0',
-            '--caffe2_omp_num_threads=1',
         ])
 
     def setUp(self):

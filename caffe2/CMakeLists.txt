@@ -161,13 +161,3 @@ foreach(binary_src ${Caffe2_ALL_BINARY_SRCS})
   install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
 endforeach()
 
-
-# ---[ Python files
-if (BUILD_PYTHON)
-  file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *.py)
-  foreach(python_src ${PYTHON_SRCS})
-    get_filename_component(dir ${python_src} DIRECTORY)
-    file(COPY ${python_src} DESTINATION ${CMAKE_BINARY_DIR}/caffe2/${dir})
-  endforeach()
-endif()
-
