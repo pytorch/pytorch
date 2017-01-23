@@ -40,7 +40,7 @@ class Adam(Optimizer):
         for group in self.param_groups:
             for p in group['params']:
                 grad = p.grad.data
-                state = self.state[id(p)]
+                state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:

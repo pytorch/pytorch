@@ -88,7 +88,6 @@ class LBFGS(Optimizer):
         state.setdefault('func_evals', 0)
         state.setdefault('n_iter', 0)
 
-
         # evaluate initial f(x) and df/dx
         orig_loss = closure()
         loss = orig_loss.data[0]

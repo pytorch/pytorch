@@ -46,7 +46,7 @@ class SGD(Optimizer):
                 if weight_decay != 0:
                     d_p.add_(weight_decay, p.data)
                 if momentum != 0:
-                    param_state = self.state[id(p)]
+                    param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
                         param_state['momentum_buffer'] = d_p.clone()
                     else:
