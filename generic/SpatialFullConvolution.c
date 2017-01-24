@@ -59,7 +59,7 @@ static void THNN_(col2im)(const real* data_col, const int channels,
 
 static inline void THNN_(SpatialFullConvolution_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
-	THTensor *weight, THTensor *bias, 
+	THTensor *weight, THTensor *bias,
 	int kH, int kW, int dH, int dW, int padH, int padW, int adjH, int adjW) {
 
   THArgCheck(kW > 0 && kH > 0, 9,
@@ -103,7 +103,7 @@ static inline void THNN_(SpatialFullConvolution_shapeCheck)(
 	    nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
 
   THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
-  
+
   if (gradOutput != NULL) {
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
@@ -342,8 +342,9 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
     int dW, int dH,
     int padW, int padH,
     int adjW, int adjH,
-    real scale)
+    accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_(SpatialFullConvolution_shapeCheck)
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW, adjH, adjW);
 

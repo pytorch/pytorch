@@ -6,8 +6,9 @@ void THNN_(Sqrt_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          real eps)
+          accreal eps_)
 {
+  real eps = TH_CONVERT_ACCREAL_TO_REAL(eps_);
   THTensor_(resizeAs)(output, input);
   THTensor_(sqrt)(output, input);
 }
@@ -22,8 +23,8 @@ void THNN_(Sqrt_updateGradInput)(
   THNN_CHECK_SHAPE(output, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (output->nDimension == 1 || 
-      !THTensor_(isContiguous)(output) || 
+  if (output->nDimension == 1 ||
+      !THTensor_(isContiguous)(output) ||
       !THTensor_(isContiguous)(gradOutput) ||
       !THTensor_(isContiguous)(gradInput))
   {
