@@ -4,7 +4,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, recurrent, workspace
+from caffe2.python.utils import debug
 from caffe2.python.model_helper import ModelHelperBase
+from caffe2.python.cnn import CNNModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -51,19 +53,88 @@ def lstm_unit(cell_t_prev, gates, seq_lengths, timestep):
     return hidden_t, cell_t
 
 
+def lstm_reference(input, hidden_input, cell_input,
+                   gates_w, gates_b, seq_lengths):
+    T = input.shape[0]
+    N = input.shape[1]
+    G = input.shape[2]
+    D = hidden_input.shape[2]
+    hidden = np.zeros(shape=(T + 1, N, D))
+    cell = np.zeros(shape=(T + 1, N, D))
+    assert hidden.shape[0] == T + 1
+    assert cell.shape[0] == T + 1
+    assert hidden.shape[1] == N
+    assert cell.shape[1] == N
+    cell[0, :, :] = cell_input
+    hidden[0, :, :] = hidden_input
+    for t in range(T):
+        timestep = np.asarray([t]).astype(np.int32)
+        input_t = input[t].reshape(1, N, G)
+        hidden_t_prev = hidden[t].reshape(1, N, D)
+        cell_t_prev = cell[t].reshape(1, N, D)
+        gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
+        gates = gates + input_t
+        hidden_t, cell_t = lstm_unit(cell_t_prev, gates, seq_lengths,
+                                     timestep)
+        hidden[t + 1] = hidden_t
+        cell[t + 1] = cell_t
+    return (
+        hidden[1:],
+        hidden[-1].reshape(1, N, D),
+        cell[1:],
+        cell[-1].reshape(1, N, D)
+    )
+
+
+def old_lstm_reference(
+        input, seq_lengths, gates_w, gates_b, hidden_init, cell_init):
+    output, last_output, cell_states, last_state = lstm_reference(
+        input, hidden_init, cell_init, gates_w, gates_b, seq_lengths)
+    return (output, last_output, last_state)
+
+
 class RecurrentNetworkTest(hu.HypothesisTestCase):
 
     @given(t=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
-    def test_lstm(self, t, n, d):
+    def test_lstm_new(self, t, n, d):
         model = ModelHelperBase(name='external')
 
+        def create_lstm(
+                model, input_blob, seq_lengths, init, dim_in, dim_out, scope):
+            recurrent.LSTM(
+                model, input_blob, seq_lengths, init,
+                dim_in, dim_out, scope="external/recurrent")
+
+        self.lstm(model, create_lstm, t, n, d, lstm_reference,
+                  gradients_to_check=[0, 3, 4])
+
+    @given(t=st.integers(1, 4),
+           n=st.integers(1, 5),
+           d=st.integers(1, 5))
+    def test_lstm_old(self, t, n, d):
+        model = CNNModelHelper(name='external')
+
+        def create_lstm(
+                model, input_blob, seq_lengths, init, dim_in, dim_out, scope):
+            model.LSTM(
+                input_blob, seq_lengths, init,
+                dim_in, dim_out, scope="external/recurrent")
+
+        # CNNModelHelper.LSTM returns only 3 outputs. But the operator itself
+        # returns 5. We ignore the rest.
+        self.lstm(model, create_lstm, t, n, d, old_lstm_reference,
+                  gradients_to_check=[0, 2, 3], outputs_to_check=[0, 3, 4])
+
+    @debug
+    def lstm(self, model, create_lstm, t, n, d, ref, gradients_to_check,
+             outputs_to_check=None):
         input_blob, seq_lengths, hidden_init, cell_init = (
             model.net.AddExternalInputs(
                 'input_blob', 'seq_lengths', 'hidden_init', 'cell_init'))
 
-        recurrent.LSTM(
+        create_lstm(
             model, input_blob, seq_lengths, (hidden_init, cell_init),
             d, d, scope="external/recurrent")
 
@@ -82,37 +153,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                  for gate in ["gates_t_b", "gates_t_w"]}
         workspace.RunNetOnce(model.param_init_net)
 
-        def reference(input, hidden_input, cell_input,
-                      gates_w, gates_b, seq_lengths):
-            T = input.shape[0]
-            N = input.shape[1]
-            G = input.shape[2]
-            D = hidden_input.shape[2]
-            hidden = np.zeros(shape=(T + 1, N, D))
-            cell = np.zeros(shape=(T + 1, N, D))
-            assert hidden.shape[0] == T + 1
-            assert cell.shape[0] == T + 1
-            assert hidden.shape[1] == N
-            assert cell.shape[1] == N
-            cell[0, :, :] = cell_input
-            hidden[0, :, :] = hidden_input
-            for t in range(T):
-                timestep = np.asarray([t]).astype(np.int32)
-                input_t = input[t].reshape(1, N, G)
-                hidden_t_prev = hidden[t].reshape(1, N, D)
-                cell_t_prev = cell[t].reshape(1, N, D)
-                gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
-                gates = gates + input_t
-                hidden_t, cell_t = lstm_unit(cell_t_prev, gates, seq_lengths,
-                                             timestep)
-                hidden[t + 1] = hidden_t
-                cell[t + 1] = cell_t
-            return (
-                hidden[1:],
-                hidden[-1].reshape(1, N, D),
-                cell[1:],
-                cell[-1].reshape(1, N, D)
-            )
 
         input_blob = op.input[0]
 
@@ -128,34 +168,17 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             hu.cpu_do,
             op,
-            [
-                workspace.FetchBlob(name)
-                for name in [
-                    input_blob,
-                    "hidden_init", "cell_init",
-                    gates["gates_t_w"],
-                    gates["gates_t_b"],
-                    "seq_lengths"
-                ]
-            ],
-            reference,
+            [workspace.FetchBlob(name) for name in op.input],
+            ref,
+            outputs_to_check=outputs_to_check,
         )
 
         # Checking for input, gates_t_w and gates_t_b gradients
-        for param in [0, 3, 4]:
+        for param in gradients_to_check:
             self.assertGradientChecks(
                 hu.cpu_do,
                 op,
-                [
-                    workspace.FetchBlob(name)
-                    for name in [
-                        input_blob,
-                        "hidden_init", "cell_init",
-                        gates["gates_t_w"],
-                        gates["gates_t_b"],
-                        "seq_lengths"
-                    ]
-                ],
+                [workspace.FetchBlob(name) for name in op.input],
                 param,
                 [0],
                 threshold=0.01,
