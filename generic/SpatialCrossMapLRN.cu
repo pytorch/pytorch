@@ -3,8 +3,12 @@
 #else
 
 void LRNforward(THCState* state, THCTensor* input, THCTensor* output,
-    THCTensor* scale, int local_size, real alpha, real beta, real k)
+    THCTensor* scale, int local_size, accreal alpha_, accreal beta_, accreal k_)
 {
+  real alpha = ScalarConvert<accreal, real>::to(alpha_);
+  real beta = ScalarConvert<accreal, real>::to(beta_);
+  real k = ScalarConvert<accreal, real>::to(k_);
+
   THCTensor_(resizeAs)(state, output, input);
   THCTensor_(resizeAs)(state, scale, input);
 
@@ -45,8 +49,12 @@ void LRNforward(THCState* state, THCTensor* input, THCTensor* output,
 
 void LRNbackward(THCState* state, THCTensor* input, THCTensor* output,
     THCTensor* gradOutput, THCTensor* gradInput, THCTensor* scale,
-    int local_size, real alpha, real beta, real k)
+    int local_size, accreal alpha_, accreal beta_, accreal k_)
 {
+  real alpha = ScalarConvert<accreal, real>::to(alpha_);
+  real beta = ScalarConvert<accreal, real>::to(beta_);
+  real k = ScalarConvert<accreal, real>::to(k_);
+
   THCTensor_(resizeAs)(state, gradInput, input);
 
   int batchSize;
@@ -89,9 +97,9 @@ void THNN_(SpatialCrossMapLRN_updateOutput)(
     THCTensor *output,
     THCTensor *scale,
     int size,
-    real alpha,
-    real beta,
-    real k)
+    accreal alpha,
+    accreal beta,
+    accreal k)
 {
   LRNforward(state, input, output, scale, size, alpha, beta, k);
 }
@@ -104,9 +112,9 @@ void THNN_(SpatialCrossMapLRN_updateGradInput)(
     THCTensor *scale,
     THCTensor *output,
     int size,
-    real alpha,
-    real beta,
-    real k)
+    accreal alpha,
+    accreal beta,
+    accreal k)
 {
   LRNbackward(state, input, output, gradOutput, gradInput, scale, size, alpha, beta, k);
 }

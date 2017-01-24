@@ -8,10 +8,13 @@ void THNN_(HardTanh_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           real min_val,
-           real max_val,
+           accreal min_val_,
+           accreal max_val_,
            bool inplace)
 {
+  real min_val = ScalarConvert<accreal, real>::to(min_val_);
+  real max_val = ScalarConvert<accreal, real>::to(max_val_);
+
   THCUNN_assertSameGPU(state, 2, input, output);
   if(inplace)
   {
@@ -31,10 +34,13 @@ void THNN_(HardTanh_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           real min_val,
-           real max_val,
+           accreal min_val_,
+           accreal max_val_,
            bool inplace)
 {
+  real min_val = ScalarConvert<accreal, real>::to(min_val_);
+  real max_val = ScalarConvert<accreal, real>::to(max_val_);
+
   THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
 

@@ -315,8 +315,9 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
            int dW, int dH,
            int padW, int padH,
            int adjW, int adjH,
-           real scale)
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
   int nOutputPlane = THCTensor_(size)(state, gradWeight, 1);
 
