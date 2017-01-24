@@ -18,13 +18,18 @@ DEBUG = check_env_flag('DEBUG')
 # Monkey-patch setuptools to compile in parallel
 ################################################################################
 
-def parallelCCompile(self, sources, output_dir=None, macros=None, include_dirs=None, debug=0, extra_preargs=None, extra_postargs=None, depends=None):
+
+def parallelCCompile(self, sources, output_dir=None, macros=None,
+                     include_dirs=None, debug=0, extra_preargs=None,
+                     extra_postargs=None, depends=None):
     # those lines are copied from distutils.ccompiler.CCompiler directly
-    macros, objects, extra_postargs, pp_opts, build = self._setup_compile(output_dir, macros, include_dirs, sources, depends, extra_postargs)
+    macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
+        output_dir, macros, include_dirs, sources, depends, extra_postargs)
     cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
 
     # compile using a thread pool
     import multiprocessing.pool
+
     def _single_compile(obj):
         src, ext = build[obj]
         self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
@@ -38,6 +43,7 @@ distutils.ccompiler.CCompiler.compile = parallelCCompile
 ################################################################################
 # Custom build commands
 ################################################################################
+
 
 class build_deps(Command):
     user_options = []
@@ -73,6 +79,7 @@ class build_module(Command):
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+
     def run(self):
         # Print build options
         if WITH_NUMPY:
@@ -116,6 +123,7 @@ class build(distutils.command.build.build):
 
 
 class install(setuptools.command.install.install):
+
     def run(self):
         if not self.skip_build:
             self.run_command('build_deps')
@@ -123,6 +131,7 @@ class install(setuptools.command.install.install):
 
 
 class clean(distutils.command.clean.clean):
+
     def run(self):
         import glob
         with open('.gitignore', 'r') as f:
@@ -136,7 +145,6 @@ class clean(distutils.command.clean.clean):
 
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
-
 
 
 ################################################################################
@@ -166,21 +174,21 @@ include_dirs += [
 extra_link_args.append('-L' + lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-TH_LIB     = os.path.join(lib_path, 'libTH.so.1')
-THS_LIB    = os.path.join(lib_path, 'libTHS.so.1')
-THC_LIB    = os.path.join(lib_path, 'libTHC.so.1')
-THCS_LIB   = os.path.join(lib_path, 'libTHCS.so.1')
-THNN_LIB   = os.path.join(lib_path, 'libTHNN.so.1')
+TH_LIB = os.path.join(lib_path, 'libTH.so.1')
+THS_LIB = os.path.join(lib_path, 'libTHS.so.1')
+THC_LIB = os.path.join(lib_path, 'libTHC.so.1')
+THCS_LIB = os.path.join(lib_path, 'libTHCS.so.1')
+THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
-THPP_LIB   = os.path.join(lib_path, 'libTHPP.so.1')
+THPP_LIB = os.path.join(lib_path, 'libTHPP.so.1')
 if platform.system() == 'Darwin':
-    TH_LIB     = os.path.join(lib_path, 'libTH.1.dylib')
-    THS_LIB    = os.path.join(lib_path, 'libTHS.1.dylib')
-    THC_LIB    = os.path.join(lib_path, 'libTHC.1.dylib')
-    THCS_LIB   = os.path.join(lib_path, 'libTHCS.1.dylib')
-    THNN_LIB   = os.path.join(lib_path, 'libTHNN.1.dylib')
+    TH_LIB = os.path.join(lib_path, 'libTH.1.dylib')
+    THS_LIB = os.path.join(lib_path, 'libTHS.1.dylib')
+    THC_LIB = os.path.join(lib_path, 'libTHC.1.dylib')
+    THCS_LIB = os.path.join(lib_path, 'libTHCS.1.dylib')
+    THNN_LIB = os.path.join(lib_path, 'libTHNN.1.dylib')
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
-    THPP_LIB   = os.path.join(lib_path, 'libTHPP.1.dylib')
+    THPP_LIB = os.path.join(lib_path, 'libTHPP.1.dylib')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
@@ -267,70 +275,70 @@ extensions = []
 packages = find_packages(exclude=('tools.*',))
 
 C = Extension("torch._C",
-    libraries=main_libraries,
-    sources=main_sources,
-    language='c++',
-    extra_compile_args=main_compile_args + extra_compile_args,
-    include_dirs=include_dirs,
-    extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')],
-)
+              libraries=main_libraries,
+              sources=main_sources,
+              language='c++',
+              extra_compile_args=main_compile_args + extra_compile_args,
+              include_dirs=include_dirs,
+              extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')],
+              )
 extensions.append(C)
 
 DL = Extension("torch._dl",
-    sources=["torch/csrc/dl.c"],
-    language='c',
-)
+               sources=["torch/csrc/dl.c"],
+               language='c',
+               )
 extensions.append(DL)
 
 THNN = Extension("torch._thnn._THNN",
-    sources=['torch/csrc/nn/THNN.cpp'],
-    language='c++',
-    extra_compile_args=extra_compile_args,
-    include_dirs=include_dirs,
-    extra_link_args=extra_link_args + [
-        TH_LIB,
-        THNN_LIB,
-        make_relative_rpath('../lib'),
-    ]
-)
+                 sources=['torch/csrc/nn/THNN.cpp'],
+                 language='c++',
+                 extra_compile_args=extra_compile_args,
+                 include_dirs=include_dirs,
+                 extra_link_args=extra_link_args + [
+                     TH_LIB,
+                     THNN_LIB,
+                     make_relative_rpath('../lib'),
+                 ]
+                 )
 extensions.append(THNN)
 
 if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
-        sources=['torch/csrc/nn/THCUNN.cpp'],
-        language='c++',
-        extra_compile_args=extra_compile_args,
-        include_dirs=include_dirs,
-        extra_link_args=extra_link_args + [
-            TH_LIB,
-            THC_LIB,
-            THCUNN_LIB,
-            make_relative_rpath('../lib'),
-        ]
-    )
+                       sources=['torch/csrc/nn/THCUNN.cpp'],
+                       language='c++',
+                       extra_compile_args=extra_compile_args,
+                       include_dirs=include_dirs,
+                       extra_link_args=extra_link_args + [
+                           TH_LIB,
+                           THC_LIB,
+                           THCUNN_LIB,
+                           make_relative_rpath('../lib'),
+                       ]
+                       )
     extensions.append(THCUNN)
 
-version="0.1"
+version = "0.1"
 if os.getenv('PYTORCH_BUILD_VERSION'):
     version = os.getenv('PYTORCH_BUILD_VERSION') \
-              + '_' + os.getenv('PYTORCH_BUILD_NUMBER')
+        + '_' + os.getenv('PYTORCH_BUILD_NUMBER')
 
 setup(name="torch", version=version,
-    ext_modules=extensions,
-    cmdclass = {
-        'build': build,
-        'build_ext': build_ext,
-        'build_deps': build_deps,
-        'build_module': build_module,
-        'install': install,
-        'clean': clean,
-    },
-    packages=packages,
-    package_data={'torch': [
-        'lib/*.so*', 'lib/*.dylib*',
-        'lib/torch_shm_manager',
-        'lib/*.h',
-        'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-        'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
-    install_requires=['pyyaml'],
-)
+      ext_modules=extensions,
+      cmdclass={
+          'build': build,
+          'build_ext': build_ext,
+          'build_deps': build_deps,
+          'build_module': build_module,
+          'install': install,
+          'clean': clean,
+      },
+      packages=packages,
+      package_data={'torch': [
+          'lib/*.so*', 'lib/*.dylib*',
+          'lib/torch_shm_manager',
+          'lib/*.h',
+          'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
+          'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
+      install_requires=['pyyaml'],
+      )
