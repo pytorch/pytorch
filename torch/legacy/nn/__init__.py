@@ -115,7 +115,6 @@ from .SpatialMaxUnpooling import SpatialMaxUnpooling
 from .SpatialReflectionPadding import SpatialReflectionPadding
 from .SpatialReplicationPadding import SpatialReplicationPadding
 from .SpatialSoftMax import SpatialSoftMax
-from .SpatialLogSoftMax import SpatialLogSoftMax
 from .SpatialSubSampling import SpatialSubSampling
 from .SpatialSubtractiveNormalization import SpatialSubtractiveNormalization
 from .SpatialUpSamplingNearest import SpatialUpSamplingNearest
