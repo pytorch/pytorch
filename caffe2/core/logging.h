@@ -71,6 +71,16 @@ inline string MakeString(const char* c_str) {
   return string(c_str);
 }
 
+template <class Container>
+inline string Join(const string& delimiter, const Container& v) {
+  std::stringstream s;
+  int cnt = static_cast<int64_t>(v.size()) - 1;
+  for (auto i = v.begin(); i != v.end(); ++i, --cnt) {
+    s << (*i) << (cnt ? delimiter : "");
+  }
+  return s.str();
+}
+
 // Obtains the base name from a full path.
 string StripBasename(const std::string& full_path);
 

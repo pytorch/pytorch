@@ -64,6 +64,15 @@ TEST(LoggingTest, EnforceShowcase) {
   WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(Equals(one * two + three, three * two)));
 }
 
+TEST(LoggingTest, Join) {
+  auto s = Join(", ", vector<int>({1, 2, 3}));
+  EXPECT_EQ(s, "1, 2, 3");
+  s = Join(":", vector<string>());
+  EXPECT_EQ(s, "");
+  s = Join(", ", set<int>({3, 1, 2}));
+  EXPECT_EQ(s, "1, 2, 3");
+}
+
 #if GTEST_HAS_DEATH_TEST
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
