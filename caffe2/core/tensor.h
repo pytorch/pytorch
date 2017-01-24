@@ -3,9 +3,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <sstream>
-#include <typeinfo>
 #include <type_traits>
+#include <typeinfo>
 #include <vector>
 
 #include "caffe2/core/common.h"
@@ -650,6 +651,61 @@ class Tensor {
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
 typedef Tensor<CPUContext> TensorCPU;
+
+constexpr int k_limit_default_ = 1000;
+
+class TensorPrinter {
+ public:
+  explicit TensorPrinter(
+      const std::string& tensor_name = "",
+      const std::string& file_name = "",
+      int limit = k_limit_default_);
+  ~TensorPrinter();
+
+  template <class T>
+  void Print(const Tensor<CPUContext>& tensor);
+
+  template <class Context>
+  void PrintMeta(const Tensor<Context>& tensor);
+
+ private:
+  string MetaStr(const Tensor<CPUContext>& tensor);
+
+ private:
+  bool to_file_;
+  int limit_;
+  std::unique_ptr<std::ofstream> log_file_;
+  std::string tensor_name_;
+};
+
+template <class T>
+void TensorPrinter::Print(const Tensor<CPUContext>& tensor) {
+  std::stringstream values_stream;
+  // One most likely doesn't want to print int64-number of items for visual
+  // inspection, so we cast down to int here.
+  int total_count = std::min(tensor.size(), TIndex(limit_));
+  const T* tensor_data = tensor.template data<T>();
+  for (int i = 0; i < total_count - 1; ++i) {
+    values_stream << tensor_data[i] << ",";
+  }
+  // We do not add a comma after the last item.
+  values_stream << tensor_data[total_count - 1];
+  if (to_file_) {
+    (*log_file_) << MetaStr(tensor) << values_stream.str() << std::endl;
+  } else {
+    // Log to console.
+    LOG(INFO) << MetaStr(tensor) << values_stream.str();
+  }
+}
+
+template <class Context>
+void TensorPrinter::PrintMeta(const Tensor<Context>& tensor) {
+  if (to_file_) {
+    (*log_file_) << MetaStr(tensor) << std::endl;
+  } else {
+    LOG(INFO) << MetaStr(tensor);
+  }
+}
 
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_TENSOR_H_

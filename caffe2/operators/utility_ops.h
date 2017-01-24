@@ -1,9 +1,6 @@
 #ifndef CAFFE2_OPERATORS_UTILITY_OPS_H_
 #define CAFFE2_OPERATORS_UTILITY_OPS_H_
 
-#include <fstream>
-#include <sstream>
-
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -43,32 +40,12 @@ class PrintOp final : public Operator<Context> {
   USE_DISPATCH_HELPER;
   PrintOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        to_file_(OperatorBase::GetSingleArgument<int>("to_file", 0)),
-        limit_(OperatorBase::GetSingleArgument<int>("limit", 0)) {
-    if (limit_ == 0) {
-      limit_ = INT_MAX;
-    }
-    if (to_file_) {
-      // We will output to file instead of printing on screen.
-      const string& target_folder = ws->RootFolder();
-      // We will write each individual tensor to its individual file.
-      log_file_.reset(new std::ofstream(
-          target_folder + "/" + def().input(0) + kPrintFileExtension,
-          std::ofstream::out | std::ofstream::trunc));
-      CAFFE_ENFORCE(
-          log_file_->good(),
-          "Failed to open PrintOp file for tensor ",
-          def().input(0),
-          ". rdstate() = ",
-          log_file_->rdstate());
-    }
-  }
-
-  ~PrintOp() {
-    if (log_file_.get()) {
-      log_file_->close();
-    }
-  }
+        tensor_printer_(
+            def().input(0),
+            OperatorBase::GetSingleArgument<int>("to_file", 0)
+                ? ws->RootFolder() + "/" + def().input(0) + kPrintFileExtension
+                : "",
+            OperatorBase::GetSingleArgument<int>("limit", 0)) {}
 
   bool RunOnDevice() override {
     if (!OperatorBase::InputIsType<Tensor<Context>>(0) &&
@@ -79,11 +56,7 @@ class PrintOp final : public Operator<Context> {
     }
     // special-case empty tensors since they may have no meta()
     if (Input(0).size() == 0) {
-      if (to_file_) {
-        (*log_file_) << std::endl;
-      } else {
-        LOG(INFO) << MetaStr();
-      }
+      tensor_printer_.PrintMeta(Input(0));
       return true;
     }
 
@@ -106,17 +79,6 @@ class PrintOp final : public Operator<Context> {
   }
 
  private:
-  std::string MetaStr() {
-    std::stringstream meta_stream;
-    meta_stream << "Tensor " << def().input(0) << " " << Input(0).meta().name()
-                << " (";
-    for (const auto dim : Input(0).dims()) {
-      meta_stream << dim << ",";
-    }
-    meta_stream << "): ";
-    return meta_stream.str();
-  }
-
   template <typename T>
   bool DoRunWithType() {
     // A simple strategy to copy tensor if needed, and have the tensor pointer
@@ -132,29 +94,12 @@ class PrintOp final : public Operator<Context> {
       context_.FinishDeviceComputation();
       tensor = &tensor_copy_if_needed;
     }
-    std::stringstream values_stream;
-    // One most likely doesn't want to print int64-number of items for visual
-    // inspection, so we cast down to int here.
-    int total_count = std::min(tensor->size(), TIndex(limit_));
-    const T* tensor_data = tensor->template data<T>();
-    for (int i = 0; i < total_count - 1; ++i) {
-      values_stream << tensor_data[i] << ",";
-    }
-    // We do not add a comma after the last item.
-    values_stream << tensor_data[total_count - 1];
-    if (to_file_) {
-      (*log_file_) << values_stream.str() << std::endl;
-    } else {
-      // Log to console.
-      LOG(INFO) << MetaStr() << values_stream.str();
-    }
+    tensor_printer_.Print<T>(*tensor);
     return true;
   }
 
  private:
-  bool to_file_;
-  int limit_;
-  std::unique_ptr<std::ofstream> log_file_;
+  TensorPrinter tensor_printer_;
 };
 
 /**
