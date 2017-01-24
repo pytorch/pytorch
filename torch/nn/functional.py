@@ -398,8 +398,8 @@ def nll_loss(input, target, weight=None, size_average=True):
     Args:
         input: :math:`(N, C)` where `C = number of classes`
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-        weight (Tensor, optional): a manual rescaling weight given to each
-                class. If given, has to be a Tensor of size "nclasses"
+        weight (Variable, optional): a manual rescaling weight given to each
+                class. If given, has to be a Variable of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
@@ -425,8 +425,8 @@ def kl_div(input, target, size_average=True):
     See :class:`~torch.nn.KLDivLoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
+        input: Variable of arbitrary shape
+        target: Variable of the same shape as input
         size_average: if True the output is divided by the number of elements
           in input tensor
     """
@@ -439,10 +439,10 @@ def cross_entropy(input, target, weight=None, size_average=True):
     See :class:`torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input: Tensor :math:`(N, C)` where `C = number of classes`
-        target: Tensor :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-        weight (Tensor, optional): a manual rescaling weight given to each
-                class. If given, has to be a Tensor of size "nclasses"
+        input: Variable :math:`(N, C)` where `C = number of classes`
+        target: Variable :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        weight (Variable, optional): a manual rescaling weight given to each
+                class. If given, has to be a Variable of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
@@ -458,9 +458,9 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
     See :class:`~torch.nn.BCELoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
-        weight (Tensor, optional): a manual rescaling weight
+        input: Variable of arbitrary shape
+        target: Variable of the same shape as input
+        weight (Variable, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
@@ -481,7 +481,7 @@ def pixel_shuffle(input, upscale_factor):
     See :class:`~torch.nn.PixelShuffle` for details.
 
     Args:
-        input (Tensor): Input
+        input (Variable): Input
         upscale_factor (int): factor to increase spatial resolution by
 
     Examples:
@@ -503,3 +503,31 @@ def pixel_shuffle(input, upscale_factor):
 
     shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3).contiguous()
     return shuffle_out.view(batch_size, channels, out_height, out_width)
+
+
+def upsample_nearest(input, size=None, scale_factor=None):
+    """Upsamples the input, using nearest neighbours' pixel values.
+
+    Currently only spatial upsampling is supported (i.e. expected inputs
+    are 4 dimensional).
+
+    Args:
+        input (Variable): input
+        size (int or Tuple[int, int]): output spatial size.
+        scale_factor (int): multiplier for spatial size. Has to be an integer.
+    """
+    return _functions.thnn.UpsamplingNearest2d(size, scale_factor)(input)
+
+
+def upsample_billinear(input, size=None, scale_factor=None):
+    """Upscales the input, using the billinear upsampling.
+
+    Currently only spatial upsampling is supported (i.e. expected inputs
+    are 4 dimensional).
+
+    Args:
+        input (Variable): input
+        size (int or Tuple[int, int]): output spatial size.
+        scale_factor (int): multiplier for spatial size. Has to be an integer.
+    """
+    return _functions.thnn.UpsamplingBillinear2d(size, scale_factor)(input)

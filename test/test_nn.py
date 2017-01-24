@@ -1514,6 +1514,40 @@ new_module_tests = [
         constructor_args=(3,),
         input_size=(1, 9, 4, 4),
     ),
+    dict(
+        module_name='UpsamplingNearest2d',
+        constructor_args=(12,),
+        input_size=(1, 2, 4, 4),
+    ),
+    dict(
+        module_name='UpsamplingNearest2d',
+        constructor_args=((12, 16)),
+        input_size=(1, 2, 3, 4),
+        desc='tuple'
+    ),
+    dict(
+        module_name='UpsamplingNearest2d',
+        constructor_args=(None, 4),
+        input_size=(1, 2, 4, 4),
+        desc='scale'
+    ),
+    dict(
+        module_name='UpsamplingBillinear2d',
+        constructor_args=(12,),
+        input_size=(1, 2, 4, 4),
+    ),
+    dict(
+        module_name='UpsamplingBillinear2d',
+        constructor_args=((4, 6)),
+        input_size=(1, 2, 2, 3),
+        desc='tuple'
+    ),
+    dict(
+        module_name='UpsamplingBillinear2d',
+        constructor_args=(None, 4),
+        input_size=(1, 2, 4, 4),
+        desc='scale'
+    ),
 ]
 
 
