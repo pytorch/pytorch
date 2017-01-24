@@ -225,6 +225,14 @@ void cudnn_convolution_forward(
   size_t workspaceSize;
   CHECK(cudnnGetConvolutionForwardWorkspaceSize(handle, idesc.desc, wdesc.desc,
       cdesc.desc, odesc.desc, fwdAlg, &workspaceSize));
+  size_t memFree;
+  size_t memTotal;
+  cudaMemGetInfo(&memFree, &memTotal);
+  if (workspaceSize > memFree) {
+    fwdAlg = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+    CHECK(cudnnGetConvolutionForwardWorkspaceSize(handle, idesc.desc, wdesc.desc,
+        cdesc.desc, odesc.desc, fwdAlg, &workspaceSize));
+  }
 
   Workspace workspace(state, workspaceSize);
 
