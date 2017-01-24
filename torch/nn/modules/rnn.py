@@ -428,6 +428,7 @@ class LSTMCell(RNNCellBase):
 
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
+    
     .. math::
 
         \begin{array}{ll}
