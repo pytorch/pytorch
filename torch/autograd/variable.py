@@ -741,6 +741,27 @@ class Variable(_C._VariableBase):
     def __iter__(self):
         return iter(map(lambda i: self[i], range(self.size(0))))
 
+    def __eq__(self, other):
+        raise TypeError("Variables are not comparable yet.")
+
+    def __ne__(self, other):
+        raise TypeError("Variables are not comparable yet.")
+
+    def __lt__(self, other):
+        raise TypeError("Variables are not comparable yet.")
+
+    def __le__(self, other):
+        raise TypeError("Variables are not comparable yet.")
+
+    def __gt__(self, other):
+        raise TypeError("Variables are not comparable yet.")
+
+    def __ge__(self, other):
+        raise TypeError("Variables are not comparable yet.")
+
+    def __hash__(self):
+        return id(self)
+
     class _torch(object):
 
         @staticmethod
