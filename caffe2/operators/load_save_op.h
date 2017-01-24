@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <map>
+#include <regex>
 #include <unordered_set>
 
 #include "caffe2/core/blob_serialization.h"
@@ -215,6 +216,8 @@ class SaveOp final : public Operator<Context> {
         ws_(ws),
         absolute_path_(
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
+        strip_regex_(
+            OperatorBase::GetSingleArgument<string>("strip_regex", "")),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")) {
     CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
@@ -228,22 +231,25 @@ class SaveOp final : public Operator<Context> {
         caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::NEW));
     CAFFE_ENFORCE(out_db.get(), "Cannot open db for writing: ", full_db_name);
 
-    const vector<const Blob*>& inputs = OperatorBase::Inputs();
+    std::regex strip_expr(strip_regex_);
     BlobSerializerBase::SerializationAcceptor acceptor = [&](
         const std::string& blobName, const std::string& data) {
       // transaction should take care of locking
-      VLOG(2) << "Sending " << blobName << " blob's data of size "
+      std::string name = std::regex_replace(blobName, strip_expr, "");
+      VLOG(2) << "Sending " << name << " blob's data of size "
               << data.size() << " to db";
       auto transaction = out_db->NewTransaction();
-      transaction->Put(blobName, data);
+      transaction->Put(name, data);
       transaction->Commit();
     };
+
+    const vector<const Blob*>& inputs = OperatorBase::Inputs();
+
     std::set<std::string> input_names;
     for (int i = 0; i < inputs.size(); ++i) {
+      std::string name = std::regex_replace(def().input(i), strip_expr, "");
       CAFFE_ENFORCE(
-          input_names.insert(def().input(i)).second,
-          "Duplicated feature: ",
-          def().input(i));
+          input_names.insert(name).second, "Duplicated feature: ", name);
     }
     for (int i = 0; i < inputs.size(); ++i) {
       inputs[i]->Serialize(def().input(i), acceptor);
@@ -254,6 +260,7 @@ class SaveOp final : public Operator<Context> {
  private:
   Workspace* ws_;
   bool absolute_path_;
+  string strip_regex_;
   string db_name_;
   string db_type_;
 };
