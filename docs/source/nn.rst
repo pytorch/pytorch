@@ -368,6 +368,12 @@ Loss functions
 .. autoclass:: NLLLoss
     :members:
 
+:hidden:`NLLLoss2d`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: NLLLoss2d
+    :members:
+
 :hidden:`KLDivLoss`
 ~~~~~~~~~~~~~~~~~~~
 
