@@ -351,11 +351,13 @@ def ensure_type(obj, type_map):
         setattr(obj, attr, getattr(value, converter)())
 
 
-ensure_attr('Linear', 'bias', 'gradWeight', 'gradBias')
+ensure_attr('Linear', 'bias', 'gradWeight', 'gradBias', 'addBuffer')
 ensure_attr('CAddTable', 'inplace')
 ensure_attr('SpatialFractionalMaxPooling', 'outW', 'outH', 'ratioW', 'ratioH')
-ensure_attr('BatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias')
-ensure_attr('SpatialBatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias')
+ensure_attr('BatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias',
+            'save_mean', 'save_std')
+ensure_attr('SpatialBatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias',
+            'save_mean', 'save_std')
 ensure_attr('VolumetricBatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias')
 ensure_attr('LookupTable', 'maxNorm', 'normType', '_gradOutput', '_sorted', '_indices')
 ensure_attr('MixtureTable', 'table')
