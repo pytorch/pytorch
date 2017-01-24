@@ -30,3 +30,9 @@ sudo: false
 
 matrix:
     fast_finish: true
+    include:
+        env: LINT_CHECK
+        python: "2.7"
+        addons: true
+        install: pip install pep8
+        script: pep8 setup.py
