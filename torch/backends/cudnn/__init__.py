@@ -14,9 +14,10 @@ lib = None
 thisdir = path.dirname(__file__)
 libpaths = ['', path.join(thisdir, '../../lib')]
 if sys.platform.startswith('linux'):
-    libnames = ['libcudnn.so.6.0.5', 'libcudnn.so.6.0.10']
+    libnames = ['libcudnn.so.6.0.5', 'libcudnn.so.6.0.10', 'libcudnn.so.5.1.5', 'libcudnn.so.5.1.3', 
+                'libcudnn.so.5.0.5', 'libcudnn.so.5.1.10']
 elif sys.platform == 'darwin':
-    libnames = ['libcudnn.6.dylib']
+    libnames = ['libcudnn.6.dylib', 'libcudnn.5.dylib']
 else:
     libnames = []
 
@@ -258,25 +259,46 @@ class RNNDescriptor(object):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateRNNDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
+        if version() >=6000:
+            check_error(lib.cudnnSetRNNDescriptor_v6(
+                handle,
+                self,
+                hidden_size,
+                num_layers,
+                dropout_desc,
+                input_mode,
+                bidirectional,
+                mode,
+                CUDNN_RNN_ALGO_STANDARD,
+                datatype
+            ))
+        else:
+            check_error(lib.cudnnSetRNNDescriptor(
+                self,
+                hidden_size,
+                num_layers,
+                dropout_desc,
+                input_mode,
+                bidirectional,
+                mode,
+                datatype
+            ))
 
-        check_error(lib.cudnnSetRNNDescriptor_v6(
-            handle,
-            self,
-            hidden_size,
-            num_layers,
-            dropout_desc,
-            input_mode,
-            bidirectional,
-            mode,
-            CUDNN_RNN_ALGO_STANDARD,
-            datatype
-        ))
 
     def __del__(self):
         check_error(lib.cudnnDestroyRNNDescriptor(self))
 
 
-class ConvolutionAlgoPerf(ctypes.Structure):
+
+class ConvolutionAlgoPerf_v5(ctypes.Structure):
+    _fields_ = [
+        ("algo", ctypes.c_int),
+        ("status", ctypes.c_int),
+        ("time", ctypes.c_float),
+        ("memory", ctypes.c_size_t),
+    ]
+
+class ConvolutionAlgoPerf_v6(ctypes.Structure):
     _fields_ = [
         ("algo", ctypes.c_int),
         ("status", ctypes.c_int),
@@ -285,6 +307,9 @@ class ConvolutionAlgoPerf(ctypes.Structure):
         ("determinism", ctypes.c_int),
         ("reserved", ctypes.c_int * 4)
     ]
+
+
+
 
 def check_error(status):
     if status is not 0:
@@ -354,7 +379,10 @@ def convolution_forward_algorithm(idesc, weight_desc, conv_desc, odesc):
         return _autotuner_forward[k]
 
     if benchmark:
-        perf_results = ConvolutionAlgoPerf()
+        if version() < 6000:
+            perf_results = ConvolutionAlgoPerf_v5()
+        else:
+            perf_results = ConvolutionAlgoPerf_v6()
         algo_count = ctypes.c_int()
         check_error(lib.cudnnFindConvolutionForwardAlgorithm(
             get_handle(), idesc, weight_desc, conv_desc, odesc, 1,
