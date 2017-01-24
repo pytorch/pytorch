@@ -12,14 +12,16 @@ class Adadelta(Optimizer):
             of squared gradients (default: 0.9)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6)
+        step_rate (float, optional): coefficient that scale delta before it is applied to the
+            parameters (default: 1)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
-        https://arxiv.org/abs/1609.05158
+        https://arxiv.org/abs/1212.5701
     """
 
-    def __init__(self, params, rho=0.9, eps=1e-6, weight_decay=0):
-        defaults = dict(rho=rho, eps=eps, weight_decay=weight_decay)
+    def __init__(self, params, rho=0.9, eps=1e-6, step_rate=1, weight_decay=0):
+        defaults = dict(rho=rho, eps=eps, weight_decay=weight_decay, step_rate=step_rate)
         super(Adadelta, self).__init__(params, defaults)
 
     def step(self, closure=None):
@@ -45,7 +47,7 @@ class Adadelta(Optimizer):
                     state['acc_delta'] = grad.new().resize_as_(grad).zero_()
 
                 square_avg, acc_delta = state['square_avg'], state['acc_delta']
-                rho, eps = group['rho'], group['eps']
+                rho, eps, step_rate = group['rho'], group['eps'], group['step_rate']
 
                 state['step'] += 1
 
@@ -54,7 +56,7 @@ class Adadelta(Optimizer):
 
                 square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
                 std = square_avg.add(eps).sqrt_()
-                delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
+                delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad).mul_(step_rate)
                 p.data.sub_(delta)
                 acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
 
