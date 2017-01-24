@@ -389,7 +389,8 @@ class HypothesisTestCase(test_util.TestCase):
         threshold=1e-4,
         output_to_grad=None,
         grad_reference=None,
-        atol=None
+        atol=None,
+        outputs_to_check=None,
     ):
         """
         This runs the reference Python function implementation
@@ -429,10 +430,13 @@ class HypothesisTestCase(test_util.TestCase):
                 raise RuntimeError(
                     "You are providing a wrong reference implementation. A "
                     "proper one should return a tuple/list of numpy arrays.")
-            self.assertEqual(len(reference_outputs), len(op.output))
+            if not outputs_to_check:
+                self.assertEqual(len(reference_outputs), len(op.output))
+                outputs_to_check = range(len(op.output))
             outs = []
-            for (n, ref) in zip(op.output, reference_outputs):
-                output = workspace.FetchBlob(n)
+            for (output_index, ref) in zip(outputs_to_check, reference_outputs):
+                output_blob_name = op.output[output_index]
+                output = workspace.FetchBlob(output_blob_name)
                 if output.dtype.kind in ('S', 'O'):
                     np.testing.assert_array_equal(output, ref)
                 else:
