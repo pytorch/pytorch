@@ -229,6 +229,10 @@ class TestAutograd(TestCase):
         self.assertEqual(x[1:2, 2], y[1:2, 2].data)
         self.assertEqual(x[1, 2:], y[1, 2:].data)
 
+    def test_compare(self):
+        x = Variable(torch.randn(5, 5))
+        self.assertRaises(TypeError, lambda: x > 4)
+
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))
         y = Variable(torch.randn(5, 5))

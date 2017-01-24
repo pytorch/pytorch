@@ -789,7 +789,7 @@ class TestNN(NNTestCase):
         var = Variable(torch.randn(5, 5))
         l.var_name = var
         self.assertEqual(num_params(), 3)
-        self.assertNotIn(var, l.parameters())
+        self.assertNotIn(id(var), map(id, l.parameters()))
 
         # Make sure Variables are not saved as parameters
         l.variable_attr = Variable(torch.Tensor(5, 5))
