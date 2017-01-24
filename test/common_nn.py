@@ -102,7 +102,6 @@ module_tests = [
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand_as(i)).log_(),
         desc='multiparam'
-
     ),
     dict(
         module_name='ELU',
