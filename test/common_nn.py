@@ -98,6 +98,12 @@ module_tests = [
         reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
     ),
     dict(
+        module_name='LogSoftmax',
+        input_size=(1, 3, 10, 20),
+        reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand_as(i)).log_(),
+        desc='multiparam'
+    ),
+    dict(
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
