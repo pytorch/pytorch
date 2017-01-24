@@ -112,7 +112,7 @@ class RNN(RNNBase):
 
     Inputs: input, h_0
         - `input`: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0`: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        - `h_0`: A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
 
     Outputs: output, h_n
         - `output`: A (seq_len x batch x hidden_size) tensor containing the output features (h_k) from the last layer of the RNN, for each k
@@ -164,7 +164,7 @@ class LSTM(RNNBase):
             f_t = sigmoid(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
             o_t = sigmoid(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
-            c_t = f_t * c_{(t-1)} + i_t * c_t \\
+            c_t = f_t * c_{(t-1)} + i_t * g_t \\
             h_t = o_t * \tanh(c_t)
             \end{array}
 
@@ -184,8 +184,8 @@ class LSTM(RNNBase):
 
     Inputs: `input, (h_0, c_0)`
         - `input` : A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0` : A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-        - `c_0` : A (num_layers x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
+        - `h_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        - `c_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
 
     Outputs: output, (h_n, c_n)
         - `output` : A (seq_len x batch x hidden_size) tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
@@ -222,7 +222,7 @@ class GRU(RNNBase):
             \begin{array}{ll}
             r_t = sigmoid(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             i_t = sigmoid(W_{ii} x_t + b_{ii} + W_hi h_{(t-1)} + b_{hi}) \\
-            n_t = \tanh(W_{in} x_t + resetgate * W_{hn} h_{(t-1)}) \\
+            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
             h_t = (1 - i_t) * n_t + i_t * h_{(t-1)} \\
             \end{array}
 
@@ -241,7 +241,7 @@ class GRU(RNNBase):
 
     Inputs: `input, h_0`
         - `input` : A `(seq_len x batch x input_size)` tensor containing the features of the input sequence.
-        - `h_0` : A `(num_layers x batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+        - `h_0` : A `((num_layers * num_directions) x batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
 
     Outputs: `output, h_n`
         - `output` : A `(seq_len x batch x hidden_size)` tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
@@ -362,7 +362,7 @@ class LSTMCell(RNNCellBase):
         f = sigmoid(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
         g = \tanh(W_{ig} x + b_{ig} + W_{hc} h + b_{hg}) \\
         o = sigmoid(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
-        c' = f * c + i * c \\
+        c' = f * c + i * g \\
         h' = o * \tanh(c_t) \\
         \end{array}
 
@@ -374,7 +374,7 @@ class LSTMCell(RNNCellBase):
     Inputs: `input, (h_0, c_0)`
         - `input` : A `(batch x input_size)` tensor containing input features
         - `h_0` : A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
-        - `c_0` : A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+        - `c_0` : A `(batch x hidden_size)` tensor containing the initial cell state for each element in the batch.
 
     Outputs: `h_1, c_1`
         - h_1: A `(batch x hidden_size)` tensor containing the next hidden state for each element in the batch
@@ -433,7 +433,7 @@ class GRUCell(RNNCellBase):
         \begin{array}{ll}
         r = sigmoid(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
         i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
-        n = \tanh(W_{in} x + r * W_{hn} h) \\
+        n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
         h' = (1 - i) * n + i * h
         \end{array}
 

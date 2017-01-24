@@ -7,6 +7,12 @@ torch.nn
 .. automodule:: torch.nn
 .. currentmodule:: torch.nn
 
+Parameters
+----------
+
+.. autoclass:: Parameter
+    :members:
+
 Containers
 ----------------------------------
 
@@ -360,6 +366,12 @@ Loss functions
 ~~~~~~~~~~~~~~~~~
 
 .. autoclass:: NLLLoss
+    :members:
+
+:hidden:`NLLLoss2d`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: NLLLoss2d
     :members:
 
 :hidden:`KLDivLoss`

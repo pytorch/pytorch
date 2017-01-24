@@ -17,6 +17,10 @@ static inline void THNN_(VolumetricFullConvolution_shapeCheck)(
   THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
                   "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
                   "expected for weight, but got: %s");
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
+             "bias tensor has to be contiguous");
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 8,
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
   THArgCheck(adjT < dT && adjW < dW && adjH < dH, 14,

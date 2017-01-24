@@ -149,6 +149,8 @@ class ConvNd(Function):
             res = []
             for g in range(self.groups):
                 def group(tensor, dim=None):
+                    if tensor is None:
+                        return None
                     if dim is None:
                         dim = 0 if tensor.dim() == 1 else 1
                     n = tensor.size(dim) // self.groups
@@ -158,7 +160,8 @@ class ConvNd(Function):
                 grouped_args += [group(t) for t in args]
                 res.append(impl[fn_name](self, self._bufs[g], *grouped_args))
             if fn_name == 'grad_params':
-                return [torch.cat(t, 0) for t in zip(*res)]
+                return [torch.cat(t, 0) if t[0] is not None else None
+                                        for t in zip(*res)]
             else:
                 return torch.cat(res, 1)
 
@@ -178,8 +181,11 @@ def _view3d(*tensors):
     # view 4d tensor as 3d
     output = []
     for t in tensors:
-        assert t.dim() == 4 and t.size(2) == 1
-        output += [t.squeeze(2)]
+        if t is None:
+            output += [None]
+        else:
+            assert t.dim() == 4 and t.size(2) == 1
+            output += [t.squeeze(2)]
     return output
 
 

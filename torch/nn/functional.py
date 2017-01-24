@@ -53,7 +53,7 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
-        >>> F.conv1d(inputs)
+        >>> F.conv1d(inputs, filters)
     """
     f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
                _single(0), groups)

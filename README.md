@@ -135,7 +135,10 @@ conda install pytorch torchvision -c soumith
 
 ### From source
 
-Instructions for an Anaconda environment.
+If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
+You will get a high-quality BLAS library (MKL) and you get a controlled compiler version regardless of your Linux distro.
+
+Once you have [anaconda](https://www.continuum.io/downloads) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
@@ -143,14 +146,21 @@ If you want to compile with CUDA support, install
 
 #### Install optional dependencies
 
+On Linux
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 
 # Install basic dependencies
 conda install numpy mkl setuptools cmake gcc cffi
 
-# On Linux, add LAPACK support for the GPU
+# Add LAPACK support for the GPU
 conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
+```
+
+On OSX
+```bash
+export CMAKE_PREFIX_PATH=[anaconda root directory]
+conda install numpy setuptools cmake cffi
 ```
 
 #### Install PyTorch

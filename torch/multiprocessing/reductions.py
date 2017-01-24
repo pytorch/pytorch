@@ -92,7 +92,7 @@ def rebuild_storage_filename(cls, manager, handle, size):
 def reubild_storage_cuda(cls, device, handle, size, offset, view_size):
     storage = storage_from_cache(cls, handle)
     if storage is not None:
-        return storage._new_view(offset, size)
+        return storage._new_view(offset, view_size)
     torch.cuda._lazy_init()
     storage = cls._new_shared_cuda(device, handle, size, offset, view_size)
     shared_cache[handle] = storage._weak_ref(StorageRef)

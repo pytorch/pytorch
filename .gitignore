@@ -15,6 +15,7 @@ torch/csrc/nn/THNN.cwrap
 torch/csrc/nn/THNN.cpp
 torch/csrc/nn/THCUNN.cwrap
 torch/csrc/nn/THCUNN.cpp
+docs/src/**/*
 test/data/legacy_modules.t7
 test/htmlcov
 test/.coverage

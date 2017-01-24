@@ -14,6 +14,7 @@ from .sgd import SGD
 from .rprop import Rprop
 from .rmsprop import RMSprop
 from .optimizer import Optimizer
+from .lbfgs import LBFGS
 
 del adadelta
 del adagrad
@@ -24,3 +25,4 @@ del sgd
 del rprop
 del rmsprop
 del optimizer
+del lbfgs

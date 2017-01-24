@@ -160,6 +160,7 @@ include_dirs += [
     os.path.join(cwd, "torch", "csrc"),
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
+    tmp_install_path + "/include/THPP",
 ]
 
 extra_link_args.append('-L' + lib_path)
@@ -168,9 +169,10 @@ extra_link_args.append('-L' + lib_path)
 TH_LIB     = os.path.join(lib_path, 'libTH.so.1')
 THS_LIB    = os.path.join(lib_path, 'libTHS.so.1')
 THC_LIB    = os.path.join(lib_path, 'libTHC.so.1')
-THCS_LIB    = os.path.join(lib_path, 'libTHCS.so.1')
+THCS_LIB   = os.path.join(lib_path, 'libTHCS.so.1')
 THNN_LIB   = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
+THPP_LIB   = os.path.join(lib_path, 'libTHPP.so.1')
 if platform.system() == 'Darwin':
     TH_LIB     = os.path.join(lib_path, 'libTH.1.dylib')
     THS_LIB    = os.path.join(lib_path, 'libTHS.1.dylib')
@@ -178,10 +180,11 @@ if platform.system() == 'Darwin':
     THCS_LIB   = os.path.join(lib_path, 'libTHCS.1.dylib')
     THNN_LIB   = os.path.join(lib_path, 'libTHNN.1.dylib')
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
+    THPP_LIB   = os.path.join(lib_path, 'libTHPP.1.dylib')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB]
+main_link_args = [TH_LIB, THS_LIB, THPP_LIB]
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",

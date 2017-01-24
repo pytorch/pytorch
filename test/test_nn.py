@@ -805,6 +805,32 @@ class TestNN(NNTestCase):
         l.param_attr = None
         self.assertEqual(num_params(), 3)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_Conv2d_large_workspace(self):
+        # These sizes require huge cuDNN workspaces. Make sure we choose a
+        # reasonable algorithm that does not run out of memory
+        sizes = [
+          (1, 256, 109, 175),
+          (1, 256, 80, 128),
+          (1, 256, 120, 192),
+        ]
+        dtype = torch.cuda.FloatTensor
+
+        def run_test(benchmark):
+            torch.backends.cudnn.benchmark = benchmark
+            conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).type(dtype)
+            for size in sizes:
+                x = torch.randn(size).type(dtype)
+                out = conv(Variable(x, requires_grad=True))
+                out.backward(torch.ones(out.size()).type(dtype))
+
+        b = torch.backends.cudnn.benchmark
+        try:
+            run_test(benchmark=False)
+            run_test(benchmark=True)
+        finally:
+            torch.backends.cudnn.benchmark = b
+
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
         i = Variable(torch.randn(2, 3, 6, 6))
@@ -1307,6 +1333,11 @@ new_module_tests = [
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
+    ),
+    dict(
+        fullname='Conv2d_groups_thnn',
+        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
+        input_size=(2, 4, 6, 5),
     ),
     dict(
         module_name='ConvTranspose2d',

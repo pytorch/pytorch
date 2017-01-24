@@ -30,7 +30,7 @@ performed in the subgraphs, where all Variables didn't require gradients.
     >>> x = Variable(torch.randn(5, 5))
     >>> y = Variable(torch.randn(5, 5))
     >>> z = Variable(torch.randn(5, 5), requires_grad=True)
-    >>> a = x + z
+    >>> a = x + y
     >>> a.requires_grad
     False
     >>> b = a + z
