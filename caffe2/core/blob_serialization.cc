@@ -94,15 +94,14 @@ void Blob::Serialize(
 
 // The blob serialization member function implementation.
 std::string Blob::Serialize(const string& name) const {
-  std::stringstream data;
-  std::mutex mutex;
-  BlobSerializerBase::SerializationAcceptor acceptor =
-    [&data, &mutex](const std::string&, const std::string& blob) {
-    std::lock_guard<std::mutex> guard(mutex);
-    data << blob;
+  std::string data;
+  BlobSerializerBase::SerializationAcceptor acceptor = [&data](
+      const std::string&, const std::string& blob) {
+    DCHECK(data.empty()); // should be called once with kNoChunking
+    data = blob;
   };
-  this->Serialize(name, acceptor);
-  return data.str();
+  this->Serialize(name, acceptor, kNoChunking);
+  return data;
 }
 
 // Specialization for StoreDeviceDetail for CPU - nothing needs to be done.

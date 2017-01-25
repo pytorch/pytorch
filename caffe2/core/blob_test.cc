@@ -652,6 +652,10 @@ TEST(CustomChunkSize, BigTensorSerialization) {
   counter = 0;
   blob.Serialize("test", acceptor, (size / 2) + 1);
   EXPECT_EQ(counter, 2);
+
+  counter = 0;
+  blob.Serialize("test", acceptor, kNoChunking);
+  EXPECT_EQ(counter, 1);
 }
 } // namespace
 } // namespace caffe2
