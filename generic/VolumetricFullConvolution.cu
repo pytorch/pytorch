@@ -344,9 +344,8 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
            int dT, int dW, int dH,
            int padT, int padW, int padH,
            int adjT, int adjW, int adjH,
-           accreal scale_)
+           real scale)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCTensor  *columns = finput;
   THCTensor  *ones = fgradInput;
 

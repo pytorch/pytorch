@@ -8,9 +8,8 @@ void THNN_(Sqrt_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           accreal eps_)
+           real eps)
 {
-  real eps = ScalarConvert<accreal, real>::to(eps_);
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resizeAs)(state, output, input);
   THC_pointwiseApply2(state, output, input, sqrtupdateOutput_functor<real>(eps));

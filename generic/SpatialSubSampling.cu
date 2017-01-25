@@ -191,7 +191,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
            THCTensor *gradBias,
            int kW, int kH,
            int dW, int dH,
-           accreal scale)
+           float scale)
 {
   THCUNN_assertSameGPU(state, 4, input, gradOutput, gradWeight, gradBias);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, gradOutput, gradWeight, kW, kH);

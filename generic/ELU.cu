@@ -9,10 +9,9 @@ void THNN_(ELU_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           accreal alpha_,
+           real alpha,
            bool inplace)
 {
-  real alpha = ScalarConvert<accreal, real>::to(alpha_);
   THCUNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
@@ -34,10 +33,9 @@ void THNN_(ELU_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *output,
-           accreal alpha_,
+           real alpha,
            bool inplace)
 {
-  real alpha = ScalarConvert<accreal, real>::to(alpha_);
   THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 

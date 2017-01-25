@@ -8,11 +8,9 @@ void THNN_(LeakyReLU_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           accreal negval_,
+           real negval,
            bool inplace)
 {
-  real negval = ScalarConvert<accreal, real>::to(negval_);
-
   THCUNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
@@ -34,11 +32,9 @@ void THNN_(LeakyReLU_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           accreal negval_,
+           real negval,
            bool inplace)
 {
-  real negval = ScalarConvert<accreal, real>::to(negval_);
-
   THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 

@@ -34,8 +34,8 @@ void THNN_CudaHalfSparseLinear_accGradParameters(
           THCudaHalfTensor *gradBias,
           THCudaHalfTensor *weight,
           THCudaHalfTensor *bias,
-          float weightDecay,
-          float scale) {
+          double weightDecay,
+          double scale) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
 
@@ -56,8 +56,8 @@ void THNN_CudaHalfSparseLinear_legacyAccGradParameters(
           THCudaHalfTensor *gradBias,
           THCudaHalfTensor *weight,
           THCudaHalfTensor *bias,
-          float weightDecay,
-          float scale) {
+          double weightDecay,
+          double scale) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
 
@@ -76,7 +76,7 @@ void THNN_CudaHalfSparseLinear_updateParameters(
           THCudaHalfTensor *gradWeight,
           THCudaHalfTensor *gradBias,
           THCudaHalfTensor *lastInput,
-          float learningRate) {
+          double learningRate) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
 #endif

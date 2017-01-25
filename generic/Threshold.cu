@@ -8,12 +8,10 @@ void THNN_(Threshold_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           accreal threshold_,
-           accreal val_,
+           real threshold,
+           real val,
            bool inplace)
 {
-  real threshold = ScalarConvert<accreal, real>::to(threshold_);
-  real val = ScalarConvert<accreal, real>::to(val_);
   THCUNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
@@ -39,12 +37,10 @@ void THNN_(Threshold_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           accreal threshold_,
-           accreal val_,
+           real threshold,
+           real val,
            bool inplace)
 {
-  real threshold = ScalarConvert<accreal, real>::to(threshold_);
-  real val = ScalarConvert<accreal, real>::to(val_);
   THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 

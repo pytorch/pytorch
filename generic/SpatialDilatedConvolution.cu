@@ -322,9 +322,8 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
            int dW, int dH,
            int padW, int padH,
            int dilationW, int dilationH,
-           accreal scale_) {
+           real scale) {
 
-  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, columns, ones);
   if (gradBias) {
    THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
