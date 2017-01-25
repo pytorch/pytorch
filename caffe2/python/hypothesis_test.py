@@ -1756,16 +1756,19 @@ class TestOperators(hu.HypothesisTestCase):
             step_net.Proto().external_input)
         backward_step_net.Proto().external_input.extend(
             step_net.Proto().external_output)
+        inputs = ["input", "seq_lengths", "gates_t_w", "gates_t_b", "hidden_input"]
+        recurrent_inputs = ["hidden_input"]
         op = core.CreateOperator(
             "RecurrentNetwork",
-            ["input", "seq_lengths", "gates_t_w", "gates_t_b", "hidden_input"],
+            inputs,
             ["output", "hidden", "hidden_output"],
             alias_src=["hidden", "hidden"],
             alias_dst=["output", "hidden_output"],
             alias_offset=[1, -1],
             recurrent_states=["hidden"],
-            recurrent_inputs=["hidden_input"],
+            recurrent_inputs=recurrent_inputs,
             recurrent_sizes=[d],
+            recurrent_input_pos=map(inputs.index, recurrent_inputs),
             link_internal=link_internal,
             link_external=link_external,
             link_offset=link_offset,
@@ -1775,8 +1778,7 @@ class TestOperators(hu.HypothesisTestCase):
             backward_alias_src=["gates_grad"],
             backward_alias_dst=["input_grad"],
             backward_alias_offset=[0],
-            param=[str(p) for p in step_net.params],
-            param_gradient=[backward_mapping[str(p)] for p in step_net.params],
+            param=map(inputs.index, step_net.params),
             scratch=["gates"],
             backward_scratch=["gates_grad"],
             scratch_sizes=[d],

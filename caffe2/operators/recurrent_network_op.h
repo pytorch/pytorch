@@ -334,15 +334,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     recurrentGradients_ = constructRecurrentGradients();
     aliases_ = constructAliases();
     recurrentSizes_ = constructRecurrentSizes();
+    recurrentInputIds_ = OperatorBase::template GetRepeatedArgument<int32_t>(
+        "recurrent_input_ids");
 
-    if (OutputSize() >= 2) {
-      Output(1)->Resize(1);
-      Output(1)->template mutable_data<float>();
-    }
-    if (OutputSize() >= 6) {
-      Output(5)->Resize(1);
-      Output(5)->template mutable_data<float>();
-    }
     CAFFE_ENFORCE(ws);
     const auto stepNet =
         OperatorBase::GetSingleArgument<string>("backward_step_net", "");
@@ -401,15 +395,14 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
   std::vector<detail::Param> constructParams() {
     std::vector<detail::Param> params;
-    const auto& param = OperatorBase::GetRepeatedArgument<std::string>("param");
-    const auto& paramGradient =
-        OperatorBase::GetRepeatedArgument<std::string>("param_gradient");
-    CAFFE_ENFORCE_EQ(param.size(), paramGradient.size());
-    for (auto i = 0; i < param.size(); ++i) {
+    const auto& param = OperatorBase::GetRepeatedArgument<int32_t>("param");
+    for (int i = 0; i < param.size(); ++i) {
       detail::Param p;
-      p.param = param[i];
-      p.grad = paramGradient[i];
-      p.accGrad = paramGradient[i] + "_acc";
+      // Forward inputs come after the main input (sequence)
+      p.param = def().input(param[i] + numSequences_);
+      // See GetRecurrentNetworkGradient to understand offseting here"
+      p.grad = def().output(i + numSequences_);
+      p.accGrad = p.grad + "_acc";
       params.push_back(p);
     }
     return params;
@@ -457,9 +450,17 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto seqLen = Input(0).dim32(0);
     VLOG(1) << "seqLen: " << seqLen;
     const auto batchSize = Input(0).dim32(1);
-    if (OutputSize() >= 5) {
-      Output(4)->Resize(1, batchSize, recurrentSizes_[0]);
-      Output(4)->template mutable_data<float>();
+    // See GetRecurrentNetworkGradient to understand offseting here
+    for (int i = 0; i < recurrentInputIds_.size(); ++i) {
+      // See GetRecurrentNetworkGradient to understand offseting here
+      // Outputs of the gradient are inputs of the forward pass.
+      // So we need to offset on all inputs that go before recurrent
+      // initial ones
+      auto outputIdx = i + params_.size() + numSequences_;
+      int inputId = recurrentInputIds_[i];
+      VLOG(1) << "Resetting output " << outputIdx << " like input " << inputId;
+      Output(outputIdx)->ResizeLike(Input(inputId));
+      Output(outputIdx)->template mutable_data<float>();
     }
     for (auto& param : params_) {
       auto pBlob = ws_.GetBlob(param.param);
@@ -498,6 +499,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
           &context_);
     }
 
+    // This code assumes that there are several input
+    // sequences. Actually it is not supported by the rest of the code
+    // and here we either have 0 or 1 inputGradientId.
     const auto& inputGradientIds =
         OperatorBase::GetRepeatedArgument<int32_t>("input_gradient_ids");
     for (int id : inputGradientIds) {
@@ -609,6 +613,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   std::vector<detail::OffsetAlias> aliases_;
   std::vector<int32_t> recurrentSizes_;
   std::string timestep_;
+  // For now we support only one input sequence
+  const int numSequences_{1};
+  std::vector<int32_t> recurrentInputIds_;
 };
 
 } // namespace caffe2

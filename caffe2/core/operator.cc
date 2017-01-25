@@ -12,7 +12,6 @@
 
 namespace caffe2 {
 
-// TODO(Yangqing): move all the checks to a less fatal check mechanism.
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     : operator_def_(operator_def), arg_helper_(operator_def_) {
   for (const string& input_str : operator_def_.input()) {

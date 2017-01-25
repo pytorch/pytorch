@@ -35,6 +35,11 @@ OPERATOR_SCHEMA(RecurrentNetworkGradient);
 struct GetRecurrentNetworkGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   std::vector<OperatorDef> GetGradientDefs() override {
+    ArgumentHelper argsHelper(def_);
+    auto params = argsHelper.GetRepeatedArgument<int32_t>("param");
+    auto recurrentInputs =
+        argsHelper.GetRepeatedArgument<int32_t>("recurrent_input_ids");
+
     std::vector<std::string> gradientInputs;
 
     // Grad output of output (0)
@@ -44,18 +49,21 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
     for (int i = 0; i < def_.input_size(); ++i) {
       gradientInputs.push_back(I(i));
     }
-
     for (int i = 0; i < def_.output_size(); ++i) {
       gradientInputs.push_back(O(i));
     }
 
-    // Grad WRT all inputs - only a few of these are actually filled
-    // (in particular, parameters and input), but this should be OK
-    // for now.
+    // We calculate gradients only for parameters and recurrent inputs
     std::vector<std::string> gradientOutputs;
-    for (int i = 0; i < def_.input_size(); ++i) {
-      gradientOutputs.push_back(GI(i));
+    gradientOutputs.push_back(GI(0));
+    for (auto id : params) {
+      gradientOutputs.push_back(GI(id));
     }
+    for (auto id : recurrentInputs) {
+      gradientOutputs.push_back(GI(id));
+    }
+
+    VLOG(1) << "Gradient blobs: " << Join(", ", gradientOutputs);
 
     return SingleGradientDef(
         "RecurrentNetworkGradient", "", gradientInputs, gradientOutputs);
