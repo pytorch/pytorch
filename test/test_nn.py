@@ -63,10 +63,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             test_case.assertEqual(input._version, input_version)
 
             input_ip = deepcopy(input)
-            output_ip = module_ip(input_ip)
-            test_case.assertNotEqual(input_ip._version, input_version)
-
+            input_ip_clone = input_ip.clone()
+            output_ip = module_ip(input_ip_clone)
+            test_case.assertNotEqual(input_ip_clone._version, input_version)
             test_case.assertEqual(output, output_ip)
+            grad = output.data.clone().normal_()
+            output.backward(grad)
+            output_ip.backward(grad)
+            test_case.assertEqual(output.grad, output_ip.grad)
 
         if type(input.data) == torch.LongTensor and TEST_CUDA:
             input = input.cuda()
