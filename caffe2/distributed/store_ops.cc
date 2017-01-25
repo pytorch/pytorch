@@ -20,10 +20,7 @@ bool StoreSetOp::RunOnDevice() {
   // Serialize and pass to store
   auto* handler =
       OperatorBase::Input<std::unique_ptr<StoreHandler>>(HANDLER).get();
-  OperatorBase::Inputs()[DATA]->Serialize(
-      name, [handler](const std::string& name, const std::string& data) {
-        handler->set(name, data);
-      });
+  handler->set(name, InputBlob(DATA).Serialize(name));
   return true;
 }
 
