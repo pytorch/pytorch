@@ -164,8 +164,8 @@ def is_compatible(candidate_range, assignment, static_blobs):
     (name, range_) = assignment[-1]
     if name in static_blobs:
         return False
-    if candidate_range.used is None or candidate_range.defined is None \
-       or range_.defined is None or range_.used is None:
+    if candidate_range.defined is None or range_.defined is None \
+      or range_.used is None:
         return False
     return candidate_range.defined > range_.used
 
@@ -175,13 +175,21 @@ def compute_blob_assignments(assignments):
     for assignment in assignments:
         if len(assignment) == 1:
             continue
+        last_blob, _ = assignment[-1]
         for (blob, _) in assignment:
-            blob_assignments[blob] = ",".join([b for b, _ in assignment])
+            blob_assignments[blob] = last_blob
     return blob_assignments
 
 
 def compute_assignments(ranges, static_blobs):
-    ranges = sorted(list(ranges.iteritems()), key=lambda p: p[1].used)
+    # Sort the ranges based on when they are last used.
+    # If LiveRange.used is None, then the blob is never used and could
+    # be consumed externally. Sort these to the end of the list as opposed
+    # to the beginning so that they can be shared as well.
+    ranges = sorted(
+        list(ranges.items()),
+        key=lambda p: (p[1].used is None, p[1].used),
+    )
     assignments = []
     for (name, range_) in ranges:
         assigned = False
@@ -219,7 +227,7 @@ def apply_assignments(net, blob_assignments):
     def canonical_name(blob):
         if blob not in blob_assignments:
             return blob
-        return b"{}_shared".format(blob_assignments[blob])
+        return blob_assignments[blob]
 
     for op in net.op:
         for i, input_ in enumerate(op.input):
@@ -242,6 +250,14 @@ def optimize_interference(net, static_blobs,
     g = compute_interference_graph(net.op)
     ordering = ordering_function(g)
     linearized_ops = [net.op[i] for i in ordering]
+
+    # Reorder ops in net based on the computed linearlized order.
+    # If the graph has multiple topological orderings and if the NetDef's
+    # ordering differs from the order used to compute ranges, then the
+    # runtime might end up overwriting blobs before they are used.
+    del net.op[:]
+    net.op.extend(linearized_ops)
+
     ranges = compute_ranges(linearized_ops)
     assignments = compute_assignments(ranges, static_blobs)
     blob_assignments = compute_blob_assignments(assignments)
