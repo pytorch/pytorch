@@ -1177,6 +1177,32 @@ class TestNN(NNTestCase):
         output.backward(output.data)
         self.assertEqual(input.data, input.grad.data)
 
+    def test_batchnorm_eval(self):
+        types = (torch.FloatTensor,)
+        if TEST_CUDA:
+            types += (torch.cuda.FloatTensor,)
+        for tp in types:
+            module = nn.BatchNorm1d(3).type(tp)
+            module.eval()
+
+            data = Variable(torch.rand(4,3).type(tp), requires_grad=True)
+            grad = torch.rand(4,3).type(tp)
+
+            # 1st pass
+            res1 = module(data)
+            res1.backward(grad)
+            grad1 = data.grad.data.clone()
+
+            # 2nd pass
+            data.grad.data.zero_()
+
+            res2 = module(data)
+            res2.backward(grad)
+            grad2 = data.grad.data.clone()
+            self.assertEqual(res1, res2)
+            self.assertEqual(grad1, grad2)
+
+
 def add_test(test):
     test_name = test.get_name()
     cuda_test_name = test_name + '_cuda'
