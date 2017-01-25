@@ -7,14 +7,12 @@ void THNN_(RReLU_updateOutput)(
           THTensor *input,
           THTensor *output,
           THTensor *noise,
-          accreal lower_,
-          accreal upper_,
+          real lower,
+          real upper,
           bool train,
           bool inplace,
           THGenerator *generator)
 {
-  real lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
-  real upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
   if (train)
   {
     // get default random generator
@@ -74,7 +72,7 @@ void THNN_(RReLU_updateOutput)(
         *output_data = *input_data * r;
       );
     }
-  }
+  }  
 }
 
 void THNN_(RReLU_updateGradInput)(
@@ -83,13 +81,11 @@ void THNN_(RReLU_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *noise,
-          accreal lower_,
-          accreal upper_,
+          real lower,
+          real upper,
           bool train,
           bool inplace)
 {
-  real lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
-  real upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (train && upper - lower > 1E-6)    // e.g. if upper == lower, RReLU behaves like LeakyReLU
   {
@@ -103,10 +99,10 @@ void THNN_(RReLU_updateGradInput)(
     {
       THTensor_(resizeAs)(gradInput, input);
       THTensor_(cmul)(gradInput, gradOutput, noise);
-    }
+    }    
   }
   else
-  {
+  { 
     // use constant factor for negative input values
     const real negSlope = (lower + upper) / 2;
     if (inplace)

@@ -11,9 +11,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           bool sizeAverage,
           int p,
           THTensor *weights,
-          accreal margin_)
+          real margin)
 {
-  real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   real *input_data, *weights_data;
   THIndex_t *target_data;
   long nframe, dim;
@@ -91,9 +90,8 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
           bool sizeAverage,
           int p,
           THTensor *weights,
-          accreal margin_)
+          real margin)
 {
-  real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   real *input_data;
   real *gradInput_data;
   THIndex_t *target_data;

@@ -402,9 +402,8 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
   int dT, int dW, int dH,   // stride
   int pT, int pW, int pH,   // padding
   int aT, int aW, int aH,   // extra output adjustment
-  accreal scale_)
+  real scale)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   // number of input & output planes and kernel size is indirectly defined by the gradWeight tensor
   THNN_(VolumetricFullConvolution_shapeCheck)(
         input, gradOutput, gradWeight, gradBias,

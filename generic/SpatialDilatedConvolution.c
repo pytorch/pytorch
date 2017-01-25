@@ -289,9 +289,8 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     int dW, int dH,
     int padW, int padH,
     int dilationW, int dilationH,
-    accreal scale_)
+    real scale)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_(SpatialDilatedConvolution_shapeCheck)
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW);

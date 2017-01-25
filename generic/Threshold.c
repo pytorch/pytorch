@@ -6,12 +6,10 @@ void THNN_(Threshold_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          accreal threshold_,
-          accreal val_,
+          real threshold,
+          real val,
           bool inplace)
 {
-  real threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
-  real val = TH_CONVERT_ACCREAL_TO_REAL(val_);
   if (inplace)
   {
     TH_TENSOR_APPLY(real, input,
@@ -34,12 +32,10 @@ void THNN_(Threshold_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          accreal threshold_,
-          accreal val_,
+          real threshold,
+          real val,
           bool inplace)
 {
-  real threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
-  real val = TH_CONVERT_ACCREAL_TO_REAL(val_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (inplace)
   {

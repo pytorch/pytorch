@@ -6,17 +6,15 @@ void THNN_(HardTanh_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          accreal min_val_,
-          accreal max_val_,
+          real min_val,
+          real max_val,
           bool inplace)
 {
-  real min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
-  real max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
   if (inplace)
     THTensor_(set)(output, input);
   else
     THTensor_(resizeAs)(output, input);
-
+  
   if (input->nDimension == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
     if (inplace)
@@ -70,13 +68,10 @@ void THNN_(HardTanh_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          accreal min_val_,
-          accreal max_val_,
+          real min_val,
+          real max_val,
           bool inplace)
 {
-  real min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
-  real max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
-
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (inplace)
     THTensor_(set)(gradInput, gradOutput);
