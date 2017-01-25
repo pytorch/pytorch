@@ -43,9 +43,7 @@ REGISTER_CPU_OPERATOR(SegmentIdsToRanges, SegmentIdsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
-REGISTER_CPU_OPERATOR(
-    SegmentIdsToLengthWeights,
-    SegmentIdsToLengthWeightsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(LengthsToWeights, LengthsToWeightsOp<CPUContext>);
 
 OPERATOR_SCHEMA(WallClockTime)
     .NumInputs(0)
@@ -507,19 +505,16 @@ index in the first input vector + 1.
         "if provided, number of segments = the size of its first dimension")
     .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
 
-OPERATOR_SCHEMA(SegmentIdsToLengthWeights)
+OPERATOR_SCHEMA(LengthsToWeights)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("power", "n of 1/pow(length,n) for normalization")
     .SetDoc(
-        R"DOC( Similar as SegmentIdsToLengths but output vector of segment
+        R"DOC( Similar as LengthsToSegmentIds but output vector of segment
 weights derived by lengths. i.e 1/pow(length, power)
 )DOC")
-    .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
-    .Output(
-        0,
-        "a vector of weights",
-        "1-D float tensor of segment weights by length");
+    .Input(0, "lengths", "1-D int32_t or int64_t tensor of lengths")
+    .Output(0, "a vector of weights", "1-D float tensor of weights by length");
 
 OPERATOR_SCHEMA(Slice)
     .NumInputs(3)

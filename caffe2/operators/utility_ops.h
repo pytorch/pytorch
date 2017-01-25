@@ -739,10 +739,10 @@ class SegmentIdsToRangesOp : public Operator<Context> {
 };
 
 template <class Context>
-class SegmentIdsToLengthWeightsOp : public Operator<Context> {
+class LengthsToWeightsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SegmentIdsToLengthWeightsOp(const OperatorDef& operator_def, Workspace* ws)
+  LengthsToWeightsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         power_(OperatorBase::GetSingleArgument<float>("power", 0.5)) {}
 
@@ -758,38 +758,16 @@ class SegmentIdsToLengthWeightsOp : public Operator<Context> {
     auto input_size = input.size();
     auto* output = Output(0);
 
-    // segment id starts from 0
-    auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
-    CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
-
-    std::vector<int64_t> seg_lengths(num_segments, 0);
-
-    output->Resize(input_size);
-    auto* output_data = output->template mutable_data<float>();
-    if (num_segments == 0) {
-      return true;
+    int64_t output_size = 0;
+    for (auto i = 0; i < input_size; i++) {
+      CAFFE_ENFORCE_GE(input_data[i], 0, "unexpected negative length value");
+      output_size += input_data[i];
     }
-    std::fill(output_data, output_data + num_segments, 0);
-
-    Index prev = input_data[0];
-    for (int64_t i = 0; i < input_size; i++) {
-      CAFFE_ENFORCE(
-          prev == input_data[i] || prev + 1 == input_data[i],
-          "Segment ids must be sorted and at least size 1: ",
-          prev,
-          " vs ",
-          input_data[i]);
-      prev = input_data[i];
-      seg_lengths[input_data[i]] += 1;
-    }
-
-    int64_t in = 0;
 
     std::function<float(const int64_t& length, const float& power)> getWeight;
-
     if (power_ == 0.5) {
       getWeight = [](const int64_t& length, const float& power) {
-        return 1.0 / sqrt(length);
+        return 1.0 / std::sqrt(length);
       };
     } else if (power_ == 1) {
       getWeight = [](const int64_t& length, const float& power) {
@@ -797,15 +775,23 @@ class SegmentIdsToLengthWeightsOp : public Operator<Context> {
       };
     } else {
       getWeight = [](const int64_t& length, const float& power) {
-        return 1.0 / pow(length, power);
+        return 1.0 / std::pow(length, power);
       };
     }
 
-    for (int64_t i = 0; i < num_segments; i++) {
-      float weight = getWeight(seg_lengths[i], power_);
-      for (int64_t j = 0; j < seg_lengths[i]; j++) {
-        output_data[in++] = weight;
+    output->Resize(output_size);
+    auto* output_data = output->template mutable_data<float>();
+    int64_t cnt = 0;
+    for (auto i = 0; i < input_size; i++) {
+      auto len = input_data[i];
+      if (len == 0) {
+        continue;
       }
+      CAFFE_ENFORCE_LE(cnt + len, output_size, "unexpected lengths value");
+
+      float weight_value = getWeight(len, power_);
+      std::fill(output_data + cnt, output_data + cnt + len, weight_value);
+      cnt += len;
     }
 
     return true;

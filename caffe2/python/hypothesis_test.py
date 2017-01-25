@@ -1085,43 +1085,14 @@ class TestOperators(hu.HypothesisTestCase):
                             max_size=10),
             power=st.sampled_from([0.5, 1.0, 1.5, 2.0]),
            **hu.gcs_cpu_only)
-    def test_segment_ids_to_lengths_weight(self, lengths, power, gc, dc):
+    def test_lengths_to_weights(self, lengths, power, gc, dc):
         op = core.CreateOperator(
-            "SegmentIdsToLengthWeights",
-            ["segment_ids"],
+            "LengthsToWeights",
             ["lengths"],
+            ["weights"],
             power=power)
 
-        def lengths_to_ids(lengths):
-            sids = []
-            for i, l in enumerate(lengths):
-                sids.extend(l * [i])
-            return sids
-
-        segment_ids = lengths_to_ids(lengths)
-
-        def ids_to_length_weights(ids):
-            ids_length = len(ids)
-            if ids_length == 0:
-                return (np.array([], dtype=float),)
-
-            lengths = []
-            # segment id starts with 0
-            prev_id = -1
-            tmp_length = 0
-            for idx in range(ids_length):
-                cur_id = ids[idx]
-                if cur_id != prev_id:
-                    if idx != 0:
-                        lengths.append(tmp_length)
-                    while prev_id + 1 != cur_id:
-                        lengths.append(0)
-                        prev_id += 1
-                    prev_id = cur_id
-                    tmp_length = 0
-                tmp_length += 1
-            lengths.append(tmp_length)
-
+        def lengths_to_weights(lengths):
             weighted_length = []
             for l in lengths:
                 weighted_length.extend(l * [1 / pow(l, power)])
@@ -1131,8 +1102,8 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[np.array(segment_ids, dtype=np.int32)],
-            reference=ids_to_length_weights)
+            inputs=[np.array(lengths, dtype=np.int32)],
+            reference=lengths_to_weights)
 
     @given(input_tensor=hu.arrays(
         dims=[10], elements=st.floats(allow_nan=False,
