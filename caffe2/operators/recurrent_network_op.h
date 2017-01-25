@@ -19,7 +19,6 @@ struct Param {
 struct RecurrentInput {
   std::string state;
   std::string input;
-  int32_t size;
 };
 
 struct RecurrentGradient {
@@ -90,12 +89,11 @@ void initializeRecurrentInput(
   CAFFE_ENFORCE_EQ(input.ndim(), 3, rc.input);
   CAFFE_ENFORCE_EQ(input.dim(0), 1, rc.input);
   CAFFE_ENFORCE_EQ(input.dim(1), batchSize, rc.input);
-  CAFFE_ENFORCE_EQ(input.dim(2), rc.size, rc.input);
 
   // States at [0, ..., T] (inclusive)
-  state->Resize(seqLen + 1, batchSize, rc.size);
+  state->Resize(seqLen + 1, batchSize, input.dim(2));
   context->template Copy<T, Context, Context>(
-      batchSize * rc.size,
+      batchSize * input.dim(2),
       input.template data<T>(),
       state->template mutable_data<T>());
 }
@@ -228,10 +226,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
         OperatorBase::GetRepeatedArgument<std::string>("recurrent_states");
     const auto inputs =
         OperatorBase::GetRepeatedArgument<std::string>("recurrent_inputs");
-    const auto sizes =
-        OperatorBase::GetRepeatedArgument<int32_t>("recurrent_sizes");
     CAFFE_ENFORCE_EQ(states.size(), inputs.size(), "states/inputs mismatch");
-    CAFFE_ENFORCE_EQ(sizes.size(), inputs.size(), "sizes/inputs mismatch");
     std::vector<detail::RecurrentInput> ris;
     for (auto i = 0; i < states.size(); ++i) {
       // States need to be "global" (since they are shared between
@@ -241,7 +236,6 @@ class RecurrentNetworkOp final : public Operator<Context> {
       detail::RecurrentInput ri;
       ri.state = states[i];
       ri.input = inputs[i];
-      ri.size = sizes[i];
       ris.push_back(ri);
     }
     return ris;
@@ -333,7 +327,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     params_ = constructParams();
     recurrentGradients_ = constructRecurrentGradients();
     aliases_ = constructAliases();
-    recurrentSizes_ = constructRecurrentSizes();
     recurrentInputIds_ = OperatorBase::template GetRepeatedArgument<int32_t>(
         "recurrent_input_ids");
 
@@ -434,16 +427,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         "backward_link_offset",
         &links);
     return links;
-  }
-
-  std::vector<int32_t> constructRecurrentSizes() {
-    std::vector<int32_t> rsz;
-    const auto& sizes =
-        OperatorBase::GetRepeatedArgument<int32_t>("recurrent_sizes");
-    for (auto i = 0; i < sizes.size(); ++i) {
-      rsz.push_back(sizes[i]);
-    }
-    return rsz;
   }
 
   bool RunOnDevice() {
@@ -611,7 +594,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   std::vector<detail::Param> params_;
   std::vector<detail::RecurrentGradient> recurrentGradients_;
   std::vector<detail::OffsetAlias> aliases_;
-  std::vector<int32_t> recurrentSizes_;
   std::string timestep_;
   // For now we support only one input sequence
   const int numSequences_{1};
