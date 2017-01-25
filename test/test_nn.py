@@ -14,7 +14,7 @@ from torch.autograd import Variable
 from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PRECISION
-from common import freeze_rng_state
+from common import freeze_rng_state, run_tests
 
 def default_tensor_type(type):
     type_str = torch.typename(type)
@@ -1600,4 +1600,4 @@ add_test(NewModuleTest(
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

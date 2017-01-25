@@ -4,7 +4,7 @@ import torch
 import traceback
 import unittest
 from torch.utils.data import Dataset, TensorDataset, DataLoader
-from common import TestCase
+from common import TestCase, run_tests
 from common_nn import TEST_CUDA
 
 
@@ -159,4 +159,4 @@ class TestDataLoader(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

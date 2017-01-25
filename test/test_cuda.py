@@ -7,7 +7,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests
 
 if not torch.cuda.is_available():
     print('CUDA not available, skipping tests')
@@ -677,4 +677,4 @@ for decl in tests:
             setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

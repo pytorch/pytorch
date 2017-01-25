@@ -7,7 +7,7 @@ import torch
 import torch.legacy.nn as nn
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
     module_tests, criterion_tests, TEST_CUDA, PRECISION
-from common import to_gpu, freeze_rng_state
+from common import to_gpu, freeze_rng_state, run_tests
 
 class OldModuleTest(ModuleTest):
     def __init__(self, *args, **kwargs):
@@ -1229,4 +1229,4 @@ class TestNN(NNTestCase):
 
 if __name__ == '__main__':
     prepare_tests()
-    unittest.main()
+    run_tests()

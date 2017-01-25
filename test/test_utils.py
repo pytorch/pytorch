@@ -19,7 +19,7 @@ from torch.utils.serialization import load_lua
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase
+from common import TestCase, run_tests
 
 try:
     import cffi
@@ -364,4 +364,4 @@ class TestLuaReader(TestCase):
 
 TestLuaReader.init()
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

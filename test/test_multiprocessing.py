@@ -11,7 +11,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase
+from common import TestCase, run_tests
 
 
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
@@ -409,4 +409,4 @@ class TestMultiprocessing(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
