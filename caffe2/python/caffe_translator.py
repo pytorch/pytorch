@@ -469,3 +469,9 @@ def TranslateReshape(layer, pretrained_blobs, is_test):
     reshape_param = layer.reshape_param
     AddArgument(caffe_op, 'shape', reshape_param.shape.dim)
     return caffe_op, []
+
+
+@TranslatorRegistry.Register("Sigmoid")
+def TranslateSigmoid(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "Sigmoid")
+    return caffe_op, []
