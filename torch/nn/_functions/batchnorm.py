@@ -54,7 +54,8 @@ class BatchNorm(Function):
         if (len(self.needs_input_grad) > 1 and self.needs_input_grad[2]) or self.use_cudnn:
             grad_bias = bias.new(bias.size()).zero_()
 
-        if self.use_cudnn:
+        if self.use_cudnn and self.training:
+            # cudnn does not support backward in evaluate mode
             torch._C._cudnn_batch_norm_backward(
                 input, grad_output, grad_input,
                 grad_weight, grad_bias, weight,
