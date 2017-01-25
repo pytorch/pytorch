@@ -235,7 +235,7 @@ class SaveOp final : public Operator<Context> {
     BlobSerializerBase::SerializationAcceptor acceptor = [&](
         const std::string& blobName, const std::string& data) {
       // transaction should take care of locking
-      std::string name = std::regex_replace(blobName, strip_expr, "");
+      std::string name = std::regex_replace(blobName, strip_expr, string(""));
       VLOG(2) << "Sending " << name << " blob's data of size "
               << data.size() << " to db";
       auto transaction = out_db->NewTransaction();
@@ -247,7 +247,7 @@ class SaveOp final : public Operator<Context> {
 
     std::set<std::string> input_names;
     for (int i = 0; i < inputs.size(); ++i) {
-      std::string name = std::regex_replace(def().input(i), strip_expr, "");
+      std::string name = std::regex_replace(def().input(i), strip_expr, string(""));
       CAFFE_ENFORCE(
           input_names.insert(name).second, "Duplicated feature: ", name);
     }
