@@ -789,7 +789,6 @@ class CNNModelHelper(ModelHelperBase):
             alias_offset=[1, -1, -1],
             recurrent_states=[s("hidden"), s("cell")],
             recurrent_inputs=recurrent_inputs,
-            recurrent_sizes=[dim_out, dim_out],
             recurrent_input_id=map(inputs.index, recurrent_inputs),
             link_internal=link_internal,
             link_external=link_external,

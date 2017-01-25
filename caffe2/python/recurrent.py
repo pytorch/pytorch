@@ -23,7 +23,7 @@ def recurrent_net(
 
     initial_cell_inputs: inputs of the cell_net for the 0 timestamp.
     Format for each input is:
-        (cell_net_input_name, external_blob_with_data, input_size)
+        (cell_net_input_name, external_blob_with_data)
 
     links: a dictionary from cell_net input names in moment t+1 and
     output names of moment t. Currently we assume that each output becomes
@@ -123,7 +123,7 @@ def recurrent_net(
 
     # A mapping from a blob to its gradient state blob
 
-    for cell_input, _, size in initial_cell_inputs:
+    for cell_input, _ in initial_cell_inputs:
         cell_input = str(cell_input)
         # Recurrent_states is going to be (T + 1) x ...
         # It stores all inputs and outputs of the cell net over time.
@@ -206,7 +206,6 @@ def recurrent_net(
         alias_offset=alias_offset,
         recurrent_states=recurrent_states,
         recurrent_inputs=recurrent_inputs,
-        recurrent_sizes=[int(x[2]) for x in initial_cell_inputs],
         recurrent_input_ids=map(all_inputs.index, recurrent_inputs),
         link_internal=map(str, link_internal),
         link_external=map(str, link_external),
@@ -278,8 +277,8 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         cell_net=step_model.net,
         inputs=[(input_t, input_blob)],
         initial_cell_inputs=[
-            (hidden_t_prev, hidden_input_blob, dim_out),
-            (cell_t_prev, cell_input_blob, dim_out),
+            (hidden_t_prev, hidden_input_blob),
+            (cell_t_prev, cell_input_blob),
         ],
         links={
             hidden_t_prev: hidden_t,
