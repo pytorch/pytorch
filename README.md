@@ -14,6 +14,7 @@ We are in an early-release Beta. Expect some adventures and rough edges.
 - [Installation](#installation)
   - [Binaries](#binaries)
   - [From source](#from-source)
+  - [Docker image](#docker-image)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
@@ -168,6 +169,25 @@ export MACOSX_DEPLOYMENT_TARGET=10.9 # if OSX
 pip install -r requirements.txt
 python setup.py install
 ```
+
+### Docker image
+
+Dockerfiles are supplied to build images with cuda support and cudnn v5 and cudnn v6 RC. Build them as usual
+```
+docker build . -t pytorch-cudnnv5 
+```
+or 
+```
+docker build . -t pytorch-cudnnv6 -f tools/docker/Dockerfile-v6
+```
+and run them with nvidia-docker:
+```
+nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv5
+```
+Please note that pytorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
+for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
+should increase shared memory size either with --ipc=host or --shm-size command line options to nvidia-docker run. 
+
 
 ## Getting Started
 
