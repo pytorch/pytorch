@@ -31,7 +31,9 @@ class SoftmaxWithLossOp final : public Operator<Context> {
   StorageOrder order_;
 
   Tensor<Context> losses_; // Per example loss
+  Tensor<Context> weights_; // unignored weights
   Tensor<Context> sum_multiplier_; // Vector of ones for summing via dot prod
+  Tensor<Context> total_weight_ptr_;
 };
 
 template <typename T, class Context>
@@ -55,6 +57,8 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
   float scale_;
   int spatial_mode_;
   Tensor<Context> sum_multiplier_;
+  Tensor<Context> weights_; // unignored weights
+  Tensor<Context> total_weight_ptr_;
   StorageOrder order_;
 };
 
