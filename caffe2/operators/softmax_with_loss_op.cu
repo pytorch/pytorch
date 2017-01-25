@@ -50,150 +50,94 @@ __global__ void RowMaxKernel(const int num, const int D, const float* data,
   }
 }
 
-
 __global__ void SpatialSoftmaxKernel(const int num, const int D, const int W, const int H,
       const float* Xdata, float* Pdata) {
-  CUDA_1D_KERNEL_LOOP(i, num) {
-    for(int y = 0; y < H; ++y) {
-      for(int x = 0; x < W; ++x) {
-        // Subtract max on each cell for numerical reasons
-        float max_val = -FLT_MAX;
-        for(int c = 0; c < D; ++c) {
-          // TODO optimize
-          int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-          max_val = max(max_val, Xdata[idx]);
-        }
+  CUDA_1D_KERNEL_LOOP(index, num * W * H) {
+    int x = index % W;
+    int y = (index / W) % H;
+    int i = index / W / H;
 
-        // Exponentiate
-        float expsum = 0.0f;
-        for(int c = 0; c < D; ++c) {
-          int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-          float expx = exp(Xdata[idx] - max_val);
-          Pdata[idx] = expx;
-          expsum += expx;
-        }
+    // Subtract max on each cell for numerical reasons
+    float max_val = -FLT_MAX;
+    for(int c = 0; c < D; ++c) {
+      int idx = i * (H * W * D) + c * (H * W) + y * W + x;
+      max_val = max(max_val, Xdata[idx]);
+    }
 
-        // Normalize
-        for(int c=0; c<D; ++c) {
-          int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-          Pdata[idx] /= expsum;
-        }
-      }
+    // Exponentiate
+    float expsum = 0.0f;
+    for(int c = 0; c < D; ++c) {
+      int idx = i * (H * W * D) + c * (H * W) + y * W + x;
+      float expx = exp(Xdata[idx] - max_val);
+      Pdata[idx] = expx;
+      expsum += expx;
+    }
+
+    // Normalize
+    for(int c=0; c<D; ++c) {
+      int idx = i * (H * W * D) + c * (H * W) + y * W + x;
+      Pdata[idx] /= expsum;
     }
   }
 }
 
-#define DONTCARE (-1)
 
-#define REDUCTION_KERNEL_THREADS_X 16
-#define REDUCTION_KERNEL_THREADS_Y 16
-#define REDUCTION_THREADS (REDUCTION_KERNEL_THREADS_X * REDUCTION_KERNEL_THREADS_Y)
+#define DONTCARE (-1)
 
 __global__ void SpatialCrossEntropyLossKernel(const int N, const int D, const int W, const int H,
     const float* Pdata, const int* label_data, const float *weights,
-      float* avg_loss_data, float *total_weight_ret) {
-    __shared__ float sum_buf[REDUCTION_THREADS];
-    __shared__ float total_weight_buffer[REDUCTION_THREADS];
+      float* loss_data, float* weight_data) {
+  CUDA_1D_KERNEL_LOOP(index, N * W * H) {
+    int x = index % W;
+    int y = (index / W) % H;
+    int i = index / W / H;
+    const int label = static_cast<int>(label_data[index]);
 
-    const int thread_idx = REDUCTION_KERNEL_THREADS_X * threadIdx.y + threadIdx.x;
-    float sum_label_xent = 0.0;
-    float total_weight = 0.0f;
-    for (int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-             x < W;
-             x += blockDim.x * gridDim.x) {
-      for (int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-               y < H;
-               y += blockDim.y * gridDim.y) {
-        for(int i = 0; i < N; ++i) {
-          int labelidx =  i * H * W + y * W + x;
-          int label = label_data[labelidx];
-          if (label != DONTCARE) {
-            float weight = (weights == NULL ? 1.0 : weights[labelidx]);
-            int idx = i * (H * W * D) + label * (H * W) + y * W + x;
-            sum_label_xent += -logf(max(Pdata[idx], 1e-20f)) * weight;
-            total_weight += weight;
-          }
-        }
-
-      }
+    if (label != DONTCARE) {
+      float weight = (weights == NULL ? 1.0 : weights[index]);
+      loss_data[index] = -log(max(
+        Pdata[i * W * H * D + label * W * H + y * W + x], 1e-20f)) * weight;
+      weight_data[index] = weight;
+    } else {
+      loss_data[index] = 0;
+      weight_data[index] = 0;
     }
-    sum_buf[thread_idx] = sum_label_xent;
-    total_weight_buffer[thread_idx] = total_weight;
-
-    __syncthreads();
-
-    if (thread_idx == 0) {
-      // TODO: multi-level reduction
-      float sum_xent = 0;
-      float sum_total_weight = 0.0f;
-      for(int j = 0; j < REDUCTION_THREADS; ++j) {
-        sum_xent += sum_buf[j];
-        sum_total_weight += total_weight_buffer[j];
-      }
-
-      *avg_loss_data = (*avg_loss_data) + sum_xent;
-      *total_weight_ret = (*total_weight_ret) + sum_total_weight;
-    }
-
-    __syncthreads();
   }
+}
 
 __global__ void SpatialSoftmaxLossGradientKernel(const int N, const int D,
     const int W, const int H, const int* label_data, const float* weights,
-         float* dX_data, float* total_weight_ret) {
-      __shared__ float total_weight_buffer[REDUCTION_THREADS];
+         float* dX_data, float* weights_) {
+ CUDA_1D_KERNEL_LOOP(index, N * W * H) {
+   int x = index % W;
+   int y = (index / W) % H;
+   int i = index / W / H;
+   const int label = static_cast<int>(label_data[index]);
 
-      const int thread_idx = REDUCTION_KERNEL_THREADS_X * threadIdx.y + threadIdx.x;
-
-      float total_weight = 0.0;
-      for (int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-               x < W;
-               x += blockDim.x * gridDim.x) {
-        for (int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-                 y < H;
-                 y += blockDim.y * gridDim.y) {
-           for (int i = 0; i < N; ++i) {
-             int labelidx = i * H * W + y * W + x;
-             int label = label_data[labelidx];
-             if (label != DONTCARE) {
-               int idx = i * (H * W * D) + label * (H * W) + y * W + x;
-               dX_data[idx] = (dX_data[idx] - 1.0);
-
-               if (weights != NULL) {
-                 float weight = weights[labelidx];
-                 for (int c = 0; c < D; ++c) {
-                   int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-                   dX_data[idx] *= weight;
-                 }
-                 total_weight += weight;
-               } else {
-                 total_weight += 1.0;
-               }
-             } else {
-               // Ignore-label, so set all gradients for this positions
-               // tp zero
-               for (int c = 0; c < D; ++c) {
-                 int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-                 dX_data[idx] = 0.0;
-               }
-             }
-           }
-         }
+   if (label != DONTCARE) {
+     int data_idx = i * (H * W * D) + label * (H * W) + y * W + x;
+     dX_data[data_idx] -= 1.0;
+     if (weights != NULL) {
+       float weight = weights[index];
+       for (int c = 0; c < D; ++c) {
+         int data_idx = i * (H * W * D) + c * (H * W) + y * W + x;
+         dX_data[data_idx] *= weight;
        }
-       total_weight_buffer[thread_idx] = total_weight;
-       __syncthreads();
-
-       if (thread_idx == 0) {
-         // TODO: multi-level reduction
-         float sum_total_weight = 0.0f;
-         for(int j = 0; j < REDUCTION_THREADS; ++j) {
-           sum_total_weight += total_weight_buffer[j];
-         }
-         *total_weight_ret = (*total_weight_ret) + sum_total_weight;
-       }
-
-       __syncthreads();
-    }
+       weights_[index] = weight;
+     } else {
+       weights_[index] = 1.0;
+     }
+   } else {
+     // Ignore-label, so set all gradients for this positions
+     // tp zero
+     for (int c = 0; c < D; ++c) {
+       int data_idx = i * (H * W * D) + c * (H * W) + y * W + x;
+       dX_data[data_idx] = 0.0;
+     }
+     weights_[index] = 0.0;
+   }
+ }
+}
 
 __global__ void SoftmaxNormalizeKernel(
     const int nthreads, const int D, const float* Pdata, const float* scales,
@@ -239,6 +183,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   int N = X.dim32(0);
   int D = X.dim32(1);
   P->ResizeLike(X);
+  total_weight_ptr_.Resize(1);
 
   if (!spatial_mode_) {
     DCHECK_EQ(X.ndim(), 2);
@@ -265,12 +210,10 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     float total_weight = N;
     if (weights) {
       // Sum weights
-      float* total_weight_ptr;
-      cudaMalloc(&total_weight_ptr, sizeof(float));
-      math::Sum<float, CUDAContext>(N, weights, total_weight_ptr, &context_);
-      cudaMemcpyAsync(&total_weight, total_weight_ptr, sizeof(float),
-        cudaMemcpyDeviceToHost, context_.cuda_stream());
-      cudaFree(total_weight_ptr);
+      math::Sum<float, CUDAContext>(N, weights,
+        total_weight_ptr_.mutable_data<float>(), &context_);
+      cudaMemcpyAsync(&total_weight, total_weight_ptr_.data<float>(),
+        sizeof(float), cudaMemcpyDeviceToHost, context_.cuda_stream());
     }
 
     // Sum of all losses
@@ -287,6 +230,12 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
 
     int H = X.dim32(2);
     int W = X.dim32(3);
+    if (losses_.size() != N * W * H) {
+      losses_.Resize(N * W * H);
+    }
+    if (weights_.size() != N * W * H) {
+      weights_.Resize(N * W * H);
+    }
 
     const float* Xdata = X.data<float>();
     float* Pdata = P->mutable_data<float>();
@@ -302,24 +251,25 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     math::Set<float, CUDAContext>(1, 0.0f, avg_loss_data, &context_);
 
     const int* label_data = T.data<int>();
-    float* total_weight_ptr;
-    cudaMalloc(&total_weight_ptr, sizeof(float));
-    math::Set<float, CUDAContext>(1, 0.0f, total_weight_ptr, &context_);
+    math::Set<float, CUDAContext>(
+      1, 0.0f, total_weight_ptr_.mutable_data<float>(), &context_);
 
-    // TODO: how to set best?
-    dim3 threadsPerBlock(REDUCTION_KERNEL_THREADS_X, REDUCTION_KERNEL_THREADS_Y);
-    dim3 numBlocks(1, 1);
-    SpatialCrossEntropyLossKernel<<<numBlocks, threadsPerBlock,
-        0, context_.cuda_stream()>>>(
+    SpatialCrossEntropyLossKernel<<<CAFFE_GET_BLOCKS(N * W * H),
+      CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
         N, D, W, H, P->data<float>(), label_data, weights,
-        avg_loss_data, total_weight_ptr);
+        losses_.mutable_data<float>(), weights_.mutable_data<float>());
 
 
     // Somewhat awkward scalar passing from device to host
     float h_total_weight;
-    cudaMemcpyAsync(&h_total_weight, total_weight_ptr, sizeof(float),
-      cudaMemcpyDeviceToHost, context_.cuda_stream());
-    cudaFree(total_weight_ptr);
+    math::Sum<float, CUDAContext>(
+      weights_.size(), weights_.data<float>(),
+      total_weight_ptr_.mutable_data<float>(), &context_);
+    cudaMemcpyAsync(&h_total_weight, total_weight_ptr_.data<float>(),
+      sizeof(float), cudaMemcpyDeviceToHost, context_.cuda_stream());
+
+    math::Sum<float, CUDAContext>(
+        losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
 
     // Final scaling
     if (h_total_weight > 0) {
@@ -345,6 +295,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   int N = X.dim32(0);
   int D = X.dim32(1);
   dX->ResizeLike(X);
+  total_weight_ptr_.Resize(1);
 
   if (!spatial_mode_) {
     DCHECK_EQ(X.ndim(), 2);
@@ -362,12 +313,10 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     float total_weight = N;
     if (weights) {
       // Sum weights
-      float* total_weight_ptr;
-      cudaMalloc(&total_weight_ptr, sizeof(float));
-      math::Sum<float, CUDAContext>(N, weights, total_weight_ptr, &context_);
-      cudaMemcpyAsync(&total_weight, total_weight_ptr, sizeof(float),
-        cudaMemcpyDeviceToHost, context_.cuda_stream());
-      cudaFree(total_weight_ptr);
+      math::Sum<float, CUDAContext>(
+        N, weights, total_weight_ptr_.mutable_data<float>(), &context_);
+      cudaMemcpyAsync(&total_weight, total_weight_ptr_.data<float>(),
+        sizeof(float), cudaMemcpyDeviceToHost, context_.cuda_stream());
     }
 
     // Scale by d_avg_loss / N
@@ -385,6 +334,9 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     int H = X.dim32(2);
     int W = X.dim32(3);
     dX->ResizeLike(X);
+    if (weights_.size() != N * W * H) {
+      weights_.Resize(N * W * H);
+    }
 
     const float* Pdata = P.data<float>();
     float* dX_data = dX->mutable_data<float>();
@@ -396,24 +348,22 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     // which is the probability under softmax.
     context_.Copy<float, CUDAContext, CUDAContext>(P.size(), Pdata, dX_data);
 
-    // TODO: how to set best?
-    dim3 threadsPerBlock(REDUCTION_KERNEL_THREADS_X, REDUCTION_KERNEL_THREADS_Y);
-    dim3 numBlocks(1, 1);
+    math::Set<float, CUDAContext>(
+      1, 0.0f, total_weight_ptr_.mutable_data<float>(), &context_);
 
-    float* total_weight_ptr;
-    cudaMalloc(&total_weight_ptr, sizeof(float));
-    math::Set<float, CUDAContext>(1, 0.0f, total_weight_ptr, &context_);
-
-    SpatialSoftmaxLossGradientKernel<<<numBlocks, threadsPerBlock,
-          0, context_.cuda_stream()>>>(
+    SpatialSoftmaxLossGradientKernel<<<CAFFE_GET_BLOCKS(N * W * H),
+      CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
         N, D, W, H, label_data, weights, dX_data,
-        total_weight_ptr);
+        weights_.mutable_data<float>());
+
+    math::Sum<float, CUDAContext>(
+      weights_.size(), weights_.data<float>(),
+      total_weight_ptr_.mutable_data<float>(), &context_);
 
     // Somewhat awkward scalar passing from device to host
     float h_total_weight;
-    cudaMemcpyAsync(&h_total_weight, total_weight_ptr, sizeof(float),
-      cudaMemcpyDeviceToHost, context_.cuda_stream());
-    cudaFree(total_weight_ptr);
+    cudaMemcpyAsync(&h_total_weight, total_weight_ptr_.data<float>(),
+      sizeof(float), cudaMemcpyDeviceToHost, context_.cuda_stream());
 
     // Final scaling
     if (h_total_weight > 0) {
