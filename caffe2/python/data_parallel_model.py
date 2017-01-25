@@ -460,7 +460,7 @@ def _BroadcastComputedParamsDistributed(
     rendezvous,
 ):
     _BroadcastComputedParamsSingleHost(devices, model)
-    log.warn("Distribetud computed params all-reduce not implemented yet")
+    log.warn("Distributed computed params all-reduce not implemented yet")
 
 
 def _BroadcastComputedParamsSingleHost(devices, model):
