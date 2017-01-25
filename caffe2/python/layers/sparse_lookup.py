@@ -105,14 +105,16 @@ class SparseLookup(ModelLayer):
                 )
                 gather_pos_w = net.Gather(
                     [self.pos_w, inc_seq], self.pos_w + '_gather')
-                gather_w = net.Gather(
-                    [self.w, self.input_record.items()], self.w + '_gather')
 
-                weighted_w = net.RowMul([gather_w, gather_pos_w],
-                                        gather_w + '_weighted')
-                net.LengthsSum(
-                    [weighted_w, self.input_record.lengths()],
-                    self.output_schema.field_blobs()
+                net.SparseLengthsWeightedSum(
+                    [
+                        self.w,
+                        gather_pos_w,
+                        self.input_record.items(),
+                        self.input_record.lengths()
+                    ],
+                    self.output_schema.field_blobs(),
+                    grad_on_weights=1
                 )
             else:
                 table_rows = net.Gather([self.w, self.input_record.keys()])
