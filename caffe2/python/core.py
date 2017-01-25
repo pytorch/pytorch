@@ -13,8 +13,6 @@ import numpy as np
 
 import caffe2.python._import_c_extension as C
 
-GlobalInit = C.global_init
-
 # Convenience redirections to functions inside scope.
 DeviceScope = scope.DeviceScope
 NameScope = scope.NameScope
@@ -29,6 +27,7 @@ def _InitDataType():
     for name, value in caffe2_pb2.TensorProto.DataType.items():
         setattr(DataType, name, value)
 
+
 _InitDataType()
 
 # Python 2 and 3 compatibility: test if basestring exists
@@ -42,12 +41,25 @@ except NameError:
 def _GetRegisteredOperators():
     return set(s.decode() for s in workspace.RegisteredOperators())
 
+
 _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
 
 def RefreshRegisteredOperators():
     global _REGISTERED_OPERATORS
     _REGISTERED_OPERATORS = _GetRegisteredOperators()
+
+
+_GLOBAL_INIT_ARGS = []
+
+
+def GlobalInit(args):
+    _GLOBAL_INIT_ARGS.extend(args[1:])
+    C.global_init(args)
+
+
+def GetGlobalInitArgs():
+    return _GLOBAL_INIT_ARGS[:]
 
 
 def IsOperator(op_type):
