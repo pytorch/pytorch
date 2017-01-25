@@ -195,17 +195,19 @@ def recurrent_net(
 
     params = [x for x in references if x in backward_mapping.keys()]
 
+    recurrent_inputs = [str(x[1]) for x in initial_cell_inputs]
+
     return net.RecurrentNetwork(
         all_inputs,
         all_outputs,
-        param=params,
-        param_gradient=[backward_mapping[p] for p in params],
+        param=map(all_inputs.index, params),
         alias_src=alias_src,
         alias_dst=map(str, alias_dst),
         alias_offset=alias_offset,
         recurrent_states=recurrent_states,
-        recurrent_inputs=[str(x[1]) for x in initial_cell_inputs],
+        recurrent_inputs=recurrent_inputs,
         recurrent_sizes=[int(x[2]) for x in initial_cell_inputs],
+        recurrent_input_ids=map(all_inputs.index, recurrent_inputs),
         link_internal=map(str, link_internal),
         link_external=map(str, link_external),
         link_offset=link_offset,

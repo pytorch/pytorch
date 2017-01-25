@@ -62,7 +62,7 @@ class CNNModelHelper(ModelHelperBase):
         if self.order == "NCHW":
             if (use_gpu_transform):
                 kwargs['use_gpu_transform'] = 1 if use_gpu_transform else 0
-                # GPU transform will handle NHWC -> NCHW 
+                # GPU transform will handle NHWC -> NCHW
                 data, label = self.net.ImageInput(
                     blob_in, [blob_out[0], blob_out[1]], **kwargs)
                 # data = self.net.Transform(data, blob_out[0], **kwargs)
@@ -774,20 +774,23 @@ class CNNModelHelper(ModelHelperBase):
         backward_step_net.Proto().external_input.extend(
             step_net.Proto().external_output)
 
+        inputs = map(str, [input_blob, seq_lengths,
+                           s("gates_t_w"), s("gates_t_b"),
+                           hidden_input_blob, cell_input_blob])
+        recurrent_inputs = [str(hidden_input_blob), str(cell_input_blob)]
+
         output, _, _, hidden_state, cell_state = self.net.RecurrentNetwork(
-            [input_blob, seq_lengths,
-                s("gates_t_w"), s("gates_t_b"),
-                hidden_input_blob, cell_input_blob],
+            inputs,
             [s("output"), s("hidden"), s("cell"),
                 s("hidden_output"), s("cell_output")],
-            param=[str(p) for p in step_net.params],
-            param_gradient=[backward_mapping[str(p)] for p in step_net.params],
+            param=map(inputs.index, step_net.params),
             alias_src=[s("hidden"), s("hidden"), s("cell")],
             alias_dst=[s("output"), s("hidden_output"), s("cell_output")],
             alias_offset=[1, -1, -1],
             recurrent_states=[s("hidden"), s("cell")],
-            recurrent_inputs=[str(hidden_input_blob), str(cell_input_blob)],
+            recurrent_inputs=recurrent_inputs,
             recurrent_sizes=[dim_out, dim_out],
+            recurrent_input_id=map(inputs.index, recurrent_inputs),
             link_internal=link_internal,
             link_external=link_external,
             link_offset=link_offset,

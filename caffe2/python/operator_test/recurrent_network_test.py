@@ -184,10 +184,10 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 threshold=0.01,
             )
 
-    @given(t=st.integers(1, 4),
+    @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
-    def test_mul_rnn(self, t, n, d):
+    def test_mul_rnn(self, T, n, d):
         model = ModelHelperBase(name='external')
 
         one_blob = model.param_init_net.ConstantFill(
@@ -211,19 +211,18 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         )
 
         workspace.FeedBlob(
-            str(input_blob), np.random.randn(t, n, d).astype(np.float32))
+            str(input_blob), np.random.randn(T, n, d).astype(np.float32))
         workspace.RunNetOnce(model.param_init_net)
 
         op = model.net._net.op[-1]
 
         def reference(input, initial_input):
-            T = input.shape[0]
             recurrent_input = initial_input
             result = np.zeros(shape=input.shape)
 
-            for t in range(T):
-                recurrent_input = recurrent_input * input[t]
-                result[t] = recurrent_input
+            for t_cur in range(T):
+                recurrent_input = recurrent_input * input[t_cur]
+                result[t_cur] = recurrent_input
 
             shape = list(input.shape)
             shape[0] = 1
@@ -234,15 +233,15 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             output = ref_output[0]
             initial_input = inputs[1]
             input_grad = np.zeros(shape=input.shape)
-            T = input.shape[0]
             right_grad = 0
 
-            for t in range(T - 1, -1, -1):
-                prev_output = output[t - 1] if t > 0 else initial_input
-                input_grad[t] = (output_grad[t] + right_grad) * prev_output
-                right_grad = input[t] * (output_grad[t] + right_grad)
+            for t_cur in range(T - 1, -1, -1):
+                prev_output = output[t_cur - 1] if t_cur > 0 else initial_input
+                input_grad[t_cur] = (output_grad[t_cur] +
+                                     right_grad) * prev_output
+                right_grad = input[t_cur] * (output_grad[t_cur] + right_grad)
 
-            return (input_grad, [0.])
+            return (input_grad, np.zeros(shape=[T, n, d]).astype(np.float32))
 
         self.assertReferenceChecks(
             hu.cpu_do,
