@@ -183,8 +183,7 @@ void TensorSerializer<Context>::Serialize(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  this->SerializeWithChunkSize(
-      blob, name, acceptor, FLAGS_caffe2_tensor_chunk_size);
+  this->SerializeWithChunkSize(blob, name, acceptor, kDefaultChunkSize);
 }
 
 template <class Context>
@@ -195,7 +194,11 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
     int chunk_size) {
   CAFFE_ENFORCE(blob.IsType<Tensor<Context>>());
   const auto& tensor = blob.template Get<Tensor<Context>>();
-  chunk_size = chunk_size == -1 ? FLAGS_caffe2_tensor_chunk_size : chunk_size;
+  if (chunk_size == kNoChunking) {
+    chunk_size = tensor.size() + 1; // to account for empty tensors
+  } else if (chunk_size == kDefaultChunkSize) {
+    chunk_size = FLAGS_caffe2_tensor_chunk_size;
+  }
 
 #ifndef __ANDROID__
   std::vector<std::future<void>> futures;

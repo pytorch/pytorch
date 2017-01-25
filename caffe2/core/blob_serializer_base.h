@@ -7,6 +7,9 @@ namespace caffe2 {
 
 class Blob;
 
+constexpr int kDefaultChunkSize = -1;
+constexpr int kNoChunking = 0;
+
 /**
  * @brief BlobSerializerBase is an abstract class that serializes a blob to a
  * string.
