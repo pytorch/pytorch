@@ -76,7 +76,7 @@ class MKLMemorySerializer : public BlobSerializerBase {
  */
 class MKLMemoryDeserializer : public BlobDeserializerBase {
  public:
-  bool Deserialize(const BlobProto& blob_proto, Blob* blob) override {
+  void Deserialize(const BlobProto& blob_proto, Blob* blob) override {
     const TensorProto& proto = blob_proto.tensor();
     CAFFE_ENFORCE(
         proto.data_type() == TensorProto_DataType_FLOAT ||
@@ -106,7 +106,6 @@ class MKLMemoryDeserializer : public BlobDeserializerBase {
       default:
         CAFFE_THROW("This should not happen, we guarded things above already.");
     }
-    return true;
   }
 };
 

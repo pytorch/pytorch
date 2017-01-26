@@ -75,7 +75,7 @@ class BlobDeserializerBase {
   virtual ~BlobDeserializerBase() {}
 
   // Deserializes from a BlobProto object.
-  virtual bool Deserialize(const BlobProto& proto, Blob* blob) = 0;
+  virtual void Deserialize(const BlobProto& proto, Blob* blob) = 0;
 };
 
 CAFFE_DECLARE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
@@ -97,8 +97,8 @@ inline unique_ptr<BlobDeserializerBase> CreateDeserializer(const string& type) {
 template <class Context>
 class TensorDeserializer : public BlobDeserializerBase {
  public:
-  bool Deserialize(const BlobProto& proto, Blob* blob) override;
-  bool Deserialize(const TensorProto& proto, Tensor<Context>* tensor);
+  void Deserialize(const BlobProto& proto, Blob* blob) override;
+  void Deserialize(const TensorProto& proto, Tensor<Context>* tensor);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -372,16 +372,16 @@ void TensorSerializer<Context>::Serialize(
 }
 
 template <class Context>
-bool TensorDeserializer<Context>::Deserialize(
-    const BlobProto& blob_proto, Blob* blob) {
-  return Deserialize(
-      blob_proto.tensor(),
-      blob->GetMutable<Tensor<Context>>());
+void TensorDeserializer<Context>::Deserialize(
+    const BlobProto& blob_proto,
+    Blob* blob) {
+  Deserialize(blob_proto.tensor(), blob->GetMutable<Tensor<Context>>());
 }
 
 template <class Context>
-bool TensorDeserializer<Context>::Deserialize(
-    const TensorProto& proto, Tensor<Context>* tensor) {
+void TensorDeserializer<Context>::Deserialize(
+    const TensorProto& proto,
+    Tensor<Context>* tensor) {
   // We create a local context for deserializing. Since Caffe2 contexts are
   // usually lightweighted, this should not involve too much overhead.
   Context context(proto.device_detail());
@@ -426,10 +426,8 @@ bool TensorDeserializer<Context>::Deserialize(
     case TensorProto_DataType_BYTE:
       // Since BYTE stores the data in a string field instead of a repreated
       // field we will have it special cased.
-      if (chunkSize != proto.byte_data().size()) {
-        LOG(ERROR) << "Incorrect proto field size.";
-        return false;
-      }
+      CAFFE_ENFORCE_EQ(
+          chunkSize, proto.byte_data().size(), "Incorrect proto field size.");
       context.template Copy<uint8_t, Context, CPUContext>(
           chunkSize,
           reinterpret_cast<const uint8_t*>(proto.byte_data().data()),
@@ -503,12 +501,9 @@ bool TensorDeserializer<Context>::Deserialize(
           &context);
       break;
     case TensorProto_DataType_UNDEFINED:
-      LOG(ERROR)
-          << "Cannot deserialize from a TensorProto UNDEFINED data type.";
-      return false;
+      CAFFE_THROW("Cannot deserialize from a TensorProto UNDEFINED data type.");
   }
   context.FinishDeviceComputation();
-  return true;
 }
 
 }  // namespace caffe2

@@ -389,7 +389,7 @@ class IndexSerializer : public BlobSerializerBase {
 
 class IndexDeserializer : public BlobDeserializerBase {
  public:
-  bool Deserialize(const BlobProto& proto, Blob* blob) override {
+  void Deserialize(const BlobProto& proto, Blob* blob) override {
     TensorDeserializer<CPUContext> deser;
     Blob tensor_blob;
     deser.Deserialize(proto, &tensor_blob);
@@ -415,7 +415,6 @@ class IndexDeserializer : public BlobDeserializerBase {
     if (isFrozen) {
       (*base)->Freeze();
     }
-    return true;
   }
 
  private:

@@ -189,14 +189,12 @@ void DBReaderSerializer::Serialize(
   acceptor(name, blob_proto.SerializeAsString());
 }
 
-bool DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
+void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
   DBReaderProto reader_proto;
-  if (!reader_proto.ParseFromString(proto.content())) {
-    LOG(ERROR) << "Cannot parse content into a DBReaderProto.";
-    return false;
-  }
+  CAFFE_ENFORCE(
+      reader_proto.ParseFromString(proto.content()),
+      "Cannot parse content into a DBReaderProto.");
   blob->Reset(new DBReader(reader_proto));
-  return true;
 }
 
 namespace {

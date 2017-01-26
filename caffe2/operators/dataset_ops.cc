@@ -1077,7 +1077,7 @@ class TreeCursorSerializer : public BlobSerializerBase {
 
 class TreeCursorDeserializer : public BlobDeserializerBase {
  public:
-  bool Deserialize(const BlobProto& proto, Blob* blob) override {
+  void Deserialize(const BlobProto& proto, Blob* blob) override {
     // deserialize the offsets
     TensorDeserializer<CPUContext> deser;
     Blob offset_blob;
@@ -1101,7 +1101,6 @@ class TreeCursorDeserializer : public BlobDeserializerBase {
     auto* base = blob->template GetMutable<std::unique_ptr<TreeCursor>>();
     (*base).reset(new TreeCursor(it));
     (*base)->offsets.assign(offsets_ptr, offsets_ptr + offsets.size());
-    return true;
   }
 };
 

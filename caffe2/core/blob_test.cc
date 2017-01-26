@@ -444,7 +444,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
       EXPECT_EQ(tensor_proto.field_name(i), static_cast<TypeParam>(i));   \
     }                                                                     \
     Blob new_blob;                                                        \
-    EXPECT_TRUE(new_blob.Deserialize(serialized));                        \
+    EXPECT_NO_THROW(new_blob.Deserialize(serialized));                    \
     EXPECT_TRUE(new_blob.IsType<TensorCPU>());                            \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
@@ -473,7 +473,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
         TypeMetaToDataType(TypeMeta::Make<TypeParam>()));                 \
     EXPECT_EQ(tensor_proto.field_name##_size(), 0);                       \
     Blob new_blob;                                                        \
-    EXPECT_TRUE(new_blob.Deserialize(serialized));                        \
+    EXPECT_NO_THROW(new_blob.Deserialize(serialized));                    \
     EXPECT_TRUE(new_blob.IsType<TensorCPU>());                            \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
