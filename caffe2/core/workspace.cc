@@ -147,7 +147,7 @@ NetBase* Workspace::CreateNet(const NetDef& net_def) {
     net_map_.erase(net_def.name());
   }
   // Create a new net with its name.
-  LOG(INFO) << "Initializing network " << net_def.name();
+  VLOG(1) << "Initializing network " << net_def.name();
   net_map_[net_def.name()] =
       unique_ptr<NetBase>(caffe2::CreateNet(net_def, this));
   if (net_map_[net_def.name()].get() == nullptr) {
