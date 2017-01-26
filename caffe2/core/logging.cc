@@ -223,7 +223,7 @@ MessageLogger::~MessageLogger() {
   int android_level_index = FATAL - std::min(FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
   // Output the log string the Android log at the appropriate level.
-  __android_log_print(level, tag_, stream_.str().c_str());
+  __android_log_print(level, tag_, "%s", stream_.str().c_str());
   // Indicate termination if needed.
   if (severity_ == FATAL) {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
