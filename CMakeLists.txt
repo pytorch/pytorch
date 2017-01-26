@@ -81,10 +81,10 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
 
 # ---[ Include path needed for proto
-include_directories(BEFORE ${CMAKE_BINARY_DIR})
+include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 # ---[ Third party builds.
-include_directories(${CMAKE_SOURCE_DIR})
+include_directories(${PROJECT_SOURCE_DIR})
 
 # ---[ Old caffe protobuf.
 add_subdirectory(caffe/proto)
