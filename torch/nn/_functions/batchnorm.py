@@ -62,6 +62,7 @@ class BatchNorm(Function):
                 self.running_mean, self.running_var,
                 self._save_mean, self._save_std, self.training, self.eps)
         else:
+            grad_output = grad_output.contiguous()
             backend = type2backend[type(input)]
             backend.BatchNormalization_backward(
                 backend.library_state, input, grad_output, grad_input,
