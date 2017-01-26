@@ -268,6 +268,7 @@ class ConvPoolOpBase : public Operator<Context> {
         // will verify that they are non-negative.
         CAFFE_ENFORCE(*pad_head >= 0);
         CAFFE_ENFORCE(*pad_tail >= 0);
+        CAFFE_ENFORCE(in_size + *pad_head + *pad_tail >= dkernel);
         *out_size = static_cast<int>(
             static_cast<float>(in_size + *pad_head + *pad_tail - dkernel) /
                 stride +
