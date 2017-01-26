@@ -8,7 +8,7 @@ import unittest
 import warnings
 from itertools import product, chain
 from functools import wraps
-from common import TestCase, iter_indices, TEST_NUMPY
+from common import TestCase, iter_indices, TEST_NUMPY, run_tests
 
 if TEST_NUMPY:
     import numpy as np
@@ -2815,4 +2815,4 @@ class TestTorch(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

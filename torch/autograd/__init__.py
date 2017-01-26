@@ -28,7 +28,7 @@ def backward(variables, grad_variables, retain_variables=False):
     Arguments:
         variables (sequence of Variable): Variables of which the derivative will be
             computed.
-        grad_variables (sequence of Variable): Gradients w.r.t. each element of
+        grad_variables (sequence of Tensor): Gradients w.r.t. each element of
             corresponding variables. Required only for non-scalar variables that
             require gradient.
         retain_variables (bool): If ``True``, buffers necessary for computing

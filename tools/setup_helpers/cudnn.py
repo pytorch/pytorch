@@ -1,8 +1,14 @@
 import os
 import glob
+from itertools import chain
 
 from .env import check_env_flag
 from .cuda import WITH_CUDA, CUDA_HOME
+
+
+def gather_paths(env_vars):
+    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
+
 
 WITH_CUDNN = False
 CUDNN_LIB_DIR = None
@@ -12,13 +18,19 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         os.getenv('CUDNN_LIB_DIR'),
         os.path.join(CUDA_HOME, 'lib'),
         os.path.join(CUDA_HOME, 'lib64'),
-        '/usr/lib/x86_64-linux-gnu/',        
-    ]))
+        '/usr/lib/x86_64-linux-gnu/',
+    ] + gather_paths([
+        'LIBRARY_PATH',
+    ])))
     include_paths = list(filter(bool, [
         os.getenv('CUDNN_INCLUDE_DIR'),
         os.path.join(CUDA_HOME, 'include'),
-        '/usr/include/'
-    ]))
+        '/usr/include/',
+    ] + gather_paths([
+        'CPATH',
+        'C_INCLUDE_PATH',
+        'CPLUS_INCLUDE_PATH',
+    ])))
     for path in lib_paths:
         if path is None or not os.path.exists(path):
             continue

@@ -7,7 +7,8 @@ import unittest
 from copy import deepcopy
 from collections import OrderedDict
 
-from common import make_jacobian, TestCase, iter_tensors, get_numerical_jacobian
+from common import make_jacobian, TestCase, iter_tensors, \
+                   get_numerical_jacobian, run_tests
 from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
@@ -1069,4 +1070,4 @@ for test in method_tests:
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

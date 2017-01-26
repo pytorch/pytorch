@@ -6,7 +6,7 @@ import torch.optim as optim
 import torch.legacy.optim as old_optim
 from torch.autograd import Variable
 
-from common import TestCase
+from common import TestCase, run_tests
 
 
 def rosenbrock(tensor):
@@ -344,4 +344,4 @@ class TestOptim(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

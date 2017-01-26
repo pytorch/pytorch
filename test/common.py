@@ -1,3 +1,5 @@
+import sys
+import argparse
 import unittest
 import contextlib
 from itertools import product
@@ -9,9 +11,16 @@ from torch.autograd import Variable, Function
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
-torch.manual_seed(123)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
+
+def run_tests():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--seed', type=int, default=123)
+    args, remaining = parser.parse_known_args()
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    remaining = [sys.argv[0]] + remaining
+    unittest.main(argv=remaining)
 
 
 TEST_NUMPY = True

@@ -4,7 +4,7 @@ from torch import sparse
 import itertools
 import random
 import unittest
-from common import TestCase
+from common import TestCase, run_tests
 from numbers import Number
 
 SparseTensor = sparse.DoubleTensor
@@ -216,5 +216,4 @@ class TestSparse(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
-
+    run_tests()

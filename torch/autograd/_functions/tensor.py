@@ -288,7 +288,7 @@ class IndexSelect(Function):
         if self.needs_input_grad[0]:
             index, = self.saved_tensors
             grad_tensor = grad_output.new(*self.input_size).zero_()
-            grad_tensor.index_copy_(self.dim, index, grad_output)
+            grad_tensor.index_add_(self.dim, index, grad_output)
 
         return grad_tensor, None
 

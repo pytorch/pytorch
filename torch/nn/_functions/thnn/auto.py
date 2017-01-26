@@ -135,13 +135,13 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         if is_inplace and self.inplace:
             self.mark_dirty(input)
             output = input
-            self.save_for_backward(input, *params)
         else:
             output = input.new()
-            if save_output:
-                self.save_for_backward(input, output, *params)
-            else:
-                self.save_for_backward(input, *params)
+
+        if save_output:
+            self.save_for_backward(input, output, *params)
+        else:
+            self.save_for_backward(input, *params)
 
         getattr(self._backend, update_output.name)(self._backend.library_state, input, output, *args)
         return output
