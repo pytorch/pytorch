@@ -147,7 +147,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
       EXPECT_EQ(tensor_proto.field_name(i), static_cast<TypeParam>(i));    \
     }                                                                      \
     Blob new_blob;                                                         \
-    EXPECT_TRUE(new_blob.Deserialize(serialized));                         \
+    EXPECT_NO_THROW(new_blob.Deserialize(serialized));                     \
     EXPECT_TRUE(new_blob.IsType<TensorCUDA>());                            \
     TensorCPU new_cpu_tensor(blob.Get<TensorCUDA>());                      \
     EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
@@ -197,7 +197,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     EXPECT_EQ(tensor_proto.device_detail().cuda_gpu_id(), gpu_id);
     // Test if the restored blob is still of the same device.
     blob.Reset();
-    EXPECT_TRUE(blob.Deserialize(serialized));
+    EXPECT_NO_THROW(blob.Deserialize(serialized));
     EXPECT_TRUE(blob.IsType<TensorCUDA>());
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()),
               gpu_id);
@@ -205,7 +205,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     // can still get so.
     blob.Reset();
     proto.mutable_tensor()->mutable_device_detail()->set_cuda_gpu_id(0);
-    EXPECT_TRUE(blob.Deserialize(proto.SerializeAsString()));
+    EXPECT_NO_THROW(blob.Deserialize(proto.SerializeAsString()));
     EXPECT_TRUE(blob.IsType<TensorCUDA>());
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), 0);
   }
@@ -213,5 +213,3 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
 
 }  // namespace
 }  // namespace caffe2
-
-

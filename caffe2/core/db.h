@@ -271,7 +271,7 @@ class DBReaderSerializer : public BlobSerializerBase {
 
 class DBReaderDeserializer : public BlobDeserializerBase {
  public:
-  bool Deserialize(const BlobProto& proto, Blob* blob) override;
+  void Deserialize(const BlobProto& proto, Blob* blob) override;
 };
 
 }  // namespace db

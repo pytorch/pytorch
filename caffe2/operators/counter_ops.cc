@@ -43,7 +43,7 @@ class CounterSerializer : public BlobSerializerBase {
  */
 class CounterDeserializer : public BlobDeserializerBase {
  public:
-  bool Deserialize(const BlobProto& proto, Blob* blob) override {
+  void Deserialize(const BlobProto& proto, Blob* blob) override {
     auto tensorProto = proto.tensor();
     CAFFE_ENFORCE_EQ(tensorProto.dims_size(), 1, "Unexpected size of dims");
     CAFFE_ENFORCE_EQ(tensorProto.dims(0), 1, "Unexpected value of dims");
@@ -55,7 +55,6 @@ class CounterDeserializer : public BlobDeserializerBase {
         tensorProto.int64_data_size(), 1, "Unexpected size of data");
     *blob->GetMutable<std::unique_ptr<Counter<int64_t>>>() =
         caffe2::make_unique<Counter<int64_t>>(tensorProto.int64_data(0));
-    return true;
   }
 };
 }

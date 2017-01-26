@@ -94,7 +94,7 @@ class LoadOp final : public Operator<Context> {
       }
 
       Blob* blob = ws_->CreateBlob(key);
-      CAFFE_ENFORCE(blob->Deserialize(proto), "Couldn't deserialize blob");
+      blob->Deserialize(proto);
       if (!blob->IsType<Tensor<Context>>()) {
         // Only tensors can be seen multiple times as chunks.
         CAFFE_ENFORCE(seen_blobs.count(key) == 0, "Blob duplicated");
@@ -142,7 +142,7 @@ class LoadOp final : public Operator<Context> {
           // different GPU.
           blob->Reset();
         }
-        CAFFE_ENFORCE(blob->Deserialize(proto));
+        blob->Deserialize(proto);
 
         if (!blob->IsType<Tensor<Context>>()) {
           // Deal with non-tensors: we don't support chunking so we're done.

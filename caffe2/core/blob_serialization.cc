@@ -45,9 +45,8 @@ class StringSerializer : public BlobSerializerBase {
  */
 class StringDeserializer : public BlobDeserializerBase {
  public:
-  bool Deserialize(const BlobProto& proto, Blob* blob) override {
+  void Deserialize(const BlobProto& proto, Blob* blob) override {
     *blob->GetMutable<std::string>() = proto.content();
-    return true;
   }
 };
 
@@ -117,16 +116,15 @@ CAFFE_DEFINE_TYPED_REGISTRY(
 
 CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
-bool Blob::Deserialize(const string& content) {
+void Blob::Deserialize(const string& content) {
   BlobProto blob_proto;
-  if (!blob_proto.ParseFromString(content)) {
-    LOG(ERROR) << "Cannot parse content into a BlobProto.";
-    return false;
-  }
-  return Deserialize(blob_proto);
+  CAFFE_ENFORCE(
+      blob_proto.ParseFromString(content),
+      "Cannot parse content into a BlobProto.");
+  Deserialize(blob_proto);
 }
 
-bool Blob::Deserialize(const BlobProto& blob_proto) {
+void Blob::Deserialize(const BlobProto& blob_proto) {
   if (blob_proto.type() == kTensorBlobType) {
     // This is a tensor object. Depending on the device type, we will
     // use the corresponding TensorDeserializer.
@@ -135,14 +133,14 @@ bool Blob::Deserialize(const BlobProto& blob_proto) {
     // Tensor's deserializer should always be registered, but we will double
     // check if it is not null anyway.
     CAFFE_ENFORCE(deserializer.get());
-    return deserializer->Deserialize(blob_proto, this);
+    deserializer->Deserialize(blob_proto, this);
   } else {
     auto deserializer = CreateDeserializer(blob_proto.type());
-    if (!deserializer.get()) {
-      LOG(ERROR) << "No registered deserializer for type " << blob_proto.type();
-      return false;
-    }
-    return deserializer->Deserialize(blob_proto, this);
+    CAFFE_ENFORCE(
+        deserializer.get(),
+        "No registered deserializer for type ",
+        blob_proto.type());
+    deserializer->Deserialize(blob_proto, this);
   }
 }
 

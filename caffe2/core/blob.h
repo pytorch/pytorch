@@ -182,8 +182,8 @@ class Blob {
    * the deserialization fails, the content in the blob should no longer be
    * trusted.
    */
-  bool Deserialize(const string& content);
-  bool Deserialize(const BlobProto& proto);
+  void Deserialize(const string& content);
+  void Deserialize(const BlobProto& proto);
 
  private:
   /**

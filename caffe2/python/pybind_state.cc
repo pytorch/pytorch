@@ -246,7 +246,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "deserialize",
           [](Blob* blob, py::bytes serialized) {
-            CAFFE_ENFORCE(blob->Deserialize(serialized));
+            blob->Deserialize(serialized);
           })
       .def(
           "fetch",
@@ -735,7 +735,7 @@ void addGlobalMethods(py::module& m) {
       [](const std::string& name, const py::bytes& serialized) {
         CAFFE_ENFORCE(gWorkspace);
         auto* blob = gWorkspace->CreateBlob(name);
-        CAFFE_ENFORCE(blob->Deserialize(serialized.cast<std::string>()));
+        blob->Deserialize(serialized.cast<std::string>());
       });
 
   // we support 2 possible signatures of python op: (inputs, outputs) or

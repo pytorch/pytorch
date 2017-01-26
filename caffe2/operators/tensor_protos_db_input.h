@@ -55,9 +55,9 @@ bool TensorProtosDBInput<Context>::Prefetch() {
       if (protos.protos(i).has_device_detail()) {
         protos.mutable_protos(i)->clear_device_detail();
       }
-      CAFFE_ENFORCE(deserializer.Deserialize(
+      deserializer.Deserialize(
           protos.protos(i),
-          prefetched_blobs_[i].template GetMutable<TensorCPU>()));
+          prefetched_blobs_[i].template GetMutable<TensorCPU>());
     }
   } else {
     vector<TensorCPU> temp_tensors(OutputSize());
@@ -81,7 +81,7 @@ bool TensorProtosDBInput<Context>::Prefetch() {
         if (protos.protos(i).has_device_detail()) {
           protos.mutable_protos(i)->clear_device_detail();
         }
-        CAFFE_ENFORCE(deserializer.Deserialize(protos.protos(i), &src));
+        deserializer.Deserialize(protos.protos(i), &src);
         DCHECK_EQ(src.size() * batch_size_, dst->size());
         this->context_.template CopyItems<CPUContext, CPUContext>(
             src.meta(),
