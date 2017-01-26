@@ -10,14 +10,30 @@
 
 void THTensor_(fill)(THTensor *r_, real value)
 {
-  TH_TENSOR_APPLY(real, r_,
-                  THVector_(fill)(r__data, value, r__size); break;);
+  if (THTensor_(isContiguous)(r_) || THTensor_(isTransposed)(r_)) {
+    real *rp = THTensor_(data)(r_);
+    ptrdiff_t sz = THTensor_(nElement)(r_);
+    #pragma omp parallel if(sz > TH_OMP_OVERHEAD_THRESHOLD)
+    {
+      #ifdef _OPENMP
+      size_t num_threads = omp_get_num_threads();
+      size_t tid = omp_get_thread_num();
+      #else
+      size_t num_threads = 1;
+      size_t tid = 0;
+      #endif
+      ptrdiff_t i = tid * (sz / num_threads);
+      ptrdiff_t i_end = tid == num_threads - 1 ? sz : i + sz / num_threads;
+      THVector_(fill)(rp+i, value, i_end-i);
+    }
+  } else {
+    TH_TENSOR_APPLY(real, r_, THVector_(fill)(r__data, value, r__size); break;);
+  }
 }
 
 void THTensor_(zero)(THTensor *r_)
 {
-  TH_TENSOR_APPLY(real, r_,
-                  THVector_(fill)(r__data, 0, r__size); break;);
+  THTensor_(fill)(r_, 0);
 }
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, real value)
