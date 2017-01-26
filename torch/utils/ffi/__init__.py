@@ -138,7 +138,8 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
     if not package:
         cffi_wrapper_name = '_' + name_suffix
     else:
-        cffi_wrapper_name = name.rpartition('.')[0] + '._' + name_suffix
+        cffi_wrapper_name = (name.rpartition('.')[0] +
+                             '.{0}._{0}'.format(name_suffix))
 
     wrapper_source, include_dirs = _setup_wrapper(with_cuda)
     include_dirs.extend(kwargs.pop('include_dirs', []))
@@ -155,7 +156,7 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
     ffi.set_source(cffi_wrapper_name, wrapper_source + all_headers_source,
                    sources=sources,
                    include_dirs=include_dirs, **kwargs)
-    ffi.cdef(_typedefs + all_headers_source);
+    ffi.cdef(_typedefs + all_headers_source)
 
     _make_python_wrapper(name_suffix, '_' + name_suffix, target_dir)
     def build():
