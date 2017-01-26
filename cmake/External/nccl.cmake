@@ -7,7 +7,7 @@ if (NOT __NCCL_INCLUDED)
       set(NCCL_EXTERNAL FALSE)
   else()
     # build directory
-    set(nccl_PREFIX ${CMAKE_SOURCE_DIR}/third_party/nccl)
+    set(nccl_PREFIX ${PROJECT_SOURCE_DIR}/third_party/nccl)
 
     # we build nccl statically, but want to link it into the caffe shared library
     # this requires position-independent code

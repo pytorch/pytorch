@@ -70,10 +70,10 @@ endif()
 
 # ---[ Googletest and benchmark
 if (BUILD_TEST)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest)
-  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/benchmark)
-  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/benchmark/include)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/googletest)
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/benchmark)
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/benchmark/include)
 endif()
 
 # ---[ LMDB
@@ -160,7 +160,7 @@ if(USE_OPENCV)
 endif()
 
 # ---[ EIGEN
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/eigen)
+include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/eigen)
 
 # ---[ Python + Numpy
 if (BUILD_PYTHON)
@@ -173,7 +173,7 @@ if (BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/pybind11/include)
+include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/pybind11/include)
 
 # ---[ MPI
 if(USE_MPI)
@@ -252,14 +252,14 @@ endif()
 
 # ---[ CUB
 if(USE_CUDA)
-  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cub)
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/cub)
 endif()
 
 # ---[ CNMEM
 if(USE_CUDA)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/cnmem)
-  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/third_party/cnmem/include)
-  # message(STATUS "cnmem: ${CMAKE_SOURCE_DIR}/third_party/cnmem/libcnmem.so")
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/cnmem)
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/cnmem/include)
+  # message(STATUS "cnmem: ${PROJECT_SOURCE_DIR}/third_party/cnmem/libcnmem.so")
   # message(STATUS "${CMAKE_CURRENT_BINARY_DIR}")
   list(APPEND Caffe2_DEPENDENCY_LIBS "${CMAKE_CURRENT_BINARY_DIR}/third_party/cnmem/libcnmem.so")
 endif()
