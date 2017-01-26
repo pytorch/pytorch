@@ -164,11 +164,15 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             "cell_init", np.random.randn(1, n, d).astype(np.float32))
         workspace.FeedBlob(
             "seq_lengths", np.random.randint(0, t, size=(n,)).astype(np.int32))
+        inputs = [workspace.FetchBlob(name) for name in op.input]
+
+        print(op.input)
+        print(inputs)
 
         self.assertReferenceChecks(
             hu.cpu_do,
             op,
-            [workspace.FetchBlob(name) for name in op.input],
+            inputs,
             ref,
             outputs_to_check=outputs_to_check,
         )
@@ -178,7 +182,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             self.assertGradientChecks(
                 hu.cpu_do,
                 op,
-                [workspace.FetchBlob(name) for name in op.input],
+                inputs,
                 param,
                 [0],
                 threshold=0.01,
