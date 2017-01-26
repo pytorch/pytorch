@@ -55,21 +55,27 @@ def is_sandcastle():
         return True
     return False
 
-
 hypothesis.settings.register_profile(
     "sandcastle",
     hypothesis.settings(
+        derandomize=True,
+        suppress_health_check=[hypothesis.HealthCheck.too_slow],
+        database=None,
         max_examples=100,
         verbosity=hypothesis.Verbosity.verbose))
 
 hypothesis.settings.register_profile(
     "dev",
     hypothesis.settings(
+        suppress_health_check=[hypothesis.HealthCheck.too_slow],
+        database=None,
         max_examples=10,
         verbosity=hypothesis.Verbosity.verbose))
 hypothesis.settings.register_profile(
     "debug",
     hypothesis.settings(
+        suppress_health_check=[hypothesis.HealthCheck.too_slow],
+        database=None,
         max_examples=1000,
         verbosity=hypothesis.Verbosity.verbose))
 hypothesis.settings.load_profile(

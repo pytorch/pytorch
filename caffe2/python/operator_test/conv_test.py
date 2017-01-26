@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-from hypothesis import assume, given, settings
+from hypothesis import assume, given
 import hypothesis.strategies as st
 import collections
 
@@ -20,7 +20,7 @@ class TestConvolution(hu.HypothesisTestCase):
            pad_b=st.integers(0, 3),
            pad_r=st.integers(0, 3),
            kernel=st.integers(3, 5),
-           size=st.integers(8, 8),
+           size=st.integers(1, 8),
            input_channels=st.integers(1, 3),
            output_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
@@ -29,7 +29,6 @@ class TestConvolution(hu.HypothesisTestCase):
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
     def test_convolution_separate_stride_pad_gradients(self, stride_h, stride_w,
                                                        pad_t, pad_l, pad_b,
                                                        pad_r, kernel, size,
@@ -65,6 +64,13 @@ class TestConvolution(hu.HypothesisTestCase):
             w = w.transpose((0, 3, 1, 2))
 
         inputs = [X, w, b] if use_bias else [X, w]
+
+        # Error handling path.
+        if size + pad_r + pad_l < kernel or size + pad_t + pad_b < kernel:
+            with self.assertRaises(RuntimeError):
+                self.assertDeviceChecks(dc, op, inputs, [0])
+            return
+
         self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
@@ -142,12 +148,13 @@ class TestConvolution(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
            use_bias=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
     def test_convolution_gradients(self, stride, pad, kernel, dilation, size,
                                    input_channels, output_channels, batch_size,
                                    order, engine, use_bias, gc, dc):
-        assume(size >= dilation * (kernel - 1) + 1)
+        dkernel = dilation * (kernel - 1) + 1
+
         assume("" == engine or 1 == dilation)
+        assume(engine != "MKLDNN" or use_bias is True)
 
         op = core.CreateOperator(
             "Conv",
@@ -171,6 +178,12 @@ class TestConvolution(hu.HypothesisTestCase):
             w = w.transpose((0, 3, 1, 2))
 
         inputs = [X, w, b] if use_bias else [X, w]
+        # Error handling path.
+        if size + pad + pad < dkernel or size + pad + pad < dkernel:
+            with self.assertRaises(RuntimeError):
+                self.assertDeviceChecks(dc, op, inputs, [0])
+            return
+
         self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
