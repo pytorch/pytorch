@@ -25,3 +25,6 @@
 [submodule "third_party/protobuf"]
 	path = third_party/protobuf
 	url = https://github.com/google/protobuf.git
+[submodule "third_party/android-cmake"]
+	path = third_party/android-cmake
+	url = https://github.com/taka-no-me/android-cmake.git
