@@ -55,7 +55,14 @@ class RNNBase(Module):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, hx):
+    def forward(self, input, hx=None):
+        if (hx == None):
+            batch_sz = input.size()[0] if self.batch_first else input.size()[1]
+            hx = torch.autograd.Variable(torch.Tensor(self.num_layers, batch_sz,
+                                                   self.input_size).zero_())
+            if (self.mode == 'LSTM'):
+                hx = (torch.autograd.Variable(hx.data),
+                      torch.autograd.Variable(hx.data))
         func = self._backend.RNN(
             self.mode,
             self.input_size,
@@ -428,7 +435,6 @@ class LSTMCell(RNNCellBase):
 
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
-    
     .. math::
 
         \begin{array}{ll}
