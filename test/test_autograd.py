@@ -754,7 +754,7 @@ function_tests = [
     (Cosh,          (),                 ((S, S, S),)                                ),
     (Abs,           (),                 ((S, S, S),)                                ),
     (Clamp,         (0, 1),             ((S, S, S),)                                ),
-    (Sqrt,          (),                 (torch.rand(S, S, S) + 1e-4,)               ),
+    (Sqrt,          (),                 (torch.rand(S, S, S) + 5e-4,)               ),
     (Sin,           (),                 ((S, S, S),)                                ),
     (Cos,           (),                 ((S, S, S),)                                ),
     (Tan,           (),                 (torch.randn(S, S, S).clamp(-1, 1),)        ),
