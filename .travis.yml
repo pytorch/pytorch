@@ -4,16 +4,25 @@ python:
     - 2.7.8
     - 2.7
     - 3.5
+    - 3.6
     - nightly
 
+cache:
+    - ccache
+    - directories:
+        - $HOME/.ccache
+
 install:
-    - export CC="gcc-4.8"
-    - export CXX="g++-4.8"
+    - unset CCACHE_DISABLE
+    - export CCACHE_DIR=$HOME/.ccache
+    - export CC="ccache gcc-4.8"
+    - export CXX="ccache g++-4.8"
+    - ccache --show-stats
     - travis_retry pip install -r requirements.txt
-    - travis_retry pip install .
+    - python setup.py install
 
 script:
-    - ./test/run_test.sh
+    - OMP_NUM_THREADS=2 ./test/run_test.sh
 
 addons:
     apt:
