@@ -58,6 +58,8 @@ public:
   virtual bool isContiguous() const override;
   virtual void* data() override;
   virtual const void* data() const override;
+  virtual void* cdata() override;
+  virtual const void* cdata() const override;
   virtual THTensor& retain() override;
   virtual THTensor& free() override;
 
@@ -100,6 +102,7 @@ public:
   virtual THTensor& fmod(const Tensor& src, scalar_type value) override;
   virtual THTensor& remainder(const Tensor& src, scalar_type value) override;
   virtual THTensor& clamp(const Tensor& src, scalar_type min_value, scalar_type max_value) override;
+  virtual THTensor& cadd(const Tensor& src1, const Tensor& src2) override;
   virtual THTensor& cadd(const Tensor& src1, scalar_type value, const Tensor& src2) override;
   virtual THTensor& csub(const Tensor& src1, scalar_type value, const Tensor& src2) override;
   virtual THTensor& cmul(const Tensor& src1, const Tensor& src2) override;
@@ -131,8 +134,11 @@ public:
   virtual THTensor& cmin(const Tensor& src1, const Tensor& src2) override;
   virtual THTensor& cmaxValue(const Tensor& src, scalar_type value) override;
   virtual THTensor& cminValue(const Tensor& src, scalar_type value) override;
+  virtual THTensor& zero() override;
 
   virtual thpp::Type type() const override;
+  virtual bool isCuda() const override;
+  virtual int getDevice() const override;
   virtual std::unique_ptr<Tensor> newTensor() const override;
 
 private:

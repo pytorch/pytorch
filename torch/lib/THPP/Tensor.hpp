@@ -36,6 +36,8 @@ struct Tensor {
   virtual bool isContiguous() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
+  virtual void* cdata() = 0;
+  virtual const void* cdata() const = 0;
   virtual Tensor& retain() = 0;
   virtual Tensor& free() = 0;
 
@@ -60,6 +62,7 @@ struct Tensor {
   virtual Tensor& gather(const Tensor& src, int dimension, const Tensor& index) = 0;
   virtual Tensor& scatter(int dimension, const Tensor& index, const Tensor& src) = 0;
   virtual Tensor& neg(const Tensor& src) = 0;
+  virtual Tensor& cadd(const Tensor& src1, const Tensor& src2) = 0;
   virtual Tensor& cinv(const Tensor& src) = 0;
   virtual Tensor& cmul(const Tensor& src1, const Tensor& src2) = 0;
   virtual Tensor& cpow(const Tensor& src1, const Tensor& src2) = 0;
@@ -79,8 +82,11 @@ struct Tensor {
   virtual Tensor& cross(const Tensor& src1, const Tensor& src2, int dimension) = 0;
   virtual Tensor& cmax(const Tensor& src1, const Tensor& src2) = 0;
   virtual Tensor& cmin(const Tensor& src1, const Tensor& src2) = 0;
+  virtual Tensor& zero() = 0;
 
   virtual thpp::Type type() const = 0;
+  virtual bool isCuda() const = 0;
+  virtual int getDevice() const = 0;
   virtual std::unique_ptr<Tensor> newTensor() const = 0;
 };
 

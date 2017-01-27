@@ -85,6 +85,16 @@ const void* THTensor<real>::data() const {
 }
 
 template<>
+void* THTensor<real>::cdata() {
+  return tensor;
+}
+
+template<>
+const void* THTensor<real>::cdata() const {
+  return tensor;
+}
+
+template<>
 auto THTensor<real>::resize(const std::initializer_list<long> &new_size) -> THTensor& {
   return resize(new_size.begin(), new_size.end());
 }
@@ -341,6 +351,11 @@ auto THTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& s
 }
 
 template<>
+auto THTensor<real>::cadd(const Tensor& src1, const Tensor& src2) -> THTensor& {
+  return cadd(src1, static_cast<scalar_type>(1), src2);
+}
+
+template<>
 auto THTensor<real>::csub(const Tensor& src1, scalar_type value, const Tensor& src2) -> THTensor& {
   THTensor &src1_t = non_const_cast(src1);
   THTensor &src2_t = non_const_cast(src2);
@@ -578,8 +593,24 @@ auto THTensor<real>::cminValue(const Tensor& src, scalar_type value) -> THTensor
 }
 
 template<>
+auto THTensor<real>::zero() -> THTensor& {
+  THTensor_(zero)(tensor);
+  return *this;
+}
+
+template<>
 thpp::Type THTensor<real>::type() const {
   return thpp::type_traits<real>::type;
+}
+
+template<>
+bool THTensor<real>::isCuda() const {
+  return false;
+}
+
+template<>
+int THTensor<real>::getDevice() const {
+  return -1;
 }
 
 template<>
