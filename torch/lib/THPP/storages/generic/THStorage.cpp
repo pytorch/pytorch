@@ -89,6 +89,16 @@ thpp::Type THStorage<real>::type() const {
 }
 
 template<>
+bool THStorage<real>::isCuda() const {
+  return false;
+}
+
+template<>
+int THStorage<real>::getDevice() const {
+  return -1;
+}
+
+template<>
 std::unique_ptr<Tensor> THStorage<real>::newTensor() const {
   return std::unique_ptr<Tensor>(new THTensor<real>());
 }

@@ -49,6 +49,8 @@ public:
   virtual scalar_type fast_get(std::size_t ind) override;
 
   virtual thpp::Type type() const override;
+  virtual bool isCuda() const override;
+  virtual int getDevice() const override;
 
   virtual std::unique_ptr<Tensor> newTensor() const override;
   virtual storage_type *getRaw() const;

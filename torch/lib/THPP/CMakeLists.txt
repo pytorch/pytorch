@@ -18,7 +18,7 @@ FUNCTION(EXCLUDE_DIR list_name dir_name)
 ENDFUNCTION()
 
 ################################################################################
-    
+
 if(${CMAKE_VERSION} VERSION_LESS "2.8.12")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 else(${CMAKE_VERSION} VERSION_LESS "2.8.12")
@@ -29,6 +29,12 @@ endif(${CMAKE_VERSION} VERSION_LESS "2.8.12")
 
 IF(NOT Torch_FOUND)
   FIND_PACKAGE(Torch REQUIRED)
+ENDIF()
+
+FIND_PACKAGE(CUDA 5.5)
+IF(CUDA_FOUND)
+  INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
+  INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
 ENDIF()
 
 # Can be compiled standalone
@@ -45,6 +51,13 @@ SET(all_cpp ${base_cpp})
 SET(all_h ${base_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
+
+IF(NOT CUDA_FOUND)
+  EXCLUDE_DIR(all_h ".*THC.*.hpp$")
+  EXCLUDE_DIR(all_cpp ".*THC.*.cpp$")
+  EXCLUDE_DIR(all_cpp "TraitsCuda.cpp")
+ENDIF()
+
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THPP SHARED ${all_cpp})
