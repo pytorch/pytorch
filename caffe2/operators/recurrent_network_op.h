@@ -34,11 +34,6 @@ struct OffsetAlias {
   int32_t offset{0};
 };
 
-struct Scratch {
-  std::string name;
-  int32_t sizePerStep;
-};
-
 struct Link {
   std::string internal;
   std::string external;
@@ -52,7 +47,7 @@ void applyOffsetAlias(const OffsetAlias& oc, Workspace* ws, Context* context) {
   auto srcBlob = ws->GetBlob(oc.src);
   CAFFE_ENFORCE(srcBlob);
   auto* src = srcBlob->template GetMutable<Tensor<Context>>();
-  auto* dst = ws->CreateBlob(oc.dst)->template GetMutable<Tensor<Context>>();
+  auto* dst = ws->GetBlob(oc.dst)->template GetMutable<Tensor<Context>>();
   auto timestep = src->size() / src->dim(0);
   auto dims = src->dims();
   const int32_t startDstTimestep =
@@ -96,19 +91,6 @@ void initializeRecurrentInput(
       batchSize * input.dim(2),
       input.template data<T>(),
       state->template mutable_data<T>());
-}
-
-template <typename Context>
-void initializeScratch(
-    const Scratch& scratch,
-    int32_t seqLength,
-    int32_t batchSize,
-    Workspace* ws) {
-  CAFFE_ENFORCE(ws);
-  VLOG(1) << "Initializing scratch: " << scratch.name;
-  ws->GetBlob(scratch.name)
-      ->template GetMutable<Tensor<Context>>()
-      ->Resize(std::vector<TIndex>{seqLength, batchSize, scratch.sizePerStep});
 }
 
 template <typename T, typename Context>
@@ -171,53 +153,22 @@ class RecurrentNetworkOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RecurrentNetworkOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        ws_(ws),
+        sharedWs_(ws),
         timestep_(OperatorBase::template GetSingleArgument<std::string>(
             "timestep",
             "timestep")) {
     CAFFE_ENFORCE(ws);
     const auto stepNet =
         OperatorBase::GetSingleArgument<string>("step_net", "");
-    NetDef stepNetDef;
     CAFFE_ENFORCE(
-        google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef),
+        google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef_),
         "Invalid netdef");
     CAFFE_ENFORCE(
-        stepNetDef.type() == "simple", "Step Net must be `simple`", stepNet);
+        stepNetDef_.type() == "simple", "Step Net must be `simple`", stepNet);
 
-    ws_.CreateBlob(timestep_)->template GetMutable<TensorCPU>()->Resize(1);
-
-    for (const auto& blob : stepNetDef.external_input()) {
-      ws_.CreateBlob(blob);
-    }
-
-    stepNet_ = ws_.CreateNet(stepNetDef);
-    CAFFE_ENFORCE(stepNet_, "Step Net construction failure");
-
-    scratches_ = constructScratches(ws);
-    recurrentInputs_ = constructRecurrentInputs(ws);
+    recurrentInputs_ = constructRecurrentInputs(sharedWs_);
     links_ = constructLinks();
     aliases_ = constructAliases();
-  }
-
-  std::vector<detail::Scratch> constructScratches(Workspace* sharedWs) {
-    const auto& names =
-        OperatorBase::GetRepeatedArgument<std::string>("scratch");
-    const auto& sizes =
-        OperatorBase::GetRepeatedArgument<int32_t>("scratch_sizes");
-    CAFFE_ENFORCE(
-        sizes.size() == names.size(), "scratch and scratch_sizes mismatch");
-    std::vector<detail::Scratch> scratch;
-    for (auto i = 0; i < names.size(); ++i) {
-      // Scratches need to be "global" (since they are shared between
-      // forward and backward).
-      sharedWs->CreateBlob(names[i]);
-      detail::Scratch s;
-      s.name = names[i];
-      s.sizePerStep = sizes[i];
-      scratch.push_back(s);
-    }
-    return scratch;
   }
 
   std::vector<detail::RecurrentInput> constructRecurrentInputs(
@@ -275,36 +226,46 @@ class RecurrentNetworkOp final : public Operator<Context> {
     const auto batchSize = Input(0).dim32(1);
     for (const auto& ri : recurrentInputs_) {
       detail::initializeRecurrentInput<T, Context>(
-          ri, seqLen, batchSize, &ws_, &context_);
+          ri, seqLen, batchSize, sharedWs_, &context_);
     }
 
-    for (auto& scratch : scratches_) {
-      detail::initializeScratch<Context>(scratch, seqLen, batchSize, &ws_);
-    }
+    std::vector<std::shared_ptr<Workspace>>* stepWorkspaces =
+        OperatorBase::Output<std::vector<std::shared_ptr<Workspace>>>(
+            OutputSize() - 1);
+    stepWorkspaces->clear();
 
     for (auto t = 0; t < seqLen; ++t) {
+      stepWorkspaces->push_back(std::make_shared<Workspace>(sharedWs_));
+      auto& currentStepWorkspace = stepWorkspaces->back();
+
       for (const auto& link : links_) {
-        detail::applyLink<T, Context>(link, t, &ws_);
+        detail::applyLink<T, Context>(link, t, currentStepWorkspace.get());
       }
-      // Since we have a SimpleNet, there are no races here.
-      auto timestepBlob = ws_.GetBlob(timestep_);
+
+      currentStepWorkspace->CreateBlob(timestep_)
+          ->template GetMutable<TensorCPU>()
+          ->Resize(1);
+      auto timestepBlob = currentStepWorkspace->GetBlob(timestep_);
       CAFFE_ENFORCE(timestepBlob);
       timestepBlob->template GetMutable<TensorCPU>()
           ->template mutable_data<int32_t>()[0] = t;
-      stepNet_->RunAsync();
+
+      NetBase* stepNet = currentStepWorkspace->CreateNet(stepNetDef_);
+      CAFFE_ENFORCE(stepNet, "Step Net construction failure");
+      // Since we have a SimpleNet, there are no races here.
+      stepNet->RunAsync();
     }
 
     for (const auto& alias : aliases_) {
-      detail::applyOffsetAlias<T, Context>(alias, &ws_, &context_);
+      detail::applyOffsetAlias<T, Context>(alias, sharedWs_, &context_);
     }
 
     return true;
   }
 
  protected:
-  NetBase* stepNet_{nullptr};
-  Workspace ws_;
-  std::vector<detail::Scratch> scratches_;
+  NetDef stepNetDef_;
+  Workspace* sharedWs_;
   std::vector<detail::Link> links_;
   std::vector<detail::OffsetAlias> aliases_;
   std::vector<detail::RecurrentInput> recurrentInputs_;
@@ -317,73 +278,22 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RecurrentNetworkGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        ws_(ws),
-
+        sharedWs_(ws),
+        localWs_(ws),
         timestep_(OperatorBase::template GetSingleArgument<std::string>(
             "timestep",
             "timestep")) {
-    scratches_ = constructScratches(ws);
     links_ = constructLinks();
     params_ = constructParams();
     recurrentGradients_ = constructRecurrentGradients();
-    aliases_ = constructAliases();
     recurrentInputIds_ = OperatorBase::template GetRepeatedArgument<int32_t>(
         "recurrent_input_ids");
 
     CAFFE_ENFORCE(ws);
     const auto stepNet =
         OperatorBase::GetSingleArgument<string>("backward_step_net", "");
-    NetDef stepNetDef;
     CAFFE_ENFORCE(
-        google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef));
-    ws_.CreateBlob(timestep_)->template GetMutable<TensorCPU>()->Resize(1);
-
-    for (const auto& blob : stepNetDef.external_input()) {
-      ws_.CreateBlob(blob);
-    }
-    stepNet_ = ws_.CreateNet(stepNetDef);
-    CAFFE_ENFORCE(stepNet_);
-  }
-
-  std::vector<detail::Scratch> constructScratches(Workspace* sharedWs) {
-    const auto& names =
-        OperatorBase::GetRepeatedArgument<std::string>("backward_scratch");
-    const auto& sizes =
-        OperatorBase::GetRepeatedArgument<int32_t>("scratch_sizes");
-    CAFFE_ENFORCE(
-        sizes.size() == names.size(),
-        "backward_scratch and scratch_sizes mismatch");
-    std::vector<detail::Scratch> scratch;
-    for (auto i = 0; i < names.size(); ++i) {
-      // Scratches need to be "global" (since they are shared between
-      // forward and backward).
-      sharedWs->CreateBlob(names[i]);
-      detail::Scratch s;
-      s.name = names[i];
-      s.sizePerStep = sizes[i];
-      scratch.push_back(s);
-    }
-    return scratch;
-  }
-
-  std::vector<detail::OffsetAlias> constructAliases() {
-    const auto& src =
-        OperatorBase::GetRepeatedArgument<std::string>("backward_alias_src");
-    const auto& dst =
-        OperatorBase::GetRepeatedArgument<std::string>("backward_alias_dst");
-    const auto& offset =
-        OperatorBase::GetRepeatedArgument<int32_t>("backward_alias_offset");
-    CAFFE_ENFORCE_EQ(src.size(), offset.size(), "src/offset mismatch");
-    CAFFE_ENFORCE_EQ(dst.size(), offset.size(), "dst/offset mismatch");
-    std::vector<detail::OffsetAlias> aliases;
-    for (auto i = 0; i < src.size(); ++i) {
-      detail::OffsetAlias oc;
-      oc.src = src[i];
-      oc.dst = dst[i];
-      oc.offset = offset[i];
-      aliases.push_back(oc);
-    }
-    return aliases;
+        google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef_));
   }
 
   std::vector<detail::Param> constructParams() {
@@ -446,15 +356,15 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       Output(outputIdx)->template mutable_data<float>();
     }
     for (auto& param : params_) {
-      auto pBlob = ws_.GetBlob(param.param);
+      auto pBlob = sharedWs_->GetBlob(param.param);
       CAFFE_ENFORCE(pBlob);
       const auto& p = pBlob->template Get<Tensor<Context>>();
 
-      auto gBlob = ws_.CreateBlob(param.grad);
+      auto gBlob = sharedWs_->GetBlob(param.grad);
       CAFFE_ENFORCE(gBlob);
       auto* g = gBlob->template GetMutable<Tensor<Context>>();
 
-      auto agBlob = ws_.CreateBlob(param.accGrad);
+      auto agBlob = localWs_.CreateBlob(param.accGrad);
       CAFFE_ENFORCE(agBlob);
       auto* ag = agBlob->template GetMutable<Tensor<Context>>();
       g->ResizeLike(p);
@@ -464,11 +374,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
 
     for (auto& rg : recurrentGradients_) {
-      auto pBlob = ws_.GetBlob(rg.param);
+      auto pBlob = sharedWs_->GetBlob(rg.param);
       CAFFE_ENFORCE(pBlob);
       const auto& p = pBlob->template Get<Tensor<Context>>();
 
-      auto gBlob = ws_.CreateBlob(rg.grad);
+      auto gBlob = sharedWs_->CreateBlob(rg.grad);
       CAFFE_ENFORCE(gBlob);
       auto* g = gBlob->template GetMutable<Tensor<Context>>();
       g->ResizeLike(p);
@@ -483,36 +393,31 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
 
     // This code assumes that there are several input
-    // sequences. Actually it is not supported by the rest of the code
-    // and here we either have 0 or 1 inputGradientId.
-    const auto& inputGradientIds =
-        OperatorBase::GetRepeatedArgument<int32_t>("input_gradient_ids");
-    for (int id : inputGradientIds) {
+    // sequences. Actually it is not supported by the rest of the code,
+    // and numSequences_ is a constant, equal to 1.
+    for (int i = 0; i < numSequences_; ++i) {
       // Offseting as the first input of the op is GO(0). Then all I(0..N) go.
-      id = id + 1;
-      const auto& inputName = def().input(id);
+      const int gradientInputIndex = i + 1;
+      const auto& inputName = def().input(gradientInputIndex);
       auto gradientName = inputName + "_grad";
-      VLOG(1) << "Initializing gradient for input " << id << " (" << inputName
-              << ") "
-              << " as blob " << gradientName << ". Size: " << Input(id).size();
-      auto pGradientBlob = ws_.CreateBlob(gradientName);
+      VLOG(1) << "Initializing gradient for input " << gradientInputIndex
+              << " (" << inputName << ") "
+              << " as blob " << gradientName
+              << ". Size: " << Input(gradientInputIndex).size();
+      auto pGradientBlob = sharedWs_->GetBlob(gradientName);
       CAFFE_ENFORCE(pGradientBlob);
       auto* g = pGradientBlob->template GetMutable<Tensor<Context>>();
-      g->ResizeLike(Input(id));
+      g->ResizeLike(Input(gradientInputIndex));
       g->template mutable_data<T>();
-    }
-
-    for (auto& scratch : scratches_) {
-      detail::initializeScratch<Context>(scratch, seqLen, batchSize, &ws_);
     }
 
     auto accumulateParameterGradients = [&]() {
       for (const auto& param : params_) {
-        auto gBlob = ws_.GetBlob(param.grad);
+        auto gBlob = sharedWs_->GetBlob(param.grad);
         CAFFE_ENFORCE(gBlob);
         const auto& g = gBlob->template Get<Tensor<Context>>();
 
-        auto agBlob = ws_.GetBlob(param.accGrad);
+        auto agBlob = localWs_.GetBlob(param.accGrad);
         CAFFE_ENFORCE(agBlob);
         auto* ag = agBlob->template GetMutable<Tensor<Context>>();
         CAFFE_ENFORCE(ag->dims() == g.dims());
@@ -534,11 +439,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         VLOG(1) << "Accumulating into: " << rg.grad << " from "
                 << rg.externalGrad << " at time: " << t
                 << ", offset: " << rg.offset;
-        auto gBlob = ws_.GetBlob(rg.grad);
+        auto gBlob = sharedWs_->GetBlob(rg.grad);
         CAFFE_ENFORCE(gBlob);
         auto* g = gBlob->template GetMutable<Tensor<Context>>();
 
-        auto ogBlob = ws_.GetBlob(rg.externalGrad);
+        auto ogBlob = sharedWs_->GetBlob(rg.externalGrad);
         CAFFE_ENFORCE(ogBlob);
         const auto& og = ogBlob->template Get<Tensor<Context>>();
 
@@ -555,30 +460,27 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       }
     };
 
+    const std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
+        OperatorBase::Input<std::vector<std::shared_ptr<Workspace>>>(
+            InputSize() - 1);
+
     for (int32_t t = seqLen - 1; t >= 0; --t) {
-      VLOG(1) << "Running step: " << t;
       accumulateInputGradients(t);
       for (const auto& link : links_) {
-        detail::applyLink<T, Context>(link, t, &ws_);
+        detail::applyLink<T, Context>(link, t, stepWorkspaces[t].get());
       }
-      // Since we have a SimpleNet, there are no races here.
-      ws_.GetBlob(timestep_)
-          ->template GetMutable<TensorCPU>()
-          ->template mutable_data<int32_t>()[0] = t;
+      NetBase* stepNet_ = stepWorkspaces[t]->CreateNet(stepNetDef_);
+      CAFFE_ENFORCE(stepNet_);
       stepNet_->RunAsync();
       accumulateParameterGradients();
-    }
-
-    for (const auto& alias : aliases_) {
-      detail::applyOffsetAlias<T, Context>(alias, &ws_, &context_);
     }
 
     for (const auto& param : params_) {
       // Swap the accumulated gradients with the actual gradients so
       // the rest of the network sees the accumulated gradients.
       using std::swap;
-      auto accGradBlob = ws_.GetBlob(param.accGrad);
-      auto gradBlob = ws_.GetBlob(param.grad);
+      auto accGradBlob = localWs_.GetBlob(param.accGrad);
+      auto gradBlob = sharedWs_->GetBlob(param.grad);
       CAFFE_ENFORCE(accGradBlob);
       CAFFE_ENFORCE(gradBlob);
       swap(*accGradBlob, *gradBlob);
@@ -587,13 +489,12 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   }
 
  protected:
-  NetBase* stepNet_{nullptr};
-  Workspace ws_;
-  std::vector<detail::Scratch> scratches_;
+  NetDef stepNetDef_;
+  Workspace* sharedWs_;
+  Workspace localWs_;
   std::vector<detail::Link> links_;
   std::vector<detail::Param> params_;
   std::vector<detail::RecurrentGradient> recurrentGradients_;
-  std::vector<detail::OffsetAlias> aliases_;
   std::string timestep_;
   // For now we support only one input sequence
   const int numSequences_{1};

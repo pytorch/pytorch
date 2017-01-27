@@ -92,6 +92,7 @@ def recurrent_net(
         if ver > 0 and
         blob in undefined and
         blob not in cell_net.Proto().external_output]
+    backward_cell_net.Proto().external_input.extend(scratches)
 
     all_inputs = [i[1] for i in inputs] + [
         x[1] for x in initial_cell_inputs] + references
@@ -113,15 +114,9 @@ def recurrent_net(
     # Negative offset stands for going from the end,
     # positive - from the beginning
     aliases = []
-    backward_aliases = []
 
     # States held inputs to the cell net
     recurrent_states = []
-
-    # a map from gradient blob name to blob with its value over time
-    grad_to_state = {}
-
-    # A mapping from a blob to its gradient state blob
 
     for cell_input, _ in initial_cell_inputs:
         cell_input = str(cell_input)
@@ -144,35 +139,11 @@ def recurrent_net(
 
         recurrent_states.append(state)
 
-    for scratch in scratches:
-        # no scoping as scratches should be already scoped
-        forward_links.append((scratch, scratch + "_states", 0))
-        grad_blob = scratch + "_grad"
-        states_grad_blob = scratch + "_states_grad"
-        backward_links.append((grad_blob, states_grad_blob, 0))
-        backward_cell_net.Proto().external_input.append(scratch)
-        grad_to_state[grad_blob] = states_grad_blob
-
-    input_gradient_ids = []
     for input_id, (input_t, input_blob) in enumerate(inputs):
         forward_links.append((str(input_t), str(input_blob), 0))
-
-        input_blob_grad = str(input_blob) + "_grad"
-        if backward_mapping[str(input_t)] != str(input_t) + "_grad":
-            # Some scratch (internal blob) ends up being an input gradient
-            # So we avoid extra copy and reuse it by applying this alias
-            backward_aliases.append((
-                grad_to_state[backward_mapping[str(input_t)]],
-                input_blob_grad,
-                0
-            ))
-        else:
-            # This is a general case - we have to explicitly create input
-            # gradient blob as it doesn't match any of internal gradients
-            backward_links.append(
-                (str(input_t) + "_grad", input_blob_grad, 0))
-            input_gradient_ids.append(input_id)
-
+        backward_links.append((
+            backward_mapping[str(input_t)], str(input_blob) + "_grad", 0
+        ))
     backward_cell_net.Proto().external_input.extend(
         cell_net.Proto().external_input)
     backward_cell_net.Proto().external_input.extend(
@@ -190,16 +161,14 @@ def recurrent_net(
     backward_link_internal, backward_link_external, backward_link_offset = \
         unpack_triple(backward_links)
     alias_src, alias_dst, alias_offset = unpack_triple(aliases)
-    backward_alias_src, backward_alias_dst, backward_alias_offset = \
-        unpack_triple(backward_aliases)
 
     params = [x for x in references if x in backward_mapping.keys()]
 
     recurrent_inputs = [str(x[1]) for x in initial_cell_inputs]
 
-    return net.RecurrentNetwork(
+    results = net.RecurrentNetwork(
         all_inputs,
-        all_outputs,
+        all_outputs + [s("step_workspaces")],
         param=map(all_inputs.index, params),
         alias_src=alias_src,
         alias_dst=map(str, alias_dst),
@@ -213,17 +182,13 @@ def recurrent_net(
         backward_link_internal=map(str, backward_link_internal),
         backward_link_external=map(str, backward_link_external),
         backward_link_offset=backward_link_offset,
-        backward_alias_src=backward_alias_src,
-        backward_alias_dst=backward_alias_dst,
-        backward_alias_offset=backward_alias_offset,
-        scratch=[sc + "_states" for sc in scratches],
-        backward_scratch=[sc + "_states_grad" for sc in scratches],
-        scratch_sizes=scratch_sizes,
         step_net=str(cell_net.Proto()),
         backward_step_net=str(backward_cell_net.Proto()),
         timestep="timestep" if timestep is None else str(timestep),
-        input_gradient_ids=input_gradient_ids,
     )
+    # The last output is a list of step workspaces,
+    # which is only needed internally for gradient propogation
+    return results[:-1]
 
 
 def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,

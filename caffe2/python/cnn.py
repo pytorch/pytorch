@@ -738,7 +738,6 @@ class CNNModelHelper(ModelHelperBase):
             ("hidden_t", s("hidden"), 1),
             ("cell_t_prev", s("cell"), 0),
             ("cell_t", s("cell"), 1),
-            (s("gates_t"), s("gates"), 0),
             ("input_t", str(input_blob), 0),
         ]
         link_internal, link_external, link_offset = zip(*links)
@@ -761,7 +760,7 @@ class CNNModelHelper(ModelHelperBase):
             ("hidden_t_grad", s("hidden_grad"), 1),
             ("cell_t_prev_grad", s("cell_grad"), 0),
             ("cell_t_grad", s("cell_grad"), 1),
-            (s("gates_t_grad"), s("gates_grad"), 0),
+            (s("gates_t_grad"), str(input_blob) + "_grad", 0),
         ]
 
         backward_link_internal, backward_link_external, \
@@ -779,29 +778,23 @@ class CNNModelHelper(ModelHelperBase):
                            hidden_input_blob, cell_input_blob])
         recurrent_inputs = [str(hidden_input_blob), str(cell_input_blob)]
 
-        output, _, _, hidden_state, cell_state = self.net.RecurrentNetwork(
+        output, _, _, hidden_state, cell_state, _ = self.net.RecurrentNetwork(
             inputs,
             [s("output"), s("hidden"), s("cell"),
-                s("hidden_output"), s("cell_output")],
+                s("hidden_output"), s("cell_output"), s("step_workspaces")],
             param=map(inputs.index, step_net.params),
             alias_src=[s("hidden"), s("hidden"), s("cell")],
             alias_dst=[s("output"), s("hidden_output"), s("cell_output")],
             alias_offset=[1, -1, -1],
             recurrent_states=[s("hidden"), s("cell")],
             recurrent_inputs=recurrent_inputs,
-            recurrent_input_id=map(inputs.index, recurrent_inputs),
+            recurrent_input_ids=map(inputs.index, recurrent_inputs),
             link_internal=link_internal,
             link_external=link_external,
             link_offset=link_offset,
             backward_link_internal=backward_link_internal,
             backward_link_external=backward_link_external,
             backward_link_offset=backward_link_offset,
-            backward_alias_src=[s("gates_grad")],
-            backward_alias_dst=[str(input_blob) + "_grad"],
-            backward_alias_offset=[0],
-            scratch=[s("gates")],
-            backward_scratch=[s("gates_grad")],
-            scratch_sizes=[4 * dim_out],
             step_net=str(step_net.Proto()),
             backward_step_net=str(backward_step_net.Proto()),
             timestep="timestep")

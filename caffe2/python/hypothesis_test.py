@@ -1678,7 +1678,6 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, inputs, ref)
         self.assertEqual(dtype, out.dtype)
 
-
     @given(t=st.integers(1, 5),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
@@ -1711,14 +1710,13 @@ class TestOperators(hu.HypothesisTestCase):
         links = [
             ("hidden_t_prev", "hidden", 0),
             ("hidden_t", "hidden", 1),
-            ("gates_t", "gates", 0),
             ("input_t", "input", 0),
         ]
         link_internal, link_external, link_offset = zip(*links)
         backward_links = [
             ("hidden_t_prev_grad", "hidden_grad", 0),
             ("hidden_t_grad", "hidden_grad", 1),
-            ("gates_t_grad", "gates_grad", 0),
+            ("gates_t_grad", "input_grad", 0),
         ]
         backward_link_internal, backward_link_external, backward_link_offset = \
             zip(*backward_links)
@@ -1732,7 +1730,7 @@ class TestOperators(hu.HypothesisTestCase):
         op = core.CreateOperator(
             "RecurrentNetwork",
             inputs,
-            ["output", "hidden", "hidden_output"],
+            ["output", "hidden", "hidden_output", "step_workspaces"],
             alias_src=["hidden", "hidden"],
             alias_dst=["output", "hidden_output"],
             alias_offset=[1, -1],
@@ -1745,16 +1743,9 @@ class TestOperators(hu.HypothesisTestCase):
             backward_link_internal=backward_link_internal,
             backward_link_external=backward_link_external,
             backward_link_offset=backward_link_offset,
-            backward_alias_src=["gates_grad"],
-            backward_alias_dst=["input_grad"],
-            backward_alias_offset=[0],
             param=map(inputs.index, step_net.params),
-            scratch=["gates"],
-            backward_scratch=["gates_grad"],
-            scratch_sizes=[d],
             step_net=str(step_net.Proto()),
-            backward_step_net=str(backward_step_net.Proto()),
-            dim_out=d)
+            backward_step_net=str(backward_step_net.Proto()))
         workspace.FeedBlob(
             "input", np.random.randn(t, n, d).astype(np.float32))
         workspace.FeedBlob(
@@ -1786,7 +1777,8 @@ class TestOperators(hu.HypothesisTestCase):
             [workspace.FetchBlob(name)
              for name in ["input", "seq_lengths", "gates_t_w", "gates_t_b",
                           "hidden_input"]],
-            reference)
+            reference,
+            outputs_to_check=[0, 1, 2])
 
         for param in [0, 2, 3]:
             self.assertGradientChecks(
