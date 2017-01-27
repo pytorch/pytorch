@@ -56,13 +56,15 @@ class RNNBase(Module):
             weight.data.uniform_(-stdv, stdv)
 
     def forward(self, input, hx=None):
-        if (hx == None):
-            batch_sz = input.size()[0] if self.batch_first else input.size()[1]
-            hx = torch.autograd.Variable(torch.Tensor(self.num_layers, batch_sz,
-                                                   self.input_size).zero_())
-            if (self.mode == 'LSTM'):
-                hx = (torch.autograd.Variable(hx.data),
-                      torch.autograd.Variable(hx.data))
+        if hx is None:
+            batch_sz = input.size(0) if self.batch_first else input.size(1)
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.autograd.Variable(input.data.new(self.num_layers *
+                                                        num_directions,
+                                                        batch_sz,
+                                                        self.hidden_size).zero_())
+            if self.mode == 'LSTM':
+                hx = (hx, hx)
         func = self._backend.RNN(
             self.mode,
             self.input_size,
