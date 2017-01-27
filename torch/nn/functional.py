@@ -289,7 +289,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     kw, kh = utils._pair(kernel_size)
     out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
-    return out.mul(kw * kh).pow(1./norm_type)
+    return out.mul(kw * kh).pow(1. / norm_type)
 
 
 # Activation functions
@@ -326,7 +326,7 @@ def prelu(input, weight):
     return _functions.thnn.PReLU()(input, weight)
 
 
-def rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False):
+def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     return _functions.thnn.RReLU(lower, upper, training, inplace)(input)
 
 

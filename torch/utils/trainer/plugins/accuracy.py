@@ -1,5 +1,6 @@
 from .monitor import Monitor
 
+
 class AccuracyMonitor(Monitor):
     stat_name = 'accuracy'
 
@@ -16,4 +17,3 @@ class AccuracyMonitor(Monitor):
             correct = correct.cpu()
         correct = correct.sum()
         return 100. * correct / batch_size
-

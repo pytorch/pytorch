@@ -62,6 +62,7 @@ class Embedding(Module):
         [torch.FloatTensor of size 1x4x3]
 
     """
+
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
                  sparse=False):
@@ -89,7 +90,7 @@ class Embedding(Module):
         return self._backend.Embedding(
             padding_idx, self.max_norm, self.norm_type,
             self.scale_grad_by_freq, self.sparse
-            )(input, self.weight)
+        )(input, self.weight)
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'

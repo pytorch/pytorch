@@ -14,9 +14,9 @@ except ImportError:
     raise ImportError("torch.utils.ffi requires the cffi package")
 
 
-if cffi.__version_info__ < (1,4,0):
+if cffi.__version_info__ < (1, 4, 0):
     raise ImportError("torch.utils.ffi requires cffi version >= 1.4, but "
-            "got " + '.'.join(map(str, cffi.__version_info__)))
+                      "got " + '.'.join(map(str, cffi.__version_info__)))
 
 
 def _generate_typedefs():
@@ -106,13 +106,13 @@ def _build_extension(ffi, cffi_wrapper_name, target_dir, verbose):
 
 def _make_python_wrapper(name, cffi_wrapper_name, target_dir):
     py_source = PY_MODULE_TEMPLATE.substitute(name=name,
-            cffi_wrapper_name=cffi_wrapper_name)
+                                              cffi_wrapper_name=cffi_wrapper_name)
     with open(os.path.join(target_dir, '__init__.py'), 'w') as f:
         f.write(py_source)
 
 
 def create_extension(name, headers, sources, verbose=True, with_cuda=False,
-        package=False, relative_to='.', **kwargs):
+                     package=False, relative_to='.', **kwargs):
     """Creates and configures a cffi.FFI object, that builds PyTorch extension.
 
     Arguments:
@@ -159,6 +159,7 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
     ffi.cdef(_typedefs + all_headers_source)
 
     _make_python_wrapper(name_suffix, '_' + name_suffix, target_dir)
+
     def build():
         _build_extension(ffi, cffi_wrapper_name, target_dir, verbose)
     ffi.build = build
@@ -169,9 +170,9 @@ def _wrap_function(function, ffi):
     @wraps(function)
     def safe_call(*args, **kwargs):
         args = tuple(ffi.cast(_torch_to_cffi.get(type(arg), 'void') + '*', arg._cdata)
-                if torch.is_tensor(arg) or torch.is_storage(arg)
-                else arg
-                for arg in args)
+                     if torch.is_tensor(arg) or torch.is_storage(arg)
+                     else arg
+                     for arg in args)
         args = (function,) + args
         result = torch._C._safe_call(*args, **kwargs)
         if isinstance(result, ffi.CData):
@@ -183,4 +184,3 @@ def _wrap_function(function, ffi):
                     return _cffi_to_torch[cname](cdata=cdata)
         return result
     return safe_call
-

@@ -8,6 +8,7 @@ BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
 WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
 THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
 
+
 def import_module(name, path):
     if sys.version_info >= (3, 5):
         import importlib.util
@@ -81,7 +82,8 @@ for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
 def wrap_function(name, type, arguments):
     cname = 'THNN_' + type + name
     declaration = ''
-    declaration += 'extern "C" void ' + cname + '(' + ', '.join(TYPE_TRANSFORMS[type].get(arg.type, arg.type) for arg in arguments) + ');\n'
+    declaration += 'extern "C" void ' + cname + \
+        '(' + ', '.join(TYPE_TRANSFORMS[type].get(arg.type, arg.type) for arg in arguments) + ');\n'
     declaration += FUNCTION_TEMPLATE.substitute(name=type + name, cname=cname)
     indent = ' ' * 4
     dict_indent = ' ' * 6
@@ -92,14 +94,16 @@ def wrap_function(name, type, arguments):
         else:
             t = TYPE_TRANSFORMS[type].get(arg.type, arg.type)
             declaration += prefix + 'type: ' + t        + '\n' + \
-                      dict_indent + 'name: ' + arg.name + '\n' + \
-                      dict_indent + 'nullable: True' + '\n'
+                dict_indent + 'name: ' + arg.name + '\n' + \
+                dict_indent + 'nullable: True' + '\n'
     declaration += ']]\n\n\n'
     return declaration
+
 
 def generate_wrappers():
     wrap_nn()
     wrap_cunn()
+
 
 def wrap_nn():
     wrapper = '#include <TH/TH.h>\n\n\n'
@@ -113,6 +117,7 @@ def wrap_nn():
         StandaloneExtension('torch._thnn._THNN'),
         NullableArguments(),
     ])
+
 
 def wrap_cunn():
     wrapper = '#include <TH/TH.h>\n'

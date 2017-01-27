@@ -26,4 +26,3 @@ class ProgressMonitor(Plugin):
         stats = self.trainer.stats.setdefault(self.stat_name, {})
         stats['samples_used'] = 0
         stats['percent'] = 0
-

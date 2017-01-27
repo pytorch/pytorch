@@ -129,4 +129,3 @@ class Softmin(Function):
 _all_functions.append(PReLU)
 _all_functions.append(RReLU)
 _all_functions.append(Softmin)
-

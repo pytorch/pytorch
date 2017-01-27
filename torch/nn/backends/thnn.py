@@ -1,5 +1,6 @@
 from .backend import FunctionBackend
 
+
 class THNNFunctionBackend(FunctionBackend):
 
     def __reduce__(self):

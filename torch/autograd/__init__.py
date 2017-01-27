@@ -12,6 +12,7 @@ from .stochastic_function import StochasticFunction
 
 __all__ = ['Variable', 'Function', 'StochasticFunction', 'backward']
 
+
 def backward(variables, grad_variables, retain_variables=False):
     """Computes the sum of gradients of given variables w.r.t. graph leaves.
 
@@ -37,6 +38,6 @@ def backward(variables, grad_variables, retain_variables=False):
             times.
     """
     Variable._execution_engine.run_backward(
-            tuple(variables), tuple(grad_variables), retain_variables)
+        tuple(variables), tuple(grad_variables), retain_variables)
 
 assert torch._C._autograd_init()

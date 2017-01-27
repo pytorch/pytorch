@@ -33,8 +33,8 @@ class LBFGS(Optimizer):
     """
 
     def __init__(self, params, lr=1, max_iter=20, max_eval=None,
-            tolerance_grad=1e-5, tolerance_change=1e-9, history_size=100,
-            line_search_fn=None):
+                 tolerance_grad=1e-5, tolerance_change=1e-9, history_size=100,
+                 line_search_fn=None):
         if max_eval is None:
             max_eval = max_iter * 5 // 4
         defaults = dict(lr=lr, max_iter=max_iter, max_eval=max_eval,
@@ -44,7 +44,7 @@ class LBFGS(Optimizer):
 
         if len(self.param_groups) != 1:
             raise ValueError("LBFGS doesn't support per-parameter options "
-                    "(parameter groups)")
+                             "(parameter groups)")
 
         self._params = self.param_groups[0]['params']
         self._numel_cache = None
@@ -56,13 +56,13 @@ class LBFGS(Optimizer):
 
     def _gather_flat_grad(self):
         return torch.cat(
-                tuple(param.grad.data.view(-1) for param in self._params), 0)
+            tuple(param.grad.data.view(-1) for param in self._params), 0)
 
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
             numel = p.numel()
-            p.data.add_(step_size, update[offset:offset+numel])
+            p.data.add_(step_size, update[offset:offset + numel])
             offset += numel
         assert offset == self._numel()
 
@@ -158,7 +158,7 @@ class LBFGS(Optimizer):
 
                 # iteration in L-BFGS loop collapsed to use just one buffer
                 q = flat_grad.neg()
-                for i in range(num_old-1, -1, -1):
+                for i in range(num_old - 1, -1, -1):
                     al[i] = old_dirs[i].dot(q) * ro[i]
                     q.add_(-al[i], old_stps[i])
 

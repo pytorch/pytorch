@@ -32,20 +32,20 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         self._backend = type2backend[type(input)]
         self.save_for_backward(input, target)
         if weight_arg_idx >= 0:
-            insert_idx = weight_arg_idx - 4 # state, input, target, output
+            insert_idx = weight_arg_idx - 4  # state, input, target, output
             self.additional_args.insert(insert_idx, self.weight)
         for idx in buffers_idx:
             self.additional_args.insert(idx, input.new(1))
         output = input.new(1)
         getattr(self._backend, update_output.name)(self._backend.library_state, input, target,
-            output, *self.additional_args)
+                                                   output, *self.additional_args)
         return output
 
     def backward(self, grad_output):
         input, target = self.saved_tensors
         grad_input = grad_output.new().resize_as_(input).zero_()
         getattr(self._backend, update_grad_input.name)(self._backend.library_state, input, target,
-            grad_input, *self.additional_args)
+                                                       grad_input, *self.additional_args)
         grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))
         grad_input.mul_(grad_output_expanded.expand_as(grad_input))
         return grad_input, None
@@ -76,15 +76,15 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
     param_args = {'weight', 'bias'}
     ignored_args = {'weight', 'bias', 'gradWeight', 'gradBias', 'output'}
     expected_params = [arg for arg in update_output.arguments[3:]
-            if arg.name in param_args]
+                       if arg.name in param_args]
     buffers = {}
     buffers['update_output'] = _find_buffers(update_output.arguments[3:],
-            ignored_args)
+                                             ignored_args)
     buffers['update_grad_input'] = _find_buffers(
-            update_grad_input.arguments[4:], ignored_args)
+        update_grad_input.arguments[4:], ignored_args)
     if acc_grad_parameters is not None:
         buffers['acc_grad_parameters'] = _find_buffers(
-                acc_grad_parameters.arguments[3:], ignored_args)
+            acc_grad_parameters.arguments[3:], ignored_args)
 
     # This and __init__ assume that only the last argument can be
     # an inplace flag
@@ -112,8 +112,8 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         for param in params:
             if type(param) != type(input):
                 raise RuntimeError("input type ({}) doesn't match the type of "
-                        "a parameter tensor ({})".format(torch.typename(input),
-                            torch.typename(param)))
+                                   "a parameter tensor ({})".format(torch.typename(input),
+                                                                    torch.typename(param)))
 
         # Allocate temporary buffers and insert them into additional_args
         self.buffers = defaultdict(type(input))
@@ -246,10 +246,10 @@ def _generate_function_classes(scope_dict):
         # This has to call a function to retain correct references to functions
         if 'Criterion' in fn:
             cls = _make_function_class_criterion(class_name, update_output,
-                    update_grad_input, acc_grad_parameters)
+                                                 update_grad_input, acc_grad_parameters)
         else:
             cls = _make_function_class(class_name, update_output,
-                    update_grad_input, acc_grad_parameters)
+                                       update_grad_input, acc_grad_parameters)
         scope_dict[class_name] = cls
         if not class_name.startswith('_'):
             _all_functions.append(cls)

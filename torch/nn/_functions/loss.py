@@ -16,9 +16,9 @@ class CosineEmbeddingLoss(Function):
             return torch.ByteTensor()
 
     def forward(self, input1, input2, y):
-        self.w1  = input1.new()
+        self.w1 = input1.new()
         self.w22 = input1.new()
-        self.w  = input1.new()
+        self.w = input1.new()
         self.w32 = input1.new()
         self._outputs = input1.new()
 
@@ -98,6 +98,7 @@ class CosineEmbeddingLoss(Function):
 
 
 class HingeEmbeddingLoss(Function):
+
     def __init__(self, margin=1, size_average=True):
         super(HingeEmbeddingLoss, self).__init__()
         self.margin = margin
@@ -176,4 +177,3 @@ class MarginRankingLoss(Function):
             grad_input2.div_(y.size(0))
 
         return grad_input1, grad_input2, None
-

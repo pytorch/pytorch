@@ -48,6 +48,7 @@ class MaxPool1d(Module):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
         super(MaxPool1d, self).__init__()
@@ -60,8 +61,8 @@ class MaxPool1d(Module):
 
     def forward(self, input):
         return F.max_pool1d(input, self.kernel_size, self.stride,
-                self.padding, self.dilation, self.ceil_mode,
-                self.return_indices)
+                            self.padding, self.dilation, self.ceil_mode,
+                            self.return_indices)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
@@ -70,6 +71,7 @@ class MaxPool1d(Module):
             + ', padding=' + str(self.padding) \
             + ', dilation=' + str(self.dilation) \
             + ', ceil_mode=' + str(self.ceil_mode) + ')'
+
 
 class MaxPool2d(Module):
     r"""Applies a 2D max pooling over an input signal composed of several input
@@ -124,6 +126,7 @@ class MaxPool2d(Module):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
         super(MaxPool2d, self).__init__()
@@ -136,17 +139,17 @@ class MaxPool2d(Module):
 
     def forward(self, input):
         return F.max_pool2d(input, self.kernel_size, self.stride,
-                self.padding, self.dilation, self.ceil_mode,
-                self.return_indices)
+                            self.padding, self.dilation, self.ceil_mode,
+                            self.return_indices)
 
     def __repr__(self):
         kh, kw = _pair(self.kernel_size)
         dh, dw = _pair(self.stride)
         padh, padw = _pair(self.padding)
         dilh, dilw = _pair(self.dilation)
-        padding_str=', padding=(' + str(padh) + ', ' + str(padw) + ')' \
-                      if padh != 0 and padw !=0 else ''
-        dilation_str=(', dilation=(' + str(dilh) + ', ' + str(dilw) + ')' \
+        padding_str = ', padding=(' + str(padh) + ', ' + str(padw) + ')' \
+            if padh != 0 and padw != 0 else ''
+        dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
                         if dilh != 0 and dilw != 0 else '')
         return  self.__class__.__name__ + ' (' \
             + 'size=(' + str(kh) + ', ' + str(kw) + ')' \
@@ -185,6 +188,7 @@ class MaxUnpool1d(Module):
            0   2   0   4   0   6   0   8
         [torch.FloatTensor of size 1x1x8]
     """
+
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool1d, self).__init__()
         self.kernel_size = _single(kernel_size)
@@ -234,6 +238,7 @@ class MaxUnpool2d(Module):
            0  14   0  16
         [torch.FloatTensor of size 1x1x4x4]
     """
+
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool2d, self).__init__()
         self.kernel_size = _pair(kernel_size)
@@ -276,6 +281,7 @@ class MaxUnpool3d(Module):
         >>> unpooled_output.size()
         torch.Size([20, 16, 51, 33, 15])
     """
+
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool3d, self).__init__()
         self.kernel_size = _triple(kernel_size)
@@ -330,6 +336,7 @@ class AvgPool1d(Module):
           2  4  6
         [torch.FloatTensor of size 1x1x3]
     """
+
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool1d, self).__init__()
@@ -391,8 +398,9 @@ class AvgPool2d(Module):
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
         >>> output = m(input)
     """
+
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-            count_include_pad=True):
+                 count_include_pad=True):
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
@@ -402,7 +410,7 @@ class AvgPool2d(Module):
 
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
-                self.padding, self.ceil_mode, self.count_include_pad)
+                            self.padding, self.ceil_mode, self.count_include_pad)
 
 
 class MaxPool3d(Module):
@@ -459,8 +467,9 @@ class MaxPool3d(Module):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
-            return_indices=False, ceil_mode=False):
+                 return_indices=False, ceil_mode=False):
         super(MaxPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
@@ -471,8 +480,9 @@ class MaxPool3d(Module):
 
     def forward(self, input):
         return F.max_pool3d(input, self.kernel_size, self.stride,
-                self.padding, self.dilation, self.ceil_mode,
-                self.return_indices)
+                            self.padding, self.dilation, self.ceil_mode,
+                            self.return_indices)
+
 
 class AvgPool3d(Module):
     r"""Applies a 3D average pooling over an input signal composed of several input
@@ -515,6 +525,7 @@ class AvgPool3d(Module):
         >>> input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
         >>> output = m(input)
     """
+
     def __init__(self, kernel_size, stride=None):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
@@ -554,8 +565,9 @@ class FractionalMaxPool2d(Module):
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
+
     def __init__(self, kernel_size, output_size=None, output_ratio=None,
-            return_indices=False, _random_samples=None):
+                 return_indices=False, _random_samples=None):
         super(FractionalMaxPool2d, self).__init__()
         self.kh, self.kw = _pair(kernel_size)
         self.return_indices = return_indices
@@ -572,7 +584,7 @@ class FractionalMaxPool2d(Module):
             assert 0 < self.rw < 1
         else:
             raise ValueError("FractionalMaxPool2d requires specifying either "
-                "an output size, or a pooling ratio")
+                             "an output size, or a pooling ratio")
 
     def forward(self, input):
         kwargs = {}
@@ -581,8 +593,8 @@ class FractionalMaxPool2d(Module):
         else:
             kwargs['output_ratio'] = self.rh, self.rw
         func = self._backend.FractionalMaxPool2d(self.kw, self.kh,
-                return_indices=self.return_indices,
-                _random_samples=self._random_samples, **kwargs)
+                                                 return_indices=self.return_indices,
+                                                 _random_samples=self._random_samples, **kwargs)
         return func(input)
 
 
@@ -632,7 +644,7 @@ class LPPool2d(Module):
 
     def forward(self, input):
         return F.lp_pool2d(input, self.norm_type, self.kernel_size,
-                self.stride, self.ceil_mode)
+                           self.stride, self.ceil_mode)
 
 
 # TODO: AdaptiveMaxPool2d

@@ -5,6 +5,7 @@ import torch.backends.cudnn as cudnn
 
 
 class BatchNorm(Function):
+
     def __init__(self, running_mean, running_var, training, momentum, eps):
         super(BatchNorm, self).__init__()
         self.running_mean = running_mean

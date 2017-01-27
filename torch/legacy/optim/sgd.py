@@ -1,5 +1,6 @@
 import torch
 
+
 def sgd(opfunc, x, config, state=None):
     """A plain implementation of SGD
 
@@ -62,7 +63,7 @@ def sgd(opfunc, x, config, state=None):
         if 'dfdx' not in state:
             state['dfdx'] = torch.Tensor().type_as(dfdx).resize_as_(dfdx).copy_(dfdx)
         else:
-            state['dfdx'].mul_(mom).add_(1-damp, dfdx)
+            state['dfdx'].mul_(mom).add_(1 - damp, dfdx)
 
         if nesterov:
             dfdx.add_(mom, state['dfdx'])
@@ -81,7 +82,6 @@ def sgd(opfunc, x, config, state=None):
         x.add_(-clr, state['deltaParameters'])
     else:
         x.add_(-clr, dfdx)
-
 
     # (6) update evaluation counter
     state['evalCounter'] += 1

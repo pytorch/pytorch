@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import addSingletondimension
 
+
 class Unsqueeze(Module):
 
     def __init__(self, dim):
@@ -19,4 +20,3 @@ class Unsqueeze(Module):
 
     def __repr__(self):
         return super(Unsqueeze, self).__repr__() + '({})'.format(self.dim)
-

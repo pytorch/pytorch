@@ -3,6 +3,7 @@ import torch.backends.cudnn as cudnn
 from torch.backends.cudnn import check_error
 import ctypes
 
+
 def get_cudnn_mode(mode):
     if mode == 'RNN_RELU':
         return cudnn.CUDNN_RNN_RELU
@@ -17,9 +18,10 @@ def get_cudnn_mode(mode):
 
 
 class Unserializable(object):
+
     def __init__(self, inner):
         self.inner = inner
-    
+
     def get(self):
         return self.inner
 
@@ -38,6 +40,7 @@ def init_dropout_descriptor(fn, handle):
         fn.dropout,
         fn.dropout_seed
     )
+
 
 def init_rnn_descriptor(fn):
     return cudnn.RNNDescriptor(
@@ -161,7 +164,6 @@ def get_parameters(fn, handle, weight_buf):
 
                 cur_offset = offset + filter_dim_a[0]
 
-
         params.append(layer_params)
 
     return params
@@ -237,7 +239,7 @@ def forward(fn, input, hx, weight, output, hy):
 
         if tuple(hx.size()) != hidden_size:
             raise RuntimeError('Expected hidden size {}, got {}'.format(
-               hidden_size, tuple(hx.size())))
+                hidden_size, tuple(hx.size())))
         if cx is not None and tuple(cx.size()) != hidden_size:
             raise RuntimeError('Expected cell size {}, got {}'.format(
                 hidden_size, tuple(cx.size())))
@@ -293,7 +295,6 @@ def forward(fn, input, hx, weight, output, hy):
 
         if fn.batch_first:
             output = output.transpose_(0, 1)
-
 
 
 def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_input, grad_hx):

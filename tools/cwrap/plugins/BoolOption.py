@@ -1,6 +1,7 @@
 from . import CWrapPlugin
 from string import Template
 
+
 class BoolOption(CWrapPlugin):
 
     UNPACK_TEMPLATE = Template('$arg == Py_True ? $if_true : $if_false')
@@ -16,4 +17,3 @@ class BoolOption(CWrapPlugin):
         if self.is_bool_option(arg):
             return Template(self.UNPACK_TEMPLATE.safe_substitute(
                 if_true=arg['if_true'], if_false=arg['if_false']))
-

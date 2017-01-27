@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class DotProduct(Module):
 
     def __init__(self):
@@ -13,7 +14,7 @@ class DotProduct(Module):
         input1, input2 = input[0], input[1]
 
         if self.buffer is None:
-           self.buffer = input1.new()
+            self.buffer = input1.new()
 
         torch.mul(input1, input2, out=self.buffer)
         torch.sum(self.buffer, 1, out=self.output)
@@ -26,11 +27,11 @@ class DotProduct(Module):
         not_batch = False
 
         if len(self.gradInput) != 2:
-          if self.gradInput[0] is None:
-              self.gradInput[0] = input[0].new()
-          if self.gradInput[1] is None:
-              self.gradInput[1] = input[1].new()
-          self.gradInput = self.gradInput[:2]
+            if self.gradInput[0] is None:
+                self.gradInput[0] = input[0].new()
+            if self.gradInput[1] is None:
+                self.gradInput[1] = input[1].new()
+            self.gradInput = self.gradInput[:2]
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
@@ -46,4 +47,3 @@ class DotProduct(Module):
     def clearState(self):
         clear(self, 'buffer')
         return super(DotProduct, self).clearState()
-

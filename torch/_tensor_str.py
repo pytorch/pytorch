@@ -22,7 +22,7 @@ def set_printoptions(
         edgeitems=None,
         linewidth=None,
         profile=None,
-        ):
+):
     """Set options for printing. Items shamelessly taken from Numpy
 
     Args:
@@ -119,7 +119,7 @@ def _number_format(tensor, min_sz=-1):
         else:
             if exp_max > prec + 1 or exp_max < 0:
                 sz = max(min_sz, 7)
-                scale = math.pow(10, exp_max-1)
+                scale = math.pow(10, exp_max - 1)
             else:
                 if exp_max == 0:
                     sz = 7
@@ -132,19 +132,19 @@ def _number_format(tensor, min_sz=-1):
 
 def _tensor_str(self):
     n = PRINT_OPTS.edgeitems
-    has_hdots = self.size()[-1] > 2*n
-    has_vdots = self.size()[-2] > 2*n
+    has_hdots = self.size()[-1] > 2 * n
+    has_vdots = self.size()[-2] > 2 * n
     print_full_mat = not has_hdots and not has_vdots
     formatter = _number_format(self, min_sz=3 if not print_full_mat else 0)
     print_dots = self.numel() >= PRINT_OPTS.threshold
 
     dim_sz = max(2, max(len(str(x)) for x in self.size()))
     dim_fmt = "{:^" + str(dim_sz) + "}"
-    dot_fmt = u"{:^" + str(dim_sz+1) + "}"
+    dot_fmt = u"{:^" + str(dim_sz + 1) + "}"
 
     counter_dim = self.ndimension() - 2
     counter = torch.LongStorage(counter_dim).fill_(0)
-    counter[counter.size()-1] = -1
+    counter[counter.size() - 1] = -1
     finished = False
     strt = ''
     while True:
@@ -152,7 +152,7 @@ def _tensor_str(self):
         nskipped = [False for i in counter]
         for i in _range(counter_dim - 1, -1, -1):
             counter[i] += 1
-            if print_dots and counter[i] == n and self.size(i) > 2*n:
+            if print_dots and counter[i] == n and self.size(i) > 2 * n:
                 counter[i] = self.size(i) - n
                 nskipped[i] = True
             if counter[i] == self.size(i):
@@ -188,18 +188,18 @@ def __repr_row(row, indent, fmt, scale, sz, truncate=None):
     if truncate is not None:
         dotfmt = " {:^5} "
         return (indent +
-                ' '.join(fmt.format(val/scale) for val in row[:truncate]) +
+                ' '.join(fmt.format(val / scale) for val in row[:truncate]) +
                 dotfmt.format('...') +
-                ' '.join(fmt.format(val/scale) for val in row[-truncate:]) +
+                ' '.join(fmt.format(val / scale) for val in row[-truncate:]) +
                 '\n')
     else:
-        return indent + ' '.join(fmt.format(val/scale) for val in row) + '\n'
+        return indent + ' '.join(fmt.format(val / scale) for val in row) + '\n'
 
 
 def _matrix_str(self, indent='', formatter=None, force_truncate=False):
     n = PRINT_OPTS.edgeitems
-    has_hdots = self.size(1) > 2*n
-    has_vdots = self.size(0) > 2*n
+    has_hdots = self.size(1) > 2 * n
+    has_vdots = self.size(0) > 2 * n
     print_full_mat = not has_hdots and not has_vdots
 
     if formatter is None:
@@ -207,14 +207,14 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
                                         min_sz=5 if not print_full_mat else 0)
     else:
         fmt, scale, sz = formatter
-    nColumnPerLine = int(math.floor((PRINT_OPTS.linewidth-len(indent))/(sz+1)))
+    nColumnPerLine = int(math.floor((PRINT_OPTS.linewidth - len(indent)) / (sz + 1)))
     strt = ''
     firstColumn = 0
 
     if not force_truncate and \
        (self.numel() < PRINT_OPTS.threshold or print_full_mat):
         while firstColumn < self.size(1):
-            lastColumn = min(firstColumn + nColumnPerLine - 1, self.size(1)-1)
+            lastColumn = min(firstColumn + nColumnPerLine - 1, self.size(1) - 1)
             if nColumnPerLine < self.size(1):
                 strt += '\n' if firstColumn != 1 else ''
                 strt += 'Columns {} to {} \n{}'.format(
@@ -223,15 +223,15 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
                 strt += SCALE_FORMAT.format(scale)
             for l in _range(self.size(0)):
                 strt += indent + (' ' if scale != 1 else '')
-                row_slice = self[l, firstColumn:lastColumn+1]
-                strt += ' '.join(fmt.format(val/scale) for val in row_slice)
+                row_slice = self[l, firstColumn:lastColumn + 1]
+                strt += ' '.join(fmt.format(val / scale) for val in row_slice)
                 strt += '\n'
             firstColumn = lastColumn + 1
     else:
         if scale != 1:
             strt += SCALE_FORMAT.format(scale)
         if has_vdots and has_hdots:
-            vdotfmt = "{:^" + str((sz+1)*n-1) + "}"
+            vdotfmt = "{:^" + str((sz + 1) * n - 1) + "}"
             ddotfmt = u"{:^5}"
             for row in self[:n]:
                 strt += __repr_row(row, indent, fmt, scale, sz, n)
@@ -245,8 +245,8 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
                 strt += __repr_row(row, indent, fmt, scale, sz, n)
         elif has_vdots and not has_hdots:
             vdotfmt = u"{:^" + \
-                    str(len(__repr_row(self[0], '', fmt, scale, sz))) + \
-                    "}\n"
+                str(len(__repr_row(self[0], '', fmt, scale, sz))) + \
+                "}\n"
             for row in self[:n]:
                 strt += __repr_row(row, indent, fmt, scale, sz)
             strt += vdotfmt.format(u'\u22EE')
@@ -269,13 +269,13 @@ def _vector_str(self):
         ident = ' '
     if self.numel() < PRINT_OPTS.threshold:
         return (strt +
-                '\n'.join(ident + fmt.format(val/scale) for val in self) +
+                '\n'.join(ident + fmt.format(val / scale) for val in self) +
                 '\n')
     else:
         return (strt +
-                '\n'.join(ident + fmt.format(val/scale) for val in self[:n]) +
+                '\n'.join(ident + fmt.format(val / scale) for val in self[:n]) +
                 '\n' + (ident + dotfmt.format(u"\u22EE")) +
-                '\n'.join(ident + fmt.format(val/scale) for val in self[-n:]) +
+                '\n'.join(ident + fmt.format(val / scale) for val in self[-n:]) +
                 '\n')
 
 
@@ -295,4 +295,3 @@ def _str(self):
     strt += '[{} of size {}{}]\n'.format(torch.typename(self),
                                          size_str, device_str)
     return '\n' + strt
-

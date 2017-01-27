@@ -60,7 +60,7 @@ class Module(object):
             if not isinstance(param, Parameter):
                 if isinstance(param, Variable):
                     raise TypeError("can't use a Variable as a module "
-                        "parameter.  Convert it to torch.nn.Parameter first.")
+                                    "parameter.  Convert it to torch.nn.Parameter first.")
                 if param is not None:
                     param = Parameter(param)
             self._parameters[name] = param
@@ -398,6 +398,6 @@ class Module(object):
         for key, module in self._modules.items():
             modstr = module.__repr__()
             modstr = _addindent(modstr, 2)
-            tmpstr = tmpstr + '  ('  + key + '): ' + modstr + '\n'
+            tmpstr = tmpstr + '  (' + key + '): ' + modstr + '\n'
         tmpstr = tmpstr + ')'
         return tmpstr

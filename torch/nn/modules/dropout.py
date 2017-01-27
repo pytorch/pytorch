@@ -1,6 +1,7 @@
 from .module import Module
 from .. import functional as F
 
+
 class Dropout(Module):
     r"""Randomly zeroes some of the elements of the input tensor.
     The elements to zero are randomized on every forward call.
@@ -19,11 +20,12 @@ class Dropout(Module):
         >>> input = autograd.Variable(torch.randn(20, 16))
         >>> output = m(input)
     """
+
     def __init__(self, p=0.5, inplace=False):
         super(Dropout, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
-                    "but got {}".format(p))
+                             "but got {}".format(p))
         self.p = p
         self.inplace = inplace
 
@@ -70,11 +72,12 @@ class Dropout2d(Module):
     .. _Efficient Object Localization Using Convolutional Networks:
        http://arxiv.org/abs/1411.4280
     """
+
     def __init__(self, p=0.5, inplace=False):
         super(Dropout2d, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
-                    "but got {}".format(p))
+                             "but got {}".format(p))
         self.p = p
         self.inplace = inplace
 
@@ -82,10 +85,11 @@ class Dropout2d(Module):
         return self._backend.Dropout2d(self.p, self.training, self.inplace)(input)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
+        inplace_str = ', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + 'p=' + str(self.p) \
             + inplace_str + ')'
+
 
 class Dropout3d(Module):
     r"""Randomly zeroes whole channels of the input tensor.
@@ -120,11 +124,12 @@ class Dropout3d(Module):
     .. _Efficient Object Localization Using Convolutional Networks:
        http://arxiv.org/abs/1411.4280
     """
+
     def __init__(self, p=0.5, inplace=False):
         super(Dropout3d, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
-                    "but got {}".format(p))
+                             "but got {}".format(p))
         self.p = p
         self.inplace = inplace
 
@@ -132,8 +137,7 @@ class Dropout3d(Module):
         return self._backend.Dropout3d(self.p, self.training, self.inplace)(input)
 
     def __repr__(self):
-        inplace_str=', inplace' if self.inplace else ''
+        inplace_str = ', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + 'p=' + str(self.p) \
             + inplace_str + ')'
-

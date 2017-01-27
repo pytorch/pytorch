@@ -1,6 +1,7 @@
 import torch
 from .optimizer import Optimizer
 
+
 class Adamax(Optimizer):
     """Implements Adamax algorithm (a variant of Adam based on infinity norm).
 
@@ -21,7 +22,7 @@ class Adamax(Optimizer):
     """
 
     def __init__(self, params, lr=1e-2, betas=(0.9, 0.999), eps=1e-38,
-            weight_decay=0):
+                 weight_decay=0):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super(Adamax, self).__init__(params, defaults)
 
@@ -71,5 +72,3 @@ class Adamax(Optimizer):
                 p.data.addcdiv_(-clr, exp_avg, exp_inf)
 
         return loss
-
-

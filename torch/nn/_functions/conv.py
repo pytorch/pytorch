@@ -9,6 +9,7 @@ _thnn_convs = {}
 
 
 class ConvNd(Function):
+
     def __init__(self, stride, padding, dilation, transposed, output_padding,
                  groups):
         super(ConvNd, self).__init__()
@@ -161,7 +162,7 @@ class ConvNd(Function):
                 res.append(impl[fn_name](self, self._bufs[g], *grouped_args))
             if fn_name == 'grad_params':
                 return [torch.cat(t, 0) if t[0] is not None else None
-                                        for t in zip(*res)]
+                        for t in zip(*res)]
             else:
                 return torch.cat(res, 1)
 

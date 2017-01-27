@@ -16,8 +16,8 @@ from common import TestCase, run_tests
 
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
-                sys.version_info[0] == 3 and \
-                sys.platform != 'darwin'
+    sys.version_info[0] == 3 and \
+    sys.platform != 'darwin'
 
 
 def simple_fill(queue, event):
@@ -74,7 +74,7 @@ def autograd_sharing(queue, ready, master_modified):
     master_modified.wait()
 
     expected_var = torch.range(1, 25).view(5, 5)
-    expected_var[0,0] = 1000
+    expected_var[0, 0] = 1000
     is_ok = var.data.equal(expected_var)
     var.data[:] = torch.ones(5, 5)
 
@@ -189,7 +189,7 @@ class TestMultiprocessing(TestCase):
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
             x = torch.randn(5, 5)
-            data = [x.storage(), x.storage()[1:4], x, x[2], x[:,1]]
+            data = [x.storage(), x.storage()[1:4], x, x[2], x[:, 1]]
             q = ctx.Queue()
             q.put(data)
             new_data = q.get()
@@ -268,6 +268,7 @@ class TestMultiprocessing(TestCase):
 
     def test_inherit_tensor(self):
         class SubProcess(mp.Process):
+
             def __init__(self, tensor):
                 super(SubProcess, self).__init__()
                 self.tensor = tensor
@@ -285,7 +286,6 @@ class TestMultiprocessing(TestCase):
     def test_cuda(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
-
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda_small_tensors(self):
@@ -359,7 +359,7 @@ class TestMultiprocessing(TestCase):
         queue.put(var)
 
         ready.wait()
-        var.data[0,0] = 1000
+        var.data[0, 0] = 1000
         if var.grad is not None:
             var.grad.data[:] = torch.ones(5, 5) * 4
         master_modified.set()
@@ -380,8 +380,8 @@ class TestMultiprocessing(TestCase):
         ]
         for requires_grad, volatile in configs:
             var = Variable(torch.range(1, 25).view(5, 5),
-                            requires_grad=requires_grad,
-                            volatile=volatile)
+                           requires_grad=requires_grad,
+                           volatile=volatile)
             self._test_autograd_sharing(var)
 
     def test_parameter_sharing(self):

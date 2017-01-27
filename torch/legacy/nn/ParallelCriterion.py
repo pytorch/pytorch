@@ -2,6 +2,7 @@ import torch
 from .Criterion import Criterion
 from .utils import recursiveResizeAs, recursiveFill, recursiveAdd
 
+
 class ParallelCriterion(Criterion):
 
     def __init__(self, repeatTarget=False):
@@ -36,4 +37,3 @@ class ParallelCriterion(Criterion):
     def type(self, type=None, tensorCache=None):
         self.gradInput = []
         return super(ParallelCriterion, self).type(type, tensorCache)
-

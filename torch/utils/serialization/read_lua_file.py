@@ -130,6 +130,7 @@ def get_python_class(typename):
 
 def make_tensor_reader(typename):
     python_class = get_python_class(typename)
+
     def read_tensor(reader, version):
         # source:
         # https://github.com/torch/torch7/blob/master/generic/Tensor.c#L1243
@@ -156,6 +157,7 @@ def make_storage_reader(typename):
     python_class = get_python_class(typename)
     # TODO: be smarter about this
     element_size = python_class().element_size()
+
     def read_storage(reader, version):
         # source:
         # https://github.com/torch/torch7/blob/master/generic/Storage.c#L244
@@ -185,6 +187,7 @@ register_torch_class('Tensor', make_tensor_reader)
 # Reader function for tds.Vector and tds.Hash
 ################################################################################
 
+
 def tds_Vec_reader(reader, version):
     length = reader.read_long()
     return [reader.read() for i in range(length)]
@@ -207,6 +210,7 @@ reader_registry['tds.Hash'] = tds_Hash_reader
 # Reader function for nn modules
 ################################################################################
 
+
 def _load_backend(obj):
     if hasattr(obj, '_type'):
         obj._backend = type2backend[obj._type]
@@ -221,6 +225,7 @@ def _load_backend(obj):
                 pass
     # Monkey patch the forward to capture the type of input
     updateOutput_orig = obj.updateOutput
+
     def updateOutput_patch(*args):
         input = args[0]
         while not torch.is_tensor(input):
@@ -242,13 +247,14 @@ def nn_reader(cls):
 
 
 reader_registry.update({('nn.' + name): nn_reader(module)
-    for name, module in nn.__dict__.items()
-    if name[0] != '_' and name[0].upper() == name[0]})
+                        for name, module in nn.__dict__.items()
+                        if name[0] != '_' and name[0].upper() == name[0]})
 
 
 def custom_reader(cls):
     def reader_factory(fn):
         base = nn_reader(cls)
+
         def wrapper(reader, version):
             obj = base(reader, version)
             fn(reader, version, obj)
@@ -271,7 +277,7 @@ for prefix in ['', 'Spatial', 'Volumetric']:
 @custom_reader(nn.Transpose)
 def Transpose_reader(reader, version, obj):
     obj.permutations = list(
-            map(lambda swap: [swap[0]-1, swap[1]-1], obj.permutations))
+        map(lambda swap: [swap[0] - 1, swap[1] - 1], obj.permutations))
 
 
 @custom_reader(nn.SpatialDivisiveNormalization)
@@ -299,12 +305,14 @@ def registry_addon(fn):
     def wrapper_factory(module_name, *args, **kwargs):
         module_name = 'nn.' + module_name
         build_fn = reader_registry[module_name]
+
         def wrapper(reader, version):
             obj = build_fn(reader, version)
             fn(obj, *args, **kwargs)
             return obj
         reader_registry[module_name] = wrapper
     return wrapper_factory
+
 
 @registry_addon
 def attr_map(obj, attribute_map):
@@ -521,9 +529,9 @@ class T7Reader:
         if self.unknown_classes:
             return TorchObject(cls_name, self.read())
         raise T7ReaderException(("don't know how to deserialize Lua class "
-                "{}. If you want to ignore this error and load this object "
-                "as a dict, specify unknown_classes=True in reader's "
-                "constructor").format(cls_name))
+                                 "{}. If you want to ignore this error and load this object "
+                                 "as a dict, specify unknown_classes=True in reader's "
+                                 "constructor").format(cls_name))
 
     def _can_be_list(self, table):
         def is_natural(key):
@@ -546,7 +554,7 @@ class T7Reader:
             v = self.read()
             table[k] = v
         if self.list_heuristic and self._can_be_list(table):
-            return [table[i] for i in range(1, len(table)+1)]
+            return [table[i] for i in range(1, len(table) + 1)]
         return table
 
     def read(self):
@@ -569,7 +577,7 @@ class T7Reader:
             return self.read_table()
         else:
             raise T7ReaderException("unknown type id {}. The file may be "
-                    "corrupted.".format(typeidx))
+                                    "corrupted.".format(typeidx))
 
 
 def load_lua(filename, **kwargs):
@@ -580,4 +588,3 @@ def load_lua(filename, **kwargs):
     with open(filename, 'rb') as f:
         reader = T7Reader(f, **kwargs)
         return reader.read()
-

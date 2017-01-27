@@ -1,5 +1,6 @@
 import torch
 
+
 def lbfgs(opfunc, x, config, state=None):
     """
     An implementation of L-BFGS, heavily inspired by minFunc (Mark Schmidt)
@@ -80,8 +81,8 @@ def lbfgs(opfunc, x, config, state=None):
     if 'dir_bufs' not in state:
         # reusable buffers for y's and s's, and their histories
         verbose('creating recyclable direction/step/history buffers')
-        state['dir_bufs'] = list(g.new(nCorrection+1, p).split(1))
-        state['stp_bufs'] = list(g.new(nCorrection+1, p).split(1))
+        state['dir_bufs'] = list(g.new(nCorrection + 1, p).split(1))
+        state['stp_bufs'] = list(g.new(nCorrection + 1, p).split(1))
         for i in range(len(state['dir_bufs'])):
             state['dir_bufs'][i] = state['dir_bufs'][i].squeeze(0)
             state['stp_bufs'][i] = state['stp_bufs'][i].squeeze(0)
@@ -155,7 +156,7 @@ def lbfgs(opfunc, x, config, state=None):
             al = state['al']
 
             torch.mul(g, -1, out=q)
-            for i in range(k-1, -1, -1):
+            for i in range(k - 1, -1, -1):
                 al[i] = old_dirs[i].dot(q) * ro[i]
                 q.add_(-al[i], old_stps[i])
 
@@ -193,7 +194,7 @@ def lbfgs(opfunc, x, config, state=None):
         lsFuncEval = 0
         if lineSearch is not None:
             # perform line search, using user function
-            f,g,x,t,lsFuncEval = lineSearch(opfunc,x,t,d,f,g,gtd,lineSearchOpts)
+            f, g, x, t, lsFuncEval = lineSearch(opfunc, x, t, d, f, g, gtd, lineSearchOpts)
             f_hist.append(f)
         else:
             # no line search, simply move with fixed-step
@@ -250,4 +251,4 @@ def lbfgs(opfunc, x, config, state=None):
     state['d'] = d
 
     # return optimal x, and history of f(x)
-    return x,f_hist,currentFuncEval
+    return x, f_hist, currentFuncEval

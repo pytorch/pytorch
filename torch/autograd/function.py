@@ -154,8 +154,9 @@ def _nested_map(condition, fn):
             return type(obj)(_map(x) for x in obj)
         else:
             raise ValueError("NestedIOFunction doesn't know how to process "
-                "an input object of type " + torch.typename(obj))
+                             "an input object of type " + torch.typename(obj))
     return _map
+
 
 def _iter_filter(condition):
     def _iter(obj):
@@ -169,7 +170,7 @@ def _iter_filter(condition):
                     yield var
         else:
             raise ValueError("NestedIOFunction doesn't know how to process "
-                "an input object of type " + torch.typename(obj))
+                             "an input object of type " + torch.typename(obj))
     return _iter
 
 
@@ -178,8 +179,10 @@ _iter_tensors = _iter_filter(torch.is_tensor)
 _iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o))
 _map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable), lambda o: o.data)
 
+
 def _map_tensor_fromiter(itr):
-     return _nested_map(lambda o: torch.is_tensor(o), lambda o: next(itr))
+    return _nested_map(lambda o: torch.is_tensor(o), lambda o: next(itr))
+
 
 class NestedIOFunction(Function):
 

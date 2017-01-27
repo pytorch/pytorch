@@ -5,7 +5,9 @@ from torch._thnn import type2backend
 
 from . import _all_functions
 
+
 class _UpsamplingBase(Function):
+
     def __init__(self, size=None, scale_factor=None):
         super(_UpsamplingBase, self).__init__()
         if size is None and scale_factor is None:
@@ -25,15 +27,15 @@ class UpsamplingNearest2d(_UpsamplingBase):
 
         if self.scale_factor is None:
             if (self.size[0] % input.size(2) != 0 or
-                self.size[1] % input.size(3) != 0):
+                    self.size[1] % input.size(3) != 0):
                 raise RuntimeError("output size specified in UpSamplingNearest "
-                        "({}) has to be divisible by the input size, but got: "
-                        "{}".format('x'.join(map(str, self.size)),
-                                    'x'.join(map(str, input.size()))))
+                                   "({}) has to be divisible by the input size, but got: "
+                                   "{}".format('x'.join(map(str, self.size)),
+                                               'x'.join(map(str, input.size()))))
             self.scale_factor = self.size[0] // input.size(2)
             if self.scale_factor != self.size[1] // input.size(3):
                 raise RuntimeError("input aspect ratio doesn't match the "
-                        "output ratio")
+                                   "output ratio")
 
         output = input.new()
         backend = type2backend[type(input)]

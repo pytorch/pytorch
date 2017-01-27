@@ -16,8 +16,10 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PRECISION
 from common import freeze_rng_state, run_tests
 
+
 def default_tensor_type(type):
     type_str = torch.typename(type)
+
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -30,9 +32,12 @@ def default_tensor_type(type):
         return wrapper
     return decorator
 
+
 class InputVariableMixin(object):
+
     def _get_input(self):
         input = TestBase._get_input(self)
+
         def map_variables(i):
             if isinstance(i, Variable):
                 return i
@@ -44,6 +49,7 @@ class InputVariableMixin(object):
 
 
 class NewModuleTest(InputVariableMixin, ModuleTest):
+
     def __init__(self, *args, **kwargs):
         super(NewModuleTest, self).__init__(*args, **kwargs)
         self.cudnn = kwargs.get('cudnn', False)
@@ -356,21 +362,21 @@ class TestNN(NNTestCase):
 
     def _test_dropout(self, cls, input):
         p = 0.2
-        input.fill_(1-p)
+        input.fill_(1 - p)
 
         module = cls(p)
         input_var = Variable(input, requires_grad=True)
         output = module(input_var)
-        self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
-        self.assertLess(abs(input_var.grad.data.mean() - (1-p)), 0.05)
+        self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
         module = cls(p, True)
         input_var = Variable(input.clone(), requires_grad=True)
         output = module(input_var + 0)
-        self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
-        self.assertLess(abs(input_var.grad.data.mean() - (1-p)), 0.05)
+        self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
         # Check that these don't raise errors
         module.__repr__()
@@ -379,7 +385,9 @@ class TestNN(NNTestCase):
     def test_parameters(self):
         def num_params(module):
             return len(list(module.parameters()))
+
         class Net(nn.Module):
+
             def __init__(self):
                 super(Net, self).__init__()
                 self.l1 = l
@@ -394,6 +402,7 @@ class TestNN(NNTestCase):
 
     def test_modules(self):
         class Net(nn.Module):
+
             def __init__(self):
                 super(Net, self).__init__()
                 self.l1 = l
@@ -455,6 +464,7 @@ class TestNN(NNTestCase):
     def test_non_leaf_parameters(self):
         l1 = nn.Linear(10, 10)
         l2 = nn.Linear(10, 10)
+
         def assign_weight():
             l2.weight = l1.weight + 2
         self.assertRaises(TypeError, assign_weight)
@@ -462,8 +472,8 @@ class TestNN(NNTestCase):
         l2.weight = Parameter(torch.randn(10, 10))
 
     def test_embedding_padding_idx(self):
-        embedding = nn.Embedding(10, 20, padding_idx = 0)
-        input = Variable(torch.LongTensor([[0,2,4,5],[4,3,0,9]]))
+        embedding = nn.Embedding(10, 20, padding_idx=0)
+        input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
         output = embedding(input)
         self.assertEqual(output[0][0].sum().data[0], 0)
         self.assertEqual(output[1][2].sum().data[0], 0)
@@ -493,14 +503,14 @@ class TestNN(NNTestCase):
         def expected_indices(dim):
             if dim == 1:
                 return torch.DoubleTensor([1, 3])
-            lower_dim = expected_indices(dim-1)
+            lower_dim = expected_indices(dim - 1)
             lower_dim = lower_dim.view(1, *lower_dim.size())
-            return torch.cat((lower_dim+4, lower_dim+12), 0)
+            return torch.cat((lower_dim + 4, lower_dim + 12), 0)
 
         def expected_grad(dim):
             if dim == 1:
                 return torch.DoubleTensor([0, 1, 0, 1])
-            lower_dim_grad = expected_grad(dim-1)
+            lower_dim_grad = expected_grad(dim - 1)
             grad = lower_dim_grad.view(1, *lower_dim_grad.size())
             zero = torch.zeros(grad.size())
             return torch.cat((zero, grad, zero, grad), 0)
@@ -671,7 +681,9 @@ class TestNN(NNTestCase):
     def test_data_parallel_nested_output(self):
         def fn(input):
             return [input, (input.sin(), input.cos(), [input.add(1)]), input]
+
         class Net(nn.Module):
+
             def forward(self, input):
                 return fn(input)
         i = Variable(torch.randn(2, 2).float().cuda(1))
@@ -690,7 +702,9 @@ class TestNN(NNTestCase):
     def test_data_parallel_nested_input(self):
         def fn(input):
             return input[1][0]
+
         class Net(nn.Module):
+
             def forward(self, input):
                 return fn(input)
         i = Variable(torch.randn(20, 3).float().cuda(1))
@@ -712,7 +726,7 @@ class TestNN(NNTestCase):
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
-        block.conv=nn.Conv2d(3, 3, 3, bias=False)
+        block.conv = nn.Conv2d(3, 3, 3, bias=False)
         net = nn.Module()
         net.linear1 = l
         net.linear2 = l
@@ -781,6 +795,7 @@ class TestNN(NNTestCase):
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
+
         def num_params():
             return len(list(l.parameters()))
         self.assertEqual(num_params(), 2)
@@ -814,9 +829,9 @@ class TestNN(NNTestCase):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
         # reasonable algorithm that does not run out of memory
         sizes = [
-          (1, 256, 109, 175),
-          (1, 256, 80, 128),
-          (1, 256, 120, 192),
+            (1, 256, 109, 175),
+            (1, 256, 80, 128),
+            (1, 256, 120, 192),
         ]
         dtype = torch.cuda.FloatTensor
 
@@ -887,7 +902,7 @@ class TestNN(NNTestCase):
         small_t = torch.rand(1, 1, 5, 5)
         for i in range(0, 4, 2):
             for j in range(0, 4, 2):
-                small_t[:,:,i,j] = 100
+                small_t[:, :, i, j] = 100
         output_small, indices_small = m(Variable(small_t))
         for h in range(3, 10):
             for w in range(3, 10):
@@ -900,10 +915,11 @@ class TestNN(NNTestCase):
                     mu(output_small, indices_small, output_size=size)
                 else:
                     self.assertRaises(ValueError, lambda:
-                            mu(output_small, indices_small, (h, w)))
+                                      mu(output_small, indices_small, (h, w)))
 
     def test_container_copy(self):
         class Model(nn.Module):
+
             def __init__(self):
                 super(Model, self).__init__()
                 self.linear = nn.Linear(4, 5)
@@ -955,7 +971,7 @@ class TestNN(NNTestCase):
             for i in range(6):
                 hx, cx = lstm(input, (hx, cx))
 
-            (hx+cx).sum().backward()
+            (hx + cx).sum().backward()
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
@@ -987,9 +1003,9 @@ class TestNN(NNTestCase):
             output, hy = rnn(input, hx)
             # FIXME this is because of a pytorch bug
             if is_lstm:
-                fake_loss = 0*(hy[0] + hy[1]).sum()
+                fake_loss = 0 * (hy[0] + hy[1]).sum()
             else:
-                fake_loss = 0*hy.sum()
+                fake_loss = 0 * hy.sum()
 
             loss = output.sum() + fake_loss
             loss.backward()
@@ -1019,11 +1035,10 @@ class TestNN(NNTestCase):
                 for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
                     self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
-
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias in (True, False):
                 for bidirectional in (False, True):
-                    for dropout in (0, 1): # Because of dropout randomness, can only compare 0 and 1
+                    for dropout in (0, 1):  # Because of dropout randomness, can only compare 0 and 1
                         for batch_first in (False, True):
                             num_directions = 2 if bidirectional else 1
                             if batch_first:
@@ -1038,7 +1053,7 @@ class TestNN(NNTestCase):
                                          bias=bias,
                                          dropout=dropout,
                                          bidirectional=bidirectional,
-                                         batch_first = batch_first)
+                                         batch_first=batch_first)
 
                             outputs_cpu = forward_backward(
                                 False, rnn, input_val, hx_val, rnn.all_weights)
@@ -1049,7 +1064,7 @@ class TestNN(NNTestCase):
                                              bias=bias,
                                              dropout=dropout,
                                              bidirectional=bidirectional,
-                                             batch_first = batch_first)
+                                             batch_first=batch_first)
 
                             outputs_gpu = forward_backward(
                                 True, rnn_gpu, input_val, hx_val, rnn.all_weights)
@@ -1087,8 +1102,8 @@ class TestNN(NNTestCase):
                     rnn.weight_hh_l0.data.fill_(1)
                     rnn.weight_ih_l1.data.fill_(1)
                     rnn.weight_hh_l1.data.fill_(1)
-                    input = Variable(torch.Tensor(1,1,10).fill_(1))
-                    hx = Variable(torch.Tensor(2,1,1000).fill_(0))
+                    input = Variable(torch.Tensor(1, 1, 10).fill_(1))
+                    hx = Variable(torch.Tensor(2, 1, 1000).fill_(0))
                     if cuda:
                         input = input.cuda()
                         hx = hx.cuda()
@@ -1129,8 +1144,8 @@ class TestNN(NNTestCase):
                         rnn.train()
                     else:
                         rnn.eval()
-                    input = Variable(torch.Tensor(1,1,100).uniform_())
-                    hx = Variable(torch.Tensor(2,1,100).uniform_())
+                    input = Variable(torch.Tensor(1, 1, 100).uniform_())
+                    hx = Variable(torch.Tensor(2, 1, 100).uniform_())
                     if cuda:
                         input = input.cuda()
                         hx = hx.cuda()
@@ -1185,8 +1200,8 @@ class TestNN(NNTestCase):
             module = nn.BatchNorm1d(3).type(tp)
             module.eval()
 
-            data = Variable(torch.rand(4,3).type(tp), requires_grad=True)
-            grad = torch.rand(4,3).type(tp)
+            data = Variable(torch.rand(4, 3).type(tp), requires_grad=True)
+            grad = torch.rand(4, 3).type(tp)
 
             # 1st pass
             res1 = module(data)
@@ -1210,8 +1225,8 @@ def add_test(test):
         raise RuntimeError('Found two tests with the same name: ' + test_name)
     if hasattr(TestNN, cuda_test_name):
         raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
-    setattr(TestNN, test_name, lambda self,test=test: test(self))
-    setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
+    setattr(TestNN, test_name, lambda self, test=test: test(self))
+    setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 new_module_tests = [
@@ -1528,13 +1543,15 @@ new_module_tests = [
         jacobian_input=False
     ),
     dict(
-        constructor=lambda: nn.FractionalMaxPool2d(2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
+        constructor=lambda: nn.FractionalMaxPool2d(
+            2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
         input_size=(1, 3, 5, 5),
         fullname='FractionalMaxPool2d_ratio',
         test_cuda=False
     ),
     dict(
-        constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
+        constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
+            4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
         input_size=(1, 3, 7, 7),
         fullname='FractionalMaxPool2d_size',
         test_cuda=False
@@ -1596,6 +1613,7 @@ for test_params in criterion_tests:
 
 
 class UnpoolingNet(nn.Module):
+
     def __init__(self, pool, unpool):
         super(UnpoolingNet, self).__init__()
         self.pool = pool

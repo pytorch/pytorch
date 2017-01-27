@@ -5,6 +5,7 @@ from .container import Sequential
 from .activation import LogSoftmax
 from .. import functional as F
 
+
 def _assert_no_grad(variable):
     assert not variable.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
@@ -52,7 +53,7 @@ class L1Loss(_Loss):
 
 class NLLLoss(_WeighedLoss):
     r"""The negative log likelihood loss. It is useful to train a classication problem with n classes
-    
+
     If provided, the optional argument `weights` should be a 1D Tensor assigning
     weight to each of the classes.
 
@@ -65,7 +66,7 @@ class NLLLoss(_WeighedLoss):
     adding a  `LogSoftmax`  layer in the last layer of your network.
 
     You may use `CrossEntropyLoss`  instead, if you prefer not to add an extra layer.
-    
+
     The target that this loss expects is a class index `(0 to N-1, where N = number of classes)`
 
     The loss can be described as::
@@ -201,14 +202,14 @@ class HingeEmbeddingLoss(_Loss):
     This is usually used for measuring whether two inputs are similar or dissimilar, 
     e.g. using the L1 pairwise distance, and is typically used for learning 
     nonlinear embeddings or semi-supervised learning::
-    
+
                          { x_i,                  if y_i ==  1
         loss(x, y) = 1/n {
                          { max(0, margin - x_i), if y_i == -1
-    
+
     `x` and `y` arbitrary shapes with a total of `n` elements each
     the sum operation still operates over all the elements, and divides by `n`.
-    
+
     The division by `n` can be avoided if one sets the internal variable `sizeAverage=False`.
 
     The `margin` has a default value of `1`, or can be set in the constructor.
@@ -221,9 +222,9 @@ class MultiLabelMarginLoss(_Loss):
     hinge loss (margin-based loss) between input `x`  (a 2D mini-batch `Tensor`) and 
     output `y` (which is a 2D `Tensor` of target class indices).
     For each sample in the mini-batch::
-    
+
         loss(x, y) = sum_ij(max(0, 1 - (x[y[j]] - x[i]))) / x.size(0)
-    
+
     where `i == 0` to `x.size(0)`, `j == 0` to `y.size(0)`, 
     `y[j] != 0`, and `i != y[j]` for all `i` and `j`.
 
@@ -242,11 +243,11 @@ class SmoothL1Loss(_Loss):
     It is less sensitive to outliers than the `MSELoss` and in some cases 
     prevents exploding gradients (e.g. see "Fast R-CNN" paper by Ross Girshick).
     Also known as the Huber loss::
-    
+
                               { 0.5 * (x_i - y_i)^2, if |x_i - y_i| < 1
         loss(x, y) = 1/n \sum {
                               { |x_i - y_i| - 0.5,   otherwise
-    
+
     `x` and `y` arbitrary shapes with a total of `n` elements each
     the sum operation still operates over all the elements, and divides by `n`.
 
@@ -260,11 +261,11 @@ class SoftMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a two-class classification 
     logistic loss between input `x` (a 2D mini-batch Tensor) and 
     target `y` (which is a tensor containing either `1` or `-1`).
-    
+
     ::
-    
+
         loss(x, y) = sum_i (log(1 + exp(-y[i]*x[i]))) / x.nelement()
-    
+
     The normalization by the number of elements in the input can be disabled by
     setting `self.sizeAverage` to `False`.
     """
@@ -287,7 +288,7 @@ class CrossEntropyLoss(_WeighedLoss):
     `target` for each value of a 1D tensor of size `n`
 
     The loss can be described as::
-    
+
         loss(x, class) = -log(exp(x[class]) / (\sum_j exp(x[j])))
                        = -x[class] + log(\sum_j exp(x[j]))
 
@@ -302,25 +303,28 @@ class CrossEntropyLoss(_WeighedLoss):
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
 
     """
+
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.cross_entropy(input, target,
-                self.weight, self.size_average)
+                               self.weight, self.size_average)
+
 
 class MultiLabelSoftMarginLoss(_WeighedLoss):
     r"""Creates a criterion that optimizes a multi-label one-versus-all 
     loss based on max-entropy, between input `x`  (a 2D mini-batch `Tensor`) and 
     target `y` (a binary 2D `Tensor`). For each sample in the minibatch::
-    
+
        loss(x, y) = - sum_i (y[i] log( exp(x[i]) / (1 + exp(x[i]))) 
                              + (1-y[i]) log(1/(1+exp(x[i])))) / x:nElement()
-    
+
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
     `y` and `x` must have the same size.
     """
+
     def forward(self, input, target):
         return F.binary_cross_entropy(torch.sigmoid(input), target,
-                self.weight, self.size_average)
+                                      self.weight, self.size_average)
 
 
 class CosineEmbeddingLoss(Module):
@@ -334,16 +338,17 @@ class CosineEmbeddingLoss(Module):
     If `margin` is missing, the default value is `0`.
 
     The loss function for each sample is::
-    
+
                      { 1 - cos(x1, x2),              if y ==  1
         loss(x, y) = {
                      { max(0, cos(x1, x2) - margin), if y == -1
-    
+
     If the internal variable `sizeAverage` is equal to `True`, 
     the loss function averages the loss over the batch samples; 
     if `sizeAverage` is `False`, then the loss function sums over the 
     batch samples. By default, `sizeAverage = True`.
     """
+
     def __init__(self, margin=0, size_average=True):
         super(CosineEmbeddingLoss, self).__init__()
         self.margin = margin
@@ -351,7 +356,7 @@ class CosineEmbeddingLoss(Module):
 
     def forward(self, input1, input2, target):
         return self._backend.CosineEmbeddingLoss(self.margin,
-                self.size_average)(input1, input2, target)
+                                                 self.size_average)(input1, input2, target)
 
 
 class MarginRankingLoss(Module):
@@ -363,14 +368,15 @@ class MarginRankingLoss(Module):
     (have a larger value) than the second input, and vice-versa for `y == -1`.
 
     The loss function for each sample in the mini-batch is::
-    
+
         loss(x, y) = max(0, -y * (x1 - x2) + margin)
-    
+
     if the internal variable `sizeAverage = True`, 
     the loss function averages the loss over the batch samples; 
     if `sizeAverage = False`, then the loss function sums over the batch samples. 
     By default, `sizeAverage` equals to `True`.
     """
+
     def __init__(self, margin=0, size_average=True):
         super(MarginRankingLoss, self).__init__()
         self.margin = margin
@@ -378,7 +384,7 @@ class MarginRankingLoss(Module):
 
     def forward(self, input1, input2, target):
         return self._backend.MarginRankingLoss(self.margin,
-                self.size_average)(input1, input2, target)
+                                               self.size_average)(input1, input2, target)
 
 
 class MultiMarginLoss(Module):
@@ -401,6 +407,7 @@ class MultiMarginLoss(Module):
     However, if the field `sizeAverage` is set to `False`, 
     the losses are instead summed.
     """
+
     def __init__(self, p=1, margin=1, weight=None, size_average=True):
         super(MultiMarginLoss, self).__init__()
         if p != 1 and p != 2:
@@ -413,7 +420,7 @@ class MultiMarginLoss(Module):
 
     def forward(self, input, target):
         return self._backend.MultiMarginLoss(self.size_average, self.p,
-                self.margin, weight=self.weight)(input, target)
+                                             self.margin, weight=self.weight)(input, target)
 
 
 # TODO: L1HingeEmbeddingCriterion

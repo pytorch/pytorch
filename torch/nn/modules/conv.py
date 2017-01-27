@@ -7,6 +7,7 @@ from .utils import _single, _pair, _triple
 
 
 class _ConvNd(Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias):
         super(_ConvNd, self).__init__()
@@ -328,6 +329,7 @@ class Conv3d(_ConvNd):
 
 
 class _ConvTransposeMixin(object):
+
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
         func = self._backend.ConvNd(
@@ -400,6 +402,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
     """
+
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, groups=1, bias=True):
         kernel_size = _single(kernel_size)

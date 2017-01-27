@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class AddConstant(Module):
 
     def __init__(self, constant_scalar, inplace=False):
@@ -29,4 +30,3 @@ class AddConstant(Module):
             self.gradInput.copy_(gradOutput)
 
         return self.gradInput
-

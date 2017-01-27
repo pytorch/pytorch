@@ -1,5 +1,6 @@
 from . import CWrapPlugin
 
+
 class AutoGPU(CWrapPlugin):
 
     def __init__(self, has_self=True, condition=None):
