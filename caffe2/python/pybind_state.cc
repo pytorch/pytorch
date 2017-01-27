@@ -231,6 +231,14 @@ OPERATOR_SCHEMA(PythonGradient).AllowInplace([](int, int) { return true; });
 
 REGISTER_GRADIENT(Python, GetPythonGradient);
 
+static bool ParseProtobufFromLargeString(const string& str, Message* proto) {
+  ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
+  ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
+  // Set PlanDef message size limit to 1G.
+  coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
+  return proto->ParseFromCodedStream(&coded_stream);
+}
+
 void addObjectMethods(py::module& m) {
   py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
     py::gil_scoped_release g;
@@ -272,8 +280,8 @@ void addObjectMethods(py::module& m) {
             DeviceOption option;
             if (device_option != py::none()) {
               // If we have a device option passed in, read it.
-              CAFFE_ENFORCE(option.ParseFromString(
-                  py::bytes(device_option).cast<std::string>()));
+              CAFFE_ENFORCE(ParseProtobufFromLargeString(
+                  py::bytes(device_option).cast<std::string>(), &option));
             }
             if (PyArray_Check(arg.ptr())) { // numpy array
               PyArrayObject* array =
@@ -379,7 +387,7 @@ void addObjectMethods(py::module& m) {
           "_create_net",
           [](Workspace* self, py::bytes def) -> py::object {
             caffe2::NetDef proto;
-            CAFFE_ENFORCE(proto.ParseFromString(def));
+            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             auto* net = self->CreateNet(proto);
             CAFFE_ENFORCE(net);
             return py::cast(net, py::return_value_policy::reference_internal);
@@ -394,7 +402,7 @@ void addObjectMethods(py::module& m) {
           "_run_net",
           [](Workspace* self, py::bytes def) {
             caffe2::NetDef proto;
-            CAFFE_ENFORCE(proto.ParseFromString(def));
+            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
             CAFFE_ENFORCE(self->RunNetOnce(proto));
           })
@@ -402,7 +410,7 @@ void addObjectMethods(py::module& m) {
           "_run_operator",
           [](Workspace* self, py::bytes def) {
             caffe2::OperatorDef proto;
-            CAFFE_ENFORCE(proto.ParseFromString(def));
+            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
             CAFFE_ENFORCE(self->RunOperatorOnce(proto));
           })
@@ -410,7 +418,7 @@ void addObjectMethods(py::module& m) {
           "_run_plan",
           [](Workspace* self, py::bytes def) {
             caffe2::PlanDef proto;
-            CAFFE_ENFORCE(proto.ParseFromString(def));
+            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
             CAFFE_ENFORCE(self->RunPlan(proto));
           })
@@ -436,7 +444,7 @@ void addObjectMethods(py::module& m) {
       [](const py::bytes& op_def,
          std::vector<GradientWrapper> output_gradients) {
         OperatorDef def;
-        CAFFE_ENFORCE(def.ParseFromString(op_def));
+        CAFFE_ENFORCE(ParseProtobufFromLargeString(op_def, &def));
         CAFFE_ENFORCE(caffe2::GradientRegistry()->Has(def.type()));
         const auto& meta = GetGradientForOp(def, output_gradients);
         std::vector<py::bytes> grad_ops;
@@ -501,8 +509,9 @@ void addObjectMethods(py::module& m) {
           "__init__",
           [](Predictor& instance, py::bytes init_net, py::bytes predict_net) {
             NetDef init_net_, predict_net_;
-            CAFFE_ENFORCE(init_net_.ParseFromString(init_net));
-            CAFFE_ENFORCE(predict_net_.ParseFromString(predict_net));
+            CAFFE_ENFORCE(ParseProtobufFromLargeString(init_net, &init_net_));
+            CAFFE_ENFORCE(
+                ParseProtobufFromLargeString(predict_net, &predict_net_));
             new (&instance) Predictor(init_net_, predict_net_);
           });
 }
@@ -606,7 +615,7 @@ void addGlobalMethods(py::module& m) {
   m.def("create_net", [](py::bytes net_def) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(
-        proto.ParseFromString(net_def),
+        ParseProtobufFromLargeString(net_def, &proto),
         "Can't parse net proto: ",
         std::string(net_def));
     CAFFE_ENFORCE(
@@ -646,7 +655,7 @@ void addGlobalMethods(py::module& m) {
   m.def("run_operator_once", [](const py::bytes& op_def) {
     CAFFE_ENFORCE(gWorkspace);
     OperatorDef def;
-    CAFFE_ENFORCE(def.ParseFromString(op_def));
+    CAFFE_ENFORCE(ParseProtobufFromLargeString(op_def, &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunOperatorOnce(def));
     return true;
@@ -654,7 +663,7 @@ void addGlobalMethods(py::module& m) {
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);
     NetDef def;
-    CAFFE_ENFORCE(def.ParseFromString(net_def));
+    CAFFE_ENFORCE(ParseProtobufFromLargeString(net_def, &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunNetOnce(def));
     return true;
@@ -662,13 +671,8 @@ void addGlobalMethods(py::module& m) {
   m.def("run_plan", [](const py::bytes& plan_def) {
     CAFFE_ENFORCE(gWorkspace);
     const std::string& msg = std::move(plan_def);
-    ::google::protobuf::io::ArrayInputStream input_stream(
-        msg.data(), msg.size());
-    ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
-    // Set PlanDef message size limit to 1G.
-    coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
     PlanDef def;
-    CAFFE_ENFORCE(def.ParseFromCodedStream(&coded_stream));
+    CAFFE_ENFORCE(ParseProtobufFromLargeString(msg, &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;
@@ -699,8 +703,8 @@ void addGlobalMethods(py::module& m) {
         DeviceOption option;
         if (device_option != py::none()) {
           // If we have a device option passed in, read it.
-          CAFFE_ENFORCE(option.ParseFromString(
-              py::bytes(device_option).cast<std::string>()));
+          CAFFE_ENFORCE(ParseProtobufFromLargeString(
+              py::bytes(device_option).cast<std::string>(), &option));
         }
         auto* blob = gWorkspace->CreateBlob(name);
         if (PyArray_Check(arg.ptr())) { // numpy array
