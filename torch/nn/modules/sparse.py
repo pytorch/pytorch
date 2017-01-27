@@ -17,7 +17,8 @@ class Embedding(Module):
         padding_idx (int, optional): If given, pads the output with zeros whenever it encounters the index.
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of the words in the dictionary.
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+                                                the words in the dictionary.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)

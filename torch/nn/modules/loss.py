@@ -78,9 +78,11 @@ class NLLLoss(_WeighedLoss):
         loss(x, class) = -weights[class] * x[class]
 
     Args:
-        weight (Tensor, optional): a manual rescaling weight given to each class. If given, has to be a Tensor of size "nclasses"
+        weight (Tensor, optional): a manual rescaling weight given to each class.
+                                   If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-                      However, if the field sizeAverage is set to False, the losses are instead summed for each minibatch.
+                                       However, if the field sizeAverage is set to False,
+                                       the losses are instead summed for each minibatch.
 
 
     Shape:

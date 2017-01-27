@@ -200,7 +200,8 @@ class Conv2d(_ConvNd):
           :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (out_channels, in_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (out_channels, in_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -294,7 +295,8 @@ class Conv3d(_ConvNd):
           :math:`W_{out} = floor((W_{in}  + 2 * padding[2] - dilation[2] * (kernel\_size[2] - 1) - 1) / stride[2] + 1)`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+        weight (Tensor): the learnable weights of the module of shape
+                         (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -399,7 +401,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
           :math:`L_{out} = (L_{in} - 1) * stride - 2 * padding + kernel_size + output_padding`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
     """
 
@@ -472,7 +475,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
           :math:`W_{out} = (W_{in} - 1) * stride[1] - 2 * padding[1] + kernel_size[1] + output_padding[1]`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -573,7 +577,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
           :math:`W_{out} = (W_{in} - 1) * stride[2] - 2 * padding[2] + kernel_size[2] + output_padding[2]`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
