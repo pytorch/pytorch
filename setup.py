@@ -1,6 +1,7 @@
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
+import distutils.unixccompiler
 import distutils.command.build
 import distutils.command.clean
 import platform
@@ -17,6 +18,7 @@ DEBUG = check_env_flag('DEBUG')
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
 ################################################################################
+original_link = distutils.unixccompiler.UnixCCompiler.link
 
 
 def parallelCCompile(self, sources, output_dir=None, macros=None,
@@ -38,7 +40,17 @@ def parallelCCompile(self, sources, output_dir=None, macros=None,
 
     return objects
 
+
+def patched_link(self, *args, **kwargs):
+    _cxx = self.compiler_cxx
+    self.compiler_cxx = None
+    result = original_link(self, *args, **kwargs)
+    self.compiler_cxx = _cxx
+    return result
+
+
 distutils.ccompiler.CCompiler.compile = parallelCCompile
+distutils.unixccompiler.UnixCCompiler.link = patched_link
 
 ################################################################################
 # Custom build commands
