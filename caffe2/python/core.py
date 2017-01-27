@@ -1009,7 +1009,8 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
     return sorted(used_op_ids)
 
 
-def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None):
+def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
+                       keep_schema=True):
     """
     Clone the given Net, binding its input schema to the given `inputs` record.
     Blob names defined by the net are prepended with the given `prefix`.
@@ -1022,6 +1023,9 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None):
         inputs:     (optional) input record that will provide actual input
                     values for the cloned net. Must be compatible with the
                     net's input schema or be a strict superset of it
+        keep_schema: by default (True), the original schema will be kept and
+                     remapped accordingly. otherwise, the schema will be set as
+                     inputs or left empty if inputs is not given.
     Returns:
         Tuple (cloned_net, blob_remap)
         clone_net:  the cloned Net
@@ -1055,7 +1059,10 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None):
             blob_remap[blob] = blob
         else:
             blob_remap[blob] = prefix + blob
-    return net.Clone(name, blob_remap), blob_remap
+    cloned_net = net.Clone(name, blob_remap, keep_schema=keep_schema)
+    if not keep_schema and inputs:
+        cloned_net.set_input_record(inputs)
+    return cloned_net, blob_remap
 
 
 def _get_blob_ref(blob_name_or_ref):
