@@ -112,10 +112,12 @@ class RNN(RNNBase):
 
     Inputs: input, h_0
         - `input`: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0`: A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
+        - `h_0`: A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state
+                 for each element in the batch.
 
     Outputs: output, h_n
-        - `output`: A (seq_len x batch x hidden_size) tensor containing the output features (h_k) from the last layer of the RNN, for each k
+        - `output`: A (seq_len x batch x hidden_size) tensor containing the output features (h_k)
+                    from the last layer of the RNN, for each k
         - `h_n`: A (num_layers x batch x hidden_size) tensor containing the hidden state for k=seq_len
 
     Attributes:
@@ -184,17 +186,22 @@ class LSTM(RNNBase):
 
     Inputs: `input, (h_0, c_0)`
         - `input` : A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-        - `c_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
+        - `h_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing
+                  the initial hidden state for each element in the batch.
+        - `c_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing
+                  the initial cell state for each element in the batch.
 
     Outputs: output, (h_n, c_n)
-        - `output` : A (seq_len x batch x hidden_size) tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
+        - `output` : A (seq_len x batch x hidden_size) tensor containing the output features `(h_t)` from the last layer
+                     of the RNN, for each t
         - `h_n` : A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
         - `c_n` : A (num_layers x batch x hidden_size) tensor containing the cell state for t=seq_len
 
     Attributes:
-        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ir|W_ii|W_in)`, of shape `(input_size x 3*hidden_size)`
-        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hr|W_hi|W_hn)`, of shape `(hidden_size x 3*hidden_size)`
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ir|W_ii|W_in)`, of shape
+                         `(input_size x 3*hidden_size)`
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hr|W_hi|W_hn)`, of shape
+                         `(hidden_size x 3*hidden_size)`
         bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ir|b_ii|b_in)`, of shape `(3*hidden_size)`
         bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(W_hr|W_hi|W_hn)`, of shape `(3*hidden_size)`
 
@@ -242,15 +249,19 @@ class GRU(RNNBase):
 
     Inputs: `input, h_0`
         - `input` : A `(seq_len x batch x input_size)` tensor containing the features of the input sequence.
-        - `h_0` : A `((num_layers * num_directions) x batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+        - `h_0` : A `((num_layers * num_directions) x batch x hidden_size)` tensor containing the initial
+                  hidden state for each element in the batch.
 
     Outputs: `output, h_n`
-        - `output` : A `(seq_len x batch x hidden_size)` tensor containing the output features `(h_t)` from the last layer of the RNN, for each t
+        - `output` : A `(seq_len x batch x hidden_size)` tensor containing the output features `(h_t)` from
+                     the last layer of the RNN, for each t
         - `h_n` : A `(num_layers x batch x hidden_size)` tensor containing the hidden state for t=seq_len
 
     Attributes:
-        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
-        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape
+                         (input_size x 3*hidden_size)
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape
+                         (hidden_size x 3*hidden_size)
         bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
         bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
     Examples::
