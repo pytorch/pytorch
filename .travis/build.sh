@@ -1,9 +1,16 @@
 #!/bin/bash
 
+export CXX=$COMPILER
+
 mkdir build
 cd build
 
-if [[ $TRAVIS_OS_NAME == 'osx' ]]; then
+if [[ $BUILD_TARGET == 'android' ]]; then
+#***************#
+# Android build #
+#***************#
+  sh ../scripts/build_android.sh
+elif [[ $TRAVIS_OS_NAME == 'osx' ]]; then
 #************#
 # OS X build #
 #************#

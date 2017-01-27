@@ -7,6 +7,12 @@ matrix:
   include:
     - os: linux
       compiler: gcc
+      env: BUILD_TARGET=android
+    - os: osx
+      compiler: clang
+      env: BUILD_TARGET=android
+    - os: linux
+      compiler: gcc
       env: COMPILER=g++
     - os: osx
       compiler: clang
@@ -42,6 +48,7 @@ matrix:
     - env: COMPILER=g++-5
     - env: COMPILER=g++-4.9
     - env: COMPILER=g++-4.8
+    - env: BUILD_TARGET=android
 
 cache:
   apt: true
@@ -50,8 +57,4 @@ install:
   - ./.travis/install.sh
 
 script:
-  - export CXX=$COMPILER && ./.travis/build.sh
-
-branches:
-  only:
-  - master
+  - ./.travis/build.sh
