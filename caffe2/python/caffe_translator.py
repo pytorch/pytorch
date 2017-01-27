@@ -325,7 +325,7 @@ def TranslateInnerProduct(layer, pretrained_blobs, is_test):
     output = caffe_op.output[0]
     caffe_op.input.extend([output + '_w', output + '_b'])
     weight = utils.NumpyArrayToCaffe2Tensor(
-        pretrained_blobs[0][0, 0], output + '_w'
+        pretrained_blobs[0], output + '_w'
     )
     bias = utils.NumpyArrayToCaffe2Tensor(
         pretrained_blobs[1].flatten(), output + '_b'
@@ -476,6 +476,24 @@ def TranslateReshape(layer, pretrained_blobs, is_test):
 @TranslatorRegistry.Register("Sigmoid")
 def TranslateSigmoid(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Sigmoid")
+    return caffe_op, []
+
+
+@TranslatorRegistry.Register("Flatten")
+def TranslateFlatten(layer, pretrained_blobs, is_test):
+    param = layer.flatten_param
+    if param.end_axis != -1:
+        raise NotImplementedError("flatten_param.end_axis not supported yet.")
+
+    if param.axis == 0:
+        caffe_op = BaseTranslate(layer, "FlattenToVec")
+    elif param.axis == 1:
+        caffe_op = BaseTranslate(layer, "Flatten")
+    else:
+        # This could be a Reshape op, but dim size is not known here.
+        raise NotImplementedError(
+            "Not supported yet for flatten_param.axis {}.".format(param.axis))
+
     return caffe_op, []
 
 
