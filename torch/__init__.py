@@ -105,7 +105,7 @@ def get_rng_state():
 
 
 def manual_seed(seed):
-    r"""Sets the seed for generating random numbers. And returns a 
+    r"""Sets the seed for generating random numbers. And returns a
     `torch._C.Generator` object.
 
     Args:
@@ -115,7 +115,7 @@ def manual_seed(seed):
 
 
 def initial_seed():
-    r"""Returns the initial seed for generating random numbers as a 
+    r"""Returns the initial seed for generating random numbers as a
     python `long`.
     """
     return default_generator.initial_seed()

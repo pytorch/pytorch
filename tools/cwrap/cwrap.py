@@ -98,10 +98,10 @@ class cwrap(object):
     def set_declaration_defaults(self, declaration):
         declaration.setdefault('arguments', [])
         declaration.setdefault('return', 'void')
-        if not 'cname' in declaration:
+        if 'cname' not in declaration:
             declaration['cname'] = declaration['name']
         # Simulate multiple dispatch, even if it's not necessary
-        if not 'options' in declaration:
+        if 'options' not in declaration:
             declaration['options'] = [{'arguments': declaration['arguments']}]
             del declaration['arguments']
         # Parse arguments (some of them can be strings)
@@ -183,7 +183,7 @@ class cwrap(object):
 
     def generate_option(self, option, is_first):
         checked_args = list(filter(
-            lambda arg: not 'ignore_check' in arg or not arg['ignore_check'],
+            lambda arg: 'ignore_check' not in arg or not arg['ignore_check'],
             option['arguments']))
         option['num_checked_args'] = len(checked_args)
         idx_args = list(filter(

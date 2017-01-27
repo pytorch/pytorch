@@ -72,7 +72,7 @@ class SpatialFractionalMaxPooling(Module):
     def _getOutputSizes(self, input):
         outW = self.outW
         outH = self.outH
-        if self.ratioW != None and self.ratioH != None:
+        if self.ratioW is not None and self.ratioH is not None:
             assert input.ndimension() == 4
             outW = int(math.floor(input.size(3) * self.ratioW))
             outH = int(math.floor(input.size(2) * self.ratioH))
@@ -81,7 +81,7 @@ class SpatialFractionalMaxPooling(Module):
             assert outW > 0
             assert outH > 0
         else:
-            assert outW != None and outH != None
+            assert outW is not None and outH is not None
 
         return outW, outH
 

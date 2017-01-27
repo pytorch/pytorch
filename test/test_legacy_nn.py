@@ -927,8 +927,10 @@ class TestNN(NNTestCase):
         gradInputConcat = concat.backward(input, gradOutput)
         # the spatial dims are the largest, the nFilters is the sum
         output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_()  # zero for padding
-        narrows = ((slice(None), slice(0, 5), slice(None), slice(None)), (slice(None), slice(5, 11), slice(1, 11), slice(
-            1, 11)), (slice(None), slice(11, 18), slice(1, 10), slice(1, 10)), (slice(None), slice(18, 26), slice(2, 10), slice(2, 10)))
+        narrows = ((slice(None), slice(0, 5), slice(None), slice(None)),
+                   (slice(None), slice(5, 11), slice(1, 11), slice(1, 11)),
+                   (slice(None), slice(11, 18), slice(1, 10), slice(1, 10)),
+                   (slice(None), slice(18, 26), slice(2, 10), slice(2, 10)))
         gradInput = input.clone().zero_()
         for i in range(4):
             conv = concat.get(i)
@@ -1120,8 +1122,9 @@ class TestNN(NNTestCase):
         pc = nn.ParallelCriterion().add(nll, 0.5).add(mse)
         pc2 = nn.ParallelCriterion().add(nll2, 0.4).add(pc)
         output = pc2.forward(input, target)
-        output2 = nll2.forward(input[0], target[0]) * 0.4 + nll.forward(input[1][0],
-                                                                        target[1][0]) / 2 + mse.forward(input[1][1], target[1][1])
+        output2 = (nll2.forward(input[0], target[0]) * 0.4 +
+                   nll.forward(input[1][0], target[1][0]) / 2 +
+                   mse.forward(input[1][1], target[1][1]))
         self.assertEqual(output, output2)
         gradInput2 = [
             nll2.backward(input[0], target[0]).clone().mul(0.4),

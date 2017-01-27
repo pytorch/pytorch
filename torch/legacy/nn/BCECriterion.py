@@ -17,7 +17,7 @@ class BCECriterion(Criterion):
         self.weights = weights
 
     def updateOutput(self, input, target):
-         # - log(input) * target - log(1 - input) * (1 - target)
+        # - log(input) * target - log(1 - input) * (1 - target)
         if input.nelement() != target.nelement():
             raise RuntimeError("input and target size mismatch")
 
@@ -55,11 +55,11 @@ class BCECriterion(Criterion):
         return self.output
 
     def updateGradInput(self, input, target):
-         # - (target - input) / ( input (1 - input) )
-         # The gradient is slightly incorrect:
-         # It should have be divided by (input + self.eps) (1 - input + self.eps)
-         # but it is divided by input (1 - input + self.eps) + self.eps
-         # This modification requires less memory to be computed.
+        # - (target - input) / ( input (1 - input) )
+        # The gradient is slightly incorrect:
+        # It should have be divided by (input + self.eps) (1 - input + self.eps)
+        # but it is divided by input (1 - input + self.eps) + self.eps
+        # This modification requires less memory to be computed.
         if input.nelement() != target.nelement():
             raise RuntimeError("input and target size mismatch")
 

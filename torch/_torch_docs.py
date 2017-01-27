@@ -1469,13 +1469,13 @@ add_docstr(torch._C.geqrf,
            r"""
 geqrf(input, out=None) -> (Tensor, Tensor)
 
-This is a low-level function for calling LAPACK directly. 
+This is a low-level function for calling LAPACK directly.
 
 You'll generally want to use :func:`torch.qr` instead.
 
-Computes a QR decomposition of :attr:`input`, but without constructing `Q` and `R` as explicit separate matrices. 
+Computes a QR decomposition of :attr:`input`, but without constructing `Q` and `R` as explicit separate matrices.
 
-Rather, this directly calls the underlying LAPACK function `?geqrf` which produces a sequence of 'elementary reflectors'. 
+Rather, this directly calls the underlying LAPACK function `?geqrf` which produces a sequence of 'elementary reflectors'.
 
 See `LAPACK documentation`_ for further details.
 
@@ -1517,17 +1517,17 @@ add_docstr(torch._C.gesv,
 gesv(B, A, out=None) -> (Tensor, Tensor)
 
 `X, LU = torch.gesv(B, A)` returns the solution to the system of linear
-equations represented by :math:`AX = B` 
+equations represented by :math:`AX = B`
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
 :attr:`A` has to be a square and non-singular matrix (2D Tensor).
 
-If `A` is an `m x m` matrix and `B` is `m x k`, 
+If `A` is an `m x m` matrix and `B` is `m x k`,
 the result `LU` is `m x m` and `X` is `m x k` .
 
-.. note:: Irrespective of the original strides, the returned matrices 
-          `X` and `LU` will be transposed, i.e. with strides `(1, m)` 
+.. note:: Irrespective of the original strides, the returned matrices
+          `X` and `LU` will be transposed, i.e. with strides `(1, m)`
            instead of `(m, 1)`.
 
 Args:
@@ -3052,19 +3052,19 @@ add_docstr(torch._C.qr,
            """
 qr(input, out=None) -> (Tensor, Tensor)
 
-Computes the QR decomposition of a matrix :attr:`input`: returns matrices 
-`q` and `r` such that :math:`x = q * r`, with `q` being an orthogonal matrix 
-and `r` being an upper triangular matrix. 
+Computes the QR decomposition of a matrix :attr:`input`: returns matrices
+`q` and `r` such that :math:`x = q * r`, with `q` being an orthogonal matrix
+and `r` being an upper triangular matrix.
 
 This returns the thin (reduced) QR factorization.
 
 .. note:: precision may be lost if the magnitudes of the elements of `input` are large
 
-.. note:: while it should always give you a valid decomposition, it may not 
-          give you the same one across platforms - it will depend on your 
+.. note:: while it should always give you a valid decomposition, it may not
+          give you the same one across platforms - it will depend on your
           LAPACK implementation.
 
-.. note:: Irrespective of the original strides, the returned matrix `q` will be 
+.. note:: Irrespective of the original strides, the returned matrix `q` will be
           transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
 
 Args:
@@ -3708,7 +3708,7 @@ add_docstr(torch._C.svd,
            """
 svd(input, some=True, out=None) -> (Tensor, Tensor, Tensor)
 
-`U, S, V = torch.svd(A)` returns the singular value decomposition of a 
+`U, S, V = torch.svd(A)` returns the singular value decomposition of a
 real matrix `A` of size `(n x m)` such that :math:`A = USV'*`.
 
 `U` is of shape `n x n`
@@ -3717,10 +3717,10 @@ real matrix `A` of size `(n x m)` such that :math:`A = USV'*`.
 
 `V` is of shape `m x m`.
 
-:attr:`some` represents the number of singular values to be computed. 
+:attr:`some` represents the number of singular values to be computed.
 If `some=True`, it computes some and `some=False` computes all.
 
-.. note:: Irrespective of the original strides, the returned matrix `U` 
+.. note:: Irrespective of the original strides, the returned matrix `U`
           will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.
 
 Args:
@@ -3783,26 +3783,26 @@ add_docstr(torch._C.symeig,
            """
 symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
 
-`e, V = torch.symeig(input)` returns eigenvalues and eigenvectors 
+`e, V = torch.symeig(input)` returns eigenvalues and eigenvectors
 of a symmetric real matrix :attr:`input`.
 
 `input` and `V` are `m x m` matrices and `e` is a `m` dimensional vector.
 
-This function calculates all eigenvalues (and vectors) of `input` 
+This function calculates all eigenvalues (and vectors) of `input`
 such that `input = V diag(e) V'`
 
-The boolean argument :attr:`eigenvectors` defines computation of 
+The boolean argument :attr:`eigenvectors` defines computation of
 eigenvectors or eigenvalues only.
 
-If it is `False`, only eigenvalues are computed. If it is `True`, 
+If it is `False`, only eigenvalues are computed. If it is `True`,
 both eigenvalues and eigenvectors are computed.
 
-Since the input matrix `input` is supposed to be symmetric, 
-only the upper triangular portion is used by default. 
+Since the input matrix `input` is supposed to be symmetric,
+only the upper triangular portion is used by default.
 
 If :attr:`upper` is `False`, then lower triangular portion is used.
 
-Note: Irrespective of the original strides, the returned matrix `V` will 
+Note: Irrespective of the original strides, the returned matrix `V` will
 be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
 
 Args:

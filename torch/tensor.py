@@ -339,7 +339,8 @@ class _TensorBase(object):
         src = self.contiguous()
 
         if len(repeats) < src.dim():
-            raise ValueError('Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor')
+            raise ValueError('Number of dimensions of repeat dims can not be '
+                             'smaller than number of dimensions of tensor')
 
         xtensor = src.new().set_(src)
         xsize = list(xtensor.size())

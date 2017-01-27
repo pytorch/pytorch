@@ -3,8 +3,10 @@ from .Module import Module
 
 
 class Padding(Module):
-    # pad puts in [pad] amount of [value] over dimension [dim], starting at index [index] in that dimension. If pad<0, index counts from the left.  If pad>0 index counts from the right
-    # index = 1 pads before index 1.  index = 2 pads starting before index 2 and after index 1 in dimension [dim]
+    # pad puts in [pad] amount of [value] over dimension [dim], starting at
+    # index [index] in that dimension. If pad<0, index counts from the left.
+    # If pad>0 index counts from the right index = 1 pads before index 1.
+    # index = 2 pads starting before index 2 and after index 1 in dimension [dim]
 
     def __init__(self, dim, pad, value=0, index=0):
         self.value = value

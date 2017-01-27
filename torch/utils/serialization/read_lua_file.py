@@ -536,8 +536,8 @@ class T7Reader:
     def _can_be_list(self, table):
         def is_natural(key):
             return (isinstance(key, int) or
-                    (isinstance(key, float) and key.is_integer())
-                    and k > 0)
+                    (isinstance(key, float) and key.is_integer()) and
+                    k > 0)
         natural_keys = all(map(is_natural, table.keys()))
         if not natural_keys:
             return False
@@ -568,8 +568,8 @@ class T7Reader:
             return self.read_boolean()
         elif typeidx == TYPE_STRING:
             return self.read_string()
-        elif (typeidx == TYPE_FUNCTION or typeidx == TYPE_RECUR_FUNCTION
-                or typeidx == LEGACY_TYPE_RECUR_FUNCTION):
+        elif (typeidx == TYPE_FUNCTION or typeidx == TYPE_RECUR_FUNCTION or
+              typeidx == LEGACY_TYPE_RECUR_FUNCTION):
             return self.read_function()
         elif typeidx == TYPE_TORCH:
             return self.read_object()

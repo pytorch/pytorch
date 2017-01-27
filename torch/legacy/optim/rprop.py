@@ -42,7 +42,7 @@ def rprop(opfunc, x, config, state=None):
         fx, dfdx = opfunc(x)
 
         # init temp storage
-        if not 'delta' in state:
+        if 'delta' not in state:
             state['delta'] = dfdx.new(dfdx.size()).zero_()
             state['stepsize'] = dfdx.new(dfdx.size()).fill_(stepsize)
             state['sign'] = dfdx.new(dfdx.size())

@@ -48,7 +48,7 @@ class LookupTable(Module):
 
     def _makeInputContiguous(self, input):
         # make sure input is a contiguous torch.LongTensor
-        if not input.is_contiguous() or type(input) != type(self._input):
+        if not input.is_contiguous() or not type(input) is type(self._input):
             self.copiedInput = True
             self._input.resize_(input.size()).copy_(input)
             return self._input

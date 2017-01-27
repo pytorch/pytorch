@@ -104,7 +104,9 @@ class SpatialDivisiveNormalization(Module):
 
         # compute side coefficients
         dim = input.dim()
-        if self.localstds.dim() != self.coef.dim() or (input.size(dim - 1) != self.coef.size(dim - 1)) or (input.size(dim - 2) != self.coef.size(dim - 2)):
+        if (self.localstds.dim() != self.coef.dim() or
+                (input.size(dim - 1) != self.coef.size(dim - 1)) or
+                (input.size(dim - 2) != self.coef.size(dim - 2))):
             if self.ones is None:
                 self.ones = input.new()
             self.ones.resize_as_(input[0:1]).fill_(1)

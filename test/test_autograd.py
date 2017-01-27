@@ -1079,7 +1079,7 @@ for test in method_tests:
             try:
                 check(inplace_name)
             except Exception as e:
-                if not 'only supports scalar' in e.args[0]:
+                if 'only supports scalar' not in e.args[0]:
                     raise
 
     assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name

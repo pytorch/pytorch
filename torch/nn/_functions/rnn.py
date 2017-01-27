@@ -106,7 +106,8 @@ def Recurrent(inner, reverse=False):
     return forward
 
 
-def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False, dropout_state=None):
+def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
+                dropout=0, train=True, bidirectional=False, dropout_state=None):
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -146,7 +147,9 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, 
 
 class CudnnRNN(NestedIOFunction):
 
-    def __init__(self, mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False, dropout_state=None):
+    def __init__(self, mode, input_size, hidden_size, num_layers=1,
+                 batch_first=False, dropout=0, train=True, bidirectional=False,
+                 dropout_state=None):
         super(CudnnRNN, self).__init__()
         if dropout_state is None:
             dropout_state = {}

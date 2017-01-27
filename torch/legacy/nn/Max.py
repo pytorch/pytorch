@@ -23,7 +23,8 @@ class Max(Module):
             self._output = self.output.new()
         if self._indices is None:
             self._indices = \
-                (torch.cuda.LongTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor' else torch.LongTensor())
+                (torch.cuda.LongTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor'
+                 else torch.LongTensor())
 
     def updateOutput(self, input):
         self._lazyInit()
