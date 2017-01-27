@@ -3,9 +3,11 @@ import torch
 import torch.legacy.optim as optim
 from pprint import pprint
 
+
 def rosenbrock(tensor):
     x, y = tensor
     return (1 - x)**2 + 100 * (y - x**2)**2
+
 
 def drosenbrock(tensor):
     x, y = tensor

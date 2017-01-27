@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Threshold(Module):
 
     def __init__(self, threshold=0, value=0, inplace=False):
@@ -41,7 +42,4 @@ class Threshold(Module):
         if self.inplace:
             if self.value > self.threshold:
                 raise RuntimeError('in-place processing requires value ({}) to not '
-                    'exceed threshold ({})'.format(self.value, self.threshold))
-
-
-
+                                   'exceed threshold ({})'.format(self.value, self.threshold))

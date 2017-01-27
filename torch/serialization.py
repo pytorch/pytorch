@@ -83,7 +83,7 @@ def location_tag(storage):
         if location:
             return location
     raise RuntimeError("don't know how to determine data location of " +
-            torch.typename(storage))
+                       torch.typename(storage))
 
 
 def default_restore_location(storage, location):
@@ -92,7 +92,7 @@ def default_restore_location(storage, location):
         if result is not None:
             return result
     raise RuntimeError("don't know how to restore data location of " +
-            torch.typename(storage) + " (tagged with " + location + ")")
+                       torch.typename(storage) + " (tagged with " + location + ")")
 
 
 def normalize_storage_type(storage_type):
@@ -143,8 +143,8 @@ def _save(obj, f, pickle_module, pickle_protocol):
                 source = inspect.getsource(obj)
             except (TypeError, IOError):
                 warnings.warn("Couldn't retrieve source code for container of "
-                        "type " + obj.__name__ + ". It won't be checked "
-                        "for correctness upon loading.")
+                              "type " + obj.__name__ + ". It won't be checked "
+                              "for correctness upon loading.")
             return (obj, source_file, source)
         if torch.is_tensor(obj):
             serialized_tensors[obj._cdata] = obj
@@ -165,7 +165,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
                 storage_id = None
 
             pickle_module.dump((key, storage_id, type(tensor)), f,
-                    protocol=pickle_protocol)
+                               protocol=pickle_protocol)
             f.flush()
             tensor._write_metadata(f)
 
@@ -178,7 +178,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
             if root is not storage:
                 storage_views_roots[root._cdata] = root
                 storage_views.append((storage._cdata, root._cdata, offset,
-                    storage.size()))
+                                      storage.size()))
         for view_info in storage_views:
             del serialized_storages[view_info[0]]
         serialized_storages.update(storage_views_roots)
@@ -188,7 +188,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
             location = location_tag(storage)
             storage_type = normalize_storage_type(type(storage))
             pickle_module.dump((key, location, storage_type), f,
-                    protocol=pickle_protocol)
+                               protocol=pickle_protocol)
             f.flush()
             storage._write_file(f)
 
@@ -203,7 +203,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
         sys_info = dict(
             protocol_version=1000,
             little_endian=sys.byteorder == 'little',
-            type_sizes = dict(
+            type_sizes=dict(
                 short=SHORT_SIZE,
                 int=INT_SIZE,
                 long=LONG_SIZE,
@@ -273,10 +273,10 @@ def _load(f, map_location, pickle_module):
             if container_type.dump_patches:
                 file_name = container_type.__name__ + '.patch'
                 diff = difflib.unified_diff(
-                        current_source.split('\n'),
-                        original_source.split('\n'),
-                        source_file,
-                        source_file, lineterm="")
+                    current_source.split('\n'),
+                    original_source.split('\n'),
+                    source_file,
+                    source_file, lineterm="")
                 lines = '\n'.join(diff)
                 try:
                     with open(file_name, 'a+') as f:
@@ -312,7 +312,7 @@ def _load(f, map_location, pickle_module):
         return deserialized_objects[int(saved_id)]
 
     with closing(tarfile.open(fileobj=f, mode='r:', format=tarfile.PAX_FORMAT)) as tar, \
-         mkdtemp() as tmpdir:
+            mkdtemp() as tmpdir:
 
         tar.extract('storages', path=tmpdir)
         with open(os.path.join(tmpdir, 'storages'), 'rb', 0) as f:
@@ -327,7 +327,7 @@ def _load(f, map_location, pickle_module):
             storage_views = pickle_module.load(f)
             for target_cdata, root_cdata, offset, size in storage_views:
                 root = deserialized_objects[root_cdata]
-                deserialized_objects[target_cdata] = root[offset:offset+size]
+                deserialized_objects[target_cdata] = root[offset:offset + size]
 
         tar.extract('tensors', path=tmpdir)
         with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:

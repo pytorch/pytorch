@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class Concat(Container):
 
     def __init__(self, dimension):
@@ -22,9 +23,9 @@ class Concat(Container):
 
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = outs[i]
-           self.output.narrow(self.dimension, offset, currentOutput.size(self.dimension)).copy_(currentOutput)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = outs[i]
+            self.output.narrow(self.dimension, offset, currentOutput.size(self.dimension)).copy_(currentOutput)
+            offset = offset + currentOutput.size(self.dimension)
 
         return self.output
 
@@ -34,9 +35,11 @@ class Concat(Container):
         offset = 0
         for i, module in enumerate(self.modules):
             currentOutput = module.output
-            currentGradInput = module.updateGradInput(input, gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)))
+            currentGradInput = module.updateGradInput(input, gradOutput.narrow(
+                self.dimension, offset, currentOutput.size(self.dimension)))
 
-            if currentGradInput: # if the module does not produce a gradInput (for example first layer),: ignore it and move on.
+            # if the module does not produce a gradInput (for example first layer),: ignore it and move on.
+            if currentGradInput:
                 if i == 0:
                     self.gradInput.copy_(currentGradInput)
                 else:
@@ -46,24 +49,25 @@ class Concat(Container):
 
         return self.gradInput
 
-
     def accGradParameters(self, input, gradOutput, scale=1):
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = module.output
-           module.accGradParameters(
-               input,
-               gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
-               scale)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = module.output
+            module.accGradParameters(
+                input,
+                gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
+                scale)
+            offset = offset + currentOutput.size(self.dimension)
 
     def backward(self, input, gradOutput, scale=1):
         self.gradInput.resize_as_(input)
         offset = 0
         for i, module in enumerate(self.modules):
             currentOutput = module.output
-            currentGradInput = module.backward(input, gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)), scale)
-            if currentGradInput is not None: # if the module.es not produce a gradInput (for example first layer),: ignore it and move on.
+            currentGradInput = module.backward(input, gradOutput.narrow(
+                self.dimension, offset, currentOutput.size(self.dimension)), scale)
+            # if the module.es not produce a gradInput (for example first layer),: ignore it and move on.
+            if currentGradInput is not None:
                 if i == 0:
                     self.gradInput.copy_(currentGradInput)
                 else:
@@ -75,12 +79,12 @@ class Concat(Container):
     def accUpdateGradParameters(self, input, gradOutput, lr):
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = module.output
-           module.accUpdateGradParameters(
-               input,
-               gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
-               lr)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = module.output
+            module.accUpdateGradParameters(
+                input,
+                gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
+                lr)
+            offset = offset + currentOutput.size(self.dimension)
 
     def __tostring__(self):
         tab = '  '
@@ -92,7 +96,7 @@ class Concat(Container):
         res = torch.type(self)
         res += ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-            if i == len(self.modules)-1:
+            if i == len(self.modules) - 1:
                 res += line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
             else:
                 res += line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + ext)

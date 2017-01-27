@@ -1,5 +1,6 @@
 import torch
 
+
 def adamax(opfunc, x, config, state=None):
     """ An implementation of AdaMax http://arxiv.org/pdf/1412.6980.pdf
 

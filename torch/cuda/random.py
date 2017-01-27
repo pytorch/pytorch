@@ -35,4 +35,3 @@ def seed_all():
 def initial_seed():
     _lazy_init()
     return _C._cuda_initialSeed()
-

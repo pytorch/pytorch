@@ -1,5 +1,6 @@
 from .optimizer import Optimizer
 
+
 class Adadelta(Optimizer):
     """Implements Adadelta algorithm.
 
@@ -61,4 +62,3 @@ class Adadelta(Optimizer):
                 acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
 
         return loss
-

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class ReLU6(Module):
 
     def __init__(self, inplace=False):
@@ -16,7 +17,6 @@ class ReLU6(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.HardTanh_updateGradInput(
             self._backend.library_state,
@@ -26,4 +26,3 @@ class ReLU6(Module):
             0, 6, self.inplace
         )
         return self.gradInput
-

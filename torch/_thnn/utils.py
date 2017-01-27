@@ -12,6 +12,7 @@ def _unpickle_backend(backend_name):
 
 
 class THNNBackendBase(object):
+
     def __init__(self):
         self.methods = {}
 
@@ -33,6 +34,7 @@ class THNNBackendBase(object):
 
 
 class Function(object):
+
     def __init__(self, name):
         self.name = name
         self.arguments = []
@@ -46,6 +48,7 @@ class Function(object):
 
 
 class Argument(object):
+
     def __init__(self, _type, name, is_optional):
         self.type = _type
         self.name = name

@@ -20,6 +20,7 @@ except ImportError:
 class StorageRef(object):
     # An object with a cdata field which may be set to None. We subclass object
     # instead of using a dict() to support weak references.
+
     def __init__(self, ptr):
         self.cdata = ptr
 

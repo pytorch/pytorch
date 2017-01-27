@@ -206,6 +206,7 @@ class LSTM(RNNBase):
         >>> c0 = Variable(torch.randn(2, 3, 20))
         >>> output, hn = rnn(input, (h0, c0))
     """
+
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
 
@@ -403,11 +404,11 @@ class LSTMCell(RNNCellBase):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(4*hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(4*hidden_size, hidden_size))
+        self.weight_ih = Parameter(torch.Tensor(4 * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(4 * hidden_size, hidden_size))
         if bias:
-            self.bias_ih = Parameter(torch.Tensor(4*hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(4*hidden_size))
+            self.bias_ih = Parameter(torch.Tensor(4 * hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(4 * hidden_size))
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
@@ -428,7 +429,7 @@ class LSTMCell(RNNCellBase):
 
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
-    
+
     .. math::
 
         \begin{array}{ll}
@@ -472,11 +473,11 @@ class GRUCell(RNNCellBase):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(3*hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(3*hidden_size, hidden_size))
+        self.weight_ih = Parameter(torch.Tensor(3 * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(3 * hidden_size, hidden_size))
         if bias:
-            self.bias_ih = Parameter(torch.Tensor(3*hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(3*hidden_size))
+            self.bias_ih = Parameter(torch.Tensor(3 * hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(3 * hidden_size))
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)

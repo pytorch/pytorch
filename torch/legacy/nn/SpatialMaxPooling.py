@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialMaxPooling(Module):
 
     def __init__(self, kW, kH, dW=None, dH=None, padW=0, padH=0):
@@ -31,12 +32,12 @@ class SpatialMaxPooling(Module):
 
     def updateOutput(self, input):
         if self.indices is None:
-              self.indices = input.new()
+            self.indices = input.new()
         self.indices = self.indices.long()
 
         dims = input.dim()
-        self.iheight = input.size(dims-2)
-        self.iwidth = input.size(dims-1)
+        self.iheight = input.size(dims - 2)
+        self.iwidth = input.size(dims - 1)
 
         self._backend.SpatialMaxPooling_updateOutput(
             self._backend.library_state,

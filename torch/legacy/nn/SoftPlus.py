@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SoftPlus(Module):
 
     def __init__(self, beta=1):
@@ -35,4 +36,3 @@ class SoftPlus(Module):
             self.threshold
         )
         return self.gradInput
-

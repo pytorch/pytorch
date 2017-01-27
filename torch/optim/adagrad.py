@@ -1,5 +1,6 @@
 from .optimizer import Optimizer
 
+
 class Adagrad(Optimizer):
     """Implements Adagrad algorithm.
 
@@ -53,4 +54,3 @@ class Adagrad(Optimizer):
                 p.data.addcdiv_(-clr, grad, std)
 
         return loss
-

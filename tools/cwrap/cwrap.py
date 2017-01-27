@@ -20,13 +20,14 @@ class cwrap(object):
     """)
 
     OPTION_CODE_TEMPLATE = [
-      '$call',
-      '$return_result',
+        '$call',
+        '$return_result',
     ]
 
     FUNCTION_CALL_TEMPLATE = Template("$capture_result$cname($arg_unpack);")
 
-    DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments, ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
+    DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments,
+                              ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
 
     def __init__(self, source, destination=None, plugins=[], default_plugins=True):
         if destination is None:
@@ -87,7 +88,7 @@ class cwrap(object):
                 with open(fname, 'r') as f:
                     included = f.read().split('\n')
                 # insert it into lines at position i+1
-                lines[i+1:i+1] = included
+                lines[i + 1:i + 1] = included
             else:
                 output.append(line)
             i += 1
@@ -136,10 +137,10 @@ class cwrap(object):
         return fallback(*args)
 
     def get_type_check(self, arg, option):
-        return self.search_plugins('get_type_check', (arg, option), lambda arg,_: None)
+        return self.search_plugins('get_type_check', (arg, option), lambda arg, _: None)
 
     def get_type_unpack(self, arg, option):
-        return self.search_plugins('get_type_unpack', (arg, option), lambda arg,_: None)
+        return self.search_plugins('get_type_unpack', (arg, option), lambda arg, _: None)
 
     def get_return_wrapper(self, option):
         return self.search_plugins('get_return_wrapper', (option,), lambda _: self.RETURN_WRAPPERS[option['return']])
@@ -193,14 +194,14 @@ class cwrap(object):
 
         # Generate checks
         arg_checks = self.map_selected_arguments('get_type_check',
-                'process_single_check', option, checked_args)
+                                                 'process_single_check', option, checked_args)
         arg_checks = ' &&\n          '.join(arg_checks)
         for plugin in self.plugins:
             arg_checks = plugin.process_all_checks(arg_checks, option)
 
         # Generate unpacks
         arg_unpack = self.map_selected_arguments('get_type_unpack',
-                'process_single_unpack', option, option['arguments'])
+                                                 'process_single_unpack', option, option['arguments'])
         arg_unpack = ', '.join(arg_unpack)
         for plugin in self.plugins:
             arg_unpack = plugin.process_all_unpacks(arg_unpack, option)
@@ -209,16 +210,16 @@ class cwrap(object):
         try:
             return_result = self.get_return_wrapper(option).substitute()
             call = self.FUNCTION_CALL_TEMPLATE.substitute(capture_result='',
-                    cname=option['cname'], arg_unpack=arg_unpack)
+                                                          cname=option['cname'], arg_unpack=arg_unpack)
         except KeyError:
             return_result = self.get_return_wrapper(option).substitute(result='__result')
             call = self.FUNCTION_CALL_TEMPLATE.substitute(capture_result=(option['return'] + ' __result = '),
-                    cname=option['cname'], arg_unpack=arg_unpack)
+                                                          cname=option['cname'], arg_unpack=arg_unpack)
 
         code_template = deepcopy(self.OPTION_CODE_TEMPLATE)
         for plugin in self.plugins:
             code_template = plugin.process_option_code_template(code_template,
-                    option)
+                                                                option)
         code_template = Template('\n'.join(code_template))
         code = code_template.substitute(call=call, return_result=return_result)
         code_lines = map(lambda s: s.strip(), code.split('\n'))

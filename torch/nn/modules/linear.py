@@ -29,6 +29,7 @@ class Linear(Module):
         >>> output = m(input)
         >>> print(output.size())
     """
+
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__()
         self.in_features = in_features
@@ -41,7 +42,7 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1./math.sqrt(self.weight.size(1))
+        stdv = 1. / math.sqrt(self.weight.size(1))
         self.weight.data.uniform_(-stdv, stdv)
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)

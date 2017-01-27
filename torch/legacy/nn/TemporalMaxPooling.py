@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class TemporalMaxPooling(Module):
 
     def __init__(self, kW, dW=None):
@@ -12,7 +13,7 @@ class TemporalMaxPooling(Module):
 
     def updateOutput(self, input):
         if self.indices is None:
-              self.indices = input.new()
+            self.indices = input.new()
         self._backend.TemporalMaxPooling_updateOutput(
             self._backend.library_state,
             input,
@@ -23,10 +24,9 @@ class TemporalMaxPooling(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
-             return
+            return
         self._backend.TemporalMaxPooling_updateGradInput(
             self._backend.library_state,
             input,
@@ -41,4 +41,3 @@ class TemporalMaxPooling(Module):
     def clearState(self):
         clear(self, 'indices')
         return super(TemporalMaxPooling, self).clearState()
-

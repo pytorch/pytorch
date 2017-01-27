@@ -3,30 +3,31 @@ from copy import deepcopy
 from . import CWrapPlugin
 from itertools import product
 
+
 class CuDNNPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THTensor*':        Template('((THPVoidTensor*)$arg)->cdata'),
-        'int':              Template('THPUtils_unpackLong($arg)'),
+        'THTensor*': Template('((THPVoidTensor*)$arg)->cdata'),
+        'int': Template('THPUtils_unpackLong($arg)'),
         'std::vector<int>': Template('THPUtils_unpackIntTuple($arg)'),
-        'cudnnDataType_t':  Template('$arg'),
-        'cudnnHandle_t':    Template('$arg'),
-        'Convolution*':     Template('(Convolution*)THPWrapper_get($arg)'),
-        'bool':             Template('$arg == Py_True'),
-        'double':           Template('THPDoubleUtils_unpackReal($arg)'),
+        'cudnnDataType_t': Template('$arg'),
+        'cudnnHandle_t': Template('$arg'),
+        'Convolution*': Template('(Convolution*)THPWrapper_get($arg)'),
+        'bool': Template('$arg == Py_True'),
+        'double': Template('THPDoubleUtils_unpackReal($arg)'),
     }
 
     TYPE_CHECK = {
-        'Convolution*':     Template('THPWrapper_check($arg)'),
-        'THTensor*':        Template('(PyObject*)Py_TYPE($arg) == tensorClass'),
-        'int':              Template('THPUtils_checkLong($arg)'),
+        'Convolution*': Template('THPWrapper_check($arg)'),
+        'THTensor*': Template('(PyObject*)Py_TYPE($arg) == tensorClass'),
+        'int': Template('THPUtils_checkLong($arg)'),
         'std::vector<int>': Template('THPUtils_checkIntTuple($arg)'),
-        'bool':             Template('PyBool_Check($arg)'),
-        'double':           Template('THPDoubleUtils_checkReal($arg)'),
+        'bool': Template('PyBool_Check($arg)'),
+        'double': Template('THPDoubleUtils_checkReal($arg)'),
     }
 
     RETURN_WRAPPER = {
-        'Convolution*':     Template('return THPWrapper_New($result, [](void* arg) { delete (Convolution*)arg; });'),
+        'Convolution*': Template('return THPWrapper_New($result, [](void* arg) { delete (Convolution*)arg; });'),
     }
 
     METHODS_DECLARATION = Template("""
@@ -151,8 +152,8 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
             if not declaration.get('only_register'):
                 extra_flags += ' | METH_KEYWORDS'
             entry = Template('  {"$python_name", (PyCFunction)$name, METH_VARARGS$extra_flags, NULL},\n').substitute(
-                    python_name=declaration['python_name'], name=declaration['name'], extra_flags=extra_flags
-                )
+                python_name=declaration['python_name'], name=declaration['name'], extra_flags=extra_flags
+            )
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])
             methods += entry

@@ -35,7 +35,8 @@ class Padding(Module):
             self.output.narrow(dim, 0, input.size(dim)).copy_(input)
         else:
             self.output.narrow(dim, 0, index).copy_(input.narrow(dim, 0, index))
-            self.output.narrow(dim, index + pad, input.size(dim) - index).copy_(input.narrow(dim, index, input.size(dim) - index))
+            self.output.narrow(dim, index + pad, input.size(dim) -
+                               index).copy_(input.narrow(dim, index, input.size(dim) - index))
 
         return self.output
 
@@ -56,6 +57,7 @@ class Padding(Module):
             self.gradInput.copy_(gradOutput.narrow(dim, 0, input.size(dim)))
         else:
             self.gradInput.narrow(dim, 0, index).copy_(gradOutput.narrow(dim, 0, index))
-            self.gradInput.narrow(dim, index, input.size(dim) - index).copy_(gradOutput.narrow(dim, index + pad, input.size(dim) - index))
+            self.gradInput.narrow(dim, index, input.size(
+                dim) - index).copy_(gradOutput.narrow(dim, index + pad, input.size(dim) - index))
 
         return self.gradInput

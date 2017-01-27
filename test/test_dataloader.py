@@ -27,11 +27,12 @@ class TestTensorDataset(TestCase):
         l = torch.randn(15)
         source = TensorDataset(t, l)
         for i in range(15):
-            self.assertEqual(t[i:i+1], source[i][0])
-            self.assertEqual(l[i:i+1], source[i][1])
+            self.assertEqual(t[i:i + 1], source[i][0])
+            self.assertEqual(l[i:i + 1], source[i][1])
 
 
 class ErrorDataset(Dataset):
+
     def __init__(self, size):
         self.size = size
 
@@ -50,9 +51,9 @@ class TestDataLoader(TestCase):
         batch_size = loader.batch_size
         for i, (sample, target) in enumerate(loader):
             idx = i * batch_size
-            self.assertEqual(sample, self.data[idx:idx+batch_size])
-            self.assertEqual(target, self.labels[idx:idx+batch_size].view(-1, 1))
-        self.assertEqual(i, math.floor((len(self.dataset)-1) / batch_size))
+            self.assertEqual(sample, self.data[idx:idx + batch_size])
+            self.assertEqual(target, self.labels[idx:idx + batch_size].view(-1, 1))
+        self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_shuffle(self, loader):
         found_data = {i: 0 for i in range(self.data.size(0))}
@@ -67,9 +68,9 @@ class TestDataLoader(TestCase):
                         break
                 self.assertEqual(target, self.labels.narrow(0, data_point_idx, 1))
                 found_labels[data_point_idx] += 1
-            self.assertEqual(sum(found_data.values()), (i+1) * batch_size)
-            self.assertEqual(sum(found_labels.values()), (i+1) * batch_size)
-        self.assertEqual(i, math.floor((len(self.dataset)-1) / batch_size))
+            self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
+            self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
+        self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_error(self, loader):
         it = iter(loader)
@@ -81,9 +82,8 @@ class TestDataLoader(TestCase):
                 errors += 1
             except StopIteration:
                 self.assertEqual(errors,
-                    math.ceil(float(len(loader.dataset))/loader.batch_size))
+                                 math.ceil(float(len(loader.dataset)) / loader.batch_size))
                 return
-
 
     def test_sequential(self):
         self._test_sequential(DataLoader(self.dataset))

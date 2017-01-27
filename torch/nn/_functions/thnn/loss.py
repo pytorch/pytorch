@@ -34,4 +34,3 @@ class BCELoss(_BCELoss):
 
 
 _all_functions.append(BCELoss)
-

@@ -56,6 +56,7 @@ del old_flags
 # Define basic utilities
 ################################################################################
 
+
 def typename(o):
     module = ''
     class_name = ''
@@ -91,7 +92,7 @@ def set_default_tensor_type(t):
 
 def set_rng_state(new_state):
     r"""Sets the random number generator state.
-    
+
     Args:
         new_state (torch.ByteTensor): The desired state
     """
@@ -106,7 +107,7 @@ def get_rng_state():
 def manual_seed(seed):
     r"""Sets the seed for generating random numbers. And returns a 
     `torch._C.Generator` object.
-    
+
     Args:
         seed (int or long): The desired seed.
     """
@@ -130,61 +131,101 @@ from ._tensor_str import set_printoptions
 from .storage import _StorageBase
 from .tensor import _TensorBase
 
+
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
     pass
+
+
 class FloatStorage(_C.FloatStorageBase, _StorageBase):
     pass
+
+
 class LongStorage(_C.LongStorageBase, _StorageBase):
     pass
+
+
 class IntStorage(_C.IntStorageBase, _StorageBase):
     pass
+
+
 class ShortStorage(_C.ShortStorageBase, _StorageBase):
     pass
+
+
 class CharStorage(_C.CharStorageBase, _StorageBase):
     pass
+
+
 class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
+
 class DoubleTensor(_C.DoubleTensorBase, _TensorBase):
+
     def is_signed(self):
         return True
+
     @classmethod
     def storage_type(cls):
         return DoubleStorage
+
+
 class FloatTensor(_C.FloatTensorBase, _TensorBase):
+
     def is_signed(self):
         return True
+
     @classmethod
     def storage_type(cls):
         return FloatStorage
+
+
 class LongTensor(_C.LongTensorBase, _TensorBase):
+
     def is_signed(self):
         return True
+
     @classmethod
     def storage_type(cls):
         return LongStorage
+
+
 class IntTensor(_C.IntTensorBase, _TensorBase):
+
     def is_signed(self):
         return True
+
     @classmethod
     def storage_type(cls):
         return IntStorage
+
+
 class ShortTensor(_C.ShortTensorBase, _TensorBase):
+
     def is_signed(self):
         return True
+
     @classmethod
     def storage_type(cls):
         return ShortStorage
+
+
 class CharTensor(_C.CharTensorBase, _TensorBase):
+
     def is_signed(self):
         # TODO
         return False
+
     @classmethod
     def storage_type(cls):
         return CharStorage
+
+
 class ByteTensor(_C.ByteTensorBase, _TensorBase):
+
     def is_signed(self):
         return False
+
     @classmethod
     def storage_type(cls):
         return ByteStorage

@@ -42,4 +42,3 @@ class Triu(Function):
         return grad_output.triu(self.diagonal_idx)
 
 # TODO: trace
-

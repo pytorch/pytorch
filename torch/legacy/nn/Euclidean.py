@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Euclidean(Module):
 
     def __init__(self, inputSize, outputSize):
@@ -18,11 +19,11 @@ class Euclidean(Module):
         self.fastBackward = True
         self.reset()
 
-        self._input   = None
-        self._weight  = None
-        self._expand  = None
+        self._input = None
+        self._weight = None
+        self._expand = None
         self._expand2 = None
-        self._repeat  = None
+        self._repeat = None
         self._repeat2 = None
         self._div = None
         self._output = None
@@ -32,32 +33,32 @@ class Euclidean(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1. / math.sqrt(self.weight.size(0))
 
         self.weight.uniform_(-stdv, stdv)
 
     def _view(self, res, src, *args):
         if src.is_contiguous():
-           res.set_(src.view(*args))
+            res.set_(src.view(*args))
         else:
-           res.set_(src.contiguous().view(*args))
+            res.set_(src.contiguous().view(*args))
 
     def updateOutput(self, input):
         # lazy initialize buffers
         if self._input is None:
-              self._input = input.new()
+            self._input = input.new()
         if self._weight is None:
-              self._weight = self.weight.new()
+            self._weight = self.weight.new()
         if self._expand is None:
-              self._expand = self.output.new()
+            self._expand = self.output.new()
         if self._expand2 is None:
-              self._expand2 = self.output.new()
+            self._expand2 = self.output.new()
         if self._repeat is None:
-              self._repeat = self.output.new()
+            self._repeat = self.output.new()
         if self._repeat2 is None:
-              self._repeat2 = self.output.new()
+            self._repeat2 = self.output.new()
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -88,19 +89,19 @@ class Euclidean(Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
-           return
+            return
 
         if self._div is None:
-              self._div = input.new()
+            self._div = input.new()
         if self._output is None:
-              self._output = self.output.new()
+            self._output = self.output.new()
         if self._gradOutput is None:
-              self._gradOutput = input.new()
+            self._gradOutput = input.new()
         if self._expand3 is None:
-              self._expand3 = input.new()
+            self._expand3 = input.new()
 
         if not self.fastBackward:
-           self.updateOutput(input)
+            self.updateOutput(input)
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -126,12 +127,10 @@ class Euclidean(Module):
         else:
             torch.mul(self._repeat, self._expand3, out=self._repeat2)
 
-
         torch.sum(self._repeat2, 2, out=self.gradInput)
         self.gradInput.resize_as_(input)
 
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
@@ -144,32 +143,30 @@ class Euclidean(Module):
         # assumes a preceding call to updateGradInput
         assert input.dim() == 2
         if self._sum is None:
-              self._sum = input.new()
+            self._sum = input.new()
         torch.sum(self._repeat2, 0, out=self._sum)
         self._sum.resize_(inputSize, outputSize)
         self.gradWeight.add_(-scale, self._sum)
 
     def type(self, type=None, tensorCache=None):
         if type:
-           # prevent premature memory allocations
-           self.clearState()
+            # prevent premature memory allocations
+            self.clearState()
 
         return super(Euclidean, self).type(type, tensorCache)
 
-
     def clearState(self):
         clear(self, [
-           '_input',
-           '_output',
-           '_gradOutput',
-           '_weight',
-           '_div',
-           '_sum',
-           '_expand',
-           '_expand2',
-           '_expand3',
-           '_repeat',
-           '_repeat2',
+            '_input',
+            '_output',
+            '_gradOutput',
+            '_weight',
+            '_div',
+            '_sum',
+            '_expand',
+            '_expand2',
+            '_expand3',
+            '_repeat',
+            '_repeat2',
         ])
         return super(Euclidean, self).clearState()
-

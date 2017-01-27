@@ -72,12 +72,12 @@ class Variable(_C._VariableBase):
         if self.creator is not None:
             if value is False:
                 hint = (" If you want to use a computed variable in a subgraph "
-                    "that doesn't require differentiation use "
-                    "var_no_grad = var.detach().")
+                        "that doesn't require differentiation use "
+                        "var_no_grad = var.detach().")
             else:
                 hint = ''
             raise RuntimeError("you can only change requires_grad flags of "
-                    "leaf variables." + hint)
+                               "leaf variables." + hint)
         self._requires_grad = value
 
     def __getattr__(self, name):
@@ -87,13 +87,13 @@ class Variable(_C._VariableBase):
 
     def __getitem__(self, key):
         if (isinstance(key, Variable) and
-            type(key.data).__name__ == 'ByteTensor'):
+                type(key.data).__name__ == 'ByteTensor'):
             return MaskedSelect()(self, key)
         return Index(key)(self)
 
     def __setitem__(self, key, value):
         if (isinstance(key, Variable) and
-            type(key.data).__name__ == 'ByteTensor'):
+                type(key.data).__name__ == 'ByteTensor'):
             if isinstance(value, Variable):
                 return MaskedCopy(inplace=True)(self, key, value)
             else:
@@ -107,9 +107,9 @@ class Variable(_C._VariableBase):
     def __deepcopy__(self, memo):
         if self.creator is not None:
             raise RuntimeError("Only Variables created explicitly by the user "
-                    "(graph leaves) support the deepcopy protocol at the moment")
+                               "(graph leaves) support the deepcopy protocol at the moment")
         result = type(self)(self.data.clone(), requires_grad=self.requires_grad,
-                volatile=self.volatile)
+                            volatile=self.volatile)
         memo[id(self)] = result
         return result
 
@@ -151,7 +151,8 @@ class Variable(_C._VariableBase):
             raise RuntimeError('calling backward on a volatile variable')
         if gradient is None and self.requires_grad:
             if self.data.numel() != 1:
-                raise RuntimeError('backward should be called only on a scalar (i.e. 1-element tensor) or with gradient w.r.t. the variable')
+                raise RuntimeError(
+                    'backward should be called only on a scalar (i.e. 1-element tensor) or with gradient w.r.t. the variable')
             gradient = self.data.new().resize_as_(self.data).fill_(1)
         self._execution_engine.run_backward((self,), (gradient,), retain_variables)
 
@@ -219,7 +220,7 @@ class Variable(_C._VariableBase):
         """
         if not isinstance(self.creator, StochasticFunction):
             raise RuntimeError("reinforce() can be only called on outputs "
-                    "of stochastic functions")
+                               "of stochastic functions")
         self.creator._reinforce(reward)
 
     def detach(self):
@@ -392,7 +393,7 @@ class Variable(_C._VariableBase):
     def clamp(self, min=None, max=None):
         if min is None and max is None:
             raise ValueError("clamp requires specifying at least one of "
-                "min and max arguments")
+                             "min and max arguments")
         elif min is None and max is not None:
             return CminConstant(max)(self)
         elif min is not None and max is None:
@@ -503,7 +504,7 @@ class Variable(_C._VariableBase):
 
     def bmm(self, batch):
         output = Variable(self.data.new(self.data.size(0), self.data.size(1),
-                batch.data.size(2)))
+                                        batch.data.size(2)))
         return self._static_blas(Baddbmm, (output, 0, 1, self, batch), False)
 
     def mv(self, vector):
@@ -622,7 +623,7 @@ class Variable(_C._VariableBase):
         if isinstance(sizes[0], torch.Size):
             if len(sizes) > 1:
                 raise ValueError("expand expects a several ints or a single "
-                        "torch.Size argument")
+                                 "torch.Size argument")
             sizes = sizes[0]
         return Expand(sizes)(self)
 
@@ -641,7 +642,7 @@ class Variable(_C._VariableBase):
 
     def narrow(self, dim, start_index, length):
         index = tuple(slice(None, None) for _ in range(dim)) + \
-                    (slice(start_index, start_index+length),)
+            (slice(start_index, start_index + length),)
 
         return Index(index)(self)
 
@@ -710,7 +711,7 @@ class Variable(_C._VariableBase):
         elif dim_self == 2 and dim_other == 2:
             return self.mm(other)
         raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
-                "but they are {}D and {}D".format(dim_self, dim_other))
+                         "but they are {}D and {}D".format(dim_self, dim_other))
 
     def __div__(self, other):
         return self.div(other)

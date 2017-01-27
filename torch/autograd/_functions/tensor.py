@@ -103,6 +103,7 @@ class View(Function):
 
 
 class Expand(Function):
+
     def __init__(self, sizes):
         super(Expand, self).__init__()
         self.sizes = sizes
@@ -110,8 +111,8 @@ class Expand(Function):
 
     def forward(self, i):
         self.expanded_dims = [dim for dim, (expanded, original)
-                in enumerate(zip(self.sizes, i.size()))
-                if expanded != original]
+                              in enumerate(zip(self.sizes, i.size()))
+                              if expanded != original]
         result = i.expand(*self.sizes)
         self.mark_shared_storage((i, result))
         return result
@@ -304,8 +305,8 @@ class Concat(Function):
         return torch.cat(inputs, self.dim)
 
     def backward(self, grad_output):
-        return tuple(grad_output.narrow(self.dim, end-size, size) for size, end
-                in zip(self.input_sizes, _accumulate(self.input_sizes)))
+        return tuple(grad_output.narrow(self.dim, end - size, size) for size, end
+                     in zip(self.input_sizes, _accumulate(self.input_sizes)))
 
 
 class Resize(Function):
@@ -318,11 +319,11 @@ class Resize(Function):
     def forward(self, tensor):
         if tensor.numel() != self.numel:
             raise RuntimeError(("requested resize to {} ({} elements in total), "
-                    "but the given tensor has a size of {} ({} elements). "
-                    "autograd's resize can only change the shape of a given "
-                    "tensor, while preserving the number of elements. ").format(
-                        'x'.join(map(str, self.sizes)), self.numel,
-                        'x'.join(map(str, tensor.size())), tensor.numel()))
+                                "but the given tensor has a size of {} ({} elements). "
+                                "autograd's resize can only change the shape of a given "
+                                "tensor, while preserving the number of elements. ").format(
+                'x'.join(map(str, self.sizes)), self.numel,
+                'x'.join(map(str, tensor.size())), tensor.numel()))
         self.input_sizes = tensor.size()
         result = tensor.new(tensor).resize_(*self.sizes)
         self.mark_shared_storage((tensor, result))
@@ -493,7 +494,7 @@ class Topk(_MultiSelectionFunction):
         self.sort = sort
 
     def forward(self, input):
-        dim = self.dim if self.dim is not None else input.dim()-1
+        dim = self.dim if self.dim is not None else input.dim() - 1
         self.args = (self.k, dim, self.largest, self.sort)
         return super(Topk, self).forward(input)
 

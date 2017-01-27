@@ -25,14 +25,14 @@ module_tests = [
         module_name='Linear',
         constructor_args=(10, 8),
         input_size=(4, 10),
-        reference_fn=lambda i,p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
+        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
     ),
     dict(
         module_name='Linear',
         constructor_args=(10, 8, False),
         input_size=(4, 10),
         desc='no_bias',
-        reference_fn=lambda i,p: torch.mm(i, p[0].t())
+        reference_fn=lambda i, p: torch.mm(i, p[0].t())
     ),
     dict(
         module_name='Threshold',
@@ -72,7 +72,7 @@ module_tests = [
     dict(
         module_name='Hardtanh',
         input_size=(3, 2, 5),
-        reference_fn=lambda i,_: i.clamp(-1, 1)
+        reference_fn=lambda i, _: i.clamp(-1, 1)
     ),
     dict(
         module_name='Sigmoid',
@@ -85,22 +85,22 @@ module_tests = [
     dict(
         module_name='Softmax',
         input_size=(10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))
     ),
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand_as(i))
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1).expand_as(i))
     ),
     dict(
         module_name='LogSoftmax',
         input_size=(10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
+        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
     ),
     dict(
         module_name='LogSoftmax',
         input_size=(1, 3, 10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand_as(i)).log_(),
+        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1).expand_as(i)).log_(),
         desc='multiparam'
     ),
     dict(
@@ -130,18 +130,18 @@ module_tests = [
     dict(
         module_name='LogSigmoid',
         input_size=(2, 3, 4),
-        reference_fn=lambda i,_: i.sigmoid().log()
+        reference_fn=lambda i, _: i.sigmoid().log()
     ),
     dict(
         module_name='Softplus',
         input_size=(10, 20),
-        reference_fn=lambda i,_: torch.log(1 + torch.exp(i))
+        reference_fn=lambda i, _: torch.log(1 + torch.exp(i))
     ),
     dict(
         module_name='Softplus',
         constructor_args=(2,),
         input_size=(10, 20),
-        reference_fn=lambda i,_: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
+        reference_fn=lambda i, _: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
         desc='beta'
     ),
     dict(
@@ -172,7 +172,7 @@ module_tests = [
     dict(
         module_name='Softsign',
         input_size=(3, 2, 5),
-        reference_fn=lambda i,_: i.div(1 + torch.abs(i))
+        reference_fn=lambda i, _: i.div(1 + torch.abs(i))
     ),
     dict(
         module_name='Softmin',
@@ -187,11 +187,11 @@ module_tests = [
 
 criterion_tests = [
     dict(module_name='L1Loss',
-        input_size=(2, 3, 4),
-        target=torch.randn(2, 3, 4),
-        reference_fn=lambda i,t,_: 1./i.numel() * \
-            sum((a-b).abs().sum() for a,b in zip(i, t))
-    ),
+         input_size=(2, 3, 4),
+         target=torch.randn(2, 3, 4),
+         reference_fn=lambda i, t, _: 1. / i.numel() *
+         sum((a - b).abs().sum() for a, b in zip(i, t))
+         ),
     dict(
         module_name='NLLLoss',
         input=torch.rand(15, 10).log(),
@@ -213,7 +213,7 @@ criterion_tests = [
         module_name='MSELoss',
         input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5),
-        reference_fn=lambda i,t,_: (i-t).abs().pow(2).sum() / i.numel()
+        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel()
     ),
     dict(
         module_name='BCELoss',
@@ -370,9 +370,9 @@ class NNTestCase(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, iter_tensors(d_input)):
-                    jacobian_x[:,i] = d_x
+                    jacobian_x[:, i] = d_x
             if jacobian_parameters:
-                jacobian_param[:,i] = torch.cat(self._flatten_tensors(d_param), 0)
+                jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
         res = tuple()
         if jacobian_input:
@@ -433,7 +433,7 @@ class NNTestCase(TestCase):
                 fx1 = self._forward_criterion(criterion, input, target)
                 x[i] = original - eps
                 fx2 = self._forward_criterion(criterion, input, target)
-                deriv = (fx1 - fx2) / (2.*eps)
+                deriv = (fx1 - fx2) / (2. * eps)
                 d_x[i] = deriv
                 x[i] = original
 
@@ -447,8 +447,9 @@ class NNTestCase(TestCase):
 
 
 class TestBase(object):
+
     def __init__(self, constructor, constructor_args=tuple(), input_size=None,
-            input=None, desc='', reference_fn=None, fullname=None, **kwargs):
+                 input=None, desc='', reference_fn=None, fullname=None, **kwargs):
         if input_size is None and input is None:
             raise RuntimeError("Specify either an input tensor, or it's size!")
         self.constructor = constructor
@@ -496,6 +497,7 @@ class TestBase(object):
 
 
 class ModuleTest(TestBase):
+
     def __init__(self, *args, **kwargs):
         super(ModuleTest, self).__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
@@ -568,6 +570,7 @@ class ModuleTest(TestBase):
 
 
 class CriterionTest(TestBase):
+
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
         self.target = self._get_target(kwargs['target'])
@@ -590,7 +593,7 @@ class CriterionTest(TestBase):
             if isinstance(target, Variable):
                 target = target.data
             expected_out = self.reference_fn(deepcopy(self._unpack_input(input)),
-                    deepcopy(target), module)
+                                             deepcopy(target), module)
             test_case.assertEqual(out, expected_out)
 
         test_case.check_criterion_jacobian(module, input, self.target)

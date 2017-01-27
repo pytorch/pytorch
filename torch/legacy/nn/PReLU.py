@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class PReLU(Module):
 
     def __init__(self, nOutputPlane=0):
@@ -36,9 +37,9 @@ class PReLU(Module):
 
     def accGradParameters(self, input, gradOutput, scale=1):
         if self.gradWeightBuf is None:
-              self.gradWeightBuf = input.new()
+            self.gradWeightBuf = input.new()
         if self.gradWeightBuf2 is None:
-              self.gradWeightBuf2 = input.new()
+            self.gradWeightBuf2 = input.new()
         self._backend.PReLU_accGradParameters(
             self._backend.library_state,
             input,
@@ -56,4 +57,3 @@ class PReLU(Module):
     def clearState(self):
         clear(self, 'gradWeightBuf', 'gradWeightBuf2')
         return super(PReLU, self).clearState()
-

@@ -11,6 +11,7 @@ SparseTensor = sparse.DoubleTensor
 
 
 class TestSparse(TestCase):
+
     @staticmethod
     def _gen_sparse(d, nnz, with_size):
         v = torch.randn(nnz)
@@ -19,7 +20,7 @@ class TestSparse(TestCase):
             x = SparseTensor(i, v)
         else:
             i = torch.rand(d, nnz) * \
-                    torch.Tensor(with_size).repeat(nnz, 1).transpose(0, 1)
+                torch.Tensor(with_size).repeat(nnz, 1).transpose(0, 1)
             i = i.type(torch.LongTensor)
             x = SparseTensor(i, v, torch.Size(with_size))
 
@@ -74,13 +75,13 @@ class TestSparse(TestCase):
 
     def test_contig(self):
         i = torch.LongTensor([
-            [1,  0, 35, 14, 39,  6, 71, 66, 40, 27],
+            [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
             [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
         ])
         v = torch.Tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         x = SparseTensor(i, v, torch.Size([100, 100]))
         exp_i = torch.LongTensor([
-            [0,  1,  6, 14, 27, 35, 39, 40, 66, 71],
+            [0, 1, 6, 14, 27, 35, 39, 40, 66, 71],
             [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
         ])
         exp_v = torch.Tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])

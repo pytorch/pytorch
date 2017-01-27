@@ -1,6 +1,7 @@
 import collections
 from itertools import repeat
 
+
 def _ntuple(n):
     def parse(x):
         if isinstance(x, collections.Iterable):
