@@ -38,7 +38,7 @@ def sgd(opfunc, x, config, state=None):
     nesterov = config.get('nesterov', False)
     lrs = config.get('learningRates', None)
     wds = config.get('weightDecays', None)
-    if not 'evalCounter' in state:
+    if 'evalCounter' not in state:
         state['evalCounter'] = 0
     if nesterov and (mom <= 0 and damp != 0):
         raise ValueError("Nesterov momentum requires a momentum and zero dampening")
@@ -75,7 +75,7 @@ def sgd(opfunc, x, config, state=None):
 
     # (5) parameter update with single or individual learning rates
     if lrs is not None:
-        if not 'deltaParameters' in state:
+        if 'deltaParameters' not in state:
             state['deltaParameters'] = torch.Tensor().type_as(x).resize_as_(dfdx)
 
         state['deltaParameters'].copy_(lrs).mul_(dfdx)

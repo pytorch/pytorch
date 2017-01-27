@@ -144,7 +144,7 @@ def rebuild_variable(data, grad, backward_hooks, requires_grad, volatile):
 
 
 def rebuid_parameter(data, grad, backward_hooks, requires_grad, volatile):
-    assert volatile == False
+    assert volatile is False
     param = Parameter(data, requires_grad=requires_grad)
     param._grad = grad
     if backward_hooks is not None:

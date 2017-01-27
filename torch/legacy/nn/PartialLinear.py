@@ -50,7 +50,7 @@ class PartialLinear(Module):
         return self
 
     def parameters(self):
-        return [self.network.get(0).get(1).weight,     self.bias], \
+        return [self.network.get(0).get(1).weight, self.bias], \
                [self.network.get(0).get(1).gradWeight, self.gradBias]
         # should return only the relevant partition?
 

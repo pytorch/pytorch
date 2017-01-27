@@ -78,7 +78,9 @@ class SpatialSubtractiveNormalization(Module):
     def updateOutput(self, input):
         # compute side coefficients
         dim = input.dim()
-        if input.dim() + 1 != self.coef.dim() or (input.size(dim - 1) != self.coef.size(dim - 1)) or (input.size(dim - 2) != self.coef.size(dim - 2)):
+        if (input.dim() + 1 != self.coef.dim() or
+                (input.size(dim - 1) != self.coef.size(dim - 1)) or
+                (input.size(dim - 2) != self.coef.size(dim - 2))):
             if self.ones is None:
                 self.ones = input.new()
             if self._coef is None:

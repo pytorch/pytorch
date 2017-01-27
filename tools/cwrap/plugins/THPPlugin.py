@@ -199,8 +199,8 @@ ${cpu}
         def format_args(args, var_args=False):
             option_desc = [format_arg(arg, var_args)
                            for arg in args
-                           if not arg.get('ignore_check', False)
-                           and not arg.get('output')]
+                           if not arg.get('ignore_check', False) and
+                           not arg.get('output')]
             output_args = list(filter(lambda a: a.get('output'), args))
             if output_args:
                 if len(output_args) > 1:
@@ -392,12 +392,12 @@ ${cpu}
     def process_full_file(self, code):
         # We have to find a place before all undefs
         idx = code.find('// PUT DEFINITIONS IN HERE PLEASE')
-        return (code[:idx]
-                + self.declare_methods(False, False)
-                + self.declare_methods(True, False)
-                + self.declare_methods(False, True)
-                + self.declare_methods(True, True)
-                + code[idx:]
+        return (code[:idx] +
+                self.declare_methods(False, False) +
+                self.declare_methods(True, False) +
+                self.declare_methods(False, True) +
+                self.declare_methods(True, True) +
+                code[idx:]
                 )
 
     def preprocessor_guard(self, code, condition):

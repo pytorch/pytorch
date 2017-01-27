@@ -269,7 +269,7 @@ class RNNCellBase(Module):
 
     def __repr__(self):
         s = '{name}({input_size}, {hidden_size}'
-        if 'bias' in self.__dict__ and self.bias != True:
+        if 'bias' in self.__dict__ and self.bias is not True:
             s += ', bias={bias}}'
         if 'nonlinearity' in self.__dict__ and self.nonlinearity != "tanh":
             s += ', nonlinearity={nonlinearity}'

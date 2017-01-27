@@ -58,7 +58,7 @@ def nag(opfunc, x, config, state=None):
     clr = lr / (1 + state['evalCounter'] * lrd)
 
     # (4) apply momentum
-    if not 'dfdx' in state:
+    if 'dfdx' not in state:
         state['dfdx'] = dfdx.new().resize_as_(dfdx).zero_()
     else:
         state['dfdx'].mul_(mom)

@@ -35,7 +35,7 @@ def adadelta(opfunc, x, config, state=None):
         dfdx.add_(wd, x)
 
     # (3) parameter update
-    if not 'paramVariance' in state:
+    if 'paramVariance' not in state:
         state['paramVariance'] = x.new().resize_as_(dfdx).zero_()
         state['paramStd'] = x.new().resize_as_(dfdx).zero_()
         state['delta'] = x.new().resize_as_(dfdx).zero_()

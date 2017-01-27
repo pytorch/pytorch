@@ -374,7 +374,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     .. note::
 
@@ -425,8 +425,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
 
-    This module can be seen as the gradient of Conv2d with respect to its input. 
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    This module can be seen as the gradient of Conv2d with respect to its input.
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
@@ -525,8 +525,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
 
-    **This module can be seen as the exact reverse of Conv3d**. 
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    **This module can be seen as the exact reverse of Conv3d**.
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides

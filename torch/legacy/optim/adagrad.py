@@ -36,7 +36,7 @@ def adagrad(opfunc, x, config, state=None):
     clr = lr / (1 + state['evalCounter'] * lrd)
 
     # (4) parameter update with single or individual learning rates
-    if not 'paramVariance' in state:
+    if 'paramVariance' not in state:
         state['paramVariance'] = x.new().resize_as_(dfdx).zero_()
         state['paramStd'] = x.new().resize_as_(dfdx)
 

@@ -41,7 +41,7 @@ def rmsprop(opfunc, x, config, state=None):
         dfdx.add_(wd, x)
 
     # (3) initialize mean square values and square gradient storage
-    if not 'm' in state:
+    if 'm' not in state:
         state['m'] = x.new().resize_as_(dfdx).zero_()
         state['tmp'] = x.new().resize_as_(dfdx)
 

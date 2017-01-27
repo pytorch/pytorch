@@ -44,8 +44,8 @@ class Optimizer(object):
             for i, group in enumerate(self.param_groups):
                 if default is required and name not in group:
                     raise ValueError("parameter group " + str(i) + " didn't "
-                                     "specify a value of required optimization parameter "
-                                     + name)
+                                     "specify a value of required optimization parameter " +
+                                     name)
                 else:
                     group.setdefault(name, default)
 

@@ -41,7 +41,7 @@ def adam(opfunc, x, config, state=None):
         dfdx.add_(wd, x)
 
     # Initialization
-    if not 't' in state:
+    if 't' not in state:
         state['t'] = 0
         # Exponential moving average of gradient values
         state['m'] = x.new().resize_as_(dfdx).zero_()

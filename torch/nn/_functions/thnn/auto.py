@@ -181,7 +181,8 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         return grad_input_tuple + grad_params
 
     base_class = Function if not is_inplace else InplaceFunction
-    return type(class_name, (base_class,), dict(__init__=__init__, forward=forward, backward=backward, _initialize_buffers=_initialize_buffers))
+    return type(class_name, (base_class,), dict(__init__=__init__, forward=forward, backward=backward,
+                                                _initialize_buffers=_initialize_buffers))
 
 
 def _generate_function_classes(scope_dict):

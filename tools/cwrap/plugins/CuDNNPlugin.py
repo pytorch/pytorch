@@ -124,7 +124,8 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 
     def filter_unique_options(self, options):
         def signature(option):
-            return '#'.join(arg['type'] for arg in option['arguments'] if not 'ignore_check' in arg or not arg['ignore_check'])
+            return '#'.join(arg['type'] for arg in option['arguments']
+                            if 'ignore_check' not in arg or not arg['ignore_check'])
         seen_signatures = set()
         unique = []
         for option in options:

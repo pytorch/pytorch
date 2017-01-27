@@ -93,7 +93,7 @@ def wrap_function(name, type, arguments):
             declaration += prefix + TYPE_TRANSFORMS[type].get(arg.type, arg.type) + ' ' + arg.name + '\n'
         else:
             t = TYPE_TRANSFORMS[type].get(arg.type, arg.type)
-            declaration += prefix + 'type: ' + t        + '\n' + \
+            declaration += prefix + 'type: ' + t + '\n' + \
                 dict_indent + 'name: ' + arg.name + '\n' + \
                 dict_indent + 'nullable: True' + '\n'
     declaration += ']]\n\n\n'

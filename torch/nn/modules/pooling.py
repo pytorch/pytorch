@@ -151,7 +151,7 @@ class MaxPool2d(Module):
             if padh != 0 and padw != 0 else ''
         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
                         if dilh != 0 and dilw != 0 else '')
-        return  self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + ' (' \
             + 'size=(' + str(kh) + ', ' + str(kw) + ')' \
             + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
             + padding_str + dilation_str + ')'
@@ -174,7 +174,7 @@ class MaxUnpool1d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in})`
         - Output: :math:`(N, C, H_{out})` where
-          :math:`H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]`          
+          :math:`H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]`
           or as given by :attr:`output_size` in the call operator
 
     Example:

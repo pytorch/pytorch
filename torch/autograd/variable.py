@@ -152,7 +152,8 @@ class Variable(_C._VariableBase):
         if gradient is None and self.requires_grad:
             if self.data.numel() != 1:
                 raise RuntimeError(
-                    'backward should be called only on a scalar (i.e. 1-element tensor) or with gradient w.r.t. the variable')
+                    'backward should be called only on a scalar (i.e. 1-element tensor) '
+                    'or with gradient w.r.t. the variable')
             gradient = self.data.new().resize_as_(self.data).fill_(1)
         self._execution_engine.run_backward((self,), (gradient,), retain_variables)
 

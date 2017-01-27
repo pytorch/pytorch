@@ -3,7 +3,8 @@ from .plugin import Plugin
 
 class Monitor(Plugin):
 
-    def __init__(self, running_average=True, epoch_average=True, smoothing=0.7, precision=None, number_format=None, unit=''):
+    def __init__(self, running_average=True, epoch_average=True, smoothing=0.7,
+                 precision=None, number_format=None, unit=''):
         if precision is None:
             precision = 4
         if number_format is None:
