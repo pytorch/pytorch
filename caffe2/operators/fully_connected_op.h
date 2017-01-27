@@ -63,7 +63,7 @@ class FullyConnectedOp final : public Operator<Context> {
     Y->Resize(Y_shape_cache_);
     CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
 
-    // W * x
+    // X * W^T
     math::Gemm<T, Context, Engine>(
         CblasNoTrans,
         CblasTrans,
