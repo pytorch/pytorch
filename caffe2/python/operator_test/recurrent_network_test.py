@@ -108,7 +108,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 dim_in, dim_out, scope="external/recurrent")
 
         self.lstm(model, create_lstm, t, n, d, lstm_reference,
-                  gradients_to_check=[0, 3, 4])
+                  gradients_to_check=[0, 3, 4], outputs_to_check=[0, 1, 2, 3])
 
     @given(t=st.integers(1, 4),
            n=st.integers(1, 5),
@@ -149,11 +149,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             assert len(result) == 1
             return result[0]
 
-        gates = {gate: extract_param_name(model, gate)
-                 for gate in ["gates_t_b", "gates_t_w"]}
         workspace.RunNetOnce(model.param_init_net)
-
-
         input_blob = op.input[0]
 
         workspace.FeedBlob(
@@ -180,11 +176,11 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         # Checking for input, gates_t_w and gates_t_b gradients
         for param in gradients_to_check:
             self.assertGradientChecks(
-                hu.cpu_do,
-                op,
-                inputs,
-                param,
-                [0],
+                device_option=hu.cpu_do,
+                op=op,
+                inputs=inputs,
+                outputs_to_check=param,
+                outputs_with_grads=[0],
                 threshold=0.01,
             )
 
@@ -248,13 +244,16 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             return (input_grad, np.zeros(shape=[T, n, d]).astype(np.float32))
 
         self.assertReferenceChecks(
-            hu.cpu_do,
-            op,
-            [workspace.FetchBlob(name)
-             for name in [input_blob, one_blob]],
-            reference,
+            device_option=hu.cpu_do,
+            op=op,
+            inputs=[
+                workspace.FetchBlob(name)
+                for name in [input_blob, one_blob]
+            ],
+            reference=reference,
             grad_reference=grad_reference,
             output_to_grad=op.output[0],
+            outputs_to_check=[0, 1],
         )
 
     @given(n=st.integers(1, 10),

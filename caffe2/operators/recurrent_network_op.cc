@@ -1,6 +1,9 @@
 #include "recurrent_network_op.h"
+#include "caffe2/core/workspace.h"
 
 namespace caffe2 {
+CAFFE_KNOWN_TYPE(std::vector<std::shared_ptr<Workspace>>);
+
 namespace {
 REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<float, CPUContext>);
 OPERATOR_SCHEMA(RecurrentNetwork)
