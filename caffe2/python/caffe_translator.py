@@ -1,12 +1,14 @@
 #!/usr/bin/env python2
 
+import argparse
 import copy
 import logging
 import numpy as np
 
 from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
 from caffe.proto import caffe_pb2
-from caffe2.python import core, utils
+from caffe2.python import core, utils, workspace
+from google.protobuf import text_format
 
 logging.basicConfig()
 log = logging.getLogger("caffe_translator")
@@ -475,3 +477,36 @@ def TranslateReshape(layer, pretrained_blobs, is_test):
 def TranslateSigmoid(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Sigmoid")
     return caffe_op, []
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="Utilitity to convert pretrained caffe models to Caffe2 models.")
+    parser.add_argument("prototext", help="Caffe prototext.")
+    parser.add_argument("caffemodel", help="Caffe trained model.")
+    parser.add_argument("--init_net", help="Caffe2 initialization net.", default="init_net.pb")
+    parser.add_argument("--predict_net", help="Caffe2 prediction net.", default="predict_net.pb")
+    args = parser.parse_args()
+
+    caffenet = caffe_pb2.NetParameter()
+    caffenet_pretrained = caffe_pb2.NetParameter()
+    input_proto = args.prototext
+    input_caffemodel = args.caffemodel
+    output_init_net = args.init_net
+    output_predict_net = args.predict_net
+
+    text_format.Merge(
+        open(input_proto).read(), caffenet
+    )
+    caffenet_pretrained.ParseFromString(
+        open(input_caffemodel).read()
+    )
+    net, pretrained_params = TranslateModel(
+        caffenet, caffenet_pretrained, is_test=True
+    )
+    for param in pretrained_params.protos:
+        workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
+    with open(output_predict_net, 'wb') as f:
+        f.write(str(net))
+    with open(output_init_net, 'wb') as f:
+        f.write(pretrained_params.SerializeToString())
