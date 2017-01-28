@@ -519,8 +519,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
     return _functions.thnn.UpsamplingNearest2d(size, scale_factor)(input)
 
 
-def upsample_billinear(input, size=None, scale_factor=None):
-    """Upscales the input, using the billinear upsampling.
+def upsample_bilinear(input, size=None, scale_factor=None):
+    """Upscales the input, using the bilinear upsampling.
 
     Currently only spatial upsampling is supported (i.e. expected inputs
     are 4 dimensional).
@@ -530,4 +530,4 @@ def upsample_billinear(input, size=None, scale_factor=None):
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
-    return _functions.thnn.UpsamplingBillinear2d(size, scale_factor)(input)
+    return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
