@@ -13,7 +13,8 @@ import torch.nn.parallel as dp
 from torch.autograd import Variable
 from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
-    module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PRECISION
+    module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
+    TEST_CUDNN_VERSION, PRECISION
 from common import freeze_rng_state, run_tests
 
 
@@ -973,9 +974,7 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
-    def test_RNN_cpu_vs_cudnn(self):
+    def _test_RNN_cpu_vs_cudnn(self, dropout):
 
         def forward_backward(cuda, rnn, input_val, hx_val, weights_val):
             is_lstm = type(rnn) == nn.LSTM
@@ -1038,16 +1037,26 @@ class TestNN(NNTestCase):
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias in (True, False):
                 for bidirectional in (False, True):
-                    for dropout in (0, 1):  # Because of dropout randomness, can only compare 0 and 1
-                        for batch_first in (False, True):
-                            num_directions = 2 if bidirectional else 1
-                            if batch_first:
-                                input_val = torch.randn(batch, seq_length, input_size)
-                            else:
-                                input_val = torch.randn(seq_length, batch, input_size)
-                            hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
+                    for batch_first in (False, True):
+                        num_directions = 2 if bidirectional else 1
+                        if batch_first:
+                            input_val = torch.randn(batch, seq_length, input_size)
+                        else:
+                            input_val = torch.randn(seq_length, batch, input_size)
+                        hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
 
-                            rnn = module(input_size,
+                        rnn = module(input_size,
+                                     hidden_size,
+                                     num_layers,
+                                     bias=bias,
+                                     dropout=dropout,
+                                     bidirectional=bidirectional,
+                                     batch_first=batch_first)
+
+                        outputs_cpu = forward_backward(
+                            False, rnn, input_val, hx_val, rnn.all_weights)
+
+                        rnn_gpu = module(input_size,
                                          hidden_size,
                                          num_layers,
                                          bias=bias,
@@ -1055,21 +1064,10 @@ class TestNN(NNTestCase):
                                          bidirectional=bidirectional,
                                          batch_first=batch_first)
 
-                            outputs_cpu = forward_backward(
-                                False, rnn, input_val, hx_val, rnn.all_weights)
+                        outputs_gpu = forward_backward(
+                            True, rnn_gpu, input_val, hx_val, rnn.all_weights)
 
-                            rnn_gpu = module(input_size,
-                                             hidden_size,
-                                             num_layers,
-                                             bias=bias,
-                                             dropout=dropout,
-                                             bidirectional=bidirectional,
-                                             batch_first=batch_first)
-
-                            outputs_gpu = forward_backward(
-                                True, rnn_gpu, input_val, hx_val, rnn.all_weights)
-
-                            compare_cpu_gpu(outputs_cpu, outputs_gpu)
+                        compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
         for nonlinearity in ('tanh', 'relu'):
             hx_val = torch.randn(num_layers, batch, hidden_size)
@@ -1084,6 +1082,17 @@ class TestNN(NNTestCase):
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
+    def test_RNN_cpu_vs_cudnn_no_dropout(self):
+        self._test_RNN_cpu_vs_cudnn(0)
+
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
+    def test_RNN_cpu_vs_cudnn_with_dropout(self):
+        # Because of dropout randomness, can only compare dropout=0 and dropout=1
+        self._test_RNN_cpu_vs_cudnn(1)
+
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -1126,7 +1135,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:

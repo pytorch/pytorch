@@ -174,14 +174,24 @@ def _iter_filter(condition):
     return _iter
 
 
+def _unflatten(input, proto):
+    # unflatten a list or tuple input into a nested list/tuple structure
+    # specified by proto
+    def unflatten_helper(input, proto):
+        res = []
+        if not isinstance(proto, (list, tuple)):
+            return input[0], input[1:]
+        for e in proto:
+            res_e, input = unflatten_helper(input, e)
+            res.append(res_e)
+        return type(proto)(res), input
+
+    return unflatten_helper(input, proto)[0]
+
 _iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable))
 _iter_tensors = _iter_filter(torch.is_tensor)
 _iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o))
 _map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable), lambda o: o.data)
-
-
-def _map_tensor_fromiter(itr):
-    return _nested_map(lambda o: torch.is_tensor(o), lambda o: next(itr))
 
 
 class NestedIOFunction(Function):
@@ -191,11 +201,11 @@ class NestedIOFunction(Function):
         flat_input = tuple(_iter_variables(input))
         flat_output = super(NestedIOFunction, self)._do_forward(*flat_input)
         nested_output = self._nested_output
-        nested_variables = _map_tensor_fromiter(iter(flat_output))(self._nested_output)
+        nested_variables = _unflatten(flat_output, self._nested_output)
         return nested_variables
 
     def backward(self, *gradients):
-        nested_gradients = _map_tensor_fromiter(iter(gradients))(self._nested_output)
+        nested_gradients = _unflatten(gradients, self._nested_output)
         del self._nested_output
         result = self.backward_extended(*nested_gradients)
         del self._to_save_nested
@@ -217,7 +227,7 @@ class NestedIOFunction(Function):
     @property
     def saved_tensors(self):
         flat_tensors = super(NestedIOFunction, self).saved_tensors
-        return _map_tensor_fromiter(iter(flat_tensors))(self._to_save_nested)
+        return _unflatten(flat_tensors, self._to_save_nested)
 
     def mark_dirty(self, *args, **kwargs):
         self.dirty_tensors = tuple(_iter_tensors((args, kwargs)))

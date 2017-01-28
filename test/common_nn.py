@@ -18,6 +18,7 @@ else:
 TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
+TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 PRECISION = 1e-5
 
 module_tests = [
