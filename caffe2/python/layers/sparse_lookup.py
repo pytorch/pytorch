@@ -10,8 +10,10 @@ from caffe2.python.layers.layers import (
     LayerParameter,
     ModelLayer,
 )
+import functools
 import math
 import numpy as np
+import operator
 
 
 class SparseLookup(ModelLayer):
@@ -86,6 +88,9 @@ class SparseLookup(ModelLayer):
                                                     ),
                     optimizer=weight_optim
                 ))
+
+    def get_memory_usage(self):
+        return functools.reduce(operator.mul, self.shape) * 4
 
     def add_ops(self, net):
         if schema.equal_schemas(self.input_record, IdList):

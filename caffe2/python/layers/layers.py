@@ -80,6 +80,9 @@ class ModelLayer(object):
     def get_parameters(self):
         return self.params
 
+    def get_memory_usage(self):
+        return 0
+
     def add_operators(self, net, init_net=None,
                       context=InstantiationContext.TRAINING):
         if context != InstantiationContext.PREDICTION:
