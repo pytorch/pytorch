@@ -329,6 +329,12 @@ def ensure_attr(obj, *attrs):
 
 
 @registry_addon
+def make_none_attr(obj, *attrs):
+    for attr in attrs:
+        setattr(obj, attr, None)
+
+
+@registry_addon
 def decrement(obj, *attrs):
     for attr in attrs:
         value = getattr(obj, attr)
@@ -376,8 +382,8 @@ ensure_attr('SpatialClassNLLCriterion', 'weights')
 ensure_attr('ClassNLLCriterion', 'weights')
 ensure_attr('ParallelCriterion', 'repeatTarget')
 ensure_attr('MultiMarginCriterion', 'weights')
-ensure_attr('SpatialConvolution', 'bias', 'finput', 'fgradInput',
-            'gradWeight', 'gradBias', '_gradOutput')
+ensure_attr('SpatialConvolution', 'bias', 'gradWeight', 'gradBias', '_gradOutput')
+make_none_attr('SpatialConvolution', 'finput', 'fgradInput')
 attr_map('ReLU', {'val': 'value'})
 attr_map('Threshold', {'val': 'value'})
 attr_map('Unsqueeze', {'pos': 'dim'})
