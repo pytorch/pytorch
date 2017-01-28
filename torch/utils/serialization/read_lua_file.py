@@ -333,6 +333,7 @@ def make_none_attr(obj, *attrs):
     for attr in attrs:
         setattr(obj, attr, None)
 
+
 @registry_addon
 def decrement(obj, *attrs):
     for attr in attrs:
