@@ -14,6 +14,7 @@ from torch.nn import Parameter
 from common import TestCase, run_tests
 
 
+TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.version_info[0] == 3 and \
@@ -113,7 +114,7 @@ class leak_checker(object):
             # one-off initialization that may use up a file descriptor
             available_fds = self._get_next_fds(10)
             self.test_case.assertLessEqual(
-                available_fds[-1] - self.next_fds[-1], 4)
+                available_fds[-1] - self.next_fds[-1], 5)
             self.test_case.assertFalse(self.has_shm_files())
         return False
 
@@ -229,27 +230,27 @@ class TestMultiprocessing(TestCase):
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_sharing(self):
-        self._test_sharing(repeat=20)
+        self._test_sharing(repeat=TEST_REPEATS)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_preserve_sharing(self):
-        self._test_preserve_sharing(repeat=20)
+        self._test_preserve_sharing(repeat=TEST_REPEATS)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_pool(self):
-        self._test_pool(repeat=20)
+        self._test_pool(repeat=TEST_REPEATS)
 
     def test_fs_sharing(self):
         with fs_sharing():
-            self._test_sharing(repeat=20)
+            self._test_sharing(repeat=TEST_REPEATS)
 
     def test_fs_preserve_sharing(self):
         with fs_sharing():
-            self._test_preserve_sharing(repeat=20)
+            self._test_preserve_sharing(repeat=TEST_REPEATS)
 
     def test_fs_pool(self):
         with fs_sharing():
-            self._test_pool(repeat=20)
+            self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
     def test_fs(self):
@@ -263,7 +264,7 @@ class TestMultiprocessing(TestCase):
             q.get()
 
         with fs_sharing(), leak_checker(self) as lc:
-            for i in range(20):
+            for i in range(TEST_REPEATS):
                 queue_put()
 
     def test_inherit_tensor(self):
