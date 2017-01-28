@@ -4,7 +4,7 @@ from .optimizer import Optimizer
 class Adadelta(Optimizer):
     """Implements Adadelta algorithm.
 
-    It has been proposed in `ADADELTA: An Adaptive Learning Rate Method`_.
+    It has been proposed in `ADADELTA: An Adaptive Learning Rate Method`__.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -17,8 +17,7 @@ class Adadelta(Optimizer):
             parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
-    .. _ADADELTA\: An Adaptive Learning Rate Method:
-        https://arxiv.org/abs/1212.5701
+    __ https://arxiv.org/abs/1212.5701
     """
 
     def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0):

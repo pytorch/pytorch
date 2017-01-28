@@ -369,7 +369,7 @@ Loss functions
     :members:
 
 :hidden:`NLLLoss2d`
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: NLLLoss2d
     :members:

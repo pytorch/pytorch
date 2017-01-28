@@ -1535,9 +1535,11 @@ equations represented by :math:`AX = B`
 If `A` is an `m x m` matrix and `B` is `m x k`,
 the result `LU` is `m x m` and `X` is `m x k` .
 
-.. note:: Irrespective of the original strides, the returned matrices
-          `X` and `LU` will be transposed, i.e. with strides `(1, m)`
-           instead of `(m, 1)`.
+.. note::
+
+    Irrespective of the original strides, the returned matrices
+    `X` and `LU` will be transposed, i.e. with strides `(1, m)`
+    instead of `(m, 1)`.
 
 Args:
     B (Tensor): input matrix of `m x k` dimensions
