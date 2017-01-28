@@ -11,6 +11,9 @@ matrix:
     - os: osx
       compiler: clang
       env: BUILD_TARGET=android
+    - os: osx
+      compiler: clang
+      env: BUILD_TARGET=ios
     - os: linux
       compiler: gcc
       env: COMPILER=g++
@@ -49,6 +52,7 @@ matrix:
     - env: COMPILER=g++-4.9
     - env: COMPILER=g++-4.8
     - env: BUILD_TARGET=android
+    - env: BUILD_TARGET=ios
 
 cache:
   apt: true
