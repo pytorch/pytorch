@@ -3,6 +3,7 @@
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
 #include "common.h"
+#include <THC/THCApply.cuh>
 
 #include <thrust/functional.h>
 
