@@ -51,6 +51,7 @@ option(USE_MPI "Use MPI" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(BUILD_PYTHON "Build python binaries" ON)
+option(BUILD_BINARY "Build c++ binary executives" ON)
 
 # options that do not affect the main binaries, but affects testing binaries
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)

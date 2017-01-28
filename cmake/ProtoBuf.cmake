@@ -1,9 +1,18 @@
 # Finds Google Protocol Buffers library and compilers and extends
 # the standard cmake script with version and python generation support
 
-if (ANDROID)
-  message(WARNING "Android build is not well supported yet.")
-  include(cmake/ProtoBuf_Android.cmake)
+if (ANDROID OR IOS)
+  option(protobuf_BUILD_SHARED_LIBS "" OFF)
+  option(protobuf_BUILD_TESTS "" OFF)
+  option(protobuf_BUILD_EXAMPLES "" OFF)
+  if (APPLE)
+    # Protobuf generated files triggers a deprecated atomic operation warning
+    # so we turn it off here.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
+  endif()
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/protobuf/src)
+  list(APPEND Caffe2_DEPENDENCY_LIBS libprotobuf)
 else()
   find_package( Protobuf REQUIRED )
   list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES})
