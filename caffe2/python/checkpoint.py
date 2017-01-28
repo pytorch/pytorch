@@ -79,29 +79,29 @@ class Job(object):
         self.stop_signals.append(output)
 
 
-class SnapshotManager(object):
+class CheckpointManager(object):
     """
     Controls saving and loading of workspaces on every epoch boundary of a job.
-    If a SnapshotManager instance is passed to JobRunner, then JobRunner will
+    If a CheckpointManager instance is passed to JobRunner, then JobRunner will
     call `init`, `read` and `save` at different moments in between epoch runs.
     """
     def __init__(self, db, db_type):
         self._db = db
         self._db_type = db_type
-        # make sure these blobs are the first in the snapshot file.
-        self._net = core.Net('!!snapshot_mngr')
+        # make sure these blobs are the first in the checkpoint file.
+        self._net = core.Net('!!checkpoint_mngr')
         self._blob_names = self._net.AddExternalInput('blob_names')
         self._names_output = None
 
     def init(self, nodes=None, retrieve_from_epoch=None):
         """
         Build a Task that will be run once after the job's `init_group` is run.
-        This task will determine which blobs need to be snapshoted.
-        If retrieve_from_epoch is not None, then the snapshot metadata is
-        retrieved from a previously saved snapshot.
+        This task will determine which blobs need to be checkpointed.
+        If retrieve_from_epoch is not None, then the checkpoint metadata is
+        retrieved from a previously saved checkpoint.
         """
         assert nodes is None or len(nodes) == 1, (
-            'SnapshotManager only supports single node.')
+            'CheckpointManager only supports single node.')
         net = core.Net('get_blob_list')
         if retrieve_from_epoch is None:
             net.GetAllBlobNames(
@@ -146,20 +146,21 @@ class SnapshotManager(object):
         epoch is run. This will execute a Save ops to serialize and persist
         blobs present in the global workspaace.
         """
-        net = core.Net('snapshot_save')
+        net = core.Net('checkpoint_save')
         net.Save(
             self.blob_list(), [], db=self._dbname(epoch),
             db_type=self._db_type, absolute_path=True)
         return Task(step=net)
 
 
-class MultiNodeSnapshotManager(object):
+class MultiNodeCheckpointManager(object):
     """
-    Coordinates snapshoting and checkpointing across multiple nodes.
+    Coordinates checkpointing and checkpointing across multiple nodes.
     Each of `init`, `load` and `save` will build TaskGroups which will
-    trigger snapshotting on each of the nodes involved in a distributed job.
+    trigger checkpointing on each of the nodes involved in a distributed job.
     """
-    def __init__(self, db_prefix, db_type, node_manager_class=SnapshotManager):
+    def __init__(
+            self, db_prefix, db_type, node_manager_class=CheckpointManager):
         self._node_manager_class = node_manager_class
         self._node_managers = None
         self._db_prefix = db_prefix
@@ -203,17 +204,17 @@ class JobRunner(object):
     runner is a callable to be called once from the client, passing a Session
     as argument. This call will block until the Job execution is complete.
 
-    If a snapshot_manager is passed, snapshots will be taken after
+    If a checkpoint_manager is passed, checkpoints will be taken after
     initialization and after each epoch execution. If, in addition,
-    `resume_from_epoch` is an epoch number, the corresponding snapshot will
+    `resume_from_epoch` is an epoch number, the corresponding checkpoint will
     be loaded and job execution will continue from the given epoch. In
     this case, the job's init_group will not be run.
 
-    Refer to snapshot_test.py for an example.
+    Refer to checkpoint_test.py for an example.
     """
-    def __init__(self, job, snapshot_manager=None, resume_from_epoch=None):
+    def __init__(self, job, checkpoint_manager=None, resume_from_epoch=None):
         self.resume_from_epoch = resume_from_epoch
-        self.snapshot = snapshot_manager
+        self.checkpoint = checkpoint_manager
         self.job = job
 
     def __call__(self, client):
@@ -221,20 +222,20 @@ class JobRunner(object):
         if from_scratch:
             client.run(self.job.init_group)
 
-        if self.snapshot:
-            logger.info('Preparing snapshot ...')
-            client.run(self.snapshot.init(
+        if self.checkpoint:
+            logger.info('Preparing checkpoint ...')
+            client.run(self.checkpoint.init(
                 self.job.init_group.used_nodes(),
                 retrieve_from_epoch=self.resume_from_epoch))
             if from_scratch:
-                logger.info('Saving first snapshot ...')
-                client.run(self.snapshot.save(0))
-                logger.info('First snapshot saved.')
+                logger.info('Saving first checkpoint ...')
+                client.run(self.checkpoint.save(0))
+                logger.info('First checkpoint saved.')
             else:
-                logger.info('Loading snapshot for epoch {} ...'.format(
+                logger.info('Loading checkpoint for epoch {} ...'.format(
                     self.resume_from_epoch))
-                client.run(self.snapshot.load(self.resume_from_epoch))
-                logger.info('Snapshot loaded.')
+                client.run(self.checkpoint.load(self.resume_from_epoch))
+                logger.info('Checkpoint loaded.')
 
         epoch = 1 if from_scratch else self.resume_from_epoch + 1
         while True:
@@ -243,10 +244,10 @@ class JobRunner(object):
             logger.info('Ran epoch %d.' % epoch)
             stop_signals = [o.fetch() for o in self.job.stop_signals]
 
-            if self.snapshot:
-                logger.info('Saving snapshot ...')
-                client.run(self.snapshot.save(epoch))
-                logger.info('Snapshot saved.')
+            if self.checkpoint:
+                logger.info('Saving checkpoint ...')
+                client.run(self.checkpoint.save(epoch))
+                logger.info('Checkpoint saved.')
 
             if any(stop_signals):
                 logger.info('Stopping.')
