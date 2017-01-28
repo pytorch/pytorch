@@ -8,8 +8,8 @@ from caffe2.python import core, workspace
 from caffe2.python.session import LocalSession
 from caffe2.python.dataset import Dataset
 from caffe2.python.pipeline import pipe
-from caffe2.python.snapshot import (
-    SnapshotManager, MultiNodeSnapshotManager, Job, JobRunner)
+from caffe2.python.checkpoint import (
+    CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner)
 from caffe2.python.task import Task, Node
 from caffe2.python.test_util import TestCase
 from caffe2.python.dataio import ReaderWithLimit
@@ -46,7 +46,7 @@ def build_job():
 EXPECTED_TOTALS = [103, 115, 136, 145]
 
 
-class TestSnapshot(TestCase):
+class TestCheckpoint(TestCase):
     def run_with(self, builder):
         job, output_fetcher = build_job()
 
@@ -54,29 +54,29 @@ class TestSnapshot(TestCase):
             session.run(output_fetcher)
             return output_fetcher.outputs()[0].fetch()
 
-        session, snapshot = builder()
-        num_epochs = JobRunner(job, snapshot)(session)
+        session, checkpoint = builder()
+        num_epochs = JobRunner(job, checkpoint)(session)
         self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
         self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
         for initial_epoch in range(1, num_epochs + 1):
-            session, snapshot = builder()
-            JobRunner(job, snapshot, resume_from_epoch=initial_epoch)(session)
+            session, checkpoint = builder()
+            JobRunner(job, checkpoint, resume_from_epoch=initial_epoch)(session)
             self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
         for epoch in range(1, num_epochs + 1):
-            session.run(snapshot.load(epoch))
+            session.run(checkpoint.load(epoch))
             self.assertEquals(fetch_total(session), EXPECTED_TOTALS[epoch - 1])
 
-    def test_single_snapshot(self):
+    def test_single_checkpoint(self):
         # test single node
         with tempfile.NamedTemporaryFile() as tmp:
 
             def builder():
                 ws = workspace.C.Workspace()
                 session = LocalSession(ws)
-                snapshot = SnapshotManager(tmp.name, 'minidb')
-                return session, snapshot
+                checkpoint = CheckpointManager(tmp.name, 'minidb')
+                return session, checkpoint
 
             self.run_with(builder)
 
@@ -87,8 +87,8 @@ class TestSnapshot(TestCase):
             def builder():
                 ws = workspace.C.Workspace()
                 session = LocalSession(ws)
-                snapshot = MultiNodeSnapshotManager(tmpdir, 'minidb')
-                return session, snapshot
+                checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+                return session, checkpoint
 
             self.run_with(builder)
         finally:
