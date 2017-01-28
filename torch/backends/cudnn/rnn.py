@@ -83,7 +83,7 @@ def get_num_weights(handle, rnn_desc, x_desc, datatype):
         datatype
     ))
     elem_size = cudnn._sizeofmap[datatype]
-    assert(weight_size.value % elem_size == 0)
+    assert weight_size.value % elem_size == 0
     return weight_size.value // elem_size
 
 
@@ -142,10 +142,11 @@ def get_parameters(fn, handle, weight_buf):
                     ctypes.byref(nb_dims),
                     ctypes.c_void_p(filter_dim_a.data_ptr())))
 
-                filter_dim_a.resize_(nb_dims.value)
+                assert nb_dims.value <= min_dim
+                filter_dim_a = filter_dim_a[:nb_dims.value]
                 elem_size = cudnn._sizeofmap[fn.datatype]
                 offset_bytes = (matrix_pointer.value - weight_buf.data_ptr())
-                assert(offset_bytes % elem_size == 0)
+                assert offset_bytes % elem_size == 0
                 offset = offset_bytes // elem_size
 
                 # for all the RNN types provided by CUDNN, all the ih weights
@@ -154,13 +155,13 @@ def get_parameters(fn, handle, weight_buf):
                 # Since we're storing all the weights in a single tensor anyway,
                 # might as well merge the CUDNN ones into a single tensor as well
                 if linear_id == 0 or linear_id == num_linear_layers / 2:
-                    assert(filter_dim_a.prod() == filter_dim_a[0])
+                    assert filter_dim_a.prod() == filter_dim_a[0]
                     param = fn.weight_buf.new().set_(
                         weight_buf.storage(), offset,
                         filter_dim_a[0] * num_linear_layers // 2, filter_dim_a[2])
                     layer_params.append(param)
                 else:
-                    assert(cur_offset == offset)
+                    assert cur_offset == offset
 
                 cur_offset = offset + filter_dim_a[0]
 
@@ -172,7 +173,7 @@ def get_parameters(fn, handle, weight_buf):
 def _copyParams(params_from, params_to):
     for layer_params_from, layer_params_to in zip(params_from, params_to):
         for param_from, param_to in zip(layer_params_from, layer_params_to):
-            assert(param_from.type() == param_to.type())
+            assert param_from.type() == param_to.type()
             param_to.copy_(param_from)
 
 
@@ -206,9 +207,9 @@ def forward(fn, input, hx, weight, output, hy):
         output_size = _output_size(fn)
         x = input.contiguous()
         output.resize_(*output_size)
-        hy.resize_(*hidden_size).zero_()
+        hy.resize_(*hidden_size)
         if cy is not None:
-            cy.resize_(*hidden_size).zero_()
+            cy.resize_(*hidden_size)
         y = output
 
         # init descriptors
