@@ -322,8 +322,8 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         y = output
         w = fn.weight_buf
         dx = grad_input.resize_as_(input)
-        dhy = grad_hy.resize_(*hidden_size)
-        dcy = grad_cy.resize_(*hidden_size) if grad_cy is not None else None
+        dhy = grad_hy.contiguous().view(*hidden_size)
+        dcy = grad_cy.contiguous().view(*hidden_size) if grad_cy is not None else None
         dhx = grad_hx.resize_(*hidden_size)
         dcx = grad_cx.resize_(*hidden_size) if grad_cx is not None else None
 

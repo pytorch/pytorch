@@ -187,11 +187,9 @@ class CudnnRNN(NestedIOFunction):
 
         grad_input, grad_weight, grad_hx = None, None, None
 
-        assert(cudnn.is_acceptable(input))
+        assert cudnn.is_acceptable(input)
 
         grad_input = input.new()
-        grad_weight = input.new()
-        grad_hx = input.new()
         if torch.is_tensor(hx):
             grad_hx = input.new()
         else:
