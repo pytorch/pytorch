@@ -7,19 +7,22 @@ except ImportError:
     pass
 
 
-def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hy = F.relu(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
+    xw_ih = input if skip_input else F.linear(input, w_ih, b_ih)
+    hy = F.relu(xw_ih + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
-def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
+    xw_ih = input if skip_input else F.linear(input, w_ih, b_ih)
+    hy = F.tanh(xw_ih + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
-def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
     hx, cx = hidden
-    gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+    xw_ih = input if skip_input else F.linear(input, w_ih, b_ih)
+    gates = xw_ih + F.linear(hx, w_hh, b_hh)
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
     ingate = F.sigmoid(ingate)
@@ -33,8 +36,9 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     return hy, cy
 
 
-def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    gi = F.linear(input, w_ih, b_ih)
+def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
+    xw_ih = input if skip_input else F.linear(input, w_ih, b_ih)
+    gi = xw_ih
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = gi.chunk(3, 1)
     h_r, h_i, h_n = gh.chunk(3, 1)
@@ -47,7 +51,7 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     return hy
 
 
-def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
+def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True, skip_input=False):
 
     num_directions = len(inners)
     total_layers = num_layers * num_directions
@@ -63,8 +67,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
             all_output = []
             for j, inner in enumerate(inners):
                 l = i * num_directions + j
-
-                hy, output = inner(input, hidden[l], weight[l])
+                hy, output = inner(input, hidden[l], weight[l], (i == 0 and skip_input))
                 next_hidden.append(hy)
                 all_output.append(output)
 
@@ -89,11 +92,11 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
 
 
 def Recurrent(inner, reverse=False):
-    def forward(input, hidden, weight):
+    def forward(input, hidden, weight, skip_input=False):
         output = []
         steps = range(input.size(0) - 1, -1, -1) if reverse else range(input.size(0))
         for i in steps:
-            hidden = inner(input[i], hidden, *weight)
+            hidden = inner(input[i], hidden, *weight, skip_input=skip_input)
             # hack to handle LSTM
             output.append(isinstance(hidden, tuple) and hidden[0] or hidden)
 
@@ -107,7 +110,7 @@ def Recurrent(inner, reverse=False):
 
 
 def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
-                dropout=0, train=True, bidirectional=False, dropout_state=None):
+                dropout=0, train=True, bidirectional=False, dropout_state=None, skip_input=False):
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -129,7 +132,8 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
                       num_layers,
                       (mode == 'LSTM'),
                       dropout=dropout,
-                      train=train)
+                      train=train,
+                      skip_input=skip_input)
 
     def forward(input, weight, hidden):
         if batch_first:
@@ -149,12 +153,12 @@ class CudnnRNN(NestedIOFunction):
 
     def __init__(self, mode, input_size, hidden_size, num_layers=1,
                  batch_first=False, dropout=0, train=True, bidirectional=False,
-                 dropout_state=None):
+                 dropout_state=None, skip_input=False):
         super(CudnnRNN, self).__init__()
         if dropout_state is None:
             dropout_state = {}
         self.mode = cudnn.rnn.get_cudnn_mode(mode)
-        self.input_mode = cudnn.CUDNN_LINEAR_INPUT
+        self.input_mode = cudnn.CUDNN_SKIP_INPUT if skip_input else cudnn.CUDNN_LINEAR_INPUT
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers

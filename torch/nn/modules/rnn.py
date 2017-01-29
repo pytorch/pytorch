@@ -9,7 +9,7 @@ class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0, bidirectional=False, skip_input=False):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -21,6 +21,7 @@ class RNNBase(Module):
         self.dropout_state = {}
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
+        self.skip_input = skip_input
 
         self.all_weights = []
         for layer in range(num_layers):
@@ -74,7 +75,8 @@ class RNNBase(Module):
             dropout=self.dropout,
             train=self.training,
             bidirectional=self.bidirectional,
-            dropout_state=self.dropout_state
+            dropout_state=self.dropout_state,
+            skip_input=self.skip_input,
         )
         return func(input, self.all_weights, hx)
 
@@ -118,6 +120,7 @@ class RNN(RNNBase):
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        skip_input: If True, The first MM with the input is skipped for the first layer. Default: False
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
@@ -192,6 +195,7 @@ class LSTM(RNNBase):
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        skip_input: If True, The first MM with the input is skipped for the first layer. Default: False
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
@@ -256,6 +260,7 @@ class GRU(RNNBase):
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        skip_input: If True, The first MM with the input is skipped for the first layer. Default: False
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.

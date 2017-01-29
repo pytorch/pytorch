@@ -198,7 +198,7 @@ def forward(fn, input, hx, weight, output, hy):
                 'input must have 3 dimensions, got {}'.format(input.dim()))
         if fn.input_size != input.size(2):
             raise RuntimeError('input.size(2) must be equal to input_size. Expected {}, got {}'.format(
-                fn.input_size
+                fn.input_size, input.size(2)
             ))
         if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v5.1 and above')

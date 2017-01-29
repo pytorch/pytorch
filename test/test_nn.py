@@ -989,7 +989,7 @@ class TestNN(NNTestCase):
 
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
-        def forward_backward(cuda, rnn, input_val, hx_val, weights_val):
+        def forward_backward(cuda, rnn, input_val, hx_val, weights_val, skip_input=False):
             is_lstm = type(rnn) == nn.LSTM
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
@@ -1051,36 +1051,41 @@ class TestNN(NNTestCase):
             for bias in (True, False):
                 for bidirectional in (False, True):
                     for batch_first in (False, True):
-                        num_directions = 2 if bidirectional else 1
-                        if batch_first:
-                            input_val = torch.randn(batch, seq_length, input_size)
-                        else:
-                            input_val = torch.randn(seq_length, batch, input_size)
-                        hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
+                        for skip_input in (False, True):
+                            num_directions = 2 if bidirectional else 1
+                            if skip_input:
+                                input_val = torch.randn(seq_length, batch, hidden_size)
+                            else:
+                                input_val = torch.randn(seq_length, batch, input_size)
+                            if batch_first:
+                                input_val = input_val.transpose(0, 1).contiguous()
+                            hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
 
-                        rnn = module(input_size,
-                                     hidden_size,
-                                     num_layers,
-                                     bias=bias,
-                                     dropout=dropout,
-                                     bidirectional=bidirectional,
-                                     batch_first=batch_first)
-
-                        outputs_cpu = forward_backward(
-                            False, rnn, input_val, hx_val, rnn.all_weights)
-
-                        rnn_gpu = module(input_size,
+                            rnn = module(hidden_size if skip_input else input_size,
                                          hidden_size,
                                          num_layers,
                                          bias=bias,
                                          dropout=dropout,
                                          bidirectional=bidirectional,
-                                         batch_first=batch_first)
+                                         batch_first=batch_first,
+                                         skip_input=skip_input)
 
-                        outputs_gpu = forward_backward(
-                            True, rnn_gpu, input_val, hx_val, rnn.all_weights)
+                            outputs_cpu = forward_backward(
+                                False, rnn, input_val, hx_val, rnn.all_weights, skip_input)
 
-                        compare_cpu_gpu(outputs_cpu, outputs_gpu)
+                            rnn_gpu = module(hidden_size if skip_input else input_size,
+                                             hidden_size,
+                                             num_layers,
+                                             bias=bias,
+                                             dropout=dropout,
+                                             bidirectional=bidirectional,
+                                             batch_first=batch_first,
+                                             skip_input=skip_input)
+
+                            outputs_gpu = forward_backward(
+                                True, rnn_gpu, input_val, hx_val, rnn.all_weights, skip_input)
+
+                            compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
         for nonlinearity in ('tanh', 'relu'):
             hx_val = torch.randn(num_layers, batch, hidden_size)
