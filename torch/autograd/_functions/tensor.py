@@ -475,7 +475,7 @@ class _MultiSelectionFunction(Function):
 
 class Sort(_MultiSelectionFunction):
 
-    def __init__(self, dim=None, descending=False, return_indices=False):
+    def __init__(self, dim=None, descending=False, return_indices=True):
         super(Sort, self).__init__(dim, return_indices)
         self.descending = descending
 
@@ -487,7 +487,7 @@ class Sort(_MultiSelectionFunction):
 
 class Topk(_MultiSelectionFunction):
 
-    def __init__(self, k, dim=None, largest=True, sort=True, return_indices=False):
+    def __init__(self, k, dim=None, largest=True, sort=True, return_indices=True):
         super(Topk, self).__init__(dim, return_indices)
         self.k = k
         self.largest = largest
