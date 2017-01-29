@@ -35,24 +35,23 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+    assert(dstIndex < dstCopyDimSize);
 
-    if (dstIndex < dstCopyDimSize) {
-      // We stride over the output ignoring the indexed dimension
-      // (innerSize), whose offset calculation is handled differently
-      for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-           linearIndex < innerSize;
-           linearIndex += gridDim.x * blockDim.x) {
-        IndexType dstOffset =
-          IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
+    // We stride over the output ignoring the indexed dimension
+    // (innerSize), whose offset calculation is handled differently
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < innerSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      IndexType dstOffset =
+        IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
 
-        dstOffset += dstIndex * dst.strides[dstCopyDim];
+      dstOffset += dstIndex * dst.strides[dstCopyDim];
 
-        IndexType srcOffset =
-          IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
-        srcOffset += srcIndex * src.strides[srcCopyDim];
+      IndexType srcOffset =
+        IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
+      srcOffset += srcIndex * src.strides[srcCopyDim];
 
-        dst.data[dstOffset] = src.data[srcOffset];
-      }
+      dst.data[dstOffset] = src.data[srcOffset];
     }
   }
 }
@@ -82,18 +81,17 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+    assert(dstIndex < dstCopyDimSize);
 
-    if (dstIndex < dstCopyDimSize) {
-      IndexType dstOffset =
-        IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
-      dstOffset += dstIndex * dst.strides[dstCopyDim];
+    IndexType dstOffset =
+      IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstCopyDim];
 
-      IndexType srcOffset =
-        IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
-      srcOffset += srcIndex * src.strides[srcCopyDim];
+    IndexType srcOffset =
+      IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcCopyDim];
 
-      dst.data[dstOffset] = src.data[srcOffset];
-    }
+    dst.data[dstOffset] = src.data[srcOffset];
   }
 }
 
@@ -120,23 +118,22 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+    assert(dstIndex < dstAddDimSize);
 
-    if (dstIndex < dstAddDimSize) {
-      // We stride over the output ignoring the indexed dimension
-      // (innerSize), whose offset calculation is handled differently
-      for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-           linearIndex < innerSize;
-           linearIndex += gridDim.x * blockDim.x) {
-        IndexType dstOffset =
-          IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
-        dstOffset += dstIndex * dst.strides[dstAddDim];
+    // We stride over the output ignoring the indexed dimension
+    // (innerSize), whose offset calculation is handled differently
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < innerSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      IndexType dstOffset =
+        IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
+      dstOffset += dstIndex * dst.strides[dstAddDim];
 
-        IndexType srcOffset =
-          IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
-        srcOffset += srcIndex * src.strides[srcAddDim];
+      IndexType srcOffset =
+        IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
+      srcOffset += srcIndex * src.strides[srcAddDim];
 
-        atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
-      }
+      atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
     }
   }
 }
@@ -166,18 +163,17 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+    assert(dstIndex < dstAddDimSize);
 
-    if (dstIndex < dstAddDimSize) {
-      IndexType dstOffset =
-        IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
-      dstOffset += dstIndex * dst.strides[dstAddDim];
+    IndexType dstOffset =
+      IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstAddDim];
 
-      IndexType srcOffset =
-        IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
-      srcOffset += srcIndex * src.strides[srcAddDim];
+    IndexType srcOffset =
+      IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcAddDim];
 
-      atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
-    }
+    atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
   }
 }
 
@@ -203,19 +199,18 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+    assert(dstIndex < dstFillDimSize);
 
-    if (dstIndex < dstFillDimSize) {
-      // We stride over the output ignoring the indexed dimension
-      // (innerSize), whose offset calculation is handled differently
-      for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-           linearIndex < innerSize;
-           linearIndex += gridDim.x * blockDim.x) {
-        IndexType dstOffset =
+    // We stride over the output ignoring the indexed dimension
+    // (innerSize), whose offset calculation is handled differently
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < innerSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      IndexType dstOffset =
           IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
-        dstOffset += dstIndex_ * dst.strides[dstFillDim];
+      dstOffset += dstIndex_ * dst.strides[dstFillDim];
 
-        dst.data[dstOffset] = val;
-      }
+      dst.data[dstOffset] = val;
     }
   }
 }
@@ -244,14 +239,13 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+    assert(dstIndex_ < dstFillDimSize);
 
-    if (dstIndex_ < dstFillDimSize) {
-      IndexType dstOffset =
-        IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
-      dstOffset += dstIndex_ * dst.strides[dstFillDim];
+    IndexType dstOffset =
+      IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex_ * dst.strides[dstFillDim];
 
-      dst.data[dstOffset] = val;
-    }
+    dst.data[dstOffset] = val;
   }
 }
 
@@ -278,23 +272,22 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+    assert(srcIndex < srcSelectDimSize);
 
-    if (srcIndex < srcSelectDimSize) {
-      // We stride over the output ignoring the indexed dimension
-      // (innerSize), whose offset calculation is handled differently
-      for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-           linearIndex < innerSize;
-           linearIndex += gridDim.x * blockDim.x) {
-        IndexType dstOffset =
-          IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
-        dstOffset += dstIndex * dst.strides[dstSelectDim];
+    // We stride over the output ignoring the indexed dimension
+    // (innerSize), whose offset calculation is handled differently
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < innerSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      IndexType dstOffset =
+        IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
+      dstOffset += dstIndex * dst.strides[dstSelectDim];
 
-        IndexType srcOffset =
-          IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
-        srcOffset += srcIndex * src.strides[srcSelectDim];
+      IndexType srcOffset =
+        IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
+      srcOffset += srcIndex * src.strides[srcSelectDim];
 
-        dst.data[dstOffset] = src.data[srcOffset];
-      }
+      dst.data[dstOffset] = src.data[srcOffset];
     }
   }
 }
@@ -325,18 +318,17 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+    assert(srcIndex < srcSelectDimSize);
 
-    if (srcIndex < srcSelectDimSize) {
-      IndexType dstOffset =
-        IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
-      dstOffset += dstIndex * dst.strides[dstSelectDim];
+    IndexType dstOffset =
+      IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstSelectDim];
 
-      IndexType srcOffset =
-        IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
-      srcOffset += srcIndex * src.strides[srcSelectDim];
+    IndexType srcOffset =
+      IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcSelectDim];
 
-      dst.data[dstOffset] = src.data[srcOffset];
-    }
+    dst.data[dstOffset] = src.data[srcOffset];
   }
 }
 
