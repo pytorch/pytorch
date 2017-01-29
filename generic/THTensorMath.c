@@ -2043,7 +2043,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   long offset;
   int maxDim = dimension + 1;
   int allEmpty = 1;
-  int allContiguous;
+  int allContiguous = 1;
   int ldimension = dimension;
 
   for (i = 0; i < numInputs; i++)
