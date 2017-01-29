@@ -568,9 +568,22 @@ class Scatter(InplaceFunction):
         return grad_input, None, grad_source
 
 
-# TODO: kthvalue
-# TODO: repeat
-# TODO: sort
-# TODO: split
-# TODO: topk
+class Repeat(Function):
+
+    def __init__(self, repeats):
+        super(Repeat, self).__init__()
+        self.repeats = repeats
+
+    def forward(self, input):
+        return input.repeat(self.repeats)
+
+    def backward(self, grad_output):
+        grad_input = grad_output
+        for dim, repeat in enumerate(self.repeats):
+            if repeat == 1:
+                continue
+            grad_input = sum(grad_input.chunk(repeat, dim))
+        return grad_input
+
+
 # TODO: unfold

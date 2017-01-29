@@ -484,6 +484,40 @@ class Variable(_C._VariableBase):
     def view_as(self, tensor):
         return View(*tensor.size())(self)
 
+    def split(self, split_size, dim=0):
+        return torch.split(self, split_size, dim)
+
+    def chunk(self, n_chunks, dim=0):
+        return torch.chunk(self, n_chunks, dim)
+
+    def repeat(self, *repeats):
+        if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
+            repeats = repeats[0]
+        else:
+            repeats = torch.Size(repeats)
+        return Repeat(repeats)(self)
+
+    def var(self, dim=None, unbiased=True):
+        mean = self.mean(dim)
+        if dim is None:
+            mean = mean.view(*(1 for s in self.size()))
+        mean_expanded = mean.expand_as(self)
+        zero_centered = self.sub(mean_expanded)
+        var = zero_centered.mul(zero_centered).sum(dim)
+        numel = self.numel() if dim is None else self.size(dim)
+        return var.div(numel - int(unbiased))
+
+    def std(self, dim=None, unbiased=True):
+        return self.var(dim, unbiased).sqrt()
+
+    def renorm(self, norm_type, dim, maxnorm):
+        t = self.transpose(dim, 0)
+        flat = t.contiguous().view(self.size(0), -1)
+        norms = flat.norm(norm_type, 1)
+        norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
+        flat_out = flat.mul(norms.expand_as(flat))
+        return flat_out.view(t.size()).transpose(dim, 0)
+
     @staticmethod
     def _static_blas(cls, args, inplace):
         num_args = len(args)
@@ -674,6 +708,42 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Bernoulli()(self)
 
+    def eq(self, other):
+        if isinstance(other, Variable):
+            return Eq()(self, other)
+        assert not torch.is_tensor(other), "can't compare Variable and tensor"
+        return Eq(other)(self)
+
+    def ne(self, other):
+        if isinstance(other, Variable):
+            return Ne()(self, other)
+        assert not torch.is_tensor(other), "can't compare Variable and tensor"
+        return Ne(other)(self)
+
+    def gt(self, other):
+        if isinstance(other, Variable):
+            return Gt()(self, other)
+        assert not torch.is_tensor(other), "can't compare Variable and tensor"
+        return Gt(other)(self)
+
+    def ge(self, other):
+        if isinstance(other, Variable):
+            return Ge()(self, other)
+        assert not torch.is_tensor(other), "can't compare Variable and tensor"
+        return Ge(other)(self)
+
+    def lt(self, other):
+        if isinstance(other, Variable):
+            return Lt()(self, other)
+        assert not torch.is_tensor(other), "can't compare Variable and tensor"
+        return Lt(other)(self)
+
+    def le(self, other):
+        if isinstance(other, Variable):
+            return Le()(self, other)
+        assert not torch.is_tensor(other), "can't compare Variable and tensor"
+        return Le(other)(self)
+
     def __add__(self, other):
         return self.add(other)
     __radd__ = __add__
@@ -743,23 +813,26 @@ class Variable(_C._VariableBase):
     def __iter__(self):
         return iter(map(lambda i: self[i], range(self.size(0))))
 
+    def __mod__(self, other):
+        return self.remainder(other)
+
     def __eq__(self, other):
-        raise TypeError("Variables are not comparable yet.")
+        return self.eq(other)
 
     def __ne__(self, other):
-        raise TypeError("Variables are not comparable yet.")
+        return self.ne(other)
 
     def __lt__(self, other):
-        raise TypeError("Variables are not comparable yet.")
+        return self.lt(other)
 
     def __le__(self, other):
-        raise TypeError("Variables are not comparable yet.")
+        return self.le(other)
 
     def __gt__(self, other):
-        raise TypeError("Variables are not comparable yet.")
+        return self.gt(other)
 
     def __ge__(self, other):
-        raise TypeError("Variables are not comparable yet.")
+        return self.ge(other)
 
     def __hash__(self):
         return id(self)
