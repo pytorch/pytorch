@@ -146,7 +146,7 @@ class TestAutograd(TestCase):
         v.backward(grad_output)
         self.assertEqual(v.grad.data, grad_output)
 
-        a = x + (y * z) + 4 * z**2 * x / y
+        a = x + (y * z) + 4 * z ** 2 * x / y
         a.backward(grad_output)
         x_grad = 4 * z_t.pow(2) / y_t + 1
         y_grad = z_t - 4 * x_t * z_t.pow(2) / y_t.pow(2)

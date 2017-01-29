@@ -20,4 +20,4 @@ from .sparse import Embedding
 from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
-from .upsampling import UpsamplingNearest2d, UpsamplingBillinear2d
+from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d

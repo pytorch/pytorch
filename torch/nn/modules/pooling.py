@@ -161,9 +161,16 @@ class MaxUnpool1d(Module):
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     :class:`MaxPool1d` is not fully invertible, since the non-maximal values are lost.
+
     :class:`MaxUnpool1d` takes in as input the output of :class:`MaxPool1d`
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
+
+    .. note:: `MaxPool1d` can map several input sizes to the same output sizes.
+              Hence, the inversion process can get ambiguous.
+              To accommodate this, you can provide the needed output size
+              as an additional argument `output_size` in the forward call.
+              See the Inputs and Example below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
@@ -171,13 +178,19 @@ class MaxUnpool1d(Module):
             It is set to ``kernel_size`` by default.
         padding (int or tuple): Padding that was added to the input
 
+    Inputs:
+        - `input`: the input Tensor to invert
+        - `indices`: the indices given out by `MaxPool1d`
+        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
+
     Shape:
         - Input: :math:`(N, C, H_{in})`
         - Output: :math:`(N, C, H_{out})` where
           :math:`H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]`
           or as given by :attr:`output_size` in the call operator
 
-    Example:
+    Example::
+
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
         >>> input = Variable(torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8]]]))
@@ -187,6 +200,22 @@ class MaxUnpool1d(Module):
         (0 ,.,.) =
            0   2   0   4   0   6   0   8
         [torch.FloatTensor of size 1x1x8]
+
+        >>> # Example showcasing the use of output_size
+        >>> input = Variable(torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8, 9]]]))
+        >>> output, indices = pool(input)
+        >>> unpool(output, indices, output_size=input.size())
+        Variable containing:
+        (0 ,.,.) =
+           0   2   0   4   0   6   0   8   0
+        [torch.FloatTensor of size 1x1x9]
+
+        >>> unpool(output, indices)
+        Variable containing:
+        (0 ,.,.) =
+           0   2   0   4   0   6   0   8
+        [torch.FloatTensor of size 1x1x8]
+
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -204,15 +233,27 @@ class MaxUnpool2d(Module):
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     :class:`MaxPool2d` is not fully invertible, since the non-maximal values are lost.
+
     :class:`MaxUnpool2d` takes in as input the output of :class:`MaxPool2d`
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
+
+    .. note:: `MaxPool2d` can map several input sizes to the same output sizes.
+              Hence, the inversion process can get ambiguous.
+              To accommodate this, you can provide the needed output size
+              as an additional argument `output_size` in the forward call.
+              See the Inputs and Example below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
             It is set to ``kernel_size`` by default.
         padding (int or tuple): Padding that was added to the input
+
+    Inputs:
+        - `input`: the input Tensor to invert
+        - `indices`: the indices given out by `MaxPool2d`
+        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -221,7 +262,8 @@ class MaxUnpool2d(Module):
           :math:`W_{out} = (W_{in} - 1) * stride[1] -2 * padding[1] + kernel\_size[1]`
           or as given by :attr:`output_size` in the call operator
 
-    Example:
+    Example::
+
         >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool2d(2, stride=2)
         >>> input = Variable(torch.Tensor([[[[ 1,  2,  3,  4],
@@ -237,6 +279,18 @@ class MaxUnpool2d(Module):
            0   0   0   0
            0  14   0  16
         [torch.FloatTensor of size 1x1x4x4]
+
+        >>> # specify a different output size than input size
+        >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
+        Variable containing:
+        (0 ,0 ,.,.) =
+           0   0   0   0   0
+           6   0   8   0   0
+           0   0   0  14   0
+          16   0   0   0   0
+           0   0   0   0   0
+        [torch.FloatTensor of size 1x1x5x5]
+
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -258,11 +312,22 @@ class MaxUnpool3d(Module):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
+    .. note:: `MaxPool3d` can map several input sizes to the same output sizes.
+              Hence, the inversion process can get ambiguous.
+              To accommodate this, you can provide the needed output size
+              as an additional argument `output_size` in the forward call.
+              See the Inputs section below.
+
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
             It is set to ``kernel_size`` by default.
         padding (int or tuple): Padding that was added to the input
+
+    Inputs:
+        - `input`: the input Tensor to invert
+        - `indices`: the indices given out by `MaxPool3d`
+        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
@@ -273,6 +338,7 @@ class MaxUnpool3d(Module):
           or as given by :attr:`output_size` in the call operator
 
     Example::
+
         >>> # pool of square window of size=3, stride=2
         >>> pool = nn.MaxPool3d(3, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool3d(3, stride=2)

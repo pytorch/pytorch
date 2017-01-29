@@ -62,7 +62,7 @@ class UpsamplingNearest2d(_UpsamplingBase):
         return grad_input
 
 
-class UpsamplingBillinear2d(_UpsamplingBase):
+class UpsamplingBilinear2d(_UpsamplingBase):
 
     def forward(self, input):
         assert input.dim() == 4
@@ -108,4 +108,4 @@ class UpsamplingBillinear2d(_UpsamplingBase):
 
 
 _all_functions.append(UpsamplingNearest2d)
-_all_functions.append(UpsamplingBillinear2d)
+_all_functions.append(UpsamplingBilinear2d)

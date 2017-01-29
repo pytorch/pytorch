@@ -52,10 +52,10 @@ class ClassSimplexCriterion(MSECriterion):
             if k == 0:
                 a[k][k] = 1
             else:
-                a[k][k] = math.sqrt(1 - a[k:k + 1, 0:k + 1].norm()**2)
+                a[k][k] = math.sqrt(1 - a[k:k + 1, 0:k + 1].norm() ** 2)
 
             # fill_ the k-th coordinates for the vectors of the remaining vertices
-            c = (a[k][k]**2 - 1 - 1 / n) / a[k][k]
+            c = (a[k][k] ** 2 - 1 - 1 / n) / a[k][k]
             a[k + 1:n + 2, k:k + 1].fill_(c)
 
         return a
