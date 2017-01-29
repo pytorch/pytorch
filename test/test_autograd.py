@@ -233,10 +233,6 @@ class TestAutograd(TestCase):
         self.assertEqual(x[1:2, 2], y[1:2, 2].data)
         self.assertEqual(x[1, 2:], y[1, 2:].data)
 
-    def test_compare(self):
-        x = Variable(torch.randn(5, 5))
-        self.assertRaises(TypeError, lambda: x > 4)
-
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))
         y = Variable(torch.randn(5, 5))
@@ -808,6 +804,7 @@ function_tests = [
     (Addr, (0.1, 0.4), ((S, M), (S,), (M,)), 'coef'),
     (Dot, (), ((L,), (L,)),),
     (Max, (), ((S, S, S),),),
+    (Repeat, (torch.Size([2, 3, 1, 4]),), ((S, S, S, S),)),
     (Min, (), ((S, S, S),),),
     (Max, (0,), ((S, S, S),), 'dim'),
     (Min, (0,), ((S, S, S),), 'dim'),
@@ -911,6 +908,13 @@ method_tests = [
     ('sum', (S, S, S), (1,), 'dim'),
     ('prod', (S, S, S), ()),
     ('prod', (S, S, S), (1,), 'dim'),
+    ('var', (S, S, S), ()),
+    ('var', (S, S, S), (1,), 'dim'),
+    ('std', (S, S, S), ()),
+    ('std', (S, S, S), (1,), 'dim'),
+    ('renorm', (S, S, S), (2, 1, 0.5)),
+    ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
+    ('repeat', (S, S, S, S), (2, 3, 1, 4)),
     ('addmm', (S, M), ((S, S), (S, M)),),
     ('addmm', (S, M), (0.2, 0.6, (S, S), (S, M)), 'coef'),
     ('addbmm', (S, M), ((S, S, S), (S, S, M)),),
@@ -936,6 +940,18 @@ method_tests = [
     ('tril', (M, M), ()),
     ('triu', (M, M), ()),
     ('clone', (S, M, S), ()),
+    ('eq', (S, S, S), ((S, S, S),)),
+    ('ne', (S, S, S), ((S, S, S),)),
+    ('gt', (S, S, S), ((S, S, S),)),
+    ('ge', (S, S, S), ((S, S, S),)),
+    ('lt', (S, S, S), ((S, S, S),)),
+    ('le', (S, S, S), ((S, S, S),)),
+    ('eq', (S, S, S), (0,), 'scalar'),
+    ('ne', (S, S, S), (0,), 'scalar'),
+    ('gt', (S, S, S), (0,), 'scalar'),
+    ('ge', (S, S, S), (0,), 'scalar'),
+    ('lt', (S, S, S), (0,), 'scalar'),
+    ('le', (S, S, S), (0,), 'scalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
     ('select', (S, S, S), (1, 2)),
     ('narrow', (S, S, S), (1, 2, 2)),
