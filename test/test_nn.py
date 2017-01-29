@@ -974,6 +974,19 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
+    def test_rnn_initial_hidden_state(self):
+        rnn_modes = ['RNN', 'GRU', 'LSTM']
+        for mode in rnn_modes:
+            rnn = getattr(nn, mode)(30, 20, 2)
+            input = Variable(torch.randn(10, 32, 30))
+            hidden = Variable(torch.Tensor(2, 32, 20).zero_())
+            if mode is 'LSTM':
+                hidden = (hidden, hidden)
+            output1, hidden1 = rnn(input, hidden)
+            output2, hidden2 = rnn(input)
+            self.assertEqual(output1, output2)
+            self.assertEqual(hidden1, hidden2)
+
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
         def forward_backward(cuda, rnn, input_val, hx_val, weights_val):
