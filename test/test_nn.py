@@ -980,7 +980,7 @@ class TestNN(NNTestCase):
             rnn = getattr(nn, mode)(30, 20, 2)
             input = Variable(torch.randn(10, 32, 30))
             hidden = Variable(torch.Tensor(2, 32, 20).zero_())
-            if (mode == 'LSTM'):
+            if mode is 'LSTM':
                 hidden = (hidden, hidden)
             output1, hidden1 = rnn(input, hidden)
             output2, hidden2 = rnn(input)
