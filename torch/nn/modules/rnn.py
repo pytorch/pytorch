@@ -103,7 +103,7 @@ class RNN(RNNBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        num_layers: the size of the convolving kernel.
+        num_layers: Number of recurrent layers.
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
@@ -111,14 +111,14 @@ class RNN(RNNBase):
         bidirectional: If True, becomes a bidirectional RNN. Default: False
 
     Inputs: input, h_0
-        - `input`: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0`: A ((num_layers * num_directions) x batch x hidden_size) tensor containing the initial hidden state
-                 for each element in the batch.
+        - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
+        - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial hidden state
+          for each element in the batch.
 
     Outputs: output, h_n
-        - `output`: A (seq_len x batch x hidden_size) tensor containing the output features (h_k)
-                    from the last layer of the RNN, for each k
-        - `h_n`: A (num_layers x batch x hidden_size) tensor containing the hidden state for k=seq_len
+        - **output** (seq_len, batch, hidden_size * num_directions): tensor containing the output features (h_k)
+          from the last layer of the RNN, for each k.
+        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for k=seq_len.
 
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
@@ -178,24 +178,25 @@ class LSTM(RNNBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        num_layers: the size of the convolving kernel.
+        num_layers: Number of recurrent layers.
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
 
-    Inputs: `input, (h_0, c_0)`
-        - `input` : A (seq_len x batch x input_size) tensor containing the features of the input sequence.
-        - `h_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing
-                  the initial hidden state for each element in the batch.
-        - `c_0` : A ((num_layers * num_directions) x batch x hidden_size) tensor containing
-                  the initial cell state for each element in the batch.
+    Inputs: input, (h_0, c_0)
+        - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
+        - **h_0** (num_layers \* num_directions, batch, hidden_size): tensor containing
+          the initial hidden state for each element in the batch.
+        - **c_0** (num_layers \* num_directions, batch, hidden_size): tensor containing
+          the initial cell state for each element in the batch.
+
 
     Outputs: output, (h_n, c_n)
-        - `output` : A (seq_len x batch x hidden_size) tensor containing the output features `(h_t)` from the last layer
-                     of the RNN, for each t
-        - `h_n` : A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
-        - `c_n` : A (num_layers x batch x hidden_size) tensor containing the cell state for t=seq_len
+        - **output** (seq_len, batch, hidden_size * num_directions): tensor containing
+          the output features `(h_t)` from the last layer of the RNN, for each t.
+        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
+        - **c_n** (num_layers * num_directions, batch, hidden_size): tensor containing the cell state for t=seq_len
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ir|W_ii|W_in)`, of shape
@@ -241,21 +242,21 @@ class GRU(RNNBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        num_layers: the size of the convolving kernel.
+        num_layers: Number of recurrent layers.
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
 
-    Inputs: `input, h_0`
-        - `input` : A `(seq_len x batch x input_size)` tensor containing the features of the input sequence.
-        - `h_0` : A `((num_layers * num_directions) x batch x hidden_size)` tensor containing the initial
-                  hidden state for each element in the batch.
+    Inputs: input, h_0
+        - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
+        - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial
+          hidden state for each element in the batch.
 
-    Outputs: `output, h_n`
-        - `output` : A `(seq_len x batch x hidden_size)` tensor containing the output features `(h_t)` from
-                     the last layer of the RNN, for each t
-        - `h_n` : A `(num_layers x batch x hidden_size)` tensor containing the hidden state for t=seq_len
+    Outputs: output, h_n
+        - **output** (seq_len, batch, hidden_size * num_directions): tensor containing the output features h_t from
+          the last layer of the RNN, for each t.
+        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape
@@ -303,12 +304,12 @@ class RNNCell(RNNCellBase):
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
 
-    Inputs: `input, hidden`
-        - input: A `(batch x input_size)` tensor containing input features
-        - hidden: A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+    Inputs: input, hidden
+        - **input** (batch, input_size): tensor containing input features
+        - **hidden** (batch, hidden_size): tensor containing the initial hidden state for each element in the batch.
 
-    Outputs: `h'`
-        - `h'`: A `(batch x hidden_size)` tensor containing the next hidden state for each element in the batch
+    Outputs: h'
+        - **h'** (batch, hidden_size): tensor containing the next hidden state for each element in the batch
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
@@ -383,14 +384,14 @@ class LSTMCell(RNNCellBase):
         hidden_size: The number of features in the hidden state h
         bias: If `False`, then the layer does not use bias weights `b_ih` and `b_hh`. Default: True
 
-    Inputs: `input, (h_0, c_0)`
-        - `input` : A `(batch x input_size)` tensor containing input features
-        - `h_0` : A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
-        - `c_0` : A `(batch x hidden_size)` tensor containing the initial cell state for each element in the batch.
+    Inputs: input, (h_0, c_0)
+        - **input** (batch, input_size): tensor containing input features
+        - **h_0** (batch, hidden_size): tensor containing the initial hidden state for each element in the batch.
+        - **c_0** (batch. hidden_size): tensor containing the initial cell state for each element in the batch.
 
-    Outputs: `h_1, c_1`
-        - h_1: A `(batch x hidden_size)` tensor containing the next hidden state for each element in the batch
-        - c_1: A `(batch x hidden_size)` tensor containing the next cell state for each element in the batch
+    Outputs: h_1, c_1
+        - **h_1** (batch, hidden_size): tensor containing the next hidden state for each element in the batch
+        - **c_1** (batch, hidden_size): tensor containing the next cell state for each element in the batch
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
@@ -455,12 +456,12 @@ class GRUCell(RNNCellBase):
         hidden_size: The number of features in the hidden state h
         bias: If `False`, then the layer does not use bias weights `b_ih` and `b_hh`. Default: `True`
 
-    Inputs: `input, hidden`
-        - `input` : A `(batch x input_size)` tensor containing input features
-        - `hidden` : A `(batch x hidden_size)` tensor containing the initial hidden state for each element in the batch.
+    Inputs: input, hidden
+        - **input** (batch, input_size): tensor containing input features
+        - **hidden** (batch, hidden_size): tensor containing the initial hidden state for each element in the batch.
 
-    Outputs: `h'`
-        - `h'`: A `(batch x hidden_size)` tensor containing the next hidden state for each element in the batch
+    Outputs: h'
+        - **h'**: (batch, hidden_size): tensor containing the next hidden state for each element in the batch
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
