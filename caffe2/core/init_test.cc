@@ -3,7 +3,6 @@
 
 #include "caffe2/core/init.h"
 #include "gtest/gtest.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 namespace {
