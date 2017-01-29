@@ -23,12 +23,13 @@ class _UpsamplingBase(Module):
             info = 'size=' + str(self.size)
         return self.__class__.__name__ + '(' + info + ')'
 
+
 class UpsamplingNearest2d(_UpsamplingBase):
     """
     Applies a 2D nearest neighbor upsampling to an input signal composed of several input
     channels.
 
-    To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor` 
+    To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
 
     When `size` is given, it is the output size of the image (h, w).
@@ -51,7 +52,7 @@ class UpsamplingNearest2d(_UpsamplingBase):
       1  2
       3  4
     [torch.FloatTensor of size 1x1x2x2]
-    
+
     >>> m = nn.UpsamplingNearest2d(scale_factor=2)
     >>> m(inp)
     Variable containing:
@@ -61,11 +62,11 @@ class UpsamplingNearest2d(_UpsamplingBase):
       3  3  4  4
       3  3  4  4
     [torch.FloatTensor of size 1x1x4x4]
-    
+
     """
+
     def forward(self, input):
         return F.upsample_nearest(input, self.size, self.scale_factor)
-
 
 
 class UpsamplingBilinear2d(_UpsamplingBase):
@@ -73,7 +74,7 @@ class UpsamplingBilinear2d(_UpsamplingBase):
     Applies a 2D bilinear upsampling to an input signal composed of several input
     channels.
 
-    To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor` 
+    To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
 
     When `size` is given, it is the output size of the image (h, w).
@@ -96,7 +97,7 @@ class UpsamplingBilinear2d(_UpsamplingBase):
       1  2
       3  4
     [torch.FloatTensor of size 1x1x2x2]
-    
+
     >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
     >>> m(inp)
     Variable containing:
@@ -106,7 +107,8 @@ class UpsamplingBilinear2d(_UpsamplingBase):
       2.3333  2.6667  3.0000  3.3333
       3.0000  3.3333  3.6667  4.0000
     [torch.FloatTensor of size 1x1x4x4]
-        
+
     """
+
     def forward(self, input):
         return F.upsample_bilinear(input, self.size, self.scale_factor)

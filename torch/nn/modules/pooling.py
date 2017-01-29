@@ -168,8 +168,8 @@ class MaxUnpool1d(Module):
 
     .. note:: `MaxPool1d` can map several input sizes to the same output sizes.
               Hence, the inversion process can get ambiguous.
-              To accommodate this, you can provide the needed output size 
-              as an additional argument `output_size` in the forward call. 
+              To accommodate this, you can provide the needed output size
+              as an additional argument `output_size` in the forward call.
               See the Inputs and Example below.
 
     Args:
@@ -200,7 +200,7 @@ class MaxUnpool1d(Module):
         (0 ,.,.) =
            0   2   0   4   0   6   0   8
         [torch.FloatTensor of size 1x1x8]
-        
+
         >>> # Example showcasing the use of output_size
         >>> input = Variable(torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8, 9]]]))
         >>> output, indices = pool(input)
@@ -209,13 +209,13 @@ class MaxUnpool1d(Module):
         (0 ,.,.) =
            0   2   0   4   0   6   0   8   0
         [torch.FloatTensor of size 1x1x9]
-        
+
         >>> unpool(output, indices)
         Variable containing:
         (0 ,.,.) =
            0   2   0   4   0   6   0   8
         [torch.FloatTensor of size 1x1x8]
-        
+
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -240,8 +240,8 @@ class MaxUnpool2d(Module):
 
     .. note:: `MaxPool2d` can map several input sizes to the same output sizes.
               Hence, the inversion process can get ambiguous.
-              To accommodate this, you can provide the needed output size 
-              as an additional argument `output_size` in the forward call. 
+              To accommodate this, you can provide the needed output size
+              as an additional argument `output_size` in the forward call.
               See the Inputs and Example below.
 
     Args:
@@ -279,7 +279,7 @@ class MaxUnpool2d(Module):
            0   0   0   0
            0  14   0  16
         [torch.FloatTensor of size 1x1x4x4]
-        
+
         >>> # specify a different output size than input size
         >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
         Variable containing:
@@ -290,7 +290,7 @@ class MaxUnpool2d(Module):
           16   0   0   0   0
            0   0   0   0   0
         [torch.FloatTensor of size 1x1x5x5]
-        
+
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -314,8 +314,8 @@ class MaxUnpool3d(Module):
 
     .. note:: `MaxPool3d` can map several input sizes to the same output sizes.
               Hence, the inversion process can get ambiguous.
-              To accommodate this, you can provide the needed output size 
-              as an additional argument `output_size` in the forward call. 
+              To accommodate this, you can provide the needed output size
+              as an additional argument `output_size` in the forward call.
               See the Inputs section below.
 
     Args:
