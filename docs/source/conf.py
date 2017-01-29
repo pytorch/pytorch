@@ -201,12 +201,13 @@ from docutils import nodes
 from sphinx.util.docfields import TypedField
 from sphinx import addnodes
 
+
 def patched_make_field(self, types, domain, items):
     # type: (List, unicode, Tuple) -> nodes.field
     def handle_item(fieldarg, content):
         par = nodes.paragraph()
         par += addnodes.literal_strong('', fieldarg)  # Patch: this line added
-        #par.extend(self.make_xrefs(self.rolename, domain, fieldarg,
+        # par.extend(self.make_xrefs(self.rolename, domain, fieldarg,
         #                           addnodes.literal_strong))
         if fieldarg in types:
             par += nodes.Text(' (')

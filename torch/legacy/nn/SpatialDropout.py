@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialDropout(Module):
 
     def __init__(self, p=0.5):
@@ -18,20 +19,20 @@ class SpatialDropout(Module):
             else:
                 raise RuntimeError('Input must be 4D (nbatch, nfeat, h, w)')
 
-            self.noise.bernoulli_(1-self.p)
+            self.noise.bernoulli_(1 - self.p)
             # We expand the random dropouts to the entire feature map because the
             # features are likely correlated accross the map and so the dropout
             # should also be correlated.
             self.output.mul_(self.noise.expand_as(input))
         else:
-            self.output.mul_(1-self.p)
+            self.output.mul_(1 - self.p)
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         if self.train:
             self.gradInput.resize_as_(gradOutput).copy_(gradOutput)
-            self.gradInput.mul_(self.noise.expand_as(input)) # simply mask the gradients with the noise vector
+            self.gradInput.mul_(self.noise.expand_as(input))  # simply mask the gradients with the noise vector
         else:
             raise RuntimeError('backprop only defined while training')
 
@@ -46,4 +47,3 @@ class SpatialDropout(Module):
     def clearState(self):
         clear(self, 'noise')
         return super(SpatialDropout, self).clearState()
-

@@ -29,4 +29,3 @@ class Linear(Function):
             return grad_input, grad_weight, grad_bias
         else:
             return grad_input, grad_weight
-

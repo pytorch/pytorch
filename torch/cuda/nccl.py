@@ -92,6 +92,7 @@ nccl_types = {
 
 
 class NcclError(RuntimeError):
+
     def __init__(self, status):
         self.status = status
         msg = '{0} ({1})'.format(status_codes.get(status), status)
@@ -103,6 +104,7 @@ class NcclComm(ctypes.c_void_p):
 
 
 class NcclCommList(object):
+
     def __init__(self, devices):
         self.devices = devices
         ptrs = (NcclComm * len(devices))()
@@ -141,7 +143,7 @@ def communicator(inputs, outputs=None):
 
 def cudaStream():
     # TODO: return the current stream
-    #ffi.C.THCState_getCurrentStream(cutorch.getState())
+    # ffi.C.THCState_getCurrentStream(cutorch.getState())
     return None
 
 
@@ -202,7 +204,7 @@ def all_gather(inputs, outputs):
 
 
 def reduce_scatter(inputs, outputs, op=SUM):
-    _check_inputs(inputs, outputs, 1.0/len(inputs))
+    _check_inputs(inputs, outputs, 1.0 / len(inputs))
     comm = communicator(inputs, outputs)
     count = inputs[0].numel() // len(inputs)
     data_type = nccl_types[inputs[0].type()]

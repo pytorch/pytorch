@@ -33,7 +33,7 @@ class Embedding(Function):
     def _make_sparse(self, indices):
         i = torch.LongTensor(2, indices.numel())
         v = torch.ones(indices.numel())
-        i[1].copy_(torch.range(0, indices.numel()-1))
+        i[1].copy_(torch.range(0, indices.numel() - 1))
         i[0].copy_(indices)
         return sparse.FloatTensor(i, v, torch.Size(
             [self._weight_size[0], indices.numel()])).contiguous()

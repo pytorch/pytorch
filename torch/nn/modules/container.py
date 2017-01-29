@@ -4,13 +4,14 @@ import torch
 import warnings
 from .module import Module
 
+
 class Container(Module):
 
     def __init__(self, **kwargs):
         super(Container, self).__init__()
         # DeprecationWarning is ignored by default <sigh>
         warnings.warn("nn.Container is deprecated. All of it's functionality "
-                "is now implemented in nn.Module. Subclass that instead.")
+                      "is now implemented in nn.Module. Subclass that instead.")
         for key, value in kwargs.items():
             self.add_module(key, value)
 

@@ -9,7 +9,7 @@ class Dropout(InplaceFunction):
         super(Dropout, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
-                    "but got {}".format(p))
+                             "but got {}".format(p))
         self.p = p
         self.train = train
         self.inplace = inplace
@@ -26,7 +26,7 @@ class Dropout(InplaceFunction):
 
         if self.p > 0 and self.train:
             self.noise = self._make_noise(input)
-            self.noise.bernoulli_(1-self.p).div_(1-self.p)
+            self.noise.bernoulli_(1 - self.p).div_(1 - self.p)
             if self.p == 1:
                 self.noise.fill_(0)
             self.noise = self.noise.expand_as(input)
@@ -45,4 +45,4 @@ class FeatureDropout(Dropout):
 
     def _make_noise(self, input):
         return input.new().resize_(input.size(0), input.size(1),
-                *repeat(1, input.dim()-2))
+                                   *repeat(1, input.dim() - 2))

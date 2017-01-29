@@ -1,6 +1,7 @@
 import math
 from .optimizer import Optimizer
 
+
 class Adam(Optimizer):
     """Implements Adam algorithm.
 
@@ -21,9 +22,9 @@ class Adam(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-            weight_decay=0):
+                 weight_decay=0):
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                weight_decay=weight_decay)
+                        weight_decay=weight_decay)
         super(Adam, self).__init__(params, defaults)
 
     def step(self, closure=None):
@@ -71,4 +72,3 @@ class Adam(Optimizer):
                 p.data.addcdiv_(-step_size, exp_avg, denom)
 
         return loss
-

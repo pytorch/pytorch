@@ -43,7 +43,7 @@ class JoinTable(Module):
         dim = self._getPositiveDimension(input)
 
         for i in range(len(input)):
-            if len(self.gradInput) < i+1:
+            if len(self.gradInput) < i + 1:
                 self.gradInput.append(input[i].new())
             self.gradInput[i].resize_as_(input[i])
         self.gradInput = self.gradInput[:len(input)]

@@ -339,11 +339,12 @@ class _TensorBase(object):
         src = self.contiguous()
 
         if len(repeats) < src.dim():
-            raise ValueError('Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor')
+            raise ValueError('Number of dimensions of repeat dims can not be '
+                             'smaller than number of dimensions of tensor')
 
         xtensor = src.new().set_(src)
         xsize = list(xtensor.size())
-        for i in _range(len(repeats)-src.dim()):
+        for i in _range(len(repeats) - src.dim()):
             xsize = [1] + xsize
 
         size = torch.Size([a * b for a, b in zip(xsize, repeats)])
@@ -351,8 +352,8 @@ class _TensorBase(object):
         result.resize_(size)
         urtensor = result.new(result)
         for i in _range(xtensor.dim()):
-            urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
-        for i in _range(urtensor.dim()-xtensor.dim()):
+            urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
+        for i in _range(urtensor.dim() - xtensor.dim()):
             xsize = [1] + xsize
         xtensor.resize_(torch.Size(xsize))
         xxtensor = xtensor.expand_as(urtensor)
@@ -391,7 +392,7 @@ class _TensorBase(object):
         return self.set_(self.storage(), self.storage_offset(),
                          torch.Size(sizes), tuple(strides))
 
-    #TODO: add tests for operators
+    # TODO: add tests for operators
     def __add__(self, other):
         return self.add(other)
     __radd__ = __add__
@@ -430,7 +431,7 @@ class _TensorBase(object):
         elif dim_self == 2 and dim_other == 2:
             return self.mm(other)
         raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
-                "but they are {}D and {}D".format(dim_self, dim_other))
+                         "but they are {}D and {}D".format(dim_self, dim_other))
 
     def __pow__(self, other):
         return self.pow(other)

@@ -3,7 +3,8 @@ from .plugin import Plugin
 
 class Monitor(Plugin):
 
-    def __init__(self, running_average=True, epoch_average=True, smoothing=0.7, precision=None, number_format=None, unit=''):
+    def __init__(self, running_average=True, epoch_average=True, smoothing=0.7,
+                 precision=None, number_format=None, unit=''):
         if precision is None:
             precision = 4
         if number_format is None:
@@ -41,7 +42,7 @@ class Monitor(Plugin):
 
         if self.with_epoch_average:
             stats['epoch_stats'] = tuple(sum(t) for t in
-                    zip(stats['epoch_stats'], (stats['last'], 1)))
+                                         zip(stats['epoch_stats'], (stats['last'], 1)))
 
         if self.with_running_average:
             previous_avg = stats.get('running_avg', 0)
@@ -54,4 +55,3 @@ class Monitor(Plugin):
             epoch_stats = stats['epoch_stats']
             stats['epoch_mean'] = epoch_stats[0] / epoch_stats[1]
             stats['epoch_stats'] = (0, 0)
-

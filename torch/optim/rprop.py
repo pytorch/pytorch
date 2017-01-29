@@ -1,6 +1,7 @@
 import math
 from .optimizer import Optimizer
 
+
 class Rprop(Optimizer):
     """Implements the resilient backpropagation algorithm.
 
@@ -65,4 +66,3 @@ class Rprop(Optimizer):
                 state['prev'].copy_(grad)
 
         return loss
-

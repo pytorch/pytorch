@@ -14,6 +14,7 @@ if not torch.cuda.is_available():
     import sys
     sys.exit()
 
+
 def is_floating(t):
     return type(t) in [torch.FloatTensor, torch.DoubleTensor,
                        torch.cuda.FloatTensor, torch.cuda.DoubleTensor]
@@ -31,7 +32,8 @@ types = [
 float_types = [
     torch.FloatTensor,
     torch.DoubleTensor
-] # TODO: add half...
+]  # TODO: add half...
+
 
 def number(floating, integer, t):
     name = type(t).__name__
@@ -44,48 +46,63 @@ def number(floating, integer, t):
 S = 10
 M = 50
 
+
 def make_tensor(t, *sizes):
     return t(*sizes).copy_(torch.randn(*sizes))
+
 
 def small_2d(t):
     return make_tensor(t, S, S)
 
+
 def small_2d_scaled(t, scale=10):
     return make_tensor(t, S, S).mul(scale)
+
 
 def small_3d(t):
     return make_tensor(t, S, S, S)
 
+
 def medium_1d(t):
     return make_tensor(t, M)
+
 
 def medium_2d(t):
     return make_tensor(t, M, M)
 
+
 def medium_2d_scaled(t, scale=10):
     return make_tensor(t, M, M).mul(scale)
 
+
 def small_3d_ones(t):
     return t(S, S, S).copy_(torch.ones(S, S, S))
+
 
 def small_3d_positive(t):
     min_val = 1e-3 if is_floating(t) else 2
     return make_tensor(t, S, S, S).clamp_(min_val, 120)
 
+
 def small_3d_unique(t):
-    return t(S, S, S).copy_(torch.range(1, S*S*S))
+    return t(S, S, S).copy_(torch.range(1, S * S * S))
+
 
 def small_1d_lapack(t):
     return t(1, 3).copy_(torch.range(1, 3).view(3))
 
+
 def small_2d_lapack(t):
     return t(3, 3).copy_(torch.range(1, 9).view(3, 3))
+
 
 def small_2d_lapack_skinny(t):
     return t(3, 4).copy_(torch.range(1, 12).view(3, 4))
 
+
 def small_2d_lapack_fat(t):
     return t(4, 3).copy_(torch.range(1, 12).view(4, 3))
+
 
 def new_t(*sizes):
     def tmp(t):
@@ -93,139 +110,140 @@ def new_t(*sizes):
     return tmp
 
 tests = [
-    ('add',           small_3d,           lambda t: [number(3.14, 3, t)]                                    ),
-    ('add',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('add',           small_3d,           lambda t: [number(0.2, 2, t), small_3d_positive(t)], 'scalar_tensor' ),
-    ('sub',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
-    ('sub',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('mul',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
-    ('mul',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('div',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
-    ('div',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('pow',           small_3d,           lambda t: [number(3.14, 3, t)],                    None,    float_types),
-    ('pow',           small_3d,           lambda t: [small_3d(t).abs_()],                   'tensor', float_types),
-    ('addbmm',        small_2d,           lambda t: [small_3d(t), small_3d(t)],              None,    float_types),
-    ('addbmm',        small_2d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
-    ('addbmm',        small_2d,           lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars' ),
-    ('baddbmm',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
-    ('baddbmm',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
-    ('baddbmm',       small_3d,           lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars' ),
-    ('addcdiv',       small_2d_lapack,    lambda t: [small_2d_lapack(t).mul(2), small_2d_lapack(t)],        ),
-    ('addcdiv',       small_2d_lapack,    lambda t: [number(2.8, 1, t), small_2d_lapack(t).mul(2), small_2d_lapack(t)], 'scalar' ),
-    ('addcmul',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
-    ('addcmul',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
-    ('addmm',         medium_2d,          lambda t: [medium_2d(t), medium_2d(t)],                           ),
-    ('addmm',         medium_2d,          lambda t: [number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'scalar' ),
-    ('addmm',         medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'two_scalars'   ),
-    ('addmv',         medium_1d,          lambda t: [medium_2d(t), medium_1d(t)],                           ),
-    ('addmv',         medium_1d,          lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar' ),
-    ('addmv',         medium_1d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'   ),
-    ('addr',          medium_2d,          lambda t: [medium_1d(t), medium_1d(t)],                           ),
-    ('addr',          medium_2d,          lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar' ),
-    ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
-    ('atan2',         medium_2d,          lambda t: [medium_2d(t)],                          None,    float_types),
-    ('fmod',          small_3d,           lambda t: [3],                                  'value'           ),
-    ('fmod',          small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
-    ('chunk',         medium_2d,          lambda t: [4],                                                    ),
-    ('chunk',         medium_2d,          lambda t: [4, 1],                                 'dim'           ),
-    ('clamp',         medium_2d_scaled,   lambda t: [-1, 5],                                                ),
-    ('clone',         medium_2d,          lambda t: [],                                                     ),
-    ('contiguous',    medium_2d,          lambda t: [],                                                     ),
-    ('cross',         new_t(M, 3, M),     lambda t: [new_t(M, 3, M)(t)],                                    ),
-    ('cumprod',       small_3d,           lambda t: [1],                                                    ),
-    ('cumsum',        small_3d,           lambda t: [1],                                                    ),
-    ('dim',           small_3d,           lambda t: [],                                                     ),
-    ('dist',          small_2d,           lambda t: [small_2d(t)],                                          ),
-    ('dist',          small_2d,           lambda t: [small_2d(t), 3],                       '3_norm'        ),
-    ('dist',          small_2d,           lambda t: [small_2d(t), 2.5],                     '2_5_norm'      ),
-    ('dot',           medium_1d,          lambda t: [medium_1d(t)],                                         ),
-    ('element_size',  medium_1d,          lambda t: [],                                                     ),
-    ('eq',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
-    ('eq',            small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
-    ('ne',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
-    ('ne',            small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
-    ('equal',         small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
-    ('equal',         small_3d_ones,      lambda t: [small_3d(t)],                                          ),
-    ('expand',        new_t(M, 1, M),     lambda t: [M, 4, M],                                              ),
-    ('expand_as',     new_t(M, 1, M),     lambda t: [new_t(M, 4, M)(t)],                                    ),
-    ('fill',          medium_2d,          lambda t: [number(3.14, 3, t)],                                   ),
-    ('ge',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
-    ('le',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
-    ('gt',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
-    ('lt',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
-    ('is_contiguous', medium_2d,          lambda t: [],                                                     ),
+    ('add', small_3d, lambda t: [number(3.14, 3, t)]),
+    ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('add', small_3d, lambda t: [number(0.2, 2, t), small_3d_positive(t)], 'scalar_tensor'),
+    ('sub', small_3d, lambda t: [number(3.14, 3, t)],),
+    ('sub', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('mul', small_3d, lambda t: [number(3.14, 3, t)],),
+    ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('div', small_3d, lambda t: [number(3.14, 3, t)],),
+    ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('pow', small_3d, lambda t: [number(3.14, 3, t)], None, float_types),
+    ('pow', small_3d, lambda t: [small_3d(t).abs_()], 'tensor', float_types),
+    ('addbmm', small_2d, lambda t: [small_3d(t), small_3d(t)], None, float_types),
+    ('addbmm', small_2d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
+    ('addbmm', small_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
+    ('baddbmm', small_3d, lambda t: [small_3d(t), small_3d(t)],),
+    ('baddbmm', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
+    ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
+    ('addcdiv', small_2d_lapack, lambda t: [small_2d_lapack(t).mul(2), small_2d_lapack(t)],),
+    ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t),
+                                            small_2d_lapack(t).mul(2), small_2d_lapack(t)], 'scalar'),
+    ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)],),
+    ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
+    ('addmm', medium_2d, lambda t: [medium_2d(t), medium_2d(t)],),
+    ('addmm', medium_2d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'scalar'),
+    ('addmm', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'two_scalars'),
+    ('addmv', medium_1d, lambda t: [medium_2d(t), medium_1d(t)],),
+    ('addmv', medium_1d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar'),
+    ('addmv', medium_1d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'),
+    ('addr', medium_2d, lambda t: [medium_1d(t), medium_1d(t)],),
+    ('addr', medium_2d, lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar'),
+    ('addr', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'),
+    ('atan2', medium_2d, lambda t: [medium_2d(t)], None, float_types),
+    ('fmod', small_3d, lambda t: [3], 'value'),
+    ('fmod', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('chunk', medium_2d, lambda t: [4],),
+    ('chunk', medium_2d, lambda t: [4, 1], 'dim'),
+    ('clamp', medium_2d_scaled, lambda t: [-1, 5],),
+    ('clone', medium_2d, lambda t: [],),
+    ('contiguous', medium_2d, lambda t: [],),
+    ('cross', new_t(M, 3, M), lambda t: [new_t(M, 3, M)(t)],),
+    ('cumprod', small_3d, lambda t: [1],),
+    ('cumsum', small_3d, lambda t: [1],),
+    ('dim', small_3d, lambda t: [],),
+    ('dist', small_2d, lambda t: [small_2d(t)],),
+    ('dist', small_2d, lambda t: [small_2d(t), 3], '3_norm'),
+    ('dist', small_2d, lambda t: [small_2d(t), 2.5], '2_5_norm'),
+    ('dot', medium_1d, lambda t: [medium_1d(t)],),
+    ('element_size', medium_1d, lambda t: [],),
+    ('eq', small_3d_ones, lambda t: [small_3d(t)],),
+    ('eq', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
+    ('ne', small_3d_ones, lambda t: [small_3d(t)],),
+    ('ne', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
+    ('equal', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
+    ('equal', small_3d_ones, lambda t: [small_3d(t)],),
+    ('expand', new_t(M, 1, M), lambda t: [M, 4, M],),
+    ('expand_as', new_t(M, 1, M), lambda t: [new_t(M, 4, M)(t)],),
+    ('fill', medium_2d, lambda t: [number(3.14, 3, t)],),
+    ('ge', medium_2d, lambda t: [medium_2d(t)],),
+    ('le', medium_2d, lambda t: [medium_2d(t)],),
+    ('gt', medium_2d, lambda t: [medium_2d(t)],),
+    ('lt', medium_2d, lambda t: [medium_2d(t)],),
+    ('is_contiguous', medium_2d, lambda t: [],),
     # TODO: can't check negative case - GPU copy will be contiguous
-    ('is_same_size',  medium_2d,          lambda t: [small_3d(t)],                          'negative'      ),
-    ('is_same_size',  medium_2d,          lambda t: [medium_2d(t)],                         'positive'      ),
-    ('is_set_to',     medium_2d,          lambda t: [medium_2d(t)],                                         ),
+    ('is_same_size', medium_2d, lambda t: [small_3d(t)], 'negative'),
+    ('is_same_size', medium_2d, lambda t: [medium_2d(t)], 'positive'),
+    ('is_set_to', medium_2d, lambda t: [medium_2d(t)],),
     # TODO: positive case
-    ('kthvalue',      small_3d_unique,    lambda t: [3],                                                    ),
-    ('kthvalue',      small_3d_unique,    lambda t: [3, 1],                                 'dim'           ),
-    ('lerp',          small_3d,           lambda t: [small_3d(t), 0.3],                                     ),
-    ('max',           small_3d_unique,    lambda t: [],                                                     ),
-    ('max',           small_3d_unique,    lambda t: [1],                                    'dim'           ),
-    ('max',           medium_2d,          lambda t: [medium_2d(t)],                         'elementwise'   ),
-    ('min',           small_3d_unique,    lambda t: [],                                                     ),
-    ('min',           small_3d_unique,    lambda t: [1],                                    'dim'           ),
-    ('min',           medium_2d,          lambda t: [medium_2d(t)],                         'elementwise'   ),
-    ('mean',          small_3d,           lambda t: [],                                                     ),
-    ('mean',          small_3d,           lambda t: [1],                                    'dim'           ),
-    ('mode',          small_3d,           lambda t: [],                                                     ),
-    ('mode',          small_3d,           lambda t: [1],                                    'dim'           ),
-    ('remainder',     small_3d,           lambda t: [3],                                  'value'           ),
-    ('remainder',     small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
-    ('std',           small_3d,           lambda t: [],                                                     ),
-    ('std',           small_3d,           lambda t: [1],                                    'dim'           ),
-    ('var',           small_3d,           lambda t: [],                                                     ),
-    ('var',           small_3d,           lambda t: [1],                                    'dim'           ),
-    ('ndimension',    small_3d,           lambda t: [],                                                     ),
-    ('nelement',      small_3d,           lambda t: [],                                                     ),
-    ('numel',         small_3d,           lambda t: [],                                                     ),
-    ('narrow',        small_3d,           lambda t: [1, 3, 2],                                              ),
-    ('nonzero',       small_3d,           lambda t: [],                                                     ),
-    ('norm',          small_3d,           lambda t: [],                                                     ),
-    ('norm',          small_3d,           lambda t: [3],                                    '3_norm'        ),
-    ('norm',          small_3d,           lambda t: [3, 0],                                 '3_norm_dim'    ),
-    ('ones',          small_3d,           lambda t: [1, 2, 3, 4, 5],                                        ),
-    ('permute',       new_t(1, 2, 3, 4),  lambda t: [2, 1, 3, 0],                                           ),
-    ('prod',          small_3d,           lambda t: [],                                                     ),
-    ('prod',          small_3d,           lambda t: [1],                                    'dim'           ),
-    ('sum',           small_2d,           lambda t: [],                                                     ),
-    ('sum',           small_3d,           lambda t: [1],                                    'dim'           ),
-    ('renorm',        small_3d,           lambda t: [2, 1, 1],                              '2_norm'        ),
-    ('renorm',        small_3d,           lambda t: [1.5, 1, 1],                            '1_5_norm'      ),
-    ('repeat',        small_2d,           lambda t: [2, 2, 2],                                              ),
-    ('size',          new_t(1, 2, 3, 4),  lambda t: [],                                                     ),
-    ('sort',          small_3d_unique,    lambda t: [],                                                     ),
-    ('sort',          small_3d_unique,    lambda t: [1],                                    'dim'           ),
-    ('sort',          small_3d_unique,    lambda t: [1, True],                              'dim_descending'),
-    ('split',         small_3d,           lambda t: [2],                                                    ),
-    ('split',         small_3d,           lambda t: [2, 1],                                 'dim'           ),
-    ('squeeze',       new_t(1, 2, 1, 4),  lambda t: [],                                                     ),
-    ('squeeze',       new_t(1, 2, 1, 4),  lambda t: [2],                                    'dim'           ),
-    ('t',             new_t(1, 2),        lambda t: [],                                                     ),
-    ('transpose',     new_t(1, 2, 3, 4),  lambda t: [1, 2],                                                 ),
-    ('to_list',       small_3d,           lambda t: [],                                                     ),
-    ('topk',          small_3d,           lambda t: [2, 1, False, True],                    'dim_sort'      ),
-    ('topk',          small_3d,           lambda t: [2, 1, True, True],                     'dim_desc_sort' ),
-    ('trace',         medium_2d,          lambda t: [],                                                     ),
-    ('tril',          medium_2d,          lambda t: [],                                                     ),
-    ('tril',          medium_2d,          lambda t: [2],                                    'positive'      ),
-    ('tril',          medium_2d,          lambda t: [-2],                                   'negative'      ),
-    ('triu',          medium_2d,          lambda t: [],                                                     ),
-    ('triu',          medium_2d,          lambda t: [2],                                    'positive'      ),
-    ('triu',          medium_2d,          lambda t: [-2],                                   'negative'      ),
-    ('view',          small_3d,           lambda t: [100, 10],                                              ),
-    ('view_as',       small_3d,           lambda t: [t(100, 10)],                                           ),
-    ('zero',          small_3d,           lambda t: [],                                                     ),
-    ('zeros',         small_3d,           lambda t: [1, 2, 3, 4],                                           ),
-    ('rsqrt',         lambda t: small_3d(t) + 1,                lambda t: [], None,              float_types),
-    ('sinh',          lambda t: small_3d(t).clamp(-1, 1),       lambda t: [], None,              float_types),
-    ('tan',           lambda t: small_3d(t).clamp(-1, 1),       lambda t: [], None,              float_types),
+    ('kthvalue', small_3d_unique, lambda t: [3],),
+    ('kthvalue', small_3d_unique, lambda t: [3, 1], 'dim'),
+    ('lerp', small_3d, lambda t: [small_3d(t), 0.3],),
+    ('max', small_3d_unique, lambda t: [],),
+    ('max', small_3d_unique, lambda t: [1], 'dim'),
+    ('max', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
+    ('min', small_3d_unique, lambda t: [],),
+    ('min', small_3d_unique, lambda t: [1], 'dim'),
+    ('min', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
+    ('mean', small_3d, lambda t: [],),
+    ('mean', small_3d, lambda t: [1], 'dim'),
+    ('mode', small_3d, lambda t: [],),
+    ('mode', small_3d, lambda t: [1], 'dim'),
+    ('remainder', small_3d, lambda t: [3], 'value'),
+    ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('std', small_3d, lambda t: [],),
+    ('std', small_3d, lambda t: [1], 'dim'),
+    ('var', small_3d, lambda t: [],),
+    ('var', small_3d, lambda t: [1], 'dim'),
+    ('ndimension', small_3d, lambda t: [],),
+    ('nelement', small_3d, lambda t: [],),
+    ('numel', small_3d, lambda t: [],),
+    ('narrow', small_3d, lambda t: [1, 3, 2],),
+    ('nonzero', small_3d, lambda t: [],),
+    ('norm', small_3d, lambda t: [],),
+    ('norm', small_3d, lambda t: [3], '3_norm'),
+    ('norm', small_3d, lambda t: [3, 0], '3_norm_dim'),
+    ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
+    ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
+    ('prod', small_3d, lambda t: [],),
+    ('prod', small_3d, lambda t: [1], 'dim'),
+    ('sum', small_2d, lambda t: [],),
+    ('sum', small_3d, lambda t: [1], 'dim'),
+    ('renorm', small_3d, lambda t: [2, 1, 1], '2_norm'),
+    ('renorm', small_3d, lambda t: [1.5, 1, 1], '1_5_norm'),
+    ('repeat', small_2d, lambda t: [2, 2, 2],),
+    ('size', new_t(1, 2, 3, 4), lambda t: [],),
+    ('sort', small_3d_unique, lambda t: [],),
+    ('sort', small_3d_unique, lambda t: [1], 'dim'),
+    ('sort', small_3d_unique, lambda t: [1, True], 'dim_descending'),
+    ('split', small_3d, lambda t: [2],),
+    ('split', small_3d, lambda t: [2, 1], 'dim'),
+    ('squeeze', new_t(1, 2, 1, 4), lambda t: [],),
+    ('squeeze', new_t(1, 2, 1, 4), lambda t: [2], 'dim'),
+    ('t', new_t(1, 2), lambda t: [],),
+    ('transpose', new_t(1, 2, 3, 4), lambda t: [1, 2],),
+    ('to_list', small_3d, lambda t: [],),
+    ('topk', small_3d, lambda t: [2, 1, False, True], 'dim_sort'),
+    ('topk', small_3d, lambda t: [2, 1, True, True], 'dim_desc_sort'),
+    ('trace', medium_2d, lambda t: [],),
+    ('tril', medium_2d, lambda t: [],),
+    ('tril', medium_2d, lambda t: [2], 'positive'),
+    ('tril', medium_2d, lambda t: [-2], 'negative'),
+    ('triu', medium_2d, lambda t: [],),
+    ('triu', medium_2d, lambda t: [2], 'positive'),
+    ('triu', medium_2d, lambda t: [-2], 'negative'),
+    ('view', small_3d, lambda t: [100, 10],),
+    ('view_as', small_3d, lambda t: [t(100, 10)],),
+    ('zero', small_3d, lambda t: [],),
+    ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
+    ('rsqrt', lambda t: small_3d(t) + 1, lambda t: [], None, float_types),
+    ('sinh', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
+    ('tan', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
     # lapack tests
-    ('qr',            small_2d_lapack,           lambda t: [],   'square',                       float_types),
-    ('qr',            small_2d_lapack_skinny,    lambda t: [],   'skinny',                       float_types),
-    ('qr',            small_2d_lapack_fat,       lambda t: [],   'fat',                          float_types),
+    ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
+    ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
+    ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
 
 ]
 
@@ -275,6 +293,8 @@ for fn in simple_pointwise_float:
     tests.append((fn, small_3d, lambda t: [], None, float_types))
 
 _cycles_per_ms = None
+
+
 def get_cycles_per_ms():
     """Approximate number of cycles per millisecond for torch.cuda._sleep"""
     global _cycles_per_ms
@@ -287,6 +307,7 @@ def get_cycles_per_ms():
         end.synchronize()
         _cycles_per_ms = 1000000 / start.elapsed_time(end)
     return _cycles_per_ms
+
 
 def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
     def tmp(self):
@@ -313,6 +334,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         # Compare results
         self.assertEqual(cpu_result, gpu_result, precision)
     return tmp
+
 
 class TestCuda(TestCase):
 
@@ -412,7 +434,7 @@ class TestCuda(TestCase):
         y_cuda = y.cuda(1)
         result = comm.reduce_add((x_cuda, y_cuda))
         self.assertEqual(result.get_device(), 0)
-        self.assertEqual(result.cpu(), x+y)
+        self.assertEqual(result.cpu(), x + y)
 
     def _test_scatter(self, input, chunk_sizes=None, dim=0):
         if torch.cuda.device_count() < 2:
@@ -473,7 +495,7 @@ class TestCuda(TestCase):
         self._test_gather(1)
 
     def test_from_sequence(self):
-        seq = [list(range(i*4,i*4+4)) for i in range(5)]
+        seq = [list(range(i * 4, i * 4 + 4)) for i in range(5)]
         reference = torch.range(0, 19).resize_(5, 4)
         for t in types:
             cuda_type = get_gpu_type(t)
@@ -526,6 +548,7 @@ class TestCuda(TestCase):
     @unittest.skipIf(torch.cuda.device_count() < 2, "detected only one GPU")
     def test_multigpu_serialization_remap(self):
         x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
+
         def gpu_remap(storage, location):
             if location == 'cuda:1':
                 return storage.cuda(0)
@@ -666,7 +689,8 @@ for decl in tests:
             if not hasattr(tensor, name_inner):
                 continue
             if not hasattr(gpu_tensor, name_inner):
-                print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(name_inner, gpu_tensor.__class__.__name__))
+                print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(
+                    name_inner, gpu_tensor.__class__.__name__))
                 continue
 
             test_name = 'test_' + t.__name__ + '_' + name_inner

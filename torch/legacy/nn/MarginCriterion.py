@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MarginCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):
@@ -11,7 +12,7 @@ class MarginCriterion(Criterion):
 
     def updateOutput(self, input, target):
         if self.output_tensor is None:
-              self.output_tensor = input.new(1)
+            self.output_tensor = input.new(1)
         self._backend.MarginCriterion_updateOutput(
             self._backend.library_state,
             input,
@@ -33,4 +34,3 @@ class MarginCriterion(Criterion):
             self.margin
         )
         return self.gradInput
-

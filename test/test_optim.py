@@ -53,7 +53,7 @@ class TestOptim(TestCase):
         for i in range(2000):
             optimizer.step(eval)
             old_fn(lambda _: (rosenbrock(params_t), drosenbrock(params_t)),
-                    params_t, state)
+                   params_t, state)
             self.assertEqual(params.data, params_t)
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
@@ -128,8 +128,8 @@ class TestOptim(TestCase):
         )
         # non-contiguous parameters
         self._test_basic_cases_template(
-            torch.randn(10, 5, 2)[...,0],
-            torch.randn(10, 2)[...,0],
+            torch.randn(10, 5, 2)[..., 0],
+            torch.randn(10, 2)[..., 0],
             torch.randn(5),
             constructor
         )

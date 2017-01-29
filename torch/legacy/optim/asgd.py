@@ -1,5 +1,6 @@
 import math
 
+
 def asgd(opfunc, x, config, state=None):
     """ An implementation of ASGD
 
@@ -60,11 +61,10 @@ def asgd(opfunc, x, config, state=None):
     state['tmp'] = state.get('tmp', state['ax'].new().resize_as_(state['ax']))
     if state['mu_t'] != 1:
         state['tmp'].copy_(x)
-        state['tmp'].add_(-1,state['ax']).mul_(state['mu_t'])
+        state['tmp'].add_(-1, state['ax']).mul_(state['mu_t'])
         state['ax'].add_(state['tmp'])
     else:
         state['ax'].copy_(x)
-
 
     # (5) update eta_t and mu_t
     state['t'] += 1
@@ -73,4 +73,3 @@ def asgd(opfunc, x, config, state=None):
 
     # return x*, f(x) before optimization, and average(x_t0,x_t1,x_t2,...)
     return x, fx, state['ax']
-

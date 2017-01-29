@@ -29,12 +29,15 @@ Below you can find a small example showcasing this::
         b = torch.FloatTensor(1).cuda()
         # a.get_device() == b.get_device() == 1
 
+        c = a + b
+        # c.get_device() == 1
+
         z = x + y
-        # z.get_device() == 1
+        # z.get_device() == 0
 
         # even within a context, you can give a GPU id to the .cuda call
-        c = torch.randn(2).cuda(2)
-        # c.get_device() == 2
+        d = torch.randn(2).cuda(2)
+        # d.get_device() == 2
 
 Best practices
 --------------

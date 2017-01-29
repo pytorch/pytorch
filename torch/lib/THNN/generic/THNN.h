@@ -102,6 +102,18 @@ TH_API void THNN_(DistKLDivCriterion_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           bool sizeAverage);           // if true, the loss will be normalized **by total number of elements**
 
+TH_API void THNN_(GatedLinear_updateOutput)(
+          THNNState *state,            // library's state
+          THTensor *input,             // input tensor
+          THTensor *output,            // [OUT] output tensor, half size of input along dimension dim
+          int dim);                    // dimension for halving operation
+TH_API void THNN_(GatedLinear_updateGradInput)(
+          THNNState *state,            // library's state
+          THTensor *input,             // input tensor
+          THTensor *gradOutput,        // gradient w.r.t module's output
+          THTensor *gradInput,         // [OUT] gradient w.r.t input
+          int dim);                    // dimension for halving operation
+
 // HardShink outputs 0 on interval of (-lambda; lambda) or original value otherwise.
 TH_API void THNN_(HardShrink_updateOutput)(
           THNNState *state,            // library's state
@@ -574,6 +586,44 @@ TH_API void THNN_(TemporalSubSampling_accGradParameters)(
           THTensor *gradWeight,
           THTensor *gradBias,
           int kW, int dW,
+          real scale);
+
+TH_API void THNN_(TemporalRowConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kW,
+          int dW,
+          int padW,
+          bool featFirst);
+TH_API void THNN_(TemporalRowConvolution_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kW,
+          int dW,
+          int padW,
+          bool featFirst);
+TH_API void THNN_(TemporalRowConvolution_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kW,
+          int dW,
+          int padW,
+          bool featFirst,
           real scale);
 
 TH_API void THNN_(BatchNormalization_updateOutput)(

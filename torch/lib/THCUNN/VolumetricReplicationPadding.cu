@@ -7,6 +7,7 @@
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
+#include <THC/THCApply.cuh>
 
 template <typename Dtype>
 __global__ void VolumetricReplicationPadding_updateOutput(

@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Dropout(Module):
 
     def __init__(self, p=0.5, inplace=False):
@@ -19,8 +20,8 @@ class Dropout(Module):
 
         if self.p > 0 and self.train:
             self.noise.resize_as_(input)
-            self.noise.bernoulli_(1-self.p)
-            self.noise.div_(1-self.p)
+            self.noise.bernoulli_(1 - self.p)
+            self.noise.div_(1 - self.p)
             self.output.mul_(self.noise)
 
         return self.output
@@ -32,7 +33,7 @@ class Dropout(Module):
             self.gradInput.resize_as_(gradOutput).copy_(gradOutput)
 
         if self.p > 0 and self.train:
-            self.gradInput.mul_(self.noise) # simply mask the gradients with the noise vector
+            self.gradInput.mul_(self.noise)  # simply mask the gradients with the noise vector
 
         return self.gradInput
 
@@ -45,4 +46,3 @@ class Dropout(Module):
     def clearState(self):
         clear(self, 'noise')
         return super(Dropout, self).clearState()
-

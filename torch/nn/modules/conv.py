@@ -7,6 +7,7 @@ from .utils import _single, _pair, _triple
 
 
 class _ConvNd(Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias):
         super(_ConvNd, self).__init__()
@@ -199,7 +200,8 @@ class Conv2d(_ConvNd):
           :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (out_channels, in_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (out_channels, in_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -293,7 +295,8 @@ class Conv3d(_ConvNd):
           :math:`W_{out} = floor((W_{in}  + 2 * padding[2] - dilation[2] * (kernel\_size[2] - 1) - 1) / stride[2] + 1)`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+        weight (Tensor): the learnable weights of the module of shape
+                         (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -328,6 +331,7 @@ class Conv3d(_ConvNd):
 
 
 class _ConvTransposeMixin(object):
+
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
         func = self._backend.ConvNd(
@@ -372,7 +376,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     .. note::
 
@@ -397,9 +401,11 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
           :math:`L_{out} = (L_{in} - 1) * stride - 2 * padding + kernel_size + output_padding`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
     """
+
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, groups=1, bias=True):
         kernel_size = _single(kernel_size)
@@ -422,8 +428,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
 
-    This module can be seen as the gradient of Conv2d with respect to its input. 
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    This module can be seen as the gradient of Conv2d with respect to its input.
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
@@ -469,7 +475,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
           :math:`W_{out} = (W_{in} - 1) * stride[1] - 2 * padding[1] + kernel_size[1] + output_padding[1]`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -522,8 +529,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
 
-    **This module can be seen as the exact reverse of Conv3d**. 
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    **This module can be seen as the exact reverse of Conv3d**.
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
@@ -570,7 +577,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
           :math:`W_{out} = (W_{in} - 1) * stride[2] - 2 * padding[2] + kernel_size[2] + output_padding[2]`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::

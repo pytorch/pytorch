@@ -1,15 +1,16 @@
 import torch
 from .Module import Module
 
+
 class LeakyReLU(Module):
 
-    def __init__(self, negval=1/100, inplace=False):
+    def __init__(self, negval=1 / 100, inplace=False):
         super(LeakyReLU, self).__init__()
         if isinstance(negval, bool):
-           inplace = negval
-           self.negval = 1/100
+            inplace = negval
+            self.negval = 1 / 100
         else:
-           self.negval = negval
+            self.negval = negval
 
         # default for inplace is False
         self.inplace = inplace
@@ -27,7 +28,6 @@ class LeakyReLU(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.LeakyReLU_updateGradInput(
             self._backend.library_state,
@@ -39,7 +39,5 @@ class LeakyReLU(Module):
         )
         return self.gradInput
 
-
     def __repr__(self):
         return str(type(self)) + '({:.4f})'.format(self.negval)
-

@@ -165,6 +165,7 @@ class Tan(Function):
 
 
 class Asin(Function):
+
     def forward(self, i):
         self.save_for_backward(i)
         return i.asin()
@@ -175,6 +176,7 @@ class Asin(Function):
 
 
 class Acos(Function):
+
     def forward(self, i):
         self.save_for_backward(i)
         return i.acos()
@@ -185,6 +187,7 @@ class Acos(Function):
 
 
 class Atan(Function):
+
     def forward(self, i):
         self.save_for_backward(i)
         return i.atan()

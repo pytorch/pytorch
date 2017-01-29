@@ -8,43 +8,43 @@ except ImportError:
 
 
 def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        hy = F.relu(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
-        return hy
+    hy = F.relu(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+    return hy
 
 
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
-        return hy
+    hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+    return hy
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        hx, cx = hidden
-        gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
-        ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+    hx, cx = hidden
+    gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+    ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
-        ingate = F.sigmoid(ingate)
-        forgetgate = F.sigmoid(forgetgate)
-        cellgate = F.tanh(cellgate)
-        outgate = F.sigmoid(outgate)
+    ingate = F.sigmoid(ingate)
+    forgetgate = F.sigmoid(forgetgate)
+    cellgate = F.tanh(cellgate)
+    outgate = F.sigmoid(outgate)
 
-        cy = (forgetgate * cx) + (ingate * cellgate)
-        hy = outgate * F.tanh(cy)
+    cy = (forgetgate * cx) + (ingate * cellgate)
+    hy = outgate * F.tanh(cy)
 
-        return hy, cy
+    return hy, cy
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        gi = F.linear(input, w_ih, b_ih)
-        gh = F.linear(hidden, w_hh, b_hh)
-        i_r, i_i, i_n = gi.chunk(3, 1)
-        h_r, h_i, h_n = gh.chunk(3, 1)
+    gi = F.linear(input, w_ih, b_ih)
+    gh = F.linear(hidden, w_hh, b_hh)
+    i_r, i_i, i_n = gi.chunk(3, 1)
+    h_r, h_i, h_n = gh.chunk(3, 1)
 
-        resetgate = F.sigmoid(i_r + h_r)
-        inputgate = F.sigmoid(i_i + h_i)
-        newgate = F.tanh(i_n + resetgate * h_n)
-        hy = newgate + inputgate * (hidden - newgate)
+    resetgate = F.sigmoid(i_r + h_r)
+    inputgate = F.sigmoid(i_i + h_i)
+    newgate = F.tanh(i_n + resetgate * h_n)
+    hy = newgate + inputgate * (hidden - newgate)
 
-        return hy
+    return hy
 
 
 def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
@@ -87,6 +87,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
 
     return forward
 
+
 def Recurrent(inner, reverse=False):
     def forward(input, hidden, weight):
         output = []
@@ -105,7 +106,8 @@ def Recurrent(inner, reverse=False):
     return forward
 
 
-def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False, dropout_state=None):
+def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
+                dropout=0, train=True, bidirectional=False, dropout_state=None):
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -144,7 +146,10 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, 
 
 
 class CudnnRNN(NestedIOFunction):
-    def __init__(self, mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0,  train=True, bidirectional=False, dropout_state=None):
+
+    def __init__(self, mode, input_size, hidden_size, num_layers=1,
+                 batch_first=False, dropout=0, train=True, bidirectional=False,
+                 dropout_state=None):
         super(CudnnRNN, self).__init__()
         if dropout_state is None:
             dropout_state = {}
@@ -177,17 +182,14 @@ class CudnnRNN(NestedIOFunction):
         self.save_for_backward(input, hx, weight, output)
         return output, hy
 
-
     def backward_extended(self, grad_output, grad_hy):
         input, hx, weight, output = self.saved_tensors
 
         grad_input, grad_weight, grad_hx = None, None, None
 
-        assert(cudnn.is_acceptable(input))
+        assert cudnn.is_acceptable(input)
 
         grad_input = input.new()
-        grad_weight = input.new()
-        grad_hx = input.new()
         if torch.is_tensor(hx):
             grad_hx = input.new()
         else:

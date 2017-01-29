@@ -32,10 +32,10 @@ def adadelta(opfunc, x, config, state=None):
 
     # (2) weight decay
     if wd != 0:
-      dfdx.add_(wd, x)
+        dfdx.add_(wd, x)
 
     # (3) parameter update
-    if not 'paramVariance' in state:
+    if 'paramVariance' not in state:
         state['paramVariance'] = x.new().resize_as_(dfdx).zero_()
         state['paramStd'] = x.new().resize_as_(dfdx).zero_()
         state['delta'] = x.new().resize_as_(dfdx).zero_()
@@ -43,7 +43,8 @@ def adadelta(opfunc, x, config, state=None):
 
     state['paramVariance'].mul_(rho).addcmul_(1 - rho, dfdx, dfdx)
     state['paramStd'].resize_as_(state['paramVariance']).copy_(state['paramVariance']).add_(eps).sqrt_()
-    state['delta'].resize_as_(state['paramVariance']).copy_(state['accDelta']).add_(eps).sqrt_().div_(state['paramStd']).mul_(dfdx)
+    state['delta'].resize_as_(state['paramVariance']).copy_(
+        state['accDelta']).add_(eps).sqrt_().div_(state['paramStd']).mul_(dfdx)
     x.add_(-1, state['delta'])
     state['accDelta'].mul_(rho).addcmul_(1 - rho, state['delta'], state['delta'])
 
