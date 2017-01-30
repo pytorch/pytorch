@@ -62,6 +62,26 @@ def GetGlobalInitArgs():
     return _GLOBAL_INIT_ARGS[:]
 
 
+_WORKER_INIT_CALLS = []
+
+
+def worker_init_func(func):
+    """
+    By decorating a function with this, each call to the function will be
+    recorded at workflow time and replayed in each of the works at startup.
+    Used for example for registering caffe python operators.
+    """
+    def call(*args, **kwargs):
+        _WORKER_INIT_CALLS.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    return call
+
+
+def GetWorkerInitCalls():
+    return _WORKER_INIT_CALLS[:]
+
+
 def IsOperator(op_type):
     return (op_type in _REGISTERED_OPERATORS)
 
@@ -269,11 +289,18 @@ def CreateOperator(
 
 
 def _RegisterPythonImpl(f, grad_f=None, pass_workspace=False):
+    if isinstance(f, tuple):
+        print('Registering python with tuple', f)
+        f = f[0](*f[1], **f[2])
+    else:
+        print('Registering python without tuple', f)
+    if isinstance(grad_f, tuple):
+        grad_f = grad_f[0](*grad_f[1], **grad_f[2])
+
     token = C.register_python_op(f, pass_workspace)
     if grad_f:
         C.register_python_gradient_op(token, grad_f)
     return token
-
 
 def CreatePythonOperator(
     f, inputs,
@@ -1600,7 +1627,21 @@ class Net(object):
 
     def Python(self, f, grad_f=None, pass_workspace=False):
         """
-        `f` should have a signature (inputs, outputs)
+        Registers and returns a python operator.
+
+        `f` and `f_grad` can be one of the following:
+            - a function with signature (inputs, outputs), where inputs and
+              outputs are a list of CPUTensor objects. This function will be
+              called from C++ everytime the operator is executed.
+            - a tuple (func, args, kwargs), here `func` is a callable, args is
+              an argument list, and kwargs is a dict list. The call:
+                  f = func(*args, kwargs)
+              will be performed locally at node initialization time, on all of
+              the nodes of the job, returning `f`, a callable that will be used
+              as the python operator function to be called during Net execution.
+              This is to be used when using python operator in a distributed
+              context, and allows to create and keep local python state across
+              calls to the operator.
 
         If `pass_workspace` is True, the signature is changed to
         (inputs, outputs, workspace) where `workspace` is the workspace the op
@@ -1608,7 +1649,14 @@ class Net(object):
         manipulate the workspace directly), use on your own risk.
         """
         assert(IsOperator('Python'))
-        token = _RegisterPythonImpl(f, grad_f, pass_workspace=pass_workspace)
+        if isinstance(f, tuple) or isinstance(grad_f, tuple):
+            # if we got a tuple, we will make sure this tuple will be
+            # registered to run at startup on each of the workers in a
+            # distributed run.
+            registry = worker_init_func(_RegisterPythonImpl)
+        else:
+            registry = _RegisterPythonImpl
+        token = registry(f, grad_f, pass_workspace=pass_workspace)
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             'Python', token=token, *args, **kwargs)
 

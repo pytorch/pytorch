@@ -6,6 +6,18 @@ from __future__ import unicode_literals
 from caffe2.python import core, context
 from caffe2.python.schema import Field, from_blob_list
 from collections import defaultdict
+from copy import copy
+
+
+def _merge_node_kwargs(a, b):
+    # TODO(azzolini): consistency checks
+    if a is None:
+        return b
+    if b is None:
+        return a
+    c = copy(a)
+    c.update(b)
+    return c
 
 
 @context.define_context(allow_default=True)
@@ -19,16 +31,23 @@ class Cluster(object):
     def __init__(self):
         # list instead of set to keep order
         self._nodes = []
+        self._node_kwargs = {}
 
     def add_node(self, node):
         if str(node) not in self._nodes:
             self._nodes.append(str(node))
+        self._node_kwargs[str(node)] = _merge_node_kwargs(
+            node.kwargs(),
+            self._node_kwargs.get(str(node)))
 
     def nodes(self):
         """
         Returns the list of unique node names used within this context.
         """
         return self._nodes
+
+    def node_kwargs(self):
+        return self._node_kwargs
 
 
 @context.define_context(allow_default=True)
@@ -50,14 +69,27 @@ class Node(object):
         In this example, all three execution steps will run in parallel.
         Moreover, s1 and s3 will run on the same node, and can see each
         others blobs.
+
+        Additionally, a Node can be passed implementation-specific kwargs,
+        in order to specify properties of the node. When using AML Flow,
+        we currently support:
+            resource_requirements: a fblearner.flow.api.ResourceRequirements
+                                   specifying requirements for this Node.
+            flow_returns: a fblearner.flow.api.types.Schema object specifying
+                          the output schema of the Flow operator where the
+                          Node will run.
     """
 
-    def __init__(self, node='local'):
+    def __init__(self, node='local', **kwargs):
         self._name = str(node)
+        self._kwargs = kwargs
         Cluster.current().add_node(self)
 
     def __str__(self):
         return self._name
+
+    def kwargs(self):
+        return self._kwargs
 
 
 class WorkspaceType(object):
