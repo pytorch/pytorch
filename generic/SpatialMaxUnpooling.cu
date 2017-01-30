@@ -46,7 +46,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
     THCTensor_(resize3d)(state, output, nInputPlane, oheight, owidth);
 
   THCTensor_(free)(state, input);
-
+  THCIndexTensor_(free)(state, indices);
 }
 
 void THNN_(SpatialMaxUnpooling_updateGradInput)(
@@ -97,6 +97,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
 
   // clean
   THCTensor_(free)(state, input);
+  THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, gradOutput);
 }
 
