@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 
+#include "torch/csrc/utils/object_ptr.h"
+
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
 
 #define THPUtils_typename(obj) (Py_TYPE(obj)->tp_name)
@@ -149,28 +151,6 @@ bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart,
 #define THSTensorPtr  TH_CONCAT_3(THS,Real,TensorPtr)
 #define THSPTensorPtr  TH_CONCAT_3(THSP,Real,TensorPtr)
 
-template<class T>
-class THPPointer {
-public:
-  THPPointer(): ptr(nullptr) {};
-  THPPointer(T *ptr): ptr(ptr) {};
-  THPPointer(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; };
-
-  ~THPPointer() { free(); };
-  T * get() { return ptr; }
-  T * release() { T *tmp = ptr; ptr = NULL; return tmp; }
-  operator T*() { return ptr; }
-  THPPointer& operator =(T *new_ptr) { free(); ptr = new_ptr; return *this; }
-  THPPointer& operator =(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; return *this; }
-  T * operator ->() { return ptr; }
-  operator bool() { return ptr != nullptr; }
-
-private:
-  void free();
-  T *ptr = nullptr;
-};
-
-typedef THPPointer<PyObject> THPObjectPtr;
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
 
 template <typename T>
