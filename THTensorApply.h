@@ -374,7 +374,7 @@
 #define TH_TENSOR_APPLY(TYPE, TENSOR, CODE) \
 { \
   TYPE *TENSOR##_data = NULL; \
-  long *TENSOR##_counter = NULL; \
+  long *TENSOR##_counter = NULL, *TENSOR##_dims = NULL, *TENSOR##_strides = NULL; \
   long TENSOR##_stride = 0, TENSOR##_size = 0, TENSOR##_dim = 0, TENSOR##_i; \
   int TH_TENSOR_APPLY_hasFinished = 0; \
 \
@@ -384,63 +384,68 @@
   { \
     TENSOR##_data = TENSOR->storage->data+TENSOR->storageOffset; \
 \
-    /* what is the first stride (ignore first dims=1)? */ \
-    /* it will be used for offset updates while looping through the largest contiguous section */ \
-    for(TENSOR##_dim = TENSOR->nDimension-1; TENSOR##_dim >= 0; TENSOR##_dim--) \
+    /* find the dimension of contiguous regions */ \
+    TENSOR##_dim = 1; \
+    for(TENSOR##_i = TENSOR->nDimension-2; TENSOR##_i >= 0; TENSOR##_i--) \
     { \
-      if(TENSOR->size[TENSOR##_dim] != 1) \
-        break; \
-    } \
-    TENSOR##_stride = (TENSOR##_dim == -1 ? 0 : TENSOR->stride[TENSOR##_dim]); \
-\
-    /* what is the largest contiguous section? size will store the size of this section */ \
-    TENSOR##_size = 1; \
-    for(TENSOR##_dim = TENSOR->nDimension-1; TENSOR##_dim >= 0; TENSOR##_dim--) \
-    { \
-      if(TENSOR->size[TENSOR##_dim] != 1) \
-      { \
-        if(TENSOR->stride[TENSOR##_dim] == TENSOR##_size) \
-          TENSOR##_size *= TENSOR->size[TENSOR##_dim]; \
-        else \
-          break; \
-      } \
+      if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1]) \
+	TENSOR##_dim++; \
     } \
 \
     /* allocate an array of k+1 elements, where k is the first index that */ \
     /* break contiguity. Note that if the tensor is contiguous, then k is -1 and */ \
     /* this counter array is empty. */ \
 \
+    TENSOR##_dims = (long*)THAlloc(sizeof(long)*(TENSOR##_dim)); \
+    TENSOR##_strides = (long*)THAlloc(sizeof(long)*(TENSOR##_dim)); \
+    TENSOR##_counter = (long*)THAlloc(sizeof(long)*(TENSOR##_dim)); \
+    long dim_index = TENSOR##_dim-1; \
+    TENSOR##_dims[dim_index] = TENSOR->size[TENSOR->nDimension-1]; \
+    TENSOR##_strides[dim_index] = TENSOR->stride[TENSOR->nDimension-1]; \
+    /* what is the first stride? */ \
     /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
     /* storage is given by storage_offset + (i * j), where i is the stride */ \
     /* vector and j is tensor_counter vector. This sets the starting position for the loop. */ \
-    TENSOR##_counter = (long*)THAlloc(sizeof(long)*(TENSOR##_dim+1)); \
-    for(TENSOR##_i = 0; TENSOR##_i <= TENSOR##_dim; TENSOR##_i++) \
+    for(TENSOR##_i = TENSOR##_dim-1; TENSOR##_i >= 0; --TENSOR##_i) { \
       TENSOR##_counter[TENSOR##_i] = 0; \
+    } \
+    for(TENSOR##_i = TENSOR->nDimension-2; TENSOR##_i >= 0; --TENSOR##_i) { \
+      if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1]) { \
+        TENSOR##_dims[dim_index] = TENSOR->size[TENSOR##_i] * TENSOR##_dims[dim_index]; \
+      } else { \
+        --dim_index; \
+	TENSOR##_dims[dim_index] = TENSOR->size[TENSOR##_i]; \
+	TENSOR##_strides[dim_index] = TENSOR->stride[TENSOR##_i]; \
+      } \
+    } \
+    /* it will be used for offset updates while looping through the largest contiguous section */ \
+    TENSOR##_size = TENSOR##_dims[TENSOR##_dim-1]; \
+    /* what is the largest contiguous section? size will store the size of this section */ \
+    TENSOR##_stride = TENSOR##_strides[TENSOR##_dim-1]; \
   } \
+\
 \
   while(!TH_TENSOR_APPLY_hasFinished) \
   { \
-    /* Loop through the contiguous section of the Tensor */ \
+    /* Loop through the inner most region of the Tensor */ \
     for(TENSOR##_i = 0; TENSOR##_i < TENSOR##_size; TENSOR##_i++, TENSOR##_data += TENSOR##_stride) /* 0 et pas TENSOR##_dim! */ \
     { \
       CODE \
     } \
 \
+    if(TENSOR##_dim == 1) \
+      break; \
 \
-    /* Handle corner case where the entire Tensor was contiguous */ \
-    if(TENSOR##_dim == -1) \
-       break; \
- \
     /* Reset pointer to beginning of loop */ \
     TENSOR##_data -= TENSOR##_i*TENSOR##_stride; \
-    for(TENSOR##_i = TENSOR##_dim; TENSOR##_i >= 0; TENSOR##_i--) \
+    for(TENSOR##_i = TENSOR##_dim-2; TENSOR##_i >= 0; TENSOR##_i--) \
     { \
       TENSOR##_counter[TENSOR##_i]++; \
 \
       /* Jump ahread by the stride of this dimension */ \
-      TENSOR##_data += TENSOR->stride[TENSOR##_i]; \
+      TENSOR##_data += TENSOR##_strides[TENSOR##_i]; \
 \
-      if(TENSOR##_counter[TENSOR##_i]  == TENSOR->size[TENSOR##_i]) \
+      if(TENSOR##_counter[TENSOR##_i] == TENSOR##_dims[TENSOR##_i]) \
       { \
         if(TENSOR##_i == 0) \
         { \
@@ -450,7 +455,7 @@
         else \
         { \
           /* Reset the pointer to the beginning of the chunk defined by this dimension */ \
-          TENSOR##_data -= TENSOR##_counter[TENSOR##_i]*TENSOR->stride[TENSOR##_i]; \
+          TENSOR##_data -= TENSOR##_counter[TENSOR##_i]*TENSOR##_strides[TENSOR##_i]; \
           TENSOR##_counter[TENSOR##_i] = 0; \
         } \
       } \
@@ -459,6 +464,10 @@
     } \
   } \
   THFree(TENSOR##_counter); \
+  THFree(TENSOR##_strides); \
+  THFree(TENSOR##_dims); \
 }
+//printf("dim %ld counter %ld stride %ld\n", TENSOR##_i, TENSOR##_counter[TENSOR##_i], TENSOR##_strides[TENSOR##_i]); 
+//printf("address %ld\n", TENSOR##_data-TENSOR->storage->data+TENSOR->storageOffset);
 
 #endif

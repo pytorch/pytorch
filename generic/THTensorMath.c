@@ -27,7 +27,7 @@ void THTensor_(fill)(THTensor *r_, real value)
       THVector_(fill)(rp+i, value, i_end-i);
     }
   } else {
-    TH_TENSOR_APPLY(real, r_, THVector_(fill)(r__data, value, r__size); break;);
+    TH_TENSOR_APPLY(real, r_, *r__data = value;);
   }
 }
 
