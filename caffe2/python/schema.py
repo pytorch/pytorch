@@ -240,6 +240,11 @@ class Struct(Field):
             assert field[0] != 'lengths', (
                 'Struct cannot contain a field named `lengths`.'
             )
+        existing = set()
+        for name, field in fields:
+            if name in existing:
+                raise ValueError('Duplicate field name: %s' % name)
+            existing.add(name)
         fields = [(name, _normalize_field(field)) for name, field in fields]
         for id, (name, field) in enumerate(fields):
             field._set_parent(self, id)

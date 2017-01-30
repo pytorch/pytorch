@@ -120,6 +120,12 @@ class TestDB(unittest.TestCase):
         self.assertEqual(6, sv.c.value.metadata.categorical_limit)
         self.assertEqual(7, sv.c.lengths.metadata.categorical_limit)
 
+    def testDupField(self):
+        with self.assertRaises(ValueError):
+            schema.Struct(
+                ('a', schema.Scalar()),
+                ('a', schema.Scalar()))
+
     def testPreservesEmptyFields(self):
         s = schema.Struct(
             ('a', schema.Scalar(np.float32)),
