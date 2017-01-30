@@ -72,8 +72,8 @@ class ConvNd(Function):
 
     def _update_output(self, input, weight, bias):
         self.use_cudnn = cudnn.is_acceptable(input) 
-        if cudnn.version() < 6000:
-            self.use_cudnn = self.use_cudnn and not self.is_dilated()
+        if self.use_cudnn and cudnn.version() < 6000:
+            self.use_cudnn = not self.is_dilated()
         if self.use_cudnn:
             output = input.new(*self._output_size(input, weight))
             if self.transposed:
