@@ -27,13 +27,15 @@ void THTensor_(fill)(THTensor *r_, real value)
       THVector_(fill)(rp+i, value, i_end-i);
     }
   } else {
-    TH_TENSOR_APPLY(real, r_, 
+    TH_TENSOR_APPLY(real, r_,
       if (r__stride == 1) {
         THVector_(fill)(r__data, value, r__size);
+	r__data += r__stride * r__size;
 	break;
       } else {
         *r__data = value;
-      });
+      }
+      );
   }
 }
 
