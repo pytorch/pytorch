@@ -413,14 +413,14 @@ class _DistTestBase(object):
 
     # BARRIER
     def _test_barrier_helper(self, group, group_id, rank):
-        WAIT_TIME = 0.3 # seconds
+        WAIT_TIME = 0.3  # seconds
 
         for dest in group:
             expected_time = torch.DoubleTensor(1).fill_(0.0)
             if dest == rank:
                 expected_time.fill_(time.time() + WAIT_TIME)
                 dist.broadcast(expected_time, dest, group_id)
-                time.sleep(WAIT_TIME + 0.1) # sleep a little bit longer
+                time.sleep(WAIT_TIME + 0.1)  # sleep a little bit longer
                 dist.barrier(group_id)
             else:
                 dist.broadcast(expected_time, dest, group_id)
