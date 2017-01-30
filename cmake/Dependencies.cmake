@@ -161,6 +161,7 @@ endif()
 
 # ---[ EIGEN
 include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/eigen)
+add_definitions(-DEIGEN_MPL2_ONLY)
 
 # ---[ Python + Numpy
 if (BUILD_PYTHON)
