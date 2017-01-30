@@ -56,6 +56,9 @@ option(BUILD_BINARY "Build c++ binary executives" ON)
 # options that do not affect the main binaries, but affects testing binaries
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 
+# options that takes in strings instead of on and off statemens.
+option(CAFFE2_CPU_FLAGS "Flags to specify CPU features." "")
+
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
     message(STATUS "Build type not set - defaulting to Release")
@@ -80,6 +83,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "binaries")
 # ---[ Build flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
+
+if (CAFFE2_CPU_FLAGS)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_CPU_FLAGS}")
+endif()
 
 # ---[ Include path needed for proto
 include_directories(BEFORE ${PROJECT_BINARY_DIR})

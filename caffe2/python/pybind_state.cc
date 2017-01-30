@@ -784,6 +784,10 @@ void addGlobalMethods(py::module& m) {
     "Compiling without AVX2. Please consider upgrading your version of Clang."
   // Provide a dummy avx2 flag.
   m.def("builtin_cpu_supports_avx2", []() { return false; });
+#elif defined(CAFFE2_NO_BUILTIN_CPU_SUPPORTS) && !defined(__AVX2__)
+  // If the compile does not support builtin_cpu_supports, and avx2 is not
+  // manually specified, we mark it as not-supported.
+  m.def("builtin_cpu_supports_avx2", []() { return false; });
 #else
   CAFFE2_CPU_FEATURE_SUPPORT(avx2);
 #endif
