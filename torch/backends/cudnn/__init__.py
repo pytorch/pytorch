@@ -14,7 +14,7 @@ lib = None
 thisdir = path.dirname(__file__)
 libpaths = ['', path.join(thisdir, '../../lib')]
 if sys.platform.startswith('linux'):
-    libnames = ['libcudnn.so.6.0.5', 'libcudnn.so.6.0.10', 'libcudnn.so.5.1.5', 'libcudnn.so.5.1.3', 
+    libnames = ['libcudnn.so.6.0.5', 'libcudnn.so.6.0.10', 'libcudnn.so.5.1.5', 'libcudnn.so.5.1.3',
                 'libcudnn.so.5.0.5', 'libcudnn.so.5.1.10']
 elif sys.platform == 'darwin':
     libnames = ['libcudnn.6.dylib', 'libcudnn.5.dylib']
@@ -114,7 +114,7 @@ CUDNN_LINEAR_INPUT = 0
 CUDNN_SKIP_INPUT = 1
 
 CUDNN_NON_DETERMINISTIC = 0
-CUDNN_DETERMINISTIC     = 1
+CUDNN_DETERMINISTIC = 1
 
 CUDNN_RNN_ALGO_STANDARD = 0
 CUDNN_RNN_ALGO_PERSIST_STATIC = 1
@@ -264,12 +264,13 @@ class DropoutDescriptor(object):
 
 
 class RNNDescriptor(object):
+
     def __init__(self, handle, hidden_size, num_layers, dropout_desc, input_mode,
-            bidirectional, mode, datatype):
+                 bidirectional, mode, datatype):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateRNNDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
-        if version() >=6000:
+        if version() >= 6000:
             check_error(lib.cudnnSetRNNDescriptor_v6(
                 handle,
                 self,
@@ -294,10 +295,8 @@ class RNNDescriptor(object):
                 datatype
             ))
 
-
     def __del__(self):
         check_error(lib.cudnnDestroyRNNDescriptor(self))
-
 
 
 class ConvolutionAlgoPerf_v5(ctypes.Structure):
