@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class MV(Module):
     """Module to perform matrix vector multiplication on two minibatch inputs,
        producing a minibatch.
@@ -63,4 +64,3 @@ class MV(Module):
                 self.gradInput[1] = M.t() * gradOutput
 
         return self.gradInput
-

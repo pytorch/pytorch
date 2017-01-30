@@ -1,5 +1,6 @@
 import torch
 
+
 def rprop(opfunc, x, config, state=None):
     """ A plain implementation of RPROP
 
@@ -41,23 +42,21 @@ def rprop(opfunc, x, config, state=None):
         fx, dfdx = opfunc(x)
 
         # init temp storage
-        if not 'delta' in state:
-            state['delta']    = dfdx.new(dfdx.size()).zero_()
+        if 'delta' not in state:
+            state['delta'] = dfdx.new(dfdx.size()).zero_()
             state['stepsize'] = dfdx.new(dfdx.size()).fill_(stepsize)
-            state['sign']     = dfdx.new(dfdx.size())
+            state['sign'] = dfdx.new(dfdx.size())
             state['bytesign'] = torch.ByteTensor(dfdx.size())
-            state['psign']    = torch.ByteTensor(dfdx.size())
-            state['nsign']    = torch.ByteTensor(dfdx.size())
-            state['zsign']    = torch.ByteTensor(dfdx.size())
-            state['dminmax']  = torch.ByteTensor(dfdx.size())
+            state['psign'] = torch.ByteTensor(dfdx.size())
+            state['nsign'] = torch.ByteTensor(dfdx.size())
+            state['zsign'] = torch.ByteTensor(dfdx.size())
+            state['dminmax'] = torch.ByteTensor(dfdx.size())
             if str(type(x)).find('Cuda') > -1:
                 # Push to GPU
-                state['psign']    = state['psign'].cuda()
-                state['nsign']    = state['nsign'].cuda()
-                state['zsign']    = state['zsign'].cuda()
-                state['dminmax']  = state['dminmax'].cuda()
-
-
+                state['psign'] = state['psign'].cuda()
+                state['nsign'] = state['nsign'].cuda()
+                state['zsign'] = state['zsign'].cuda()
+                state['dminmax'] = state['dminmax'].cuda()
 
         # sign of derivative from last step to this one
         torch.mul(dfdx, state['delta'], out=state['sign']).sign_()
@@ -98,4 +97,3 @@ def rprop(opfunc, x, config, state=None):
 
     # return x*, table of f(x) values from each step
     return x, hfx
-

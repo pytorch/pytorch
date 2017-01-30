@@ -33,7 +33,7 @@ class Gather(Function):
 
     def backward(self, grad_output):
         return comm.scatter(grad_output, self.input_gpus, self.input_sizes,
-                self.dim)
+                            self.dim)
 
 
 class Scatter(Function):

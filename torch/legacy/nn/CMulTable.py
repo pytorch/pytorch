@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class CMulTable(Module):
 
     def __init__(self, ):
@@ -17,7 +18,7 @@ class CMulTable(Module):
 
     def updateGradInput_efficient(self, input, gradOutput):
         if self.tout is None:
-              self.tout = input[0].new()
+            self.tout = input[0].new()
         self.tout.resize_as_(self.output)
         for i in range(len(input)):
             if len(self.gradInput) <= i:

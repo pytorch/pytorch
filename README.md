@@ -14,17 +14,17 @@ We are in an early-release Beta. Expect some adventures and rough edges.
 - [Installation](#installation)
   - [Binaries](#binaries)
   - [From source](#from-source)
+  - [Docker image](#docker-image)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 
-| Python |  **`Linux CPU`**   |  **`Linux GPU`** |
-|--------|--------------------|------------------|
-| 2.7.8  | [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | |
-| 2.7    | [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2)](https://build.pytorch.org/job/pytorch-master-py2)  |
-| 3.5    | [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3)](https://build.pytorch.org/job/pytorch-master-py3)  |
-| Nightly| [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | |
+| System | Python | Status |
+| --- | --- | --- |
+| Linux CPU | 2.7.8, 2.7, 3.5, nightly | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) |
+| Linux GPU | 2.7 | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2)](https://build.pytorch.org/job/pytorch-master-py2) |
+| Linux GPU | 3.5 | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3)](https://build.pytorch.org/job/pytorch-master-py3) |
 
 ## More about PyTorch
 
@@ -101,7 +101,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries 
 such as Intel MKL and NVIDIA (CuDNN, NCCL) to maximize speed. 
-At the core, it's CPU and GPU Tensor and Neural Network backends 
+At the core, its CPU and GPU Tensor and Neural Network backends 
 (TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.  
 They are mature and have been tested for years.
 
@@ -169,6 +169,25 @@ export MACOSX_DEPLOYMENT_TARGET=10.9 # if OSX
 pip install -r requirements.txt
 python setup.py install
 ```
+
+### Docker image
+
+Dockerfiles are supplied to build images with cuda support and cudnn v5 and cudnn v6 RC. Build them as usual
+```
+docker build . -t pytorch-cudnnv5 
+```
+or 
+```
+docker build . -t pytorch-cudnnv6 -f tools/docker/Dockerfile-v6
+```
+and run them with nvidia-docker:
+```
+nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv5
+```
+Please note that pytorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
+for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
+should increase shared memory size either with --ipc=host or --shm-size command line options to nvidia-docker run. 
+
 
 ## Getting Started
 

@@ -4,7 +4,7 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from common import TestCase
+from common import TestCase, run_tests
 
 if not torch.cuda.is_available():
     print('CUDA not available, skipping tests')
@@ -87,4 +87,4 @@ class TestNCCL(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

@@ -15,4 +15,3 @@ class Softsign(Function):
             self.buffer_squared = True
         grad_input = grad_output.clone().div_(self.buffer)
         return grad_input
-

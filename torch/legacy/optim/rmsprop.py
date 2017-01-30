@@ -1,5 +1,6 @@
 import torch
 
+
 def rmsprop(opfunc, x, config, state=None):
     """ An implementation of RMSprop
 
@@ -40,14 +41,13 @@ def rmsprop(opfunc, x, config, state=None):
         dfdx.add_(wd, x)
 
     # (3) initialize mean square values and square gradient storage
-    if not 'm' in state:
+    if 'm' not in state:
         state['m'] = x.new().resize_as_(dfdx).zero_()
         state['tmp'] = x.new().resize_as_(dfdx)
 
-
     # (4) calculate new (leaky) mean squared values
     state['m'].mul_(alpha)
-    state['m'].addcmul_(1.0-alpha, dfdx, dfdx)
+    state['m'].addcmul_(1.0 - alpha, dfdx, dfdx)
 
     # (5) perform update
     torch.sqrt(state['m'], out=state['tmp']).add_(epsilon)

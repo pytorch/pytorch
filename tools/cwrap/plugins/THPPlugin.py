@@ -4,85 +4,92 @@ from . import CWrapPlugin
 from itertools import product, chain
 from collections import OrderedDict
 
+
 class THPPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*':   Template('((THPFloatTensor*)$arg)->cdata'),
-        'THDoubleTensor*':  Template('((THPDoubleTensor*)$arg)->cdata'),
-        'THLongTensor*':    Template('((THPLongTensor*)$arg)->cdata'),
-        'THIntTensor*':     Template('((THPIntTensor*)$arg)->cdata'),
-        'THTensor*':        Template('((THPTensor*)$arg)->cdata'),
-        'THBoolTensor*':    Template('((THPBoolTensor*)$arg)->cdata'),
-        'THIndexTensor*':   Template('((THPIndexTensor*)$arg)->cdata'),
+        'THFloatTensor*': Template('((THPFloatTensor*)$arg)->cdata'),
+        'THDoubleTensor*': Template('((THPDoubleTensor*)$arg)->cdata'),
+        'THLongTensor*': Template('((THPLongTensor*)$arg)->cdata'),
+        'THIntTensor*': Template('((THPIntTensor*)$arg)->cdata'),
+        'THTensor*': Template('((THPTensor*)$arg)->cdata'),
+        'THBoolTensor*': Template('((THPBoolTensor*)$arg)->cdata'),
+        'THIndexTensor*': Template('((THPIndexTensor*)$arg)->cdata'),
 
-        'THSFloatTensor*':  Template('((THSPFloatTensor*)$arg)->cdata'),
+        'THCudaTensor*': Template('((THCPFloatTensor*)$arg)->cdata'),
+        'THCudaDoubleTensor*': Template('((THCPDoubleTensor*)$arg)->cdata'),
+
+        'THSFloatTensor*': Template('((THSPFloatTensor*)$arg)->cdata'),
         'THSDoubleTensor*': Template('((THSPDoubleTensor*)$arg)->cdata'),
-        'THSLongTensor*':   Template('((THSPLongTensor*)$arg)->cdata'),
-        'THSIntTensor*':    Template('((THSPIntTensor*)$arg)->cdata'),
-        'THSTensor*':       Template('((THSPTensor*)$arg)->cdata'),
-        'THSBoolTensor*':   Template('((THSPBoolTensor*)$arg)->cdata'),
-        'THSIndexTensor*':  Template('((THSPIndexTensor*)$arg)->cdata'),
+        'THSLongTensor*': Template('((THSPLongTensor*)$arg)->cdata'),
+        'THSIntTensor*': Template('((THSPIntTensor*)$arg)->cdata'),
+        'THSTensor*': Template('((THSPTensor*)$arg)->cdata'),
+        'THSBoolTensor*': Template('((THSPBoolTensor*)$arg)->cdata'),
+        'THSIndexTensor*': Template('((THSPIndexTensor*)$arg)->cdata'),
 
-        'THLongStorage*':   Template('((THPLongStorage*)$arg)->cdata'),
-        'THStorage*':       Template('((THPStorage*)$arg)->cdata'),
-        'THGenerator*':     Template('((THPGenerator*)$arg)->cdata'),
-        'THSize*':          Template('__size.get()'),
-        'THStride*':        Template('__stride.get()'),
-        'void*':            Template('THPUtils_unpackLong($arg)'),
-        'long':             Template('THPUtils_unpackLong($arg)'),
-        'int':              Template('THPUtils_unpackLong($arg)'),
-        'bool':             Template('($arg == Py_True ? true : false)'),
-        'float':            Template('THPFloatUtils_unpackReal($arg)'),
-        'double':           Template('THPDoubleUtils_unpackReal($arg)'),
-        'real':             Template('THPUtils_(unpackReal)($arg)'),
-        'accreal':          Template('THPUtils_(unpackAccreal)($arg)'),
+        'THLongStorage*': Template('((THPLongStorage*)$arg)->cdata'),
+        'THStorage*': Template('((THPStorage*)$arg)->cdata'),
+        'THGenerator*': Template('((THPGenerator*)$arg)->cdata'),
+        'THSize*': Template('__size.get()'),
+        'THStride*': Template('__stride.get()'),
+        'void*': Template('THPUtils_unpackLong($arg)'),
+        'long': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('THPUtils_unpackLong($arg)'),
+        'bool': Template('($arg == Py_True ? true : false)'),
+        'float': Template('THPFloatUtils_unpackReal($arg)'),
+        'double': Template('THPDoubleUtils_unpackReal($arg)'),
+        'real': Template('THPUtils_(unpackReal)($arg)'),
+        'accreal': Template('THPUtils_(unpackAccreal)($arg)'),
     }
 
     TYPE_CHECK = {
-        'THDoubleTensor*':  Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
-        'THFloatTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
-        'THLongTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
-        'THIntTensor*':     Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
-        'THCudaTensor*':    Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
-        'THTensor*':        Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
-        'THBoolTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
-        'THIndexTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
+        'THDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
+        'THFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
+        'THLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
+        'THIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
+        'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
+        'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
+        'THBoolTensor*': Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
+        'THIndexTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
+
+        'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
+        'THCudaDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPDoubleTensorClass'),
 
         'THSDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPDoubleTensorClass'),
-        'THSFloatTensor*':  Template('(PyObject*)Py_TYPE($arg) == THSPFloatTensorClass'),
-        'THSLongTensor*':   Template('(PyObject*)Py_TYPE($arg) == THSPLongTensorClass'),
-        'THSIntTensor*':    Template('(PyObject*)Py_TYPE($arg) == THSPIntTensorClass'),
-        'THSTensor*':       Template('(PyObject*)Py_TYPE($arg) == THSPTensorClass'),
-        'THSBoolTensor*':   Template('(PyObject*)Py_TYPE($arg) == THSPBoolTensorClass'),
-        'THSIndexTensor*':  Template('(PyObject*)Py_TYPE($arg) == THSPIndexTensorClass'),
+        'THSFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPFloatTensorClass'),
+        'THSLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPLongTensorClass'),
+        'THSIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPIntTensorClass'),
+        'THSTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPTensorClass'),
+        'THSBoolTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPBoolTensorClass'),
+        'THSIndexTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPIndexTensorClass'),
 
-        'THLongStorage*':   Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
-        'THStorage*':       Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
-        'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
-        'THSize*':          Template('THPUtils_tryUnpackLongs($arg, __size)'),
-        'THStride*':        Template('THPUtils_tryUnpackLongs($arg, __stride)'),
-        'void*':            Template('THPUtils_checkLong($arg)'),
-        'long':             Template('THPUtils_checkLong($arg)'),
-        'int':              Template('THPUtils_checkLong($arg)'),
-        'bool':             Template('PyBool_Check($arg)'),
-        'float':            Template('THPFloatUtils_checkReal($arg)'),
-        'double':           Template('THPDoubleUtils_checkReal($arg)'),
-        'real':             Template('THPUtils_(checkReal)($arg)'),
-        'accreal':          Template('THPUtils_(checkAccreal)($arg)'),
+        'THLongStorage*': Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
+        'THStorage*': Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
+        'THGenerator*': Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
+        'THSize*': Template('THPUtils_tryUnpackLongs($arg, __size)'),
+        'THStride*': Template('THPUtils_tryUnpackLongs($arg, __stride)'),
+        'void*': Template('THPUtils_checkLong($arg)'),
+        'long': Template('THPUtils_checkLong($arg)'),
+        'int': Template('THPUtils_checkLong($arg)'),
+        'bool': Template('PyBool_Check($arg)'),
+        'float': Template('THPFloatUtils_checkReal($arg)'),
+        'double': Template('THPDoubleUtils_checkReal($arg)'),
+        'real': Template('THPUtils_(checkReal)($arg)'),
+        'accreal': Template('THPUtils_(checkAccreal)($arg)'),
     }
 
     SIZE_VARARG_CHECK = Template('THPUtils_tryUnpackLongVarArgs(args, $idx, __size)')
 
     RETURN_WRAPPER = {
-        'THTensor*':        Template('return THPTensor_(New)($result);'),
-        'THSTensor*':       Template('return THSPTensor_(New)($result);'),
-        'THLongTensor*':    Template('return THPLongTensor_New($result);'),
-        'THLongStorage*':   Template('return THPLongStorage_New($result);'),
+        'THTensor*': Template('return THPTensor_(New)($result);'),
+        'THSTensor*': Template('return THSPTensor_(New)($result);'),
+        'THLongTensor*': Template('return THPLongTensor_New($result);'),
+        'THLongStorage*': Template('return THPLongStorage_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
-        'long':             Template('return PyInt_FromLong($result);'),
-        'accreal':          Template('return THPUtils_(newAccreal)($result);'),
-        'self':             Template('Py_INCREF(self);\nreturn (PyObject*)self;'),
-        'real':             Template('return THPUtils_(newReal)($result);'),
+        'long': Template('return PyInt_FromLong($result);'),
+        'accreal': Template('return THPUtils_(newAccreal)($result);'),
+        'self': Template('Py_INCREF(self);\nreturn (PyObject*)self;'),
+        'real': Template('return THPUtils_(newReal)($result);'),
     }
 
     TENSOR_METHODS_DECLARATION = Template("""
@@ -138,13 +145,13 @@ ${cpu}
         return Template(code)
 
     ALLOCATE_TYPE = {
-        'THTensor*':        _allocate('', ALLOCATE_TMPL),
-        'THLongTensor*':    _allocate('Long', ALLOCATE_TMPL),
-        'THIntTensor*':     _allocate('Int', ALLOCATE_TMPL),
-        'THBoolTensor*':    _allocate('Byte', ALLOCATE_TMPL, ALLOCATE_CUDA),
-        'THIndexTensor*':   _allocate('Long', ALLOCATE_TMPL, ALLOCATE_CUDA),
+        'THTensor*': _allocate('', ALLOCATE_TMPL),
+        'THLongTensor*': _allocate('Long', ALLOCATE_TMPL),
+        'THIntTensor*': _allocate('Int', ALLOCATE_TMPL),
+        'THBoolTensor*': _allocate('Byte', ALLOCATE_TMPL, ALLOCATE_CUDA),
+        'THIndexTensor*': _allocate('Long', ALLOCATE_TMPL, ALLOCATE_CUDA),
 
-        'THSTensor*':       _allocate('', ALLOCATE_TMPL, sparse=True),
+        'THSTensor*': _allocate('', ALLOCATE_TMPL, sparse=True),
     }
 
     TYPE_NAMES = {
@@ -159,6 +166,8 @@ ${cpu}
         'THIndexTensor*': '" THPModuleStr "LongTensor',
         'THFloatTensor*': '" THPModuleStr "FloatTensor',
         'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
+        'THCudaTensor*': 'torch.cuda.FloatTensor',
+        'THCudaDoubleTensor*': 'torch.cuda.DoubleTensor',
         'THSize*': 'torch.Size',
         'THStride*': 'tuple',
         'long': 'int',
@@ -198,14 +207,14 @@ ${cpu}
         def format_args(args, var_args=False):
             option_desc = [format_arg(arg, var_args)
                            for arg in args
-                           if not arg.get('ignore_check', False)
-                           and not arg.get('output')]
+                           if not arg.get('ignore_check', False) and
+                           not arg.get('output')]
             output_args = list(filter(lambda a: a.get('output'), args))
             if output_args:
                 if len(output_args) > 1:
                     out_type = 'tuple['
                     out_type += ', '.join(
-                            self.TYPE_NAMES[arg['type']] for arg in output_args)
+                        self.TYPE_NAMES[arg['type']] for arg in output_args)
                     out_type += ']'
                     option_desc += ['#' + out_type + ' out']
                 else:
@@ -287,7 +296,7 @@ ${cpu}
                     if not output_provided:
                         arg['ignore_check'] = True
                     else:
-                        option_copy['argcount_offset'] =  -len(out_idx) + 1
+                        option_copy['argcount_offset'] = -len(out_idx) + 1
                         arg['no_kwargs'] = True
                         arg['no_idx'] = True
                 new_options.append(option_copy)
@@ -345,7 +354,6 @@ ${cpu}
                     if arg['name'] == 'self':
                         arg['ignore_check'] = True
 
-
         declarations = [d for d in declarations if not d.get('only_stateless', False)]
         self.declarations.extend(filter(lambda x: not x.get('only_stateless', False), register_only))
         self.stateless_declarations.extend(filter(lambda x: x.get('only_stateless', False), register_only))
@@ -377,9 +385,9 @@ ${cpu}
             if declaration.get('override_method_flags'):
                 flags = declaration['override_method_flags']
             entry = Template('  {"$python_name", (PyCFunction)$name, $flags, $docstring},\n').substitute(
-                    python_name=declaration['python_name'], name=declaration['name'], flags=flags,
-                    docstring=declaration.get('docstring_var', 'NULL')
-                )
+                python_name=declaration['python_name'], name=declaration['name'], flags=flags,
+                docstring=declaration.get('docstring_var', 'NULL')
+            )
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])
             tensor_methods += entry
@@ -392,16 +400,16 @@ ${cpu}
     def process_full_file(self, code):
         # We have to find a place before all undefs
         idx = code.find('// PUT DEFINITIONS IN HERE PLEASE')
-        return (code[:idx]
-                + self.declare_methods(False, False)
-                + self.declare_methods(True, False)
-                + self.declare_methods(False, True)
-                + self.declare_methods(True, True)
-                + code[idx:]
+        return (code[:idx] +
+                self.declare_methods(False, False) +
+                self.declare_methods(True, False) +
+                self.declare_methods(False, True) +
+                self.declare_methods(True, True) +
+                code[idx:]
                 )
 
     def preprocessor_guard(self, code, condition):
-            return '#if ' + condition + '\n' + code + '#endif\n'
+        return '#if ' + condition + '\n' + code + '#endif\n'
 
     def process_wrapper(self, code, declaration):
         if 'defined_if' in declaration:
@@ -419,7 +427,7 @@ ${cpu}
                 if option['output_count'] > 1:
                     checks += "PyTuple_Check(__out) &&\n" + indent
                     length_check = "PyTuple_GET_SIZE(__out) == {} &&\n".format(
-                            option['output_count'])
+                        option['output_count'])
                     checks += length_check + indent
                 code = checks + code
             else:
@@ -443,13 +451,13 @@ ${cpu}
     def generate_docstrings_cpp(self):
         template = Template('char* $name = "$content";')
         return '\n\n'.join(
-                template.substitute(name=decl['docstring_var'], content=decl['docstring_content'])
-                for decl in chain(self.declarations, self.stateless_declarations)
-                if 'docstring_var' in decl)
+            template.substitute(name=decl['docstring_var'], content=decl['docstring_content'])
+            for decl in chain(self.declarations, self.stateless_declarations)
+            if 'docstring_var' in decl)
 
     def generate_docstrings_h(self):
         template = Template('extern char* $name;')
         return '\n\n'.join(
-                template.substitute(name=decl['docstring_var'])
-                for decl in chain(self.declarations, self.stateless_declarations)
-                if 'docstring_var' in decl)
+            template.substitute(name=decl['docstring_var'])
+            for decl in chain(self.declarations, self.stateless_declarations)
+            if 'docstring_var' in decl)

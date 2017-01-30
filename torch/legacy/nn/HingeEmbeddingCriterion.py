@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class HingeEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):
@@ -11,7 +12,7 @@ class HingeEmbeddingCriterion(Criterion):
 
     def updateOutput(self, input, y):
         if self.buffer is None:
-              self.buffer = input.new()
+            self.buffer = input.new()
         self.buffer.resize_as_(input).copy_(input)
         self.buffer[torch.eq(y, -1.)] = 0
         self.output = self.buffer.sum()
@@ -34,4 +35,3 @@ class HingeEmbeddingCriterion(Criterion):
             self.gradInput.mul_(1. / input.nelement())
 
         return self.gradInput
-

@@ -39,4 +39,3 @@ class TensorDataset(Dataset):
 
     def __len__(self):
         return self.data_tensor.size(0)
-

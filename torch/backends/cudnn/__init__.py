@@ -21,6 +21,7 @@ elif sys.platform == 'darwin':
 else:
     libnames = []
 
+
 def _loadlib():
     global lib
     loaded = False
@@ -39,6 +40,7 @@ def _loadlib():
     else:
         lib = None
         raise OSError("Could not load cuDNN")
+
 
 def is_acceptable(tensor):
     if not enabled:
@@ -59,13 +61,15 @@ def is_acceptable(tensor):
             return False
     if not _C.has_cudnn:
         warnings.warn("cuDNN library has been detected, but your pytorch "
-                "installation was compiled without support for it. You "
-                "might want to rebuild pytorch, making sure the library "
-                "is visible to the build system.")
+                      "installation was compiled without support for it. You "
+                      "might want to rebuild pytorch, making sure the library "
+                      "is visible to the build system.")
         return False
     return True
 
 __cudnn_version = []
+
+
 def version():
     if not lib:
         raise RuntimeError("cuDNN not initialized")
@@ -109,7 +113,6 @@ CUDNN_GRU = 3
 CUDNN_LINEAR_INPUT = 0
 CUDNN_SKIP_INPUT = 1
 
-
 CUDNN_NON_DETERMINISTIC = 0
 CUDNN_DETERMINISTIC     = 1
 
@@ -118,8 +121,8 @@ CUDNN_RNN_ALGO_PERSIST_STATIC = 1
 CUDNN_RNN_ALGO_PERSIST_DYNAMIC = 2
 
 
-
 class CuDNNHandle:
+
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreate(ctypes.byref(ptr)))
@@ -128,7 +131,9 @@ class CuDNNHandle:
     def __del__(self):
         check_error(lib.cudnnDestroy(self))
 
+
 class CuDNNError(RuntimeError):
+
     def __init__(self, status):
         self.status = status
         msg = '{}: {}'.format(status, get_error_string(status))
@@ -136,6 +141,7 @@ class CuDNNError(RuntimeError):
 
 
 class TensorDescriptor(object):
+
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateTensorDescriptor(ctypes.byref(ptr)))
@@ -158,6 +164,7 @@ class TensorDescriptor(object):
 
 
 class TensorDescriptorArray(object):
+
     def __init__(self, N):
         self.ptrs = (ctypes.c_void_p * N)()
         for i in range(N):
@@ -186,6 +193,7 @@ class TensorDescriptorArray(object):
 
 
 class ConvolutionDescriptor(object):
+
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateConvolutionDescriptor(ctypes.byref(ptr)))
@@ -206,7 +214,9 @@ class ConvolutionDescriptor(object):
     def as_tuple(self):
         return (self._pad, self._stride)
 
+
 class FilterDescriptor(object):
+
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateFilterDescriptor(ctypes.byref(ptr)))
@@ -227,6 +237,7 @@ class FilterDescriptor(object):
 
 
 class DropoutDescriptor(object):
+
     def __init__(self, handle, dropout, seed):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateDropoutDescriptor(ctypes.byref(ptr)))
@@ -250,7 +261,6 @@ class DropoutDescriptor(object):
 
     def __del__(self):
         check_error(lib.cudnnDestroyDropoutDescriptor(self))
-
 
 
 class RNNDescriptor(object):
@@ -298,6 +308,7 @@ class ConvolutionAlgoPerf_v5(ctypes.Structure):
         ("memory", ctypes.c_size_t),
     ]
 
+
 class ConvolutionAlgoPerf_v6(ctypes.Structure):
     _fields_ = [
         ("algo", ctypes.c_int),
@@ -309,14 +320,14 @@ class ConvolutionAlgoPerf_v6(ctypes.Structure):
     ]
 
 
-
-
 def check_error(status):
     if status is not 0:
         raise CuDNNError(status)
 
+
 def get_error_string(status):
     return lib.cudnnGetErrorString(status)
+
 
 def get_handle():
     if lib is None:
@@ -335,10 +346,11 @@ _typemap = {
 }
 
 _sizeofmap = {
-    CUDNN_DATA_HALF : 2,
-    CUDNN_DATA_FLOAT : 4,
-    CUDNN_DATA_DOUBLE : 8,
+    CUDNN_DATA_HALF: 2,
+    CUDNN_DATA_FLOAT: 4,
+    CUDNN_DATA_DOUBLE: 8,
 }
+
 
 def c_type(tensor):
     if isinstance(tensor, torch.cuda.HalfTensor):
@@ -350,9 +362,11 @@ def c_type(tensor):
     else:
         raise ValueError("unknown type '{}'".format(type(tensor)))
 
+
 def int_array(itr):
     array_type = ctypes.c_int * len(itr)
     return array_type(*itr)
+
 
 def descriptor(tensor, N=None):
     if N is not None:
@@ -370,8 +384,10 @@ _autotuner_forward = {}
 _autotuner_backward_data = {}
 _autotuner_backward_filter = {}
 
+
 def convolution_autotuner_key(idesc, weight_desc, conv_desc):
     return (idesc.as_tuple(), weight_desc.as_tuple(), conv_desc.as_tuple())
+
 
 def convolution_forward_algorithm(idesc, weight_desc, conv_desc, odesc):
     k = convolution_autotuner_key(idesc, weight_desc, conv_desc)
@@ -402,14 +418,18 @@ def convolution_forward_algorithm(idesc, weight_desc, conv_desc, odesc):
         wlimit, ctypes.byref(fwd_alg)))
     return fwd_alg
 
+
 def convolution_forward_workspace_size(*args):
     check_error(lib.cudnnGetConvolutionForwardWorkspaceSize(*args))
+
 
 def convolution_forward(*args):
     check_error(lib.cudnnConvolutionForward(*args))
 
+
 def convolution_backward_data(*args):
     return check_error(lib.cudnnConvolutionBackwardData(*args))
+
 
 def convolution_backward_data_algorithm(weight_desc, odesc, conv_desc, idesc):
     k = convolution_autotuner_key(idesc, weight_desc, conv_desc)
@@ -437,11 +457,14 @@ def convolution_backward_data_algorithm(weight_desc, odesc, conv_desc, idesc):
         wlimit, ctypes.byref(bwd_data_alg)))
     return bwd_data_alg
 
+
 def convolution_backward_data_workspace_size(*args):
     return check_error(lib.cudnnGetConvolutionBackwardDataWorkspaceSize(*args))
 
+
 def convolution_backward_filter(*args):
     return check_error(lib.cudnnConvolutionBackwardFilter(*args))
+
 
 def convolution_backward_filter_algorithm(idesc, odesc, conv_desc, weight_desc):
     k = convolution_autotuner_key(idesc, weight_desc, conv_desc)
@@ -469,11 +492,14 @@ def convolution_backward_filter_algorithm(idesc, odesc, conv_desc, weight_desc):
         wlimit, ctypes.byref(bwd_filter_alg)))
     return bwd_filter_alg
 
+
 def convolution_backward_filter_workspace_size(*args):
     return check_error(lib.cudnnGetConvolutionBackwardFilterWorkspaceSize(*args))
 
+
 def convolution_backward_bias(*args):
     check_error(lib.cudnnConvolutionBackwardBias(*args))
+
 
 def add_tensor(*args):
     check_error(lib.cudnnAddTensor(*args))

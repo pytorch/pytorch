@@ -1,6 +1,7 @@
 import torch
 from .SpatialConvolution import SpatialConvolution
 
+
 class SpatialDilatedConvolution(SpatialConvolution):
 
     def __init__(self, nInputPlane, nOutputPlane, kW, kH, dW=1, dH=1, padW=0, padH=None, dilationH=1, dilationW=None):
@@ -11,9 +12,9 @@ class SpatialDilatedConvolution(SpatialConvolution):
 
     def updateOutput(self, input):
         if self.finput is None:
-              self.finput = self.weight.new()
+            self.finput = self.weight.new()
         if self.fgradInput is None:
-              self.fgradInput = self.weight.new()
+            self.fgradInput = self.weight.new()
         input = self._makeContiguous(input)
         self._backend.SpatialDilatedConvolution_updateOutput(
             self._backend.library_state,
@@ -36,7 +37,7 @@ class SpatialDilatedConvolution(SpatialConvolution):
 
         input, gradOutput = self._makeContiguous(input, gradOutput)
         if self.fgradInput is None:
-              self.fgradInput = self.weight.new()
+            self.fgradInput = self.weight.new()
         self._backend.SpatialDilatedConvolution_updateGradInput(
             self._backend.library_state,
             input,
@@ -54,7 +55,7 @@ class SpatialDilatedConvolution(SpatialConvolution):
     def accGradParameters(self, input, gradOutput, scale=1):
         input, gradOutput = self._makeContiguous(input, gradOutput)
         if self.fgradInput is None:
-              self.fgradInput = self.weight.new()
+            self.fgradInput = self.weight.new()
         self._backend.SpatialDilatedConvolution_accGradParameters(
             self._backend.library_state,
             input,
@@ -83,6 +84,5 @@ class SpatialDilatedConvolution(SpatialConvolution):
 
         s += ')'
         if self.bias is None:
-           s += ' without bias'
+            s += ' without bias'
         return s
-

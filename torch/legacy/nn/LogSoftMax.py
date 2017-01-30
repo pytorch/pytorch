@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class LogSoftMax(Module):
 
     def updateOutput(self, input):
@@ -11,7 +12,6 @@ class LogSoftMax(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.LogSoftMax_updateGradInput(
             self._backend.library_state,
@@ -21,4 +21,3 @@ class LogSoftMax(Module):
             self.output
         )
         return self.gradInput
-

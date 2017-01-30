@@ -5,6 +5,7 @@ import torch.backends.cudnn as cudnn
 
 
 class BatchNorm(Function):
+
     def __init__(self, running_mean, running_var, training, momentum, eps):
         super(BatchNorm, self).__init__()
         self.running_mean = running_mean
@@ -18,9 +19,9 @@ class BatchNorm(Function):
 
         # don't use cuDNN for half inputs because cuDNN requires the weight and
         # bias tensors to be floats, unlike THCUNN which requires half tensors.
-        self.use_cudnn = (cudnn.is_acceptable(input)
-                          and weight is not None and bias is not None
-                          and not isinstance(input, torch.cuda.HalfTensor))
+        self.use_cudnn = (cudnn.is_acceptable(input) and
+                          weight is not None and bias is not None and
+                          not isinstance(input, torch.cuda.HalfTensor))
 
         # temporary buffers used in forward and backward
         num_features = input.size(1)
@@ -54,13 +55,15 @@ class BatchNorm(Function):
         if (len(self.needs_input_grad) > 1 and self.needs_input_grad[2]) or self.use_cudnn:
             grad_bias = bias.new(bias.size()).zero_()
 
-        if self.use_cudnn:
+        if self.use_cudnn and self.training:
+            # cudnn does not support backward in evaluate mode
             torch._C._cudnn_batch_norm_backward(
                 input, grad_output, grad_input,
                 grad_weight, grad_bias, weight,
                 self.running_mean, self.running_var,
                 self._save_mean, self._save_std, self.training, self.eps)
         else:
+            grad_output = grad_output.contiguous()
             backend = type2backend[type(input)]
             backend.BatchNormalization_backward(
                 backend.library_state, input, grad_output, grad_input,

@@ -4,6 +4,7 @@ from ..function import Function
 
 
 class _DimReduceFunction(Function):
+
     def __init__(self, dim=None):
         super(_DimReduceFunction, self).__init__()
         self.dim = dim
@@ -139,6 +140,7 @@ class Kthvalue(_SelectionFunction):
 
 
 class Norm(Function):
+
     def __init__(self, norm_type=2, dim=None):
         super(Norm, self).__init__()
         self.norm_type = norm_type

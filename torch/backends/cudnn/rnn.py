@@ -3,6 +3,7 @@ import torch.backends.cudnn as cudnn
 from torch.backends.cudnn import check_error
 import ctypes
 
+
 def get_cudnn_mode(mode):
     if mode == 'RNN_RELU':
         return cudnn.CUDNN_RNN_RELU
@@ -17,9 +18,10 @@ def get_cudnn_mode(mode):
 
 
 class Unserializable(object):
+
     def __init__(self, inner):
         self.inner = inner
-    
+
     def get(self):
         return self.inner
 
@@ -38,6 +40,7 @@ def init_dropout_descriptor(fn, handle):
         fn.dropout,
         fn.dropout_seed
     )
+
 
 def init_rnn_descriptor(fn, handle):
     return cudnn.RNNDescriptor(
@@ -81,7 +84,7 @@ def get_num_weights(handle, rnn_desc, x_desc, datatype):
         datatype
     ))
     elem_size = cudnn._sizeofmap[datatype]
-    assert(weight_size.value % elem_size == 0)
+    assert weight_size.value % elem_size == 0
     return weight_size.value // elem_size
 
 
@@ -140,10 +143,11 @@ def get_parameters(fn, handle, weight_buf):
                     ctypes.byref(nb_dims),
                     ctypes.c_void_p(filter_dim_a.data_ptr())))
 
-                filter_dim_a.resize_(nb_dims.value)
+                assert nb_dims.value <= min_dim
+                filter_dim_a = filter_dim_a[:nb_dims.value]
                 elem_size = cudnn._sizeofmap[fn.datatype]
                 offset_bytes = (matrix_pointer.value - weight_buf.data_ptr())
-                assert(offset_bytes % elem_size == 0)
+                assert offset_bytes % elem_size == 0
                 offset = offset_bytes // elem_size
 
                 # for all the RNN types provided by CUDNN, all the ih weights
@@ -152,16 +156,15 @@ def get_parameters(fn, handle, weight_buf):
                 # Since we're storing all the weights in a single tensor anyway,
                 # might as well merge the CUDNN ones into a single tensor as well
                 if linear_id == 0 or linear_id == num_linear_layers / 2:
-                    assert(filter_dim_a.prod() == filter_dim_a[0])
+                    assert filter_dim_a.prod() == filter_dim_a[0]
                     param = fn.weight_buf.new().set_(
                         weight_buf.storage(), offset,
                         filter_dim_a[0] * num_linear_layers // 2, filter_dim_a[2])
                     layer_params.append(param)
                 else:
-                    assert(cur_offset == offset)
+                    assert cur_offset == offset
 
                 cur_offset = offset + filter_dim_a[0]
-
 
         params.append(layer_params)
 
@@ -171,7 +174,7 @@ def get_parameters(fn, handle, weight_buf):
 def _copyParams(params_from, params_to):
     for layer_params_from, layer_params_to in zip(params_from, params_to):
         for param_from, param_to in zip(layer_params_from, layer_params_to):
-            assert(param_from.type() == param_to.type())
+            assert param_from.type() == param_to.type()
             param_to.copy_(param_from)
 
 
@@ -205,9 +208,9 @@ def forward(fn, input, hx, weight, output, hy):
         output_size = _output_size(fn)
         x = input.contiguous()
         output.resize_(*output_size)
-        hy.resize_(*hidden_size).zero_()
+        hy.resize_(*hidden_size)
         if cy is not None:
-            cy.resize_(*hidden_size).zero_()
+            cy.resize_(*hidden_size)
         y = output
 
         # init descriptors
@@ -238,7 +241,7 @@ def forward(fn, input, hx, weight, output, hy):
 
         if tuple(hx.size()) != hidden_size:
             raise RuntimeError('Expected hidden size {}, got {}'.format(
-               hidden_size, tuple(hx.size())))
+                hidden_size, tuple(hx.size())))
         if cx is not None and tuple(cx.size()) != hidden_size:
             raise RuntimeError('Expected cell size {}, got {}'.format(
                 hidden_size, tuple(cx.size())))
@@ -296,7 +299,6 @@ def forward(fn, input, hx, weight, output, hy):
             output = output.transpose_(0, 1)
 
 
-
 def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_input, grad_hx):
     with torch.cuda.device_of(input):
         handle = cudnn.get_handle()
@@ -322,8 +324,8 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         y = output
         w = fn.weight_buf
         dx = grad_input.resize_as_(input)
-        dhy = grad_hy.resize_(*hidden_size)
-        dcy = grad_cy.resize_(*hidden_size) if grad_cy is not None else None
+        dhy = grad_hy.contiguous().view(*hidden_size)
+        dcy = grad_cy.contiguous().view(*hidden_size) if grad_cy is not None else None
         dhx = grad_hx.resize_(*hidden_size)
         dcx = grad_cx.resize_(*hidden_size) if grad_cx is not None else None
 

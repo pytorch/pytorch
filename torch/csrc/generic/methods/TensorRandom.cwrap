@@ -483,10 +483,19 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: bernoulli_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  cname: bernoulli
   return: self
-  arguments:
-    - THTensor* self
-    - arg: double p
-      default: 0.5
+  options:
+    - cname: bernoulli
+      arguments:
+        - THTensor* self
+        - arg: double p
+          default: 0.5
+    - cname: bernoulli_FloatTensor
+      arguments:
+        - THTensor* self
+        - THCudaTensor* float_p
+    - cname: bernoulli_DoubleTensor
+      arguments:
+        - THTensor* self
+        - THCudaDoubleTensor* float_p
 ]]

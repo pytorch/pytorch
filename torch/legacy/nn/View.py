@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class View(Module):
 
     def resetSize(self, *args):
@@ -28,14 +29,13 @@ class View(Module):
 
     def updateOutput(self, input):
         if self.output is None:
-              self.output = input.new()
+            self.output = input.new()
         self.output = input.view(self.size)
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
-              self.gradInput = gradOutput.new()
+            self.gradInput = gradOutput.new()
         self.gradInput = gradOutput.view(input.size())
         return self.gradInput
 

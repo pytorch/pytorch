@@ -369,7 +369,7 @@ Loss functions
     :members:
 
 :hidden:`NLLLoss2d`
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: NLLLoss2d
     :members:
@@ -443,6 +443,19 @@ Vision layers
 
 .. autoclass:: PixelShuffle
     :members:
+
+:hidden:`UpsamplingNearest2d`
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: UpsamplingNearest2d
+    :members:
+
+:hidden:`UpsamplingBilinear2d`
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: UpsamplingBilinear2d
+    :members:
+
 
 Multi-GPU layers
 ----------------

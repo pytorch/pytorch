@@ -1,5 +1,6 @@
 from . import CWrapPlugin
 
+
 class ArgcountChecker(CWrapPlugin):
 
     def process_all_checks(self, checks, option):

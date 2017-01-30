@@ -1,6 +1,8 @@
 #ifndef THC_THRUST_ALLOCATOR_INC
 #define THC_THRUST_ALLOCATOR_INC
 
+#include <cstddef>
+
 /// Allocator for Thrust to re-route its internal device allocations
 /// to the THC allocator
 class THCThrustAllocator {

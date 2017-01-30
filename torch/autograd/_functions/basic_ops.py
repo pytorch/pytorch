@@ -59,7 +59,7 @@ class Pow(Function):
 
     def backward(self, grad_output):
         a, b = self.saved_tensors
-        return grad_output.mul(b).mul_(a.pow(b-1)), grad_output.mul(a.pow(b)).mul_(a.log())
+        return grad_output.mul(b).mul_(a.pow(b - 1)), grad_output.mul(a.pow(b)).mul_(a.log())
 
 
 class AddConstant(InplaceFunction):
@@ -174,7 +174,7 @@ class PowConstant(Function):
             return grad_output.mul(self.fw_result).mul_(math.log(self.constant))
         else:
             a = self.saved_tensors[0]
-            return grad_output.mul(self.constant).mul_(a.pow(self.constant-1))
+            return grad_output.mul(self.constant).mul_(a.pow(self.constant - 1))
 
 
 class Negate(InplaceFunction):

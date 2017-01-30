@@ -3,6 +3,7 @@ import math
 import torch
 from .Module import Module
 
+
 class SpatialFullConvolutionMap(Module):
 
     def __init__(self, conMatrix, kW, kH, dW=1, dH=1):
@@ -36,10 +37,10 @@ class SpatialFullConvolutionMap(Module):
                 ninp[idx] += 1
             for k in range(self.connTable.size(0)):
                 idx = int(self.connTable[k][1])
-                stdv = 1. / math.sqrt(self.kW*self.kH*ninp[idx])
+                stdv = 1. / math.sqrt(self.kW * self.kH * ninp[idx])
                 self.weight[k].uniform_(-stdv, stdv)
             for k in range(self.bias.size(0)):
-                stdv = 1. / math.sqrt(self.kW*self.kH*ninp[k])
+                stdv = 1. / math.sqrt(self.kW * self.kH * ninp[k])
                 # TODO: torch.uniform
                 self.bias[k] = random.uniform(-stdv, stdv)
 
@@ -57,7 +58,6 @@ class SpatialFullConvolutionMap(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.SpatialFullConvolutionMap_updateGradInput(
             self._backend.library_state,
@@ -73,7 +73,6 @@ class SpatialFullConvolutionMap(Module):
         )
         return self.gradInput
 
-
     def accGradParameters(self, input, gradOutput, scale=1):
         self._backend.SpatialFullConvolutionMap_accGradParameters(
             self._backend.library_state,
@@ -87,4 +86,3 @@ class SpatialFullConvolutionMap(Module):
             self.dW, self.dH,
             scale
         )
-

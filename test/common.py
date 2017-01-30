@@ -1,3 +1,5 @@
+import sys
+import argparse
 import unittest
 import contextlib
 from itertools import product
@@ -9,9 +11,17 @@ from torch.autograd import Variable, Function
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
-torch.manual_seed(123)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
+
+
+def run_tests():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--seed', type=int, default=123)
+    args, remaining = parser.parse_known_args()
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    remaining = [sys.argv[0]] + remaining
+    unittest.main(argv=remaining)
 
 
 TEST_NUMPY = True
@@ -19,6 +29,7 @@ try:
     import numpy
 except ImportError:
     TEST_NUMPY = False
+
 
 def get_cpu_type(t):
     assert t.__module__ == 'torch.cuda'
@@ -146,7 +157,7 @@ def make_jacobian(input, num_out):
         return torch.zeros(input.nelement(), num_out)
     else:
         return type(input)(filter(lambda x: x is not None,
-            (make_jacobian(elem, num_out) for elem in input)))
+                                  (make_jacobian(elem, num_out) for elem in input)))
 
 
 def iter_tensors(x, only_requiring_grad=False):
@@ -197,7 +208,7 @@ def get_numerical_jacobian(fn, input, target):
             outb.copy_(fn(input))
             flat_tensor[i] = orig
 
-            outb.add_(-1,outa).div_(2*perturbation)
+            outb.add_(-1, outa).div_(2 * perturbation)
             d_tensor[i] = outb
 
     return jacobian

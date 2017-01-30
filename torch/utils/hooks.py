@@ -3,6 +3,7 @@ import weakref
 
 class RemovableHandle(object):
     """A handle which provides the capability to remove a hook."""
+
     def __init__(self, hooks_dict):
         self.hooks_dict_ref = weakref.ref(hooks_dict)
 

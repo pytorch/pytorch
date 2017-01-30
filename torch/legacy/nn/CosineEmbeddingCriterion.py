@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class CosineEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=0, sizeAverage=True):
@@ -9,13 +10,12 @@ class CosineEmbeddingCriterion(Criterion):
         self.sizeAverage = sizeAverage
         self.gradInput = [torch.Tensor(), torch.Tensor()]
         self.buffer = None
-        self.w1  = None
+        self.w1 = None
         self.w22 = None
-        self.w  = None
+        self.w = None
         self.w32 = None
         self._outputs = None
         self._idx = None
-
 
     def updateOutput(self, input, y):
         input1, input2 = input[0], input[1]
@@ -23,9 +23,9 @@ class CosineEmbeddingCriterion(Criterion):
         # keep backward compatibility
         if self.buffer is None:
             self.buffer = input1.new()
-            self.w1  = input1.new()
+            self.w1 = input1.new()
             self.w22 = input1.new()
-            self.w  = input1.new()
+            self.w = input1.new()
             self.w32 = input1.new()
             self._outputs = input1.new()
 
@@ -64,14 +64,13 @@ class CosineEmbeddingCriterion(Criterion):
         self.output = self._outputs.sum()
 
         if self.sizeAverage:
-           self.output = self.output / y.size(0)
+            self.output = self.output / y.size(0)
 
         return self.output
 
-
     def updateGradInput(self, input, y):
-        v1  = input[0]
-        v2  = input[1]
+        v1 = input[0]
+        v2 = input[1]
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
@@ -98,22 +97,21 @@ class CosineEmbeddingCriterion(Criterion):
         gw2[self._idx] = gw2[self._idx].mul_(-1)
 
         if self.sizeAverage:
-           gw1.div_(y.size(0))
-           gw2.div_(y.size(0))
+            gw1.div_(y.size(0))
+            gw2.div_(y.size(0))
 
         return self.gradInput
 
     def type(self, type=None, tensorCache=None):
         if not type:
-           return self._type
+            return self._type
 
         self._idx = None
         super(CosineEmbeddingCriterion, self).type(type, tensorCache)
         # comparison operators behave differently from cuda/c implementations
         if type == 'torch.cuda.FloatTensor':
-           self._idx = torch.cuda.ByteTensor()
+            self._idx = torch.cuda.ByteTensor()
         else:
-           self._idx = torch.ByteTensor()
+            self._idx = torch.ByteTensor()
 
         return self
-

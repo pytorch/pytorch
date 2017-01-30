@@ -1,5 +1,6 @@
 from .optimizer import Optimizer
 
+
 class RMSprop(Optimizer):
     """Implements RMSprop algorithm.
 
@@ -32,7 +33,7 @@ class RMSprop(Optimizer):
         for group in self.param_groups:
             for p in group['params']:
                 grad = p.grad.data
-                state = self.state[id(p)]
+                state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:
@@ -52,6 +53,3 @@ class RMSprop(Optimizer):
                 p.data.addcdiv_(-group['lr'], grad, avg)
 
         return loss
-
-
-

@@ -4,11 +4,12 @@ from .utils import clear
 from functools import wraps
 import sys
 
+
 class Container(Module):
 
     def __init__(self, *args):
-         super(Container, self).__init__(*args)
-         self.modules = []
+        super(Container, self).__init__(*args)
+        self.modules = []
 
     def add(self, module):
         self.modules.append(module)
@@ -18,11 +19,11 @@ class Container(Module):
         return self.modules[index]
 
     def size(self):
-         return len(self.modules)
+        return len(self.modules)
 
     def applyToModules(self, func):
-         for module in self.modules:
-             func(module)
+        for module in self.modules:
+            func(module)
 
     def zeroGradParameters(self):
         self.applyToModules(lambda m: m.zeroGradParameters())
@@ -46,16 +47,16 @@ class Container(Module):
         self.applyToModules(lambda m: m.reset(stdv))
 
     def parameters(self):
-         w = []
-         gw = []
-         for module in self.modules:
-             mparam = module.parameters()
-             if mparam is not None:
-                 w.extend(mparam[0])
-                 gw.extend(mparam[1])
-         if not w:
-             return
-         return w, gw
+        w = []
+        gw = []
+        for module in self.modules:
+            mparam = module.parameters()
+            if mparam is not None:
+                w.extend(mparam[0])
+                gw.extend(mparam[1])
+        if not w:
+            return
+        return w, gw
 
     def clearState(self):
         clear('output')
@@ -63,4 +64,3 @@ class Container(Module):
         for module in self.modules:
             module.clearState()
         return self
-

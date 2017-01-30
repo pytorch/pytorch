@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MarginRankingCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):
@@ -15,29 +16,29 @@ class MarginRankingCriterion(Criterion):
 
     def updateOutput(self, input, y):
         if input[0].size(0) == 1:
-           self.output = max(0, -y*(input[0][0]-input[1][0]) + self.margin)
+            self.output = max(0, -y * (input[0][0] - input[1][0]) + self.margin)
         else:
-           if self._output is None:
-                  self._output = input[0].clone()
-           self._output.resize_as_(input[0])
-           self._output.copy_(input[0])
+            if self._output is None:
+                self._output = input[0].clone()
+            self._output.resize_as_(input[0])
+            self._output.copy_(input[0])
 
-           self._output.add_(-1, input[1])
-           self._output.mul_(-1).mul_(y)
-           self._output.add_(self.margin)
+            self._output.add_(-1, input[1])
+            self._output.mul_(-1).mul_(y)
+            self._output.add_(self.margin)
 
-           self._output.clamp_(min=0)
+            self._output.clamp_(min=0)
 
-           self.output = self._output.sum()
+            self.output = self._output.sum()
 
-           if self.sizeAverage:
-              self.output = self.output / y.size(0)
+            if self.sizeAverage:
+                self.output = self.output / y.size(0)
 
         return self.output
 
     def updateGradInput(self, input, y):
         if input[0].size(0) == 1:
-            dist = -y * (input[0][0]-input[1][0]) + self.margin
+            dist = -y * (input[0][0] - input[1][0]) + self.margin
             if dist < 0:
                 self.gradInput[0][0] = 0
                 self.gradInput[1][0] = 0
@@ -46,7 +47,7 @@ class MarginRankingCriterion(Criterion):
                 self.gradInput[1][0] = y
         else:
             if self.dist is None:
-                  self.dist = input[0].new()
+                self.dist = input[0].new()
             self.dist = self.dist.resize_as_(input[0]).copy_(input[0])
             dist = self.dist
 
@@ -55,7 +56,7 @@ class MarginRankingCriterion(Criterion):
             dist.add_(self.margin)
 
             if self.mask is None:
-                  self.mask = input[0].new()
+                self.mask = input[0].new()
             self.mask = self.mask.resize_as_(input[0]).copy_(dist)
             mask = self.mask
 
@@ -74,4 +75,3 @@ class MarginRankingCriterion(Criterion):
                 self.gradInput[1].div_(y.size(0))
 
         return self.gradInput
-

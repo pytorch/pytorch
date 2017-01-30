@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class SpatialFractionalMaxPooling(Module):
     # Usage:
     # nn.SpatialFractionalMaxPooling(poolSizeW, poolSizeH, outW, outH)
@@ -34,21 +35,21 @@ class SpatialFractionalMaxPooling(Module):
         self.indices = None
 
         if arg1 >= 1 and arg2 >= 1:
-           # Desired output size: the input tensor will determine the reduction
-           # ratio
-           self.outW = arg1
-           self.outH = arg2
-           self.ratioW = self.ratioH = None
+            # Desired output size: the input tensor will determine the reduction
+            # ratio
+            self.outW = arg1
+            self.outH = arg2
+            self.ratioW = self.ratioH = None
         else:
-           # Reduction ratio specified per each input
-           # This is the reduction ratio that we use
-           self.ratioW = arg1
-           self.ratioH = arg2
-           self.outW = self.outH = None
+            # Reduction ratio specified per each input
+            # This is the reduction ratio that we use
+            self.ratioW = arg1
+            self.ratioH = arg2
+            self.outW = self.outH = None
 
-           # The reduction ratio must be between 0 and 1
-           assert self.ratioW > 0 and self.ratioW < 1
-           assert self.ratioH > 0 and self.ratioH < 1
+            # The reduction ratio must be between 0 and 1
+            assert self.ratioW > 0 and self.ratioW < 1
+            assert self.ratioH > 0 and self.ratioH < 1
 
     def _getBufferSize(self, input):
         assert input.ndimension() == 4
@@ -56,7 +57,6 @@ class SpatialFractionalMaxPooling(Module):
         planeSize = input.size(1)
 
         return torch.Size([batchSize, planeSize, 2])
-
 
     def _initSampleBuffer(self, input):
         sampleBufferSize = self._getBufferSize(input)
@@ -72,7 +72,7 @@ class SpatialFractionalMaxPooling(Module):
     def _getOutputSizes(self, input):
         outW = self.outW
         outH = self.outH
-        if self.ratioW != None and self.ratioH != None:
+        if self.ratioW is not None and self.ratioH is not None:
             assert input.ndimension() == 4
             outW = int(math.floor(input.size(3) * self.ratioW))
             outH = int(math.floor(input.size(2) * self.ratioH))
@@ -81,7 +81,7 @@ class SpatialFractionalMaxPooling(Module):
             assert outW > 0
             assert outH > 0
         else:
-            assert outW != None and outH != None
+            assert outW is not None and outH is not None
 
         return outW, outH
 
@@ -93,7 +93,7 @@ class SpatialFractionalMaxPooling(Module):
 
     def updateOutput(self, input):
         if self.indices is None:
-              self.indices = input.new()
+            self.indices = input.new()
         self.indices = self.indices.long()
         self._initSampleBuffer(input)
         outW, outH = self._getOutputSizes(input)
@@ -130,6 +130,6 @@ class SpatialFractionalMaxPooling(Module):
 
     def __repr__(self):
         return super(SpatialFractionalMaxPooling, self).__repr__() + \
-                '({}x{}, {}, {})'.format(self.outW or self.ratioW,
-                                        self.outH or self.ratioH,
-                                        self.poolSizeW, self.poolSizeH)
+            '({}x{}, {}, {})'.format(self.outW or self.ratioW,
+                                     self.outH or self.ratioH,
+                                     self.poolSizeW, self.poolSizeH)

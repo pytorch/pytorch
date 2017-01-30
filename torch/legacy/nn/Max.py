@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear, addSingletondimension
 
+
 class Max(Module):
 
     def __init__(self, dimension=0):
@@ -13,25 +14,26 @@ class Max(Module):
     def _getPositiveDimension(self, input):
         dimension = self.dimension
         if dimension < 0:
-           dimension = input.dim() + dimension
+            dimension = input.dim() + dimension
 
         return dimension
 
     def _lazyInit(self):
         if self._output is None:
-              self._output = self.output.new()
+            self._output = self.output.new()
         if self._indices is None:
-              self._indices = \
-           (torch.cuda.LongTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor' else torch.LongTensor())
+            self._indices = \
+                (torch.cuda.LongTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor'
+                 else torch.LongTensor())
 
     def updateOutput(self, input):
         self._lazyInit()
         dimension = self._getPositiveDimension(input)
         torch.max(input, dimension, out=(self._output, self._indices))
         if input.dim() > 1:
-          self.output.set_(self._output.select(dimension, 0))
+            self.output.set_(self._output.select(dimension, 0))
         else:
-          self.output.set_(self._output)
+            self.output.set_(self._output)
 
         return self.output
 
@@ -39,9 +41,9 @@ class Max(Module):
         self._lazyInit()
         dimension = self._getPositiveDimension(input)
         if input.dim() > 1:
-          gradOutputView = addSingletondimension(gradOutput, dimension)
+            gradOutputView = addSingletondimension(gradOutput, dimension)
         else:
-          gradOutputView = gradOutput
+            gradOutputView = gradOutput
 
         self.gradInput.resize_as_(input).zero_().scatter_(dimension, self._indices, gradOutputView)
         return self.gradInput
@@ -64,4 +66,3 @@ class Max(Module):
     def clearState(self):
         clear(self, '_indices', '_output')
         return super(Max, self).clearState()
-

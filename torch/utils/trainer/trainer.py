@@ -58,6 +58,7 @@ class Trainer(object):
             target_var = Variable(batch_target)
 
             plugin_data = [None, None]
+
             def closure():
                 batch_output = self.model(input_var)
                 loss = self.criterion(batch_output, target_var)
@@ -70,7 +71,7 @@ class Trainer(object):
             self.optimizer.zero_grad()
             self.optimizer.step(closure)
             self.call_plugins('iteration', i, batch_input, batch_target,
-                                *plugin_data)
+                              *plugin_data)
             self.call_plugins('update', i, self.model)
 
         self.iterations += i

@@ -32,7 +32,7 @@ def parallel_apply(modules, inputs):
 
     threads = [threading.Thread(target=_worker,
                                 args=(module, input, results, lock))
-                for module, input in zip(modules, inputs)]
+               for module, input in zip(modules, inputs)]
 
     for thread in threads:
         thread.start()
@@ -45,4 +45,3 @@ def parallel_apply(modules, inputs):
             raise output
         outputs.append(output)
     return outputs
-

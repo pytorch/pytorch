@@ -4,6 +4,7 @@ from torch._utils import _accumulate
 
 # TODO: sync streams when implemented
 
+
 def broadcast(tensor, devices):
     """Broadcasts a tensor to a number of GPUs.
 

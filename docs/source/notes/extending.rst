@@ -144,9 +144,9 @@ This is how a ``Linear`` module can be implemented::
             if bias is not None:
                 self.bias.data.uniform_(-0.1, 0.1)
 
-    def forward(self, input):
-        # See the autograd section for explanation of what happens here.
-        return Linear()(input, self.weight, self.bias)
+        def forward(self, input):
+            # See the autograd section for explanation of what happens here.
+            return Linear()(input, self.weight, self.bias)
 
 
 Writing custom C extensions

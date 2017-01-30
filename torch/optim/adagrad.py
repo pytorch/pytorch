@@ -1,5 +1,6 @@
 from .optimizer import Optimizer
 
+
 class Adagrad(Optimizer):
     """Implements Adagrad algorithm.
 
@@ -34,7 +35,7 @@ class Adagrad(Optimizer):
         for group in self.param_groups:
             for p in group['params']:
                 grad = p.grad.data
-                state = self.state[id(p)]
+                state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:
@@ -53,4 +54,3 @@ class Adagrad(Optimizer):
                 p.data.addcdiv_(-clr, grad, std)
 
         return loss
-
