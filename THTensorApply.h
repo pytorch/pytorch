@@ -1,5 +1,6 @@
 #ifndef TH_TENSOR_APPLY_INC
 #define TH_TENSOR_APPLY_INC
+#include <sys/time.h>
 
 #define TH_TENSOR_APPLY3(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
 { \
@@ -396,9 +397,9 @@
     /* break contiguity. Note that if the tensor is contiguous, then k is -1 and */ \
     /* this counter array is empty. */ \
 \
-    TENSOR##_dims = (long*)THAlloc(sizeof(long)*(TENSOR##_dim)); \
-    TENSOR##_strides = (long*)THAlloc(sizeof(long)*(TENSOR##_dim)); \
-    TENSOR##_counter = (long*)THAlloc(sizeof(long)*(TENSOR##_dim)); \
+    TENSOR##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR##_dim)); \
+    TENSOR##_dims = TENSOR##_counter + TENSOR##_dim; \
+    TENSOR##_strides = TENSOR##_counter + 2*TENSOR##_dim; \
     long dim_index = TENSOR##_dim-1; \
     TENSOR##_dims[dim_index] = TENSOR->size[TENSOR->nDimension-1]; \
     TENSOR##_strides[dim_index] = TENSOR->stride[TENSOR->nDimension-1]; \
@@ -464,8 +465,6 @@
     } \
   } \
   THFree(TENSOR##_counter); \
-  THFree(TENSOR##_strides); \
-  THFree(TENSOR##_dims); \
 }
 //printf("dim %ld counter %ld stride %ld\n", TENSOR##_i, TENSOR##_counter[TENSOR##_i], TENSOR##_strides[TENSOR##_i]); 
 //printf("address %ld\n", TENSOR##_data-TENSOR->storage->data+TENSOR->storageOffset);
