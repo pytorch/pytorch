@@ -59,9 +59,7 @@
 	TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1##_i]; \
       } \
     } \
-    /* it will be used for offset updates while looping through the largest contiguous section */ \
     TENSOR1##_size = TENSOR1##_sizes[TENSOR1##_dim-1]; \
-    /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR1##_stride = TENSOR1##_strides[TENSOR1##_dim-1]; \
 \
     TENSOR2##_data = TENSOR2->storage->data+TENSOR2->storageOffset; \
@@ -89,9 +87,7 @@
 	TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2##_i]; \
       } \
     } \
-    /* it will be used for offset updates while looping through the largest contiguous section */ \
     TENSOR2##_size = TENSOR2##_sizes[TENSOR2##_dim-1]; \
-    /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR2##_stride = TENSOR2##_strides[TENSOR2##_dim-1]; \
 \
     TENSOR3##_data = TENSOR3->storage->data+TENSOR3->storageOffset; \
@@ -119,9 +115,7 @@
 	TENSOR3##_strides[TH_TENSOR_dim_index] = TENSOR3->stride[TENSOR3##_i]; \
       } \
     } \
-    /* it will be used for offset updates while looping through the largest contiguous section */ \
     TENSOR3##_size = TENSOR3##_sizes[TENSOR3##_dim-1]; \
-    /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR3##_stride = TENSOR3##_strides[TENSOR3##_dim-1]; \
   } \
 \
@@ -281,9 +275,7 @@
 	TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1##_i]; \
       } \
     } \
-    /* it will be used for offset updates while looping through the largest contiguous section */ \
     TENSOR1##_size = TENSOR1##_sizes[TENSOR1##_dim-1]; \
-    /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR1##_stride = TENSOR1##_strides[TENSOR1##_dim-1]; \
 \
     TENSOR2##_data = TENSOR2->storage->data+TENSOR2->storageOffset; \
@@ -311,9 +303,7 @@
 	TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2##_i]; \
       } \
     } \
-    /* it will be used for offset updates while looping through the largest contiguous section */ \
     TENSOR2##_size = TENSOR2##_sizes[TENSOR2##_dim-1]; \
-    /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR2##_stride = TENSOR2##_strides[TENSOR2##_dim-1]; \
   } \
 \
@@ -412,6 +402,11 @@
  * Tensor. But because we are guaranteed the subsequent data is contiguous in memory, we
  * can simply loop for sizeof(A) iterations and perform the operation, without having to
  * follow the order described by the strides of A.
+ *
+ * 3. We find the contiguous sections in a tensor and compress the counter array.
+ * For instance, if A is a 3x3x4x3 tensor, from which we get A' (3x3x3x3). Then, the
+ * original counter for A' is the same as A. But actually the first dimension and the
+ * second dimension can be collapsed into a single one.
  */
 #define TH_TENSOR_APPLY(TYPE, TENSOR, CODE) \
 { \
@@ -427,7 +422,7 @@
   { \
     TENSOR##_data = TENSOR->storage->data+TENSOR->storageOffset; \
 \
-    /* find the dimension of contiguous regions */ \
+    /* Find the dimension of contiguous sections */ \
     TENSOR##_dim = 1; \
     for(TENSOR##_i = TENSOR->nDimension-2; TENSOR##_i >= 0; TENSOR##_i--) \
     { \
@@ -435,17 +430,13 @@
 	TENSOR##_dim++; \
     } \
 \
-    /* allocate an array of k+1 elements, where k is the first index that */ \
-    /* break contiguity. Note that if the tensor is contiguous, then k is -1 and */ \
-    /* this counter array is empty. */ \
-\
+    /* Allocate an array of 3*dim elements, where dim is the number of contiguous sections */ \
     TENSOR##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR##_dim)); \
     TENSOR##_sizes = TENSOR##_counter + TENSOR##_dim; \
     TENSOR##_strides = TENSOR##_counter + 2*TENSOR##_dim; \
     TH_TENSOR_dim_index = TENSOR##_dim-1; \
     TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR->nDimension-1]; \
     TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR->nDimension-1]; \
-    /* what is the first stride? */ \
     /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
     /* storage is given by storage_offset + (i * j), where i is the stride */ \
     /* vector and j is tensor_counter vector. This sets the starting position for the loop. */ \
@@ -461,9 +452,9 @@
 	TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR##_i]; \
       } \
     } \
-    /* it will be used for offset updates while looping through the largest contiguous section */ \
+    /* Size of the inner most section */ \
     TENSOR##_size = TENSOR##_sizes[TENSOR##_dim-1]; \
-    /* what is the largest contiguous section? size will store the size of this section */ \
+    /* Stride of the inner most section */ \
     TENSOR##_stride = TENSOR##_strides[TENSOR##_dim-1]; \
   } \
 \
@@ -508,7 +499,5 @@
   } \
   THFree(TENSOR##_counter); \
 }
-//printf("dim %ld counter %ld stride %ld\n", TENSOR##_i, TENSOR##_counter[TENSOR##_i], TENSOR##_strides[TENSOR##_i]); 
-//printf("address %ld\n", TENSOR##_data-TENSOR->storage->data+TENSOR->storageOffset);
 
 #endif
