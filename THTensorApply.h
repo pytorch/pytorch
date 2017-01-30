@@ -209,10 +209,10 @@
 #define TH_TENSOR_APPLY2(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
-  long *TENSOR1##_counter = NULL, *TENSOR1##_dims = NULL, *TENSOR1##_strides = NULL; \
+  long *TENSOR1##_counter = NULL, *TENSOR1##_sizes = NULL, *TENSOR1##_strides = NULL; \
   long TENSOR1##_stride = 0, TENSOR1##_size = 0, TENSOR1##_dim = 0, TENSOR1##_i, TENSOR1##_n; \
   TYPE2 *TENSOR2##_data = NULL; \
-  long *TENSOR2##_counter = NULL, *TENSOR2##_dims = NULL, *TENSOR2##_strides = NULL; \
+  long *TENSOR2##_counter = NULL, *TENSOR2##_sizes = NULL, *TENSOR2##_strides = NULL; \
   long TENSOR2##_stride = 0, TENSOR2##_size = 0, TENSOR2##_dim = 0, TENSOR2##_i, TENSOR2##_n; \
   int TH_TENSOR_APPLY_hasFinished = 0; \
   long TH_TENSOR_dim_index = 0; \
@@ -240,25 +240,25 @@
 	TENSOR1##_dim++; \
     } \
     TENSOR1##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR1##_dim)); \
-    TENSOR1##_dims = TENSOR1##_counter + TENSOR1##_dim; \
+    TENSOR1##_sizes = TENSOR1##_counter + TENSOR1##_dim; \
     TENSOR1##_strides = TENSOR1##_counter + 2*TENSOR1##_dim; \
     TH_TENSOR_dim_index = TENSOR1##_dim-1; \
-    TENSOR1##_dims[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1->nDimension-1]; \
+    TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1->nDimension-1]; \
     TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1->nDimension-1]; \
     for(TENSOR1##_i = TENSOR1##_dim-1; TENSOR1##_i >= 0; --TENSOR1##_i) { \
       TENSOR1##_counter[TENSOR1##_i] = 0; \
     } \
     for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; --TENSOR1##_i) { \
       if (TENSOR1->stride[TENSOR1##_i] == TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) { \
-        TENSOR1##_dims[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i] * TENSOR1##_dims[TH_TENSOR_dim_index]; \
+        TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i] * TENSOR1##_sizes[TH_TENSOR_dim_index]; \
       } else { \
         --TH_TENSOR_dim_index; \
-	TENSOR1##_dims[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i]; \
+	TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i]; \
 	TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1##_i]; \
       } \
     } \
     /* it will be used for offset updates while looping through the largest contiguous section */ \
-    TENSOR1##_size = TENSOR1##_dims[TENSOR1##_dim-1]; \
+    TENSOR1##_size = TENSOR1##_sizes[TENSOR1##_dim-1]; \
     /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR1##_stride = TENSOR1##_strides[TENSOR1##_dim-1]; \
 \
@@ -270,25 +270,25 @@
 	TENSOR2##_dim++; \
     } \
     TENSOR2##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR2##_dim)); \
-    TENSOR2##_dims = TENSOR2##_counter + TENSOR2##_dim; \
+    TENSOR2##_sizes = TENSOR2##_counter + TENSOR2##_dim; \
     TENSOR2##_strides = TENSOR2##_counter + 2*TENSOR2##_dim; \
     TH_TENSOR_dim_index = TENSOR2##_dim-1; \
-    TENSOR2##_dims[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2->nDimension-1]; \
+    TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2->nDimension-1]; \
     TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2->nDimension-1]; \
     for(TENSOR2##_i = TENSOR2##_dim-1; TENSOR2##_i >= 0; --TENSOR2##_i) { \
       TENSOR2##_counter[TENSOR2##_i] = 0; \
     } \
     for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; --TENSOR2##_i) { \
       if (TENSOR2->stride[TENSOR2##_i] == TENSOR2->stride[TENSOR2##_i+1] * TENSOR2->size[TENSOR2##_i+1]) { \
-        TENSOR2##_dims[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i] * TENSOR2##_dims[TH_TENSOR_dim_index]; \
+        TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i] * TENSOR2##_sizes[TH_TENSOR_dim_index]; \
       } else { \
         --TH_TENSOR_dim_index; \
-	TENSOR2##_dims[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i]; \
+	TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i]; \
 	TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2##_i]; \
       } \
     } \
     /* it will be used for offset updates while looping through the largest contiguous section */ \
-    TENSOR2##_size = TENSOR2##_dims[TENSOR2##_dim-1]; \
+    TENSOR2##_size = TENSOR2##_sizes[TENSOR2##_dim-1]; \
     /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR2##_stride = TENSOR2##_strides[TENSOR2##_dim-1]; \
   } \
@@ -313,7 +313,7 @@
         TENSOR1##_counter[TENSOR1##_i]++; \
         TENSOR1##_data += TENSOR1##_strides[TENSOR1##_i]; \
 \
-        if(TENSOR1##_counter[TENSOR1##_i]  == TENSOR1##_dims[TENSOR1##_i]) \
+        if(TENSOR1##_counter[TENSOR1##_i]  == TENSOR1##_sizes[TENSOR1##_i]) \
         { \
           if(TENSOR1##_i == 0) \
           { \
@@ -343,7 +343,7 @@
         TENSOR2##_counter[TENSOR2##_i]++; \
         TENSOR2##_data += TENSOR2##_strides[TENSOR2##_i]; \
 \
-        if(TENSOR2##_counter[TENSOR2##_i]  == TENSOR2##_dims[TENSOR2##_i]) \
+        if(TENSOR2##_counter[TENSOR2##_i]  == TENSOR2##_sizes[TENSOR2##_i]) \
         { \
           if(TENSOR2##_i == 0) \
           { \
@@ -392,7 +392,7 @@
 #define TH_TENSOR_APPLY(TYPE, TENSOR, CODE) \
 { \
   TYPE *TENSOR##_data = NULL; \
-  long *TENSOR##_counter = NULL, *TENSOR##_dims = NULL, *TENSOR##_strides = NULL; \
+  long *TENSOR##_counter = NULL, *TENSOR##_sizes = NULL, *TENSOR##_strides = NULL; \
   long TENSOR##_stride = 0, TENSOR##_size = 0, TENSOR##_dim = 0, TENSOR##_i; \
   int TH_TENSOR_APPLY_hasFinished = 0; \
   long TH_TENSOR_dim_index = 0; \
@@ -416,10 +416,10 @@
     /* this counter array is empty. */ \
 \
     TENSOR##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR##_dim)); \
-    TENSOR##_dims = TENSOR##_counter + TENSOR##_dim; \
+    TENSOR##_sizes = TENSOR##_counter + TENSOR##_dim; \
     TENSOR##_strides = TENSOR##_counter + 2*TENSOR##_dim; \
     TH_TENSOR_dim_index = TENSOR##_dim-1; \
-    TENSOR##_dims[TH_TENSOR_dim_index] = TENSOR->size[TENSOR->nDimension-1]; \
+    TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR->nDimension-1]; \
     TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR->nDimension-1]; \
     /* what is the first stride? */ \
     /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
@@ -430,15 +430,15 @@
     } \
     for(TENSOR##_i = TENSOR->nDimension-2; TENSOR##_i >= 0; --TENSOR##_i) { \
       if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1]) { \
-        TENSOR##_dims[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i] * TENSOR##_dims[TH_TENSOR_dim_index]; \
+        TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i] * TENSOR##_sizes[TH_TENSOR_dim_index]; \
       } else { \
         --TH_TENSOR_dim_index; \
-	TENSOR##_dims[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i]; \
+	TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i]; \
 	TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR##_i]; \
       } \
     } \
     /* it will be used for offset updates while looping through the largest contiguous section */ \
-    TENSOR##_size = TENSOR##_dims[TENSOR##_dim-1]; \
+    TENSOR##_size = TENSOR##_sizes[TENSOR##_dim-1]; \
     /* what is the largest contiguous section? size will store the size of this section */ \
     TENSOR##_stride = TENSOR##_strides[TENSOR##_dim-1]; \
   } \
@@ -464,7 +464,7 @@
       /* Jump ahread by the stride of this dimension */ \
       TENSOR##_data += TENSOR##_strides[TENSOR##_i]; \
 \
-      if(TENSOR##_counter[TENSOR##_i] == TENSOR##_dims[TENSOR##_i]) \
+      if(TENSOR##_counter[TENSOR##_i] == TENSOR##_sizes[TENSOR##_i]) \
       { \
         if(TENSOR##_i == 0) \
         { \
