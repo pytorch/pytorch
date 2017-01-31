@@ -1200,6 +1200,15 @@ class TestNN(NNTestCase):
                                   (c * upscale_factor ** 2)
                     self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
 
+    def test_inplace_thnn(self):
+        r = nn.ReLU(True)
+        input = Variable(torch.randn(5, 5), requires_grad=True)
+        output = r(input + 0)
+        grad_output = torch.randn(5, 5)
+        grad_output_clone = grad_output.clone()
+        output.backward(grad_output)
+        self.assertEqual(grad_output, grad_output_clone)
+
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)
         upscale_factor = random.randint(2, 5)
