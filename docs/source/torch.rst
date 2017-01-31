@@ -37,6 +37,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: stack
 .. autofunction:: t
 .. autofunction:: transpose
+.. autofunction:: unbind
 
 
 Random sampling
