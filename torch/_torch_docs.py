@@ -2768,7 +2768,7 @@ Example::
 
 add_docstr(torch._C.normal,
            """
-.. function:: normal(means, stddevs, out=None)
+.. function:: normal(means, std, out=None)
 
 Returns a Tensor of random numbers drawn from separate normal distributions
 who's mean and standard deviation are given.
@@ -2776,10 +2776,10 @@ who's mean and standard deviation are given.
 The :attr:`means` is a Tensor with the mean of
 each output element's normal distribution
 
-The :attr:`stddevs` is a Tensor with the standard deviation of
+The :attr:`std` is a Tensor with the standard deviation of
 each output element's normal distribution
 
-The shapes of :attr:`means` and :attr:`stddevs` don't need to match.
+The shapes of :attr:`means` and :attr:`std` don't need to match.
 The total number of elements in each Tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`means`
@@ -2787,12 +2787,12 @@ The total number of elements in each Tensor need to be the same.
 
 Args:
     means (Tensor): the Tensor of per-element means
-    stddevs (Tensor): the Tensor of per-element standard deviations
+    std (Tensor): the Tensor of per-element standard deviations
     out (Tensor): the optional result Tensor
 
 Example::
 
-    torch.normal(means=torch.range(1, 10), stddevs=torch.range(1, 0.1, -0.1))
+    torch.normal(means=torch.range(1, 10), std=torch.range(1, 0.1, -0.1))
 
      1.5104
      1.6955
@@ -2806,18 +2806,18 @@ Example::
      9.8916
     [torch.FloatTensor of size 10]
 
-.. function:: normal(mean=0.0, stddevs, out=None)
+.. function:: normal(mean=0.0, std, out=None)
 
 Similar to the function above, but the means are shared among all drawn elements.
 
 Args:
     means (float, optional): the mean for all distributions
-    stddevs (Tensor): the Tensor of per-element standard deviations
+    std (Tensor): the Tensor of per-element standard deviations
     out (Tensor): the optional result Tensor
 
 Example::
 
-    >>> torch.normal(mean=0.5, stddevs=torch.range(1, 5))
+    >>> torch.normal(mean=0.5, std=torch.range(1, 5))
 
       0.5723
       0.0871
@@ -2826,13 +2826,13 @@ Example::
      10.7893
     [torch.FloatTensor of size 5]
 
-.. function:: normal(means, stddev=1.0, out=None)
+.. function:: normal(means, std=1.0, out=None)
 
 Similar to the function above, but the standard-deviations are shared among all drawn elements.
 
 Args:
     means (Tensor): the Tensor of per-element means
-    stddevs (float, optional): the standard deviation for all distributions
+    std (float, optional): the standard deviation for all distributions
     out (Tensor): the optional result Tensor
 
 Example::
