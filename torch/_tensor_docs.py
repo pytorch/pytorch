@@ -991,10 +991,10 @@ See :func:`torch.norm`
 
 add_docstr(torch._C.FloatTensorBase.normal_,
            """
-normal_(generator=None, mean=0, var=1)
+normal_(generator=None, mean=0, stddev=1)
 
 Fills this tensor with elements samples from the normal distribution
-parameterized by :attr:`mean` and :attr:`var`.
+parameterized by :attr:`mean` and :attr:`stddev`.
 """)
 
 add_docstr(torch._C.FloatTensorBase.numel,
