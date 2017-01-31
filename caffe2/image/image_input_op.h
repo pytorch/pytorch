@@ -241,14 +241,14 @@ void TransformImage(const cv::Mat& scaled_img, const int channels,
       std::uniform_int_distribution<>(0, scaled_img.cols - crop)(*randgen);
   int height_offset =
       std::uniform_int_distribution<>(0, scaled_img.rows - crop)(*randgen);
+  float std_inv = 1.f / std;
   if (mirror && (*mirror_this_image)(*randgen)) {
     // Copy mirrored image.
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset + crop - 1; w >= width_offset; --w) {
-        const cv::Vec3b& cv_data = scaled_img.at<cv::Vec3b>(h, w);
+        const uint8_t* cv_data = scaled_img.ptr(h) + w*channels;
         for (int c = 0; c < channels; ++c) {
-          *(image_data++) =
-              (static_cast<uint8_t>(cv_data[c]) - mean) / std;
+          *(image_data++) = (static_cast<float>(cv_data[c]) - mean) * std_inv;
         }
       }
     }
@@ -256,10 +256,9 @@ void TransformImage(const cv::Mat& scaled_img, const int channels,
     // Copy normally.
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset; w < width_offset + crop; ++w) {
-        const cv::Vec3b& cv_data = scaled_img.at<cv::Vec3b>(h, w);
+        const uint8_t* cv_data = scaled_img.ptr(h) + w*channels;
         for (int c = 0; c < channels; ++c) {
-          *(image_data++) =
-              (static_cast<uint8_t>(cv_data[c]) - mean) / std;
+          *(image_data++) = (static_cast<float>(cv_data[c]) - mean) * std_inv;
         }
       }
     }
@@ -284,7 +283,7 @@ void CropTransposeImage(const cv::Mat& scaled_img, const int channels,
     // Copy mirrored image.
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset + crop - 1; w >= width_offset; --w) {
-        const cv::Vec3b& cv_data = scaled_img.at<cv::Vec3b>(h, w);
+        const uint8_t* cv_data = scaled_img.ptr(h) + w*channels;
         for (int c = 0; c < channels; ++c) {
           *(cropped_data++) = cv_data[c];
         }
@@ -294,7 +293,7 @@ void CropTransposeImage(const cv::Mat& scaled_img, const int channels,
     // Copy normally.
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset; w < width_offset + crop; ++w) {
-        const cv::Vec3b& cv_data = scaled_img.at<cv::Vec3b>(h, w);
+        const uint8_t* cv_data = scaled_img.ptr(h) + w*channels;
         for (int c = 0; c < channels; ++c) {
           *(cropped_data++) = cv_data[c];
         }
