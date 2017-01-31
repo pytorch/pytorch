@@ -144,6 +144,8 @@ If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
 - [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x
 
+If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
+
 #### Install optional dependencies
 
 On Linux
