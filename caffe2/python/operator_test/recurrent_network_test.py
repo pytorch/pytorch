@@ -99,7 +99,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
            n=st.integers(1, 5),
            d=st.integers(1, 5))
     def test_lstm_new(self, t, n, d):
-        model = ModelHelperBase(name='external')
+        model = CNNModelHelper(name='external')
 
         def create_lstm(
                 model, input_blob, seq_lengths, init, dim_in, dim_out, scope):
@@ -142,15 +142,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
 
         op = model.net._net.op[-1]
 
-        def extract_param_name(model, param_substr):
-            result = []
-            for p in model.params:
-                if param_substr in str(p):
-                    result.append(str(p))
-
-            assert len(result) == 1
-            return result[0]
-
         workspace.RunNetOnce(model.param_init_net)
         input_blob = op.input[0]
 
@@ -184,6 +175,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 outputs_to_check=param,
                 outputs_with_grads=[0],
                 threshold=0.01,
+                stepsize=0.005,
             )
 
     @given(T=st.integers(1, 4),
