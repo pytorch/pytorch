@@ -15,6 +15,8 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
     for (i=0; i<sz; ++i)
       rp[i] = sp[i];
 #endif
+  } else if (THTensor_(isContiguous)(tensor) || THTensor_(isContiguous)(src)) {
+    TH_TENSOR_APPLY2_CONTIGUOUS(real, tensor, real, src, *tensor_data = *src_data;)
   } else {
     TH_TENSOR_APPLY2(real, tensor, real, src, *tensor_data = *src_data;)
   }
