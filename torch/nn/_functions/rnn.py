@@ -37,8 +37,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
-    xw_ih = input if skip_input else F.linear(input, w_ih, b_ih)
-    gi = xw_ih
+    gi = input if skip_input else F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = gi.chunk(3, 1)
     h_r, h_i, h_n = gh.chunk(3, 1)

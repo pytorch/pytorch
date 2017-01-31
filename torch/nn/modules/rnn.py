@@ -23,6 +23,9 @@ class RNNBase(Module):
         num_directions = 2 if bidirectional else 1
         self.skip_input = skip_input
 
+        if skip_input and input_size != hidden_size:
+            raise RuntimeError("Skip input requires input size to be equal to hidden size")
+
         self.all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
