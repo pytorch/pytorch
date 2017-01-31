@@ -58,7 +58,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 ]]
 
 [[
-  python_name: set_index
+  python_name: _set_index
   name: THPTensor_(setIndex)
   only_register: True
 ]]

@@ -1274,13 +1274,6 @@ Args:
     stride (tuple): The desired stride. Defaults to C-contiguous strides.
 """)
 
-add_docstr(torch._C.FloatTensorBase.set_index,
-           """
-set_index(index, value)
-
-Alias for ``self[index] = value``
-""")
-
 add_docstr(torch._C.FloatTensorBase.sigmoid,
            """
 sigmoid() -> Tensor

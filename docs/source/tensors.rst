@@ -251,7 +251,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: scatter_
    .. automethod:: select
    .. automethod:: set_
-   .. automethod:: set_index
    .. automethod:: share_memory_
    .. automethod:: short
    .. automethod:: sigmoid
