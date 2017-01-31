@@ -761,7 +761,7 @@ In-place version of :meth:`~Tensor.log`
 """)
 
 add_docstr(torch._C.FloatTensorBase.log_normal_, u"""
-log_normal_(generator=None, mean=1, stdv=2)
+log_normal_(generator=None, mean=1, std=2)
 
 Fills this tensor with numbers samples from the log-normal distribution
 parameterized by the given mean (\u00B5) and standard deviation (\u03C3). Note that
@@ -991,10 +991,10 @@ See :func:`torch.norm`
 
 add_docstr(torch._C.FloatTensorBase.normal_,
            """
-normal_(generator=None, mean=0, stddev=1)
+normal_(generator=None, mean=0, std=1)
 
 Fills this tensor with elements samples from the normal distribution
-parameterized by :attr:`mean` and :attr:`stddev`.
+parameterized by :attr:`mean` and :attr:`std`.
 """)
 
 add_docstr(torch._C.FloatTensorBase.numel,
