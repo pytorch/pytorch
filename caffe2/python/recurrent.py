@@ -196,7 +196,7 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     '''
     Adds a standard LSTM recurrent network operator to a model.
 
-    model: ModelHelperBase object new operators would be added to
+    model: CNNModelHelper object new operators would be added to
 
     input_blob: the input sequence in a format T x N x D
     where T is sequence size, N - batch size and D - input dimention
