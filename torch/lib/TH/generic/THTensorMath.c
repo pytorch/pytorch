@@ -2074,10 +2074,6 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         // accumulate the size over the dimension we want to cat on.
         // Empty tensors are allowed
         dimSize += i < inputs[j]->nDimension ? inputs[j]->size[i] : THMin(inputs[j]->nDimension, 1);
-        if(inputs[j]->nDimension)
-        {
-          allContiguous = allContiguous && THTensor_(isContiguous)(inputs[j]);
-        }
       }
     }
     else
@@ -2108,6 +2104,12 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   {
     THTensor_(resize)(result, size, NULL);
 
+    // Check contiguity of all inputs and result
+    for (i = 0; i < numInputs; i++) {
+      if(inputs[i]->nDimension) {
+        allContiguous = allContiguous && THTensor_(isContiguous)(inputs[i]);
+      }
+    }
     allContiguous = allContiguous && THTensor_(isContiguous)(result);
 
     // First path is for contiguous inputs along dim 1
