@@ -437,6 +437,21 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 #define GET_OFFSET(t, idx)                                                     \
   t->storageOffset + t->stride[0] * idx;
 
+
+#ifdef THC_GENERIC_FILE
+#define THIndexTensor THCudaLongTensor
+#define THIndexTensor_(NAME) TH_CONCAT_2(THCudaLongTensor_,NAME)
+#define THPIndexTensor THCPLongTensor
+#define THPIndexTensor_Check THCPLongTensor_Check
+#else
+#define THIndexTensor THLongTensor
+#define THIndexTensor_(NAME) TH_CONCAT_2(THLongTensor_,NAME)
+#define THPIndexTensor THPLongTensor
+#define THPIndexTensor_Check THPLongTensor_Check
+#endif
+
+
+template<bool allow_index>
 static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
 {
@@ -466,6 +481,17 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
       return false;
     THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, 0, start, length);
     return true;
+  } else if (THPIndexTensor_Check(index)) {
+    if (allow_index) {
+      THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
+      tresult = THTensor_(new)(LIBRARY_STATE_NOARGS);
+      THTensor_(indexSelect)(LIBRARY_STATE tresult.get(), self->cdata, 0, index_t);
+      return true;
+    } else {
+      THPUtils_setError("assignments using LongTensors as index aren't supported yet");
+      tresult = NULL;
+      return false;
+    }
   // Indexing multiple dimensions
   } else if(PyTuple_Check(index)) {
     long num_index_dim = (long)PyTuple_Size(index);
@@ -500,7 +526,6 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
             // 1D tensor
             sresult = tresult->storage;
             storage_offset = GET_OFFSET(tresult, idx);
-            THTensor_(free)(LIBRARY_STATE tresult.get());
             tresult = NULL;
             return true,
             // >1D tensor
@@ -512,10 +537,22 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
         if (!THPUtils_parseSlice(dimidx, size_dim, &start, &end, &length))
           return false;
         THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, t_dim++, start, length);
+      } else if (THPIndexTensor_Check(dimidx)) {
+        if (allow_index) {
+          THIndexTensor *index_t = ((THPIndexTensor*)dimidx)->cdata;
+          THTensorPtr index_result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+          THTensor_(indexSelect)(LIBRARY_STATE index_result.get(), tresult.get(), t_dim++, index_t);
+          tresult = index_result.release();
+        } else {
+          THPUtils_setError("assignments using LongTensors as index aren't supported yet");
+          tresult = NULL;
+          return false;
+        }
       } else {
-        THTensor_(free)(LIBRARY_STATE tresult.get());
         tresult = NULL;
         valid = false;
+        // overwrite this, so the message mentions the incorrect object
+        index = dimidx;
         break;
       }
     }
@@ -541,6 +578,10 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
 #undef IS_SCALAR
 #undef INDEX_SCALAR
 #undef GET_OFFSET
+#undef THIndexTensor
+#undef THIndexTensor_
+#undef THPIndexTensor
+#undef THPIndexTensor_Check
 
 extern THPCopyList THTensor_(copy_functions);
 THPCopyList THTensor_(copy_functions);
@@ -610,7 +651,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   THTensorPtr tresult;
   THStorage *sresult;
   long storage_offset;
-  if (!THPTensor_(_index)(self, index, tresult, sresult, storage_offset))
+  if (!THPTensor_(_index)<true>(self, index, tresult, sresult, storage_offset))
     return NULL;
   if (tresult)
     return THPTensor_(New)(tresult.release());
@@ -656,7 +697,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
   THTensorPtr tresult;
   THStorage *sresult;
   long storage_offset;
-  if (!THPTensor_(_index)(self, index, tresult, sresult, storage_offset))
+  if (!THPTensor_(_index)<false>(self, index, tresult, sresult, storage_offset))
     return -1;
   if (sresult) {
     if (!force_tensor) {
