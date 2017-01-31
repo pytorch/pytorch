@@ -9,8 +9,7 @@ from caffe2.python.cnn import CNNModelHelper
 
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
-        links, scratch_sizes,
-        timestep=None, scope=None
+        links, timestep=None, scope=None
 ):
     '''
     net: the main net operator should be added to
@@ -28,15 +27,6 @@ def recurrent_net(
     links: a dictionary from cell_net input names in moment t+1 and
     output names of moment t. Currently we assume that each output becomes
     an input for the next timestep.
-
-    scratch_sizes: sizes of the scratch blobs. Scratch blobs are those
-    intermidiate blobs of the cell_net which are used in backward pass.
-    We use sizes iformation to preallocate memory for them over time.
-
-    For example in case of LSTM we have FC -> Sum ->LSTMUnit sequence of
-    operations in each iteration of the cell net. Output of Sum is an
-    intermidiate blob. Also it is going to be part of the backward pass.
-    Thus it is a scratch blob size of which we must to pvovide.
 
     timestep: name of the timestep blob to be used. If not provided "timestep"
     is used.
@@ -163,7 +153,6 @@ def recurrent_net(
     alias_src, alias_dst, alias_offset = unpack_triple(aliases)
 
     params = [x for x in references if x in backward_mapping.keys()]
-
     recurrent_inputs = [str(x[1]) for x in initial_cell_inputs]
 
     results = net.RecurrentNetwork(
@@ -174,8 +163,7 @@ def recurrent_net(
         alias_dst=map(str, alias_dst),
         alias_offset=alias_offset,
         recurrent_states=recurrent_states,
-        recurrent_inputs=recurrent_inputs,
-        recurrent_input_ids=map(all_inputs.index, recurrent_inputs),
+        initial_recurrent_state_ids=map(all_inputs.index, recurrent_inputs),
         link_internal=map(str, link_internal),
         link_external=map(str, link_external),
         link_offset=link_offset,
@@ -250,7 +238,6 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
             cell_t_prev: cell_t,
         },
         timestep=timestep,
-        scratch_sizes=[dim_out * 4],
         scope=scope,
     )
     return output, last_output, all_states, last_state

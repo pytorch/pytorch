@@ -200,7 +200,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             inputs=[(input_t, input_blob)],
             initial_cell_inputs=[(output_t_prev, one_blob)],
             links={output_t_prev: output_t},
-            scratch_sizes=[],
             scope="test_mul_rnn",
         )
 

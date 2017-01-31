@@ -41,7 +41,7 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
     ArgumentHelper argsHelper(def_);
     auto params = argsHelper.GetRepeatedArgument<int32_t>("param");
     auto recurrentInputs =
-        argsHelper.GetRepeatedArgument<int32_t>("recurrent_input_ids");
+        argsHelper.GetRepeatedArgument<int32_t>("initial_recurrent_state_ids");
 
     std::vector<std::string> gradientInputs;
 
