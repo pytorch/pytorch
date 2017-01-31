@@ -176,7 +176,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     const auto states =
         OperatorBase::GetRepeatedArgument<std::string>("recurrent_states");
     const auto inputs =
-        OperatorBase::GetRepeatedArgument<std::string>("recurrent_inputs");
+        OperatorBase::GetRepeatedArgument<int>("initial_recurrent_state_ids");
     CAFFE_ENFORCE_EQ(states.size(), inputs.size(), "states/inputs mismatch");
     std::vector<detail::RecurrentInput> ris;
     for (auto i = 0; i < states.size(); ++i) {
@@ -186,7 +186,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
 
       detail::RecurrentInput ri;
       ri.state = states[i];
-      ri.input = inputs[i];
+      ri.input = def().input(inputs[i]);
       ris.push_back(ri);
     }
     return ris;
@@ -287,7 +287,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     params_ = constructParams();
     recurrentGradients_ = constructRecurrentGradients();
     recurrentInputIds_ = OperatorBase::template GetRepeatedArgument<int32_t>(
-        "recurrent_input_ids");
+        "initial_recurrent_state_ids");
 
     CAFFE_ENFORCE(ws);
     const auto stepNet =
