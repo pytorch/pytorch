@@ -160,7 +160,11 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             if save_output:
                 additional_args = (output,) + additional_args
 
-            grad_input = input.new().resize_as_(input).zero_()
+            if is_inplace and self.inplace:
+                grad_output = grad_output.clone()
+                grad_input = grad_output.new()
+            else:
+                grad_input = input.new().resize_as_(input).zero_()
             params_without_bias = params if len(params) < 2 else params[:1]
             update_grad_input_fn = getattr(self._backend, update_grad_input.name)
             gi_args = params_without_bias + additional_args
