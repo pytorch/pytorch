@@ -39,14 +39,16 @@ class RNNBase(Module):
                 b_hh = Parameter(torch.Tensor(gate_size))
 
                 suffix = '_reverse' if direction == 1 else ''
-                setattr(self, 'weight_ih_l{}{}'.format(layer, suffix), w_ih)
-                setattr(self, 'weight_hh_l{}{}'.format(layer, suffix), w_hh)
+                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
+                weights = [x.format(layer, suffix) for x in weights]
+                setattr(self, weights[0], w_ih)
+                setattr(self, weights[1], w_hh)
                 if bias:
-                    setattr(self, 'bias_ih_l{}{}'.format(layer, suffix), b_ih)
-                    setattr(self, 'bias_hh_l{}{}'.format(layer, suffix), b_hh)
-                    self.all_weights += [(w_ih, w_hh, b_ih, b_hh)]
+                    setattr(self, weights[2], b_ih)
+                    setattr(self, weights[3], b_hh)
+                    self.all_weights += [weights]
                 else:
-                    self.all_weights += [(w_ih, w_hh)]
+                    self.all_weights += [weights[:2]]
 
         self.reset_parameters()
 
@@ -76,7 +78,8 @@ class RNNBase(Module):
             bidirectional=self.bidirectional,
             dropout_state=self.dropout_state
         )
-        return func(input, self.all_weights, hx)
+        all_weights = [[getattr(self, weight) for weight in weights] for weights in self.all_weights]
+        return func(input, all_weights, hx)
 
     def __repr__(self):
         s = '{name}({input_size}, {hidden_size}'
