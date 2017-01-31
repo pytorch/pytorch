@@ -343,18 +343,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto seqLen = Input(0).dim32(0);
     VLOG(1) << "seqLen: " << seqLen;
     const auto batchSize = Input(0).dim32(1);
-    // See GetRecurrentNetworkGradient to understand offseting here
-    for (int i = 0; i < recurrentInputIds_.size(); ++i) {
-      // See GetRecurrentNetworkGradient to understand offseting here
-      // Outputs of the gradient are inputs of the forward pass.
-      // So we need to offset on all inputs that go before recurrent
-      // initial ones
-      auto outputIdx = i + params_.size() + numSequences_;
-      int inputId = recurrentInputIds_[i];
-      VLOG(1) << "Resetting output " << outputIdx << " like input " << inputId;
-      Output(outputIdx)->ResizeLike(Input(inputId));
-      Output(outputIdx)->template mutable_data<float>();
-    }
     for (auto& param : params_) {
       auto pBlob = sharedWs_->GetBlob(param.param);
       CAFFE_ENFORCE(pBlob);
@@ -485,6 +473,30 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       CAFFE_ENFORCE(gradBlob);
       swap(*accGradBlob, *gradBlob);
     }
+
+    CAFFE_ENFORCE_EQ(recurrentInputIds_.size(), recurrentGradients_.size());
+    // See GetRecurrentNetworkGradient to understand offseting here
+    for (int i = 0; i < recurrentInputIds_.size(); ++i) {
+      // See GetRecurrentNetworkGradient to understand offseting here
+      // Outputs of the gradient are inputs of the forward pass.
+      // So we need to offset on all inputs that go before recurrent
+      // initial ones
+      auto outputIdx = i + params_.size() + numSequences_;
+      // +1 because Output(0) is GO(0)
+      int inputId = recurrentInputIds_[i] + 1;
+      VLOG(1) << "Resetting output " << def().output(outputIdx)
+              << " like input " << def().input(inputId);
+      Output(outputIdx)->ResizeLike(Input(inputId));
+
+      auto pBlob = sharedWs_->GetBlob(recurrentGradients_[i].grad);
+      CAFFE_ENFORCE(pBlob);
+      auto* p = pBlob->template GetMutable<Tensor<Context>>();
+      context_.template Copy<T, Context, Context>(
+          Output(outputIdx)->size(),
+          p->template data<T>(),
+          Output(outputIdx)->template mutable_data<T>());
+    }
+
     return true;
   }
 

@@ -1736,7 +1736,7 @@ class TestOperators(hu.HypothesisTestCase):
             alias_offset=[1, -1],
             recurrent_states=["hidden"],
             recurrent_inputs=recurrent_inputs,
-            recurrent_input_pos=map(inputs.index, recurrent_inputs),
+            recurrent_input_ids=map(inputs.index, recurrent_inputs),
             link_internal=link_internal,
             link_external=link_external,
             link_offset=link_offset,

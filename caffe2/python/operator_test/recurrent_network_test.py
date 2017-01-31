@@ -108,7 +108,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 dim_in, dim_out, scope="external/recurrent")
 
         self.lstm(model, create_lstm, t, n, d, lstm_reference,
-                  gradients_to_check=[0, 3, 4], outputs_to_check=[0, 1, 2, 3])
+                  gradients_to_check=[0, 1, 2, 3, 4],
+                  outputs_to_check=[0, 1, 2, 3])
 
     @given(t=st.integers(1, 4),
            n=st.integers(1, 5),
@@ -125,7 +126,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         # CNNModelHelper.LSTM returns only 3 outputs. But the operator itself
         # returns 5. We ignore the rest.
         self.lstm(model, create_lstm, t, n, d, old_lstm_reference,
-                  gradients_to_check=[0, 2, 3], outputs_to_check=[0, 3, 4])
+                  gradients_to_check=[0, 2, 3, 4, 5],
+                  outputs_to_check=[0, 3, 4])
 
     @debug
     def lstm(self, model, create_lstm, t, n, d, ref, gradients_to_check,
@@ -240,8 +242,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 input_grad[t_cur] = (output_grad[t_cur] +
                                      right_grad) * prev_output
                 right_grad = input[t_cur] * (output_grad[t_cur] + right_grad)
-
-            return (input_grad, np.zeros(shape=[T, n, d]).astype(np.float32))
+            return (input_grad, right_grad.reshape([1, n, d]))
 
         self.assertReferenceChecks(
             device_option=hu.cpu_do,
