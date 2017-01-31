@@ -42,8 +42,9 @@ def init_dropout_descriptor(fn, handle):
     )
 
 
-def init_rnn_descriptor(fn):
+def init_rnn_descriptor(fn, handle):
     return cudnn.RNNDescriptor(
+        handle,
         fn.hidden_size,
         fn.num_layers,
         fn.dropout_state['desc'].get(),
@@ -217,7 +218,7 @@ def forward(fn, input, hx, weight, output, hy):
             fn.dropout_state['desc'] = Unserializable(
                 init_dropout_descriptor(fn, handle)
             )
-        fn.rnn_desc = init_rnn_descriptor(fn)
+        fn.rnn_desc = init_rnn_descriptor(fn, handle)
         fn.x_descs = cudnn.descriptor(x[0], fn.seq_length)
         fn.y_descs = cudnn.descriptor(y[0], fn.seq_length)
         fn.hx_desc = cudnn.descriptor(hx)

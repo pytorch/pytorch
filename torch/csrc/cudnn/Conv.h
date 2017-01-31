@@ -18,6 +18,7 @@ struct ConvolutionParams
   int weight_size[5];
   int pad[3];
   int stride[3];
+  int dilation[3];
   int groups;
 };
 
@@ -41,7 +42,7 @@ struct Convolution
   Convolution(
       cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
       THVoidTensor* bias, THVoidTensor* output, std::vector<int> pad,
-      std::vector<int> stride, int groups, bool transposed);
+      std::vector<int> stride, std::vector<int> dilation, int groups, bool transposed);
 };
 
 void cudnn_convolution_forward(
@@ -73,12 +74,12 @@ void cudnn_convolution_backward_bias(
 Convolution* cudnn_convolution_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    std::vector<int> pad, std::vector<int> stride, int groups, bool benchmark);
+    std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation, int groups, bool benchmark);
 
 Convolution* cudnn_convolution_transpose_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    std::vector<int> pad, std::vector<int> stride, int groups, bool benchmark);
+    std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation, int groups, bool benchmark);
 
 }}  // namespace torch::cudnn
 

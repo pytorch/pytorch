@@ -50,6 +50,7 @@ extern THCState* state;
     - THTensor* output
     - std::vector<int> pad
     - std::vector<int> stride
+    - std::vector<int> dilation 
     - int groups
     - bool benchmark
 ]]
@@ -68,6 +69,7 @@ extern THCState* state;
     - THTensor* output
     - std::vector<int> pad
     - std::vector<int> stride
+    - std::vector<int> dilation 
     - int groups
     - bool benchmark
 ]]
