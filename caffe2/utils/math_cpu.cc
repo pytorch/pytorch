@@ -11,10 +11,9 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
-#include <sys/time.h>
-#include <sys/types.h>
 #include <unistd.h>
 #include <atomic>
+#include <chrono>
 #include <random>
 
 #ifdef CAFFE2_USE_MKL
@@ -1129,17 +1128,20 @@ void CopyMatrix<CPUContext>(
 }
 
 uint32_t randomNumberSeed() {
-  // Copied from folly::randomNumberSeed (at 418ad4)
+  // Originally copied from folly::randomNumberSeed (at 418ad4)
+  // modified to use chrono instead of sys/time.h
   static std::atomic<uint32_t> seedInput(0);
-  struct timeval tv;
-  gettimeofday(&tv, nullptr);
+  auto tv = std::chrono::system_clock::now().time_since_epoch();
+  uint64_t usec = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(tv).count());
+  uint32_t tv_sec = usec / 1000000;
+  uint32_t tv_usec = usec % 1000000;
   const uint32_t kPrime0 = 51551;
   const uint32_t kPrime1 = 61631;
   const uint32_t kPrime2 = 64997;
   const uint32_t kPrime3 = 111857;
   return kPrime0 * (seedInput++) + kPrime1 * static_cast<uint32_t>(getpid()) +
-      kPrime2 * static_cast<uint32_t>(tv.tv_sec) +
-      kPrime3 * static_cast<uint32_t>(tv.tv_usec);
+      kPrime2 * tv_sec + kPrime3 * tv_usec;
 }
 
 }  // namespace math
