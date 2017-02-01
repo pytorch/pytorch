@@ -34,6 +34,36 @@ using StringElementwiseOp = UnaryElementwiseWithArgsOp<
     ForEach<ScalarFunctor>,
     TypeMap>;
 
+template <class Context>
+class StringJoinOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  StringJoinOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        delimiter_(
+            OperatorBase::GetSingleArgument<std::string>("delimiter", ",")) {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<
+        float,
+        double,
+        int8_t,
+        uint8_t,
+        int16_t,
+        uint16_t,
+        int32_t,
+        int64_t,
+        bool>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType();
+
+ protected:
+  std::string delimiter_;
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_STRING_OPS_H_
