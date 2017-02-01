@@ -195,6 +195,8 @@ class ResNetBuilder():
         self.comp_count += 1
 
 
+# The conv1 and final_avg kernel/stride args provide a basic mechanism for
+# adapting resnet50 for different sizes of input images.
 def create_resnet50(
     model,
     data,
@@ -204,10 +206,13 @@ def create_resnet50(
     is_test=False,
     no_loss=False,
     no_bias=0,
+    conv1_kernel=7,
+    conv1_stride=2,
+    final_avg_kernel=7,
 ):
     # conv1 + maxpool
     model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}),
-               kernel=7, stride=2, pad=3, no_bias=no_bias)
+               kernel=conv1_kernel, stride=conv1_stride, pad=3, no_bias=no_bias)
 
     model.SpatialBN('conv1', 'conv1_spatbn_relu', 64,
                     epsilon=1e-3, momentum=0.1, is_test=is_test)
@@ -240,7 +245,7 @@ def create_resnet50(
 
     # Final layers
     final_avg = model.AveragePool(
-        builder.prev_blob, 'final_avg', kernel=7, stride=1,
+        builder.prev_blob, 'final_avg', kernel=final_avg_kernel, stride=1,
     )
 
     # Final dimension of the "image" is reduced to 7x7
