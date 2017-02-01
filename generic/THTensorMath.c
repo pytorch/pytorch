@@ -508,8 +508,6 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
       ptrdiff_t i_end = tid == num_threads - 1 ? sz : i + sz / num_threads;
       THVector_(add)(rp+i, tp+i, value, i_end-i); 
     }
-  } else if (THTensor_(isContiguous)(r_) || THTensor_(isContiguous)(t)) {
-    TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = *t_data + value;);
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
   }
@@ -540,8 +538,6 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
       ptrdiff_t i_end = tid == num_threads - 1 ? sz : i + sz / num_threads;
       THVector_(mul)(rp+i, tp+i, value, i_end-i); 
     }
-  } else if (THTensor_(isContiguous)(r_) || THTensor_(isContiguous)(t)) {
-    TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = *t_data * value;);
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * value;);
   }
@@ -567,8 +563,6 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
       ptrdiff_t i_end = tid == num_threads - 1 ? sz : i + sz / num_threads;
       THVector_(div)(rp+i, tp+i, value, i_end-i); 
     }
-  } else if (THTensor_(isContiguous)(r_) || THTensor_(isContiguous)(t)) {
-    TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = *t_data / value;);
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data / value;);
   }
@@ -660,12 +654,6 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
           rp[i] = tp[i] % value;
 #endif
       }
-  } else if (THTensor_(isContiguous)(r_) || THTensor_(isContiguous)(t)) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = fmod(*t_data, value););
-#else
-      TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = (*t_data % value););
-#endif
   } else {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = fmod(*t_data, value););
@@ -691,13 +679,6 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
           rp[i] = tp[i] - value * (tp[i] / value); // There is no NAN for integers
 #endif
       }
-  } else if (THTensor_(isContiguous)(r_) || THTensor_(isContiguous)(t)) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
-#else
-       // There is no NAN for integers
-      TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = *t_data - value * (*t_data / value););
-#endif
   } else {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
@@ -789,8 +770,6 @@ void THTensor_(clamp)(THTensor *r_, THTensor *t, real min_value, real max_value)
     #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
     for (i=0; i<sz; i++)
       rp[i] = (tp[i] < min_value) ? min_value : (tp[i] > max_value ? max_value : tp[i]);
-  } else if (THTensor_(isContiguous)(r_) || THTensor_(isContiguous)(t)) {
-    TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data););
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data););
   }
@@ -1121,8 +1100,6 @@ void THTensor_(tpow)(THTensor *r_, real value, THTensor *t)
     #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
     for (i=0; i<sz; i++)
       rp[i] = pow(value, tp[i]);
-  } else if (THTensor_(isContiguous)(r_) || THTensor_(isContiguous)(t)) {
-    TH_TENSOR_APPLY2_CONTIGUOUS(real, r_, real, t, *r__data = pow(value, *t_data););
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = pow(value, *t_data););
   }
@@ -2563,13 +2540,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
     for (i=0; i<sz; ++i){
       if(tap[i] != tbp[i]) return 0;
     }
-  } else if (THTensor_(isContiguous)(ta) || THTensor_(isContiguous)(tb)) {
-    // Short-circuit the apply function on inequality
-    TH_TENSOR_APPLY2_CONTIGUOUS(real, ta, real, tb,
-                                if (equal && *ta_data != *tb_data) {
-                                   equal = 0;
-                                   TH_TENSOR_APPLY_hasFinished = 1; break;
-                                })
   } else {
     // Short-circuit the apply function on inequality
     TH_TENSOR_APPLY2(real, ta, real, tb,

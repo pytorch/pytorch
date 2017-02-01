@@ -13,6 +13,7 @@
   long *TENSOR3##_counter = NULL, *TENSOR3##_sizes = NULL, *TENSOR3##_strides = NULL; \
   long TENSOR3##_stride = 0, TENSOR3##_size = 0, TENSOR3##_dim = 0, TENSOR3##_i, TENSOR3##_n; \
   int TH_TENSOR_APPLY_hasFinished = 0; \
+  int TH_TENSOR1_contiguous = 1, TH_TENSOR2_contiguous = 1, TH_TENSOR3_contiguous = 1; \
   long TH_TENSOR_dim_index = 0; \
 \
   TENSOR1##_n = (TENSOR1->nDimension ? 1 : 0); \
@@ -35,88 +36,131 @@
   else \
   { \
     TENSOR1##_data = TENSOR1->storage->data+TENSOR1->storageOffset; \
-    TENSOR1##_dim = 1; \
-    for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; TENSOR1##_i--) \
-    { \
-      if(TENSOR1->stride[TENSOR1##_i] != TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) \
-	TENSOR1##_dim++; \
-    } \
-    TENSOR1##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR1##_dim)); \
-    TENSOR1##_sizes = TENSOR1##_counter + TENSOR1##_dim; \
-    TENSOR1##_strides = TENSOR1##_counter + 2*TENSOR1##_dim; \
-    TH_TENSOR_dim_index = TENSOR1##_dim-1; \
-    TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1->nDimension-1]; \
-    TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1->nDimension-1]; \
-    for(TENSOR1##_i = TENSOR1##_dim-1; TENSOR1##_i >= 0; --TENSOR1##_i) { \
-      TENSOR1##_counter[TENSOR1##_i] = 0; \
-    } \
-    for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; --TENSOR1##_i) { \
-      if (TENSOR1->stride[TENSOR1##_i] == TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) { \
-        TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i] * TENSOR1##_sizes[TH_TENSOR_dim_index]; \
-      } else { \
-        --TH_TENSOR_dim_index; \
-	TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i]; \
-	TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1##_i]; \
+    TENSOR1##_size = 1; \
+    TENSOR1##_stride = 1; \
+    for(TENSOR1##_i = TENSOR1->nDimension-1; TENSOR1##_i >= 0; TENSOR1##_i--) { \
+      if(TENSOR1->size[TENSOR1##_i] != 1) { \
+        if(TENSOR1->stride[TENSOR1##_i] == TENSOR1##_size) \
+          TENSOR1##_size *= TENSOR1->size[TENSOR1##_i]; \
+        else{ \
+          TH_TENSOR1_contiguous = 0; \
+	  break; \
+	} \
       } \
     } \
-    TENSOR1##_size = TENSOR1##_sizes[TENSOR1##_dim-1]; \
-    TENSOR1##_stride = TENSOR1##_strides[TENSOR1##_dim-1]; \
+    if (!TH_TENSOR1_contiguous) { \
+      TENSOR1##_dim = 1; \
+      for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; TENSOR1##_i--) \
+      { \
+        if(TENSOR1->stride[TENSOR1##_i] != TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) \
+          TENSOR1##_dim++; \
+      } \
+      TENSOR1##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR1##_dim)); \
+      TENSOR1##_sizes = TENSOR1##_counter + TENSOR1##_dim; \
+      TENSOR1##_strides = TENSOR1##_counter + 2*TENSOR1##_dim; \
+      TH_TENSOR_dim_index = TENSOR1##_dim-1; \
+      TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1->nDimension-1]; \
+      TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1->nDimension-1]; \
+      for(TENSOR1##_i = TENSOR1##_dim-1; TENSOR1##_i >= 0; --TENSOR1##_i) { \
+        TENSOR1##_counter[TENSOR1##_i] = 0; \
+      } \
+      for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; --TENSOR1##_i) { \
+        if (TENSOR1->stride[TENSOR1##_i] == TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) { \
+          TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i] * TENSOR1##_sizes[TH_TENSOR_dim_index]; \
+        } else { \
+          --TH_TENSOR_dim_index; \
+          TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i]; \
+          TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1##_i]; \
+        } \
+      } \
+      TENSOR1##_size = TENSOR1##_sizes[TENSOR1##_dim-1]; \
+      TENSOR1##_stride = TENSOR1##_strides[TENSOR1##_dim-1]; \
+    } \
 \
     TENSOR2##_data = TENSOR2->storage->data+TENSOR2->storageOffset; \
-    TENSOR2##_dim = 1; \
-    for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; TENSOR2##_i--) \
-    { \
-      if(TENSOR2->stride[TENSOR2##_i] != TENSOR2->stride[TENSOR2##_i+1] * TENSOR2->size[TENSOR2##_i+1]) \
-	TENSOR2##_dim++; \
-    } \
-    TENSOR2##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR2##_dim)); \
-    TENSOR2##_sizes = TENSOR2##_counter + TENSOR2##_dim; \
-    TENSOR2##_strides = TENSOR2##_counter + 2*TENSOR2##_dim; \
-    TH_TENSOR_dim_index = TENSOR2##_dim-1; \
-    TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2->nDimension-1]; \
-    TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2->nDimension-1]; \
-    for(TENSOR2##_i = TENSOR2##_dim-1; TENSOR2##_i >= 0; --TENSOR2##_i) { \
-      TENSOR2##_counter[TENSOR2##_i] = 0; \
-    } \
-    for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; --TENSOR2##_i) { \
-      if (TENSOR2->stride[TENSOR2##_i] == TENSOR2->stride[TENSOR2##_i+1] * TENSOR2->size[TENSOR2##_i+1]) { \
-        TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i] * TENSOR2##_sizes[TH_TENSOR_dim_index]; \
-      } else { \
-        --TH_TENSOR_dim_index; \
-	TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i]; \
-	TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2##_i]; \
+    TENSOR2##_size = 1; \
+    TENSOR2##_stride = 1; \
+    for(TENSOR2##_i = TENSOR2->nDimension-1; TENSOR2##_i >= 0; TENSOR2##_i--) { \
+      if(TENSOR2->size[TENSOR2##_i] != 1) { \
+        if(TENSOR2->stride[TENSOR2##_i] == TENSOR2##_size) \
+          TENSOR2##_size *= TENSOR2->size[TENSOR2##_i]; \
+        else{ \
+          TH_TENSOR2_contiguous = 0; \
+	  break; \
+	} \
       } \
     } \
-    TENSOR2##_size = TENSOR2##_sizes[TENSOR2##_dim-1]; \
-    TENSOR2##_stride = TENSOR2##_strides[TENSOR2##_dim-1]; \
+    if (!TH_TENSOR2_contiguous) { \
+      TENSOR2##_dim = 1; \
+      for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; TENSOR2##_i--) \
+      { \
+        if(TENSOR2->stride[TENSOR2##_i] != TENSOR2->stride[TENSOR2##_i+1] * TENSOR2->size[TENSOR2##_i+1]) \
+          TENSOR2##_dim++; \
+      } \
+      TENSOR2##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR2##_dim)); \
+      TENSOR2##_sizes = TENSOR2##_counter + TENSOR2##_dim; \
+      TENSOR2##_strides = TENSOR2##_counter + 2*TENSOR2##_dim; \
+      TH_TENSOR_dim_index = TENSOR2##_dim-1; \
+      TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2->nDimension-1]; \
+      TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2->nDimension-1]; \
+      for(TENSOR2##_i = TENSOR2##_dim-1; TENSOR2##_i >= 0; --TENSOR2##_i) { \
+        TENSOR2##_counter[TENSOR2##_i] = 0; \
+      } \
+      for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; --TENSOR2##_i) { \
+        if (TENSOR2->stride[TENSOR2##_i] == TENSOR2->stride[TENSOR2##_i+1] * TENSOR2->size[TENSOR2##_i+1]) { \
+          TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i] * TENSOR2##_sizes[TH_TENSOR_dim_index]; \
+        } else { \
+          --TH_TENSOR_dim_index; \
+          TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i]; \
+          TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2##_i]; \
+        } \
+      } \
+      TENSOR2##_size = TENSOR2##_sizes[TENSOR2##_dim-1]; \
+      TENSOR2##_stride = TENSOR2##_strides[TENSOR2##_dim-1]; \
+    } \
 \
     TENSOR3##_data = TENSOR3->storage->data+TENSOR3->storageOffset; \
-    TENSOR3##_dim = 1; \
-    for(TENSOR3##_i = TENSOR3->nDimension-2; TENSOR3##_i >= 0; TENSOR3##_i--) \
-    { \
-      if(TENSOR3->stride[TENSOR3##_i] != TENSOR3->stride[TENSOR3##_i+1] * TENSOR3->size[TENSOR3##_i+1]) \
-	TENSOR3##_dim++; \
-    } \
-    TENSOR3##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR3##_dim)); \
-    TENSOR3##_sizes = TENSOR3##_counter + TENSOR3##_dim; \
-    TENSOR3##_strides = TENSOR3##_counter + 2*TENSOR3##_dim; \
-    TH_TENSOR_dim_index = TENSOR3##_dim-1; \
-    TENSOR3##_sizes[TH_TENSOR_dim_index] = TENSOR3->size[TENSOR3->nDimension-1]; \
-    TENSOR3##_strides[TH_TENSOR_dim_index] = TENSOR3->stride[TENSOR3->nDimension-1]; \
-    for(TENSOR3##_i = TENSOR3##_dim-1; TENSOR3##_i >= 0; --TENSOR3##_i) { \
-      TENSOR3##_counter[TENSOR3##_i] = 0; \
-    } \
-    for(TENSOR3##_i = TENSOR3->nDimension-2; TENSOR3##_i >= 0; --TENSOR3##_i) { \
-      if (TENSOR3->stride[TENSOR3##_i] == TENSOR3->stride[TENSOR3##_i+1] * TENSOR3->size[TENSOR3##_i+1]) { \
-        TENSOR3##_sizes[TH_TENSOR_dim_index] = TENSOR3->size[TENSOR3##_i] * TENSOR3##_sizes[TH_TENSOR_dim_index]; \
-      } else { \
-        --TH_TENSOR_dim_index; \
-	TENSOR3##_sizes[TH_TENSOR_dim_index] = TENSOR3->size[TENSOR3##_i]; \
-	TENSOR3##_strides[TH_TENSOR_dim_index] = TENSOR3->stride[TENSOR3##_i]; \
+    TENSOR3##_size = 1; \
+    TENSOR3##_stride = 1; \
+    for(TENSOR3##_i = TENSOR3->nDimension-1; TENSOR3##_i >= 0; TENSOR3##_i--) { \
+      if(TENSOR3->size[TENSOR3##_i] != 1) { \
+        if(TENSOR3->stride[TENSOR3##_i] == TENSOR3##_size) \
+          TENSOR3##_size *= TENSOR3->size[TENSOR3##_i]; \
+        else{ \
+          TH_TENSOR3_contiguous = 0; \
+	  break; \
+	} \
       } \
     } \
-    TENSOR3##_size = TENSOR3##_sizes[TENSOR3##_dim-1]; \
-    TENSOR3##_stride = TENSOR3##_strides[TENSOR3##_dim-1]; \
+    if (!TH_TENSOR3_contiguous) { \
+      TENSOR3##_data = TENSOR3->storage->data+TENSOR3->storageOffset; \
+      TENSOR3##_dim = 1; \
+      for(TENSOR3##_i = TENSOR3->nDimension-2; TENSOR3##_i >= 0; TENSOR3##_i--) \
+      { \
+        if(TENSOR3->stride[TENSOR3##_i] != TENSOR3->stride[TENSOR3##_i+1] * TENSOR3->size[TENSOR3##_i+1]) \
+          TENSOR3##_dim++; \
+      } \
+      TENSOR3##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR3##_dim)); \
+      TENSOR3##_sizes = TENSOR3##_counter + TENSOR3##_dim; \
+      TENSOR3##_strides = TENSOR3##_counter + 2*TENSOR3##_dim; \
+      TH_TENSOR_dim_index = TENSOR3##_dim-1; \
+      TENSOR3##_sizes[TH_TENSOR_dim_index] = TENSOR3->size[TENSOR3->nDimension-1]; \
+      TENSOR3##_strides[TH_TENSOR_dim_index] = TENSOR3->stride[TENSOR3->nDimension-1]; \
+      for(TENSOR3##_i = TENSOR3##_dim-1; TENSOR3##_i >= 0; --TENSOR3##_i) { \
+        TENSOR3##_counter[TENSOR3##_i] = 0; \
+      } \
+      for(TENSOR3##_i = TENSOR3->nDimension-2; TENSOR3##_i >= 0; --TENSOR3##_i) { \
+        if (TENSOR3->stride[TENSOR3##_i] == TENSOR3->stride[TENSOR3##_i+1] * TENSOR3->size[TENSOR3##_i+1]) { \
+          TENSOR3##_sizes[TH_TENSOR_dim_index] = TENSOR3->size[TENSOR3##_i] * TENSOR3##_sizes[TH_TENSOR_dim_index]; \
+        } else { \
+          --TH_TENSOR_dim_index; \
+          TENSOR3##_sizes[TH_TENSOR_dim_index] = TENSOR3->size[TENSOR3##_i]; \
+          TENSOR3##_strides[TH_TENSOR_dim_index] = TENSOR3->stride[TENSOR3##_i]; \
+        } \
+      } \
+      TENSOR3##_size = TENSOR3##_sizes[TENSOR3##_dim-1]; \
+      TENSOR3##_stride = TENSOR3##_strides[TENSOR3##_dim-1]; \
+    } \
   } \
 \
   TENSOR1##_i = 0; \
@@ -131,6 +175,9 @@
 \
     if(TENSOR1##_i == TENSOR1##_size) \
     { \
+      if(TH_TENSOR1_contiguous) \
+	break; \
+\
       if(TENSOR1##_dim == 1) \
          break; \
 \
@@ -161,6 +208,9 @@
 \
     if(TENSOR2##_i == TENSOR2##_size) \
     { \
+      if(TH_TENSOR2_contiguous) \
+	break; \
+\
       if(TENSOR2##_dim == 1) \
          break; \
 \
@@ -191,6 +241,9 @@
 \
     if(TENSOR3##_i == TENSOR3##_size) \
     { \
+      if(TH_TENSOR3_contiguous) \
+	break; \
+\
       if(TENSOR3##_dim == 1) \
          break; \
 \
@@ -219,9 +272,12 @@
       TENSOR3##_i = 0; \
     } \
   } \
-  THFree(TENSOR1##_counter); \
-  THFree(TENSOR2##_counter); \
-  THFree(TENSOR3##_counter); \
+  if(TH_TENSOR1_contiguous) \
+    THFree(TENSOR1##_counter); \
+  if(TH_TENSOR2_contiguous) \
+    THFree(TENSOR2##_counter); \
+  if(TH_TENSOR3_contiguous) \
+    THFree(TENSOR3##_counter); \
 }
 
 #define TH_TENSOR_APPLY2(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
@@ -233,6 +289,7 @@
   long *TENSOR2##_counter = NULL, *TENSOR2##_sizes = NULL, *TENSOR2##_strides = NULL; \
   long TENSOR2##_stride = 0, TENSOR2##_size = 0, TENSOR2##_dim = 0, TENSOR2##_i, TENSOR2##_n; \
   int TH_TENSOR_APPLY_hasFinished = 0; \
+  int TH_TENSOR1_contiguous = 1, TH_TENSOR2_contiguous = 1; \
   long TH_TENSOR_dim_index = 0; \
 \
   TENSOR1##_n = (TENSOR1->nDimension ? 1 : 0); \
@@ -251,164 +308,19 @@
   else \
   { \
     TENSOR1##_data = TENSOR1->storage->data+TENSOR1->storageOffset; \
-    TENSOR1##_dim = 1; \
-    for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; TENSOR1##_i--) \
-    { \
-      if(TENSOR1->stride[TENSOR1##_i] != TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) \
-        TENSOR1##_dim++; \
-    } \
-    TENSOR1##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR1##_dim)); \
-    TENSOR1##_sizes = TENSOR1##_counter + TENSOR1##_dim; \
-    TENSOR1##_strides = TENSOR1##_counter + 2*TENSOR1##_dim; \
-    TH_TENSOR_dim_index = TENSOR1##_dim-1; \
-    TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1->nDimension-1]; \
-    TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1->nDimension-1]; \
-    for(TENSOR1##_i = TENSOR1##_dim-1; TENSOR1##_i >= 0; --TENSOR1##_i) { \
-      TENSOR1##_counter[TENSOR1##_i] = 0; \
-    } \
-    for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; --TENSOR1##_i) { \
-      if (TENSOR1->stride[TENSOR1##_i] == TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) { \
-        TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i] * TENSOR1##_sizes[TH_TENSOR_dim_index]; \
-      } else { \
-        --TH_TENSOR_dim_index; \
-        TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i]; \
-        TENSOR1##_strides[TH_TENSOR_dim_index] = TENSOR1->stride[TENSOR1##_i]; \
+    TENSOR1##_size = 1; \
+    TENSOR1##_stride = 1; \
+    for(TENSOR1##_i = TENSOR1->nDimension-1; TENSOR1##_i >= 0; TENSOR1##_i--) { \
+      if(TENSOR1->size[TENSOR1##_i] != 1) { \
+        if(TENSOR1->stride[TENSOR1##_i] == TENSOR1##_size) \
+          TENSOR1##_size *= TENSOR1->size[TENSOR1##_i]; \
+        else{ \
+          TH_TENSOR1_contiguous = 0; \
+	  break; \
+	} \
       } \
     } \
-    TENSOR1##_size = TENSOR1##_sizes[TENSOR1##_dim-1]; \
-    TENSOR1##_stride = TENSOR1##_strides[TENSOR1##_dim-1]; \
-\
-    TENSOR2##_data = TENSOR2->storage->data+TENSOR2->storageOffset; \
-    TENSOR2##_dim = 1; \
-    for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; TENSOR2##_i--) \
-    { \
-      if(TENSOR2->stride[TENSOR2##_i] != TENSOR2->stride[TENSOR2##_i+1] * TENSOR2->size[TENSOR2##_i+1]) \
-        TENSOR2##_dim++; \
-    } \
-    TENSOR2##_counter = (long*)THAlloc(sizeof(long)*(3*TENSOR2##_dim)); \
-    TENSOR2##_sizes = TENSOR2##_counter + TENSOR2##_dim; \
-    TENSOR2##_strides = TENSOR2##_counter + 2*TENSOR2##_dim; \
-    TH_TENSOR_dim_index = TENSOR2##_dim-1; \
-    TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2->nDimension-1]; \
-    TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2->nDimension-1]; \
-    for(TENSOR2##_i = TENSOR2##_dim-1; TENSOR2##_i >= 0; --TENSOR2##_i) { \
-      TENSOR2##_counter[TENSOR2##_i] = 0; \
-    } \
-    for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; --TENSOR2##_i) { \
-      if (TENSOR2->stride[TENSOR2##_i] == TENSOR2->stride[TENSOR2##_i+1] * TENSOR2->size[TENSOR2##_i+1]) { \
-        TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i] * TENSOR2##_sizes[TH_TENSOR_dim_index]; \
-      } else { \
-        --TH_TENSOR_dim_index; \
-        TENSOR2##_sizes[TH_TENSOR_dim_index] = TENSOR2->size[TENSOR2##_i]; \
-        TENSOR2##_strides[TH_TENSOR_dim_index] = TENSOR2->stride[TENSOR2##_i]; \
-      } \
-    } \
-    TENSOR2##_size = TENSOR2##_sizes[TENSOR2##_dim-1]; \
-    TENSOR2##_stride = TENSOR2##_strides[TENSOR2##_dim-1]; \
-  } \
-\
-  TENSOR1##_i = 0; \
-  TENSOR2##_i = 0; \
-  while(!TH_TENSOR_APPLY_hasFinished) \
-  { \
-    for(; TENSOR1##_i < TENSOR1##_size && TENSOR2##_i < TENSOR2##_size; TENSOR1##_i++, TENSOR2##_i++, TENSOR1##_data += TENSOR1##_stride, TENSOR2##_data += TENSOR2##_stride) /* 0 et pas TENSOR##_dim! */ \
-    { \
-      CODE \
-    } \
-\
-    if(TENSOR1##_i == TENSOR1##_size) \
-    { \
-      if(TENSOR1##_dim == 1) \
-         break; \
-\
-      TENSOR1##_data -= TENSOR1##_size*TENSOR1##_stride; \
-      for(TENSOR1##_i = TENSOR1##_dim-2; TENSOR1##_i >= 0; TENSOR1##_i--) \
-      { \
-        TENSOR1##_counter[TENSOR1##_i]++; \
-        TENSOR1##_data += TENSOR1##_strides[TENSOR1##_i]; \
-\
-        if(TENSOR1##_counter[TENSOR1##_i]  == TENSOR1##_sizes[TENSOR1##_i]) \
-        { \
-          if(TENSOR1##_i == 0) \
-          { \
-            TH_TENSOR_APPLY_hasFinished = 1; \
-            break; \
-          } \
-            else \
-          { \
-            TENSOR1##_data -= TENSOR1##_counter[TENSOR1##_i]*TENSOR1##_strides[TENSOR1##_i]; \
-            TENSOR1##_counter[TENSOR1##_i] = 0; \
-          } \
-        } \
-        else \
-          break; \
-      } \
-      TENSOR1##_i = 0; \
-    } \
-\
-    if(TENSOR2##_i == TENSOR2##_size) \
-    { \
-      if(TENSOR2##_dim == 1) \
-         break; \
-\
-      TENSOR2##_data -= TENSOR2##_size*TENSOR2##_stride; \
-      for(TENSOR2##_i = TENSOR2##_dim-2; TENSOR2##_i >= 0; TENSOR2##_i--) \
-      { \
-        TENSOR2##_counter[TENSOR2##_i]++; \
-        TENSOR2##_data += TENSOR2##_strides[TENSOR2##_i]; \
-\
-        if(TENSOR2##_counter[TENSOR2##_i]  == TENSOR2##_sizes[TENSOR2##_i]) \
-        { \
-          if(TENSOR2##_i == 0) \
-          { \
-            TH_TENSOR_APPLY_hasFinished = 1; \
-            break; \
-          } \
-            else \
-          { \
-            TENSOR2##_data -= TENSOR2##_counter[TENSOR2##_i]*TENSOR2##_strides[TENSOR2##_i]; \
-            TENSOR2##_counter[TENSOR2##_i] = 0; \
-          } \
-        } \
-        else \
-          break; \
-      } \
-      TENSOR2##_i = 0; \
-    } \
-  } \
-  THFree(TENSOR1##_counter); \
-  THFree(TENSOR2##_counter); \
-}
-
-#define TH_TENSOR_APPLY2_CONTIGUOUS(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
-{ \
-  TYPE1 *TENSOR1##_data = NULL; \
-  long *TENSOR1##_counter = NULL, *TENSOR1##_sizes = NULL, *TENSOR1##_strides = NULL; \
-  long TENSOR1##_stride = 0, TENSOR1##_size = 0, TENSOR1##_dim = 0, TENSOR1##_i, TENSOR1##_n; \
-  TYPE2 *TENSOR2##_data = NULL; \
-  long *TENSOR2##_counter = NULL, *TENSOR2##_sizes = NULL, *TENSOR2##_strides = NULL; \
-  long TENSOR2##_stride = 0, TENSOR2##_size = 0, TENSOR2##_dim = 0, TENSOR2##_i, TENSOR2##_n; \
-  int TH_TENSOR_APPLY_hasFinished = 0; \
-  int TH_TENSOR1_contiguous = 0, TH_TENSOR2_contiguous = 0; \
-  long TH_TENSOR_dim_index = 0; \
-\
-  TENSOR1##_n = (TENSOR1->nDimension ? 1 : 0); \
-  for(TENSOR1##_i = 0; TENSOR1##_i < TENSOR1->nDimension; TENSOR1##_i++) \
-    TENSOR1##_n *= TENSOR1->size[TENSOR1##_i]; \
-\
-  TENSOR2##_n = (TENSOR2->nDimension ? 1 : 0); \
-  for(TENSOR2##_i = 0; TENSOR2##_i < TENSOR2->nDimension; TENSOR2##_i++) \
-    TENSOR2##_n *= TENSOR2->size[TENSOR2##_i]; \
-\
-  if(TENSOR1##_n != TENSOR2##_n) /* should we do the check in the function instead? i think so */ \
-    THError("inconsistent tensor size"); \
-\
-  if(TENSOR1->nDimension == 0) \
-    TH_TENSOR_APPLY_hasFinished = 1; \
-  else \
-  { \
-    TENSOR1##_data = TENSOR1->storage->data+TENSOR1->storageOffset; \
-    if (!THTensor_(isContiguous)(TENSOR1)) { \
+    if (!TH_TENSOR1_contiguous) { \
       TENSOR1##_dim = 1; \
       for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; TENSOR1##_i--) \
       { \
@@ -425,7 +337,7 @@
         TENSOR1##_counter[TENSOR1##_i] = 0; \
       } \
       for(TENSOR1##_i = TENSOR1->nDimension-2; TENSOR1##_i >= 0; --TENSOR1##_i) { \
-        if (TENSOR1->stride[TENSOR1##_i] == TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) { \
+        if(TENSOR1->stride[TENSOR1##_i] == TENSOR1->stride[TENSOR1##_i+1] * TENSOR1->size[TENSOR1##_i+1]) { \
           TENSOR1##_sizes[TH_TENSOR_dim_index] = TENSOR1->size[TENSOR1##_i] * TENSOR1##_sizes[TH_TENSOR_dim_index]; \
         } else { \
           --TH_TENSOR_dim_index; \
@@ -435,14 +347,22 @@
       } \
       TENSOR1##_size = TENSOR1##_sizes[TENSOR1##_dim-1]; \
       TENSOR1##_stride = TENSOR1##_strides[TENSOR1##_dim-1]; \
-    } else { \
-      TH_TENSOR1_contiguous = 1; \
-      TENSOR1##_size = THTensor_(nElement)(TENSOR1); \
-      TENSOR1##_stride = 1; \
     } \
 \
     TENSOR2##_data = TENSOR2->storage->data+TENSOR2->storageOffset; \
-    if (!THTensor_(isContiguous)(TENSOR2)) { \
+    TENSOR2##_size = 1; \
+    TENSOR2##_stride = 1; \
+    for(TENSOR2##_i = TENSOR2->nDimension-1; TENSOR2##_i >= 0; TENSOR2##_i--) { \
+      if(TENSOR2->size[TENSOR2##_i] != 1) { \
+        if(TENSOR2->stride[TENSOR2##_i] == TENSOR2##_size) \
+          TENSOR2##_size *= TENSOR2->size[TENSOR2##_i]; \
+        else{ \
+          TH_TENSOR2_contiguous = 0; \
+	  break; \
+	} \
+      } \
+    } \
+    if(!TH_TENSOR2_contiguous) { \
       TENSOR2##_dim = 1; \
       for(TENSOR2##_i = TENSOR2->nDimension-2; TENSOR2##_i >= 0; TENSOR2##_i--) \
       { \
@@ -470,8 +390,10 @@
       TENSOR2##_size = TENSOR2##_sizes[TENSOR2##_dim-1]; \
       TENSOR2##_stride = TENSOR2##_strides[TENSOR2##_dim-1]; \
     } else { \
-      TH_TENSOR2_contiguous = 1; \
-      TENSOR2##_size = THTensor_(nElement)(TENSOR2); \
+      TENSOR2##_size = 1; \
+      for(TENSOR2##_i = TENSOR2->nDimension-1; TENSOR2##_i >= 0; --TENSOR2##_i) { \
+        TENSOR2##_size *= TENSOR2->size[TENSOR2##_i]; \
+      } \
       TENSOR2##_stride = 1; \
     } \
   } \
@@ -551,12 +473,10 @@
       TENSOR2##_i = 0; \
     } \
   } \
-  if (!THTensor_(isContiguous)(TENSOR1)) { \
+  if (!TH_TENSOR1_contiguous) \
     THFree(TENSOR1##_counter); \
-  } \
-  if (!THTensor_(isContiguous)(TENSOR2)) { \
+  if (!TH_TENSOR2_contiguous) \
     THFree(TENSOR2##_counter); \
-  } \
 }
 
 /*
