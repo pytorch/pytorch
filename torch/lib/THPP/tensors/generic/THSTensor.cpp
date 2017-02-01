@@ -66,7 +66,7 @@ std::size_t THSTensor<real>::elementSize() const {
 
 template<>
 long long THSTensor<real>::numel() const {
-  throw std::runtime_error("THSTensor::>::() not supported");
+  throw std::runtime_error("THSTensor::numel not supported");
 }
 
 template<>
@@ -76,22 +76,22 @@ bool THSTensor<real>::isContiguous() const {
 
 template<>
 void* THSTensor<real>::data() {
-  throw std::runtime_error("THSTensor::>::() not supported");
+  throw std::runtime_error("THSTensor::data() not supported");
 }
 
 template<>
 const void* THSTensor<real>::data() const {
-  throw std::runtime_error("THSTensor::real() not supported");
+  throw std::runtime_error("THSTensor::data() not supported");
 }
 
 template<>
 void* THSTensor<real>::cdata() {
-  throw std::runtime_error("THSTensor::>::() not supported");
+  throw std::runtime_error("THSTensor::cdata() not supported");
 }
 
 template<>
 const void* THSTensor<real>::cdata() const {
-  throw std::runtime_error("THSTensor::real() not supported");
+  throw std::runtime_error("THSTensor::cdata() not supported");
 }
 
 template<>
@@ -135,9 +135,9 @@ auto THSTensor<real>::setStorage(const Storage& storage,
 
 template<>
 auto THSTensor<real>::narrow(const Tensor& src,
-                            int dimension,
-                            long firstIndex,
-                            long size) -> THSTensor& {
+                             int dimension,
+                             long firstIndex,
+                             long size) -> THSTensor& {
   throw std::runtime_error("THSTensor::narrow not supported");}
 
 
