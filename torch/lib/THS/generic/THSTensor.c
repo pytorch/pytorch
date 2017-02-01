@@ -54,6 +54,7 @@ THTensor *THSTensor_(values)(const THSTensor *self) {
 /*** Helper methods ***/
 static void THSTensor_(rawInit)(THSTensor *self)
 {
+  self->refcount = 1;
   self->size = NULL;
   self->indices = THLongTensor_new();
   self->values = THTensor_(new)();
@@ -354,10 +355,17 @@ void THSTensor_(free)(THSTensor *self)
 {
   if(!self)
     return;
+  if(THAtomicDecrementRef(&self->refcount))
+  {
+    THLongTensor_free(self->indices);
+    THTensor_(free)(self->values);
+    THFree(self);
+  }
+}
 
-  THLongTensor_free(self->indices);
-  THTensor_(free)(self->values);
-  THFree(self);
+void THSTensor_(retain)(THSTensor *self)
+{
+  THAtomicIncrementRef(&self->refcount);
 }
 
 #endif

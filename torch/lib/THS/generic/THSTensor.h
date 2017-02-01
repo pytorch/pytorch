@@ -14,6 +14,7 @@ typedef struct THSTensor
     THTensor *values;
     // Math operations can only be performed on ordered sparse tensors
     int contiguous;
+    int refcount;
 
 } THSTensor;
 
@@ -54,6 +55,7 @@ TH_API int THSTensor_(isContiguous)(const THSTensor *self);
 TH_API void THSTensor_(contiguous)(THSTensor *self);
 
 TH_API void THSTensor_(free)(THSTensor *self);
+TH_API void THSTensor_(retain)(THSTensor *self);
 
 
 /* TODO (check function signatures too, might be wrong)

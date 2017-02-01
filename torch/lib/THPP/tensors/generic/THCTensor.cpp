@@ -605,6 +605,11 @@ bool THCTensor<real>::isCuda() const {
 }
 
 template<>
+bool THCTensor<real>::isSparse() const {
+  return true;
+}
+
+template<>
 int THCTensor<real>::getDevice() const {
   return tensor->storage->device;
 }

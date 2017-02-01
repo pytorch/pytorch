@@ -138,6 +138,7 @@ public:
 
   virtual thpp::Type type() const override;
   virtual bool isCuda() const override;
+  virtual bool isSparse() const override;
   virtual int getDevice() const override;
   virtual std::unique_ptr<Tensor> newTensor() const override;
 
@@ -148,7 +149,7 @@ private:
   THTensor& resize(const iterator& size_begin, const iterator& size_end,
                    const iterator& stride_begin, const iterator& stride_end);
 
-protected:
+public:
   tensor_type *tensor;
 };
 
