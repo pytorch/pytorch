@@ -127,7 +127,7 @@ def TranslateModel(*args, **kwargs):
     return TranslatorRegistry.TranslateModel(*args, **kwargs)
 
 
-def ConvertTensorProtosToInitNet(net_params):
+def ConvertTensorProtosToInitNet(net_params, input_name):
     """Takes the net_params returned from TranslateModel, and wrap it as an
     init net that contain GivenTensorFill.
 
@@ -147,6 +147,7 @@ def ConvertTensorProtosToInitNet(net_params):
                 utils.MakeArgument("shape", list(tensor.dims)),
                 utils.MakeArgument("values", tensor.float_data)])
         init_net.op.extend([op])
+    init_net.op.extend([core.CreateOperator("ConstantFill", [], [input_name], shape=[1])])
     return init_net
 
 
@@ -544,9 +545,19 @@ if __name__ == '__main__':
     net, pretrained_params = TranslateModel(
         caffenet, caffenet_pretrained, is_test=True
     )
+
+    # Assume there is one input and one output
+    external_input = net.op[0].input[0]
+    external_output = net.op[-1].output[0]
+
+    net.external_input.extend([external_input])
+    net.external_input.extend([param.name for param in pretrained_params.protos])
+    net.external_output.extend([external_output])
+    init_net = ConvertTensorProtosToInitNet(pretrained_params, external_input)
+
     for param in pretrained_params.protos:
         workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
     with open(output_predict_net, 'wb') as f:
-        f.write(str(net))
+        f.write(net.SerializeToString())
     with open(output_init_net, 'wb') as f:
-        f.write(pretrained_params.SerializeToString())
+        f.write(init_net.SerializeToString())
