@@ -3,7 +3,6 @@
 /* Copyright 1993-2014 NVIDIA Corporation.  All rights reserved. */
 
 // Host functions for converting between FP32 and FP16 formats
-// Paulius Micikevicius (pauliusm@nvidia.com)
 
 float TH_half2float(THHalf h)
 {
