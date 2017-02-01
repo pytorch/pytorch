@@ -63,3 +63,78 @@ class Sequential(Module):
         for module in self._modules.values():
             input = module(input)
         return input
+
+
+class ModuleList(Module):
+
+    def __init__(self, modules=None):
+        super(ModuleList, self).__init__()
+        if modules is not None:
+            self += modules
+
+    def __getitem__(self, idx):
+        if idx < 0:
+            idx += len(self)
+        return self._modules[str(idx)]
+
+    def __setitem__(self, idx, module):
+        return setattr(self, str(idx), module)
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def __iadd__(self, modules):
+        return self.extend(modules)
+
+    def append(self, module):
+        self.add_module(str(len(self)), module)
+        return self
+
+    def extend(self, modules):
+        if not isinstance(modules, list):
+            raise TypeError("ModuleList.extend should be called with a "
+                            "list, but got " + type(modules).__name__)
+        offset = len(self)
+        for i, module in enumerate(modules):
+            self.add_module(str(offset + i), module)
+        return self
+
+
+class ParameterList(Module):
+    def __init__(self, parameters=None):
+        super(ParameterList, self).__init__()
+        if parameters is not None:
+            self += parameters
+
+    def __getitem__(self, idx):
+        if idx < 0:
+            idx += len(self)
+        return self._parameters[str(idx)]
+
+    def __setitem__(self, idx, param):
+        return self.register_parameter(str(idx), param)
+
+    def __len__(self):
+        return len(self._parameters)
+
+    def __iter__(self):
+        return iter(self._parameters.values())
+
+    def __iadd__(self, parameters):
+        return self.extend(parameters)
+
+    def append(self, parameter):
+        self.register_parameter(str(len(self)), parameter)
+        return self
+
+    def extend(self, parameters):
+        if not isinstance(parameters, list):
+            raise TypeError("ParameterList.extend should be called with a "
+                            "list, but got " + type(parameters).__name__)
+        offset = len(self)
+        for i, param in enumerate(parameters):
+            self.register_parameter(str(offset + i), param)
+        return self
