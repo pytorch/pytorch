@@ -345,8 +345,15 @@ auto THTensor<real>::clamp(const Tensor &src, scalar_type min_value, scalar_type
 template<>
 auto THTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& src2) -> THTensor& {
   THTensor &src1_t = non_const_cast(src1);
-  THTensor &src2_t = non_const_cast(src2);
-  THTensor_(cadd)(tensor, src1_t.tensor, value, src2_t.tensor);
+
+  THSTensor<real>* src2_sparse;
+  if ((src2_sparse = dynamic_cast<THSTensor<real>*>(const_cast<Tensor*>(&src2)))) {
+    THSTensor_(spcadd)(tensor, src1_t.tensor, value, src2_sparse->tensor);
+    return *this;
+  } else {
+    THTensor &src2_t = non_const_cast(src2);
+    THTensor_(cadd)(tensor, src1_t.tensor, value, src2_t.tensor);
+  }
   return *this;
 }
 
@@ -605,6 +612,11 @@ thpp::Type THTensor<real>::type() const {
 
 template<>
 bool THTensor<real>::isCuda() const {
+  return false;
+}
+
+template<>
+bool THTensor<real>::isSparse() const {
   return false;
 }
 
