@@ -101,7 +101,8 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
             caffe2::to_string(size));
     bool status = queue->blockingWrite(this->Outputs());
     Output(size)->Resize();
-    *Output(size)->template mutable_data<bool>() = !status;
+    math::Set<bool, Context>(
+        1, !status, Output(size)->template mutable_data<bool>(), &context_);
     return true;
   }
 };
@@ -123,7 +124,8 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
             caffe2::to_string(size));
     bool status = queue->blockingRead(this->Outputs());
     Output(size)->Resize();
-    *Output(size)->template mutable_data<bool>() = !status;
+    math::Set<bool, Context>(
+        1, !status, Output(size)->template mutable_data<bool>(), &context_);
     return true;
   }
 
