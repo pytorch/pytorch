@@ -1567,11 +1567,15 @@ new_module_tests = [
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
-        input=Variable(
-            torch.randperm(2).repeat(1, 2),
-            requires_grad=False
-        ),
+        input=Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False
+    ),
+    dict(
+        constructor=lambda: nn.Embedding(4, 3, sparse=True),
+        input=Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        fullname='Embedding_sparse',
+        test_cuda=False,
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d(
