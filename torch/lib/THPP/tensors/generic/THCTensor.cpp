@@ -606,7 +606,7 @@ bool THCTensor<real>::isCuda() const {
 
 template<>
 bool THCTensor<real>::isSparse() const {
-  return true;
+  return false;
 }
 
 template<>
