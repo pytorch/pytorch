@@ -75,14 +75,14 @@ class Embedding(Function):
                 indices = indices.view(-1)
 
             grad_output = grad_output.contiguous()
-
-            if torch.typename(grad_output) == 'torch.cuda.FloatTensor':
-                _sorted = torch.cuda.LongTensor()
-                _indices = torch.cuda.LongTensor()
-                _count = torch.cuda.LongTensor()
-            else:
-                _count = torch.IntTensor()
-                _sorted = _indices = None
+            with torch.cuda.device_of(grad_output):
+                if torch.typename(grad_output) == 'torch.cuda.FloatTensor':
+                    _sorted = torch.cuda.LongTensor()
+                    _indices = torch.cuda.LongTensor()
+                    _count = torch.cuda.LongTensor()
+                else:
+                    _count = torch.IntTensor()
+                    _sorted = _indices = None
 
             # TODO: sparse updates...
             grad_weight = grad_output.new(self._weight_size).zero_()
