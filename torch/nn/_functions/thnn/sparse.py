@@ -30,12 +30,13 @@ class Embedding(Function):
             self.norm_type
         )
 
-    def _make_sparse(self, indices):
+    def _make_sparse(self, indices, tensor_type):
         i = torch.LongTensor(2, indices.numel())
         v = torch.ones(indices.numel())
         i[1].copy_(torch.range(0, indices.numel() - 1))
         i[0].copy_(indices)
-        return sparse.FloatTensor(i, v, torch.Size(
+        SparseTensor = getattr(sparse, tensor_type.__name__)
+        return SparseTensor(i, v, torch.Size(
             [self._weight_size[0], indices.numel()])).contiguous()
 
     def forward(self, indices, weight):
@@ -99,7 +100,7 @@ class Embedding(Function):
                 1
             )
         else:
-            sp = self._make_sparse(indices)
+            sp = self._make_sparse(indices, type(grad_output))
             go = grad_output.view(-1, grad_output.size()[-1])
             grad_weight = torch.smm(sp, go)
         return None, grad_weight
