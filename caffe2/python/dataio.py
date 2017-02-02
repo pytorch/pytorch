@@ -106,7 +106,7 @@ class Reader(object):
             fields = from_blob_list(self._schema, fields)
         return should_stop, fields
 
-    def execution_step(self, reader_net_name=None):
+    def execution_step(self, reader_net_name=None, external_should_stop=None):
         """Create an execution step with a net containing read operators.
 
         The execution step will contain a `stop_blob` that knows how to stop
@@ -138,6 +138,8 @@ class Reader(object):
         """
         reader_net = core.Net(reader_net_name or 'reader')
         should_stop, fields = self.read_record(reader_net)
+        if external_should_stop is not None:
+            should_stop = reader_net.Or([external_should_stop, should_stop])
         read_step = core.execution_step(
             '{}_step'.format(reader_net_name),
             reader_net,
