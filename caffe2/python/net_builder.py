@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, context
-from caffe2.python.task import Task
+from caffe2.python.task import Task, TaskGroup
 
 
 @context.define_context()
@@ -229,7 +229,7 @@ class Operations(object):
         """
         setup = _SetupBuilder(_SetupBuilder.INIT)
         self.net().add_attribute(Task.TASK_SETUP, setup)
-        return NetBuilder.current().add(setup)
+        return setup
 
     def task_exit(self):
         """
@@ -244,7 +244,25 @@ class Operations(object):
         """
         setup = _SetupBuilder(_SetupBuilder.EXIT)
         self.net().add_attribute(Task.TASK_SETUP, setup)
-        return NetBuilder.current().add(setup)
+        return setup
+
+    def local_init(self):
+        """
+        Similar to `task_init`, but executes at TaskGroup's startup instead,
+        before any task of the group starts executing.
+        """
+        setup = _SetupBuilder(_SetupBuilder.INIT)
+        self.net().add_attribute(TaskGroup.LOCAL_SETUP, setup)
+        return setup
+
+    def local_exit(self):
+        """
+        Similar to `task_init`, but executes at TaskGroup's exit instead,
+        after all tasks of the group finished execution.
+        """
+        setup = _SetupBuilder(_SetupBuilder.EXIT)
+        self.net().add_attribute(TaskGroup.LOCAL_SETUP, setup)
+        return setup
 
 
 ops = Operations()
