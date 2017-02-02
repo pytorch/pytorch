@@ -36,6 +36,13 @@ class TestCounterOps(TestCase):
         assert not workspace.FetchBlob('t3')
 
         workspace.RunOperatorOnce(core.CreateOperator(
+            'ResetCounter', ['c'], ['t31'], init_count=5))  # 0 -> 5
+        assert workspace.FetchBlob('t31') == 0
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'ResetCounter', ['c'], ['t32']))  # 5 -> 0
+        assert workspace.FetchBlob('t32') == 5
+
+        workspace.RunOperatorOnce(core.CreateOperator(
             'ConstantFill', [], ['t4'], value=False, shape=[],
             dtype=core.DataType.BOOL))
         assert workspace.FetchBlob('t4') == workspace.FetchBlob('t1')
