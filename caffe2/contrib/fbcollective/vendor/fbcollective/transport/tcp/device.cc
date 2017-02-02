@@ -1,7 +1,10 @@
 #include "fbcollective/transport/tcp/device.h"
 
+#include <netdb.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <array>
@@ -13,12 +16,22 @@ namespace fbcollective {
 namespace transport {
 namespace tcp {
 
-std::shared_ptr<transport::Device> CreateDevice() {
-  auto device = std::make_shared<Device>();
+std::shared_ptr<transport::Device> CreateDevice(const struct attr& attr) {
+  struct attr x = attr;
+
+  // Initialize hostname to equal this host's name
+  if (x.hostname.size() == 0) {
+    std::array<char, HOST_NAME_MAX> hostname;
+    auto rv = gethostname(hostname.data(), hostname.size());
+    FBC_ENFORCE_EQ(rv, 0);
+    x.hostname = hostname.data();
+  }
+
+  auto device = std::make_shared<Device>(x);
   return std::shared_ptr<transport::Device>(device);
 }
 
-Device::Device() {
+Device::Device(const struct attr& attr) : attr_(attr) {
   fd_ = epoll_create(1);
   FBC_ENFORCE_NE(fd_, -1, "epoll_create: ", strerror(errno));
 

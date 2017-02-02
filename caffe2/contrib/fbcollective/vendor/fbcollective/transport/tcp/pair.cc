@@ -44,11 +44,7 @@ void Pair::connect(const std::vector<char>& bytes) {
 
 void Pair::listen() {
   std::lock_guard<std::mutex> lock(m_);
-  std::array<char, 128> hostname;
   int rv;
-
-  rv = gethostname(hostname.data(), hostname.size());
-  FBC_ENFORCE_NE(rv, -1);
 
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
@@ -56,7 +52,7 @@ void Pair::listen() {
   hints.ai_socktype = SOCK_STREAM;
 
   struct addrinfo* result;
-  rv = getaddrinfo(hostname.data(), nullptr, &hints, &result);
+  rv = getaddrinfo(dev_->attr_.hostname.data(), nullptr, &hints, &result);
   FBC_ENFORCE_NE(rv, -1);
   for (auto rp = result; rp != nullptr; rp = rp->ai_next) {
     auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
