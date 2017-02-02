@@ -11,7 +11,7 @@ __global__ void LabelCrossEntropyKernel(
     const int N, const int D, const float* Pdata, const int* labeldata,
     const float* weights, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    CUDA_KERNEL_ASSERT(labeldata[i] < D);
+    CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
     float weight = weights ? weights[i] : 1.0;
     Ydata[i] = -logf(max(Pdata[i * D + labeldata[i]], FLT_MIN)) * weight;
   }
