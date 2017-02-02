@@ -260,7 +260,8 @@ int main(int argc, char** argv) {
   std::shared_ptr<transport::Device> device;
 #ifdef BENCHMARK_TCP
   if (transport == "tcp") {
-    device = transport::tcp::CreateDevice();
+    transport::tcp::attr attr;
+    device = transport::tcp::CreateDevice(attr);
   }
 #endif
 #ifdef BENCHMARK_IBVERBS

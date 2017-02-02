@@ -15,7 +15,11 @@ namespace test {
 class BaseTest : public ::testing::Test {
  protected:
   virtual void SetUp() {
-    device_ = ::fbcollective::transport::tcp::CreateDevice();
+    ::fbcollective::transport::tcp::attr attr = {
+        .hostname = "localhost",
+    };
+
+    device_ = ::fbcollective::transport::tcp::CreateDevice(attr);
     store_ = std::unique_ptr<::fbcollective::rendezvous::Store>(
         new ::fbcollective::rendezvous::HashStore);
   }

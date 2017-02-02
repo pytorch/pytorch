@@ -12,7 +12,12 @@ namespace fbcollective {
 namespace transport {
 namespace tcp {
 
-std::shared_ptr<::fbcollective::transport::Device> CreateDevice();
+struct attr {
+  std::string hostname;
+};
+
+std::shared_ptr<::fbcollective::transport::Device> CreateDevice(
+    const struct attr&);
 
 // Forward declarations
 class Pair;
@@ -21,7 +26,7 @@ class Buffer;
 class Device : public ::fbcollective::transport::Device,
                public std::enable_shared_from_this<Device> {
  public:
-  Device();
+  explicit Device(const struct attr& attr);
   virtual ~Device();
 
   virtual std::unique_ptr<::fbcollective::transport::Pair> createPair()
@@ -33,6 +38,7 @@ class Device : public ::fbcollective::transport::Device,
   void registerDescriptor(int fd, int events, Pair* p);
   void unregisterDescriptor(int fd);
 
+  const struct attr attr_;
   std::atomic<bool> done_;
   std::unique_ptr<std::thread> loop_;
 

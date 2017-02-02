@@ -14,7 +14,8 @@ CreateCommonWorld<CPUContext>::createDevice() {
   // Share single device between all common worlds.
   // This should be made configurable, for varying transports, and
   // transport options (e.g. tcp socket options, ibverbs device).
-  static auto sharedDevice = ::fbcollective::transport::tcp::CreateDevice();
+  ::fbcollective::transport::tcp::attr attr;
+  static auto sharedDevice = ::fbcollective::transport::tcp::CreateDevice(attr);
   return sharedDevice;
 }
 
