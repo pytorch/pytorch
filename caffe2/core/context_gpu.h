@@ -78,26 +78,59 @@ class ThreadLocalCUDAObjects {
  private:
   ThreadLocalCUDAObjects() {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
-      cuda_stream_[i] = nullptr;
-      cublas_handle_[i] = nullptr;
+      cuda_streams_[i] = vector<cudaStream_t>();
+      cublas_handles_[i] = vector<cublasHandle_t>();
     }
-    for (int i = 0; i < NumCudaDevices(); ++i) {
-      DeviceGuard guard(i);
+  }
+
+  cudaStream_t GetStream(int gpu, int stream_id) {
+    vector<cudaStream_t> &gpu_streams = cuda_streams_[gpu];
+    if (gpu_streams.size() <= stream_id) {
+      gpu_streams.resize(stream_id + 1);
+    }
+    if (!gpu_streams[stream_id]) {
+      DeviceGuard guard(gpu);
       CUDA_CHECK(cudaStreamCreateWithFlags(
-          &cuda_stream_[i], cudaStreamNonBlocking));
+        &gpu_streams[stream_id], cudaStreamNonBlocking
+      ));
     }
+    return gpu_streams[stream_id];
+  }
+
+  cublasHandle_t GetHandle(int gpu, int stream_id) {
+    vector<cublasHandle_t> &gpu_handles = cublas_handles_[gpu];
+    if (gpu_handles.size() <= stream_id) {
+      gpu_handles.resize(stream_id + 1);
+    }
+    if (!gpu_handles[stream_id]) {
+      CUBLAS_CHECK(cublasCreate(&gpu_handles[stream_id]));
+      // The default is CUBLAS_POINTER_MODE_HOST. You can override
+      // it after obtaining the cublas handle, but do that with
+      // caution.
+      CUBLAS_CHECK(cublasSetPointerMode(
+          gpu_handles[stream_id], CUBLAS_POINTER_MODE_HOST));
+      CUBLAS_CHECK(cublasSetStream(gpu_handles[stream_id],
+          GetStream(gpu, stream_id)));
+    }
+    return gpu_handles[stream_id];
   }
 
   ~ThreadLocalCUDAObjects() {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
-      if (cublas_handle_[i]) {
-        cublasDestroy(cublas_handle_[i]);
+      for (auto handle : cublas_handles_[i]) {
+        if (handle) {
+          cublasDestroy(handle);
+        }
       }
-      cudaStreamDestroy(cuda_stream_[i]);
+      for (auto stream: cuda_streams_[i]) {
+        if (stream) {
+          cudaStreamDestroy(stream);
+        }
+      }
     }
   }
-  cudaStream_t cuda_stream_[CAFFE2_COMPILE_TIME_MAX_GPUS];
-  cublasHandle_t cublas_handle_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  vector<cudaStream_t> cuda_streams_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  vector<cublasHandle_t> cublas_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
 };
 
 class CUDAContext final {
@@ -118,7 +151,7 @@ class CUDAContext final {
   }
 
   bool FinishDeviceComputation() {
-    cudaStreamSynchronize(cuda_objects_.cuda_stream_[gpu_id_]);
+    cudaStreamSynchronize(cuda_objects_.GetStream(gpu_id_, stream_id_));
     cudaError_t error = cudaGetLastError();
     if (error == cudaSuccess) {
       return true;
@@ -131,34 +164,20 @@ class CUDAContext final {
 
   inline int cuda_gpu_id() const { return gpu_id_; }
 
-  inline cudaStream_t& cuda_stream() {
-    return cuda_stream(gpu_id_);
+  inline cudaStream_t cuda_stream() {
+    return cuda_stream(gpu_id_, stream_id_);
   }
 
-  inline const cudaStream_t& cuda_stream() const {
-    return cuda_stream(gpu_id_);
+  inline const cudaStream_t cuda_stream() const {
+    return cuda_stream(gpu_id_, stream_id_);
   }
 
-  static cudaStream_t& cuda_stream(int gpu_id) {
-    return cuda_objects_.cuda_stream_[gpu_id];
+  static cudaStream_t cuda_stream(int gpu_id, int stream_id) {
+    return cuda_objects_.GetStream(gpu_id, stream_id);
   }
 
-  cublasHandle_t& cublas_handle() {
-    auto& cublas_handle_ = cuda_objects_.cublas_handle_[gpu_id_];
-    if (cublas_handle_) {
-      return cublas_handle_;
-    } else {
-      DeviceGuard guard(gpu_id_);
-      auto& cuda_stream_ = cuda_objects_.cuda_stream_[gpu_id_];
-      CUBLAS_CHECK(cublasCreate(&cublas_handle_));
-      // The default is CUBLAS_POINTER_MODE_HOST. You can override
-      // it after obtaining the cublas handle, but do that with
-      // caution.
-      CUBLAS_CHECK(cublasSetPointerMode(
-          cublas_handle_, CUBLAS_POINTER_MODE_HOST));
-      CUBLAS_CHECK(cublasSetStream(cublas_handle_, cuda_stream_));
-      return cublas_handle_;
-    }
+  cublasHandle_t cublas_handle() {
+    return cuda_objects_.GetHandle(gpu_id_, stream_id_);
   }
 
   curandGenerator_t& curand_generator() {
@@ -188,7 +207,7 @@ class CUDAContext final {
   inline void CopyBytes(size_t nbytes, const void* src, void* dst) {
     CUDA_CHECK(cudaMemcpyAsync(
         dst, src, nbytes, cudaMemcpyDefault,
-        cuda_objects_.cuda_stream_[gpu_id_]));
+        cuda_objects_.GetStream(gpu_id_, stream_id_)));
   }
 
   template <typename T, class SrcContext, class DstContext>
@@ -205,8 +224,13 @@ class CUDAContext final {
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
 
+  void set_stream_id(int stream_id) {
+    stream_id_ = stream_id;
+  }
+
  protected:
   int gpu_id_;
+  int stream_id_ = 0;
   int random_seed_;
   curandGenerator_t curand_generator_{nullptr};
   static thread_local ThreadLocalCUDAObjects cuda_objects_;
