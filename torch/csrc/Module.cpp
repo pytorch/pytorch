@@ -243,6 +243,7 @@ IMPLEMENT_STATELESS(topk)
 IMPLEMENT_STATELESS(t)
 IMPLEMENT_STATELESS(transpose)
 IMPLEMENT_STATELESS(squeeze)
+IMPLEMENT_STATELESS(unsqueeze)
 IMPLEMENT_STATELESS(renorm)
 IMPLEMENT_STATELESS(dist)
 IMPLEMENT_STATELESS(linspace)
@@ -593,6 +594,7 @@ static PyMethodDef TorchMethods[] = {
   {"t",               (PyCFunction)THPModule_t,                 METH_VARARGS | METH_KEYWORDS, NULL},
   {"transpose",       (PyCFunction)THPModule_transpose,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"squeeze",         (PyCFunction)THPModule_squeeze,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"unsqueeze",       (PyCFunction)THPModule_unsqueeze,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero",         (PyCFunction)THPModule_nonzero,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"renorm",          (PyCFunction)THPModule_renorm,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"dist",            (PyCFunction)THPModule_dist,              METH_VARARGS | METH_KEYWORDS, NULL},

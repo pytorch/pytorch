@@ -409,6 +409,28 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: unsqueeze
+  with_stateless: True
+  return: argument 0
+  cname: unsqueeze1d
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - long dim
+]]
+
+[[
+  name: unsqueeze_
+  return: self
+  cname: unsqueeze1d
+  arguments:
+    - THTensor* self
+    - THTensor* self
+    - long dim
+]]
+
+[[
   name: nonzero
   with_stateless: True
   return: argument 0
@@ -432,6 +454,16 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: THTensor*
   arguments:
     - THTensor* self
+]]
+
+[[
+  name: view
+  cname: newView
+  return: THTensor*
+  arguments:
+    - THTensor* self
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[

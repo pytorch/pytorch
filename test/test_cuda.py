@@ -233,6 +233,7 @@ tests = [
     ('triu', medium_2d, lambda t: [],),
     ('triu', medium_2d, lambda t: [2], 'positive'),
     ('triu', medium_2d, lambda t: [-2], 'negative'),
+    ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('view', small_3d, lambda t: [100, 10],),
     ('view_as', small_3d, lambda t: [t(100, 10)],),
     ('zero', small_3d, lambda t: [],),
