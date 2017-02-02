@@ -2152,6 +2152,9 @@ class TestTorch(TestCase):
         self.assertEqual((tensor_view - tensor).abs().max(), 0)
         self.assertEqual(empty.view_as(empty), empty)
         self.assertEqual(empty.view(0), empty)
+        self.assertRaises(RuntimeError, lambda: tensor.view(15, 0))
+        self.assertRaises(RuntimeError, lambda: tensor.view(7, -1))
+        self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
 
     def test_expand(self):
         result = torch.Tensor()
@@ -2599,6 +2602,8 @@ class TestTorch(TestCase):
         self.assertEqual(y, x.contiguous().view(2, 1, 4))
         y = x.clone().unsqueeze_(2)
         self.assertEqual(y, x.contiguous().view(2, 4, 1))
+
+        self.assertRaises(RuntimeError, lambda: torch.Tensor().unsqueeze(0))
 
     def test_iter(self):
         x = torch.randn(5, 5)
