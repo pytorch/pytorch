@@ -138,19 +138,6 @@ TH_API void THNN_(HardTanh_updateGradInput)(
                   real max_val,
                   bool inplace);
 
-TH_API void THNN_(GatedLinear_updateOutput)(
-                  THCState *state,
-                  THCudaTensor *input,
-                  THCudaTensor *output,
-                  int dim);
-
-TH_API void THNN_(GatedLinear_updateGradInput)(
-                  THCState *state,
-                  THCudaTensor *input,
-                  THCudaTensor *gradOutput,
-                  THCudaTensor *gradInput,
-                  int dim);
-
 TH_API void THNN_(LeakyReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
