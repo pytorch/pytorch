@@ -2,37 +2,38 @@
 
 #include <string>
 
-#include <sys/socket.h>
+#include <infiniband/verbs.h>
 
 #include "fbcollective/transport/address.h"
 
 namespace fbcollective {
 namespace transport {
-namespace tcp {
+namespace ibverbs {
 
 // Forward declaration
 class Pair;
 
 class Address : public ::fbcollective::transport::Address {
  public:
-  Address() {}
-  explicit Address(const struct sockaddr_storage&);
+  Address();
   explicit Address(const std::vector<char>&);
   virtual ~Address() {}
 
   virtual std::vector<char> bytes() const override;
   virtual std::string str() const override;
 
-  static Address fromSockName(int fd);
-  static Address fromPeerName(int fd);
-
  protected:
-  struct sockaddr_storage ss_;
+  struct {
+    uint32_t lid;
+    uint32_t qpn;
+    uint32_t psn;
+    union ibv_gid ibv_gid;
+  } addr_;
 
-  // Pair can access ss_ directly
+  // Pair can access addr_ directly
   friend class Pair;
 };
 
-} // namespace tcp
+} // namespace ibverbs
 } // namespace transport
 } // namespace fbcollective

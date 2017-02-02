@@ -12,8 +12,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <iostream>
-
 #include "fbcollective/common/logging.h"
 #include "fbcollective/transport/tcp/buffer.h"
 

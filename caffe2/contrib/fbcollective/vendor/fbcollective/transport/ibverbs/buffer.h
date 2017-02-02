@@ -3,17 +3,18 @@
 #include <condition_variable>
 #include <map>
 #include <mutex>
-#include <queue>
+
+#include <infiniband/verbs.h>
 
 #include "fbcollective/transport/buffer.h"
-#include "fbcollective/transport/tcp/device.h"
-#include "fbcollective/transport/tcp/pair.h"
+#include "fbcollective/transport/ibverbs/device.h"
+#include "fbcollective/transport/ibverbs/pair.h"
 
 namespace fbcollective {
 namespace transport {
-namespace tcp {
+namespace ibverbs {
 
-class Buffer : public ::fbcollective::transport::Buffer {
+class Buffer : public ::fbcollective::transport::Buffer, public Handler {
  public:
   virtual ~Buffer();
 
@@ -22,14 +23,15 @@ class Buffer : public ::fbcollective::transport::Buffer {
   virtual void waitRecv() override;
   virtual void waitSend() override;
 
+  virtual void handleCompletion(struct ibv_wc* wc) override;
+
  protected:
   // May only be constructed from helper function in pair.cc
   Buffer(Pair* pair, int slot, void* ptr, size_t size);
 
-  void handleRecvCompletion();
-  void handleSendCompletion();
-
   Pair* pair_;
+
+  struct ibv_mr* mr_;
 
   std::mutex m_;
   std::condition_variable recvCv_;
@@ -41,6 +43,6 @@ class Buffer : public ::fbcollective::transport::Buffer {
   friend class Pair;
 };
 
-} // namespace tcp
+} // namespace ibverbs
 } // namespace transport
 } // namespace fbcollective
