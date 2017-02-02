@@ -243,7 +243,7 @@ class ProcessingReader(Reader):
 
     def read_ex(self, init_net, exit_net):
         read_nets, status, rec = self.reader.read_record_ex(init_net, exit_net)
-        with NetBuilder():
+        with NetBuilder(_stop_blob=status):
             # Current NetBuilder is optionally used inside the processor,
             # then its children are retrived inside of
             # normalize_processor_output.
