@@ -131,13 +131,15 @@ ImageInputOp<Context>::ImageInputOp(
 
 template <class Context>
 bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
-      const string& value, cv::Mat* img, int item_id) {
-
+    const string& value,
+    cv::Mat* img,
+    int item_id) {
   //
   // recommend using --caffe2_use_fatal_for_enforce=1 when using ImageInputOp
   // as this function runs on a worker thread and the exceptions from
   // CAFFE_ENFORCE are silently dropped by the thread worker functions
   //
+  cv::Mat src;
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
     caffe::Datum datum;
@@ -146,26 +148,30 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
     prefetched_label_.mutable_data<int>()[item_id] = datum.label();
     if (datum.encoded()) {
       // encoded image in datum.
-      *img = cv::imdecode(
-          cv::Mat(1, datum.data().size(), CV_8UC1,
-          const_cast<char*>(datum.data().data())),
+      src = cv::imdecode(
+          cv::Mat(
+              1,
+              datum.data().size(),
+              CV_8UC1,
+              const_cast<char*>(datum.data().data())),
           color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
     } else {
       // Raw image in datum.
-      *img = cv::Mat(datum.height(), datum.width(),
-                     color_ ? CV_8UC3 : CV_8UC1);
-      // Note(Yangqing): I believe that the mat should be created continuous.
-      CAFFE_ENFORCE(img->isContinuous());
-      CAFFE_ENFORCE((color_ && datum.channels() == 3) || datum.channels() == 1);
-      if (datum.channels() == 1) {
-        memcpy(img->ptr<uchar>(0), datum.data().data(), datum.data().size());
+      CAFFE_ENFORCE(datum.channels() == 3 || datum.channels() == 1);
+
+      int src_c = datum.channels();
+      src.create(
+          datum.height(), datum.width(), (src_c == 3) ? CV_8UC3 : CV_8UC1);
+
+      if (src_c == 1) {
+        memcpy(src.ptr<uchar>(0), datum.data().data(), datum.data().size());
       } else {
         // Datum stores things in CHW order, let's do HWC for images to make
         // things more consistent with conventional image storage.
         for (int c = 0; c < 3; ++c) {
           const char* datum_buffer =
               datum.data().data() + datum.height() * datum.width() * c;
-          uchar* ptr = img->ptr<uchar>(0) + c;
+          uchar* ptr = src.ptr<uchar>(0) + c;
           for (int h = 0; h < datum.height(); ++h) {
             for (int w = 0; w < datum.width(); ++w) {
               *ptr = *(datum_buffer++);
@@ -177,7 +183,6 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
     }
   } else {
     // The input is a caffe2 format.
-
     TensorProtos protos;
     CAFFE_ENFORCE(protos.ParseFromString(value));
     const TensorProto& image_proto = protos.protos(0);
@@ -189,23 +194,26 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
       const string& encoded_image_str = image_proto.string_data(0);
       int encoded_size = encoded_image_str.size();
       // We use a cv::Mat to wrap the encoded str so we do not need a copy.
-      *img = cv::imdecode(
-          cv::Mat(1, &encoded_size, CV_8UC1,
+      src = cv::imdecode(
+          cv::Mat(
+              1,
+              &encoded_size,
+              CV_8UC1,
               const_cast<char*>(encoded_image_str.data())),
           color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
     } else if (image_proto.data_type() == TensorProto::BYTE) {
       // raw image content.
-      CAFFE_ENFORCE_EQ(image_proto.dims_size(), (color_ ? 3 : 2));
-      CAFFE_ENFORCE_GE(
-          image_proto.dims(0), crop_, "Image height must be bigger than crop.");
-      CAFFE_ENFORCE_GE(
-          image_proto.dims(1), crop_, "Image width must be bigger than crop.");
-      CAFFE_ENFORCE(!color_ || image_proto.dims(2) == 3);
+      int src_c = (image_proto.dims_size() == 3) ? image_proto.dims(2) : 1;
+      CAFFE_ENFORCE(src_c == 3 || src_c == 1);
 
-      *img = cv::Mat(
-          image_proto.dims(0), image_proto.dims(1), color_ ? CV_8UC3 : CV_8UC1);
-      memcpy(img->ptr<uchar>(0), image_proto.byte_data().data(),
-             image_proto.byte_data().size());
+      src.create(
+          image_proto.dims(0),
+          image_proto.dims(1),
+          (src_c == 3) ? CV_8UC3 : CV_8UC1);
+      memcpy(
+          src.ptr<uchar>(0),
+          image_proto.byte_data().data(),
+          image_proto.byte_data().size());
     } else {
       LOG(FATAL) << "Unknown image data type.";
     }
@@ -215,7 +223,7 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
 
       prefetched_label_.mutable_data<float>()[item_id] =
           label_proto.float_data(0);
-    } else if( label_proto.data_type() == TensorProto::INT32 ) {
+    } else if (label_proto.data_type() == TensorProto::INT32) {
       DCHECK_EQ(label_proto.int32_data_size(), 1);
 
       prefetched_label_.mutable_data<int>()[item_id] =
@@ -224,17 +232,39 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
       LOG(FATAL) << "Unsupported label type.";
     }
   }
+
+  CAFFE_ENFORCE_GE(src.rows, crop_, "Image height must be bigger than crop.");
+  CAFFE_ENFORCE_GE(src.cols, crop_, "Image width must be bigger than crop.");
+
+  //
+  // convert source to the color format requested from Op
+  //
+  int out_c = color_ ? 3 : 1;
+  if (out_c == src.channels()) {
+    *img = src;
+  } else {
+    cv::cvtColor(src, *img, (out_c == 1) ? CV_BGR2GRAY : CV_GRAY2BGR);
+  }
+
+  // Note(Yangqing): I believe that the mat should be created continuous.
+  CAFFE_ENFORCE(img->isContinuous());
+
   // TODO(Yangqing): return false if any error happens.
   return true;
 }
 
 // Factored out image transformation
 template <class Context>
-void TransformImage(const cv::Mat& scaled_img, const int channels,
-                    float *image_data,
-                    const int crop, const bool mirror, const float mean,
-                    const float std, std::mt19937 *randgen,
-                    std::bernoulli_distribution *mirror_this_image) {
+void TransformImage(
+    const cv::Mat& scaled_img,
+    const int channels,
+    float* image_data,
+    const int crop,
+    const bool mirror,
+    const float mean,
+    const float std,
+    std::mt19937* randgen,
+    std::bernoulli_distribution* mirror_this_image) {
   // find the cropped region, and copy it to the destination matrix with
   // mean subtraction and scaling.
   int width_offset =
@@ -246,7 +276,7 @@ void TransformImage(const cv::Mat& scaled_img, const int channels,
     // Copy mirrored image.
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset + crop - 1; w >= width_offset; --w) {
-        const uint8_t* cv_data = scaled_img.ptr(h) + w*channels;
+        const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
         for (int c = 0; c < channels; ++c) {
           *(image_data++) = (static_cast<float>(cv_data[c]) - mean) * std_inv;
         }
@@ -256,7 +286,7 @@ void TransformImage(const cv::Mat& scaled_img, const int channels,
     // Copy normally.
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset; w < width_offset + crop; ++w) {
-        const uint8_t* cv_data = scaled_img.ptr(h) + w*channels;
+        const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
         for (int c = 0; c < channels; ++c) {
           *(image_data++) = (static_cast<float>(cv_data[c]) - mean) * std_inv;
         }
