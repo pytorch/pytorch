@@ -83,12 +83,13 @@ argument.
 
 OPERATOR_SCHEMA(ResetCounter)
     .NumInputs(1)
-    .NumOutputs(0)
+    .NumOutputs(0, 1)
     .SetDoc(R"DOC(
 Resets a count-down counter with initial value specified by the 'init_count'
 argument.
 )DOC")
     .Input(0, "counter", "A blob pointing to an instance of a new counter.")
+    .Output(0, "previous_value", "(optional) Previous value of the counter.")
     .Arg("init_count", "Resets counter to this value, must be >= 0.");
 
 OPERATOR_SCHEMA(CountDown)

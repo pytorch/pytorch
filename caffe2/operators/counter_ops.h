@@ -31,8 +31,8 @@ class Counter {
     return (count_.load() <= 0);
   }
 
-  void reset(T init_count) {
-    count_ = init_count;
+  T reset(T init_count) {
+    return count_.exchange(init_count);
   }
 
  private:
@@ -73,7 +73,12 @@ class ResetCounterOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    counterPtr->reset(init_count_);
+    auto previous = counterPtr->reset(init_count_);
+    if (OutputSize() == 1) {
+      auto* output = OperatorBase::Output<TensorCPU>(0);
+      output->Resize();
+      *output->template mutable_data<T>() = previous;
+    }
     return true;
   }
 
