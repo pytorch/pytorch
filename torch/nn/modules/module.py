@@ -56,14 +56,6 @@ class Module(object):
         self._forward_hooks = OrderedDict()
         self._modules = OrderedDict()
         self.training = True
-        for name, param in self._parameters.items():
-            if not isinstance(param, Parameter):
-                if isinstance(param, Variable):
-                    raise TypeError("can't use a Variable as a module "
-                                    "parameter.  Convert it to torch.nn.Parameter first.")
-                if param is not None:
-                    param = Parameter(param)
-            self._parameters[name] = param
 
     def forward(self, *input):
         """Defines the computation performed at every call.
