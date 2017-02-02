@@ -73,7 +73,7 @@ struct Stream {
     if (device_option.device_type() == CUDA) {
       gpu_id_ = device_option.has_cuda_gpu_id() ? device_option.cuda_gpu_id()
                                                 : GetDefaultGPUID();
-      stream_ = CHECK_NOTNULL(CUDAContext::cuda_stream(gpu_id_));
+      stream_ = CHECK_NOTNULL(CUDAContext::cuda_stream(gpu_id_, 0));
     }
   }
 
