@@ -18,6 +18,12 @@ Address::Address(const std::vector<char>& bytes) {
   memcpy(&ss_, bytes.data(), sizeof(ss_));
 }
 
+std::vector<char> Address::bytes() const {
+  std::vector<char> bytes(sizeof(ss_));
+  memcpy(bytes.data(), &ss_, sizeof(ss_));
+  return bytes;
+}
+
 std::string Address::str() const {
   char str[INET6_ADDRSTRLEN + 8];
   int port = 0;
@@ -39,12 +45,6 @@ std::string Address::str() const {
   snprintf(str + len, sizeof(str) - len, "]:%d", port);
 
   return str;
-}
-
-std::vector<char> Address::bytes() const {
-  std::vector<char> bytes(sizeof(ss_));
-  memcpy(bytes.data(), &ss_, sizeof(ss_));
-  return bytes;
 }
 
 Address Address::fromSockName(int fd) {

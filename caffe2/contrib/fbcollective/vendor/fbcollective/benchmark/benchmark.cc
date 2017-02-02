@@ -15,7 +15,14 @@
 #include "fbcollective/rendezvous/prefix_store.h"
 #include "fbcollective/rendezvous/redis_store.h"
 #include "fbcollective/transport/device.h"
+
+#ifdef BENCHMARK_TCP
 #include "fbcollective/transport/tcp/device.h"
+#endif
+
+#ifdef BENCHMARK_IBVERBS
+#include "fbcollective/transport/ibverbs/device.h"
+#endif
 
 using namespace fbcollective;
 
@@ -251,9 +258,19 @@ int main(int argc, char** argv) {
   }
 
   std::shared_ptr<transport::Device> device;
+#ifdef BENCHMARK_TCP
   if (transport == "tcp") {
     device = transport::tcp::CreateDevice();
   }
+#endif
+#ifdef BENCHMARK_IBVERBS
+  if (transport == "ibverbs") {
+    transport::ibverbs::attr attr = {
+        .name = "mlx5_0", .port = 1, .index = 1,
+    };
+    device = transport::ibverbs::CreateDevice(attr);
+  }
+#endif
   FBC_ENFORCE(device, "Unknown transport: ", transport);
 
   auto context = std::make_shared<Context>(contextRank, contextSize);
