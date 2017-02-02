@@ -25,13 +25,13 @@ class NetBuilder(object):
             ops.Print(d, [])
         step = core.to_execution_step(nb)
     """
-    def __init__(self, name=None, _stop_blob_required=False):
+    def __init__(self, name=None, _stop_blob_required=False, _stop_blob=None):
         self._name = name or ''
         self._prefix = name + '/' if name else ''
         self._frozen = False
         self._current_net = None
         self._children = []
-        self._stop_blob = None
+        self._stop_blob = _stop_blob
         self._stop_blob_required = _stop_blob_required
 
     def stop_blob(self):
