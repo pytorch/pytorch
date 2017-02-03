@@ -69,6 +69,19 @@ message TensorProtos {
   repeated TensorProto protos = 1;
 }
 
+message TensorShape {
+  repeated int64 dims = 1;
+  optional TensorProto.DataType data_type = 2 [default = FLOAT];
+  repeated int32 unknown_dims = 3;
+  optional bool unknown_shape = 4 [default = false];
+  optional string name = 5;
+
+}
+
+message TensorShapes {
+  repeated TensorShape shapes = 1;
+}
+
 // A named argument containing either singular float, integer and string
 // values, or repeated float, int and string arrays.
 message Argument {

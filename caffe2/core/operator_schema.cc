@@ -173,9 +173,28 @@ OpSchema& OpSchema::TensorInferenceFunction(
 
 OpSchema& OpSchema::IdenticalTypeAndShape() {
   return TensorInferenceFunction(
-      [](const OperatorDef&, const vector<TensorProto>& input_types) {
-        return vector<TensorProto>(input_types);
+      [](const OperatorDef&, const vector<TensorShape>& input_types) {
+        return vector<TensorShape>(input_types);
       });
+}
+
+OpSchema& OpSchema::IdenticalTypeAndShapeOfInput(int idx) {
+  return TensorInferenceFunction(
+      [idx](const OperatorDef&, const vector<TensorShape>& input_types) {
+        vector<TensorShape> out(1);
+        out[0] = input_types[idx];
+        return out;
+      });
+}
+
+OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
+  return TensorInferenceFunction(
+     [dt](const OperatorDef&, const vector<TensorShape>& input_types) {
+       vector<TensorShape> out(1);
+       out[0].add_dims(1);
+       out[0].set_data_type(dt);
+       return out;
+     });
 }
 
 OpSchema& OpSchema::SetDoc(const string& doc) {

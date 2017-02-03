@@ -40,6 +40,7 @@ OPERATOR_SCHEMA(Sigmoid)
   .NumInputs(1)
   .NumOutputs(1)
   .AllowInplace({{0, 0}})
+  .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
 Sigmoid takes one input data (Tensor<T>) and produces one output data
 (Tensor<T>) where the sigmoid function, y = 1 / (1 + exp(-x)), is applied to the

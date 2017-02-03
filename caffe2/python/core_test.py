@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util
+from caffe2.python import core, workspace, test_util, cnn
 
 
 class TestScopes(test_util.TestCase):

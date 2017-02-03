@@ -70,6 +70,7 @@ REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(Softmax)
   .NumInputs(1)
   .NumOutputs(1)
+  .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
 The operator computes the softmax normalized values for each layer in the batch
  of the given input. The input is a 2-D tensor (Tensor<float>) of size

@@ -37,6 +37,7 @@ OPERATOR_SCHEMA(Softsign)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Calculates the softsign (x/1+|x|) of the given input tensor element-wise. This
 operation can be done in an in-place fashion too, by providing the same input

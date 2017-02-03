@@ -1,5 +1,6 @@
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_op_impl.h"
+#include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
 namespace {
@@ -9,6 +10,7 @@ REGISTER_CPU_OPERATOR(ConvGradient, ConvGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(Conv)
   .NumInputs(2,3)
   .NumOutputs(1)
+  .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
   .SetDoc(R"DOC(
 The convolution operator consumes an input vector, the filter blob and the bias
 blob and computes the output. Note that other parameters, such as the stride and

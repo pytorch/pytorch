@@ -123,6 +123,7 @@ Increases count value by 1 and outputs the previous value atomically
 OPERATOR_SCHEMA(RetrieveCount)
     .NumInputs(1)
     .NumOutputs(1)
+    .ScalarType(TensorProto::INT64)
     .SetDoc(R"DOC(
 Retrieve the current value from the counter.
 )DOC")

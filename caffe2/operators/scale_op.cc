@@ -7,6 +7,7 @@ OPERATOR_SCHEMA(Scale)
   .NumInputs(1)
   .NumOutputs(1)
   .AllowInplace({{0, 0}})
+  .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
 Scale takes one input data (Tensor<float>) and produces one output data
 (Tensor<float>) whose value is the input data tensor scaled element-wise.

@@ -21,6 +21,7 @@ OPERATOR_SCHEMA(Exp)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Calculates the exponential of the given input tensor, element-wise. This
 operation can be done in an in-place fashion too, by providing the same input

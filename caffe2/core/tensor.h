@@ -30,6 +30,37 @@ inline vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
 }
 
 /**
+ * Return product of all dimensions starting from K
+ */
+inline TIndex size_from_dim_(int k, vector<TIndex> dims) {
+  TIndex r = 1;
+  for (int i = k; i < dims.size(); ++i) {
+    r *= dims[i];
+  }
+  return r;
+}
+
+// Product of all dims up to
+inline TIndex size_to_dim_(int k, vector<TIndex> dims) {
+  CAFFE_ENFORCE(k < dims.size());
+  TIndex r = 1;
+  for (int i = 0; i < k; ++i) {
+    r *= dims[i];
+  }
+  return r;
+}
+
+inline int canonical_axis_index_(int axis_index, int ndims) {
+  CAFFE_ENFORCE_GE(axis_index, -ndims);
+  CAFFE_ENFORCE_LT(axis_index, ndims);
+  if (axis_index < 0) {
+    return axis_index + ndims;
+  }
+  return axis_index;
+}
+
+
+/**
  * @brief Tensor is the basic class in Caffe2 that stores a contiguous memory
  * with its shape information.
  *
@@ -496,25 +527,13 @@ class Tensor {
    * Returns the dimensions of the tensor as a vector.
    */
   inline const vector<TIndex>& dims() const { return dims_; }
-  /**
-   * Return product of all dimensions starting from K
-   */
+
   inline TIndex size_from_dim(int k) const {
-    TIndex r = 1;
-    for (int i = k; i < dims_.size(); ++i) {
-      r *= dims_[i];
-    }
-    return r;
+    return size_from_dim_(k, dims_);
   }
 
-  // Product of all dims up to
   inline TIndex size_to_dim(int k) const {
-    CAFFE_ENFORCE(k < dims_.size());
-    TIndex r = 1;
-    for (int i = 0; i < k; ++i) {
-      r *= dims_[i];
-    }
-    return r;
+    return size_to_dim_(k, dims_);
   }
 
   /**
@@ -529,13 +548,9 @@ class Tensor {
   *        Dies on out of range index.
   */
   inline int canonical_axis_index(int axis_index) const {
-    CAFFE_ENFORCE_GE(axis_index, -ndim());
-    CAFFE_ENFORCE_LT(axis_index, ndim());
-    if (axis_index < 0) {
-      return axis_index + ndim();
-    }
-    return axis_index;
+    return canonical_axis_index_(axis_index, ndim());
   }
+
   /**
    * Checks if the tensor content is of the given data type.
    */
@@ -653,6 +668,17 @@ class Tensor {
 typedef Tensor<CPUContext> TensorCPU;
 
 constexpr int k_limit_default_ = 1000;
+
+// Shape call registry
+typedef vector<TIndex> (*ShapeCall)(void*);
+ShapeCall GetShapeCallFunction(CaffeTypeId id);
+void RegisterShapeCallFunction(CaffeTypeId id, ShapeCall c);
+
+template <class Context>
+vector<TIndex> GetTensorShape(void* c) {
+  Tensor<Context>* tc = static_cast<Tensor<Context>*>(c);
+  return tc->dims();
+}
 
 class TensorPrinter {
  public:

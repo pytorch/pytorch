@@ -123,6 +123,17 @@ unchanged.
 OPERATOR_SCHEMA(FlattenToVec)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction(
+          [](const OperatorDef& def, const vector<TensorShape>& in) {
+            vector<TensorShape> out(1);
+            int total = 1;
+            for(auto d : in[0].dims()) {
+              total *= d;
+            }
+            out[0].add_dims(total);
+            return out;
+          }
+    )
     .SetDoc(R"DOC(
 Flattens the input tensor into a 1D vector.
 )DOC")
@@ -135,6 +146,7 @@ Flattens the input tensor into a 1D vector.
 OPERATOR_SCHEMA(Alias)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Makes the output and the input share the same underlying storage.
 
@@ -154,6 +166,13 @@ similar to multi-thread computation before you use it explicitly.
 OPERATOR_SCHEMA(ResizeLike)
     .NumInputs(2)
     .NumOutputs(1)
+    .TensorInferenceFunction(
+          [](const OperatorDef& def, const vector<TensorShape>& in) {
+            vector<TensorShape> out(1);
+            out.push_back(in[1]);
+            out[0].set_data_type(in[0].data_type());
+            return out;
+          })
     .SetDoc(R"DOC(
 Produces tensor condaining data of first input and shape of second input.
 )DOC")
@@ -165,12 +184,19 @@ Produces tensor condaining data of first input and shape of second input.
 OPERATOR_SCHEMA(SumInt)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def, const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out.push_back(in[0]);
+      out[0].set_data_type(TensorProto::INT32);
+      return out;
+    })
     .AllowInplace({{0, 0}});
 
 OPERATOR_SCHEMA(Sum)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Element-wise sum of each of the input tensors. The first input tensor can be
 used in-place as the output tensor, in which case the sum will be done in
@@ -184,6 +210,7 @@ OPERATOR_SCHEMA(WeightedSum)
     .NumInputs([](int n) { return (n > 0 && n % 2 == 0); })
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Element-wise weighted sum of several data, weight tensor pairs.
 Input should be in the form X_0, weight_0, X_1, weight_1, ... where X_i all
@@ -242,6 +269,7 @@ Currently only works on CPU because of access to INDICES.
 OPERATOR_SCHEMA(Max)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
+    .IdenticalTypeAndShape()
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 Element-wise max of each of the input tensors. The first input tensor can be
@@ -287,6 +315,7 @@ Currently only works on CPU because of access to INDICES.
 OPERATOR_SCHEMA(Copy)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShape()
     .SetDoc("Copy input tensor into output, potentially across devices.")
     .Input(0, "input", "The input tensor.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
@@ -294,6 +323,7 @@ OPERATOR_SCHEMA(Copy)
 OPERATOR_SCHEMA(CopyGPUToCPU)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Copy tensor for GPU to CPU context. Must be run under GPU device option.
 )DOC")
@@ -303,6 +333,7 @@ Copy tensor for GPU to CPU context. Must be run under GPU device option.
 OPERATOR_SCHEMA(CopyCPUToGPU)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Copy tensor for CPU to GPU context. Must be run under GPU device option.
 )DOC")
@@ -312,6 +343,7 @@ Copy tensor for CPU to GPU context. Must be run under GPU device option.
 OPERATOR_SCHEMA(EnsureCPUOutput)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Take an input tensor in the current Context (GPU or CPU) and create an output
 which is always a TensorCPU. This may involves cross-device MemCpy.
@@ -322,6 +354,7 @@ which is always a TensorCPU. This may involves cross-device MemCpy.
 OPERATOR_SCHEMA(CopyFromCPUInput)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Take a CPU input tensor and copy it to an output in the current
 Context (GPU or CPU). This may involves cross-device MemCpy.
@@ -332,6 +365,12 @@ Context (GPU or CPU). This may involves cross-device MemCpy.
 OPERATOR_SCHEMA(Shape)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def, const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0].add_dims(in[0].dims().size());
+      out[0].set_data_type(TensorProto::INT32);
+      return out;
+    })
     .SetDoc("Produce a 1D int64 tensor with the shape of the input tensor.");
 
 OPERATOR_SCHEMA(HasElements)

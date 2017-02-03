@@ -9,6 +9,7 @@ REGISTER_CPU_OPERATOR(
     SoftmaxWithLossGradientOp<float, CPUContext>);
 
 // Input: X (logits), T (labels); Output: P (probs), Y
+// TODO: add Shape inference function (bootcamp)
 OPERATOR_SCHEMA(SoftmaxWithLoss).NumOutputs(2).SetDoc(R"DOC(
 Combined Softmax and Cross-Entropy loss operator.
 The operator computes the softmax normalized values for each layer in the batch

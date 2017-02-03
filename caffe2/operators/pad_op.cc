@@ -416,6 +416,7 @@ REGISTER_CPU_OPERATOR(PadImageGradient, PadImageGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(PadImage)
     .NumInputs(1)
     .NumOutputs(1)
+    // TODO: add Shape inference function (bootcamp)
     .SetDoc(R"DOC(
 PadImage pads values around the boundary of an image according to the pad
 values and stride sizes defined by the ConvPoolOpBase operator.

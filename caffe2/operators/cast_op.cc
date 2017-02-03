@@ -23,9 +23,10 @@ OPERATOR_SCHEMA(Cast)
     .NumInputs(1)
     .NumOutputs(1)
     .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorProto>& in) {
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
           ArgumentHelper helper(def);
-          vector<TensorProto> out(in);
+          vector<TensorShape> out;
+          out.push_back(in[0]);
           out[0].set_data_type(cast::GetCastDataType(helper));
           return out;
         })

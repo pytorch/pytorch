@@ -8,6 +8,7 @@ REGISTER_CPU_OPERATOR(MatMul, MatMulOp<float, CPUContext>);
 OPERATOR_SCHEMA(MatMul)
     .NumInputs(2)
     .NumOutputs(1)
+    // TODO: add Shape inference function (bootcamp)
     .SetDoc(R"DOC(
 Matrix multiplication Y = A * B, where A has size (M x K), B has size (K x N).
 )DOC")

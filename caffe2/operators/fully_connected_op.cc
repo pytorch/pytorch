@@ -7,9 +7,22 @@ REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(FC)
-    .NumInputs(3)
-    .NumOutputs(1)
-    .SetDoc(R"DOC(
+  .NumInputs(3)
+  .NumOutputs(1)
+  .TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          ArgumentHelper helper(def);
+
+          auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
+          const auto canonical_axis =
+            canonical_axis_index_(axis, in[0].dims().size());
+          const auto M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
+          const int N = in[1].dims(0);
+          out[0] = CreateTensorShape(vector<int> {M, N}, TensorProto::FLOAT);
+          return out;
+        })
+  .SetDoc(R"DOC(
 Computes the result of passing an input vector X into a fully connected
 layer with 2D weight matrix W and 1D bias vector b.
 

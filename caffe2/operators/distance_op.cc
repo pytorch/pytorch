@@ -99,6 +99,7 @@ REGISTER_CPU_OPERATOR(SquaredL2DistanceGradient,
 OPERATOR_SCHEMA(SquaredL2Distance)
     .NumInputs(2)
     .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
   Given two input float tensors X, Y, and produces one output float tensor
   of the L2 difference between X and Y that is computed as ||(X - Y)^2 / 2||.
@@ -128,6 +129,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(DotProduct)
     .NumInputs(2)
     .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
   Given two input float tensors X, Y, and produces one output float tensor
   of the dot product between X and Y.
@@ -158,6 +160,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(CosineSimilarity)
     .NumInputs(2)
     .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
   Given two input float tensors X, Y, and produces one output float tensor
   of the cosine similarity between X and Y.

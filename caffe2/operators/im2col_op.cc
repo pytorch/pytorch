@@ -9,6 +9,7 @@ OPERATOR_SCHEMA(Im2Col)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc("The Im2Col operator from Matlab.")
+    // TODO: add Shape inference function (bootcamp)
     .Input(0, "X", "4-tensor in NCHW or NHWC.")
     .Output(
         0,

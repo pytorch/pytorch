@@ -116,6 +116,11 @@ static void Caffe2InitializeCuda() {
   }
   // Restore the current device.
   CUDA_CHECK(cudaSetDevice(init_device));
+  
+  RegisterShapeCallFunction(
+    TypeMeta::Id<Tensor<CUDAContext>>(),
+    GetTensorShape<CUDAContext>
+  );
 }
 
 static void SetUpCNMEM() {
