@@ -69,7 +69,8 @@ ClientSocket& get_manager_socket(char *manager_handle) {
   std::string str_handle(manager_handle);
   auto it = managers.find(str_handle);
   if (it == managers.end()) {
-    auto result = managers.emplace(std::move(str_handle), ClientSocket(str_handle));
+    auto socket = ClientSocket(str_handle);
+    auto result = managers.emplace(std::move(str_handle), std::move(socket));
     return result.first->second;
   } else {
     return it->second;
