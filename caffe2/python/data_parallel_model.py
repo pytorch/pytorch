@@ -71,13 +71,16 @@ def Parallelize_GPU(
     log.info("Create input and model training operators")
 
     losses_by_gpu = {}
+    num_shards = 1 if rendezvous is None else rendezvous['num_shards']
+    loss_scale = 1.0 / (len(devices) * num_shards)
+
     for device in devices:
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
         with core.DeviceScope(device_opt):
             with core.NameScope("gpu_{}".format(device)):
                 log.info("Model for GPU: {}".format(device))
                 input_builder_fun(model_helper_obj)
-                losses = forward_pass_builder_fun(model_helper_obj)
+                losses = forward_pass_builder_fun(model_helper_obj, loss_scale)
                 # Losses are not needed for test net
                 if param_update_builder_fun is not None:
                     assert isinstance(losses, list), \
@@ -127,13 +130,11 @@ def Parallelize_GPU(
     )
 
     log.info("Post-iteration operators for updating params")
-    num_shards = 1 if rendezvous is None else rendezvous['num_shards']
-    lr_scale = 1.0 / (len(devices) * num_shards)
     for device in devices:
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
         with core.DeviceScope(device_opt):
             with core.NameScope("gpu_{}".format(device)):
-                param_update_builder_fun(model_helper_obj, lr_scale)
+                param_update_builder_fun(model_helper_obj)
 
     _AnalyzeOperators(model_helper_obj)
 
