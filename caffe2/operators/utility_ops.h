@@ -646,7 +646,13 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     auto& input = Input(0);
-    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    if (input.ndim() == 2) {
+      CAFFE_ENFORCE(
+          input.dim32(0) == 1 || input.dim32(1) == 1,
+          "Input must be a vector.");
+    } else {
+      CAFFE_ENFORCE_EQ(input.ndim(), 1, "Input must be a vector.");
+    }
     auto* input_data = input.template data<Index>();
     auto input_size = input.size();
     auto* output = Output(0);
@@ -668,7 +674,7 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
       return true;
     }
     std::fill(output_data, output_data + num_segments, 0);
-    Index prev = input_data[0];
+    Index prev = 0; // Assume that segment_id >= 0.
     for (int64_t i = 0; i < input_size; i++) {
       CAFFE_ENFORCE(
           prev <= input_data[i],
