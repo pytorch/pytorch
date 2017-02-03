@@ -35,8 +35,91 @@ DAGNetBase::ExecutionChains singleChains(
   return chains;
 }
 
+static void prune(
+    int node_idx,
+    int prev_node_idx,
+    std::vector<internal::OpGraphNode>& nodes,
+    std::vector<bool>& ancestors) {
+  if (nodes[node_idx].visited) {
+    return;
+  }
+  nodes[node_idx].visited = true;
+
+  // Check if this has a parent that can be pruned:
+  //  if parent is not the previous node visited and is
+  //  an ancestor of the current traversar, it can be
+  //  pruned.
+  if (prev_node_idx >= 0) {
+    std::vector<int> new_parents;
+    for (auto parent : nodes[node_idx].parents_) {
+      if (parent != prev_node_idx && ancestors[parent]) {
+        // We can prune this one
+        nodes[parent].children_.erase(
+            std::remove(
+                nodes[parent].children_.begin(),
+                nodes[parent].children_.end(),
+                node_idx),
+            nodes[parent].children_.end());
+      } else {
+        new_parents.push_back(parent);
+      }
+    }
+    nodes[node_idx].parents_ = new_parents;
+  }
+  ancestors[node_idx] = true;
+
+  // Increase satisfied input count for children
+  std::vector<int> children = nodes[node_idx].children_;
+  for (auto child : children) {
+    nodes[child].visited_inputs++;
+  }
+
+  // Descend -- but only once from each node
+  if (nodes[node_idx].visited_inputs == nodes[node_idx].num_orig_parents) {
+    for (auto child : children) {
+      prune(child, node_idx, nodes, ancestors);
+    }
+  }
+
+  ancestors[node_idx] = false;
+}
+
+/**
+  * Prune redundant dependencies to improve chaining.
+  * TODO: t15868555 This algorithm is fast but can miss dependencies.
+  */
+std::vector<internal::OpGraphNode> pruneOpNodeGraph(
+    const std::vector<internal::OperatorNode>& orig_nodes) {
+  Timer t;
+  std::vector<internal::OpGraphNode> pruned;
+
+  // Create a separate list of pruned operatornodes used
+  // for the chaining computation. Because of the unique_ptr
+  // in the OperatorNode, we cannot do a copy but have to
+  // copy just the fields we need.
+  for (auto& node : orig_nodes) {
+    internal::OpGraphNode nd;
+    nd.children_ = node.children_;
+    nd.parents_ = node.parents_;
+    nd.num_orig_parents = nd.parents_.size();
+    pruned.push_back(nd);
+  }
+
+  for (int i = 0; i < pruned.size(); ++i) {
+    std::vector<bool> ancestors(pruned.size(), false);
+    if (pruned[i].parents_.size() == 0) {
+      prune(i, -1, pruned, ancestors);
+    }
+  }
+
+  LOG(INFO) << "Operator graph pruning prior to chain compute took: "
+            << t.Seconds() << " secs";
+  return pruned;
+}
+
 DAGNetBase::ExecutionChains computeChains(
-    const std::vector<internal::OperatorNode>& nodes) {
+    const std::vector<internal::OperatorNode>& orig_nodes) {
+  const std::vector<internal::OpGraphNode> nodes = pruneOpNodeGraph(orig_nodes);
   vector<int> initial_frontier;
   for (int idx = 0; idx < nodes.size(); ++idx) {
     if (nodes[idx].parents_.size() == 0) {
@@ -88,8 +171,8 @@ DAGNetBase::ExecutionChains computeChains(
     return (
         node_seen_count[cur.first] == 1 &&
         (chain.size() == 0 || sameDevice(
-                                  nodes[cur.first].operator_->def(),
-                                  nodes[chain.back()].operator_->def())));
+                                  orig_nodes[cur.first].operator_->def(),
+                                  orig_nodes[chain.back()].operator_->def())));
   };
   auto commit_chain = [&]() {
     if (chain.size() > 0) {

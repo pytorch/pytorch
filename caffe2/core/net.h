@@ -103,6 +103,14 @@ struct OperatorNode {
   vector<int> parents_;
   std::atomic<int> runtime_parent_count_;
 };
+
+struct OpGraphNode {
+  vector<int> children_;
+  vector<int> parents_;
+  int visited_inputs = 0;
+  int num_orig_parents;
+  bool visited = false;
+};
 }
 
 class DAGNetBase : public NetBase {
