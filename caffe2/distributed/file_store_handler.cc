@@ -3,14 +3,16 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include <array>
 #include <chrono>
+#include <iostream>
 #include <thread>
 
-#include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/murmur_hash3.h"
 
 namespace caffe2 {
 
@@ -27,36 +29,59 @@ std::string FileStoreHandler::realPath(const std::string& path) {
   return std::string(buf.data());
 }
 
-std::string FileStoreHandler::objectPath(const std::string& name) {
-  std::string encoded;
-  for (const auto& c : name) {
-    // Convert non-alphabetic characters to octal.
-    // Means argument cannot collide with encoding.
-    // Don't want to take a dependency on SSL for SHA1 here.
-    if (!isalpha(c)) {
-      // 0-prefix, max 3 numbers, 0-terminator
-      std::array<char, 5> buf;
-      snprintf(buf.data(), buf.size(), "%#03o", c);
-      encoded.append(buf.data());
-    } else {
-      encoded.append(&c, 1);
-    }
+static std::string encodeName(const std::string& name) {
+  uint64_t out[2];
+  MurmurHash3_x64_128(name.data(), name.size(), 0xcafef00d, &out);
+  std::array<char, 32> buf;
+  for (int i = 0; i < 16; i++) {
+    snprintf(&buf[i * 2], buf.size() - (i * 2), "%02x", ((char*)out)[i]);
   }
-  return basePath_ + "/" + encoded;
+  return std::string(buf.data(), buf.size());
+}
+
+std::string FileStoreHandler::tmpPath(const std::string& name) {
+  return basePath_ + "/." + encodeName(name);
+}
+
+std::string FileStoreHandler::objectPath(const std::string& name) {
+  return basePath_ + "/" + encodeName(name);
 }
 
 void FileStoreHandler::set(const std::string& name, const std::string& data) {
+  auto tmp = tmpPath(name);
   auto path = objectPath(name);
-  WriteStringToFile(data, path.c_str());
+
+  {
+    std::ofstream ofs(tmp.c_str(), std::ios::out | std::ios::trunc);
+    if (!ofs.is_open()) {
+      CAFFE_ENFORCE(
+          false, "File cannot be created: ", tmp, " (", ofs.rdstate(), ")");
+    }
+    ofs << data;
+  }
+
+  // Atomically movve result to final location
+  auto rv = rename(tmp.c_str(), path.c_str());
+  CAFFE_ENFORCE_EQ(rv, 0, "rename: ", strerror(errno));
 }
 
 std::string FileStoreHandler::get(const std::string& name) {
+  auto path = objectPath(name);
+  std::string result;
+
   // Block until key is set
   wait({name});
 
-  std::string result;
-  auto path = objectPath(name);
-  ReadStringFromFile(path.c_str(), &result);
+  std::ifstream ifs(path.c_str(), std::ios::in);
+  if (!ifs) {
+    CAFFE_ENFORCE(
+        false, "File cannot be opened: ", path, " (", ifs.rdstate(), ")");
+  }
+  ifs.seekg(0, std::ios::end);
+  size_t n = ifs.tellg();
+  result.resize(n);
+  ifs.seekg(0);
+  ifs.read(&result[0], n);
   return result;
 }
 

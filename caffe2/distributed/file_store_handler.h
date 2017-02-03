@@ -24,6 +24,8 @@ class FileStoreHandler : public StoreHandler {
 
   std::string realPath(const std::string& path);
 
+  std::string tmpPath(const std::string& name);
+
   std::string objectPath(const std::string& name);
 };
 
