@@ -1070,6 +1070,11 @@ class TestNN(NNTestCase):
                                          batch_first=batch_first,
                                          skip_input=skip_input)
 
+                            # cuDNN bug, bias still used even when skip_input true
+                            if skip_input and bias:
+                                rnn.all_weights[0][3].data.fill_(0)
+                                rnn.all_weights[0][2].data.fill_(0)
+
                             outputs_cpu = forward_backward(
                                 False, rnn, input_val, hx_val, rnn.all_weights, skip_input)
 
@@ -1081,6 +1086,10 @@ class TestNN(NNTestCase):
                                              bidirectional=bidirectional,
                                              batch_first=batch_first,
                                              skip_input=skip_input)
+
+                            if skip_input and bias:
+                                rnn_gpu.all_weights[0][3].data.fill_(0)
+                                rnn_gpu.all_weights[0][2].data.fill_(0)
 
                             outputs_gpu = forward_backward(
                                 True, rnn_gpu, input_val, hx_val, rnn.all_weights, skip_input)
