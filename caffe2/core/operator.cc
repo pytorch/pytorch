@@ -5,7 +5,9 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
+
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
@@ -181,6 +183,71 @@ GradientOpsMeta GetGradientForOp(
     }
   }
   return meta;
+}
+
+// TODO: add ability to pass shapes separatetely (not via workspace) - bootcamp
+TensorShapes InferBlobShapesAndTypes(
+    Workspace* ws,
+    const vector<std::unique_ptr<NetDef>>& nets) {
+  CaffeMap<string, TensorShape> blob_desc;
+  // Populate shapes from workplace
+  std::vector<string> ws_blobs = ws->Blobs();
+  for (auto& s : ws_blobs) {
+    Blob* b = ws->GetBlob(s);
+    ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
+    TensorShape tp;
+
+    if (shape_fun) {
+      auto shape = shape_fun(b->GetRaw());
+      for (auto d : shape) {
+        tp.add_dims(d);
+      }
+    } else {
+      tp.set_unknown_shape(true);
+    }
+    blob_desc[s] = tp;
+  }
+
+  for (auto& defptr : nets) {
+    for (const OperatorDef& op : defptr.get()->op()) {
+      vector<TensorShape> input_desc;
+      for (const string& in : op.input()) {
+        auto inp_desc = blob_desc.find(in);
+        if (inp_desc == blob_desc.end()) {
+          CAFFE_THROW(
+              "Shape and type inference failed, could not find shape for ", in);
+        }
+        input_desc.push_back(inp_desc->second);
+      }
+      auto op_schema = OpSchemaRegistry::Schema(op.type());
+      if (op_schema == nullptr) {
+        CAFFE_THROW("Shape inference failed, since no schema for: ", op.type());
+      }
+
+      std::vector<TensorShape> out = op_schema->InferTensor(op, input_desc);
+      if (out.size() != op.output_size()) {
+        CAFFE_THROW(
+            "Invalid shape inference for operator",
+            op.type(),
+            " Expected ",
+            op.output_size(),
+            " outputs, but got ",
+            out.size());
+      } else {
+        for (int i = 0; i < out.size(); i++) {
+          blob_desc[op.output(i)] = out[i];
+        }
+      }
+    }
+  }
+  TensorShapes tps;
+  for (auto kv : blob_desc) {
+    TensorShape& tp = kv.second;
+    TensorShape* tpnew = tps.add_shapes();
+    tpnew->CopyFrom(tp);
+    tpnew->set_name(kv.first);
+  }
+  return tps;
 }
 
 }  // namespace caffe2

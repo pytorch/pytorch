@@ -411,6 +411,11 @@ class UnsupportedOperatorFeature : public std::exception {
 unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def, Workspace* ws);
 
+
+TensorShapes InferBlobShapesAndTypes(
+    Workspace* ws,
+    const vector<std::unique_ptr<NetDef>>& nets);
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

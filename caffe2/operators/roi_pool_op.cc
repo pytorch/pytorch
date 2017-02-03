@@ -123,6 +123,7 @@ REGISTER_CPU_OPERATOR(RoIPoolGradient, RoIPoolGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(RoIPool)
     .NumInputs(2)
     .NumOutputs({1, 2})
+    // TODO: add Shape inference function (bootcamp)
     .SetDoc(R"DOC(
 Carries out ROI Pooling for Faster-RCNN.
 Depending on the mode, there are multiple output cases:

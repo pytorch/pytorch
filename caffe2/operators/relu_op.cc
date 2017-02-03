@@ -54,6 +54,7 @@ OPERATOR_SCHEMA(Relu)
   .NumInputs(1)
   .NumOutputs(1)
   .AllowInplace({{0, 0}})
+  .IdenticalTypeAndShape() 
   .SetDoc(R"DOC(
 Relu takes one input data (Tensor<T>) and produces one output data
 (Tensor<T>) where the rectified linear function, y = max(0, x), is applied to

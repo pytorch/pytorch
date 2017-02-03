@@ -18,15 +18,15 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   const int top_k = top_k_;
   int correct = 0;
   for (int i = 0; i < N; ++i) {
-    // Make a vector of pairs(prediction, index) so that 
+    // Make a vector of pairs(prediction, index) so that
     // the index of elements can be extracted after sort.
-    // top-k algorithm rewritten based on algorithm in 
+    // top-k algorithm rewritten based on algorithm in
     // Caffe accuracy layer
     std::vector<std::pair<float, int> > Xdata_pairs;
     for (int j = 0; j < D; ++j) {
       Xdata_pairs.push_back(std::make_pair(Xdata[i * D + j], j));
     }
-    // Sort so that the k maximum predictions appear 
+    // Sort so that the k maximum predictions appear
     // at the beginning of vector.
     std::partial_sort(
         Xdata_pairs.begin(),
@@ -35,15 +35,15 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
         [](std::pair<float, int> lhs, std::pair<float, int> rhs) {
             if(lhs.first == rhs.first) {
                 return lhs.second < rhs.second;
-            }   
+            }
             else {
                 return lhs.first > rhs.first;
-            }   
+            }
         });
-    // Increment accuracy if any of the top k predictions 
+    // Increment accuracy if any of the top k predictions
     // are equal to the expected label.
-    for (int k = 0; k < top_k; k++) { 
-      if (Xdata_pairs[k].second == labelData[i]) {                                               
+    for (int k = 0; k < top_k; k++) {
+      if (Xdata_pairs[k].second == labelData[i]) {
         ++correct;
         break;
       }
@@ -62,6 +62,7 @@ REGISTER_CPU_OPERATOR(Accuracy, AccuracyOp<float, CPUContext>);
 OPERATOR_SCHEMA(Accuracy)
   .NumInputs(2)
   .NumOutputs(1)
+  .ScalarType(TensorProto::FLOAT)
   .SetDoc(R"DOC(
 Accuracy takes two inputs- predictions and labels, and returns a float
 accuracy value for the batch. Predictions are expected in the form of 2-D tensor

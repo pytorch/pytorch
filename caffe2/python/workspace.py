@@ -170,6 +170,22 @@ def RunPlan(plan_or_step):
     return C.run_plan(StringfyProto(plan_or_step))
 
 
+def InferShapesAndTypes(nets):
+    blobdesc_prototxt = C.infer_shapes_and_types(
+        [StringfyProto(n.Proto()) for n in nets]
+    )
+    blobdesc_proto = caffe2_pb2.TensorShapes()
+    blobdesc_proto.ParseFromString(blobdesc_prototxt)
+    shapes = {}
+    types = {}
+    for ts in blobdesc_proto.shapes:
+        if not ts.unknown_shape:
+            shapes[ts.name] = list(ts.dims)
+            types[ts.name] = ts.data_type
+
+    return (shapes, types)
+
+
 def _StringifyName(name, expected_type):
     if isinstance(name, basestring):
         return name

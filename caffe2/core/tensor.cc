@@ -49,4 +49,20 @@ std::string TensorPrinter::MetaStr(const Tensor<CPUContext>& tensor) {
   return meta_stream.str();
 }
 
+static CaffeMap<CaffeTypeId, ShapeCall> shape_call_registry_ {
+  {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorShape<Tensor<CPUContext>>}
+};
+
+ShapeCall GetShapeCallFunction(CaffeTypeId id) {
+  auto f = shape_call_registry_.find(id);
+  if (f == shape_call_registry_.end()) {
+    return nullptr;
+  }
+  return f->second;
+}
+
+void RegisterShapeCallFunction(CaffeTypeId id, ShapeCall c) {
+  shape_call_registry_[id] = c;
+}
+
 } // namespace caffe2

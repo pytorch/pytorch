@@ -260,6 +260,7 @@ OPERATOR_SCHEMA(PRelu)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 
 PRelu takes input data (Tensor<T>) and slope tensor as input, and produces one

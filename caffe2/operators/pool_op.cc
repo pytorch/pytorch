@@ -567,6 +567,7 @@ REGISTER_CPU_OPERATOR(AveragePoolGradient,
 OPERATOR_SCHEMA(AveragePool)
   .NumInputs(1)
   .NumOutputs(1)
+  .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
   .SetDoc(R"DOC(
 AveragePool consumes an input blob X and applies average pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the
@@ -593,6 +594,7 @@ REGISTER_CPU_OPERATOR(MaxPoolGradient,
 OPERATOR_SCHEMA(MaxPool)
   .NumInputs(1)
   .NumOutputs(1)
+  .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
   .SetDoc(R"DOC(
 MaxPool consumes an input blob X and applies max pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the

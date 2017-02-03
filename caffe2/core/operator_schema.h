@@ -133,7 +133,7 @@ class OpSchema {
   // shape specified by TensorProto objects (whose data fields are empty), and
   // produces a series of output type and shape.
   typedef std::function<
-      vector<TensorProto>(const OperatorDef&, const vector<TensorProto>&)>
+      vector<TensorShape>(const OperatorDef&, const vector<TensorShape>&)>
       TensorInferenceFunctionType;
   /**
    * @brief Sets the tensor inference function, which is a std::function object
@@ -145,13 +145,16 @@ class OpSchema {
    * the input.
    */
   OpSchema& IdenticalTypeAndShape();
+  OpSchema& IdenticalTypeAndShapeOfInput(int idx);
+  OpSchema& ScalarType(::caffe2::TensorProto_DataType dt);
+
   /**
    * @brief A function to allow one to infer the type and shape from the op
    * schema.
    */
-  inline vector<TensorProto> InferTensor(
+  inline vector<TensorShape> InferTensor(
       const OperatorDef& def,
-      const vector<TensorProto> input_type_shape) const {
+      const vector<TensorShape> input_type_shape) const {
     return tensor_inference_function_(def, input_type_shape);
   }
 
@@ -206,9 +209,14 @@ class OpSchema {
   std::function<bool(int, int)> inplace_enforced_
       = [](int, int) { return false; };
   TensorInferenceFunctionType tensor_inference_function_ =
-      [](const OperatorDef& def, const vector<TensorProto>&) {
-        // In default, return a vector of TensorProto that has nothing set.
-        return vector<TensorProto>(def.output_size());
+      [](const OperatorDef& def, const vector<TensorShape>&) {
+        vector<TensorShape> out;
+        for(int i=0; i<def.output_size(); i++) {
+          TensorShape ts;
+          ts.set_unknown_shape(true);
+          out.push_back(ts);
+        }
+        return out;
       };
 };
 
@@ -257,6 +265,27 @@ class OpSchemaRegistry {
    */
   static CaffeMap<string, OpSchema>& map();
 };
+
+// Helper function for creating simple tensorproto with dimension and type
+inline TensorShape CreateTensorShape(
+    vector<int> dims,
+    ::caffe2::TensorProto_DataType dt) {
+  TensorShape ts;
+  for (int d : dims) {
+    ts.add_dims(d);
+  }
+  ts.set_data_type(dt);
+  return ts;
+}
+
+// Helper function
+inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
+  vector<TIndex> dims;
+  for (auto d : shape.dims()) {
+    dims.push_back(d);
+  }
+  return dims;
+}
 
 }  // namespace caffe2
 

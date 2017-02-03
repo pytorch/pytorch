@@ -151,23 +151,23 @@ TEST(OperatorSchemaTest, TensorInferenceIdentical) {
       "",
       vector<string>{"in"},
       vector<string>{"out"});
-  vector<TensorProto> protos(1);
-  protos[0].set_data_type(TensorProto::FLOAT);
-  protos[0].add_dims(1);
-  protos[0].add_dims(2);
-  protos[0].add_dims(3);
-  vector<TensorProto> out = schema->InferTensor(def, protos);
+  vector<TensorShape> shapes(1);
+  shapes[0].set_data_type(TensorProto::FLOAT);
+  shapes[0].add_dims(1);
+  shapes[0].add_dims(2);
+  shapes[0].add_dims(3);
+  vector<TensorShape> out = schema->InferTensor(def, shapes);
   EXPECT_EQ(out.size(), 1);
-  EXPECT_EQ(out[0].SerializeAsString(), protos[0].SerializeAsString());
+  EXPECT_EQ(out[0].SerializeAsString(), shapes[0].SerializeAsString());
 }
 
 OPERATOR_SCHEMA(OpSchemaArbitraryTensorInference)
     .TensorInferenceFunction(
-        [](const OperatorDef&, const vector<TensorProto>&) {
-          vector<TensorProto> protos(1);
-          protos[0].set_data_type(TensorProto::FLOAT);
-          protos[0].add_dims(1701);
-          return protos;
+        [](const OperatorDef&, const vector<TensorShape>&) {
+          vector<TensorShape> shapes(1);
+          shapes[0].set_data_type(TensorProto::FLOAT);
+          shapes[0].add_dims(1701);
+          return shapes;
         });
 
 TEST(OperatorSchemaTest, TensorInferenceArbitrary) {
@@ -178,7 +178,7 @@ TEST(OperatorSchemaTest, TensorInferenceArbitrary) {
       "",
       vector<string>{"in"},
       vector<string>{"out"});
-  vector<TensorProto> out = schema->InferTensor(def, vector<TensorProto>());
+  vector<TensorShape> out = schema->InferTensor(def, vector<TensorShape>());
   EXPECT_EQ(out.size(), 1);
   EXPECT_EQ(out[0].data_type(), TensorProto::FLOAT);
   EXPECT_EQ(out[0].dims_size(), 1);
@@ -200,7 +200,7 @@ TEST(OperatorSchemaTest, TestCastSchema) {
       vector<string>{"in"},
       vector<string>{"out"},
       vector<Argument>{MakeArgument<int64_t>("to", TensorProto::UINT8)});
-  vector<TensorProto> out = schema->InferTensor(def, vector<TensorProto>(1));
+  vector<TensorShape> out = schema->InferTensor(def, vector<TensorShape>(1));
   EXPECT_EQ(out.size(), 1);
   // Data type should be inferred.
   EXPECT_EQ(out[0].data_type(), TensorProto::UINT8);

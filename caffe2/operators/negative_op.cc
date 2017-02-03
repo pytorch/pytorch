@@ -20,14 +20,15 @@ REGISTER_CPU_OPERATOR(
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(Negative)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .AllowInplace({{0, 0}})
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
+    .SetDoc(R"DOC(
 Computes the element-wise negative of the input.
 )DOC")
-  .Input(0, "X", "1D input tensor")
-  .Output(0, "Y", "1D input tensor");
+    .Input(0, "X", "1D input tensor")
+    .Output(0, "Y", "1D input tensor");
 
 class GetNegativeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

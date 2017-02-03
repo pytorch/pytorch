@@ -105,6 +105,7 @@ class Workspace {
   inline bool HasBlob(const string& name) const {
     return (blob_map_.count(name) || (shared_ && shared_->HasBlob(name)));
   }
+
   /**
    * Creates a blob of the given name. The pointer to the blob is returned, but
    * the workspace keeps ownership of the pointer. If a blob of the given name

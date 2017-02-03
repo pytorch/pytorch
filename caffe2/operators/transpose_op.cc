@@ -37,6 +37,7 @@ REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
 OPERATOR_SCHEMA(Transpose)
     .NumInputs(1)
     .NumOutputs(1)
+    // TODO: add Shape inference function (bootcamp)
     .SetDoc(R"DOC(
 Transpose the input tensor similar to numpy.transpose. For example, when
 axes=(1, 0, 2), given an input tensor of shape (1, 2, 3), the output shape

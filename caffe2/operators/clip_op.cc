@@ -41,6 +41,7 @@ OPERATOR_SCHEMA(Clip)
   .NumInputs(1)
   .NumOutputs(1)
   .AllowInplace({{0, 0}})
+  .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
 Clip operator limits the given input within an interval. The interval is
 specified with arguments 'min' and 'max'. They default to numeric_limits::min()

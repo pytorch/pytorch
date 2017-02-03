@@ -1,4 +1,6 @@
 #include "caffe2/core/context.h"
+#include "caffe2/core/typeid.h"
+#include "caffe2/core/tensor.h"
 
 namespace caffe2 {
 

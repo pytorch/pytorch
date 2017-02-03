@@ -10,6 +10,7 @@ REGISTER_CPU_OPERATOR(AveragedLossGradient,
 OPERATOR_SCHEMA(AveragedLoss)
   .NumInputs(1)
   .NumOutputs(1)
+  .ScalarType(TensorProto::FLOAT)
   .SetDoc(R"DOC(
 AveragedLoss takes in a 1-D tensor as input and returns a single output float
 value which represents the average of input data (average of the losses).
