@@ -155,7 +155,7 @@ def Train(args):
     )
 
     # Model building functions
-    def create_resnet50_model_ops(model):
+    def create_resnet50_model_ops(model, loss_scale):
         [softmax, loss] = resnet.create_resnet50(
             model,
             "data",
@@ -163,18 +163,19 @@ def Train(args):
             num_labels=args.num_labels,
             label="label",
         )
+        loss = model.Scale(loss, scale=loss_scale)
         model.Accuracy([softmax, "label"], "accuracy")
         return [loss]
 
     # SGD
-    def add_parameter_update_ops(model, lr_scale):
+    def add_parameter_update_ops(model):
         model.AddWeightDecay(args.weight_decay)
         ITER = model.Iter("ITER")
         stepsz = int(30 * args.epoch_size / total_batch_size)
         LR = model.net.LearningRate(
             [ITER],
             "LR",
-            base_lr=args.base_learning_rate * lr_scale,
+            base_lr=args.base_learning_rate,
             policy="step",
             stepsize=stepsz,
             gamma=0.1,

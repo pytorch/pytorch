@@ -20,21 +20,22 @@ class GPUDataParallelModelTest(TestCase):
         def input_builder_fun(model):
             return None
 
-        def model_build_fun(model):
+        def model_build_fun(model, loss_scale):
             fc = model.FC("data", "fc", 16, 1,
                           ("ConstantFill", {}), ("ConstantFill", {}))
             fc_fl = model.FlattenToVec(fc, "fc_fl")
             sigm = model.Sigmoid(fc_fl, "sigm")
             sq = model.SquaredL2Distance([sigm, "label"], "sq")
             loss = model.AveragedLoss(sq, "loss")
+            loss = model.Scale(loss, scale=loss_scale)
             return [loss]
 
-        def param_update_fun(model, lr_scale):
+        def param_update_fun(model):
             ITER = model.Iter("ITER")
             LR = model.net.LearningRate(
                 [ITER],
                 "LR",
-                base_lr=(-0.1) * lr_scale,
+                base_lr=(-0.1),
                 policy="fixed",
             )
             ONE = model.param_init_net.ConstantFill(
