@@ -102,15 +102,17 @@ class WorkspaceType(object):
     GLOBAL = 'global'
 
 
-def get_setup_nets(key, steps, target):
+def get_setup_nets(key, steps_or_nets, target):
     init_net = core.Net(key + '/init')
     exit_net = core.Net(key + '/exit')
     init_nets = []
     exit_nets = []
     objs = []
-    for step in steps:
-        if step is not None:
-            objs += step.get_all_attributes(key)
+    for step_or_net in steps_or_nets:
+        if hasattr(step_or_net, 'get_all_attributes'):
+            objs += step_or_net.get_all_attributes(key)
+        elif hasattr(step_or_net, 'get_attributes'):
+            objs += step_or_net.get_attributes(key)
     for obj in objs:
         # these are needed in order to allow nesting of TaskGroup, which
         # is a feature not yet implemented.
@@ -263,8 +265,13 @@ class TaskGroup(object):
             tasks_by_node[node_map[task.node]].append(task)
         grouped_by_node = TaskGroup()
         for node, tasks in tasks_by_node.items():
+            report_net = (
+                self._report_nets[node][0]
+                if node in self._report_nets else None)
             node_inits, node_exits = get_setup_nets(
-                TaskGroup.LOCAL_SETUP, [t.get_step() for t in tasks], self)
+                TaskGroup.LOCAL_SETUP,
+                [t.get_step() for t in tasks] + [report_net],
+                self)
             # shortcut for single task with no queue
             steps = []
             outputs = []
@@ -375,6 +382,7 @@ class Task(object):
     """
 
     TASK_SETUP = 'task_setup'
+    REPORT_NET = 'report_net'
 
     def __init__(
             self, step=None, outputs=None,
@@ -400,6 +408,7 @@ class Task(object):
         self._pipeline = None
         self._is_pipeline_context = False
         self._workspace_type = workspace_type
+        self._report_net = None
 
     def __enter__(self):
         self._assert_not_used()
@@ -442,6 +451,14 @@ class Task(object):
 
     def get_step(self):
         if self._step is not None and self._step_with_setup is None:
+            report_net = self._step.get_all_attributes(Task.REPORT_NET)
+            assert len(report_net) <= 1, (
+                'Currently only one report net supported per task.')
+            if report_net:
+                report_net = report_net[0]
+                if not hasattr(report_net, '_report_net_used'):
+                    self._step.SetReportNet(report_net, 1)
+                    report_net._report_net_used = True
             init_nets, exit_nets = get_setup_nets(
                 Task.TASK_SETUP, [self._step], self)
             if len(self._outputs) == 0:
