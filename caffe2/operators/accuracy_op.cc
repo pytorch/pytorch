@@ -17,42 +17,70 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   const auto* labelData = label.data<int>();
   const int top_k = top_k_;
   int correct = 0;
-  for (int i = 0; i < N; ++i) {
+
+  if (top_k == 1) {
+    // Specially handling the case when top_k equals to 1
+    // to achieve a better performance
+
+    for (int i = 0; i < N; ++i) {
+      // Find the corresponding index of the max prediction
+      float max_pred = Xdata[i * D];
+      int max_idx = 0;
+      for (int j = 1; j < D; j++) {
+        float pred = Xdata[i * D + j];
+        if (pred > max_pred) {
+          max_pred = pred;
+          max_idx = j;
+        }
+      }
+      // Increment accurary if the max predictions equal to the expected label
+      if (max_idx == labelData[i]) {
+        ++correct;
+      }
+    }
+  } else {
     // Make a vector of pairs(prediction, index) so that
     // the index of elements can be extracted after sort.
     // top-k algorithm rewritten based on algorithm in
     // Caffe accuracy layer
-    std::vector<std::pair<float, int> > Xdata_pairs;
-    for (int j = 0; j < D; ++j) {
-      Xdata_pairs.push_back(std::make_pair(Xdata[i * D + j], j));
-    }
-    // Sort so that the k maximum predictions appear
-    // at the beginning of vector.
-    std::partial_sort(
-        Xdata_pairs.begin(),
-        Xdata_pairs.begin() + top_k,
-        Xdata_pairs.end(),
-        [](std::pair<float, int> lhs, std::pair<float, int> rhs) {
-            if(lhs.first == rhs.first) {
-                return lhs.second < rhs.second;
+    std::vector<std::pair<float, int>> Xdata_pairs;
+
+    for (int i = 0; i < N; ++i) {
+      // Clear the data from the previous iteration
+      Xdata_pairs.clear();
+
+      for (int j = 0; j < D; ++j) {
+        Xdata_pairs.push_back(std::make_pair(Xdata[i * D + j], j));
+      }
+
+      // Sort so that the k maximum predictions appear
+      // at the beginning of vector.
+      std::partial_sort(
+          Xdata_pairs.begin(),
+          Xdata_pairs.begin() + top_k,
+          Xdata_pairs.end(),
+          [](std::pair<float, int> lhs, std::pair<float, int> rhs) {
+            if (lhs.first == rhs.first) {
+              return lhs.second < rhs.second;
+            } else {
+              return lhs.first > rhs.first;
             }
-            else {
-                return lhs.first > rhs.first;
-            }
-        });
-    // Increment accuracy if any of the top k predictions
-    // are equal to the expected label.
-    for (int k = 0; k < top_k; k++) {
-      if (Xdata_pairs[k].second == labelData[i]) {
-        ++correct;
-        break;
+          });
+
+      // Increment accuracy if any of the top k predictions
+      // are equal to the expected label.
+      for (int k = 0; k < top_k; k++) {
+        if (Xdata_pairs[k].second == labelData[i]) {
+          ++correct;
+          break;
+        }
       }
     }
   }
 
-
   DCHECK_LE(correct, N);
   *(Y->mutable_data<float>()) = static_cast<float>(correct) / N;
+
   return true;
 }
 
