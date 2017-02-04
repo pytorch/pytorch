@@ -501,9 +501,17 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 #undef th_isnan
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 #define th_isnan(val) \
-if (isnan(value)) break;
+(isnan(val))
 #else
-#define th_isnan(val)
+#define th_isnan(val) (0)
+#endif
+
+#undef th_isnan_break
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#define th_isnan_break(val) \
+if (isnan(val)) break;
+#else
+#define th_isnan_break(val)
 #endif
 
 real THTensor_(minall)(THTensor *tensor)
@@ -519,7 +527,7 @@ real THTensor_(minall)(THTensor *tensor)
                   if(!(value >= theMin))
                   {
                     theMin = value;
-                    th_isnan(value)
+                    th_isnan_break(value)
                   });
   return theMin;
 }
@@ -537,7 +545,7 @@ real THTensor_(maxall)(THTensor *tensor)
                   if(!(value <= theMax))
                   {
                     theMax = value;
-                    th_isnan(value)
+                    th_isnan_break(value)
                   });
   return theMax;
 }
@@ -665,6 +673,7 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
+
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
       ptrdiff_t sz = THTensor_(nElement)(t);
@@ -1461,10 +1470,6 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
 void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
 {
   THLongStorage *dim;
-  real theMax;
-  real value;
-  long theIndex;
-  long i;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -1475,32 +1480,70 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
-  TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
-                       theMax = t_data[0];
-                       theIndex = 0;
+  // two implementations optimized for data locality
+  if (t->stride[dimension] == 1) {
+    real theMax;
+    real value;
+    long theIndex;
+    long i;
+    TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
+                         theMax = t_data[0];
+                         theIndex = 0;
 
-                       for(i = 0; i < t_size; i++)
-                       {
-                         value = t_data[i*t_stride];
-                         /* This is not the same as value>theMax in the case of NaNs */
-                         if(!(value <= theMax))
+                         for(i = 0; i < t_size; i++)
                          {
-                           theIndex = i;
-                           theMax = value;
-                           th_isnan(value)
+                           value = t_data[i*t_stride];
+                           /* This is not the same as value>theMax in the case of NaNs */
+                           if(!(value <= theMax))
+                           {
+                             theIndex = i;
+                             theMax = value;
+                             th_isnan_break(value)
+                           }
                          }
-                       }
-                       *indices__data = theIndex;
-                       *values__data = theMax;);
+                         *indices__data = theIndex;
+                         *values__data = theMax;);
+  } else {
+    if (THTensor_(nDimension)(t) > 1) {
+      THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
+      THTensor_(copy)(values_, t0);
+      THTensor_(free)(t0);
+    } else {
+      THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
+    }
+    THLongTensor_zero(indices_);
+
+    if(t->size[dimension] == 1) {
+      return;
+    }
+
+    THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
+    // tempValues_.expand_as(t)
+    tempValues_->size[dimension] = t->size[dimension];
+    tempValues_->stride[dimension] = 0;
+
+    THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
+    // tempIndices_.expand_as(t)
+    tempIndices_->size[dimension] = t->size[dimension];
+    tempIndices_->stride[dimension] = 0;
+
+    // this shows the flexibility of using TH_TENSOR_APPLY in place of
+    // TH_TENSOR_DIM_APPLY. Unfortunately, I'm leveraging the fact that since
+    // tempIndices has stride 0 and size >1 in dimension, there will definitely
+    // be an instantiated counter dimension there; this might not be true after
+    // some new optimizations to TH_TENSOR_APPLY3, so we'll need a different
+    // set of macros.
+    TH_TENSOR_APPLY3(real, t, real, tempValues_, long, tempIndices_,
+                     if(!(*t_data <= *tempValues__data) && !th_isnan(*tempValues__data)) {
+                       *tempValues__data = *t_data;
+                       *tempIndices__data = tempIndices__counter[dimension];
+                     });
+  }
 }
 
 void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
 {
   THLongStorage *dim;
-  real theMin;
-  real value;
-  long theIndex;
-  long i;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -1511,23 +1554,65 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
-  TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
-                       theMin = t_data[0];
-                       theIndex = 0;
+  // two implementations optimized for data locality
+  if (t->stride[dimension] == 1) {
+    real theMax;
+    real value;
+    long theIndex;
+    long i;
+    TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
+                         theMax = t_data[0];
+                         theIndex = 0;
 
-                       for(i = 0; i < t_size; i++)
-                       {
-                         value = t_data[i*t_stride];
-                         /* This is not the same as value<theMin in the case of NaNs */
-                         if(!(value >= theMin))
+                         for(i = 0; i < t_size; i++)
                          {
-                           theIndex = i;
-                           theMin = value;
-                           th_isnan(value)
+                           value = t_data[i*t_stride];
+                           /* This is not the same as value>theMax in the case of NaNs */
+                           if(!(value >= theMax))
+                           {
+                             theIndex = i;
+                             theMax = value;
+                             th_isnan_break(value)
+                           }
                          }
-                       }
-                       *indices__data = theIndex;
-                       *values__data = theMin;);
+                         *indices__data = theIndex;
+                         *values__data = theMax;);
+  } else {
+    if (THTensor_(nDimension)(t) > 1) {
+      THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
+      THTensor_(copy)(values_, t0);
+      THTensor_(free)(t0);
+    } else {
+      THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
+    }
+    THLongTensor_zero(indices_);
+
+    if(t->size[dimension] == 1) {
+      return;
+    }
+
+    THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
+    // tempValues_.expand_as(t)
+    tempValues_->size[dimension] = t->size[dimension];
+    tempValues_->stride[dimension] = 0;
+
+    THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
+    // tempIndices_.expand_as(t)
+    tempIndices_->size[dimension] = t->size[dimension];
+    tempIndices_->stride[dimension] = 0;
+
+    // this shows the flexibility of using TH_TENSOR_APPLY in place of
+    // TH_TENSOR_DIM_APPLY. Unfortunately, I'm leveraging the fact that since
+    // tempIndices has stride 0 and size >1 in dimension, there will definitely
+    // be an instantiated counter dimension there; this might not be true after
+    // some new optimizations to TH_TENSOR_APPLY3, so we'll need a different
+    // set of macros.
+    TH_TENSOR_APPLY3(real, t, real, tempValues_, long, tempIndices_,
+                     if(!(*t_data >= *tempValues__data) && !th_isnan(*tempValues__data)) {
+                       *tempValues__data = *t_data;
+                       *tempIndices__data = tempIndices__counter[dimension];
+                     });
+  }
 }
 
 
@@ -1543,12 +1628,24 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension)
   THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
-  TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                       accreal sum = 0;
-                       long i;
-                       for(i = 0; i < t_size; i++)
-                         sum += t_data[i*t_stride];
-                       *r__data = (real)sum;);
+  // two implementations optimized for data locality
+  if (t->stride[dimension] == 1) {
+    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
+                         accreal sum = 0;
+                         long i;
+                         for(i = 0; i < t_size; i++)
+                           sum += t_data[i*t_stride];
+                         *r__data = (real)sum;);
+  } else {
+    THTensor_(zero)(r_);
+    THTensor *temp_ = THTensor_(newWithTensor)(r_);
+    // r_.expand_as(t)
+    temp_->size[dimension] = t->size[dimension];
+    temp_->stride[dimension] = 0;
+
+    THTensor_(cadd)(temp_, temp_, 1, t);
+    THTensor_(free)(temp_);
+  }
 }
 
 void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension)
@@ -1563,13 +1660,24 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension)
   THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
-  TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                       accreal prod = 1;
-                       long i;
-                       for(i = 0; i < t_size; i++)
-                         prod *= t_data[i*t_stride];
-                       *r__data = (real)prod;);
+  // two implementations optimized for data locality
+  if (t->stride[dimension] == 1) {
+    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
+                         accreal prod = 1;
+                         long i;
+                         for(i = 0; i < t_size; i++)
+                           prod *= t_data[i*t_stride];
+                         *r__data = (real)prod;);
+  } else {
+    THTensor_(fill)(r_, 1);
+    THTensor *temp_ = THTensor_(newWithTensor)(r_);
+    // r_.expand_as(t)
+    temp_->size[dimension] = t->size[dimension];
+    temp_->stride[dimension] = 0;
 
+    THTensor_(cmul)(temp_, temp_, t);
+    THTensor_(free)(temp_);
+  }
 }
 
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
@@ -2651,12 +2759,25 @@ void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension)
   THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
-  TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                       accreal sum = 0;
-                       long i;
-                       for(i = 0; i < t_size; i++)
-                         sum += t_data[i*t_stride];
-                       *r__data = (real)sum/t_size;);
+  // two implementations optimized for data locality
+  if (t->stride[dimension] == 1) {
+    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
+                         accreal sum = 0;
+                         long i;
+                         for(i = 0; i < t_size; i++)
+                           sum += t_data[i*t_stride];
+                         *r__data = (real)sum/t_size;);
+  } else {
+    THTensor_(zero)(r_);
+    THTensor *temp_ = THTensor_(newWithTensor)(r_);
+    // r_.expand_as(t)
+    temp_->size[dimension] = t->size[dimension];
+    temp_->stride[dimension] = 0;
+
+    THTensor_(cadd)(temp_, temp_, 1, t);
+    THTensor_(free)(temp_);
+    THTensor_(div)(r_, r_, t->size[dimension]);
+  }
 }
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag)
