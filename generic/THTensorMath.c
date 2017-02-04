@@ -99,7 +99,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   long dim;
   long div = 1;
 #ifdef TH_REAL_IS_HALF
-#define IS_NONZERO(val) (TH_half2float(val)!=0)
+#define IS_NONZERO(val) ((val.x & 0x7fff) != 0)
 #else
 #define IS_NONZERO(val) ((val)!=0)
 #endif
