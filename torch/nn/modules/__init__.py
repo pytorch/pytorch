@@ -8,7 +8,7 @@ from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
 from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, NLLLoss2d, \
     CosineEmbeddingLoss, HingeEmbeddingLoss, MarginRankingLoss, \
     MultiLabelMarginLoss, MultiLabelSoftMarginLoss, MultiMarginLoss, \
-    SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss
+    SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss, CrossEntropyLoss2d
 from .container import Container, Sequential, ModuleList, ParameterList
 from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxPool3d, \
     MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d
