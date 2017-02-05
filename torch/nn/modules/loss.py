@@ -13,6 +13,7 @@ def _assert_no_grad(variable):
 
 
 class _Loss(Module):
+
     def __init__(self, size_average=True):
         super(_Loss, self).__init__()
         self.size_average = size_average
@@ -24,6 +25,7 @@ class _Loss(Module):
 
 
 class _WeighedLoss(_Loss):
+
     def __init__(self, weight=None, size_average=True):
         super(_WeighedLoss, self).__init__(size_average)
         self.register_buffer('weight', weight)
@@ -272,43 +274,6 @@ class SoftMarginLoss(_Loss):
     pass
 
 
-class CrossEntropyLoss2d(_WeighedLoss):
-    r"""This criterion combines `LogSoftMax` and `NLLLoss` in one single class.
-
-    It is useful when training a classification problem with `n` classes.
-    If provided, the optional argument `weights` should be a 1D `Tensor`
-    assigning weight to each of the classes.
-    This is particularly useful when you have an unbalanced training set.
-
-    The `input` is expected to contain scores for each class.
-
-    `input` has to be a 2D `Tensor` of size `batch x n`.
-
-    This criterion expects a class index (0 to nClasses-1) as the
-    `target` for each value of a 1D tensor of size `n`
-
-    The loss can be described as::
-
-        loss(x, class) = -log(exp(x[class]) / (\sum_j exp(x[j])))
-                       = -x[class] + log(\sum_j exp(x[j]))
-
-    or in the case of the `weights` argument being specified::
-
-        loss(x, class) = weights[class] * (-x[class] + log(\sum_j exp(x[j])))
-
-    The losses are averaged across observations for each minibatch.
-
-    Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-
-    """
-
-    def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.cross_entropy2d(input, target, self.weight, self.size_average)
-
-
 class CrossEntropyLoss(_WeighedLoss):
     r"""This criterion combines `LogSoftMax` and `NLLLoss` in one single class.
 
@@ -343,7 +308,8 @@ class CrossEntropyLoss(_WeighedLoss):
 
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.cross_entropy(input, target, self.weight, self.size_average)
+        return F.cross_entropy(input, target,
+                               self.weight, self.size_average)
 
 
 class MultiLabelSoftMarginLoss(_WeighedLoss):
@@ -359,7 +325,8 @@ class MultiLabelSoftMarginLoss(_WeighedLoss):
     """
 
     def forward(self, input, target):
-        return F.binary_cross_entropy(torch.sigmoid(input), target, self.weight, self.size_average)
+        return F.binary_cross_entropy(torch.sigmoid(input), target,
+                                      self.weight, self.size_average)
 
 
 class CosineEmbeddingLoss(Module):
@@ -390,7 +357,8 @@ class CosineEmbeddingLoss(Module):
         self.size_average = size_average
 
     def forward(self, input1, input2, target):
-        return self._backend.CosineEmbeddingLoss(self.margin, self.size_average)(input1, input2, target)
+        return self._backend.CosineEmbeddingLoss(self.margin,
+                                                 self.size_average)(input1, input2, target)
 
 
 class MarginRankingLoss(Module):
@@ -417,7 +385,8 @@ class MarginRankingLoss(Module):
         self.size_average = size_average
 
     def forward(self, input1, input2, target):
-        return self._backend.MarginRankingLoss(self.margin, self.size_average)(input1, input2, target)
+        return self._backend.MarginRankingLoss(self.margin,
+                                               self.size_average)(input1, input2, target)
 
 
 class MultiMarginLoss(Module):
@@ -452,7 +421,8 @@ class MultiMarginLoss(Module):
         self.weight = weight
 
     def forward(self, input, target):
-        return self._backend.MultiMarginLoss(self.size_average, self.p, self.margin, weight=self.weight)(input, target)
+        return self._backend.MultiMarginLoss(self.size_average, self.p,
+                                             self.margin, weight=self.weight)(input, target)
 
 
 # TODO: L1HingeEmbeddingCriterion

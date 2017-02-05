@@ -5,11 +5,11 @@ from . import _functions
 from .modules import utils
 from torch.nn._functions.conv import ConvNd
 from .modules.utils import _single, _pair, _triple
-
 # Convolutions
 
 
-def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
+           groups=1):
     """Applies a 2D convolution over an input image composed of several input
     planes.
 
@@ -32,11 +32,13 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
         >>> F.conv2d(inputs, filters, padding=1)
     """
-    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False, _pair(0), groups)
+    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
+               _pair(0), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
+           groups=1):
     """Applies a 1D convolution over an input signal composed of several input
     planes.
 
@@ -53,11 +55,13 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
         >>> F.conv1d(inputs, filters)
     """
-    f = ConvNd(_single(stride), _single(padding), _single(dilation), False, _single(0), groups)
+    f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
+               _single(0), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
+           groups=1):
     """Applies a 3D convolution over an input image composed of several input
         planes.
 
@@ -77,16 +81,20 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
         >>> F.conv3d(inputs)
     """
-    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False, _triple(0), groups)
+    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
+               _triple(0), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1):
-    f = ConvNd(_single(stride), _single(padding), _single(1), True, _single(output_padding), groups)
+def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
+                     output_padding=0, groups=1):
+    f = ConvNd(_single(stride), _single(padding), _single(1), True,
+               _single(output_padding), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1):
+def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
+                     output_padding=0, groups=1):
     """Applies a 2D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution".
 
@@ -105,11 +113,13 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_paddi
         output_padding: A zero-padding of 0 <= padding < stride that should be
           added to the output. Can be a single number or a tuple. Default: 0
     """
-    f = ConvNd(_pair(stride), _pair(padding), _pair(1), True, _pair(output_padding), groups)
+    f = ConvNd(_pair(stride), _pair(padding), _pair(1), True,
+               _pair(output_padding), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
-def conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1):
+def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
+                     output_padding=0, groups=1):
     """Applies a 3D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution"
 
@@ -124,12 +134,14 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_paddi
         padding: implicit zero padding on the input, a single number or a
           tuple (padh x padw). Default: 0
     """
-    f = ConvNd(_triple(stride), _triple(padding), _triple(1), True, _triple(output_padding), groups)
+    f = ConvNd(_triple(stride), _triple(padding), _triple(1), True,
+               _triple(output_padding), groups)
     return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 # Pooling
-def avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True):
+def avg_pool1d(input, kernel_size, stride=None, padding=0,
+               ceil_mode=False, count_include_pad=True):
     r"""Applies a 1D average pooling over an input signal composed of several
     input planes.
 
@@ -152,15 +164,18 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, coun
         [torch.FloatTensor of size 1x1x3]
     """
     if input.dim() != 3:
-        raise ValueError('expected 3D input (got {} dimensions)'.format(input.dim()))
-    kernel_size = _single(kernel_size) + (1, )
-    stride = _single(stride) + (1, )
-    padding = _single(padding) + (0, )
-    f = _functions.thnn.AvgPool2d(kernel_size, stride, padding, ceil_mode, count_include_pad)
+        raise ValueError('expected 3D input (got {} dimensions)'
+                         .format(input.dim()))
+    kernel_size = _single(kernel_size) + (1,)
+    stride = _single(stride) + (1,)
+    padding = _single(padding) + (0,)
+    f = _functions.thnn.AvgPool2d(kernel_size, stride, padding,
+                                  ceil_mode, count_include_pad)
     return f(input.unsqueeze(3)).squeeze(3)
 
 
-def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True):
+def avg_pool2d(input, kernel_size, stride=None, padding=0,
+               ceil_mode=False, count_include_pad=True):
     """Applies 2D average-pooling operation in kh x kw regions by step size
     dh x dw steps. The number of output features is equal to the number of
     input planes.
@@ -179,7 +194,8 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, coun
         count_include_pad: divide by the number of elements inside the
           original non-padded image or kh * kw
     """
-    return _functions.thnn.AvgPool2d(kernel_size, stride, padding, ceil_mode, count_include_pad)(input)
+    return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
+                                     ceil_mode, count_include_pad)(input)
 
 
 def avg_pool3d(input, kernel_size, stride=None):
@@ -191,23 +207,30 @@ def avg_pool3d(input, kernel_size, stride=None):
 
 
 # share the same interface
-def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation, return_indices, ceil_mode)(input)
+def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
+               ceil_mode=False, return_indices=False):
+    return _functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation,
+                                     return_indices, ceil_mode)(input)
 
 
-def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation, return_indices, ceil_mode)(input)
+def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
+               ceil_mode=False, return_indices=False):
+    return _functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation,
+                                     return_indices, ceil_mode)(input)
 
 
-def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation, return_indices, ceil_mode)(input)
+def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
+               ceil_mode=False, return_indices=False):
+    return _functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation,
+                                     return_indices, ceil_mode)(input)
 
 
 def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     input_size = input.size()
     default_size = []
     for d in range(len(kernel_size)):
-        default_size.append((input_size[d + 2] - 1) * stride[d] + kernel_size[d] - 2 * padding[d])
+        default_size.append((input_size[d + 2] - 1) * stride[d] +
+                            kernel_size[d] - 2 * padding[d])
     if output_size is None:
         return default_size
 
@@ -217,40 +240,48 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     if len(output_size) != len(kernel_size):
         raise ValueError("output_size should be a sequence containing "
                          "{} or {} elements, but it has a length of '{}'"
-                         .format(len(kernel_size), len(kernel_size) + 2, len(output_size)))
+                         .format(len(kernel_size), len(kernel_size) + 2,
+                                 len(output_size)))
     for d in range(len(kernel_size)):
         min_size = default_size[d] - stride[d]
         max_size = default_size[d] + stride[d]
         if not (min_size < output_size[d] < max_size):
-            raise ValueError('invalid output_size "{}" (dim {} must be between {} and {})'
-                             .format(output_size, d, min_size, max_size))
+            raise ValueError(
+                'invalid output_size "{}" (dim {} must be between {} and {})'
+                .format(output_size, d, min_size, max_size))
 
     return output_size
 
 
-def max_unpool1d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
+def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
+                 output_size=None):
     kernel_size = _single(kernel_size)
     stride = _single(stride)
     padding = _single(padding)
-    output_size = _unpool_output_size(input, kernel_size, stride, padding, output_size)
+    output_size = _unpool_output_size(input, kernel_size, stride, padding,
+                                      output_size)
     f = _functions.thnn.MaxUnpool2d(output_size + [1])
     return f(input.unsqueeze(3), indices.unsqueeze(3)).squeeze(3)
 
 
-def max_unpool2d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
+def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
+                 output_size=None):
     kernel_size = _pair(kernel_size)
     stride = _pair(stride)
     padding = _pair(padding)
-    output_size = _unpool_output_size(input, kernel_size, stride, padding, output_size)
+    output_size = _unpool_output_size(input, kernel_size, stride, padding,
+                                      output_size)
     f = _functions.thnn.MaxUnpool2d(output_size)
     return f(input, indices)
 
 
-def max_unpool3d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
+def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
+                 output_size=None):
     kernel_size = _triple(kernel_size)
     stride = _triple(stride)
     padding = _triple(padding)
-    output_size = _unpool_output_size(input, kernel_size, stride, padding, output_size)
+    output_size = _unpool_output_size(input, kernel_size, stride, padding,
+                                      output_size)
     f = _functions.thnn.MaxUnpool3d(output_size, stride, padding)
     return f(input, indices)
 
@@ -262,7 +293,6 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 
 # Activation functions
-
 
 def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout(p, training, inplace)(input)
@@ -346,19 +376,19 @@ def sigmoid(input):
 
 # etc.
 
-
 def linear(input, weight, bias=None):
     state = _functions.linear.Linear()
     return bias and state(input, weight, bias) or state(input, weight)
 
 
-def batch_norm(input, running_mean, running_var, weight=None, bias=None, training=False, momentum=0.1, eps=1e-5):
-    state = _functions.batchnorm.BatchNorm(running_mean, running_var, training, momentum, eps)
+def batch_norm(input, running_mean, running_var, weight=None, bias=None,
+               training=False, momentum=0.1, eps=1e-5):
+    state = _functions.batchnorm.BatchNorm(
+        running_mean, running_var, training, momentum, eps)
     return weight and state(input, weight, bias) or state(input)
 
 
 # loss
-
 
 def nll_loss(input, target, weight=None, size_average=True):
     r"""The negative log likelihood loss.
@@ -387,28 +417,6 @@ def nll_loss(input, target, weight=None, size_average=True):
         >>> output.backward()
     """
     return _functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
-
-
-def nll_loss2d(input, target, weight=None, size_average=True):
-    r"""The negative log likelihood loss.
-
-    See :class:`~torch.nn.SpatialClassNLLCriterion` for details.
-
-    Args:
-        input: :math:`(N, C, H, W)` where `C = number of classes`
-        target: :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
-        weight (Variable, optional): a manual rescaling weight given to each
-                class. If given, has to be a Variable of size "nclasses"
-        size_average (bool, optional): By default, the losses are averaged
-                over observations for each minibatch. However, if the field
-                sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
-
-    Attributes:
-        weight: the class-weights given as input to the constructor
-
-    """
-    return _functions.thnn.NLLLoss2d(size_average, weight=weight)(input, target)
 
 
 def kl_div(input, target, size_average=True):
@@ -441,24 +449,6 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 for each minibatch.
     """
     return nll_loss(log_softmax(input), target, weight, size_average)
-
-
-def cross_entropy2d(input, target, weight=None, size_average=True):
-    r"""This criterion combines `log_softmax` and `nll_loss2d` in one single class.
-
-    See :class:`torch.nn.CrossEntropyLoss` for details.
-
-    Args:
-        input: Variable :math:`(N, C, H, W)` where `C = number of classes`
-        target: Variable :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
-        weight (Variable, optional): a manual rescaling weight given to each
-                class. If given, has to be a Variable of size "nclasses"
-        size_average (bool, optional): By default, the losses are averaged
-                over observations for each minibatch. However, if the field
-                sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
-    """
-    return nll_loss2d(log_softmax(input), target, weight, size_average)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
@@ -502,12 +492,14 @@ def pixel_shuffle(input, upscale_factor):
         torch.Size([1, 1, 12, 12])
     """
     batch_size, channels, in_height, in_width = input.size()
-    channels //= upscale_factor**2
+    channels //= upscale_factor ** 2
 
     out_height = in_height * upscale_factor
     out_width = in_width * upscale_factor
 
-    input_view = input.contiguous().view(batch_size, channels, upscale_factor, upscale_factor, in_height, in_width)
+    input_view = input.contiguous().view(
+        batch_size, channels, upscale_factor, upscale_factor,
+        in_height, in_width)
 
     shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3).contiguous()
     return shuffle_out.view(batch_size, channels, out_height, out_width)
