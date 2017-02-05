@@ -309,6 +309,7 @@ class CrossEntropyLoss(_WeighedLoss):
         return F.cross_entropy(input, target,
                                self.weight, self.size_average)
 
+
 class CrossEntropyLoss2d(_WeighedLoss):
     r"""This criterion combines `LogSoftMax` and `NLLLoss2d` in one single class.
 

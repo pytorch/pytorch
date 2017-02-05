@@ -440,6 +440,7 @@ def nll_loss2d(input, target, weight=None, size_average=True):
     """
     return _functions.thnn.NLLLoss2d(size_average, weight=weight)(input, target)
 
+
 def kl_div(input, target, size_average=True):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
