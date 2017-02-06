@@ -58,7 +58,7 @@ def lstm_reference(input, hidden_input, cell_input,
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
-    D = hidden_input.shape[2]
+    D = hidden_input.shape[hidden_input.ndim - 1]
     hidden = np.zeros(shape=(T + 1, N, D))
     cell = np.zeros(shape=(T + 1, N, D))
     assert hidden.shape[0] == T + 1
@@ -145,12 +145,19 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         workspace.RunNetOnce(model.param_init_net)
         input_blob = op.input[0]
 
+        def generate_random_state(n, d):
+            ndim = int(np.random.choice(3, 1)) + 1
+            if ndim == 1:
+                return np.random.randn(1, n, d).astype(np.float32)
+            random_state = np.random.randn(n, d).astype(np.float32)
+            if ndim == 3:
+                random_state = random_state.reshape([1, n, d])
+            return random_state
+
         workspace.FeedBlob(
             str(input_blob), np.random.randn(t, n, d * 4).astype(np.float32))
-        workspace.FeedBlob(
-            "hidden_init", np.random.randn(1, n, d).astype(np.float32))
-        workspace.FeedBlob(
-            "cell_init", np.random.randn(1, n, d).astype(np.float32))
+        workspace.FeedBlob("hidden_init", generate_random_state(n, d))
+        workspace.FeedBlob("cell_init", generate_random_state(n, d))
         workspace.FeedBlob(
             "seq_lengths", np.random.randint(0, t, size=(n,)).astype(np.int32))
         inputs = [workspace.FetchBlob(name) for name in op.input]

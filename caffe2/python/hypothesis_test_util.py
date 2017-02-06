@@ -456,7 +456,12 @@ class HypothesisTestCase(test_util.TestCase):
                     if atol is None:
                         atol = threshold
                     np.testing.assert_allclose(
-                        output, ref, atol=atol, rtol=threshold)
+                        output, ref, atol=atol, rtol=threshold,
+                        err_msg=(
+                            'Output {0} is not matching the reference'.format(
+                                output_blob_name,
+                            )),
+                    )
                 outs.append(output)
             if grad_reference and output_to_grad:
                 self._assertGradReferenceChecks(

@@ -81,16 +81,32 @@ void initializeRecurrentInput(
   auto inputBlob = ws->GetBlob(rc.input);
   CAFFE_ENFORCE(inputBlob);
   const auto& input = inputBlob->template Get<Tensor<Context>>();
-  CAFFE_ENFORCE_EQ(input.ndim(), 3, rc.input);
-  CAFFE_ENFORCE_EQ(input.dim(0), 1, rc.input);
-  CAFFE_ENFORCE_EQ(input.dim(1), batchSize, rc.input);
+  CAFFE_ENFORCE_GE(input.ndim(), 1, rc.input);
+  CAFFE_ENFORCE_LE(input.ndim(), 3, rc.input);
 
+  const auto stateSize = input.dim(input.ndim() - 1);
   // States at [0, ..., T] (inclusive)
-  state->Resize(seqLen + 1, batchSize, input.dim(2));
-  context->template Copy<T, Context, Context>(
-      batchSize * input.dim(2),
-      input.template data<T>(),
-      state->template mutable_data<T>());
+  state->Resize(seqLen + 1, batchSize, stateSize);
+
+  if (input.ndim() == 3) {
+    CAFFE_ENFORCE_EQ(input.dim(0), 1, rc.input);
+  }
+  if (input.ndim() >= 2) {
+    CAFFE_ENFORCE_EQ(input.dim(input.ndim() - 2), batchSize, rc.input);
+    context->template Copy<T, Context, Context>(
+        batchSize * stateSize,
+        input.template data<T>(),
+        state->template mutable_data<T>());
+  } else {
+    for (int i = 0; i < batchSize; ++i) {
+      // Usually, the initial state is the same for all inputs in the batch.
+      // So the op conveniently accepts 1-D input and copies it batchSize times.
+      context->template Copy<T, Context, Context>(
+          stateSize,
+          input.template data<T>(),
+          state->template mutable_data<T>() + i * stateSize);
+    }
+  }
 }
 
 template <typename T, typename Context>
@@ -487,14 +503,30 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       VLOG(1) << "Resetting output " << def().output(outputIdx)
               << " like input " << def().input(inputId);
       Output(outputIdx)->ResizeLike(Input(inputId));
-
       auto pBlob = sharedWs_->GetBlob(recurrentGradients_[i].grad);
       CAFFE_ENFORCE(pBlob);
       auto* p = pBlob->template GetMutable<Tensor<Context>>();
-      context_.template Copy<T, Context, Context>(
-          Output(outputIdx)->size(),
-          p->template data<T>(),
-          Output(outputIdx)->template mutable_data<T>());
+
+      if (Input(inputId).ndim() >= 2) {
+        context_.template Copy<T, Context, Context>(
+            Output(outputIdx)->size(),
+            p->template data<T>(),
+            Output(outputIdx)->template mutable_data<T>());
+      } else {
+        const auto recurrentStateSize = Input(inputId).dim32(0);
+        context_.template Copy<T, Context, Context>(
+            recurrentStateSize,
+            p->template data<T>(),
+            Output(outputIdx)->template mutable_data<T>());
+        for (int j = 1; j < batchSize; ++j) {
+          math::Add<T, Context>(
+              recurrentStateSize,
+              p->template data<T>() + j * recurrentStateSize,
+              Output(outputIdx)->template data<T>(),
+              Output(outputIdx)->template mutable_data<T>(),
+              &context_);
+        }
+      }
     }
 
     return true;
