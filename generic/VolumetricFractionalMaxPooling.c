@@ -139,7 +139,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
              "poolSizeW (%d) too large relative to input width (%d)",
 	     poolSizeW, inputW);
   THArgCheck(outputT + poolSizeT - 1 < inputT, 7,
-             "poolSizeW (%d) too large relative to input width (%d)",
+             "poolSizeT (%d) too large relative to input time (%d)",
 	     poolSizeT, inputT);
 
   /* get contiguous input */
@@ -198,7 +198,7 @@ static void THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
     for (h = 0; h < outputH; ++h) {
       for (w = 0; w < outputW; ++w) {
         for (t = 0; t < outputT; ++t) {
-          long outputIndex = h * outputW * outputT + w * outputT+ t;
+          long outputIndex = h * outputW * outputT + w * outputT + t;
           long index = indicesForPlane[outputIndex] - TH_INDEX_BASE;
           THAssert(index >= 0 && index < inputT * inputW * inputH);
 
