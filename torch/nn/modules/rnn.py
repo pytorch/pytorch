@@ -24,7 +24,7 @@ class RNNBase(Module):
         self.skip_input = skip_input
 
         if skip_input and input_size != hidden_size:
-            raise RuntimeError("Skip input requires input size to be equal to hidden size")
+            raise ValueError("Skip input requires input size to be equal to hidden size")
 
         self.all_weights = []
         for layer in range(num_layers):
