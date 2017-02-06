@@ -36,17 +36,15 @@ def Parallelize_GPU(
       forward_pass_builder_fun:
                         Function to add the operators to the model.
                         Must return list of loss-blob references that
-                        are used to build the gradient.
-                        Signature: forward_pass_builder_fun(model)
+                        are used to build the gradient. Loss scale parameter
+                        is passed, as you should scale the loss of your model
+                        by 1.0 / the total number of gpus.
+                        Signature: forward_pass_builder_fun(model, loss_scale)
       param_update_builder_fun:
                         Function that adds operators that are run after
                         gradient update, such as updating the weights and
-                        weight decaying. Function is also passed the learning
-                        rate scaling factor. You should multiple the learning
-                        rate by the factor to maintain invariant of same
-                        results with same total batch size, regardless of
-                        number of gpus.
-                        Signature: param_update_builder_fun(model, lr_scale)
+                        weight decaying.
+                        Signature: param_update_builder_fun(model)
       devices:          List of GPU ids, such as [0, 1, 2, 3],
       rendezvous:       used for rendezvous in distributed computation, if None
                         then only one node is used. To create rendezvous,
