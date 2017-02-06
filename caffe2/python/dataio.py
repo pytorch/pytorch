@@ -227,6 +227,38 @@ class ReaderBuilder(object):
         raise NotImplementedError()
 
 
+class PipedReaderBuilder(ReaderBuilder):
+    """
+    ReaderBuilder that modifies underlying builder by calling `piper`
+    function on each new reader produced, and return the result of
+    the function. This way, it is possible to append data processing
+    pipelines that will be replicated for each reader that gets created.
+
+    E.g.:
+
+    PipedReaderBuilder(
+        HiveReaderBuilder(...),
+        lambda reader: pipe(reader, processor=my_proc))
+    """
+
+    def __init__(self, builder, piper):
+        self._builder = builder
+        self._piper = piper
+
+    def schema(self):
+        return self._builder.schema()
+
+    def enqueue_splits(self, net, split_queue):
+        return self._builder.enqueue_splits(net, split_queue)
+
+    def splits(self, net):
+        return self._builder.splits(net)
+
+    def new_reader(self, split_queue):
+        output = self._piper(self._builder.new_reader(split_queue))
+        return output if isinstance(output, Reader) else output.reader()
+
+
 class Pipe(object):
     def __init__(self, schema=None, obj_key=None):
         self._num_writers = 0
