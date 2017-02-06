@@ -228,6 +228,17 @@ THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, long size_, lon
   return self;
 }
 
+THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
+{
+  THArgCheck(THTensor_(isContiguous)(tensor), 1, "input is not contiguous");
+  ptrdiff_t numel = THTensor_(nElement)(tensor);
+  THTensor *self = THTensor_(new)();
+  THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
+  THTensor_(setStorage)(self, tensor->storage, tensor->storageOffset, inferred_size, NULL);
+  THLongStorage_free(inferred_size);
+  return self;
+}
+
 /* Resize */
 void THTensor_(resize)(THTensor *self, THLongStorage *size, THLongStorage *stride)
 {
@@ -804,24 +815,9 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
 }
 
 THDescBuff THTensor_(sizeDesc)(const THTensor *tensor) {
-  const int L = TH_DESC_BUFF_LEN;
-  THDescBuff buf;
-  char *str = buf.str;
-  int n = 0;
-  n += snprintf(str, L-n, "[");
-  int i;
-  for(i = 0; i < tensor->nDimension; i++) {
-    if(n >= L) break;
-    n += snprintf(str+n, L-n, "%ld", tensor->size[i]);
-    if(i < tensor->nDimension-1) {
-      n += snprintf(str+n, L-n, " x ");
-    }
-  }
-  if(n < L - 2) {
-    snprintf(str+n, L-n, "]");
-  } else {
-    snprintf(str+L-5, 5, "...]");
-  }
+  THLongStorage *size = THTensor_(newSizeOf)((THTensor*)tensor);
+  THDescBuff buf = THLongStorage_sizeDesc(size);
+  THLongStorage_free(size);
   return buf;
 }
 
