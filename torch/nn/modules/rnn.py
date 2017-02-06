@@ -96,6 +96,23 @@ class RNNBase(Module):
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        if isinstance(self.all_weights[0][0], str):
+            return
+        num_layers = self.num_layers
+        num_directions = 2 if self.bidirectional else 1
+        self.all_weights = []
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                suffix = '_reverse' if direction == 1 else ''
+                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
+                weights = [x.format(layer, suffix) for x in weights]
+                if d['bias']:
+                    self.all_weights += [weights]
+                else:
+                    self.all_weights += [weights[:2]]
+
 
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with tanh or ReLU non-linearity to an input sequence.
