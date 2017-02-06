@@ -108,7 +108,7 @@ class RNNBase(Module):
                 suffix = '_reverse' if direction == 1 else ''
                 weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
                 weights = [x.format(layer, suffix) for x in weights]
-                if d['bias']:
+                if self.bias:
                     self.all_weights += [weights]
                 else:
                     self.all_weights += [weights[:2]]
