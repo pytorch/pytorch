@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "caffe2/core/operator.h"
+#include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
@@ -756,8 +757,13 @@ class DAGNet : public DAGNetBase {
  protected:
   bool RunAt(const std::vector<int>& chain) override {
     bool success = true;
-    for (const auto idx : chain) {
-      success &= operator_nodes_[idx].operator_->Run();
+    const auto& net_name = name_.c_str();
+    for (const auto i : chain) {
+      const auto& op_name = operator_nodes_[i].operator_->def().name().c_str();
+      const auto& op_type = operator_nodes_[i].operator_->def().type().c_str();
+      CAFFE_SDT(operator_start, net_name, op_name, op_type);
+      success &= operator_nodes_[i].operator_->Run();
+      CAFFE_SDT(operator_done, net_name, op_name, op_type);
     }
     return success;
   }
