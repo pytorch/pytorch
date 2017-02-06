@@ -502,7 +502,10 @@ class Scalar(Field):
 
     def set_type(self, dtype):
         self._original_dtype = dtype
-        self.dtype = np.dtype(dtype or np.void)
+        if dtype is not None:
+            self.dtype = np.dtype(dtype)
+        else:
+            self.dtype = np.dtype(np.void)
         self._validate_metadata()
 
     def id(self):
