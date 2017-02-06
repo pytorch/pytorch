@@ -320,6 +320,14 @@ class Struct(Field):
         except KeyError:
             raise AttributeError(item)
 
+    def __add__(self, other):
+        """
+        Allows to merge fields of two schema.Struct using '+' operator
+        """
+        if not isinstance(other, Struct):
+            return NotImplemented
+        return Struct(*(self.get_children() + other.get_children()))
+
 
 class Scalar(Field):
     """Represents a typed scalar or tensor of fixed shape.
