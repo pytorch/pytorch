@@ -138,3 +138,18 @@ class TestDB(unittest.TestCase):
         self.assertIn("a", sv.fields)
         self.assertIn("b", sv.fields)
         self.assertEqual(0, len(sv.b.fields))
+
+    def testStructAddition(self):
+        s1 = schema.Struct(
+            ('a', schema.Scalar())
+        )
+        s2 = schema.Struct(
+            ('b', schema.Scalar())
+        )
+        s = s1 + s2
+        self.assertIn("a", s.fields)
+        self.assertIn("b", s.fields)
+        with self.assertRaises(ValueError):
+            s1 + s1
+        with self.assertRaises(TypeError):
+            s1 + schema.Scalar()
