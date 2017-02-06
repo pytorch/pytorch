@@ -66,6 +66,8 @@ THC_API THCTensor *THCTensor_(newSelect)(THCState *state, THCTensor *tensor, int
 THC_API THCTensor *THCTensor_(newNarrow)(THCState *state, THCTensor *tensor, int dimension_, long firstIndex_, long size_);
 THC_API THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dimension1_, int dimension2_);
 THC_API THCTensor *THCTensor_(newUnfold)(THCState *state, THCTensor *tensor, int dimension_, long size_, long step_);
+THC_API THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage *size);
+
 
 THC_API void THCTensor_(resize)(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
 THC_API void THCTensor_(resizeAs)(THCState *state, THCTensor *tensor, THCTensor *src);

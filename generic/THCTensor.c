@@ -224,6 +224,17 @@ THCTensor *THCTensor_(newUnfold)(THCState *state, THCTensor *tensor, int dimensi
   return self;
 }
 
+THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage *size)
+{
+  THArgCheck(THCTensor_(isContiguous)(state, tensor), 2, "input is not contiguous");
+  ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
+  THCTensor *self = THCTensor_(new)(state);
+  THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
+  THCTensor_(setStorage)(state, self, tensor->storage, tensor->storageOffset, inferred_size, NULL);
+  THLongStorage_free(inferred_size);
+  return self;
+}
+
 /* Resize */
 void THCTensor_(resize)(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride)
 {
