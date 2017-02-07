@@ -65,6 +65,7 @@ def init_data_input_workers(
     batch_size,
     num_worker_threads=2,
     input_source_name="train",
+    max_buffered_batches=100,
 ):
     global global_coordinator
     device_option = scope.CurrentDeviceScope()
@@ -79,6 +80,7 @@ def init_data_input_workers(
         device_option,
         scope.CurrentNameScope(),
         input_source_name,
+        max_buffered_batches,
     )
 
     # Launch fetch worker threads
@@ -102,11 +104,12 @@ def init_data_input_workers(
 
 class DataInputCoordinator(object):
     def __init__(self, net, input_blob_names, batch_size,
-                 device_option, namescope, input_source_name):
+                 device_option, namescope, input_source_name,
+                 max_buffered_batches):
         self._net = net
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
-        self._internal_queue = Queue.Queue(maxsize=500)
+        self._internal_queue = Queue.Queue(maxsize=max_buffered_batches)
         self._queues = []
         self._device_option = device_option
         self._namescope = namescope
