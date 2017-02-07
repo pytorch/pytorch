@@ -333,8 +333,8 @@ class RNNCell(RNNCellBase):
         >>> hx = Variable(torch.randn(3, 20))
         >>> output = []
         >>> for i in range(6):
-        ...     hx = rnn(input, hx)
-        ...     output[i] = hx
+        ...     hx = rnn(input[i], hx)
+        ...     output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
