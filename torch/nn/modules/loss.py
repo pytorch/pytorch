@@ -167,11 +167,12 @@ class MSELoss(_Loss):
 
     ..math:: loss(x, y) = 1/n \sum |x_i - y_i|^2
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each
-    the sum operation still operates over all the elements, and divides by `n`.
+    `x` and `y` arbitrary shapes with a total of `n` elements each.
+    
+    The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
-    `sizeAverage` to `False`
+    `sizeAverage` to `False`.
 
     """
     pass
