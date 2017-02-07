@@ -6,6 +6,8 @@
 #include <mutex>
 #include <thread>
 
+#include <sys/socket.h>
+
 #include "fbcollective/transport/device.h"
 
 namespace fbcollective {
@@ -13,7 +15,14 @@ namespace transport {
 namespace tcp {
 
 struct attr {
+  attr() {}
+  /* implicit */ attr(const char* ptr) : hostname(ptr) {}
+
   std::string hostname;
+
+  // The address family defaults to AF_UNSPEC such that getaddrinfo(3)
+  // will try to find either IPv4 or IPv6 addresses.
+  int ai_family = AF_UNSPEC;
 };
 
 std::shared_ptr<::fbcollective::transport::Device> CreateDevice(

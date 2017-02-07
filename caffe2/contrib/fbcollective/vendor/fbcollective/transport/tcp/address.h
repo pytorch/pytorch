@@ -17,6 +17,7 @@ class Address : public ::fbcollective::transport::Address {
  public:
   Address() {}
   explicit Address(const struct sockaddr_storage&);
+  explicit Address(const struct sockaddr* addr, size_t addrlen);
   explicit Address(const std::vector<char>&);
   virtual ~Address() {}
 

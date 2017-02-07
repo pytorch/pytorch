@@ -17,8 +17,7 @@ EnforceNotMet::EnforceNotMet(
           "] ",
           condition,
           ". ",
-          msg,
-          " ")} {
+          msg)} {
   full_msg_ = this->msg();
 }
 

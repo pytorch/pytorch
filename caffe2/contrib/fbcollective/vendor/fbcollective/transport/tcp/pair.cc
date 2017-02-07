@@ -1,5 +1,7 @@
 #include "fbcollective/transport/tcp/pair.h"
 
+#include <sstream>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -48,7 +50,7 @@ void Pair::listen() {
 
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET6;
+  hints.ai_family = dev_->attr_.ai_family;
   hints.ai_socktype = SOCK_STREAM;
 
   struct addrinfo* result;
@@ -76,10 +78,21 @@ void Pair::listen() {
     break;
   }
 
-  freeaddrinfo(result);
+  // Expect listening file descriptor at this point.
+  // If there is none, build error message that includes all
+  // addresses that we attempted to bind to.
+  if (fd_ == -1) {
+    std::stringstream err;
+    for (auto rp = result; rp != nullptr; rp = rp->ai_next) {
+      err << Address(rp->ai_addr, rp->ai_addrlen).str();
+      if (rp->ai_next != nullptr) {
+        err << ", ";
+      }
+    }
+    FBC_ENFORCE_NE(fd_, -1, "Attempted to bind to: ", err);
+  }
 
-  // Expect listening file descriptor at this point
-  FBC_ENFORCE_NE(fd_, -1);
+  freeaddrinfo(result);
 
   // Register with device so we're called when peer connects
   changeState(LISTENING);

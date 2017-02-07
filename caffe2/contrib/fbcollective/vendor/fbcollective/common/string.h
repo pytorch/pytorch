@@ -11,6 +11,13 @@ inline void MakeStringInternal(std::stringstream& ss, const T& t) {
   ss << t;
 }
 
+template <>
+inline void MakeStringInternal(
+    std::stringstream& ss,
+    const std::stringstream& t) {
+  ss << t.str();
+}
+
 template <typename T, typename... Args>
 inline void
 MakeStringInternal(std::stringstream& ss, const T& t, const Args&... args) {

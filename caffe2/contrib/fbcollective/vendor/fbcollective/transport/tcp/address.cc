@@ -13,6 +13,10 @@ Address::Address(const struct sockaddr_storage& ss) {
   ss_ = ss;
 }
 
+Address::Address(const struct sockaddr* addr, size_t addrlen) {
+  memcpy(&ss_, addr, addrlen);
+}
+
 Address::Address(const std::vector<char>& bytes) {
   FBC_ENFORCE_EQ(sizeof(ss_), bytes.size());
   memcpy(&ss_, bytes.data(), sizeof(ss_));
