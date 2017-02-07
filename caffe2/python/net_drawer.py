@@ -4,13 +4,17 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import argparse
 import json
+import logging
 from collections import defaultdict
 from caffe2.python import utils
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 try:
     import pydot
 except ImportError:
-    print(
+    logger.info(
         'Cannot import pydot, which is required for drawing a network. This '
         'can usually be installed in python with "pip install pydot". Also, '
         'pydot requires graphviz to convert dot files to pdf: in ubuntu, this '
@@ -305,6 +309,29 @@ def GetGraphInJson(operators_or_net, output_filepath):
 
     with open(output_filepath, 'w') as f:
         json.dump({'nodes': nodes, 'edges': edges}, f)
+
+
+# A dummy minimal PNG image used by GetGraphPngSafe as a
+# placeholder when rendering fail to run.
+_DummyPngImage = (
+    b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00'
+    b'\x01\x01\x00\x00\x00\x007n\xf9$\x00\x00\x00\nIDATx\x9cc`\x00\x00'
+    b'\x00\x02\x00\x01H\xaf\xa4q\x00\x00\x00\x00IEND\xaeB`\x82')
+
+
+def GetGraphPngSafe(func, *args, **kwargs):
+    """
+    Invokes `func` (e.g. GetPydotGraph) with args. If anything fails - returns
+    and empty image instead of throwing Exception
+    """
+    try:
+        graph = func(*args, **kwargs)
+        if not isinstance(graph, pydot.Dot):
+            raise ValueError("func is expected to return pydot.Dot")
+        return graph.create_png()
+    except Exception as e:
+        logger.error("Failed to draw graph: %s", e)
+        return _DummyPngImage
 
 
 def main():
