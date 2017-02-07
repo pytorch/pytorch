@@ -29,10 +29,6 @@ class TensorDataset(Dataset):
         assert data_tensor.size(0) == target_tensor.size(0)
         self.data_tensor = data_tensor
         self.target_tensor = target_tensor
-        if self.data_tensor.dim() == 1:
-            self.data_tensor = self.data_tensor.view(-1, 1)
-        if self.target_tensor.dim() == 1:
-            self.target_tensor = self.target_tensor.view(-1, 1)
 
     def __getitem__(self, index):
         return self.data_tensor[index], self.target_tensor[index]

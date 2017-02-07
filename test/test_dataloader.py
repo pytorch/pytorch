@@ -27,8 +27,8 @@ class TestTensorDataset(TestCase):
         l = torch.randn(15)
         source = TensorDataset(t, l)
         for i in range(15):
-            self.assertEqual(t[i:i + 1], source[i][0])
-            self.assertEqual(l[i:i + 1], source[i][1])
+            self.assertEqual(t[i], source[i][0])
+            self.assertEqual(l[i], source[i][1])
 
 
 class ErrorDataset(Dataset):
@@ -52,7 +52,7 @@ class TestDataLoader(TestCase):
         for i, (sample, target) in enumerate(loader):
             idx = i * batch_size
             self.assertEqual(sample, self.data[idx:idx + batch_size])
-            self.assertEqual(target, self.labels[idx:idx + batch_size].view(-1, 1))
+            self.assertEqual(target, self.labels[idx:idx + batch_size])
         self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_shuffle(self, loader):
@@ -66,7 +66,7 @@ class TestDataLoader(TestCase):
                         self.assertFalse(found_data[data_point_idx])
                         found_data[data_point_idx] += 1
                         break
-                self.assertEqual(target, self.labels.narrow(0, data_point_idx, 1))
+                self.assertEqual(target, self.labels[data_point_idx])
                 found_labels[data_point_idx] += 1
             self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
             self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
