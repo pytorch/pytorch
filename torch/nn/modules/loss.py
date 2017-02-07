@@ -148,7 +148,7 @@ class KLDivLoss(_WeighedLoss):
     `input` `Tensor`.
 
     The loss can be described as:
-    
+
     .. math:: loss(x, target) = 1/n \sum(target_i * (log(target_i) - x_i))
 
     By default, the losses are averaged for each minibatch over observations
@@ -168,7 +168,7 @@ class MSELoss(_Loss):
     ..math:: loss(x, y) = 1/n \sum |x_i - y_i|^2
 
     `x` and `y` arbitrary shapes with a total of `n` elements each.
-    
+
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
