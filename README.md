@@ -39,6 +39,20 @@ Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/
     mkdir build && cd build
     cmake ..
     make
+
+#### Android and iOS
+
+We use CMake's Android and iOS ports to build native binaries that you can then integrate into your Android or XCode projects. See scripts/build_android.sh and scripts/build_ios.sh for more details.
+
+For Android, one can also use gradle to build Caffe2 directly with Android Studio. An example project can be found [here](https://github.com/bwasti/AICamera). Note that you may need to configure Android Studio so that it has the right SDK and NDK versions to build the code.
+
+#### Raspberry Pi
+
+For Raspbian, run scripts/build_raspbian.sh on the Raspberry Pi.
+
+#### Tegra X1
+
+To install Caffe2 on NVidia's Tegra X1 platform, simply install the latest system with the NVidia JetPack installer, and then run scripts/build_tegra_x1.sh on the Tegra device.
     
 ## Python support
 
