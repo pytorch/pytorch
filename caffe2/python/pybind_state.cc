@@ -625,11 +625,13 @@ void addGlobalMethods(py::module& m) {
         std::string(net_def));
     return true;
   });
-  m.def("run_net", [](const std::string& name) {
+  m.def("run_net", [](const std::string& name, int num_iter) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->GetNet(name), "Can't find net ", name);
     py::gil_scoped_release g;
-    CAFFE_ENFORCE(gWorkspace->RunNet(name), "Error running net ", name);
+    for (int i = 0; i < num_iter; i++) {
+      CAFFE_ENFORCE(gWorkspace->RunNet(name), "Error running net ", name);
+    }
     return true;
   });
   m.def(
