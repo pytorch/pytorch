@@ -24,7 +24,7 @@ class EnforceNotMet : public std::exception {
     return msg_stack_;
   }
 
-  const char* what() const noexcept override;
+  virtual const char* what() const noexcept override;
 
  private:
   std::vector<std::string> msg_stack_;

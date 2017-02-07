@@ -15,24 +15,32 @@ namespace test {
 class BaseTest : public ::testing::Test {
  protected:
   virtual void SetUp() {
-    ::fbcollective::transport::tcp::attr attr = {
-        .hostname = "localhost",
-    };
-
-    device_ = ::fbcollective::transport::tcp::CreateDevice(attr);
+    device_ = ::fbcollective::transport::tcp::CreateDevice("localhost");
     store_ = std::unique_ptr<::fbcollective::rendezvous::Store>(
         new ::fbcollective::rendezvous::HashStore);
   }
 
   void spawnThreads(int size, std::function<void(int)> fn) {
     std::vector<std::thread> threads;
+    std::vector<std::string> errors;
     for (int rank = 0; rank < size; rank++) {
-      threads.push_back(std::thread(std::bind(fn, rank)));
+      threads.push_back(std::thread([&, rank]() {
+        try {
+          fn(rank);
+        } catch (const std::exception& ex) {
+          errors.push_back(ex.what());
+        }
+      }));
     }
 
     // Wait for threads to complete
     for (auto& thread : threads) {
       thread.join();
+    }
+
+    // Re-throw first exception if there is one
+    if (errors.size() > 0) {
+      throw(std::runtime_error(errors[0]));
     }
   }
 
