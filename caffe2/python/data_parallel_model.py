@@ -9,6 +9,7 @@ from caffe2.python import model_helper, dyndep, scope, workspace, core, memonger
 from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
+dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/fbcollective:fbcollective_ops")
 
 log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
@@ -331,7 +332,7 @@ def _AllReduceGradientsDistributed(
     # Step 1: sum gradients from local GPUs to master GPU
     master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
     reducing_device_opt = master_device_opt
-    if all_reduce_engine == "RDMA_TCP":
+    if all_reduce_engine == "FBCOLLECTIVE":
         reducing_device_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
 
     # We need to specify a partial order using control_input to
@@ -367,9 +368,9 @@ def _AllReduceGradientsDistributed(
             nccl_control_blob = grads_group[0]
             model.net.Copy(master_grad, reduced_grad)
 
-        # RDMA_TCP works only on CPU context, so we need a temporary
-        # cpu-bound scratch blob.
-        if all_reduce_engine == "RDMA_TCP":
+        # FBCOLLECTIVE currently works only on CPU context, so we need
+        # a temporary cpu-bound scratch blob.
+        if all_reduce_engine == "FBCOLLECTIVE":
             with core.DeviceScope(reducing_device_opt):
                 model.param_init_net.ConstantFill(
                     [], reduced_grad + "cpu", shape=[1], value=0.0
