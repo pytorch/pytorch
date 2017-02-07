@@ -6,7 +6,7 @@ namespace fbcollective {
 
 class BarrierAllToAll : public Barrier {
  public:
-  explicit BarrierAllToAll(std::shared_ptr<Context>& context)
+  explicit BarrierAllToAll(const std::shared_ptr<Context>& context)
       : Barrier(context) {
     // Create send/recv buffers for every peer
     for (int i = 0; i < this->contextSize_; i++) {

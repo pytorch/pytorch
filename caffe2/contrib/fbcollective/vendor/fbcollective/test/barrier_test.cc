@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "fbcollective/barrier_all_to_all.h"
+#include "fbcollective/barrier_all_to_one.h"
 #include "fbcollective/test/base_test.h"
 
 namespace fbcollective {
@@ -43,6 +44,19 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::Combine(
         ::testing::Range(2, 16),
         ::testing::Values(barrierAllToAll)));
+
+static std::function<Func> barrierAllToOne =
+    [](std::shared_ptr<::fbcollective::Context>& context) {
+      ::fbcollective::BarrierAllToOne algorithm(context);
+      algorithm.Run();
+    };
+
+INSTANTIATE_TEST_CASE_P(
+    BarrierAllToOne,
+    BarrierTest,
+    ::testing::Combine(
+        ::testing::Range(2, 16),
+        ::testing::Values(barrierAllToOne)));
 
 } // namespace
 } // namespace test
