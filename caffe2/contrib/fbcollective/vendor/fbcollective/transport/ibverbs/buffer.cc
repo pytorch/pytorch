@@ -1,6 +1,10 @@
 #include "fbcollective/transport/ibverbs/buffer.h"
 
 #include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <iostream>
 
 #include "fbcollective/common/logging.h"
 
@@ -47,6 +51,12 @@ void Buffer::waitSend() {
 void Buffer::send(size_t offset, size_t length) {
   int rv;
 
+  if (debug_) {
+    std::cout << "[" << getpid() << "] ";
+    std::cout << "send " << length << " bytes";
+    std::cout << std::endl;
+  }
+
   struct ibv_sge list;
   list.addr = (uint64_t)ptr_ + offset;
   list.length = length;
@@ -73,10 +83,20 @@ void Buffer::send(size_t offset, size_t length) {
 
 void Buffer::handleCompletion(struct ibv_wc* wc) {
   if (wc->opcode & IBV_WC_RECV) {
+    if (debug_) {
+      std::cout << "[" << getpid() << "] ";
+      std::cout << "recv " << wc->byte_len << " bytes";
+      std::cout << std::endl;
+    }
     std::unique_lock<std::mutex> lock(m_);
     recvCompletions_++;
     recvCv_.notify_one();
   } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
+    if (debug_) {
+      std::cout << "[" << getpid() << "] ";
+      std::cout << "sent " << wc->byte_len << " bytes";
+      std::cout << std::endl;
+    }
     std::unique_lock<std::mutex> lock(m_);
     sendCompletions_++;
     sendCv_.notify_one();
