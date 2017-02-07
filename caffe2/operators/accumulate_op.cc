@@ -7,7 +7,7 @@ REGISTER_CPU_OPERATOR(Accumulate, AccumulateOp<float, CPUContext>);
 OPERATOR_SCHEMA(Accumulate)
   .NumInputs(1)
   .NumOutputs(1)
-  // TODO: add Shape inference function (bootcamp)
+  .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
 Accumulate operator accumulates the input tensor to the output tensor. If the
 output tensor already has the right size, we add to it; otherwise, we first
