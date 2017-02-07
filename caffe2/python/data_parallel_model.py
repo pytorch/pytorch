@@ -128,6 +128,11 @@ def Parallelize_GPU(
     )
 
     log.info("Post-iteration operators for updating params")
+    num_shards = 1 if rendezvous is None else rendezvous['num_shards']
+    # The following check is necessary for ring reduce to work
+    if rendezvous is not None:
+        assert num_shards > 1, \
+            "Please use more than one shard for distributed training"
     for device in devices:
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
         with core.DeviceScope(device_opt):
