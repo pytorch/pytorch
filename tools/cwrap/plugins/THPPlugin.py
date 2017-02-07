@@ -47,7 +47,6 @@ class THPPlugin(CWrapPlugin):
         'THFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
         'THLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
         'THIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
-        'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
         'THBoolTensor*': Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
         'THIndexTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
