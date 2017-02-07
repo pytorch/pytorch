@@ -1125,6 +1125,27 @@ class TestOperators(hu.HypothesisTestCase):
             inputs=[input_tensor],
             reference=exp_ref)
 
+    @given(input_tensor=hu.arrays(
+        dims=[10], elements=st.floats(min_value=1,
+                                      max_value=10000)),
+           **hu.gcs_cpu_only)
+    def test_log(self, input_tensor, gc, dc):
+        op = core.CreateOperator(
+            "Log",
+            ["input"],
+            ["output"]
+        )
+
+        def log_ref(input_tensor):
+            return (np.log(input_tensor),)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[input_tensor],
+            reference=log_ref)
+        self.assertGradientChecks(gc, op, [input_tensor], 0, [0])
+
     @given(num_threads=st.integers(1, 10),  # noqa
            num_elements=st.integers(1, 100),
            capacity=st.integers(1, 5),
