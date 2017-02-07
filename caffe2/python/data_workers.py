@@ -290,7 +290,7 @@ def fetcher(coordinator, worker_id, fetch_fun, batch_size, input_blob_names):
 
             coordinator.put(input_data)
         except Exception as e:
-            log.error(e)
+            logging.exception("Exception in fetcher", e)
             coordinator._stop("Exception in fetcher {}: {}".format(
                 worker_id, e
             ))
