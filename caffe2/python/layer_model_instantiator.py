@@ -20,13 +20,25 @@ def generate_predict_net(model):
     return predict_net
 
 
-def generate_training_nets(model):
+def _generate_training_net_only(model):
     train_net = core.Net('train_net')
     train_init_net = model.create_init_net('train_init_net')
 
-    loss = model.loss
     for layer in model.layers:
         layer.add_operators(train_net, train_init_net)
+    return train_init_net, train_net
+
+
+def generate_training_nets_forward_only(model):
+    train_init_net, train_net = _generate_training_net_only(model)
+    train_net.set_input_record(model.input_feature_schema)
+    return train_init_net, train_net
+
+
+def generate_training_nets(model):
+    train_init_net, train_net = _generate_training_net_only(model)
+
+    loss = model.loss
     grad_map = train_net.AddGradientOperators(loss.field_blobs())
     for param, optimizer in model.param_to_optim.items():
         if not optimizer:
