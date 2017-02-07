@@ -330,7 +330,7 @@ def GetGraphPngSafe(func, *args, **kwargs):
             raise ValueError("func is expected to return pydot.Dot")
         return graph.create_png()
     except Exception as e:
-        logger.error("Failed to draw graph: %s", e)
+        logger.error("Failed to draw graph: {}".format(e))
         return _DummyPngImage
 
 
