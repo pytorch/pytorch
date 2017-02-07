@@ -168,9 +168,13 @@ if (BUILD_PYTHON)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
-
-  include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
-  list(APPEND Caffe2_PYTHON_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
+  if (PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND AND NUMPY_FOUND)
+    include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
+    list(APPEND Caffe2_PYTHON_DEPENDENCY_LIBS ${PYTHON_LIBRARIES})
+  else()
+    message(WARNING "Python dependencies not met. Not compiling with python. Suppress this warning with -DBUILD_PYTHON=OFF")
+    set(BUILD_PYTHON OFF)
+  endif()
 endif()
 
 # ---[ pybind11

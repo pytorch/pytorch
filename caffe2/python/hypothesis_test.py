@@ -1373,7 +1373,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         # This golden array is dependent on the specified inp_sizes, out_sizes,
         # tt_ranks, and seed. Changing these will cause the test to fail.
-        self.assertAlmostEqual(np.linalg.norm(golden - Y), 0, delta=1e-12)
+        self.assertAlmostEqual(np.linalg.norm(golden - Y), 0, delta=1e-10)
 
     @given(num_workers=st.integers(1, 10),
            net_type=st.sampled_from(
