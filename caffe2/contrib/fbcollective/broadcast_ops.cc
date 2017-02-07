@@ -7,7 +7,7 @@ namespace {
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Broadcast,
     FBCOLLECTIVE,
-    BroadcastOp<float, CPUContext>);
+    BroadcastOp<CPUContext>);
 }
 } // namespace fbcollective
 } // namespace caffe2

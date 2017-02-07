@@ -10,7 +10,7 @@
 namespace caffe2 {
 namespace fbcollective {
 
-template <typename T, class Context>
+template <class Context>
 class BroadcastOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -31,13 +31,21 @@ class BroadcastOp final : public Operator<Context> {
   void initialize() {
     auto& input = Input(INPUT);
     auto* output = Output(OUTPUT);
-    CAFFE_ENFORCE_EQ(input.template data<T>(), output->template data<T>());
+    CAFFE_ENFORCE_EQ(input.raw_data(), output->raw_data());
 
     const auto& context =
         OperatorBase::Input<std::shared_ptr<::fbcollective::Context>>(COMM);
-    T* ptr = output->template mutable_data<T>();
-    algorithm_.reset(new ::fbcollective::BroadcastOneToAll<T>(
-        context, ptr, output->size(), root_));
+    if (output->template IsType<float>()) {
+      auto ptr = output->template mutable_data<float>();
+      algorithm_.reset(new ::fbcollective::BroadcastOneToAll<float>(
+          context, ptr, output->size(), root_));
+    } else if (output->template IsType<long>()) {
+      auto ptr = output->template mutable_data<long>();
+      algorithm_.reset(new ::fbcollective::BroadcastOneToAll<long>(
+          context, ptr, output->size(), root_));
+    } else {
+      CAFFE_ENFORCE(false, "Unhandled type: ", output->meta().name());
+    }
   }
 
   const int root_;
