@@ -71,6 +71,7 @@ TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, long siz
   
 TH_API void THTensor_(resize)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);
+TH_API void THTensor_(resizeNd)(THTensor *tensor, int nDimension, long *size, long *stride);
 TH_API void THTensor_(resize1d)(THTensor *tensor, long size0_);
 TH_API void THTensor_(resize2d)(THTensor *tensor, long size0_, long size1_);
 TH_API void THTensor_(resize3d)(THTensor *tensor, long size0_, long size1_, long size2_);
@@ -79,6 +80,7 @@ TH_API void THTensor_(resize5d)(THTensor *tensor, long size0_, long size1_, long
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
 TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
+TH_API void THTensor_(setStorageNd)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, int nDimension, long *size, long *stride);
 TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     long size0_, long stride0_);
 TH_API void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,

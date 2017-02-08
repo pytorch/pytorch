@@ -2178,25 +2178,25 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
   {									\
-    THByteTensor_rawResize(r_, t->nDimension, t->size, NULL);		\
+    THByteTensor_resizeNd(r_, t->nDimension, t->size, NULL);		\
     TH_TENSOR_APPLY2(unsigned char, r_, real, t,			\
 		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, real value)	\
   {									\
-    THTensor_(rawResize)(r_, t->nDimension, t->size, NULL);		\
+    THTensor_(resizeNd)(r_, t->nDimension, t->size, NULL);		\
     TH_TENSOR_APPLY2(real, r_, real, t,					\
 		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
   {									\
-    THByteTensor_rawResize(r_, ta->nDimension, ta->size, NULL);		\
+    THByteTensor_resizeNd(r_, ta->nDimension, ta->size, NULL);		\
     TH_TENSOR_APPLY3(unsigned char, r_, real, ta, real, tb,		\
 		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
   {									\
-    THTensor_(rawResize)(r_, ta->nDimension, ta->size, NULL);		\
+    THTensor_(resizeNd)(r_, ta->nDimension, ta->size, NULL);		\
     TH_TENSOR_APPLY3(real, r_, real, ta, real, tb,			\
 		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }									\
