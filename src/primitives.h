@@ -101,7 +101,7 @@ Tptr ptradd(Tptr ptr, int i) {
 }
 
 __device__ __forceinline__
-nullptr_t ptradd(nullptr_t ptr, int i) {
+std::nullptr_t ptradd(std::nullptr_t ptr, int i) {
   return nullptr;
 }
 
@@ -120,8 +120,8 @@ class Primitives {
                   DST2_T dst2,
             int len, int maxoffset, int step, SYNC_Ts... flags) {
 
-    enum { noSrc2 = std::is_same<SRC2_T, nullptr_t>::value };
-    enum { noDst2 = std::is_same<DST2_T, nullptr_t>::value };
+    enum { noSrc2 = std::is_same<SRC2_T, std::nullptr_t>::value };
+    enum { noDst2 = std::is_same<DST2_T, std::nullptr_t>::value };
     static_assert(noSrc2 || std::is_same<SRC2_T, const T*>::value,
         "src2 must be of type T* or nullptr_t");
     static_assert(noDst2 || std::is_same<DST2_T, T*>::value,
@@ -146,8 +146,8 @@ class Primitives {
              THREADS,
              OpType,
              T,
-             !std::is_same<DST2_T, nullptr_t>::value, // HAS_DEST1
-             !std::is_same<SRC2_T, nullptr_t>::value  // HAS_SRC1
+             !std::is_same<DST2_T, std::nullptr_t>::value, // HAS_DEST1
+             !std::is_same<SRC2_T, std::nullptr_t>::value  // HAS_SRC1
             >
             (
              threadIdx.x,
