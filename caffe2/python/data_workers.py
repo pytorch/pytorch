@@ -106,6 +106,7 @@ class DataInputCoordinator(object):
     def __init__(self, net, input_blob_names, batch_size,
                  device_option, namescope, input_source_name,
                  max_buffered_batches):
+        assert isinstance(max_buffered_batches, int)
         self._net = net
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
