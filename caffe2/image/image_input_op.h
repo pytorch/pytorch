@@ -357,7 +357,7 @@ void ImageInputOp<Context>::DecodeAndTransform(
   }
   if (scaled_height != img.rows || scaled_width != img.cols) {
     cv::resize(img, scaled_img, cv::Size(scaled_width, scaled_height),
-               0, 0, cv::INTER_LINEAR);
+               0, 0, cv::INTER_AREA);
   } else {
     // No scaling needs to be done.
     scaled_img = img;
@@ -392,7 +392,7 @@ void ImageInputOp<Context>::DecodeAndTransposeOnly(
   }
   if (scaled_height != img.rows || scaled_width != img.cols) {
     cv::resize(img, scaled_img, cv::Size(scaled_width, scaled_height),
-               0, 0, cv::INTER_LINEAR);
+               0, 0, cv::INTER_AREA);
   } else {
     // No scaling needs to be done.
     scaled_img = img;
