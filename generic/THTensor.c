@@ -510,6 +510,33 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
   }
 }
 
+void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
+{
+  int d;
+
+  if(!src)
+    src = self;
+
+  THArgCheck((dimension >= 0) && (dimension <= src->nDimension), 2, "dimension out of range");
+  THArgCheck(src->nDimension > 0, 2, "cannot unsqueeze empty tensor");
+
+  THTensor_(set)(self, src);
+
+  self->size = (long*)THRealloc(self->size, sizeof(long)*(self->nDimension+1));
+  self->stride = (long*)THRealloc(self->stride, sizeof(long)*(self->nDimension+1));
+  self->nDimension++;
+  for (d = self->nDimension-1; d > dimension; d--) {
+    self->size[d] = self->size[d-1];
+    self->stride[d] = self->stride[d-1];
+  }
+  if (dimension+1 < self->nDimension) {
+    self->stride[dimension] = self->size[dimension+1] * self->stride[dimension+1];
+  } else {
+    self->stride[dimension] = 1;
+  }
+  self->size[dimension] = 1;
+}
+
 int THTensor_(isContiguous)(const THTensor *self)
 {
   long z = 1;

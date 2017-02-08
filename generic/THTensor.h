@@ -101,6 +101,7 @@ TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, lon
 
 TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);
 TH_API void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension_);
+TH_API void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension_);
 
 TH_API int THTensor_(isContiguous)(const THTensor *self);
 TH_API int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor *src);
