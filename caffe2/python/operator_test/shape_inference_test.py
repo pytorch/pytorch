@@ -13,9 +13,9 @@ class TestShapeInference(test_util.TestCase):
         m.FC("data", "fc1", dim_in=96, dim_out=32)
         m.FC("fc1", "fc2", dim_in=32, dim_out=55)
 
-        workspace.FeedBlob("data", np.random.rand(64, 96).astype(np.float32))
         (shapes, types) = workspace.InferShapesAndTypes(
             [m.param_init_net, m.net],
+            {'data': [64, 96]}
         )
 
         self.assertEquals(shapes['data'], [64, 96])

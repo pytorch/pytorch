@@ -5,9 +5,9 @@
 
 #include "caffe2/core/asan.h"
 #include "caffe2/core/db.h"
+#include "caffe2/core/operator.h"
 #include "caffe2/core/predictor.h"
 #include "caffe2/utils/mkl_utils.h"
-#include "caffe2/core/operator.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 
@@ -680,23 +680,43 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;
   });
-  m.def("infer_shapes_and_types", [](const std::vector<py::bytes>& net_protos) {
-    CAFFE_ENFORCE(gWorkspace);
+  m.def(
+      "infer_shapes_and_types_from_workspace",
+      [](const std::vector<py::bytes>& net_protos) {
+        CAFFE_ENFORCE(gWorkspace);
 
-    // Parse protobuffers to NetDefs
-    std::vector<std::unique_ptr<caffe2::NetDef>> nets;
-    for(auto proto : net_protos) {
-       std::unique_ptr<NetDef> def(new NetDef());
-       def.get()->ParseFromString(proto);
-       nets.push_back(std::move(def));
-    }
+        // Parse protobuffers to NetDefs
+        std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        for (auto proto : net_protos) {
+          std::unique_ptr<NetDef> def(new NetDef());
+          def.get()->ParseFromString(proto);
+          nets.push_back(std::move(def));
+        }
 
-    auto blob_info = InferBlobShapesAndTypes(gWorkspace, nets);
+        auto blob_info = InferBlobShapesAndTypesFromWorkspace(gWorkspace, nets);
 
-    std::string protob;
-    CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
-    return py::bytes(protob);
-  });
+        std::string protob;
+        CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
+  m.def(
+      "infer_shapes_and_types_from_map",
+      [](const std::vector<py::bytes>& net_protos,
+         const std::map<std::string, std::vector<TIndex>> blob_dimensions) {
+        // Parse protobuffers to NetDefs
+        std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        for (auto proto : net_protos) {
+          std::unique_ptr<NetDef> def(new NetDef());
+          def.get()->ParseFromString(proto);
+          nets.push_back(std::move(def));
+        }
+
+        auto blob_info = InferBlobShapesAndTypesFromMap(blob_dimensions, nets);
+
+        std::string protob;
+        CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
   m.def("create_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));
