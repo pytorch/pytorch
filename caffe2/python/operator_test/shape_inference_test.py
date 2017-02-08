@@ -56,6 +56,29 @@ class TestShapeInference(test_util.TestCase):
         # initialize everything
         self.InferTensorRunAndCompare(model)
 
+    def testShapeInferenceTranspose(self):
+        model = cnn.CNNModelHelper()
+
+        workspace.FeedBlob(
+            "tensor",
+            np.random.rand(4, 2, 3, 3, 5).astype(np.float32)
+        )
+
+        # Testing with axes undefined
+        model.Transpose(
+            ["tensor"],
+            "transpose",
+        )
+        self.InferTensorRunAndCompare(model)
+
+        # Testing with axes defined
+        model.Transpose(
+            ["tensor"],
+            "transpose",
+            axes=np.random.permutation(5)
+        )
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model):
         '''
         Runs shape inference, and then the model to check

@@ -37,7 +37,38 @@ REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
 OPERATOR_SCHEMA(Transpose)
     .NumInputs(1)
     .NumOutputs(1)
-    // TODO: add Shape inference function (bootcamp)
+    .TensorInferenceFunction([](
+        const OperatorDef& def,
+        const vector<TensorShape>& in) {
+      ArgumentHelper helper(def);
+      vector<int> axes = helper.GetRepeatedArgument<int>("axes");
+      vector<TensorShape> out(1);
+      out[0].set_data_type(in[0].data_type());
+
+      if (axes.empty()) {
+        for (auto axis = in [0].dims().rbegin(); axis != in[0].dims().rend();
+             ++axis) {
+          out[0].add_dims(*axis);
+        }
+      } else {
+        auto tensor_size = in[0].dims().size();
+        auto valid_axes =
+            std::all_of(axes.begin(), axes.end(), [&tensor_size](int& axis) {
+              return axis >= 0 && axis < tensor_size;
+            });
+
+        CAFFE_ENFORCE(valid_axes, "Axes argument passed in had invalid values");
+        CAFFE_ENFORCE(
+            axes.size() == tensor_size,
+            "Axes argument passed in had the incorrect size");
+
+        for (auto axis = axes.begin(); axis != axes.end(); ++axis) {
+          out[0].add_dims(in[0].dims().Get(*axis));
+        }
+      }
+
+      return out;
+    })
     .SetDoc(R"DOC(
 Transpose the input tensor similar to numpy.transpose. For example, when
 axes=(1, 0, 2), given an input tensor of shape (1, 2, 3), the output shape
