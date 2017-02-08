@@ -185,29 +185,9 @@ GradientOpsMeta GetGradientForOp(
   return meta;
 }
 
-// TODO: add ability to pass shapes separatetely (not via workspace) - bootcamp
-TensorShapes InferBlobShapesAndTypes(
-    Workspace* ws,
+static TensorShapes InferBlobShapesAndTypes(
+    CaffeMap<string, TensorShape>& blob_desc,
     const vector<std::unique_ptr<NetDef>>& nets) {
-  CaffeMap<string, TensorShape> blob_desc;
-  // Populate shapes from workplace
-  std::vector<string> ws_blobs = ws->Blobs();
-  for (auto& s : ws_blobs) {
-    Blob* b = ws->GetBlob(s);
-    ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
-    TensorShape tp;
-
-    if (shape_fun) {
-      auto shape = shape_fun(b->GetRaw());
-      for (auto d : shape) {
-        tp.add_dims(d);
-      }
-    } else {
-      tp.set_unknown_shape(true);
-    }
-    blob_desc[s] = tp;
-  }
-
   for (auto& defptr : nets) {
     for (const OperatorDef& op : defptr.get()->op()) {
       vector<TensorShape> input_desc;
@@ -248,6 +228,46 @@ TensorShapes InferBlobShapesAndTypes(
     tpnew->set_name(kv.first);
   }
   return tps;
+}
+
+TensorShapes InferBlobShapesAndTypesFromWorkspace(
+    Workspace* ws,
+    const vector<std::unique_ptr<NetDef>>& nets) {
+  CaffeMap<string, TensorShape> blob_desc;
+  // Populate shapes from workplace
+  const std::vector<string>& ws_blobs = ws->Blobs();
+  for (const auto& s : ws_blobs) {
+    Blob* b = ws->GetBlob(s);
+    ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
+    TensorShape tp;
+
+    if (shape_fun) {
+      auto shape = shape_fun(b->GetRaw());
+      for (auto d : shape) {
+        tp.add_dims(d);
+      }
+    } else {
+      tp.set_unknown_shape(true);
+    }
+    blob_desc[s] = tp;
+  }
+  return InferBlobShapesAndTypes(blob_desc, nets);
+}
+
+TensorShapes InferBlobShapesAndTypesFromMap(
+    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const vector<std::unique_ptr<NetDef>>& nets) {
+  CaffeMap<string, TensorShape> blob_desc;
+  // Populate shapes from known blobs
+  for (const auto& blob : blob_dimensions) {
+    TensorShape tp;
+    for (auto d : blob.second) {
+      CAFFE_ENFORCE_GT(d, 0);
+      tp.add_dims(d);
+    }
+    blob_desc[blob.first] = tp;
+  }
+  return InferBlobShapesAndTypes(blob_desc, nets);
 }
 
 }  // namespace caffe2
