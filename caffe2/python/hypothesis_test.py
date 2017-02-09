@@ -2108,6 +2108,30 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X], piecewise)
         self.assertDeviceChecks(dc, op, [X], [0])
 
+    @given(X=hu.tensor(min_dim=1,
+                       max_dim=4,
+                       elements=st.floats(min_value=-100, max_value=100)),
+           extra_dim=st.integers(0, 5),
+           **hu.gcs_cpu_only)
+    def test_sparse_to_dense(self, X, extra_dim, gc, dc):
+        N = X.shape[0]
+        first_dim = N + extra_dim
+        D = np.random.uniform(0, 1, size=(first_dim, 3))
+        I = np.random.randint(first_dim, size=N)
+
+        op = core.CreateOperator("SparseToDense", ["I", "X", "D"], ["Y"])
+
+        def sparse_to_dense(I, X, D):
+            O = np.zeros([first_dim] + list(X.shape[1:]))
+            if len(O.shape) == 1:
+                O[I] = X
+            else:
+                O[I, :] = X
+            return [O]
+
+        self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
+        self.assertDeviceChecks(dc, op, [I, X, D], [0])
+
 
 if __name__ == "__main__":
     unittest.main()
