@@ -1274,6 +1274,22 @@ class TestNN(NNTestCase):
         output.backward(grad_output)
         self.assertEqual(grad_output, grad_output_clone)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_noncontig_conv_grad(self):
+        # FIXME: remove after adding non-contiguous grad tests for all modules
+        module = nn.Conv2d(3, 5, kernel_size=3, padding=1).cuda()
+        input = Variable(torch.randn(2, 3, 10, 10).cuda(), requires_grad=True)
+        output = module(input)
+
+        grad = torch.randn(2, 2, 5, 10, 10).cuda()[:, 1]
+        assert not grad.is_contiguous()
+        output.backward(grad, retain_variables=True)
+        result = output.grad.data.clone()
+        output.grad.data.zero_()
+
+        output.backward(grad.contiguous())
+        self.assertEqual(result, output.grad.data)
+
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)
         upscale_factor = random.randint(2, 5)

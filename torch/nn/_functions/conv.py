@@ -38,6 +38,7 @@ class ConvNd(Function):
 
     def backward(self, grad_output):
         k = grad_output.dim()
+        grad_output = grad_output.contiguous()
         input, weight, bias = self.saved_tensors
         if k == 3:
             grad_output, input, weight = _view4d(grad_output, input, weight)
