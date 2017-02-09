@@ -1,0 +1,5 @@
+set(GLOO_BENCHMARK_SRCS
+  "${CMAKE_CURRENT_SOURCE_DIR}/benchmark.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/options.cc"
+  PARENT_SCOPE
+  )
