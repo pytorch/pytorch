@@ -39,7 +39,7 @@ except NameError:
 
 
 def _GetRegisteredOperators():
-    return set(s.decode() for s in workspace.RegisteredOperators())
+    return set(workspace.RegisteredOperators())
 
 
 _REGISTERED_OPERATORS = _GetRegisteredOperators()
