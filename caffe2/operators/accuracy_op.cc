@@ -2,6 +2,16 @@
 
 namespace caffe2 {
 
+struct PredictionCmp {
+  bool operator()(
+      const std::pair<float, int>& lhs,
+      const std::pair<float, int>& rhs) {
+    return (
+        lhs.first > rhs.first ||
+        (lhs.first == rhs.first && lhs.second < rhs.second));
+  }
+};
+
 template <>
 bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
@@ -39,40 +49,36 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
       }
     }
   } else {
-    // Make a vector of pairs(prediction, index) so that
-    // the index of elements can be extracted after sort.
-    // top-k algorithm rewritten based on algorithm in
-    // Caffe accuracy layer
-    std::vector<std::pair<float, int>> Xdata_pairs;
-
     for (int i = 0; i < N; ++i) {
-      // Clear the data from the previous iteration
-      Xdata_pairs.clear();
+      // Build a min-heap, the heap element is paire of (prediction, idx)
+      // the top of the heap is the smallest prediction
+      std::priority_queue<
+          std::pair<float, int>,
+          std::vector<std::pair<float, int>>,
+          PredictionCmp>
+          PQ;
 
+      // Maintain the size of heap to be less or equal to top_k, therefore the
+      // heap is holding the top k largest predictions. Increase correct by one
+      // when the index j equals to labelData.
+      // When poping predictions out of the heap, check if its index
+      // equals to labelData. if yes, decrease correct by one and break, because
+      // the next index are greater than labelData, so no need to check further
       for (int j = 0; j < D; ++j) {
-        Xdata_pairs.push_back(std::make_pair(Xdata[i * D + j], j));
-      }
-
-      // Sort so that the k maximum predictions appear
-      // at the beginning of vector.
-      std::partial_sort(
-          Xdata_pairs.begin(),
-          Xdata_pairs.begin() + top_k,
-          Xdata_pairs.end(),
-          [](std::pair<float, int> lhs, std::pair<float, int> rhs) {
-            if (lhs.first == rhs.first) {
-              return lhs.second < rhs.second;
-            } else {
-              return lhs.first > rhs.first;
+        auto pred = Xdata[i * D + j];
+        if (PQ.size() < top_k || pred > PQ.top().first) {
+          const auto label_data = labelData[i];
+          if (j == label_data) {
+            ++correct;
+          }
+          PQ.push(std::make_pair(pred, j));
+          if (PQ.size() > top_k) {
+            if (PQ.top().second == label_data) {
+              --correct;
+              break;
             }
-          });
-
-      // Increment accuracy if any of the top k predictions
-      // are equal to the expected label.
-      for (int k = 0; k < top_k; k++) {
-        if (Xdata_pairs[k].second == labelData[i]) {
-          ++correct;
-          break;
+            PQ.pop();
+          }
         }
       }
     }
