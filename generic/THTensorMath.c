@@ -513,77 +513,69 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
   }
 }
 
-void THTensor_(lsh)(THTensor *r_, THTensor *t, real value)
+void THTensor_(lshift)(THTensor *r_, THTensor *t, real value)
 {
 #if defined(TH_REAL_IS_FLOAT)
-  const real temp = powf(2, value);
+  return THTensor_(mul)(r_, t, powf(2, value));
 #elif defined(TH_REAL_IS_DOUBLE)
-  const real temp = pow(2, value);
+  return THTensor_(mul)(r_, t, pow(2, value));
+#elif defined(TH_REAL_IS_HALF)
+  return THError("lshift is not supported for Half");
 #endif
   THTensor_(resizeAs)(r_, t);
-  if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
+  if (THTensor_(isContiguous)(r_) &&
+      THTensor_(isContiguous)(t) &&
+      THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
       long sz = THTensor_(nElement)(t);
       long i;
       #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD * 100) private(i)
       for (i=0; i<sz; i++) {
-#if defined(TH_REAL_IS_FLOAT)
-          rp[i] = tp[i] * temp;
-#elif defined(TH_REAL_IS_DOUBLE)
-          rp[i] = tp[i] * temp;
-#elif defined(TH_REAL_IS_BYTE)
+#if defined(TH_REAL_IS_BYTE)
           rp[i] = ((real) tp[i]) << value;
-#else
+#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
           rp[i] = ((unsigned real) tp[i]) << value;
 #endif
       }
   } else {
-#if defined(TH_REAL_IS_FLOAT)
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data * temp););
-#elif defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data * temp););
-#elif defined(TH_REAL_IS_BYTE)
+#if defined(TH_REAL_IS_BYTE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((real) *t_data) << value););
-#else
+#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((unsigned real) *t_data) << value););
 #endif
   }
 }
 
-void THTensor_(rsh)(THTensor *r_, THTensor *t, real value)
+void THTensor_(rshift)(THTensor *r_, THTensor *t, real value)
 {
 #if defined(TH_REAL_IS_FLOAT)
-  const real temp = powf(2, value);
+  return THTensor_(div)(r_, t, powf(2, value));
 #elif defined(TH_REAL_IS_DOUBLE)
-  const real temp = pow(2, value);
+  return THTensor_(div)(r_, t, pow(2, value));
+#elif defined(TH_REAL_IS_HALF)
+  return THError("rshift is not supported for Half");
 #endif
   THTensor_(resizeAs)(r_, t);
-  if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
+  if (THTensor_(isContiguous)(r_) &&
+      THTensor_(isContiguous)(t) &&
+      THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
       long sz = THTensor_(nElement)(t);
       long i;
       #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD * 100) private(i)
       for (i=0; i<sz; i++) {
-#if defined(TH_REAL_IS_FLOAT)
-          rp[i] = tp[i] / temp;
-#elif defined(TH_REAL_IS_DOUBLE)
-          rp[i] = tp[i] / temp;
-#elif defined(TH_REAL_IS_BYTE)
+#if defined(TH_REAL_IS_BYTE)
           rp[i] = ((real) tp[i]) >> value;
-#else
+#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
           rp[i] = ((unsigned real) tp[i]) >> value;
 #endif
       }
   } else {
-#if defined(TH_REAL_IS_FLOAT)
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data / temp););
-#elif defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (*t_data / temp););
-#elif defined(TH_REAL_IS_BYTE)
+#if defined(TH_REAL_IS_BYTE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((real) *t_data) >> value););
-#else
+#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((unsigned real) *t_data) >> value););
 #endif
   }
@@ -731,6 +723,86 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
         rp[i] = tp[i] / sp[i];
   } else {
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data / *src_data;);
+  }
+}
+
+void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
+{
+#if defined(TH_REAL_IS_HALF)
+  return THError("clshift is not supported for Half");
+#endif
+  THTensor_(resizeAs)(r_, t);
+  if (THTensor_(isContiguous)(r_) &&
+      THTensor_(isContiguous)(t) &&
+      THTensor_(isContiguous)(src) &&
+      THTensor_(nElement)(r_) == THTensor_(nElement)(src)) {
+      real *tp = THTensor_(data)(t);
+      real *sp = THTensor_(data)(src);
+      real *rp = THTensor_(data)(r_);
+      ptrdiff_t sz = THTensor_(nElement)(t);
+      ptrdiff_t i;
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+    for (i=0; i<sz; i++) {
+#if defined(TH_REAL_IS_FLOAT)
+      rp[i] = tp[i] * powf(2, sp[i]);
+#elif defined(TH_REAL_IS_DOUBLE)
+      rp[i] = tp[i] * pow(2, sp[i]);
+#elif defined(TH_REAL_IS_BYTE)
+      rp[i] = ((real) tp[i]) << sp[i];
+#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+      rp[i] = ((unsigned real) tp[i]) << sp[i];
+#endif
+    }
+  } else {
+#if defined(TH_REAL_IS_FLOAT)
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data * powf(2, *src_data););
+#elif defined(TH_REAL_IS_DOUBLE)
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data * pow(2, *src_data););
+#elif defined(TH_REAL_IS_BYTE)
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = ((real)*t_data) << *src_data;);
+#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = ((unsigned real)*t_data) << *src_data;);
+#endif
+  }
+}
+
+void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
+{
+#if defined(TH_REAL_IS_HALF)
+  return THError("crshift is not supported for Half");
+#endif
+  THTensor_(resizeAs)(r_, t);
+  if (THTensor_(isContiguous)(r_) &&
+      THTensor_(isContiguous)(t) &&
+      THTensor_(isContiguous)(src) &&
+      THTensor_(nElement)(r_) == THTensor_(nElement)(src)) {
+      real *tp = THTensor_(data)(t);
+      real *sp = THTensor_(data)(src);
+      real *rp = THTensor_(data)(r_);
+      ptrdiff_t sz = THTensor_(nElement)(t);
+      ptrdiff_t i;
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+    for (i=0; i<sz; i++) {
+#if defined(TH_REAL_IS_FLOAT)
+      rp[i] = tp[i] / powf(2, sp[i]);
+#elif defined(TH_REAL_IS_DOUBLE)
+      rp[i] = tp[i] / pow(2, sp[i]);
+#elif defined(TH_REAL_IS_BYTE)
+      rp[i] = ((real) tp[i]) >> sp[i];
+#else
+      rp[i] = ((unsigned real) tp[i]) >> sp[i];
+#endif
+    }
+  } else {
+#if defined(TH_REAL_IS_FLOAT)
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data / powf(2, *src_data););
+#elif defined(TH_REAL_IS_DOUBLE)
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data / pow(2, *src_data););
+#elif defined(TH_REAL_IS_BYTE)
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = ((real)*t_data) >> *src_data;);
+#else
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = ((unsigned real)*t_data) >> *src_data;);
+#endif
   }
 }
 
