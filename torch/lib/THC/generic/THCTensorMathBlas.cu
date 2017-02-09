@@ -424,7 +424,7 @@ __global__ void createBatchGemmBuffer(const real** buffer, real* data,
   const long idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < num_batches) {
     buffer[idx] = data + idx * stride;
-   }
+  }
 }
 
 THC_API void
