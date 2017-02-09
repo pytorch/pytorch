@@ -171,9 +171,9 @@ export MACOSX_DEPLOYMENT_TARGET=10.9 # if OSX
 pip install -r requirements.txt
 python setup.py install
 ```
-Alternatively:
+Alternatively, for a bleeding edge install/upgrade:
 ```
-pip install https://github.com/pytorch/pytorch/archive/master.zip
+pip install --upgrade https://github.com/pytorch/pytorch/archive/master.zip
 ```
 
 ### Docker image
