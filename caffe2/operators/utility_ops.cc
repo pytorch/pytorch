@@ -729,14 +729,27 @@ SHOULD_NOT_DO_GRADIENT(Copy);
 class GetGatherGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    // For now we don't do any reshaping as the consumer of this op would
-    // probably be ScatterUpdate which is intenionally ignores shapes. We might
-    // need to revisit it in the future for correctness purposes. The right
-    // shape for the output woild be to flatten INDICES and collapse first X
-    // dims of GRAD
+    ArgumentHelper argsHelper(def_);
+    const bool dense_gradient =
+        argsHelper.GetSingleArgument<bool>("dense_gradient", false);
+
     using Op = GatherOp<CPUContext>;
-    SetSparse(Op::DATA, I(Op::INDICES), GO(0));
-    return vector<OperatorDef>();
+
+    if (dense_gradient) {
+      return vector<OperatorDef>{CreateOperatorDef(
+          "SparseToDense",
+          "",
+          vector<string>{I(Op::INDICES), GO(0), I(Op::DATA)},
+          vector<string>{GI(Op::DATA)})};
+    } else {
+      // For now we don't do any reshaping as the consumer of this op would
+      // probably be ScatterUpdate which is intenionally ignores shapes. We
+      // might need to revisit it in the future for correctness purposes. The
+      // right shape for the output woild be to flatten INDICES and collapse
+      // first X dims of GRAD
+      SetSparse(Op::DATA, I(Op::INDICES), GO(0));
+      return vector<OperatorDef>();
+    }
   }
 };
 REGISTER_GRADIENT(Gather, GetGatherGradient);
