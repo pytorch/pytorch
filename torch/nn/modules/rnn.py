@@ -22,7 +22,7 @@ class RNNBase(Module):
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
 
-        self.all_weights = []
+        self._all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -46,9 +46,9 @@ class RNNBase(Module):
                 if bias:
                     setattr(self, weights[2], b_ih)
                     setattr(self, weights[3], b_hh)
-                    self.all_weights += [weights]
+                    self._all_weights += [weights]
                 else:
-                    self.all_weights += [weights[:2]]
+                    self._all_weights += [weights[:2]]
 
         self.reset_parameters()
 
@@ -78,8 +78,7 @@ class RNNBase(Module):
             bidirectional=self.bidirectional,
             dropout_state=self.dropout_state
         )
-        all_weights = [[getattr(self, weight) for weight in weights] for weights in self.all_weights]
-        return func(input, all_weights, hx)
+        return func(input, self.all_weights, hx)
 
     def __repr__(self):
         s = '{name}({input_size}, {hidden_size}'
@@ -98,20 +97,26 @@ class RNNBase(Module):
 
     def __setstate__(self, d):
         self.__dict__.update(d)
-        if isinstance(self.all_weights[0][0], str):
+        if 'all_weights' in d:
+            self._all_weights = d['all_weights']
+        if isinstance(self._all_weights[0][0], str):
             return
         num_layers = self.num_layers
         num_directions = 2 if self.bidirectional else 1
-        self.all_weights = []
+        self._all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
                 weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
                 weights = [x.format(layer, suffix) for x in weights]
                 if self.bias:
-                    self.all_weights += [weights]
+                    self._all_weights += [weights]
                 else:
-                    self.all_weights += [weights[:2]]
+                    self._all_weights += [weights[:2]]
+
+    @property
+    def all_weights(self):
+        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
 
 class RNN(RNNBase):
