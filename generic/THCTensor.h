@@ -101,6 +101,7 @@ THC_API void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src
 
 THC_API void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
+THC_API void THCTensor_(unsqueeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
 
 THC_API int THCTensor_(isContiguous)(THCState *state, const THCTensor *self);
 THC_API int THCTensor_(isSameSizeAs)(THCState *state, const THCTensor *self, const THCTensor *src);
