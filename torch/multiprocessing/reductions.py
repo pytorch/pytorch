@@ -88,7 +88,7 @@ def rebuild_storage_filename(cls, manager, handle, size):
     return storage._shared_decref()
 
 
-def reubild_storage_cuda(cls, device, handle, size, offset, view_size):
+def rebuild_storage_cuda(cls, device, handle, size, offset, view_size):
     storage = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._new_view(offset, view_size)
@@ -103,7 +103,7 @@ def reduce_storage(storage):
     if storage.is_cuda:
         metadata = storage._share_cuda_()
         cache_key = metadata[1]
-        rebuild = reubild_storage_cuda
+        rebuild = rebuild_storage_cuda
     elif get_sharing_strategy() == 'file_system':
         metadata = storage._share_filename_()
         cache_key = metadata[1]

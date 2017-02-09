@@ -1,4 +1,5 @@
 import sys
+import os
 import argparse
 import unittest
 import contextlib
@@ -212,3 +213,25 @@ def get_numerical_jacobian(fn, input, target):
             d_tensor[i] = outb
 
     return jacobian
+
+
+def download_file(url, path, binary=True):
+    if sys.version_info < (3,):
+        import urllib2
+        request = urllib2
+        error = urllib2
+    else:
+        import urllib.request
+        import urllib.error
+        request = urllib.request
+        error = urllib.error
+
+    if os.path.exists(path):
+        return True
+    try:
+        data = request.urlopen(url, timeout=15).read()
+        with open(path, 'wb' if binary else 'w') as f:
+            f.write(data)
+        return True
+    except error.URLError as e:
+        return False

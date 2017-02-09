@@ -74,12 +74,19 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
   }
 }
 
-THStorage * THPStorage_(readFileRaw)(int fd)
+THStorage * THPStorage_(readFileRaw)(int fd, THStorage *_storage)
 {
   real *data;
   long size;
   SYSCHECK(read(fd, &size, sizeof(long)));
-  THStoragePtr storage = THStorage_(newWithSize)(LIBRARY_STATE size);
+
+  THStoragePtr storage;
+  if (_storage == nullptr) {
+    storage = THStorage_(newWithSize)(LIBRARY_STATE size);
+  } else {
+    THPUtils_assert(_storage->size == size, "storage has wrong size");
+    storage = _storage;
+  }
 
 #ifndef THC_GENERIC_FILE
   data = storage->data;
