@@ -517,6 +517,15 @@ void addObjectMethods(py::module& m) {
           });
 }
 
+#if PY_VERSION_HEX >= 0x03000000
+static void*
+#else
+static void
+#endif
+NumpyImportArrayHelper() {
+  import_array();
+}
+
 void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
 
@@ -836,7 +845,11 @@ void addGlobalMethods(py::module& m) {
 
   auto initialize = [&]() {
     // Initialization of the module
-    ([]() {
+#if PY_VERSION_HEX >= 0x03000000
+    ([]() -> void* {
+#else
+    ([]() -> void {
+#endif
       // This is a workaround so we can deal with numpy's import_array behavior.
       // Despite the fact that you may think import_array() is a function call,
       // it is defined as a macro (as of 1.10).
