@@ -1538,6 +1538,9 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                        *tempValues__data = *t_data;
                        *tempIndices__data = tempIndices__counter[dimension];
                      });
+
+    THTensor_(free)(tempValues_);
+    THLongTensor_free(tempIndices_);
   }
 }
 
@@ -1643,7 +1646,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension)
     temp_->size[dimension] = t->size[dimension];
     temp_->stride[dimension] = 0;
 
-    THTensor_(cadd)(temp_, temp_, 1, t);
+    TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data + *t_data;);
     THTensor_(free)(temp_);
   }
 }
@@ -1675,7 +1678,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension)
     temp_->size[dimension] = t->size[dimension];
     temp_->stride[dimension] = 0;
 
-    THTensor_(cmul)(temp_, temp_, t);
+    TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data * *t_data;);
     THTensor_(free)(temp_);
   }
 }
@@ -2749,35 +2752,11 @@ void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
 
 void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
 
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
-
-  // two implementations optimized for data locality
-  if (t->stride[dimension] == 1) {
-    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                         accreal sum = 0;
-                         long i;
-                         for(i = 0; i < t_size; i++)
-                           sum += t_data[i*t_stride];
-                         *r__data = (real)sum/t_size;);
-  } else {
-    THTensor_(zero)(r_);
-    THTensor *temp_ = THTensor_(newWithTensor)(r_);
-    // r_.expand_as(t)
-    temp_->size[dimension] = t->size[dimension];
-    temp_->stride[dimension] = 0;
-
-    THTensor_(cadd)(temp_, temp_, 1, t);
-    THTensor_(free)(temp_);
-    THTensor_(div)(r_, r_, t->size[dimension]);
-  }
+  THTensor_(sum)(r_, t, dimension);
+  THTensor_(div)(r_, r_, t->size[dimension]);
 }
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag)
