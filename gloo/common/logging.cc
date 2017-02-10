@@ -10,6 +10,7 @@
 #include "gloo/common/logging.h"
 
 #include <algorithm>
+#include <numeric>
 
 namespace gloo {
 
