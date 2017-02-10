@@ -521,7 +521,7 @@ void THTensor_(lshift)(THTensor *r_, THTensor *t, real value)
   return THTensor_(mul)(r_, t, pow(2, value));
 #elif defined(TH_REAL_IS_HALF)
   return THError("lshift is not supported for torch.HalfTensor");
-#endif
+#else
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) &&
       THTensor_(isContiguous)(t) &&
@@ -534,17 +534,18 @@ void THTensor_(lshift)(THTensor *r_, THTensor *t, real value)
       for (i=0; i<sz; i++) {
 #if defined(TH_REAL_IS_BYTE)
           rp[i] = ((real) tp[i]) << value;
-#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+#else
           rp[i] = ((unsigned real) tp[i]) << value;
 #endif
       }
   } else {
 #if defined(TH_REAL_IS_BYTE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((real) *t_data) << value););
-#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+#else
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((unsigned real) *t_data) << value););
 #endif
   }
+#endif
 }
 
 void THTensor_(rshift)(THTensor *r_, THTensor *t, real value)
@@ -555,7 +556,7 @@ void THTensor_(rshift)(THTensor *r_, THTensor *t, real value)
   return THTensor_(div)(r_, t, pow(2, value));
 #elif defined(TH_REAL_IS_HALF)
   return THError("rshift is not supported for torch.HalfTensor");
-#endif
+#else
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) &&
       THTensor_(isContiguous)(t) &&
@@ -568,17 +569,18 @@ void THTensor_(rshift)(THTensor *r_, THTensor *t, real value)
       for (i=0; i<sz; i++) {
 #if defined(TH_REAL_IS_BYTE)
           rp[i] = ((real) tp[i]) >> value;
-#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+#else
           rp[i] = ((unsigned real) tp[i]) >> value;
 #endif
       }
   } else {
 #if defined(TH_REAL_IS_BYTE)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((real) *t_data) >> value););
-#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+#else
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (((unsigned real) *t_data) >> value););
 #endif
   }
+#endif
 }
 
 void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
@@ -818,7 +820,7 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
       rp[i] = tp[i] * pow(2, sp[i]);
 #elif defined(TH_REAL_IS_BYTE)
       rp[i] = ((real) tp[i]) << sp[i];
-#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+#else
       rp[i] = ((unsigned real) tp[i]) << sp[i];
 #endif
     }
@@ -829,7 +831,7 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data * pow(2, *src_data););
 #elif defined(TH_REAL_IS_BYTE)
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = ((real)*t_data) << *src_data;);
-#elif defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+#else
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = ((unsigned real)*t_data) << *src_data;);
 #endif
   }
