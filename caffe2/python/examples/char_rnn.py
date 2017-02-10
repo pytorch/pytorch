@@ -13,6 +13,10 @@ import logging
 import numpy as np
 from datetime import datetime
 
+'''
+This script takes a text file as input and uses a recurrent neural network
+to learn to predict next character in a sequence.
+'''
 
 logging.basicConfig()
 log = logging.getLogger("char_rnn")
@@ -77,9 +81,13 @@ class CharRNN(object):
         self.forward_net = core.Net(model.net.Proto())
 
         xent = model.LabelCrossEntropy([softmax_reshaped, target], 'xent')
+        # Loss is average both across batch and through time
+        # Thats why the learning rate below is multiplied by self.seq_length
         loss = model.AveragedLoss(xent, 'loss')
         model.AddGradientOperators([loss])
 
+        # Hand made SGD update. Normally one can use helper functions
+        # to build an optimizer
         ITER = model.Iter("iter")
         LR = model.LearningRate(
             ITER, "LR",
@@ -87,6 +95,7 @@ class CharRNN(object):
             policy="step", stepsize=1, gamma=0.9999)
         ONE = model.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
 
+        # Update weights for each of the model parameters
         for param in model.params:
             param_grad = model.param_to_grad[param]
             model.WeightedSum([param, ONE, param_grad, LR], param)
