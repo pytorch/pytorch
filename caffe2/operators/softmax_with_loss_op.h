@@ -15,6 +15,7 @@ class SoftmaxWithLossOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
         spatial_mode_(OperatorBase::GetSingleArgument<int>("spatial", 0)),
+        label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(scale_ >= 0);
@@ -28,6 +29,7 @@ class SoftmaxWithLossOp final : public Operator<Context> {
  protected:
   float scale_;
   int spatial_mode_;
+  int label_prob_mode_;
   StorageOrder order_;
 
   Tensor<Context> losses_; // Per example loss
@@ -43,6 +45,7 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
       : Operator<Context>(def, ws),
         scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
         spatial_mode_(OperatorBase::GetSingleArgument<int>("spatial", 0)),
+        label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(scale_ >= 0);
@@ -56,6 +59,7 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
  protected:
   float scale_;
   int spatial_mode_;
+  int label_prob_mode_;
   Tensor<Context> sum_multiplier_;
   Tensor<Context> weights_; // unignored weights
   Tensor<Context> total_weight_ptr_;
