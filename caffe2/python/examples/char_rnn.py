@@ -82,7 +82,8 @@ class CharRNN(object):
 
         ITER = model.Iter("iter")
         LR = model.LearningRate(
-            ITER, "LR", base_lr=-0.1 * self.seq_length,
+            ITER, "LR",
+            base_lr=-0.1 * self.seq_length,
             policy="step", stepsize=1, gamma=0.9999)
         ONE = model.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
 
@@ -110,8 +111,17 @@ class CharRNN(object):
         smooth_loss = -np.log(1.0 / self.D) * self.seq_length
         last_n_iter = 0
         last_n_loss = 0.0
-        pos, num_iter = 0, 0
+        num_iter = 0
         N = len(self.text)
+
+        # We split text into batch_size peaces. Each peace will be used only
+        # by a corresponding batch during the training process
+        text_block_positions = np.zeros(self.batch_size, dtype=np.int32)
+        text_block_size = N // self.batch_size
+        text_block_starts = range(0, N, text_block_size)
+        text_block_sizes = [text_block_size] * self.batch_size
+        text_block_sizes[self.batch_size - 1] += N % self.batch_size
+        assert sum(text_block_sizes) == N
 
         # Writing to output states which will be copied to input
         # states within the loop below
@@ -141,10 +151,12 @@ class CharRNN(object):
 
             for e in range(self.batch_size):
                 for i in range(self.seq_length):
+                    pos = text_block_starts[e] + text_block_positions[e]
                     input[i][e][self._idx_at_pos(pos)] = 1
                     target[i * self.batch_size + e] =\
                         self._idx_at_pos((pos + 1) % N)
-                    pos = (pos + 1) % N
+                    text_block_positions[e] = (
+                        text_block_positions[e] + 1) % text_block_sizes[e]
                     progress += 1
 
             workspace.FeedBlob('input_blob', input)
