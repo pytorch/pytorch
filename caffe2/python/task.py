@@ -310,8 +310,9 @@ class TaskGroup(object):
         self._tasks_by_node = (grouped_by_node, node_map)
         return grouped_by_node
 
-    def to_task(self, node='local'):
-        tasks = self.tasks_by_node(lambda x: 'local').tasks()
+    def to_task(self, node=None):
+        node = str(Node.current(node))
+        tasks = self.tasks_by_node(lambda x: node).tasks()
         if len(tasks) == 0:
             return Task()
         return tasks[0]
