@@ -19,7 +19,7 @@ class _QueueReader(dataio.Reader):
 
     def read_ex(self, local_init_net, local_finish_net):
         self._wrapper._new_reader(local_init_net)
-        dequeue_net = core.Net('dequeue_net')
+        dequeue_net = core.Net('dequeue')
         fields, status_blob = dequeue(
             dequeue_net,
             self._wrapper.queue(),
@@ -36,7 +36,7 @@ class _QueueWriter(dataio.Writer):
 
     def write_ex(self, fields, local_init_net, local_finish_net, status):
         self._wrapper._new_writer(self.schema(), local_init_net)
-        enqueue_net = core.Net('enqueue_net')
+        enqueue_net = core.Net('enqueue')
         enqueue(enqueue_net, self._wrapper.queue(), fields, status)
         return [enqueue_net]
 
@@ -77,15 +77,15 @@ class Queue(QueueWrapper):
 
 def enqueue(net, queue, data_blobs, status=None):
     if status is None:
-        status = net.NextName("%s_enqueue_status" % str(queue))
+        status = net.NextName('status')
     results = net.SafeEnqueueBlobs([queue] + data_blobs, data_blobs + [status])
     return results[-1]
 
 
 def dequeue(net, queue, num_blobs, status=None):
-    data_names = [net.NextName("%s_dequeue_data", i) for i in range(num_blobs)]
+    data_names = [net.NextName('data', i) for i in range(num_blobs)]
     if status is None:
-        status = net.NextName("%s_dequeue_status")
+        status = net.NextName('status')
     results = net.SafeDequeueBlobs(queue, data_names + [status])
     results = list(results)
     status_blob = results.pop(-1)

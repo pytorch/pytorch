@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, queue_util
 from caffe2.python.dataio import Reader, Writer
-from caffe2.python.net_builder import NetBuilder
+from caffe2.python.net_builder import NetBuilder, ops
 from caffe2.python.schema import as_record, Field
 from caffe2.python.task import Task, TaskGroup
 
@@ -128,10 +128,8 @@ def pipe(
         Output Queue, DataStream, Reader, or None, depending on the parameters
         passed.
     """
-    result, step = _pipe_step(
+    result, _ = _pipe_step(
         input, output, num_threads, processor, name, capacity, group)
-    if step is not None:
-        Task(step=step, group=group)
     return result
 
 
@@ -148,11 +146,10 @@ def pipe_and_output(
             task_outputs: TaskOutput object, fetchable from the client after
                           session.run() returns.
     """
-    result, step = _pipe_step(
+    assert num_threads > 0
+    result, task = _pipe_step(
         input, output, num_threads, processor, name, capacity, group,
         final_outputs)
-    assert step is not None
-    task = Task(step=step, group=group, outputs=final_outputs)
     output = None
     if final_outputs is not None:
         output = task.outputs()
@@ -161,15 +158,23 @@ def pipe_and_output(
     return result, output
 
 
+def processor_name(processor):
+    if hasattr(processor, 'name'):
+        return processor.name
+    if hasattr(processor, 'func_name'):
+        if processor.func_name == '<lambda>':
+            return processor.__module__
+        if hasattr(processor, 'im_class'):
+            return '%s.%s' % (processor.im_class.__name__, processor.func_name)
+        return processor.func_name
+    return processor.__class__.__name__
+
+
 def _pipe_step(
         input, output=None, num_threads=1, processor=None, name=None,
         capacity=None, group=None, final_outputs=None):
     """
     """
-    group = TaskGroup.current(group)
-    if name is None:
-        name = 'processor:%d' % group.num_registered_tasks()
-
     if isinstance(input, Reader):
         reader = input
     elif hasattr(input, 'reader'):
@@ -184,48 +189,51 @@ def _pipe_step(
         assert output is None
         return reader, None
 
-    global_exit_net = core.Net(name + '_producer_global_exit')
-    global_init_net = core.Net(name + '_producer_global_init')
-    out_queue = None
-    writer = None
+    if name is None and processor is not None:
+        name = processor_name(processor)
+    if name is None and output is not None:
+        name = 'pipe_into:%s' % processor_name(output)
+    if name is None:
+        name = 'pipe_from:%s' % processor_name(input)
 
-    reader.setup_ex(global_init_net, global_exit_net)
+    with Task(name=name, group=group, outputs=final_outputs) as task:
+        global_exit_net = core.Net('exit')
+        global_init_net = core.Net('init')
+        reader.setup_ex(global_init_net, global_exit_net)
 
-    steps = []
-    for thread_id in range(num_threads):
-        init_net = core.Net(name + "_init_net_%d" % thread_id)
-        exit_net = core.Net(name + "_exit_net_%d" % thread_id)
+        out_queue = None
+        writer = None
 
-        read_nets, status, rec = reader.read_record_ex(init_net, exit_net)
+        steps = []
+        for thread_id in range(num_threads):
+            with NetBuilder(name='t:%d' % thread_id) as nb:
+                init_net = core.Net('init')
+                exit_net = core.Net('exit')
+                read_nets, status, rec = reader.read_record_ex(
+                    init_net, exit_net)
 
-        if rec is not None:
-            if writer is None:
-                out_queue, writer = _init_output(
-                    output, capacity, global_init_net, global_exit_net)
-            write_nets, _ = writer.write_record_ex(
-                rec, init_net, exit_net, status)
-        else:
-            write_nets = []
-
-        step = core.execution_step(
-            name + "_thread_%d" % thread_id, [
-                core.execution_step(name + "_init_step", init_net),
-                core.execution_step(
-                    name + "_worker_step",
+                if rec is not None:
+                    if writer is None:
+                        # hack so that the out queue gets the right name prefix
+                        # (otherwise they would be prefixed with the thread id)
+                        with NetBuilder(_fullname=task.name):
+                            out_queue, writer = _init_output(
+                                output, capacity, global_init_net,
+                                global_exit_net)
+                    write_nets, _ = writer.write_record_ex(
+                        rec, init_net, exit_net, status)
+                else:
+                    write_nets = []
+                ops.net(init_net)
+                ops.net(core.execution_step('body',
                     list(read_nets) + list(write_nets),
-                    should_stop_blob=status
-                ), core.execution_step(name + "_exit_step", exit_net)
-            ]
-        )
-        steps.append(step)
-    step = core.execution_step(
-        "sender_step", [
-            core.execution_step('init_step', global_init_net),
-            core.execution_step(
-                "sender_steps", steps, concurrent_substeps=True),
-            core.execution_step('finish_step', global_exit_net),
-        ])
-    return out_queue, step
+                    should_stop_blob=status))
+                ops.net(exit_net)
+            steps.append(core.to_execution_step(nb))
+        ops.net(global_init_net)
+        ops.net(core.execution_step('body', steps, concurrent_substeps=True))
+        ops.net(global_exit_net)
+    return out_queue, task
 
 
 class ProcessingReader(Reader):
@@ -269,10 +277,11 @@ class NetProcessor(object):
     and (optionally) output records set, with net.set_input_record() and
     net.set_output_record().
     """
-    def __init__(self, net, stop_signal=None, thread_init_nets=None):
+    def __init__(self, net, stop_signal=None, thread_init_nets=None, name=None):
         assert isinstance(net, core.Net)
         assert stop_signal is None or isinstance(
             stop_signal, core.BlobReference)
+        self.name = name or str(net)
         self.thread_init_nets = thread_init_nets or []
         self.net = net
         self._stop_signal = stop_signal
@@ -288,7 +297,7 @@ class NetProcessor(object):
 
     def __call__(self, rec):
         assert not self._frozen
-        prefix = '/worker:%d/' % len(self._blob_maps)
+        prefix = NetBuilder.current().name + '/'
         blob_remap = {}
         for net in self.thread_init_nets:
             new_net, _ = core.clone_and_bind_net(

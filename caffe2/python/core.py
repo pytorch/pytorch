@@ -290,10 +290,7 @@ def CreateOperator(
 
 def _RegisterPythonImpl(f, grad_f=None, pass_workspace=False):
     if isinstance(f, tuple):
-        print('Registering python with tuple', f)
         f = f[0](*f[1], **f[2])
-    else:
-        print('Registering python without tuple', f)
     if isinstance(grad_f, tuple):
         grad_f = grad_f[0](*grad_f[1], **grad_f[2])
 
@@ -1104,8 +1101,15 @@ class Net(object):
     operator_registry_ = {}
 
     @staticmethod
+    def current_prefix():
+        from caffe2.python.net_builder import NetBuilder
+        builder = NetBuilder.current(required=False)
+        return builder.name if builder else ''
+
+    @staticmethod
     def _get_next_net_name(basename):
-        name = basename
+        name = basename = '/'.join(filter(
+            lambda x: x, (Net.current_prefix(), basename)))
         next_idx = 1
         while name in Net._net_names_used:
             name = basename + '_' + str(next_idx)
@@ -1160,13 +1164,14 @@ class Net(object):
                 self._next_name_index = max(autogen_indices) + 1
             else:
                 self._next_name_index = 0
+            name = self._net.name
         else:
+            name = name_or_proto
             self._net = caffe2_pb2.NetDef()
-            self._net.name = name_or_proto
             self._next_name_index = 0
 
         # make sure that this net name hasn't been used before
-        self._net.name = Net._get_next_net_name(self._net.name)
+        self._net.name = Net._get_next_net_name(name)
 
     def AppendNet(self, net):
         assert isinstance(net, Net)
@@ -1889,6 +1894,8 @@ def to_execution_step(step_or_nets, default_name=None):
         return step_or_nets
 
     stop_blob = None
+    if not default_name and hasattr(step_or_nets, 'name'):
+        default_name = step_or_nets.name
     if isinstance(step_or_nets, NetBuilder):
         stop_blob = step_or_nets._stop_blob
         step_or_nets = step_or_nets.get()

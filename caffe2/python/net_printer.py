@@ -167,7 +167,10 @@ class Text(object):
 
 
 class Printer(Visitor, Text):
-    pass
+    def __init__(self, factor_prefixes=False):
+        super(Visitor, self).__init__()
+        super(Text, self).__init__()
+        self.factor_prefixes = factor_prefixes
 
 
 def _sanitize_str(s):
@@ -191,12 +194,38 @@ def _arg_val(arg):
     return '[]'
 
 
-def call(op, inputs=None, outputs=None):
-    inputs = '' if not inputs else ', '.join(
-        '%s=%s' % (str(a[0]), str(a[1])) if isinstance(a, tuple) else str(a)
-        for a in inputs)
+def commonprefix(m):
+    "Given a list of strings, returns the longest common prefix"
+    if not m:
+        return ''
+    s1 = min(m)
+    s2 = max(m)
+    for i, c in enumerate(s1):
+        if c != s2[i]:
+            return s1[:i]
+    return s1
+
+
+def factor_prefix(vals, do_it):
+    vals = map(str, vals)
+    prefix = commonprefix(vals) if len(vals) > 1 and do_it else ''
+    joined = ', '.join(v[len(prefix):] for v in vals)
+    return '%s[%s]' % (prefix, joined) if prefix else joined
+
+
+def call(op, inputs=None, outputs=None, factor_prefixes=False):
+    if not inputs:
+        inputs = ''
+    else:
+        inputs_v = [a for a in inputs if not isinstance(a, tuple)]
+        inputs_kv = [a for a in inputs if isinstance(a, tuple)]
+        inputs = ', '.join(filter(
+            bool,
+            [factor_prefix(inputs_v, factor_prefixes)] +
+            ['%s=%s' % kv for kv in inputs_kv]))
     call = '%s(%s)' % (op, inputs)
-    return call if not outputs else '%s = %s' % (', '.join(outputs), call)
+    return call if not outputs else '%s = %s' % (
+        factor_prefix(outputs, factor_prefixes), call)
 
 
 @Printer.register(OperatorDef)
@@ -204,7 +233,8 @@ def print_op(text, op):
     text.add(call(
         op.type,
         list(op.input) + [(a.name, _arg_val(a)) for a in op.arg],
-        op.output))
+        op.output,
+        factor_prefixes=text.factor_prefixes))
 
 
 @Printer.register(Net)
@@ -217,27 +247,28 @@ def print_net(text, net):
 def _get_step_context(step):
     proto = step.Proto()
     if proto.should_stop_blob:
-        return call('loop'), None
+        return call('loop'), False
     if proto.num_iter and proto.num_iter != 1:
-        return call('loop', [proto.num_iter]), None
+        return call('loop', [proto.num_iter]), False
     concurrent = proto.concurrent_substeps and len(step.Substeps()) > 1
     if concurrent:
-        return call('parallel'), call('step')
+        return call('parallel'), True
     if proto.report_net:
-        return call('run_once'), None
-    return None, None
+        return call('run_once'), False
+    return None, False
 
 
 @Printer.register(ExecutionStep)
 def print_step(text, step):
     proto = step.Proto()
-    step_ctx, substep_ctx = _get_step_context(step)
+    step_ctx, do_substep = _get_step_context(step)
     with text.context(step_ctx):
         if proto.report_net:
             with text.context(call('report_net', [proto.report_interval])):
                 text(step.get_net(proto.report_net))
         substeps = step.Substeps() + [step.get_net(n) for n in proto.network]
         for substep in substeps:
+            substep_ctx = call('step', [str(substep)]) if do_substep else None
             with text.context(substep_ctx):
                 text(substep)
                 if proto.should_stop_blob:
@@ -246,7 +277,7 @@ def print_step(text, step):
 
 @Printer.register(Task)
 def print_task(text, task):
-    with text.context(call('Task', [('node', task.node)])):
+    with text.context(call('Task', [('node', task.node), ('name', task.name)])):
         text(task.get_step())
 
 
