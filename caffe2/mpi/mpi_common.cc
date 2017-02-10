@@ -164,8 +164,8 @@ void MPISetupPeers(
 
     // Let other clients join the intracommunicator we're now a part of.
     while (MPICommSize(GlobalMPIComm()) < replicas) {
-      MPI_Comm new_intra_comm = AssimilateComm(GlobalMPIComm(), MPI_COMM_NULL);
-      SetGlobalMPIComm(new_intra_comm);
+      MPI_Comm comm = AssimilateComm(GlobalMPIComm(), MPI_COMM_NULL);
+      SetGlobalMPIComm(comm);
     }
   }
 
