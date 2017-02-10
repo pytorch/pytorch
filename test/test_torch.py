@@ -1072,6 +1072,14 @@ class TestTorch(TestCase):
             self.assertEqual(res.select(dim, 1), y, 0)
             self.assertEqual(res.select(dim, 2), z, 0)
 
+    def test_unbind(self):
+        x = torch.rand(2, 3, 4, 5)
+        for dim in range(4):
+            res = torch.unbind(x, dim)
+            self.assertEqual(x.size(dim), len(res))
+            for i in range(dim):
+                self.assertEqual(x.select(dim, i), res[i])
+
     def test_linspace(self):
         _from = random.random()
         to = _from + random.random()
@@ -1872,6 +1880,13 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, 2, ..., 2], 27, 0)
         self.assertEqual(reference[2, 2, 2, ...], 27, 0)
 
+        # LongTensor indexing
+        reference = self._consecutive((5, 5, 5))
+        idx = torch.LongTensor([2, 4])
+        self.assertEqual(reference[idx], torch.stack([reference[2], reference[4]]))
+        self.assertEqual(reference[2, idx], torch.stack([reference[2, 2], reference[2, 4]]))
+        self.assertEqual(reference[3, idx, 1], torch.stack([reference[3, 2], reference[3, 4]])[:, 1])
+
         reference_5d = self._consecutive((3, 3, 3, 3, 3))
         self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
@@ -1924,6 +1939,12 @@ class TestTorch(TestCase):
             reference[0.0, ..., 0.0:2.0] = 1
         with self.assertRaises(TypeError):
             reference[0.0, :, 0.0] = 1
+
+        # LongTensor assignments are not supported yet
+        with self.assertRaises(RuntimeError):
+            reference[torch.LongTensor([2, 4])] = 1
+        with self.assertRaises(RuntimeError):
+            reference[0, torch.LongTensor([2, 4])] = 1
 
     def test_index_copy(self):
         num_copy, num_dest = 3, 20

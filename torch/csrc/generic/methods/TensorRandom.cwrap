@@ -119,7 +119,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
         - THTensor* means
-        - arg: real stddev
+        - arg: real std
           default: 1
     - cname: normal_stddevs
       arguments:
@@ -129,7 +129,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
           default: THPDefaultGenerator->cdata
         - arg: real mean
           default: 0
-        - THTensor* stddevs
+        - THTensor* std
     - cname: normal_means_stddevs
       arguments:
         - arg: THTensor* output
@@ -137,7 +137,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
         - THTensor* means
-        - THTensor* stddevs
+        - THTensor* std
 ]]
 
 [[
@@ -151,7 +151,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
       default: THPDefaultGenerator->cdata
     - arg: real mean
       default: 0
-    - arg: real stddev
+    - arg: real std
       default: 1
 ]]
 
@@ -182,7 +182,7 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
       default: THPDefaultGenerator->cdata
     - arg: real mean
       default: 1
-    - arg: real stdv
+    - arg: real std
       default: 2
 ]]
 
@@ -291,14 +291,14 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
           output: True
         - arg: double mean
           default: 0
-        - arg: double stddev
+        - arg: double std
           default: 1
     - cname: normal_means
       arguments:
         - arg: THTensor* output
           output: True
         - THTensor* means
-        - arg: double stddev
+        - arg: double std
           default: 1
     - cname: normal_stddevs
       arguments:
@@ -306,13 +306,13 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
           output: True
         - arg: double mean
           default: 0
-        - THTensor* stddevs
+        - THTensor* std
     - cname: normal_means_stddevs
       arguments:
         - arg: THTensor* output
           output: True
         - THTensor* means
-        - THTensor* stddevs
+        - THTensor* std
 ]]
 
 [[
@@ -324,7 +324,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - THTensor* self
     - arg: double mean
       default: 0
-    - arg: double var
+    - arg: double std
       default: 1
 ]]
 
@@ -351,7 +351,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - THTensor* self
     - arg: double mean
       default: 1
-    - arg: double stdv
+    - arg: double std
       default: 2
 ]]
 

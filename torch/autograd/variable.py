@@ -844,11 +844,11 @@ class Variable(_C._VariableBase):
             return Concat(dim)(*iterable)
 
         @staticmethod
-        def normal(means, stddev=1):
-            if isinstance(stddev, Variable):
-                return Normal()(means, stddev)
+        def normal(means, std=1):
+            if isinstance(std, Variable):
+                return Normal()(means, std)
             else:
-                return Normal(stddev)(means)
+                return Normal(std)(means)
 
         @staticmethod
         def _blas(cls, args, inplace):

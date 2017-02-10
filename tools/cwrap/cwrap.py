@@ -229,6 +229,8 @@ class cwrap(object):
             depth -= line.count('}') * 2
             code += ' ' * depth + line + '\n'
             depth += line.count('{') * 2
+            depth += line.count('(') * 4
+            depth -= line.count(')') * 4
 
         # Put everything together
         return self.OPTION_TEMPLATE.substitute(

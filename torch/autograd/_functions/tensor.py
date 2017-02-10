@@ -35,18 +35,18 @@ class SetItem(InplaceFunction):
         self.mark_dirty(i)
         if value is None:
             value = self.value
-        i.set_index(self.index, value)
+        i._set_index(self.index, value)
         return i
 
     def backward(self, grad_output):
         if self.value is None:
             grad_input = grad_output.clone()
-            grad_input.set_index(self.index, 0)
+            grad_input._set_index(self.index, 0)
             grad_value = grad_output.index(self.index).clone()
             return grad_input, grad_value
         else:
             grad_input = grad_output.clone()
-            grad_input.set_index(self.index, 0)
+            grad_input._set_index(self.index, 0)
             return grad_input
 
 

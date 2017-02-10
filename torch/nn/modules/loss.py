@@ -52,7 +52,7 @@ class L1Loss(_Loss):
 
 
 class NLLLoss(_WeighedLoss):
-    r"""The negative log likelihood loss. It is useful to train a classication problem with n classes
+    r"""The negative log likelihood loss. It is useful to train a classification problem with n classes
 
     If provided, the optional argument `weights` should be a 1D Tensor assigning
     weight to each of the classes.
@@ -148,7 +148,8 @@ class KLDivLoss(_WeighedLoss):
     `input` `Tensor`.
 
     The loss can be described as:
-    :math:`loss(x, target) = 1/n \sum(target_i * (log(target_i) - x_i))`
+
+    .. math:: loss(x, target) = 1/n \sum(target_i * (log(target_i) - x_i))
 
     By default, the losses are averaged for each minibatch over observations
     **as well as** over dimensions. However, if the field
@@ -164,13 +165,14 @@ class MSELoss(_Loss):
     r"""Creates a criterion that measures the mean squared error between
     `n` elements in the input `x` and target `y`:
 
-    :math:`loss(x, y) = 1/n \sum |x_i - y_i|^2`
+    ..math:: loss(x, y) = 1/n \sum |x_i - y_i|^2
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each
-    the sum operation still operates over all the elements, and divides by `n`.
+    `x` and `y` arbitrary shapes with a total of `n` elements each.
+
+    The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
-    `sizeAverage` to `False`
+    `sizeAverage` to `False`.
 
     """
     pass
@@ -180,11 +182,11 @@ class BCELoss(_WeighedLoss):
     r"""Creates a criterion that measures the Binary Cross Entropy
     between the target and the output:
 
-    :math:`loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))`
+    ..math:: loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
     or in the case of the weights argument being specified:
 
-    :math:`loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))`
+    ..math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
     This is used for measuring the error of a reconstruction in for example
     an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1,

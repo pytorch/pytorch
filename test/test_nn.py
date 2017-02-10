@@ -425,6 +425,71 @@ class TestNN(NNTestCase):
         self.assertEqual(n[2], l3)
         self.assertEqual(n[3], l4)
 
+    def test_ListModule(self):
+        modules = [nn.ReLU(), nn.Linear(5, 5)]
+        module_list = nn.ModuleList(modules)
+
+        def check():
+            self.assertEqual(len(module_list), len(modules))
+            for m1, m2 in zip(modules, module_list):
+                self.assertIs(m1, m2)
+            for m1, m2 in zip(modules, module_list.children()):
+                self.assertIs(m1, m2)
+            for i in range(len(modules)):
+                self.assertIs(module_list[i], modules[i])
+        check()
+        modules += [nn.Conv2d(3, 4, 3)]
+        module_list += [modules[-1]]
+        check()
+        modules.append(nn.Tanh())
+        module_list.append(modules[-1])
+        check()
+        next_modules = [nn.Linear(5, 5), nn.Sigmoid()]
+        modules.extend(next_modules)
+        module_list.extend(next_modules)
+        check()
+        modules[2] = nn.Conv2d(5, 3, 2)
+        module_list[2] = modules[2]
+        check()
+
+        with self.assertRaises(TypeError):
+            module_list += nn.ReLU()
+        with self.assertRaises(TypeError):
+            module_list.extend(nn.ReLU())
+
+    def test_ParameterList(self):
+        make_param = lambda: Parameter(torch.randn(10, 10))
+        parameters = [make_param(), make_param()]
+        param_list = nn.ParameterList(parameters)
+
+        def check():
+            self.assertEqual(len(parameters), len(param_list))
+            for p1, p2 in zip(parameters, param_list):
+                self.assertIs(p1, p2)
+            for p1, p2 in zip(parameters, param_list.parameters()):
+                self.assertIs(p1, p2)
+            for i in range(len(parameters)):
+                self.assertIs(parameters[i], param_list[i])
+        check()
+        parameters += [make_param()]
+        param_list += [parameters[-1]]
+        check()
+        parameters.append(make_param())
+        param_list.append(parameters[-1])
+        check()
+        next_params = [make_param(), make_param()]
+        parameters.extend(next_params)
+        param_list.extend(next_params)
+        check()
+        parameters[2] = make_param()
+        param_list[2] = parameters[2]
+        check()
+
+        with self.assertRaises(TypeError):
+            param_list += make_param()
+        with self.assertRaises(TypeError):
+            param_list.extend(make_param())
+
     def test_add_module(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
@@ -1214,6 +1279,31 @@ class TestNN(NNTestCase):
                                   (c * upscale_factor ** 2)
                     self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
 
+    def test_inplace_thnn(self):
+        r = nn.ReLU(True)
+        input = Variable(torch.randn(5, 5), requires_grad=True)
+        output = r(input + 0)
+        grad_output = torch.randn(5, 5)
+        grad_output_clone = grad_output.clone()
+        output.backward(grad_output)
+        self.assertEqual(grad_output, grad_output_clone)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_noncontig_conv_grad(self):
+        # FIXME: remove after adding non-contiguous grad tests for all modules
+        module = nn.Conv2d(3, 5, kernel_size=3, padding=1).cuda()
+        input = Variable(torch.randn(2, 3, 10, 10).cuda(), requires_grad=True)
+        output = module(input)
+
+        grad = torch.randn(2, 2, 5, 10, 10).cuda()[:, 1]
+        assert not grad.is_contiguous()
+        output.backward(grad, retain_variables=True)
+        result = output.grad.data.clone()
+        output.grad.data.zero_()
+
+        output.backward(grad.contiguous())
+        self.assertEqual(result, output.grad.data)
+
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)
         upscale_factor = random.randint(2, 5)
@@ -1572,11 +1662,15 @@ new_module_tests = [
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
-        input=Variable(
-            torch.randperm(2).repeat(1, 2),
-            requires_grad=False
-        ),
+        input=Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False
+    ),
+    dict(
+        constructor=lambda: nn.Embedding(4, 3, sparse=True),
+        input=Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        fullname='Embedding_sparse',
+        test_cuda=False,
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d(

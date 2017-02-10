@@ -86,6 +86,7 @@ struct Tensor {
 
   virtual thpp::Type type() const = 0;
   virtual bool isCuda() const = 0;
+  virtual bool isSparse() const = 0;
   virtual int getDevice() const = 0;
   virtual std::unique_ptr<Tensor> newTensor() const = 0;
 };
