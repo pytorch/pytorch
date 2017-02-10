@@ -39,6 +39,52 @@ __global__ void LabelCrossEntropyGradientKernel(
    }
 }
 
+__global__ void ProbCrossEntropyKernel(
+    const int N,
+    const int D,
+    const float* Pdata,
+    const float* labeldata,
+    const float* weights,
+    float* Ydata) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    float weight = weights ? weights[i] : 1.0;
+    float total_prob = 0.0;
+    Ydata[i] = 0.0;
+    for (int j = 0; j < D; j++) {
+      int idx = i * D + j;
+      total_prob += labeldata[idx];
+      CUDA_KERNEL_ASSERT(labeldata[idx] >= 0);
+      Ydata[i] += -logf(max(Pdata[idx], FLT_MIN)) * labeldata[idx] * weight;
+    }
+    CUDA_KERNEL_ASSERT(abs(total_prob - 1.0) < 1e-5f);
+  }
+}
+
+__global__ void ProbCrossEntropyGradientKernel(
+    const int N,
+    const int D,
+    const float* Pdata,
+    const float* labeldata,
+    float* dXdata,
+    const float* weights) {
+  if (weights == NULL) {
+    CUDA_1D_KERNEL_LOOP(i, N) {
+      for (int j = 0; j < D; j++) {
+        int idx = i * D + j;
+        dXdata[idx] = Pdata[idx] - labeldata[idx];
+      }
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(i, N) {
+      float weight = weights[i];
+      for (int d = 0; d < D; d++) {
+        int idx = i * D + d;
+        dXdata[idx] = (Pdata[idx] - labeldata[idx]) * weight;
+      }
+    }
+  }
+}
+
 __global__ void RowMaxKernel(const int num, const int D, const float* data,
     float* out) {
   CUDA_1D_KERNEL_LOOP(index, num) {
@@ -148,9 +194,14 @@ __global__ void SoftmaxNormalizeKernel(
   }
 }
 
-void Softmax(const int N, const int D, const float* logits, const int* labels,
-             const float* sum_multiplier, float* scales, float* probs,
-             CUDAContext* context) {
+void Softmax(
+    const int N,
+    const int D,
+    const float* logits,
+    const float* sum_multiplier,
+    float* scales,
+    float* probs,
+    CUDAContext* context) {
   const int size = N * D;
   RowMaxKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                  0, context->cuda_stream()>>>(N, D, logits, scales);
@@ -184,10 +235,14 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   int D = X.dim32(1);
   P->ResizeLike(X);
   total_weight_ptr_.Resize(1);
-
+  DCHECK(!(spatial_mode_ && label_prob_mode_)); // Do not currently support both
   if (!spatial_mode_) {
     DCHECK_EQ(X.ndim(), 2);
-    DCHECK((T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1));
+    if (!label_prob_mode_) {
+      DCHECK((T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1));
+    } else {
+      DCHECK(T.ndim() == 2 && T.dim32(0) == N && T.dim32(1) == D);
+    }
     DCHECK_EQ(T.dim32(0), N);
 
     avg_loss->Resize(vector<TIndex>());
@@ -199,13 +254,40 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       math::Set<float, CUDAContext>(
           D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
     }
-    Softmax(N, D, X.data<float>(), T.data<int>(), sum_multiplier_.data<float>(),
-            losses_.mutable_data<float>(), P->mutable_data<float>(), &context_);
+    Softmax(
+        N,
+        D,
+        X.data<float>(),
+        sum_multiplier_.data<float>(),
+        losses_.mutable_data<float>(),
+        P->mutable_data<float>(),
+        &context_);
     // Compute label xent loss per example
-    LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                              0, context_.cuda_stream()>>>(
-        N, D, P->data<float>(), T.data<int>(), weights,
-        losses_.mutable_data<float>());
+    if (!label_prob_mode_) {
+      LabelCrossEntropyKernel<<<
+          CAFFE_GET_BLOCKS(N),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          N,
+          D,
+          P->data<float>(),
+          T.data<int>(),
+          weights,
+          losses_.mutable_data<float>());
+    } else {
+      ProbCrossEntropyKernel<<<
+          CAFFE_GET_BLOCKS(N),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          N,
+          D,
+          P->data<float>(),
+          T.data<float>(),
+          weights,
+          losses_.mutable_data<float>());
+    }
 
     float total_weight = N;
     if (weights) {
@@ -221,8 +303,10 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     math::Sum<float, CUDAContext>(
         losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
     // Average of input batch size
-    math::Scale<float, CUDAContext>(
-        1, scale_ / total_weight, avg_loss_data, avg_loss_data, &context_);
+    if (total_weight > 0) {
+      math::Scale<float, CUDAContext>(
+          1, scale_ / total_weight, avg_loss_data, avg_loss_data, &context_);
+    }
   } else {
     DCHECK_EQ(X.ndim(), 4);
     DCHECK_EQ(T.ndim(), 3);
@@ -299,17 +383,39 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   if (!spatial_mode_) {
     DCHECK_EQ(X.ndim(), 2);
-    DCHECK((T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1));
+    DCHECK(
+        (T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1) ||
+        (T.ndim() == 2 && T.dim32(0) == N && T.dim32(1) == D));
     DCHECK_EQ(T.dim32(0), N);
     // Copy softmax probabilities into dX
     context_.Copy<float, CUDAContext, CUDAContext>(
         P.size(), P.data<float>(), dX->mutable_data<float>());
     // Subtract 1 from labeled positions
-    LabelCrossEntropyGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                                      0, context_.cuda_stream()>>>(
-        N, D, P.data<float>(), T.data<int>(), dX->mutable_data<float>(),
-        weights);
-
+    if (!label_prob_mode_) {
+      LabelCrossEntropyGradientKernel<<<
+          CAFFE_GET_BLOCKS(N),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          N,
+          D,
+          P.data<float>(),
+          T.data<int>(),
+          dX->mutable_data<float>(),
+          weights);
+    } else {
+      ProbCrossEntropyGradientKernel<<<
+          CAFFE_GET_BLOCKS(N),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          N,
+          D,
+          P.data<float>(),
+          T.data<float>(),
+          dX->mutable_data<float>(),
+          weights);
+    }
     float total_weight = N;
     if (weights) {
       // Sum weights
@@ -320,9 +426,14 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     }
 
     // Scale by d_avg_loss / N
-    math::Scale<float, CUDAContext>(
-        dX->size(), scale_ / total_weight, dX->data<float>(),
-        dX->mutable_data<float>(), &context_);
+    if (total_weight > 0) {
+      math::Scale<float, CUDAContext>(
+          dX->size(),
+          scale_ / total_weight,
+          dX->data<float>(),
+          dX->mutable_data<float>(),
+          &context_);
+    }
     math::Scale<float, CUDAContext>(
         dX->size(), d_avg_loss.data<float>(), dX->data<float>(),
         dX->mutable_data<float>(), &context_);
