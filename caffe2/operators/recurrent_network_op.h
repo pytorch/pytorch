@@ -139,28 +139,7 @@ void extractLinks(
     const std::string& internalArg,
     const std::string& externalArg,
     const std::string offsetArg,
-    std::vector<detail::Link>* links) {
-  const auto& internal = op->GetRepeatedArgument<std::string>(internalArg);
-  const auto& external = op->GetRepeatedArgument<std::string>(externalArg);
-  const auto& offset = op->GetRepeatedArgument<int32_t>(offsetArg);
-  CAFFE_ENFORCE(
-      internal.size() == offset.size(),
-      "internal/offset mismatch: ",
-      internalArg,
-      externalArg);
-  CAFFE_ENFORCE(
-      external.size() == offset.size(),
-      "external/offset mismatch",
-      externalArg,
-      offsetArg);
-  for (auto i = 0; i < internal.size(); ++i) {
-    detail::Link l;
-    l.internal = internal[i];
-    l.external = external[i];
-    l.offset = offset[i];
-    links->push_back(l);
-  }
-}
+    std::vector<detail::Link>* links);
 } // namespace detail
 
 template <typename T, class Context>

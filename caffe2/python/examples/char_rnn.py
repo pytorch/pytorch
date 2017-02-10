@@ -5,10 +5,13 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace, cnn, utils
 from caffe2.python.recurrent import LSTM
+from caffe2.proto import caffe2_pb2
+
 
 import argparse
 import logging
 import numpy as np
+from datetime import datetime
 
 
 logging.basicConfig()
@@ -26,11 +29,6 @@ def CreateNetOnce(net, created_names=set()):
 
 
 class CharRNN(object):
-    seq_length = 25
-    batch_size = 1
-    iters_to_report = 500
-    hidden_size = 100
-
     def __init__(self, args):
         self.seq_length = args.seq_length
         self.batch_size = args.batch_size
@@ -79,12 +77,12 @@ class CharRNN(object):
         self.forward_net = core.Net(model.net.Proto())
 
         xent = model.LabelCrossEntropy([softmax_reshaped, target], 'xent')
-        loss = model.ReduceFrontSum(xent, 'loss')
+        loss = model.AveragedLoss(xent, 'loss')
         model.AddGradientOperators([loss])
 
         ITER = model.Iter("iter")
         LR = model.LearningRate(
-            ITER, "LR", base_lr=-0.1 / self.batch_size,
+            ITER, "LR", base_lr=-0.1 * self.seq_length,
             policy="step", stepsize=1, gamma=0.9999)
         ONE = model.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
 
@@ -127,6 +125,8 @@ class CharRNN(object):
 
         # We iterate over text in a loop many times. Each time we peak
         # seq_length segment and feed it to LSTM as a sequence
+        last_time = datetime.now()
+        progress = 0
         while True:
             workspace.FeedBlob(
                 "seq_lengths", np.array([self.seq_length]).astype(np.int32))
@@ -145,6 +145,7 @@ class CharRNN(object):
                     target[i * self.batch_size + e] =\
                         self._idx_at_pos((pos + 1) % N)
                     pos = (pos + 1) % N
+                    progress += 1
 
             workspace.FeedBlob('input_blob', input)
             workspace.FeedBlob('target', target)
@@ -156,10 +157,22 @@ class CharRNN(object):
             last_n_iter += 1
 
             if num_iter % self.iters_to_report == 0:
+                new_time = datetime.now()
+                print("Characters Per Second: {}". format(
+                    int(progress / (new_time - last_time).total_seconds())
+                ))
+                print("Iterations Per Second: {}". format(
+                    int(self.iters_to_report /
+                        (new_time - last_time).total_seconds())
+                ))
+
+                last_time = new_time
+                progress = 0
+
                 print("{} Iteration {} {}".
                       format('-' * 10, num_iter, '-' * 10))
 
-            loss = workspace.FetchBlob(self.loss) / self.batch_size
+            loss = workspace.FetchBlob(self.loss) * self.seq_length
             smooth_loss = 0.999 * smooth_loss + 0.001 * loss
             last_n_loss += loss
 
@@ -188,8 +201,8 @@ class CharRNN(object):
 
             input = np.zeros([1, self.batch_size, self.D]).astype(np.float32)
             input[0][0][self.char_to_idx[ch]] = 1
-            workspace.FeedBlob("input_blob", input)
 
+            workspace.FeedBlob("input_blob", input)
             workspace.RunNet(self.forward_net.Name())
 
             p = workspace.FetchBlob(self.predictions)
@@ -217,12 +230,17 @@ def main():
                         help="How often to report loss and generate text")
     parser.add_argument("--hidden_size", type=int, default=100,
                         help="Dimention of the hidden representation")
+    parser.add_argument("--gpu", action="store_true",
+                        help="If set, training is going to use GPU 0")
 
     args = parser.parse_args()
 
-    model = CharRNN(args)
-    model.CreateModel()
-    model.TrainModel()
+    device = core.DeviceOption(
+        caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 0)
+    with core.DeviceScope(device):
+        model = CharRNN(args)
+        model.CreateModel()
+        model.TrainModel()
 
 
 if __name__ == '__main__':
