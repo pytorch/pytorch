@@ -23,7 +23,6 @@ BENCHMARK(BM_CUDAContextCreation);
 static void BM_CUDAContextStreamAccess(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
   CUDAContext context;
-  volatile cudaStream_t stream;
   while (state.KeepRunning()) {
     volatile cudaStream_t stream = context.cuda_stream();
   }
