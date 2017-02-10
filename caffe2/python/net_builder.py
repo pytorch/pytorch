@@ -25,9 +25,12 @@ class NetBuilder(object):
             ops.Print(d, [])
         step = core.to_execution_step(nb)
     """
-    def __init__(self, name=None, _stop_blob_required=False, _stop_blob=None):
-        self._name = name or ''
-        self._prefix = name + '/' if name else ''
+    def __init__(self, name=None, _stop_blob_required=False,
+                 _stop_blob=None, _fullname=None):
+        nb = NetBuilder.current(required=False)
+        assert not _fullname or not name, 'Cannot set both _fullname and name'
+        self.name = _fullname or '/'.join(filter(lambda x: x, (
+            nb.name if nb else None, name)))
         self._frozen = False
         self._current_net = None
         self._children = []
@@ -47,8 +50,7 @@ class NetBuilder(object):
             self._stop_blob = core.BlobReference(
                 net.NextName('stop_blob'), net=net)
             if self._current_net != self._children[0]:
-                self._children.insert(0, core.Net(
-                    self._prefix + 'stop_blob_init'))
+                self._children.insert(0, core.Net('stop_blob_init'))
                 self._children[0].Const(False, blob_out=self._stop_blob)
         return self._stop_blob
 
@@ -58,7 +60,7 @@ class NetBuilder(object):
 
     def _assert_mutable(self):
         assert not self._frozen, (
-            'This NetBuilder (%s) has been built already.' % self._name)
+            'This NetBuilder (%s) has been built already.' % self.name)
 
     def add(self, child):
         self._assert_mutable()
@@ -69,10 +71,10 @@ class NetBuilder(object):
             self._current_net = child
         return child
 
-    def current_net(self):
+    def current_net(self, name=None):
         self._assert_mutable()
-        if self._current_net is None:
-            self.add(core.Net(self._prefix + 'net'))
+        if self._current_net is None or name is not None:
+            self.add(core.Net(name))
         return self._current_net
 
     def freeze(self):
@@ -91,22 +93,33 @@ class NetBuilder(object):
         if etype is not None:
             return
         assert (not self._stop_blob_required) or self._stop_blob is not None, (
-            'This NetBuilder (%s) requires a stop condition ' % self._name +
+            'This NetBuilder (%s) requires a stop condition ' % self.name +
             'to be set with `stop` or `stop_if`')
+
+    def __str__(self):
+        return self.name or 'Un-named NetBuilder'
 
 
 class Operations(object):
     """
     Operations to be used in the context of a NetBuilder.
     """
-    def net(self, net=None):
+    def net(self, net=None, name=None):
         """
         Retrieves the current net, or add a new net to the builder.
+        Args:
+            net:   If provided, add the given net to the active builder.
+                   Else, returns the current Net or creates a new one as needed.
+            name:  if provided, creates a new Net with given name and makes
+                   it the new current net of the active builder. Cannot
+                   be provided if net is provided.
         """
+        assert name is None or net is None, (
+            'Cannot provide both `net` and `name`.')
         if net is not None:
             NetBuilder.current().add(net)
             return net
-        return NetBuilder.current().current_net()
+        return NetBuilder.current().current_net(name=name)
 
     def __getattr__(self, op_type):
         """
@@ -153,7 +166,7 @@ class Operations(object):
         """
         return NetBuilder.current().stop_if(blob)
 
-    def loop(self, iters=None):
+    def loop(self, iters=None, name=None):
         """
         Creates a NetBuilder that will execute in a loop as the next step of
         the current NetBuilder. If `iters` is provided, the loop will execute
@@ -177,9 +190,9 @@ class Operations(object):
                     ops.LogInfo(loop.iter())
             This will print the numbers from 0 to 19.
         """
-        return NetBuilder.current().add(_Loop(iters))
+        return NetBuilder.current().add(_Loop(iters, name=name))
 
-    def stop_guard(self, has_stopped_blob=None):
+    def stop_guard(self, has_stopped_blob=None, name=None):
         """
         Creates a NetBuilder that will execute once as the next step of the
         current NetBuilder. After execution, a bool tensor will indicate
@@ -199,9 +212,9 @@ class Operations(object):
             followed by True and False.
         """
         return NetBuilder.current().add(
-            _StopGuard(has_stopped_blob=has_stopped_blob))
+            _StopGuard(has_stopped_blob=has_stopped_blob, name=name))
 
-    def If(self, cond):
+    def If(self, cond, name=None):
         """
         Creates a NetBuilder that will execute once as the next step of the
         current NetBuilder if the blob `cond` is True.
@@ -212,7 +225,7 @@ class Operations(object):
                     ops.Print(ops.Const('Wont print'))
             The example will print 'Will print' once.
         """
-        return NetBuilder.current().add(_RunIf(cond))
+        return NetBuilder.current().add(_RunIf(cond, name=name))
 
     def task_init(self):
         """
@@ -296,7 +309,7 @@ class _RunOnce(NetBuilder):
 
 
 class _StopGuard(_RunOnce):
-    def __init__(self, name=None, has_stopped_blob=None):
+    def __init__(self, has_stopped_blob=None, name=None):
         _RunOnce.__init__(self, name)
         self._stopped = has_stopped_blob
         self._ran = False
@@ -371,12 +384,12 @@ class _RunIf(_RunOnce):
         ops.Const(True, blob_out=self._already_ran)
         return r
 
-    def Elif(self, cond):
+    def Elif(self, cond, name=None):
         assert not self._is_else, 'Else not allowed for an Else.'
-        return NetBuilder.current().add(
-            _RunIf(cond, _already_ran=self._already_ran))
+        return NetBuilder.current().add(_RunIf(
+            cond, name=name or self.name, _already_ran=self._already_ran))
 
-    def Else(self):
+    def Else(self, name=None):
         assert not self._is_else, 'Elif not allowed for an Else.'
         return NetBuilder.current().add(
-            _RunIf(_already_ran=self._already_ran))
+            _RunIf(name=name or self.name, _already_ran=self._already_ran))

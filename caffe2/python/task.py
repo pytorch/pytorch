@@ -305,6 +305,7 @@ class TaskGroup(object):
                 step = core.execution_step(node, steps)
             Task(
                 node=node, step=step, outputs=outputs,
+                name='grouped_by_node',
                 group=grouped_by_node, workspace_type=workspace_type)
         self._tasks_by_node = (grouped_by_node, node_map)
         return grouped_by_node
@@ -383,18 +384,41 @@ class Task(object):
 
     TASK_SETUP = 'task_setup'
     REPORT_NET = 'report_net'
+    _global_names_used = set()
+
+    @staticmethod
+    def _get_next_name(node, group, name):
+        basename = str(node) + '/' + str(name)
+        names_used = (
+            Task._global_names_used
+            if group is None else
+            set(t.name for t in group._tasks_to_add))
+        cur_name = basename
+        i = 0
+        while cur_name in names_used:
+            i += 1
+            cur_name = '%s:%d' % (basename, i)
+        return cur_name
 
     def __init__(
             self, step=None, outputs=None,
-            workspace_type=None, group=None, node=None):
+            workspace_type=None, group=None, node=None, name=None):
         """
         Instantiate a Task and add it to the current TaskGroup and Node.
         """
+        if not name and isinstance(step, core.ExecutionStep):
+            name = step.Proto().name
+        if not name:
+            name = 'task'
         # register this node name with active context
         self.node = str(Node.current(None if node is None else Node(node)))
-        group = TaskGroup.current(group, required=False)
-        if group is not None:
-            group._tasks_to_add.append(self)
+        self.group = TaskGroup.current(group, required=False)
+
+        self.name = Task._get_next_name(self.node, self.group, name)
+
+        # may need to be temporarily removed later if Task used as a context
+        if self.group is not None:
+            self.group._tasks_to_add.append(self)
 
         self._already_used = False
         self._step = None
@@ -411,17 +435,22 @@ class Task(object):
         self._report_net = None
 
     def __enter__(self):
+        # temporarily remove from _tasks_to_add to ensure correct order
+        if self.group is not None:
+            self.group._tasks_to_add.remove(self)
         self._assert_not_used()
         assert self._step is None, 'This Task already has an execution step.'
         from caffe2.python import net_builder
-        self._net_builder = net_builder.NetBuilder()
+        self._net_builder = net_builder.NetBuilder(_fullname=self.name)
         self._net_builder.__enter__()
         return self
 
     def __exit__(self, type, value, traceback):
+        self._net_builder.__exit__(type, value, traceback)
         if type is None:
             self.set_step(self._net_builder)
-        self._net_builder.__exit__(type, value, traceback)
+        if self.group is not None:
+            self.group._tasks_to_add.append(self)
         self._net_builder = None
 
     def workspace_type(self):
@@ -462,20 +491,20 @@ class Task(object):
             init_nets, exit_nets = get_setup_nets(
                 Task.TASK_SETUP, [self._step], self)
             if len(self._outputs) == 0:
-                output_net = core.Net("output_net")
+                output_net = core.Net('%s:output' % self.name)
                 self.add_output(output_net.ConstantFill(
                     [], 1, dtype=core.DataType.INT32, value=0))
                 exit_nets.append(output_net)
             self._step_with_setup = core.execution_step(
-                'task',
+                self.name,
                 [
-                    core.execution_step('task_init', init_nets),
+                    core.execution_step('%s:init' % self.name, init_nets),
                     self._step,
-                    core.execution_step('task_exit', exit_nets),
+                    core.execution_step('%s:exit' % self.name, exit_nets),
                 ]
             )
         elif self._step_with_setup is None:
-            self._step_with_setup = core.execution_step('task', [])
+            self._step_with_setup = core.execution_step(self.name, [])
         return self._step_with_setup
 
     def outputs(self):
