@@ -117,13 +117,13 @@ TEST(MPITest, TestMPIReduce) {
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
   CAFFE_ENFORCE_EQ(arg->name(), "value");
-  int rank;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  arg->set_f(rank);
-  int size;
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  int rank0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank0);
+  arg->set_f(rank0);
+  int size0;
+  MPI_Comm_size(MPI_COMM_WORLD, &size0);
 
-  for (int root = 0; root < size; ++root) {
+  for (int root = 0; root < size0; ++root) {
     net_def.mutable_op(2)->mutable_arg(0)->set_i(root);
     Workspace ws;
     unique_ptr<NetBase> net(CreateNet(net_def, &ws));
