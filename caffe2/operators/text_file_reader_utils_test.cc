@@ -44,20 +44,20 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
 
     tokenizer.next(&ch.front(), mid, tokenized);
     EXPECT_GE(expected.size(), tokenized.tokens().size());
-    for (int i = 0; i < tokenized.tokens().size(); ++i) {
-      const auto& token = tokenized.tokens().at(i);
-      EXPECT_EQ(expected.at(i).first, token.startDelimId);
-      EXPECT_EQ(expected.at(i).second, std::string(token.start, token.end));
+    for (int j = 0; j < tokenized.tokens().size(); ++j) {
+      const auto& token = tokenized.tokens().at(j);
+      EXPECT_EQ(expected.at(j).first, token.startDelimId);
+      EXPECT_EQ(expected.at(j).second, std::string(token.start, token.end));
     }
     int s1 = tokenized.tokens().size();
 
     tokenizer.next(mid, &ch.back() + 1, tokenized);
     EXPECT_EQ(expected.size(), s1 + tokenized.tokens().size());
-    for (int i = 0; i < tokenized.tokens().size(); ++i) {
-      const auto& token = tokenized.tokens().at(i);
-      EXPECT_EQ(expected.at(i + s1).first, token.startDelimId);
+    for (int j = 0; j < tokenized.tokens().size(); ++j) {
+      const auto& token = tokenized.tokens().at(j);
+      EXPECT_EQ(expected.at(j + s1).first, token.startDelimId);
       EXPECT_EQ(
-          expected.at(i + s1).second, std::string(token.start, token.end));
+          expected.at(j + s1).second, std::string(token.start, token.end));
     }
     EXPECT_EQ(0, tokenized.lastDelim());
   }
