@@ -23,6 +23,10 @@ class Broadcast : public Algorithm {
     GLOO_ENFORCE_LT(rootRank_, contextSize_);
   }
 
+  int getRootRank() const {
+    return rootRank_;
+  }
+
   virtual ~Broadcast(){};
 
  protected:

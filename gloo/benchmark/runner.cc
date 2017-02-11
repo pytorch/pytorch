@@ -57,6 +57,17 @@ Runner::Runner(const options& options) : options_(options) {
   barrier_.reset(new BarrierAllToOne(newContext()));
 }
 
+long Runner::broadcast(long value) {
+  // Set value to broadcast only on root.
+  // Otherwise it can race with the actual broadcast
+  // operation writing to the same memory location.
+  if (broadcast_->getRootRank() == options_.contextRank) {
+    broadcastValue_ = value;
+  }
+  broadcast_->run();
+  return broadcastValue_;
+}
+
 std::shared_ptr<Context> Runner::newContext() {
   std::stringstream prefix;
   prefix << options_.prefix << "-" << prefixCounter_++;

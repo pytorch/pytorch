@@ -12,9 +12,11 @@
 #include <functional>
 #include <memory>
 
+#include "gloo/barrier.h"
 #include "gloo/benchmark/benchmark.h"
 #include "gloo/benchmark/options.h"
 #include "gloo/benchmark/timer.h"
+#include "gloo/broadcast.h"
 
 namespace gloo {
 namespace benchmark {
@@ -31,11 +33,7 @@ class Runner {
   void run(BenchmarkFn& fn, int n);
 
  protected:
-  inline long broadcast(long value) {
-    broadcastValue_ = value;
-    broadcast_->run();
-    return broadcastValue_;
-  }
+  long broadcast(long value);
 
   std::shared_ptr<Context> newContext();
 
@@ -48,8 +46,8 @@ class Runner {
   std::shared_ptr<transport::Device> device_;
 
   long broadcastValue_;
-  std::unique_ptr<Algorithm> broadcast_;
-  std::unique_ptr<Algorithm> barrier_;
+  std::unique_ptr<Broadcast<long> > broadcast_;
+  std::unique_ptr<Barrier> barrier_;
 
   Distribution samples_;
 };
