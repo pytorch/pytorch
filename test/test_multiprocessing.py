@@ -289,6 +289,7 @@ class TestMultiprocessing(TestCase):
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(not torch.cuda.device_count() > 1, 'found only 1 GPU')
     def test_cuda_small_tensors(self):
         # Check multiple small tensors which will likely use the same
         # underlying cached allocation

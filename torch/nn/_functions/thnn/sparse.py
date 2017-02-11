@@ -71,11 +71,11 @@ class Embedding(Function):
         else:
             indices, = self.saved_tensors
 
+        grad_output = grad_output.contiguous()
         if not self.sparse:
             if indices.dim() == 2:
                 indices = indices.view(-1)
 
-            grad_output = grad_output.contiguous()
             with torch.cuda.device_of(grad_output):
                 if torch.typename(grad_output) == 'torch.cuda.FloatTensor':
                     _sorted = torch.cuda.LongTensor()

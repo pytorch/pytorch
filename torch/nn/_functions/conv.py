@@ -29,6 +29,7 @@ class ConvNd(Function):
     def forward(self, input, weight, bias=None):
         k = input.dim()
         self.save_for_backward(input, weight, bias)
+        input = input.contiguous()
         if k == 3:
             input, weight = _view4d(input, weight)
         output = self._update_output(input, weight, bias)
@@ -40,6 +41,7 @@ class ConvNd(Function):
         k = grad_output.dim()
         grad_output = grad_output.contiguous()
         input, weight, bias = self.saved_tensors
+        input = input.contiguous()
         if k == 3:
             grad_output, input, weight = _view4d(grad_output, input, weight)
         grad_input = (self._grad_input(input, weight, grad_output)

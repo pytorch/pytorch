@@ -29,6 +29,7 @@ class VolumetricConvolution(Module):
 
         self.finput = None
         self.fgradInput = None
+        self._gradOutput = None
 
     def reset(self, stdv=None):
         if stdv is not None:

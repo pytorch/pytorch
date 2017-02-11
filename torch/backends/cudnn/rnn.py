@@ -351,6 +351,8 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         if dcy is not None and tuple(dcy.size()) != hidden_size:
             raise RuntimeError('Expected d_cell size {}, got {}'.format(
                 hidden_size, dcy.size()))
+        if not dhy.is_cuda or not dy.is_cuda or (dcy is not None and not dcy.is_cuda):
+            raise RuntimeError('Gradients aren\'t CUDA tensors')
 
         check_error(cudnn.lib.cudnnRNNBackwardData(
             handle,

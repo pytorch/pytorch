@@ -206,8 +206,8 @@ class CudnnRNN(NestedIOFunction):
             grad_input,
             grad_hx)
 
-        if self.needs_input_grad[1]:
-            grad_weight = [tuple(w.new().resize_as_(w).zero_() for w in layer_weight) for layer_weight in weight]
+        if any(self.needs_input_grad[1:]):
+            grad_weight = [tuple(w.new().resize_as_(w) for w in layer_weight) for layer_weight in weight]
             cudnn.rnn.backward_weight(
                 self,
                 input,
