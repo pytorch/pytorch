@@ -108,6 +108,7 @@ class DataInputCoordinator(object):
                  max_buffered_batches):
         assert isinstance(max_buffered_batches, int)
         self._net = net
+        self._counter = 0
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
         self._internal_queue = Queue.Queue(maxsize=max_buffered_batches)
@@ -157,6 +158,11 @@ class DataInputCoordinator(object):
     def put(self, chunk):
         while self.is_active():
             try:
+                qsize = self._internal_queue.qsize()
+                if qsize < 2 and self._counter > 100:
+                    log.warn("Warning, data loading lagging behind: queue={} \
+                             name=".format(qsize, self._input_source_name))
+                self._counter += 1
                 self._internal_queue.put(chunk, block=True, timeout=0.5)
                 return
             except Queue.Full:
