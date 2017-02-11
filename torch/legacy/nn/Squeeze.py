@@ -15,5 +15,5 @@ class Squeeze(Module):
 
     def updateGradInput(self, input, gradOutput):
         assert input.nelement() == gradOutput.nelement()
-        self.gradInput.set_(gradOutput.view_as(input))
+        self.gradInput.set_(gradOutput.contiguous().view_as(input))
         return self.gradInput

@@ -15,7 +15,7 @@ class Unsqueeze(Module):
 
     def updateGradInput(self, input, gradOutput):
         assert input.nelement() == gradOutput.nelement()
-        self.gradInput = gradOutput.view(input.size())
+        self.gradInput = gradOutput.contiguous().view(input.size())
         return self.gradInput
 
     def __repr__(self):

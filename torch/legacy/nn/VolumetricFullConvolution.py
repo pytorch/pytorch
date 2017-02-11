@@ -39,6 +39,7 @@ class VolumetricFullConvolution(Module):
         self.ones = torch.Tensor()
         self.finput = torch.Tensor()
         self.fgradInput = torch.Tensor()
+        self._gradOutput = None
 
         self.reset()
 

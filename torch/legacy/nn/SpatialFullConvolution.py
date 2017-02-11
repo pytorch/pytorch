@@ -32,6 +32,7 @@ class SpatialFullConvolution(Module):
         self.finput = None
         self.fgradInput = None
         self.zeroScalar = None
+        self._gradOutput = None
 
         self.reset()
 
