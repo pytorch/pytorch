@@ -410,7 +410,7 @@ void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dim
   THTensor_(set)(self, src);
 
   if(dimension1 == dimension2)
-	  return;
+    return;
 
   z = self->stride[dimension1];
   self->stride[dimension1] = self->stride[dimension2];

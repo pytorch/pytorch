@@ -44,8 +44,8 @@
           TENSOR1##_size *= TENSOR1->size[TENSOR1##_i]; \
         else{ \
           TH_TENSOR1_contiguous = 0; \
-	  break; \
-	} \
+          break; \
+        } \
       } \
     } \
     if (!TH_TENSOR1_contiguous) { \
@@ -86,8 +86,8 @@
           TENSOR2##_size *= TENSOR2->size[TENSOR2##_i]; \
         else{ \
           TH_TENSOR2_contiguous = 0; \
-	  break; \
-	} \
+          break; \
+        } \
       } \
     } \
     if (!TH_TENSOR2_contiguous) { \
@@ -128,8 +128,8 @@
           TENSOR3##_size *= TENSOR3->size[TENSOR3##_i]; \
         else{ \
           TH_TENSOR3_contiguous = 0; \
-	  break; \
-	} \
+          break; \
+        } \
       } \
     } \
     if (!TH_TENSOR3_contiguous) { \
@@ -176,7 +176,7 @@
     if(TENSOR1##_i == TENSOR1##_size) \
     { \
       if(TH_TENSOR1_contiguous) \
-	break; \
+        break; \
 \
       if(TENSOR1##_dim == 1) \
          break; \
@@ -209,7 +209,7 @@
     if(TENSOR2##_i == TENSOR2##_size) \
     { \
       if(TH_TENSOR2_contiguous) \
-	break; \
+        break; \
 \
       if(TENSOR2##_dim == 1) \
          break; \
@@ -242,7 +242,7 @@
     if(TENSOR3##_i == TENSOR3##_size) \
     { \
       if(TH_TENSOR3_contiguous) \
-	break; \
+        break; \
 \
       if(TENSOR3##_dim == 1) \
          break; \
@@ -316,8 +316,8 @@
           TENSOR1##_size *= TENSOR1->size[TENSOR1##_i]; \
         else{ \
           TH_TENSOR1_contiguous = 0; \
-	  break; \
-	} \
+          break; \
+        } \
       } \
     } \
     if (!TH_TENSOR1_contiguous) { \
@@ -358,8 +358,8 @@
           TENSOR2##_size *= TENSOR2->size[TENSOR2##_i]; \
         else{ \
           TH_TENSOR2_contiguous = 0; \
-	  break; \
-	} \
+          break; \
+        } \
       } \
     } \
     if(!TH_TENSOR2_contiguous) { \
@@ -410,7 +410,7 @@
     if(TENSOR1##_i == TENSOR1##_size) \
     { \
       if(TH_TENSOR1_contiguous == 1) \
-	break; \
+        break; \
 \
       if(TENSOR1##_dim == 1) \
          break; \
@@ -443,10 +443,10 @@
     if(TENSOR2##_i == TENSOR2##_size) \
     { \
       if(TH_TENSOR2_contiguous == 1) \
-	break; \
+        break; \
 \
       if(TENSOR2##_dim == 1) \
-         break; \
+        break; \
 \
       TENSOR2##_data -= TENSOR2##_size*TENSOR2##_stride; \
       for(TENSOR2##_i = TENSOR2##_dim-2; TENSOR2##_i >= 0; TENSOR2##_i--) \
@@ -526,7 +526,7 @@
     for(TENSOR##_i = TENSOR->nDimension-2; TENSOR##_i >= 0; TENSOR##_i--) \
     { \
       if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1]) \
-	TENSOR##_dim++; \
+        TENSOR##_dim++; \
     } \
 \
     /* Allocate an array of 3*dim elements, where dim is the number of contiguous sections */ \
@@ -547,8 +547,8 @@
         TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i] * TENSOR##_sizes[TH_TENSOR_dim_index]; \
       } else { \
         --TH_TENSOR_dim_index; \
-	TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i]; \
-	TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR##_i]; \
+        TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i]; \
+        TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR##_i]; \
       } \
     } \
     /* Size of the inner most section */ \

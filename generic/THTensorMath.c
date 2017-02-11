@@ -797,7 +797,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
         #endif
         ptrdiff_t i = tid * (sz / num_threads);
         ptrdiff_t i_end = tid == num_threads - 1 ? sz : i + sz / num_threads;
-	THVector_(cadd)(rp+i, tp+i, sp+i, value, i_end-i); 
+        THVector_(cadd)(rp+i, tp+i, sp+i, value, i_end-i); 
       }
     }
   } else {
@@ -1638,13 +1638,13 @@ void THTensor_(sign)(THTensor *r_, THTensor *t)
 
 #if defined (TH_REAL_IS_BYTE)
   TH_TENSOR_APPLY2(real, r_, real, t,
-		   if (*t_data > 0) *r__data = 1;
-		   else *r__data = 0;);
+    if (*t_data > 0) *r__data = 1;
+    else *r__data = 0;);
 #else
   TH_TENSOR_APPLY2(real, r_, real, t,
-		   if (*t_data > 0) *r__data = 1;
-		   else if (*t_data < 0) *r__data = -1;
-		   else *r__data = 0;);
+    if (*t_data > 0) *r__data = 1;
+    else if (*t_data < 0) *r__data = -1;
+    else *r__data = 0;);
 #endif
 }
 
@@ -2867,7 +2867,7 @@ accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
 {
   real sum = 0;
   TH_TENSOR_APPLY2(real, tensor, real, src,
-	sum += pow(fabs(*tensor_data - *src_data), value);)
+  sum += pow(fabs(*tensor_data - *src_data), value);)
   return pow(sum, 1.0/value);
 }
 
