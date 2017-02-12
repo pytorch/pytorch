@@ -62,6 +62,8 @@ void cudnn_batch_norm_forward(
     THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
     double exponential_average_factor, double epsilon)
 {
+  assertSameGPU(dataType, input, output, weight, bias, running_mean, running_var,
+      save_mean, save_var);
   cudnnBatchNormMode_t mode;
   if (input->nDimension == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
@@ -120,6 +122,8 @@ void cudnn_batch_norm_backward(
     THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
     double epsilon)
 {
+  assertSameGPU(dataType, input, grad_output, grad_input, grad_weight, grad_bias, weight,
+      running_mean, running_var, save_mean, save_var);
   cudnnBatchNormMode_t mode;
   if (input->nDimension == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
