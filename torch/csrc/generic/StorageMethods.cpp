@@ -190,9 +190,8 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
       "descriptor from given object");
-  THStoragePtr storage = THPStorage_(readFileRaw)(fd, nullptr);
+  THStorage *storage = THPStorage_(readFileRaw)(fd, nullptr);
   PyObject *result = THPStorage_(New)(storage);
-  storage.release();
   return result;
   END_HANDLE_TH_ERRORS
 }
@@ -205,7 +204,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 
   PyObject *offset = PyTuple_GET_ITEM(args, 1);
   if (offset != Py_None) {
-    lseek(fd, PyLong_AsLong(offset), SEEK_SET);
+    lseek(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
 
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "

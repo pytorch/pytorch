@@ -2503,7 +2503,11 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
-        b + [torch.range(1, 10).int()]
+        b += [torch.range(1, 10).int()]
+        t1 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
+        t2 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
+        b += [(t1.storage(), t1.storage(), t2.storage())]
+        b += [a[0].storage()[0:2]]
         for use_name in (False, True):
             with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
@@ -2522,6 +2526,13 @@ class TestTorch(TestCase):
             c[1].fill_(20)
             self.assertEqual(c[1], c[3], 0)
             self.assertEqual(c[4], c[5][1:4], 0)
+
+            # check that serializing the same storage view object unpickles
+            # it as one object not two (and vice versa)
+            views = c[7]
+            self.assertEqual(views[0]._cdata, views[1]._cdata)
+            self.assertEqual(views[0], views[2])
+            self.assertNotEqual(views[0]._cdata, views[2]._cdata)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):

@@ -152,8 +152,17 @@ def _save(obj, f, pickle_module, pickle_protocol):
             location = location_tag(obj)
             serialized_storages[root_key] = root
             is_view = obj._cdata != root._cdata
+            if is_view:
+                view_metadata = (str(obj._cdata), offset, obj.size())
+            else:
+                view_metadata = None
 
-            return ('storage', storage_type, root_key, location, root.size(), is_view, offset, obj.size())
+            return ('storage',
+                    storage_type,
+                    root_key,
+                    location,
+                    root.size(),
+                    view_metadata)
 
         return None
 
@@ -311,7 +320,7 @@ def _load(f, map_location, pickle_module):
             result = unpickler.load()
             return result
 
-    deserialized_storages = {}
+    deserialized_objects = {}
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -324,14 +333,18 @@ def _load(f, map_location, pickle_module):
                 _check_container_source(*data)
             return data[0]
         elif typename == 'storage':
-            data_type, key, location, size, is_view, offset, view_size = data
-            if key not in deserialized_storages:
-                deserialized_storages[key] = restore_location(
+            data_type, root_key, location, size, view_metadata = data
+            if root_key not in deserialized_objects:
+                deserialized_objects[root_key] = restore_location(
                     data_type(size), location)
-            data = deserialized_storages[key]
-            if is_view:
-                data = data[offset:offset + view_size]
-            return data
+            storage = deserialized_objects[root_key]
+            if view_metadata is not None:
+                view_key, offset, view_size = view_metadata
+                if view_key not in deserialized_objects:
+                    deserialized_objects[view_key] = storage[offset:offset + view_size]
+                return deserialized_objects[view_key]
+            else:
+                return storage
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
@@ -358,8 +371,8 @@ def _load(f, map_location, pickle_module):
 
     offset = f.tell()
     for key in deserialized_storage_keys:
-        assert key in deserialized_storages
-        deserialized_storages[key]._set_from_file(f, offset)
+        assert key in deserialized_objects
+        deserialized_objects[key]._set_from_file(f, offset)
         offset = None
 
     return result
