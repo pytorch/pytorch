@@ -341,6 +341,24 @@ class TestNN(NNTestCase):
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
         self.assertEqual(input.grad.data, expected_grad)
 
+    def test_zero_grad(self):
+        module = nn.Linear(5, 5)
+        for p in module.parameters():
+            p.requires_grad = False
+        module.zero_grad()
+
+        module.weight.requires_grad = True
+        module.weight.grad.data.fill_(1)
+        module.zero_grad()
+        self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
+
+        module.bias.requires_grad = True
+        module.weight.grad.data.fill_(1)
+        module.bias.grad.data.fill_(1)
+        module.zero_grad()
+        self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
+        self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
+
     def test_volatile(self):
         module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
         input = torch.randn(1, 2, 10, 10)
