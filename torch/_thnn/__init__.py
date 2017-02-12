@@ -58,7 +58,10 @@ for t in ['Float', 'Double']:
     type2backend.backends['torch.{}Tensor'.format(t)] = backend
     type2backend.backends[getattr(torch, '{}Tensor'.format(t))] = backend
 
-backend = Backend('Cuda', 'torch._thnn._THCUNN', _thcunn_headers, (THNNCudaBackendStateMixin,))
-type2backend.backends['THNNCudaBackend'] = backend
-type2backend.backends['torch.cuda.FloatTensor'] = backend
-type2backend.backends[torch.cuda.FloatTensor] = backend
+
+for t in ['Half', '', 'Double']:
+    backend = Backend('Cuda' + t, 'torch._thnn._THCUNN', _thcunn_headers, (THNNCudaBackendStateMixin,))
+    type2backend.backends['THNNCuda{}Backend'.format(t)] = backend
+    py_name = 'Float' if t == '' else t
+    type2backend.backends['torch.cuda.{}Tensor'.format(py_name)] = backend
+    type2backend.backends[getattr(torch.cuda, '{}Tensor'.format(py_name))] = backend
