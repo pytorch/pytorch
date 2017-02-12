@@ -195,6 +195,9 @@ class CudnnRNN(NestedIOFunction):
         else:
             grad_hx = tuple(h.new() for h in hx)
 
+        if self.retain_variables:
+            self._reserve_clone = self.reserve.clone()
+
         cudnn.rnn.backward_grad(
             self,
             input,
@@ -215,6 +218,10 @@ class CudnnRNN(NestedIOFunction):
                 output,
                 weight,
                 grad_weight)
+
+        if self.retain_variables:
+            self.reserve = self._reserve_clone
+            del self._reserve_clone
 
         return grad_input, grad_weight, grad_hx
 

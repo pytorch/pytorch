@@ -204,11 +204,17 @@ class NestedIOFunction(Function):
         nested_variables = _unflatten(flat_output, self._nested_output)
         return nested_variables
 
+    def _do_backward(self, gradients, retain_variables):
+        self.retain_variables = retain_variables
+        result = super(NestedIOFunction, self)._do_backward(gradients, retain_variables)
+        if not retain_variables:
+            del self._nested_output
+            del self._to_save_nested
+        return result
+
     def backward(self, *gradients):
         nested_gradients = _unflatten(gradients, self._nested_output)
-        del self._nested_output
         result = self.backward_extended(*nested_gradients)
-        del self._to_save_nested
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward

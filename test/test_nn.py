@@ -1066,6 +1066,30 @@ class TestNN(NNTestCase):
             self.assertEqual(output1, output2)
             self.assertEqual(hidden1, hidden2)
 
+    def _test_rnn_retain_variables(self, dtype):
+        rnn = nn.LSTM(10, 20, num_layers=2).type(dtype)
+        input = Variable(torch.randn(5, 6, 10).type(dtype), requires_grad=True)
+        output = rnn(input)
+        output[0].sum().backward(retain_variables=True)
+        grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
+        rnn.zero_grad()
+        input.grad.data.zero_()
+        output[0].sum().backward(retain_variables=True)
+        grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
+        self.assertEqual(grads, grads2)
+
+    def test_rnn_retain_variables(self):
+        self._test_rnn_retain_variables(torch.DoubleTensor)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_rnn_retain_variables_cuda(self):
+        try:
+            torch.backends.cudnn.enabled = False
+            self._test_rnn_retain_variables(torch.cuda.FloatTensor)
+        finally:
+            torch.backends.cudnn.enabled = True
+        self._test_rnn_retain_variables(torch.cuda.FloatTensor)
+
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
         def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
