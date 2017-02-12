@@ -604,10 +604,10 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 {
-#if IS_CUDA && THCP_AUTO_GPU
-  THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);
-#endif
   HANDLE_TH_ERRORS
+#if IS_CUDA
+  THCPAutoGPU __autogpu_guard(-1);
+#endif
   Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
   std::vector<THPObjectPtr> items;
   std::vector<THTensor *> item_tensors;
@@ -639,6 +639,10 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
   } else {
     dimension = 0;
   }
+
+#if IS_CUDA
+  __autogpu_guard.setDevice(THTensor_(getDevice)(LIBRARY_STATE item_tensors[0]));
+#endif
 
   result = (THPTensor *)THPTensor_(NewEmpty)();
   if (!result) return NULL;
