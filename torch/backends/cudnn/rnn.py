@@ -206,6 +206,9 @@ def forward(fn, input, hx, weight, output, hy):
         fn.seq_length, fn.mini_batch, fn.input_size = input.size()
         hidden_size = _hidden_size(fn)
         output_size = _output_size(fn)
+
+        assert hx.is_contiguous()
+        assert cx is None or cx.is_contiguous()
         x = input.contiguous()
         output.resize_(*output_size)
         hy.resize_(*hidden_size)
@@ -319,6 +322,8 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         hidden_size = _hidden_size(fn)
         output_size = _output_size(fn)
 
+        assert hx.is_contiguous()
+        assert cx is None or cx.is_contiguous()
         x = input.contiguous()
         dy = grad_output.contiguous()
         y = output
@@ -397,6 +402,7 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
             hx, cx = hx
         else:
             cx = None
+
         if fn.batch_first:
             input = input.transpose(0, 1)
             output = output.transpose(0, 1)
@@ -409,12 +415,12 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
         if tuple(input.size()) != input_size:
             raise RuntimeError('Expected input size {}, got {}'.format(
                 input_size, tuple(input.size())))
-        if not fn.train:
-            raise RuntimeError('backward_weight can only be called when training!')
         if tuple(hx.size()) != hidden_size:
             raise RuntimeError('Expected input size {}, got {}'.format(
                 hidden_size, hx.size()))
 
+        assert hx.is_contiguous()
+        assert cx is None or cx.is_contiguous()
         x = input.contiguous()
         y = output
         dw = fn.weight_buf.new().resize_as_(fn.weight_buf).zero_()
