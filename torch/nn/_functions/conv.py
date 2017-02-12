@@ -71,6 +71,9 @@ class ConvNd(Function):
                     (in_size - 1) * stride - (2 * pad) + kernel + out_pad,)
             else:
                 output_size += ((in_size + (2 * pad) - kernel) // stride + 1,)
+        if not all(map(lambda s: s > 0, output_size)):
+            raise ValueError("convolution input is too small (output would be {})".format(
+                             'x'.join(map(str, output_size))))
         return output_size
 
     def _update_output(self, input, weight, bias):
