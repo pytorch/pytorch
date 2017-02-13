@@ -49,10 +49,10 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
       remaining -= result;
     }
   } else {
-    long buffer_size = std::min(self->size, (long)5000);
+    int64_t buffer_size = std::min(self->size, (long)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
     for (int64_t i = 0; i < self->size; i += buffer_size) {
-      size_t to_convert = std::min(self->size - i, (int64_t)buffer_size);
+      size_t to_convert = std::min(self->size - i, buffer_size);
       if (sizeof(real) == 2) {
         THP_encodeInt16Buffer((uint8_t*)le_buffer.get(),
             (const int16_t*)data + i,
@@ -100,10 +100,10 @@ THStorage * THPStorage_(readFileRaw)(int fd)
       remaining -= result;
     }
   } else {
-    long buffer_size = std::min(size, (long)5000);
+    int64_t buffer_size = std::min(size, (long)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
     for (int64_t i = 0; i < size; i += buffer_size) {
-      size_t to_convert = std::min(size - i, (int64_t)buffer_size);
+      size_t to_convert = std::min(size - i, buffer_size);
       SYSCHECK(read(fd, le_buffer.get(), sizeof(real) * to_convert));
       if (sizeof(real) == 2) {
         THP_decodeInt16Buffer((int16_t*)data + i,
