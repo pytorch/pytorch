@@ -30,7 +30,7 @@ from caffe2.python.fb.models.mlp import (
 from caffe2.python.fb.models.loss import BatchLRLoss
 from caffe2.python.fb.metrics.metrics import LogScoreReweightedMeasurements
 from caffe2.python.fb.executor.executor import Trainer
-from caffe2.python.fb.optimizers.sgd import build_sgd
+from caffe2.python.sgd import build_sgd
 from caffe2.python import net_drawer
 from caffe2.python import SparseTransformer
 
