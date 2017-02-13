@@ -1,5 +1,10 @@
 # https://travis-ci.org/pytorch/pytorch
 language: python
+
+os:
+    - linux
+    - osx
+  
 python:
     - 2.7.8
     - 2.7
