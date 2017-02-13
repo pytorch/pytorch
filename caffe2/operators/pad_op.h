@@ -46,6 +46,10 @@ class PadImageOp final : public ConvPoolOpBase<Context> {
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
+  static std::vector<TensorShape> PadTensorInference(
+      const OperatorDef& def,
+      const vector<TensorShape>& in);
+
  private:
   PadMode mode_;
   T value_;

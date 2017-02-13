@@ -651,6 +651,11 @@ class CNNModelHelper(ModelHelperBase):
         # Now use the Host version of the accuracy op
         self.net.Accuracy(blobs_in_dev, blob_out, device_option=core.DeviceOption(caffe2_pb2.CPU, 0), **kwargs)
 
+    def PadImage(
+        self, blob_in, blob_out, **kwargs
+    ):
+        self.net.PadImage(blob_in, blob_out, **kwargs)
+
     @property
     def XavierInit(self):
         return ('XavierFill', {})
