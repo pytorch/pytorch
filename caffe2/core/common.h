@@ -1,11 +1,13 @@
 #ifndef CAFFE2_CORE_COMMON_H_
 #define CAFFE2_CORE_COMMON_H_
 
+#include <algorithm>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <set>
-#include <string>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -68,6 +70,13 @@ private:                                                                       \
 #define CAFFE2_MOBILE 0
 #endif // ANDROID / IOS / MACOS
 #endif // CAFFE2_MOBILE
+
+// Define alignment macro that is cross platform
+#if defined(_MSC_VER)
+#define CAFFE2_ALIGNED(x) __declspec(align(x))
+#else
+#define CAFFE2_ALIGNED(x) __attribute__((aligned(x)))
+#endif
 
 // make_unique is a C++14 feature. If we don't have 14, we will emulate
 // its behavior. This is copied from folly/Memory.h

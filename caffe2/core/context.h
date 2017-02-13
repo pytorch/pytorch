@@ -30,6 +30,8 @@ struct DefaultCPUAllocator final : CPUAllocator {
     void* data = nullptr;
 #ifdef __ANDROID__
     data = memalign(gCaffe2Alignment, nbytes);
+#elif defined(_MSC_VER)
+    data = _aligned_malloc(nbytes, gCaffe2Alignment);
 #else
     CAFFE_ENFORCE_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
 #endif

@@ -50,9 +50,7 @@ const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 static_assert(sizeof(unsigned short) == 2,
               "Short on this platform is not 16 bit.");
 namespace caffe2 {
-typedef struct __f16 {
-  uint16_t x;
-} __attribute__((__aligned__(2))) float16;
+typedef struct CAFFE2_ALIGNED(2) __f16 { uint16_t x; } float16;
 }  // namespace caffe2
 
 // Make __f16 a fundamental type.

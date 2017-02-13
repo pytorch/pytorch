@@ -1,6 +1,30 @@
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/core/logging.h"
 
+#if defined(_MSC_VER)
+
+// Currently we do not support signal handling in Windows yet - below is a
+// minimal implementation that makes things compile.
+namespace caffe2 {
+SignalHandler::SignalHandler(
+    SignalHandler::Action SIGINT_action,
+    SignalHandler::Action SIGHUP_action) {}
+SignalHandler::~SignalHandler() {}
+bool SignalHandler::GotSIGINT() {
+  return false;
+}
+bool SignalHandler::GotSIGHUP() {
+  return false;
+}
+SignalHandler::Action SignalHandler::CheckForSignals() {
+  return SignalHandler::Action::NONE;
+}
+} // namespace caffe2
+
+#else // defined(_MSC_VER)
+
+// Normal signal handler implementation.
+
 #include <atomic>
 #include <signal.h>
 #include <unordered_set>
@@ -118,3 +142,5 @@ SignalHandler::Action SignalHandler::CheckForSignals() {
 }
 
 }  // namespace caffe2
+
+#endif // defined(_MSC_VER)

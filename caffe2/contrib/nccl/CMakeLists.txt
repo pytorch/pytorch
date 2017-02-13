@@ -1,4 +1,4 @@
-if(USE_CUDA)
+if(USE_NCCL)
     message(STATUS "Include NCCL operators")
     set(Caffe2_CONTRIB_NCCL_GPU_SRC
         "${CMAKE_CURRENT_SOURCE_DIR}/cuda_nccl_gpu.cc"

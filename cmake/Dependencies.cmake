@@ -248,11 +248,16 @@ if (USE_CUDA)
 endif()
 
 # ---[ NCCL
-if(USE_CUDA)
-  include("cmake/External/nccl.cmake")
-  include_directories(SYSTEM ${NCCL_INCLUDE_DIRS})
-  message(STATUS "NCCL: ${NCCL_LIBRARIES}")
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${NCCL_LIBRARIES})
+if(USE_NCCL)
+  if (NOT USE_CUDA)
+    message(WARNING "If not using cuda, one should not use NCCL either.")
+    set(USE_NCCL OFF)
+  else()
+    include("cmake/External/nccl.cmake")
+    include_directories(SYSTEM ${NCCL_INCLUDE_DIRS})
+    message(STATUS "NCCL: ${NCCL_LIBRARIES}")
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${NCCL_LIBRARIES})
+  endif()
 endif()
 
 # ---[ CUB

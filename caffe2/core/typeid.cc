@@ -1,7 +1,9 @@
 #include "caffe2/core/typeid.h"
 #include "caffe2/core/scope_guard.h"
 
+#if !defined(_MSC_VER)
 #include <cxxabi.h>
+#endif
 
 namespace caffe2 {
 std::map<CaffeTypeId, string>& gTypeNames() {
@@ -14,6 +16,12 @@ std::set<string>& gRegisteredTypeNames() {
   return g_registered_type_names;
 }
 
+#if defined(_MSC_VER)
+// Windows does not have cxxabi.h, so we will simply return the original.
+string Demangle(const char* name) {
+  return string(name);
+}
+#else
 string Demangle(const char* name) {
   int status = 0;
   auto demangled = ::abi::__cxa_demangle(name, nullptr, nullptr, &status);
@@ -23,6 +31,7 @@ string Demangle(const char* name) {
   }
   return name;
 }
+#endif
 
 string GetExceptionString(const std::exception& e) {
 #ifdef __GXX_RTTI
