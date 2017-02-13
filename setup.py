@@ -266,6 +266,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
+    main_libraries += ['cudart']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
@@ -278,7 +279,7 @@ if WITH_CUDA:
     ]
 
 if WITH_CUDNN:
-    main_libraries += ['cudart', 'cudnn']
+    main_libraries += ['cudnn']
     include_dirs.append(CUDNN_INCLUDE_DIR)
     extra_link_args.append('-L' + CUDNN_LIB_DIR)
     main_sources += [
