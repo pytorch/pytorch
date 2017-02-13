@@ -19,6 +19,7 @@ HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.version_info[0] == 3 and \
     sys.platform != 'darwin'
+TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 
 def simple_fill(queue, event):
@@ -289,7 +290,7 @@ class TestMultiprocessing(TestCase):
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(not torch.cuda.device_count() > 1, 'found only 1 GPU')
+    @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
     def test_cuda_small_tensors(self):
         # Check multiple small tensors which will likely use the same
         # underlying cached allocation
