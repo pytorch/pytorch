@@ -169,35 +169,6 @@ class ConstantFillOp final : public FillerOp<Context> {
 };
 
 template <typename T, class Context>
-class GivenTensorFillOp final : public FillerOp<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {
-    auto source_values =
-        OperatorBase::template GetRepeatedArgument<T>("values");
-    for (T f : source_values) {
-      values_.push_back(static_cast<T>(f));
-    }
-  }
-
-  bool Fill(Tensor<Context>* output) override {
-    DCHECK_EQ(output->size(), values_.size())
-        << "output size: " << output->size()
-        << " given size: " << values_.size();
-    auto* data = output->template mutable_data<T>();
-    if (output->size()) {
-      context_.template Copy<T, CPUContext, Context>(
-          output->size(), values_.data(), data);
-    }
-    return true;
-  }
-
- private:
-  vector<T> values_;
-};
-
-template <typename T, class Context>
 class GaussianFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -307,6 +278,34 @@ class LengthsRangeFillOp : public Operator<Context> {
     return true;
   }
 };
+
+inline std::vector<TensorShape> FillerTensorInference(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  vector<TensorShape> out(1);
+  ArgumentHelper helper(def);
+  out[0].set_data_type(static_cast<TensorProto_DataType>(
+      helper.GetSingleArgument<int>("dtype", TensorProto_DataType_FLOAT)));
+
+  if (in.size()) {
+    // TODO
+    bool input_as_shape =
+        helper.GetSingleArgument<bool>("input_as_shape", false);
+    if (input_as_shape) {
+      out[0].set_unknown_shape(true);
+      return out;
+    }
+    for (int d : in[0].dims()) {
+      out[0].add_dims(d);
+    }
+  } else {
+    auto shape = helper.GetRepeatedArgument<int>("shape");
+    for (int d : shape) {
+      out[0].add_dims(d);
+    }
+  }
+  return out;
+}
 
 } // namespace caffe2
 
