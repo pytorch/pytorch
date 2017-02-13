@@ -3,7 +3,7 @@
 import argparse
 import copy
 import logging
-import numpy as np
+import numpy as np  # noqa
 
 from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
 from caffe.proto import caffe_pb2
@@ -286,7 +286,7 @@ def TranslatePool(layer, pretrained_blobs, is_test):
         caffe_op = BaseTranslate(layer, "AveragePool")
     _TranslateStridePadKernelHelper(param, caffe_op)
     AddArgument(caffe_op, "order", "NCHW")
-    if param.HasField('torch_pooling') and param.torch_pooling:
+    try:
         # In the Facebook port of Caffe, a torch_pooling field was added to
         # map the pooling computation of Torch. Essentially, it uses
         #   floor((height + 2 * padding - kernel) / stride) + 1
@@ -295,8 +295,10 @@ def TranslatePool(layer, pretrained_blobs, is_test):
         # which is Caffe's version.
         # Torch pooling is actually the same as Caffe2 pooling, so we don't
         # need to do anything.
-        pass
-    else:
+        is_torch_pooling = param.torch_pooling
+    except AttributeError:
+        is_torch_pooling = False
+    if not is_torch_pooling:
         AddArgument(caffe_op, "legacy_pad",
                     caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
     if param.global_pooling:
