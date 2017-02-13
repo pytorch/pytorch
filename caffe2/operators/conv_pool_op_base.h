@@ -290,10 +290,10 @@ class ConvPoolOpBase : public Operator<Context> {
     bool channel_first;
     int kernel_h = helper.GetSingleArgument<int>(
         "kernel_h",
-        helper.GetSingleArgument<int>("kernel", 0));
+        helper.GetSingleArgument<int>("kernel", 1));
     int kernel_w = helper.GetSingleArgument<int>(
         "kernel_w",
-        helper.GetSingleArgument<int>("kernel", 0));
+        helper.GetSingleArgument<int>("kernel", 1));
     ConvPoolOpBase<CPUContext>::InferOutputSize(
       GetDimsVector(in[0]),
       output_channel,

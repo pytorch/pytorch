@@ -77,6 +77,31 @@ class TestShapeInference(test_util.TestCase):
             "transpose",
             axes=np.random.permutation(5)
         )
+
+        return self.InferTensorRunAndCompare(model)
+
+    def testShapeInferencePad(self):
+        model = cnn.CNNModelHelper(name="padtest")
+        model.PadImage("data", 'padded', pad_t=100, pad_l=37, pad_b=28,
+                       pad_r=20, mode="constant", order="NCHW")
+
+        workspace.FeedBlob(
+            "data",
+            np.random.rand(16, 3, 228, 228).astype(np.float32),
+        )
+
+        self.InferTensorRunAndCompare(model)
+
+    def testShapeInferencePadZero(self):
+        model = cnn.CNNModelHelper(name="padtest")
+        model.PadImage("data", 'padded', pad=0, mode="constant",
+                       order="NCHW")
+
+        workspace.FeedBlob(
+            "data",
+            np.random.rand(16, 3, 228, 228).astype(np.float32),
+        )
+
         self.InferTensorRunAndCompare(model)
 
     def InferTensorRunAndCompare(self, model):

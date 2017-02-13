@@ -410,13 +410,20 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+template <>
+std::vector<TensorShape> PadImageOp<float, CPUContext>::PadTensorInference(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  return ConvPoolOpBase::TensorInferenceForPool(def, in);
+}
+
 REGISTER_CPU_OPERATOR(PadImage, PadImageOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(PadImageGradient, PadImageGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(PadImage)
     .NumInputs(1)
     .NumOutputs(1)
-    // TODO: add Shape inference function (bootcamp)
+    .TensorInferenceFunction(PadImageOp<float, CPUContext>::PadTensorInference)
     .SetDoc(R"DOC(
 PadImage pads values around the boundary of an image according to the pad
 values and stride sizes defined by the ConvPoolOpBase operator.
