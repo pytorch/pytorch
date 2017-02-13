@@ -5,7 +5,7 @@
 void THVector_(copy_DEFAULT)(real *x, const real *y, const ptrdiff_t n) {
   ptrdiff_t i = 0;
 
-  for(; i < n-4; i += 4)
+  for(; i <n-4; i+=4)
   {
     x[i] = y[i];
     x[i+1] = y[i+1];
@@ -20,7 +20,7 @@ void THVector_(copy_DEFAULT)(real *x, const real *y, const ptrdiff_t n) {
 void THVector_(fill_DEFAULT)(real *x, const real c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
 
-  for(; i < n-4; i += 4)
+  for(; i <n-4; i+=4)
   {
     x[i] = c;
     x[i+1] = c;
@@ -68,7 +68,7 @@ void THVector_(cmul_DEFAULT)(real *z, const real *x, const real *y, const ptrdif
 {
   ptrdiff_t i = 0;
 
-  for(; i < n-4; i += 4)
+  for(; i <n-4; i+=4)
   {
     z[i] = x[i] * y[i];
     z[i+1] = x[i+1] * y[i+1];
@@ -84,7 +84,7 @@ void THVector_(mul_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_
 {
   ptrdiff_t i = 0;
 
-  for(; i < n-4; i += 4)
+  for(; i <n-4; i+=4)
   {
     y[i] = x[i] * c;
     y[i+1] = x[i+1] * c;
@@ -100,7 +100,7 @@ void THVector_(cdiv_DEFAULT)(real *z, const real *x, const real *y, const ptrdif
 {
   ptrdiff_t i = 0;
 
-  for(; i < n-4; i += 4)
+  for(; i<n-4; i+=4)
   {
     z[i] = x[i] / y[i];
     z[i+1] = x[i+1] / y[i+1];
@@ -116,7 +116,7 @@ void THVector_(div_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_
 {
   ptrdiff_t i = 0;
 
-  for(; i < n-4; i += 4)
+  for(; i<n-4; i+=4)
   {
     y[i] = x[i] / c;
     y[i+1] = x[i+1] / c;
