@@ -278,7 +278,7 @@ if WITH_CUDA:
     ]
 
 if WITH_CUDNN:
-    main_libraries += ['cudnn']
+    main_libraries += ['cudart', 'cudnn']
     include_dirs.append(CUDNN_INCLUDE_DIR)
     extra_link_args.append('-L' + CUDNN_LIB_DIR)
     main_sources += [
