@@ -1,7 +1,7 @@
 # Finds Google Protocol Buffers library and compilers and extends
 # the standard cmake script with version and python generation support
 
-if (ANDROID OR IOS)
+if (ANDROID OR IOS OR WIN32)
   option(protobuf_BUILD_SHARED_LIBS "" OFF)
   option(protobuf_BUILD_TESTS "" OFF)
   option(protobuf_BUILD_EXAMPLES "" OFF)
@@ -13,6 +13,14 @@ if (ANDROID OR IOS)
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
   include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/protobuf/src)
   list(APPEND Caffe2_DEPENDENCY_LIBS libprotobuf)
+  if(NOT EXISTS ${PROTOBUF_PROTOC_EXECUTABLE})
+    message(FATAL_ERROR
+            "To build with Android/iOS/Windows, you will need to manually "
+            "specify a PROTOBUF_PROTOC_EXECUTABLE. See "
+            "scripts/build_host_protoc.{sh,bat} for more details.")
+  else()
+    message(STATUS "Using protobuf compiler ${PROTOBUF_PROTOC_EXECUTABLE}.")
+  endif()
 else()
   find_package( Protobuf REQUIRED )
   list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES})

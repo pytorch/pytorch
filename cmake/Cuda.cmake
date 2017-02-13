@@ -178,13 +178,15 @@ list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY}
 # find libcuda.so and lbnvrtc.so
 # For libcuda.so, we will find it under lib, lib64, and then the
 # stubs folder, in case we are building on a system that does not
-# have cuda driver installed.
+# have cuda driver installed. On windows, we also search under the
+# folder lib/x64.
+
 find_library(CUDA_CUDA_LIB cuda
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/stubs lib64/stubs)
+    PATH_SUFFIXES lib lib64 lib/stubs lib64/stubs lib/x64)
 find_library(CUDA_NVRTC_LIB nvrtc
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64)
+    PATH_SUFFIXES lib lib64 lib/x64)
 
 # setting nvcc arch flags
 caffe2_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA)

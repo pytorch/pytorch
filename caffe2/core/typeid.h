@@ -36,7 +36,7 @@ struct TypeNameRegisterer {
   explicit TypeNameRegisterer(CaffeTypeId id) {
 #ifdef __GXX_RTTI
     string name = Demangle(typeid(T).name());
-    gTypeNames()[reinterpret_cast<CaffeTypeId>(id)] = name;
+    gTypeNames()[id] = name;
     // If we are in RTTI mode, we will also use this opportunity to do sanity
     // check if there are duplicated ids registered for the same type. This
     // usually happens when one does not do RTLD_GLOBAL, which is often the
@@ -52,8 +52,7 @@ struct TypeNameRegisterer {
     }
     gRegisteredTypeNames().insert(name);
 #else // __GXX_RTTI
-    gTypeNames()[reinterpret_cast<CaffeTypeId>(id)] =
-        "(RTTI disabled, cannot show name)";
+    gTypeNames()[id] = "(RTTI disabled, cannot show name)";
 #endif // __GXX_RTTI
   }
 };
