@@ -2,57 +2,6 @@
 
 namespace caffe2 {
 
-// For arithmetic operators, Eigen provides a good way to vectorize even
-// when broadcasting.
-#define EIGEN_FUNCTOR(name, eigen_op, input_type, output_type)               \
-  struct Eigen##name##Functor {                                              \
-    template <int b_is_scalar, typename T, typename R>                       \
-    inline void Run(size_t n, const T* a, const T* b, R* out, CPUContext*) { \
-      if (b_is_scalar) {                                                     \
-        EigenVectorArrayMap<R>(out, n) =                                     \
-            eigen_op((ConstEigenVectorArrayMap<T>(a, n)), (b[0]));           \
-      } else {                                                               \
-        EigenVectorArrayMap<R>(out, n) = eigen_op(                           \
-            (ConstEigenVectorArrayMap<T>(a, n)),                             \
-            (ConstEigenVectorArrayMap<T>(b, n)));                            \
-      }                                                                      \
-    }                                                                        \
-    template <typename T, typename R>                                        \
-    void RunWithBroadcast(                                                   \
-        const T* a,                                                          \
-        const T* b,                                                          \
-        R* out,                                                              \
-        size_t pre,                                                          \
-        size_t n,                                                            \
-        CPUContext*) {                                                       \
-      EigenArrayMap<R>(out, n, pre) = eigen_op(                              \
-          (ConstEigenArrayMap<T>(a, n, pre).colwise()),                      \
-          (ConstEigenVectorArrayMap<T>(b, n)));                              \
-    }                                                                        \
-    template <typename T, typename R>                                        \
-    void RunWithBroadcast2(                                                  \
-        const T* a,                                                          \
-        const T* b,                                                          \
-        R* out,                                                              \
-        size_t pre,                                                          \
-        size_t n,                                                            \
-        size_t post,                                                         \
-        CPUContext*) {                                                       \
-      for (int i = 0; i < pre; ++i) {                                        \
-        EigenArrayMap<R>(out + i * n * post, post, n) = eigen_op(            \
-            (ConstEigenArrayMap<T>(a + i * n * post, post, n).rowwise()),    \
-            (Eigen::Map<const Eigen::Array<T, 1, Eigen::Dynamic>>(b, n)));   \
-      }                                                                      \
-    }                                                                        \
-  };                                                                         \
-  REGISTER_CPU_OPERATOR(                                                     \
-      name,                                                                  \
-      BinaryElementwiseOp<                                                   \
-          input_type,                                                        \
-          CPUContext,                                                        \
-          Eigen##name##Functor,                                              \
-          output_type>)
-
 // For some comparison and logical operators, eigen does not have vectorized
 // math so we need to improvise.
 #define NAIVE_FUNCTOR(name, op, input_type, output_type)                       \
@@ -103,11 +52,6 @@ namespace caffe2 {
           Naive##name##Functor,                                                \
           output_type>)
 
-// See the operations supported here:
-// https://eigen.tuxfamily.org/dox-devel/group__QuickRefPage.html
-#define EIGEN_ADD(x, y) ((x) + (y))
-EIGEN_FUNCTOR(Add, EIGEN_ADD, NumericTypes, SameTypeAsInput);
-#undef EIGEN_ADD
 #define EIGEN_SUB(x, y) ((x) - (y))
 EIGEN_FUNCTOR(Sub, EIGEN_SUB, NumericTypes, SameTypeAsInput);
 #undef EIGEN_SUB
