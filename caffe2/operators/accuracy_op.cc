@@ -66,8 +66,9 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
       // the next index are greater than labelData, so no need to check further
       for (int j = 0; j < D; ++j) {
         auto pred = Xdata[i * D + j];
+        const auto label_data = labelData[i];
+
         if (PQ.size() < top_k || pred > PQ.top().first) {
-          const auto label_data = labelData[i];
           if (j == label_data) {
             ++correct;
           }
@@ -79,6 +80,10 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
             }
             PQ.pop();
           }
+        } else if (label_data == j) {
+          // The correct answer did not make it into the top K heap,
+          // so we can short circuit
+          break;
         }
       }
     }
