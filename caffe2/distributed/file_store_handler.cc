@@ -89,6 +89,7 @@ int64_t FileStoreHandler::add(
     const std::string& /* unused */,
     int64_t /* unused */) {
   CHECK(false) << "add not implemented for FileStoreHandler";
+  return 0;
 }
 
 bool FileStoreHandler::check(const std::vector<std::string>& names) {
