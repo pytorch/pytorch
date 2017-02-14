@@ -31,7 +31,7 @@ class SpatialMaxPooling(Module):
         return self
 
     def updateOutput(self, input):
-        if self.indices is None:
+        if not hasattr(self, 'indices') or self.indices is None:
             self.indices = input.new()
         self.indices = self.indices.long()
 

@@ -8,19 +8,22 @@ class Padding(Module):
     # If pad>0 index counts from the right index = 1 pads before index 1.
     # index = 2 pads starting before index 2 and after index 1 in dimension [dim]
 
-    def __init__(self, dim, pad, value=0, index=0):
+    def __init__(self, dim, pad, nInputDim, value=0, index=0):
         self.value = value
         self.index = index
         self.dim = dim
         self.pad = pad
+        self.nInputDim = nInputDim
         self.outputSize = torch.Size()
         super(Padding, self).__init__()
 
     def updateOutput(self, input):
         outputSize = list(input.size())
-        outputSize[self.dim] += abs(self.pad)
-        self.outputSize = torch.Size(outputSize)
         dim = self.dim
+        if hasattr(self, 'nInputDim') and len(outputSize) != self.nInputDim:
+            dim = dim+1
+        outputSize[dim] += abs(self.pad)
+        self.outputSize = torch.Size(outputSize)
 
         self.output.resize_(self.outputSize)
         self.output.fill_(self.value)
@@ -45,6 +48,8 @@ class Padding(Module):
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resize_as_(input)
         dim = self.dim
+        if hasattr(self, 'nInputDim') and len(outputSize) != self.nInputDim:
+            dim = dim+1
 
         index = self.index
         pad = self.pad
