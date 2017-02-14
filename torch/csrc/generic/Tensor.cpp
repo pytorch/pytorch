@@ -867,6 +867,20 @@ bool THPTensor_(init)(PyObject *module)
   return true;
 }
 
+bool THPTensor_(postInit)(PyObject *module)
+{
+  THPTensorClass = PyObject_GetAttrString(module,(char*)TH_CONCAT_STRING_2(Real,Tensor));
+  if (!THPTensorClass) return false;
+
+  bool is_cuda = false;
+#ifdef THC_GENERIC_FILE
+  is_cuda = true;
+#endif
+  const char *type_name = TH_CONCAT_STRING_2(Real,);
+  torch::registerPyTypeObject((PyTypeObject*)THPTensorClass, type_name, is_cuda, false);
+  return true;
+}
+
 #undef NUMPY_TYPE_ENUM
 
 #endif

@@ -49,6 +49,8 @@ extern PyTypeObject THSPTensorStatelessType;
 bool THPTensor_(init)(PyObject *module);
 #ifndef THD_GENERIC_FILE
 bool THSPTensor_(init)(PyObject *module);
+bool THPTensor_(postInit)(PyObject *module);
+bool THSPTensor_(postInit)(PyObject *module);
 #endif
 
 extern PyTypeObject THPTensorType;

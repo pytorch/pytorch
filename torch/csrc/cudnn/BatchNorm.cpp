@@ -143,7 +143,7 @@ void cudnn_batch_norm_backward(
   THVoidTensor_assertContiguous(save_mean);
   THVoidTensor_assertContiguous(save_var);
   CHECK(cudnnBatchNormalizationBackward(
-    handle, mode, &one, &zero, &one, &one,
+    handle, mode, &one, &zero, &one, &zero,
     idesc.desc, tensorPointer(dataType, input),
     odesc.desc, tensorPointer(dataType, grad_output),
     gdesc.desc, tensorPointer(dataType, grad_input),

@@ -118,7 +118,7 @@ class Module(object):
                 # Variables stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
-                if param.grad is not None:
+                if param._grad is not None:
                     param._grad.data = fn(param._grad.data)
 
         for key, buf in self._buffers.items():
