@@ -104,6 +104,16 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+    def testShapeInferenceMatMul(self):
+        model = cnn.CNNModelHelper()
+
+        model.MatMul(["x", "y"], "MatMul")
+
+        workspace.FeedBlob("x", np.random.rand(10, 5).astype(np.float32))
+        workspace.FeedBlob("y", np.random.rand(5, 10).astype(np.float32))
+
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model):
         '''
         Runs shape inference, and then the model to check
