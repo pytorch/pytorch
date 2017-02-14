@@ -285,23 +285,27 @@ If an insert is necessary but max_elements has been reached, fail.
   .Output(0, "indices", "Indices for each of the keys.");
 
 OPERATOR_SCHEMA(IndexFreeze)
-  .NumInputs(1)
-  .NumOutputs(0)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 Freezes the given index, disallowing creation of new index entries.
 Should not be called concurrently with IndexGet.
 )DOC")
-  .Input(0, "handle", "Pointer to an Index instance.");
+    .Input(0, "handle", "Pointer to an Index instance.")
+    .Output(0, "handle", "The input handle.")
+    .EnforceInplace({{0, 0}});
 
 OPERATOR_SCHEMA(IndexLoad)
     .NumInputs(2)
-    .NumOutputs(0)
+    .NumOutputs(1)
     .SetDoc(R"DOC(
 Loads the index from the given 1-D tensor. Elements in the tensor will be given
 consecutive indexes starting at 1. Fails if tensor contains repeated elements.
 )DOC")
     .Input(0, "handle", "Pointer to an Index instance.")
     .Input(1, "items", "1-D tensor with elements starting with index 1.")
+    .Output(0, "handle", "The input handle.")
+    .EnforceInplace({{0, 0}})
     .Arg(
         "skip_first_entry",
         "If set, skips the first entry of the tensor. This allows "
