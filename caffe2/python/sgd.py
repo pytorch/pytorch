@@ -29,6 +29,15 @@ def _build_lr(model, base_learning_rate, policy="fixed", iter_val=0,
     return LR, ITER
 
 
+def _dedup(model, dedup_indices, grad):
+    assert (isinstance(grad, core.GradientSlice))
+    # TODO(dzhulgakov): find a better place to do deduplication
+    if dedup_indices:
+        return model.net.DeduplicateGradientSlices(grad)
+    else:
+        return grad
+
+
 def build_sgd(model, base_learning_rate, policy="fixed", **other_lr_params):
     LR, _ = _build_lr(model, base_learning_rate, policy, **other_lr_params)
 
@@ -40,3 +49,26 @@ def build_sgd(model, base_learning_rate, policy="fixed", **other_lr_params):
             )
         else:
             model.WeightedSum([param, ONE, grad, LR], param)
+
+
+def build_adagrad(model, base_learning_rate, dedup_indices=False,
+                  parameters=None, **params):
+    LR, _ = _build_lr(model, base_learning_rate, policy="fixed")
+    param_to_grad = model.GetOptimizationPairs(parameters)
+
+    for param, grad in param_to_grad.items():
+        # allocate additional args of the same shape as main weights
+        moment = model.param_init_net.ConstantFill(
+            [param],
+            param + "_square_sum",
+            value=0.0
+        )
+        if isinstance(grad, core.GradientSlice):
+            g = _dedup(model, dedup_indices, grad)
+            model.SparseAdagrad(
+                [param, moment, g.indices, g.values, LR], [param, moment],
+                **params
+            )
+
+        else:
+            model.Adagrad([param, moment, grad, LR], [param, moment], **params)
