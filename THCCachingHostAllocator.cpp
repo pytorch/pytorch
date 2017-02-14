@@ -30,6 +30,19 @@ struct Block : public BlockSize
       BlockSize(size, ptr), allocated(allocated), event_count(0) { }
 };
 
+struct BlockStreamCleaner {
+  std::unordered_set<THCStream *> &streams;
+
+  BlockStreamCleaner(std::unordered_set<THCStream *> &streams) : streams(streams) {}
+  ~BlockStreamCleaner() {
+    for(auto it = streams.begin(); it != streams.end(); ++it) {
+      if (*it != NULL) {
+        THCStream_free(*it);
+      }
+    }
+    streams.clear();
+  }
+};
 static bool BlockComparator(const BlockSize& a, const BlockSize& b)
 {
   // sort by size, break ties with pointer
@@ -112,7 +125,13 @@ struct HostAllocator
     Block& block = it->second;
     THAssert(block.allocated);
 
+    // free (on valid memory) shouldn't fail, so mark unallocated before
+    // we process the streams.
     block.allocated = false;
+
+    // since the block has been deallocated, no point in keeping around the
+    // streams, even in case of error.
+    BlockStreamCleaner sc(block.streams);
     for (auto it = block.streams.begin(); it != block.streams.end(); ++it) {
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
@@ -120,7 +139,7 @@ struct HostAllocator
         return err;
       }
 
-      err = cudaEventRecord(event, (*it)->stream);
+      err = cudaEventRecord(event, (*it) == NULL ? NULL : (*it)->stream);
       if (err != cudaSuccess) {
         return err;
       }
@@ -150,7 +169,7 @@ struct HostAllocator
     Block& block = it->second;
     THAssert(block.allocated);
     auto res = block.streams.emplace(stream);
-    if (res.second == true) {
+    if (res.second == true && stream != NULL) {
       THCStream_retain(stream);
     }
 
@@ -182,9 +201,6 @@ struct HostAllocator
       Block& block = blocks.at(e.second);
       block.event_count--;
       if (block.event_count == 0 && !block.allocated) {
-        for (auto it = block.streams.begin(); it != block.streams.end(); ++it) {
-          THCStream_free(*it);
-        }
         available.insert(block);
       }
       cuda_events.pop_front();
@@ -197,18 +213,17 @@ struct HostAllocator
     std::lock_guard<std::mutex> lock(mutex);
 
     // remove events for freed blocks
-    std::deque<std::pair<cudaEvent_t, void*>> new_events;
     for (auto it = cuda_events.begin(); it != cuda_events.end(); ++it) {
       cudaEvent_t event = it->first;
       Block& block = blocks.at(it->second);
       if (!block.allocated) {
         THCudaCheckWarn(cudaEventDestroy(event));
         block.event_count--;
-      } else {
-        new_events.push_back(*it);
       }
     }
-    cuda_events.swap(new_events);
+
+    // all cuda_events have been processed
+    cuda_events.clear();
 
     // clear list of available blocks
     available.clear();
