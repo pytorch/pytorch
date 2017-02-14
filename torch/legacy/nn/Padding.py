@@ -20,7 +20,7 @@ class Padding(Module):
     def updateOutput(self, input):
         outputSize = list(input.size())
         dim = self.dim
-        if hasattr(self, 'nInputDim') and len(outputSize) != self.nInputDim:
+        if hasattr(self, 'nInputDim') and input.dim() != self.nInputDim:
             dim = dim+1
         outputSize[dim] += abs(self.pad)
         self.outputSize = torch.Size(outputSize)
@@ -48,7 +48,7 @@ class Padding(Module):
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resize_as_(input)
         dim = self.dim
-        if hasattr(self, 'nInputDim') and len(outputSize) != self.nInputDim:
+        if hasattr(self, 'nInputDim') and input.dim() != self.nInputDim:
             dim = dim+1
 
         index = self.index
