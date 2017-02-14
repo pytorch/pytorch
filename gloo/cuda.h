@@ -12,6 +12,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#include <memory>
+
 #include "gloo/common/logging.h"
 
 namespace gloo {
@@ -53,6 +55,27 @@ class CudaDeviceGuard {
 
  private:
   int previous_;
+};
+
+// Managed chunk of GPU memory.
+// Convience class used for tests and benchmarks.
+template<typename T>
+class CudaMemory {
+ public:
+  CudaMemory(size_t n, T val);
+  ~CudaMemory();
+
+  T* operator*() const {
+    return ptr_;
+  }
+
+  std::unique_ptr<T[]> copyToHost();
+
+ protected:
+  size_t n_;
+  size_t bytes_;
+  int device_;
+  T* ptr_;
 };
 
 } // namespace gloo

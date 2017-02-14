@@ -21,43 +21,6 @@ namespace gloo {
 namespace test {
 namespace {
 
-template<typename T>
-__global__ void initializeMemory(T* ptr, const T val, const size_t n)
-{
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  for (; i < n; i += blockDim.x) {
-    ptr[i] = val;
-  }
-}
-
-// Managed chunk of CUDA memory
-template<typename T>
-class CudaMemory {
- public:
-  CudaMemory(size_t n, T val)
-      : n_(n), bytes_(n * sizeof(T)) {
-    CUDA_CHECK(cudaGetDevice(&device_));
-    CUDA_CHECK(cudaMalloc(&ptr_, bytes_));
-    initializeMemory<<<1, 32>>>(ptr_, val, n);
-  }
-
-  ~CudaMemory() {
-    CudaDeviceGuard guard;
-    CUDA_CHECK(cudaSetDevice(device_));
-    CUDA_CHECK(cudaFree(ptr_));
-  }
-
-  T* operator*() const {
-    return ptr_;
-  }
-
- protected:
-  size_t n_;
-  size_t bytes_;
-  int device_;
-  T* ptr_;
-};
-
 // Function to instantiate and run algorithm.
 using Func = void(
     std::shared_ptr<::gloo::Context>&,
@@ -72,7 +35,7 @@ class CudaAllreduceTest : public BaseTest,
                           public ::testing::WithParamInterface<Param> {
 
   using CudaBuffers = std::vector<std::unique_ptr<CudaMemory<float> > >;
-  using HostBuffers = std::vector<std::vector<float> >;
+  using HostBuffers = std::vector<std::unique_ptr<float[]> >;
 
  public:
   int getDeviceCount() {
@@ -104,12 +67,9 @@ class CudaAllreduceTest : public BaseTest,
   HostBuffers getHostBuffers(const CudaBuffers& in, size_t count) {
     HostBuffers out;
     for (const auto& src : in) {
-      auto ptr = std::vector<float>(count);
-      auto bytes = count * sizeof(float);
-      cudaMemcpy(ptr.data(), **src, bytes, cudaMemcpyDefault);
-      out.push_back(std::move(ptr));
+      out.push_back(src->copyToHost());
     }
-    return std::move(out);
+    return out;
   }
 };
 
