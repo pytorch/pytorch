@@ -196,67 +196,99 @@ DataChannelTCP::~DataChannelTCP()
 
 
 void DataChannelTCP::listen(std::uint16_t port = 0) {
-  SYSCHECK(_socket = ::socket(PF_INET, SOCK_STREAM, 0))
+  struct addrinfo hints, *res = NULL;
 
+  memset(&hints, 0x00, sizeof(hints));
+  hints.ai_flags = AI_PASSIVE;
+  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+  hints.ai_socktype = SOCK_STREAM; // TCP
+
+  // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
+  // by editing `/etc/gai.conf`. so there is no need to manual sorting
+  // or protcol preference.
+  int err = getaddrinfo(NULL, std::to_string(port).data(), &hints, &res);
+  if (err != 0 || !res) {
+    throw std::invalid_argument("cannot find host to listen on: " + std::string(gai_strerror(err)));
+  }
+
+  std::shared_ptr<struct addrinfo> addresses(res, [](struct addrinfo* p) {
+    ::freeaddrinfo(p);
+  });
+
+  struct addrinfo *next_addr = addresses.get();
+  while (true) {
+    try {
+      SYSCHECK(_socket = ::socket(next_addr->ai_family, next_addr->ai_socktype, next_addr->ai_protocol))
+
+      int optval = 1;
+      SYSCHECK(::setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
+      SYSCHECK(::bind(_socket, next_addr->ai_addr, next_addr->ai_addrlen))
+      SYSCHECK(::listen(_socket, LISTEN_QUEUE_SIZE))
+      break;
+    } catch (const std::system_error& e) {
+      ::close(_socket);
+      next_addr = next_addr->ai_next;
+
+      // we have tried all addresses but could not establish listening on any of them
+      if (!next_addr) {
+        throw e;
+      }
+    }
+  }
+
+  // get listen port
   struct sockaddr_in addr;
   socklen_t addr_len = sizeof(addr);
-
-  memset(&addr, 0, addr_len);
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  addr.sin_addr.s_addr = INADDR_ANY;
-
-  int optval = 1;
-  SYSCHECK(::setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
-  SYSCHECK(::bind(_socket, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)))
-  SYSCHECK(::listen(_socket, LISTEN_QUEUE_SIZE))
   SYSCHECK(::getsockname(_socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
-
   _port = ntohs(addr.sin_port);
 }
 
 
 int DataChannelTCP::connect(const std::string& address, std::uint16_t port,
                             int wait = true) const {
-  struct sockaddr_in addr;
-  socklen_t addr_len = sizeof(addr);
+  struct addrinfo hints, *res = NULL;
 
-  memset(&addr, 0, addr_len);
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  struct addrinfo *res;
+  memset(&hints, 0x00, sizeof(hints));
+  hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
+  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+  hints.ai_socktype = SOCK_STREAM; // TCP
 
-  // get address by host or IP
-  int err = ::getaddrinfo(address.data(), NULL, NULL, &res);
-  if (err == 0) {
-    std::memcpy(
-      &(addr.sin_addr),
-      &(reinterpret_cast<struct sockaddr_in*>(res->ai_addr)->sin_addr),
-      sizeof(struct in_addr)
-    );
-    ::freeaddrinfo(res);
-  } else {
-    SYSCHECK(err = ::inet_pton(AF_INET, address.data(), &(addr.sin_addr)))
-    if (err == 0)
-      throw std::invalid_argument("invalid IP address");
+  // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
+  // by editing `/etc/gai.conf`. so there is no need to manual sorting
+  // or protcol preference.
+  int err = ::getaddrinfo(address.data(), std::to_string(port).data(), &hints, &res);
+  if (err != 0 || !res) {
+    throw std::invalid_argument("host not found: " + std::string(gai_strerror(err)));
   }
 
+  std::shared_ptr<struct addrinfo> addresses(res, [](struct addrinfo* p) {
+    ::freeaddrinfo(p);
+  });
+
+  struct addrinfo *next_addr = addresses.get();
   int socket;
   while (true) {
     try {
-      /*
-       * If connect() fails, the state of the socket is unspecified.
-       * We should close the socket and create a new one before attempting to reconnect.
-       */
-      SYSCHECK(socket = ::socket(AF_INET, SOCK_STREAM, 0))
-      SYSCHECK(::connect(socket, reinterpret_cast<const struct sockaddr*>(&addr), addr_len))
+      SYSCHECK(socket = ::socket(next_addr->ai_family, next_addr->ai_socktype, next_addr->ai_protocol))
+      SYSCHECK(::connect(socket, next_addr->ai_addr, next_addr->ai_addrlen))
       break;
     } catch (const std::system_error& e) {
+      // if `connect` fails, the state of the socket is unspecified.
+      // we should close the socket and create a new one before attempting to reconnect.
       ::close(socket);
-      if (!wait || (errno != ECONNREFUSED))
-        throw e;
 
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      if (!wait || (errno != ECONNREFUSED)) {
+        // we need to move to next address because this was not available
+        // to connect or to create socket
+        next_addr = next_addr->ai_next;
+
+        // we have tried all addresses but could not connect to any of them
+        if (!next_addr) {
+          throw e;
+        }
+      } else {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+      }
     }
   }
 
@@ -278,16 +310,24 @@ std::tuple<int, std::string> DataChannelTCP::accept() const {
       throw std::system_error(ECONNABORTED, std::system_category());
   }
 
-  struct sockaddr_in addr;
-  socklen_t addr_len = sizeof(addr);
-  std::memset(&addr, 0, sizeof(addr));
-
   int socket;
-  SYSCHECK(socket = ::accept(_socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
+  SYSCHECK(socket = ::accept(_socket, NULL, NULL))
 
-  char address[INET_ADDRSTRLEN + 1];
-  SYSCHECK(::inet_ntop(AF_INET, &(addr.sin_addr), address, INET_ADDRSTRLEN))
-  address[INET_ADDRSTRLEN] = '\0';
+  struct sockaddr_storage addr;
+  socklen_t addr_len = sizeof(addr);
+  char address[INET6_ADDRSTRLEN + 1];
+
+  SYSCHECK(::getpeername(socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
+
+  if (addr.ss_family == AF_INET) {
+    struct sockaddr_in *s = reinterpret_cast<struct sockaddr_in*>(&addr);
+    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
+    address[INET_ADDRSTRLEN] = '\0';
+  } else {
+    struct sockaddr_in6 *s = reinterpret_cast<struct sockaddr_in6*>(&addr);
+    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
+    address[INET6_ADDRSTRLEN] = '\0';
+  }
 
   return std::make_tuple(socket, std::string(address));
 }
