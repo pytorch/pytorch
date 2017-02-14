@@ -21,7 +21,7 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=Fals
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
     hx, cx = hidden
-    xw_ih = input.repeat(4) if skip_input else F.linear(input, w_ih, b_ih)
+    xw_ih = input.repeat(1, 4) if skip_input else F.linear(input, w_ih, b_ih)
     gates = xw_ih + F.linear(hx, w_hh, b_hh)
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
@@ -37,7 +37,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
-    gi = input.repeat(3) if skip_input else F.linear(input, w_ih, b_ih)
+    gi = input.repeat(1, 3) if skip_input else F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = gi.chunk(3, 1)
     h_r, h_i, h_n = gh.chunk(3, 1)
@@ -157,6 +157,7 @@ class CudnnRNN(NestedIOFunction):
         if dropout_state is None:
             dropout_state = {}
         self.mode = cudnn.rnn.get_cudnn_mode(mode)
+        self.skip_input = skip_input
         self.input_mode = cudnn.CUDNN_SKIP_INPUT if skip_input else cudnn.CUDNN_LINEAR_INPUT
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -210,7 +211,7 @@ class CudnnRNN(NestedIOFunction):
             grad_hx)
 
         if self.needs_input_grad[1]:
-            grad_weight = [tuple(w.new().resize_as_(w).zero_() for w in layer_weight) for layer_weight in weight]
+            grad_weight = [tuple(w.new().resize_as_(w).zero_() if w is not None else None for w in layer_weight) for layer_weight in weight]
             cudnn.rnn.backward_weight(
                 self,
                 input,
@@ -218,7 +219,8 @@ class CudnnRNN(NestedIOFunction):
                 output,
                 weight,
                 grad_weight)
-
+        if self.skip_input:
+            grad_weight = [tuple(w for w in layer_grad_weight if w is not None) for layer_grad_weight in grad_weight]
         return grad_input, grad_weight, grad_hx
 
 

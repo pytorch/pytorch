@@ -45,14 +45,22 @@ class RNNBase(Module):
                 suffix = '_reverse' if direction == 1 else ''
                 weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
                 weights = [x.format(layer, suffix) for x in weights]
-                setattr(self, weights[0], w_ih)
+                if not (skip_input and layer == 0):
+                    setattr(self, weights[0], w_ih)
                 setattr(self, weights[1], w_hh)
                 if bias:
-                    setattr(self, weights[2], b_ih)
-                    setattr(self, weights[3], b_hh)
-                    self._all_weights += [weights]
+                    if not (skip_input and layer == 0):
+                        setattr(self, weights[2], b_ih)
+                        setattr(self, weights[3], b_hh)
+                        self._all_weights += [weights]
+                    else:
+                        setattr(self, weights[3], b_hh)
+                        self._all_weights += [('', weights[1], '', weights[3])]
                 else:
-                    self._all_weights += [weights[:2]]
+                    if not (skip_input and layer == 0):
+                        self._all_weights += [weights[:2]]
+                    else:
+                        self._all_weights += [('', weights[1])]
 
         self.reset_parameters()
 
@@ -121,7 +129,7 @@ class RNNBase(Module):
 
     @property
     def all_weights(self):
-        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
+        return [[getattr(self, weight, None) for weight in weights] for weights in self._all_weights]
 
 
 class RNN(RNNBase):

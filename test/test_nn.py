@@ -1059,7 +1059,8 @@ class TestNN(NNTestCase):
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
+                    if x is not None and y is not None:
+                        x.data.copy_(y.data)
 
             input = Variable(input_val.clone(), requires_grad=True)
             if is_lstm:
@@ -1110,7 +1111,8 @@ class TestNN(NNTestCase):
             # check grad weights separately, as nested dict
             for cpu_layer_weight, gpu_layer_weight in zip(outputs_cpu['weights'], outputs_gpu['weights']):
                 for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
-                    self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
+                    if cpu_weight is not None and gpu_weight is not None:
+                        self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias in (True, False):
@@ -1135,11 +1137,6 @@ class TestNN(NNTestCase):
                                          batch_first=batch_first,
                                          skip_input=skip_input)
 
-                            # cuDNN bug, bias still used even when skip_input true
-                            if skip_input and bias:
-                                rnn.all_weights[0][3].data.fill_(0)
-                                rnn.all_weights[0][2].data.fill_(0)
-
                             outputs_cpu = forward_backward(
                                 False, rnn, input_val, hx_val, rnn.all_weights, skip_input)
 
@@ -1151,10 +1148,6 @@ class TestNN(NNTestCase):
                                              bidirectional=bidirectional,
                                              batch_first=batch_first,
                                              skip_input=skip_input)
-
-                            if skip_input and bias:
-                                rnn_gpu.all_weights[0][3].data.fill_(0)
-                                rnn_gpu.all_weights[0][2].data.fill_(0)
 
                             outputs_gpu = forward_backward(
                                 True, rnn_gpu, input_val, hx_val, rnn.all_weights, skip_input)
