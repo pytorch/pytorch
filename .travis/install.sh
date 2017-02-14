@@ -1,4 +1,6 @@
 #!/bin/bash
+set -e
+
 if [[ $BUILD_TARGET == 'android' ]]; then
 #**********************************************#
 # Android installation, both on OS X and Linux #
@@ -49,18 +51,32 @@ else
   # Install CUDA #
   ################
 
-  wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_8.0.44-1_amd64.deb   
-  sudo dpkg -i cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
+  CUDA_REPO_PKG="cuda-repo-ubuntu1404_8.0.44-1_amd64.deb"
+  CUDA_PKG_VERSION="8-0"
+  CUDA_VERSION="8.0"
+
+  wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/$CUDA_REPO_PKG
+  sudo dpkg -i $CUDA_REPO_PKG
+  rm $CUDA_REPO_PKG
   sudo apt-get update
-  sudo apt-get install cuda
-  
+  sudo apt-get install -y --no-install-recommends \
+      cuda-core-$CUDA_PKG_VERSION \
+      cuda-cublas-dev-$CUDA_PKG_VERSION \
+      cuda-cudart-dev-$CUDA_PKG_VERSION \
+      cuda-curand-dev-$CUDA_PKG_VERSION \
+      cuda-driver-dev-$CUDA_PKG_VERSION \
+      cuda-nvrtc-dev-$CUDA_PKG_VERSION
+
+  # manually create CUDA symlink
+  sudo ln -s /usr/local/cuda-$CUDA_VERSION /usr/local/cuda
+
   #################
   # Install cudnn #
   #################
 
   # Found here:
-  # https://github.com/NVIDIA/nvidia-docker/blob/master/ubuntu-16.04/cuda/8.0/devel/cudnn5/Dockerfile#L11-L16
-  CUDNN_DOWNLOAD_SUM=a87cb2df2e5e7cc0a05e266734e679ee1a2fadad6f06af82a76ed81a23b102c8
+  # https://gitlab.com/nvidia/cuda/blob/ff2d7c34fe/8.0/devel/cudnn5/Dockerfile
+  CUDNN_DOWNLOAD_SUM=c10719b36f2dd6e9ddc63e3189affaa1a94d7d027e63b71c3f64d449ab0645ce
   CUDNN_URL="http://developer.download.nvidia.com/compute/redist/cudnn/v5.1/cudnn-8.0-linux-x64-v5.1.tgz"
   curl -fsSL ${CUDNN_URL} -O
   echo "$CUDNN_DOWNLOAD_SUM  cudnn-8.0-linux-x64-v5.1.tgz" | sha256sum -c --strict -
