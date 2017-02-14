@@ -243,7 +243,7 @@ void THNN_(IndexLinear_updateParameters)(
     long wDim = weight->size[1];
     int maxNormalize = wDim - outDim;
     long keysSize = runningKeys->size[0];
-    long batchSize = cumSumSizes->size[0] - 1;
+    long batchSize = cumSumSizes->size[0];
 
     THCTensor_(cadd)(state, bias, bias, -learningRate, gradBias);
     long gradWeightStride = gradWeight->stride[0];

@@ -63,8 +63,8 @@ void updateOutput(
     // if (rowId >= batchSize) return;
 
     // Load the nonzero column offsets for current row
-    const long batchStart = cumSumSizes[rowId];
-    const long batchEnd   = cumSumSizes[rowId + 1];
+    const long batchStart = rowId == 0 ? 0 : cumSumSizes[rowId - 1];
+    const long batchEnd   = cumSumSizes[rowId];
 
     Ty outval = 0;
     // Since the number of nonzero elements might be greater than local memory available,
@@ -122,8 +122,8 @@ void updateOutputTrain(
     const long tid  = tidy * blockDim.x + tidx;
     const long gidx = blockIdx.x * blockDim.x + tidx;
 
-    const long batchStart = cumSumSizes[batchId];
-    const long batchEnd   = cumSumSizes[batchId + 1];
+    const long batchStart = batchId == 0 ? 0 : cumSumSizes[batchId - 1];
+    const long batchEnd   = cumSumSizes[batchId];
     const long batchLimit = batchEnd - batchStart;
 
     // A dot operation is performed by a single block.
@@ -227,8 +227,8 @@ void accGradWeight(
     Ty gradOutVal = scale * (gidx < outDim ? gradOutput[gidx] : 0);
 
     // Calculate the amount of work for the current block / batch.
-    const long batchStart = cumSumSizes[bidy];
-    const long batchEnd   = cumSumSizes[bidy + 1];
+    const long batchStart = bidy == 0 ? 0 : cumSumSizes[bidy - 1];
+    const long batchEnd   = cumSumSizes[bidy];
     const long batchLimit = batchEnd - batchStart;
 
     // Number of iterations required to finish the work for the current batch.
@@ -348,8 +348,8 @@ void updateWeight(
     long gidy = blockIdx.y * blockDim.y + threadIdx.y;
 
     // Find the limits of the work to be done
-    const long batchStart = cumSumSizes[batchId];
-    const long batchEnd = cumSumSizes[batchId + 1];
+    const long batchStart = batchId == 0 ? 0 : cumSumSizes[batchId - 1];
+    const long batchEnd = cumSumSizes[batchId];
 
     // When maxNormalize is turned on, the weight tensor will contain
     // an extra "maxNormalize" number of terms per output at the beginning.
@@ -421,8 +421,8 @@ void accUpdateWeight(
     if (gidx >= outDim) return;
 
     // Find the limits of the work to be done.
-    const long batchStart = cumSumSizes[batchId];
-    const long batchEnd = cumSumSizes[batchId + 1];
+    const long batchStart = batchId == 0 ? 0 : cumSumSizes[batchId - 1];
+    const long batchEnd = cumSumSizes[batchId];
 
     gradOutput += batchId * outDim;
     Ty gradOutVal = scale * (gidx < outDim ? gradOutput[gidx] : 0);
