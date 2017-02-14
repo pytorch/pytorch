@@ -10,6 +10,8 @@ namespace caffe2 {
 
 namespace {
 
+static std::atomic<int> counter;
+
 // A net test dummy op that does nothing but scaffolding. Here, we
 // inherit from OperatorBase because we instantiate on both CPU and
 // GPU. In general, you want to only inherit from Operator<Context>.
@@ -17,6 +19,7 @@ class NetTestDummyOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
   bool Run() override {
+    counter.fetch_add(1);
     return true;
   }
 };
@@ -108,7 +111,16 @@ TEST(NetDeathTest, DeclaredOutputNotMet) {
       EnforceNotMet);
 }
 
-void checkChaining(
+void testExecution(std::unique_ptr<NetBase>& net, int num_ops) {
+  // Run 100 times
+  for (int i = 0; i < 100; i++) {
+    counter.exchange(0);
+    net.get()->Run();
+    ASSERT_EQ(num_ops, counter.load());
+  }
+}
+
+void checkChainingAndRun(
     const char* spec,
     const DAGNetBase::ExecutionChains& expected) {
   Workspace ws;
@@ -116,6 +128,7 @@ void checkChaining(
   NetDef net_def;
   CAFFE_ENFORCE(google::protobuf::TextFormat::ParseFromString(spec, &net_def));
   {
+    net_def.set_num_workers(4);
     auto old = FLAGS_caffe2_disable_chaining;
     auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
     FLAGS_caffe2_disable_chaining = false;
@@ -125,14 +138,16 @@ void checkChaining(
     CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_TRUE(chains == expected);
+    testExecution(net, net_def.op().size());
   }
 }
 
-void checkNumChains(const char* spec, const int expected_num_chains) {
+void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   Workspace ws;
 
   NetDef net_def;
   CAFFE_ENFORCE(google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+  net_def.set_num_workers(4);
 
   // Create all external inputs
   for (auto inp : net_def.external_input()) {
@@ -149,6 +164,7 @@ void checkNumChains(const char* spec, const int expected_num_chains) {
     CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_EQ(expected_num_chains, chains.size());
+    testExecution(net, net_def.op().size());
   }
 }
 
@@ -168,7 +184,7 @@ TEST(NetTest, ChainingForLinearModel) {
           type: "NetTestDummy"
         }
 )DOC";
-  checkChaining(spec, {{0, {0, 1}}});
+  checkChainingAndRun(spec, {{0, {0, 1}}});
 }
 
 TEST(NetTest, ChainingForDifferentDevices) {
@@ -207,7 +223,7 @@ TEST(NetTest, ChainingForDifferentDevices) {
           }
         }
 )DOC";
-  checkChaining(spec, {{0, {0}}, {1, {1, 2}}, {3, {3}}});
+  checkChainingAndRun(spec, {{0, {0}}, {1, {1, 2}}, {3, {3}}});
 }
 
 TEST(NetTest, ChainingForFork) {
@@ -231,7 +247,7 @@ TEST(NetTest, ChainingForFork) {
           type: "NetTestDummy"
         }
 )DOC";
-  checkChaining(spec, {{0, {0}}, {1, {1}}, {2, {2}}});
+  checkChainingAndRun(spec, {{0, {0}}, {1, {1}}, {2, {2}}});
 }
 
 // TEST(NetTest, ChainingForJoinWithAncestor) {
@@ -260,7 +276,7 @@ TEST(NetTest, ChainingForFork) {
 //           type: "NetTestDummy"
 //         }
 // )DOC";
-//   checkChaining(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
+//   checkChainingAndRun(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
 // }
 
 TEST(NetTest, ChainingForForkJoin) {
@@ -290,7 +306,7 @@ TEST(NetTest, ChainingForForkJoin) {
           type: "NetTestDummy"
         }
 )DOC";
-  checkChaining(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
+  checkChainingAndRun(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
 }
 
 TEST(NetTest, ChainingForwardBackward) {
@@ -501,7 +517,7 @@ TEST(NetTest, ChainingForwardBackward) {
   external_input: "fc_4_b"
   external_input: "label"
   )DOC";
-  checkNumChains(spec, 1);
+  checkNumChainsAndRun(spec, 1);
 }
 
 TEST(NetTest, ChainingForHogwildModel) {
@@ -540,7 +556,7 @@ TEST(NetTest, ChainingForHogwildModel) {
           type: "NetTestDummy"
         }
 )DOC";
-  checkNumChains(spec, 2);
+  checkNumChainsAndRun(spec, 2);
 }
 
 } // namespace caffe2
