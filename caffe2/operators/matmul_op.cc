@@ -8,13 +8,26 @@ REGISTER_CPU_OPERATOR(MatMul, MatMulOp<float, CPUContext>);
 OPERATOR_SCHEMA(MatMul)
     .NumInputs(2)
     .NumOutputs(1)
-    // TODO: add Shape inference function (bootcamp)
+    .TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          out[0].set_data_type(in[0].data_type());
+
+          int M = in[0].dims().Get(0);
+          int N = in[1].dims().Get(1);
+
+          out[0].add_dims(M);
+          out[0].add_dims(N);
+
+          return out;
+        })
     .SetDoc(R"DOC(
-Matrix multiplication Y = A * B, where A has size (M x K), B has size (K x N).
+Matrix multiplication Y = A * B, where A has size (M x K), B has size (K x N),
+and Y will have a size (M x N).
 )DOC")
     .Input(0, "A", "2D matrix of size (M x K)")
     .Input(1, "B", "2D matrix of size (K x N)")
-    .Output(0, "Y", "1D product")
+    .Output(0, "Y", "2D matrix of size (M x N)")
     .Arg("trans_a", "Pass 1 to transpose A before multiplication")
     .Arg("trans_b", "Pass 1 to transpose B before multiplication");
 
