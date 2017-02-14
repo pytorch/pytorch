@@ -102,6 +102,7 @@ struct OperatorNode {
   vector<int> children_;
   vector<int> parents_;
   std::atomic<int> runtime_parent_count_;
+  bool is_chain_start_ = false;
 };
 
 struct OpGraphNode {
@@ -109,7 +110,6 @@ struct OpGraphNode {
   vector<int> parents_;
   int visited_inputs = 0;
   int num_orig_parents;
-  bool visited = false;
 };
 }
 
