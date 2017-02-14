@@ -10,7 +10,7 @@ Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/
 
 [![Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=master)](https://travis-ci.org/caffe2/caffe2)
 
-    git clone --recursive https://github.com/bwasti/caffe2.git
+    git clone --recursive https://github.com/caffe2/caffe2.git
     cd caffe2
     
 #### OS X
