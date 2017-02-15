@@ -47,6 +47,7 @@ void THNN_(IndexLinear_updateOutput)(
     long weightStride = weight->stride[0];
     int maxNormalize = wDim - outDim;
     long keysSize = keys->size[0];
+    long nnzPerRow = divup(keysSize, batchSize);
 
     THCTensor_(resize2d)(state, output, batchSize, outDim);
     long *keysData        = THCudaLongTensor_data (state, keys);
@@ -57,28 +58,29 @@ void THNN_(IndexLinear_updateOutput)(
     real *outData         = THCTensor_(data)      (state, output);
 
     cudaStream_t stream = THCState_getCurrentStream(state);
+    dim3 threads(THREADS_X, THREADS_Y);
+    int blocks_x = divup(outDim, threads.x);
+    int blocks_y = batchSize;
+    int nnzPerBlock = ((outDim == 1 || batchSize == 1) ? THREADS_X : NNZ_PER_BLOCK_MAX);
+    int blocks_z = divup(nnzPerRow, nnzPerBlock);
 
+    dim3 blocks(blocks_x, blocks_y, blocks_z);
+
+    if (blocks_z > 1) {
+        THCudaCheck(cudaMemsetAsync(outData, 0, outDim * batchSize * sizeof(real), stream));
+    }
+
+    real *normalizedValuesData = NULL;
     if (maxNormalize && train) {
         THCTensor_(resize1d)(state, normalizedValues, keysSize);
-        real *normalizedValuesData = THCTensor_(data)(state, normalizedValues);
-        dim3 threads(THREADS_X, THREADS_Y);
-        int blocks_x = divup(outDim, threads.x);
-        int blocks_y = 1;
-        dim3 blocks(blocks_x, blocks_y);
-        for (long batchId = 0; batchId < batchSize; batchId++) {
-            updateOutputTrain<real><<<blocks, threads, 0, stream>>>
-                (outData, normalizedValuesData, valuesData, cumSumSizesData, keysData,
-                 batchSize, outDim, weightData, biasData, weightStride, keysOffset,
-                 maxNormalize, batchId);
-        }
+        normalizedValuesData = THCTensor_(data)(state, normalizedValues);
+        updateOutput<real, true><<<blocks, threads, 0, stream>>>
+            (outData, normalizedValuesData, valuesData, cumSumSizesData, keysData,
+             batchSize, outDim, weightData, biasData, weightStride, keysOffset, maxNormalize, nnzPerBlock);
     } else {
-        int threads = THREADS_PER_BLOCK;
-        int blocks_x = divup(outDim, threads);
-        int blocks_y = batchSize;
-        dim3 blocks(blocks_x, blocks_y);
-        updateOutput<real><<<blocks, threads, 0, stream>>>
-            (outData, valuesData, cumSumSizesData, keysData, batchSize, outDim,
-             weightData, biasData, weightStride, keysOffset, maxNormalize);
+        updateOutput<real, false><<<blocks, threads, 0, stream>>>
+            (outData, normalizedValuesData, valuesData, cumSumSizesData, keysData,
+             batchSize, outDim, weightData, biasData, weightStride, keysOffset, maxNormalize, nnzPerBlock);
     }
 }
 
