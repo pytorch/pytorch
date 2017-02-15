@@ -11,23 +11,9 @@
 
 #include <string.h>
 
-#include "gloo/cuda.h"
+#include "gloo/cuda_private.h"
 
 namespace gloo {
-
-template <typename T>
-struct CudaAllreduceRing<T>::ptr {
-  T* device;
-  T* host;
-
-  // GPU ID the device pointer lives on
-  int deviceId;
-
-  // Kick off memcpy's on non-default stream with high priority.
-  // Use events to wait for memcpy's to complete on host side.
-  cudaStream_t stream;
-  cudaEvent_t event;
-};
 
 template <typename T>
 CudaAllreduceRing<T>::CudaAllreduceRing(
@@ -40,7 +26,7 @@ CudaAllreduceRing<T>::CudaAllreduceRing(
     leftPair_(this->getLeftPair()),
     rightPair_(this->getRightPair()) {
   for (int i = 0; i < ptrs.size(); i++) {
-    struct ptr tmp;
+    struct HostDevicePtr tmp;
     tmp.device = ptrs[i];
     tmp.deviceId = getGPUIDForPointer(ptrs[i]);
     CUDA_CHECK(cudaMallocHost(&tmp.host, bytes_));

@@ -12,8 +12,8 @@
 #include "gloo/benchmark/benchmark.h"
 #include "gloo/benchmark/math.h"
 #include "gloo/benchmark/runner.h"
-#include "gloo/cuda.h"
 #include "gloo/cuda_allreduce_ring.h"
+#include "gloo/cuda_private.h"
 #include "gloo/common/common.h"
 #include "gloo/common/logging.h"
 

@@ -13,8 +13,8 @@
 #include <vector>
 
 #include "gloo/common/common.h"
-#include "gloo/cuda.h"
 #include "gloo/cuda_allreduce_ring.h"
+#include "gloo/cuda_private.h"
 #include "gloo/test/base_test.h"
 
 namespace gloo {

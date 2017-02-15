@@ -10,7 +10,7 @@
 #pragma once
 
 #include "gloo/allreduce.h"
-#include "gloo/context.h"
+#include "gloo/cuda.h"
 
 namespace gloo {
 
@@ -27,10 +27,19 @@ class CudaAllreduceRing : public Allreduce<T> {
   virtual void run() override;
 
  protected:
-  // Forward declaration to prevent inclusion of CUDA headers.
-  // Definition in cuda_allreduce_ring.cc.
-  struct ptr;
-  std::vector<struct ptr> ptrs_;
+  struct HostDevicePtr {
+    T* device;
+    T* host;
+
+    // GPU ID the device pointer lives on
+    int deviceId;
+
+    // Kick off memcpy's on non-default stream with high priority.
+    // Use events to wait for memcpy's to complete on host side.
+    cudaStream_t stream;
+    cudaEvent_t event;
+  };
+  std::vector<struct HostDevicePtr> ptrs_;
 
   int count_;
   int bytes_;

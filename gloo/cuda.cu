@@ -7,7 +7,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "gloo/cuda.h"
+#include "gloo/cuda_private.h"
 
 #include "gloo/common/common.h"
 
