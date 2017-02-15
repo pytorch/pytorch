@@ -105,6 +105,75 @@ class UniformFillOp final : public FillerOp<Context> {
 };
 
 template <class Context>
+class UniqueUniformFillOp final : public FillerOp<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  UniqueUniformFillOp(const OperatorDef& operator_def, Workspace* ws)
+      : FillerOp<Context>(operator_def, ws) {
+    TensorProto_DataType dtype =
+        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+            "dtype", TensorProto_DataType_INT32));
+
+    switch (dtype) {
+      case TensorProto_DataType_INT32:
+        CheckRange<int>();
+        body_ = &UniqueUniformFillOp::FillWithType<int>;
+        break;
+      case TensorProto_DataType_INT64:
+        CheckRange<int64_t>();
+        body_ = &UniqueUniformFillOp::FillWithType<int64_t>;
+        break;
+      case TensorProto_DataType_UNDEFINED:
+        CAFFE_THROW(
+            "UniqueUniformFill op cannot have undefined 'dtype' argument");
+      // break;
+      default:
+        CAFFE_THROW("Unexpected 'dtype' argument value: ", dtype);
+    }
+  }
+
+  bool Fill(Tensor<Context>* output) override {
+    return (this->*body_)(output);
+  }
+
+ private:
+  template <typename T>
+  void CheckRange() {
+    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>("min"));
+    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>("max"));
+    CAFFE_ENFORCE_LT(
+        OperatorBase::GetSingleArgument<T>("min", 0),
+        OperatorBase::GetSingleArgument<T>("max", 0),
+        "Max value should be bigger than min value.");
+  }
+
+  template <typename T>
+  bool FillWithType(Tensor<Context>* output) {
+    T min = OperatorBase::GetSingleArgument<T>("min", 0);
+    T max = OperatorBase::GetSingleArgument<T>("max", 0);
+
+    const T* avoid_data = nullptr;
+    size_t avoid_size = 0;
+    if (InputSize() >= 2) {
+      auto& avoid = Input(1);
+      avoid_data = avoid.template data<T>();
+      avoid_size = avoid.size();
+    }
+    math::RandUniformUnique<T, Context>(
+        output->size(),
+        min,
+        max,
+        output->template mutable_data<T>(),
+        avoid_size,
+        avoid_data,
+        &context_);
+    return true;
+  }
+
+  bool (UniqueUniformFillOp::*body_)(Tensor<Context>* output);
+};
+
+template <class Context>
 class ConstantFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
