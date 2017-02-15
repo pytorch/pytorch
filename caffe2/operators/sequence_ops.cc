@@ -394,7 +394,7 @@ struct GetAddPadingGradient : public GradientMakerBase {
     vector<OperatorDef> ops;
     // gradient on the data
     ops.push_back(CreateOperatorDef(
-        "RemovePadding", "", g_inputs, vector<string>{GI(0)}, Def().arg()));
+        "RemovePadding", "", g_inputs, vector<string>{GI(0)}));
     // gradient on the start_padding (and end_padding)
     if (Def().input_size() >= 3) {
       std::vector<string> padding_grads{GI(2)};
@@ -402,8 +402,8 @@ struct GetAddPadingGradient : public GradientMakerBase {
         padding_grads.push_back(GI(3));
       }
       auto g_inputs2 = g_inputs;
-      ops.push_back(CreateOperatorDef(
-          "GatherPadding", "", g_inputs2, padding_grads, Def().arg()));
+      ops.push_back(
+          CreateOperatorDef("GatherPadding", "", g_inputs2, padding_grads));
     }
     return ops;
   }
@@ -420,8 +420,7 @@ struct GetRemovePaddingGradient : public GradientMakerBase {
       g_inputs.push_back(O(1));
     }
 
-    return SingleGradientDef(
-        "AddPadding", "", g_inputs, vector<string>{GI(0)}, Def().arg());
+    return SingleGradientDef("AddPadding", "", g_inputs, vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(RemovePadding, GetRemovePaddingGradient);
