@@ -10,6 +10,7 @@ on an NVIDIA GPU with compute capability >= 2.0.
 
 import sys
 from ._utils import _import_dotted_name
+from .version import __version__
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
