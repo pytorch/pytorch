@@ -166,8 +166,22 @@ void RandUniform(const int n, const T a, const T b, T* r,
                  Context* context);
 
 template <typename T, class Context>
-void RandGaussian(const int n, const T mean, const T std, T* r,
-                  Context* context);
+void RandUniformUnique(
+    const size_t n,
+    const T a,
+    const T b,
+    T* r,
+    const size_t m,
+    const T* avoid,
+    Context* context);
+
+template <typename T, class Context>
+void RandGaussian(
+    const int n,
+    const T mean,
+    const T std,
+    T* r,
+    Context* context);
 
 // Dot matrix of vector a and b, and writes the result to a single value y.
 template <typename T, class Context>
