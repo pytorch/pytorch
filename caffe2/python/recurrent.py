@@ -219,7 +219,7 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     step_model.net.Sum([gates_t, input_t], gates_t)
     hidden_t, cell_t = step_model.net.LSTMUnit(
         [cell_t_prev, gates_t, seq_lengths, timestep],
-        ['hidden_t', 'cell_t'],
+        [s('hidden_t'), s('cell_t')],
     )
     step_model.net.AddExternalOutputs(cell_t, hidden_t)
 
