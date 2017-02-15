@@ -1765,7 +1765,9 @@ class TestOperators(hu.HypothesisTestCase):
             backward_link_offset=backward_link_offset,
             param=map(inputs.index, step_net.params),
             step_net=str(step_net.Proto()),
-            backward_step_net=str(backward_step_net.Proto()))
+            backward_step_net=str(backward_step_net.Proto()),
+            outputs_with_grads=[0],
+        )
         workspace.FeedBlob(
             "input", np.random.randn(t, n, d).astype(np.float32))
         workspace.FeedBlob(

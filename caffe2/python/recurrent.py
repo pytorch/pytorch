@@ -9,7 +9,7 @@ from caffe2.python.cnn import CNNModelHelper
 
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
-        links, timestep=None, scope=None
+        links, timestep=None, scope=None, outputs_with_grads=(0,)
 ):
     '''
     net: the main net operator should be added to
@@ -34,6 +34,9 @@ def recurrent_net(
     scope: Internal blobs are going to be scoped in a format
     <scope_name>/<blob_name>
     If not provided we generate a scope name automatically
+
+    outputs_with_grads : position indices of output blobs which will receive
+    error gradient (from outside recurrent network) during backpropagation
     '''
     assert len(inputs) == 1, "Only one input blob is supported so far"
 
@@ -123,8 +126,8 @@ def recurrent_net(
 
         backward_cell_net.Proto().external_input.append(
             str(cell_output) + "_grad")
-        aliases.append((state, cell_output + "_last", -1))
         aliases.append((state, cell_output + "_all", 1))
+        aliases.append((state, cell_output + "_last", -1))
         all_outputs.extend([cell_output + "_all", cell_output + "_last"])
 
         recurrent_states.append(state)
@@ -173,6 +176,7 @@ def recurrent_net(
         step_net=str(cell_net.Proto()),
         backward_step_net=str(backward_cell_net.Proto()),
         timestep="timestep" if timestep is None else str(timestep),
+        outputs_with_grads=outputs_with_grads,
     )
     # The last output is a list of step workspaces,
     # which is only needed internally for gradient propogation
@@ -180,7 +184,7 @@ def recurrent_net(
 
 
 def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
-         scope):
+         scope, outputs_with_grads=(0,)):
     '''
     Adds a standard LSTM recurrent network operator to a model.
 
@@ -198,6 +202,9 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     dim_in: input dimention
 
     dim_out: output dimention
+
+    outputs_with_grads : position indices of output blobs which will receive
+    external error gradient during backpropagation
     '''
     def s(name):
         # We have to manually scope due to our internal/external blob
@@ -239,5 +246,6 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         },
         timestep=timestep,
         scope=scope,
+        outputs_with_grads=outputs_with_grads,
     )
     return output, last_output, all_states, last_state
