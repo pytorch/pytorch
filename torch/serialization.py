@@ -111,7 +111,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         pickle_protocol: can be specified to override the default protocol
     """
     new_fd = False
-    if isinstance(f, str):
+    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
         new_fd = True
         f = open(f, "wb")
     try:
@@ -213,7 +213,7 @@ def load(f, map_location=None, pickle_module=pickle):
             the pickle_module used to serialize file)
     """
     new_fd = False
-    if isinstance(f, str):
+    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
         new_fd = True
         f = open(f, 'rb')
     try:

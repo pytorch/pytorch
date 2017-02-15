@@ -191,6 +191,8 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
   THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
       "descriptor from given object");
   THStorage *storage = THPStorage_(readFileRaw)(fd, nullptr);
+  if (storage == nullptr)
+    return nullptr;
   PyObject *result = THPStorage_(New)(storage);
   return result;
   END_HANDLE_TH_ERRORS
@@ -209,7 +211,9 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
-  THPStorage_(readFileRaw)(fd, self->cdata);
+  THStorage *storage = THPStorage_(readFileRaw)(fd, self->cdata);
+  if (storage == nullptr)
+    return nullptr;
   Py_INCREF(self);
 
   return (PyObject *) self;
