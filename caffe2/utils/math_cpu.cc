@@ -11,7 +11,6 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
-#include <unistd.h>
 #include <atomic>
 #include <chrono>
 #include <random>
@@ -26,6 +25,10 @@
 #include "caffe2/core/context.h"
 #include "Eigen/Core"
 #include "Eigen/Dense"
+
+#if defined(_MSC_VER)
+#include <process.h>
+#endif
 
 namespace caffe2 {
 namespace math {

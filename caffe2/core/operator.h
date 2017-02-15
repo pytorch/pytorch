@@ -35,15 +35,15 @@ class OperatorBase {
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
   inline T GetSingleArgument(const string& name, const T& default_value) const {
-    return arg_helper_.GetSingleArgument<T>(name, default_value);
+    return arg_helper_.template GetSingleArgument<T>(name, default_value);
   }
   template <typename T>
   inline bool HasSingleArgumentOfType(const string& name) const {
-    return arg_helper_.HasSingleArgumentOfType<T>(name);
+    return arg_helper_.template HasSingleArgumentOfType<T>(name);
   }
   template <typename T>
   inline vector<T> GetRepeatedArgument(const string& name) const {
-    return arg_helper_.GetRepeatedArgument<T>(name);
+    return arg_helper_.template GetRepeatedArgument<T>(name);
   }
 
   // Get the inputs and outputs as specific types.
