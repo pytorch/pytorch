@@ -1158,13 +1158,13 @@ class TestNN(NNTestCase):
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias, bidirectional, batch_first, contig, skip_input in product((True, False), repeat=5):
                 num_directions = 2 if bidirectional else 1
-		grad_output = torch.randn(batch, seq_length, hidden_size * num_directions)
+                grad_output = torch.randn(batch, seq_length, hidden_size * num_directions)
                 if skip_input:
                     input_val = torch.randn(seq_length, batch, hidden_size)
                 else:
                     input_val = torch.randn(seq_length, batch, input_size)
                 if batch_first:
-		    grad_output = grad_output.transpose(0, 1).contiguous()
+                    grad_output = grad_output.transpose(0, 1).contiguous()
                     input_val = input_val.transpose(0, 1).contiguous()
 
                 hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
