@@ -442,7 +442,7 @@ class LSTMCell(RNNCellBase):
         >>> output = []
         >>> for i in range(6):
         ...     hx, cx = rnn(input, (hx, cx))
-        ...     output[i] = hx
+        ...     output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
