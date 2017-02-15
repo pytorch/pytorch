@@ -118,7 +118,7 @@ class Module(object):
                 # Variables stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
-                if param.grad is not None:
+                if param._grad is not None:
                     param._grad.data = fn(param._grad.data)
 
         for key, buf in self._buffers.items():
@@ -380,7 +380,8 @@ class Module(object):
     def zero_grad(self):
         """Sets gradients of all model parameters to zero."""
         for p in self.parameters():
-            p.grad.data.zero_()
+            if p.requires_grad:
+                p.grad.data.zero_()
 
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())

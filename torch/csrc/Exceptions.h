@@ -5,8 +5,6 @@
 #include <stdexcept>
 #include <string>
 
-#include "THP.h"
-
 #define HANDLE_TH_ERRORS                                                       \
   try {
 
@@ -21,6 +19,11 @@
 extern PyObject *THPException_FatalError;
 
 #ifdef _THP_CORE
+
+// Throwing this exception means that the python error flags have been already
+// set and control should be immediately returned to the interpreter.
+class python_error : public std::exception {};
+
 struct THException: public std::exception {
   THException(const char* msg): msg(msg) {};
 

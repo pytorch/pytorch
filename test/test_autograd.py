@@ -74,6 +74,7 @@ class TestAutograd(TestCase):
             counter[0] += inc
 
         z = x ** 2 + x * 2 + x * y + y
+        x.register_hook(lambda *args: bw_hook(0, *args))
         test = z.register_hook(lambda *args: bw_hook(1, *args))
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 1)
@@ -819,8 +820,8 @@ function_tests = [
     (Norm, (3, 0), ((S, S, S),), '3_dim'),
     (Addcmul, (), ((S, S), (S, S), (S, S))),
     (Addcmul, (0.6,), ((S, S), (S, S), (S, S)), 'scale'),
-    (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 1e-2)),
-    (Addcdiv, (0.6,), ((S, S), (S, S), torch.rand(S, S) + 1e-2), 'scale'),
+    (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2)),
+    (Addcdiv, (0.6,), ((S, S), (S, S), torch.rand(S, S) + 5e-2), 'scale'),
     (IndexAdd, (0,), ((S, S), index_variable(2, S), (2, S))),
     # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill, (0, 2), ((S, S), index_variable(2, S))),

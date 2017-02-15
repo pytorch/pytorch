@@ -90,7 +90,7 @@ class CosineDistance(Module):
         gw2.addcmul_(-1, self.buffer.expand_as(v1), v2)
         gw2.mul_(self.w.expand_as(v1))
 
-        go = gradOutput.view(-1, 1).expand_as(v1)
+        go = gradOutput.contiguous().view(-1, 1).expand_as(v1)
         gw1.mul_(go)
         gw2.mul_(go)
 

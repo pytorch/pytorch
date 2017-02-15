@@ -39,11 +39,19 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
   SYSCHECK(write(fd, &self->size, sizeof(long)));
   // fast track for bytes and little endian
   if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
-    SYSCHECK(write(fd, data, sizeof(real) * self->size));
+    char *bytes = (char *) data;
+    uint64_t remaining = sizeof(real) * self->size;
+    while (remaining > 0) {
+      ssize_t result = write(fd, bytes, remaining);
+      if (result < 0)
+        throw std::system_error(result, std::system_category());
+      bytes += result;
+      remaining -= result;
+    }
   } else {
-    long buffer_size = std::min(self->size, (long)5000);
+    int64_t buffer_size = std::min(self->size, (long)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
-    for (long i = 0; i < self->size; i += buffer_size) {
+    for (int64_t i = 0; i < self->size; i += buffer_size) {
       size_t to_convert = std::min(self->size - i, buffer_size);
       if (sizeof(real) == 2) {
         THP_encodeInt16Buffer((uint8_t*)le_buffer.get(),
@@ -61,7 +69,7 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
             THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
-      SYSCHECK(write(fd, data, to_convert * sizeof(real)));
+      SYSCHECK(write(fd, le_buffer.get(), to_convert * sizeof(real)));
     }
   }
 }
@@ -82,11 +90,19 @@ THStorage * THPStorage_(readFileRaw)(int fd)
 
   // fast track for bytes and little endian
   if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
-    SYSCHECK(read(fd, data, sizeof(real) * storage->size));
+    char *bytes = (char *) data;
+    uint64_t remaining = sizeof(real) * storage->size;
+    while (remaining > 0) {
+      ssize_t result = read(fd, bytes, remaining);
+      if (result < 0)
+        throw std::system_error(result, std::system_category());
+      bytes += result;
+      remaining -= result;
+    }
   } else {
-    long buffer_size = std::min(size, (long)5000);
+    int64_t buffer_size = std::min(size, (long)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
-    for (long i = 0; i < size; i += buffer_size) {
+    for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
       SYSCHECK(read(fd, le_buffer.get(), sizeof(real) * to_convert));
       if (sizeof(real) == 2) {

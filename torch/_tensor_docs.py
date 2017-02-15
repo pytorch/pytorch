@@ -1632,11 +1632,50 @@ Fills this tensor with numbers sampled from the uniform distribution:
     P(x) = \dfrac{1}{to - from}
 """)
 
+add_docstr(torch._C.FloatTensorBase.unsqueeze,
+           """
+unsqueeze(dim)
+
+See :func:`torch.unsqueeze`
+""")
+
+add_docstr(torch._C.FloatTensorBase.unsqueeze_,
+           """
+unsqueeze_(dim)
+
+In-place version of :meth:`~Tensor.unsqueeze`
+""")
+
 add_docstr(torch._C.FloatTensorBase.var,
            """
 var() -> float
 
 See :func:`torch.var`
+""")
+
+add_docstr(torch._C.FloatTensorBase.view,
+           """
+view(*args) -> Tensor
+
+Returns a new tensor with the same data but different size.
+
+The returned tensor shares the same data and must have the same number
+of elements, but may have a different size. A tensor must be
+:func:`contiguous` to be viewed.
+
+Args:
+    args (torch.Size or int...): Desired size
+
+Example:
+    >>> x = torch.randn(4, 4)
+    >>> x.size()
+    torch.Size([4, 4])
+    >>> y = x.view(16)
+    >>> y.size()
+    torch.Size([16])
+    >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
+    >>> z.size()
+    torch.Size([2, 8])
 """)
 
 add_docstr(torch._C.FloatTensorBase.zero_,

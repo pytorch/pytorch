@@ -220,14 +220,23 @@ main_sources = [
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/autograd/init.cpp",
-    "torch/csrc/autograd/variable.cpp",
-    "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/engine.cpp",
+    "torch/csrc/autograd/function.cpp",
+    "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/autograd/grad_buffer.cpp",
+    "torch/csrc/autograd/python_function.cpp",
+    "torch/csrc/autograd/python_cpp_function.cpp",
+    "torch/csrc/autograd/python_variable.cpp",
+    "torch/csrc/autograd/python_engine.cpp",
+    "torch/csrc/autograd/functions/batch_normalization.cpp",
+    "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN_generic.cpp",
 ]
 
@@ -266,6 +275,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
+    main_libraries += ['cudart']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",

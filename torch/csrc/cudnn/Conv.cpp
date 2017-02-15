@@ -285,6 +285,7 @@ void cudnn_convolution_forward(
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
     Convolution* info, bool benchmark)
 {
+  assertSameGPU(dataType, input, weight, output);
   int groups = info->groups;
 
   cudnnConvolutionFwdAlgo_t fwdAlg;
@@ -309,6 +310,7 @@ void cudnn_convolution_add_bias(
     THVoidTensor* bias, THVoidTensor* output,
     Convolution* info)
 {
+  assertSameGPU(dataType, bias, output);
   CHECK_ARG(output->nDimension <= 5);
   TensorDescriptor& bdesc = info->bdesc;
 
@@ -329,6 +331,7 @@ void cudnn_convolution_backward_data(
     THVoidTensor* gradOutput, THVoidTensor* gradInput, THVoidTensor* weight,
     Convolution* info, bool benchmark)
 {
+  assertSameGPU(dataType, gradOutput, gradInput, weight);
   int groups = info->params.groups;
 
   cudnnConvolutionBwdDataAlgo_t bwdDataAlg;
@@ -353,6 +356,7 @@ void cudnn_convolution_backward_filter(
     THVoidTensor* gradOutput, THVoidTensor* input, THVoidTensor* gradWeight,
     Convolution* info, bool benchmark)
 {
+  assertSameGPU(dataType, gradOutput, input, gradWeight);
   int groups = info->params.groups;
 
   cudnnConvolutionBwdFilterAlgo_t bwdFilterAlg;
@@ -380,6 +384,7 @@ void cudnn_convolution_backward_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info)
 {
+  assertSameGPU(dataType, gradOutput, gradBias);
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   void* gradOutput_ptr = tensorPointer(dataType, gradOutput, 0, 1, 0);
