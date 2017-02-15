@@ -1633,6 +1633,13 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv3d',
+        constructor_args=(3, 4, (2, 3, 4), 1, 0, 1, 1, False),
+        input_size=(2, 3, 3, 4, 5),
+        cudnn=True,
+        desc='no_bias'
+    ),
+    dict(
+        module_name='Conv3d',
         constructor_args=(3, 4, 2, 2),
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
