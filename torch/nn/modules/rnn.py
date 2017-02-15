@@ -436,7 +436,7 @@ class LSTMCell(RNNCellBase):
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20)
-        >>> input = Variable(torch.randn(3, 10))
+        >>> input = Variable(torch.randn(6, 3, 10))
         >>> hx = Variable(torch.randn(3, 20))
         >>> cx = Variable(torch.randn(3, 20))
         >>> output = []
