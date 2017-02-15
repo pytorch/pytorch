@@ -1,6 +1,6 @@
-#include <cmath>
-
 #include "caffe2/operators/elementwise_op.h"
+#include "caffe2/utils/math.h"
+
 
 namespace caffe2 {
 
@@ -8,7 +8,7 @@ struct LogCPUFunctor {
   template <typename T>
   inline void
   operator()(const int n, const T* x, T* y, CPUContext* device_context) {
-    std::transform(x, x + n, y, log);
+    math::Log<T, CPUContext>(n, x, y, device_context);
   }
 };
 
