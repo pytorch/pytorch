@@ -1023,7 +1023,7 @@ TH_API void THNN_(VolumetricConvolution_updateOutput)(
                   THCTensor *input,
                   THCTensor *output,
                   THCTensor *weight,
-                  THCTensor *bias,
+                  THCTensor *bias,         // [OPTIONAL]
                   THCTensor *finput,
                   THCTensor *fgradInput,
                   int dT, int dW, int dH,
@@ -1044,7 +1044,7 @@ TH_API void THNN_(VolumetricConvolution_accGradParameters)(
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradWeight,
-                  THCTensor *gradBias,
+                  THCTensor *gradBias,     // [OPTIONAL]
                   THCTensor *finput,
                   THCTensor *fgradInput,
                   int dT, int dW, int dH,
@@ -1056,7 +1056,7 @@ TH_API void THNN_(VolumetricDilatedConvolution_updateOutput)(
                   THCTensor  *input,
                   THCTensor  *output,
                   THCTensor  *weight,
-                  THCTensor  *bias,
+                  THCTensor  *bias,        // [OPTIONAL]
                   THCTensor  *columns,
                   THCTensor  *ones,
                   int kT, int kW, int kH,
@@ -1081,7 +1081,7 @@ TH_API void THNN_(VolumetricDilatedConvolution_accGradParameters)(
                   THCTensor  *input,
                   THCTensor  *gradOutput,
                   THCTensor  *gradWeight,
-                  THCTensor  *gradBias,
+                  THCTensor  *gradBias,    // [OPTIONAL]
                   THCTensor  *columns,
                   THCTensor  *ones,
                   int kT, int kW, int kH,
@@ -1118,7 +1118,7 @@ TH_API void THNN_(VolumetricFullConvolution_updateOutput)(
                   THCTensor  *input,
                   THCTensor  *output,
                   THCTensor  *weight,
-                  THCTensor  *bias,
+                  THCTensor  *bias,        // [OPTIONAL]
                   THCTensor  *finput,
                   THCTensor  *fgradInput,
                   int dT, int dW, int dH,
@@ -1142,7 +1142,7 @@ TH_API void THNN_(VolumetricFullConvolution_accGradParameters)(
                   THCTensor  *input,
                   THCTensor  *gradOutput,
                   THCTensor  *gradWeight,
-                  THCTensor  *gradBias,
+                  THCTensor  *gradBias,    // [OPTIONAL]
                   THCTensor  *finput,
                   THCTensor  *fgradInput,
                   int dT, int dW, int dH,
