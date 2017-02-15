@@ -409,12 +409,29 @@ class TestAutograd(TestCase):
         y = x * 2
         y = y.detach()
         self.assertFalse(y.requires_grad)
-        self.assertFalse(y.creator.requires_grad)
+        self.assertIsNone(y.creator)
         z = x + y
         z.sum().backward()
         # This is an incorrect gradient, but we assume that's what the user
         # wanted. detach() is an advanced option.
         self.assertEqual(x.grad.data, torch.ones(10, 10))
+
+        # detach() should preserve volatile flag
+        x = Variable(torch.randn(10, 10), volatile=True)
+        y = x * 2
+        y = y.detach()
+        self.assertTrue(y.volatile)
+
+        # in-place detach
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        y = Variable(torch.randn(10, 10), requires_grad=True)
+        a = x * 2
+        (y + a).sum().backward(retain_variables=True)
+        a.detach_()
+        self.assertFalse(a.requires_grad)
+        (y + a).sum().backward()  # this won't backprop to x
+        self.assertEqual(x.grad.data, torch.ones(10, 10) * 2)
+        self.assertEqual(y.grad.data, torch.ones(10, 10) * 2)
 
     def test_type_conversions(self):
         import torch.cuda
