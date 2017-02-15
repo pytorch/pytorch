@@ -1,6 +1,8 @@
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
+import setuptools.command.develop
+import setuptools.command.build_py
 import distutils.unixccompiler
 import distutils.command.build
 import distutils.command.clean
@@ -92,6 +94,28 @@ class build_module(Command):
     def run(self):
         self.run_command('build_py')
         self.run_command('build_ext')
+
+
+class build_py(setuptools.command.build_py.build_py):
+
+    def run(self):
+        self.create_version_file()
+        setuptools.command.build_py.build_py.run(self)
+
+    @staticmethod
+    def create_version_file():
+        global version, cwd
+        print('-- Building version ' + version)
+        version_path = os.path.join(cwd, 'torch', 'version.py')
+        with open(version_path, 'w') as f:
+            f.write("__version__ = '{}'\n".format(version))
+
+
+class develop(setuptools.command.develop.develop):
+
+    def run(self):
+        build_py.create_version_file()
+        setuptools.command.develop.develop.run(self)
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -362,18 +386,28 @@ if WITH_CUDA:
                        )
     extensions.append(THCUNN)
 
-version = "0.1"
+version = '0.1.9'
 if os.getenv('PYTORCH_BUILD_VERSION'):
+    assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     version = os.getenv('PYTORCH_BUILD_VERSION') \
         + '_' + os.getenv('PYTORCH_BUILD_NUMBER')
+else:
+    try:
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+        version += '+' + sha[:7]
+    except subprocess.CalledProcessError:
+        pass
+
 
 setup(name="torch", version=version,
       ext_modules=extensions,
       cmdclass={
           'build': build,
+          'build_py': build_py,
           'build_ext': build_ext,
           'build_deps': build_deps,
           'build_module': build_module,
+          'develop': develop,
           'install': install,
           'clean': clean,
       },
