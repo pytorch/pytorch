@@ -41,29 +41,19 @@ class Linear(Module):
             self.addBuffer.resize_(nframe).fill_(1)
 
     def updateOutput(self, input):
-        if input.dim() == 1:
-            self.output.resize_(self.weight.size(0))
-            if self.bias is not None:
-                self.output.copy_(self.bias)
-            else:
-                self.output.zero_()
-            self.output.addmv_(1, self.weight, input)
-            return self.output
-        elif input.dim() == 2:
-            nframe = input.size(0)
-            nelement = self.output.nelement()
-            self.output.resize_(nframe, self.weight.size(0))
-            if self.output.nelement() != nelement:
-                self.output.zero_()
+        assert input.dim() == 2
+        nframe = input.size(0)
+        nelement = self.output.nelement()
+        self.output.resize_(nframe, self.weight.size(0))
+        if self.output.nelement() != nelement:
+            self.output.zero_()
 
-            self._updateAddBuffer(input)
-            self.output.addmm_(0, 1, input, self.weight.t())
-            if self.bias is not None:
-                self.output.addr_(self.addBuffer, self.bias)
+        self._updateAddBuffer(input)
+        self.output.addmm_(0, 1, input, self.weight.t())
+        if self.bias is not None:
+            self.output.addr_(self.addBuffer, self.bias)
 
-            return self.output
-        else:
-            raise RuntimeError('input must be vector or matrix')
+        return self.output
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
