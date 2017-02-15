@@ -14,20 +14,35 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
   PiecewiseLinearTransformOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     int num_piece = OperatorBase::GetSingleArgument<int>("pieces", 0);
+    binary_ = OperatorBase::GetSingleArgument<bool>("binary", false);
     CAFFE_ENFORCE(
         num_piece > 0,
         "No pieces specified, please specify pieces through args");
     range_ = SetPiecewiseLinearFunctionParameter("bounds", num_piece + 1);
     W_ = SetPiecewiseLinearFunctionParameter("slopes", num_piece);
     b_ = SetPiecewiseLinearFunctionParameter("intercepts", num_piece);
+
+    CAFFE_ENFORCE_EQ(range_.size(), W_.size());
+    CAFFE_ENFORCE_EQ(range_.size(), b_.size());
+
+    if (binary_) {
+      CAFFE_ENFORCE_EQ(range_.size(), 1);
+      CAFFE_ENFORCE_EQ(W_.size(), 1);
+      CAFFE_ENFORCE_EQ(b_.size(), 1);
+    }
   }
 
   bool RunOnDevice() override {
+    return binary_ ? TransformBinary() : TransformGeneral();
+  }
+
+ private:
+  bool TransformGeneral() {
     auto& X = Input(0);
     auto* Y = Output(0);
     DCHECK_EQ(X.ndim(), 2);
-    int N = X.dim32(0);
-    int M = X.dim32(1);
+    TIndex N = X.dim32(0);
+    TIndex M = X.dim32(1);
     DCHECK_EQ(range_.size(), M);
     DCHECK_EQ(W_.size(), M);
     DCHECK_EQ(b_.size(), M);
@@ -36,8 +51,8 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
     const auto* Xdata = X.template data<float>();
     float* Ydata = Y->template mutable_data<float>();
 
-    for (int j = 0; j < M; ++j) {
-      for (int i = 0; i < N; ++i) {
+    for (TIndex j = 0; j < M; ++j) {
+      for (TIndex i = 0; i < N; ++i) {
         Ydata[i * M + j] = Piecewise_Linear_Transform(
             Xdata[i * M + j], range_[j], W_[j], b_[j]);
       }
@@ -45,13 +60,35 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
     return true;
   }
 
- protected:
+  bool TransformBinary() {
+    auto& X = Input(0);
+    auto* Y = Output(0);
+    DCHECK_EQ(X.ndim(), 2);
+    TIndex N = X.dim32(0);
+    TIndex M = X.dim32(1);
+    CAFFE_ENFORCE_EQ(
+        M, 2, "If binary is set to true, the input must be Nx2 tensor");
+    Y->ResizeLike(X);
+    const auto* Xdata = X.template data<float>();
+    float* Ydata = Y->template mutable_data<float>();
+
+    for (TIndex i = 0; i < N; ++i) {
+      Ydata[i * M + 1] =
+          Piecewise_Linear_Transform(Xdata[i * M + 1], range_[0], W_[0], b_[0]);
+      Ydata[i * M] = 1.0f - Ydata[i * M + 1];
+    }
+
+    return true;
+  }
+
   vector<vector<T>> SetPiecewiseLinearFunctionParameter(
       const string& arg,
       const int denom) {
     vector<vector<T>> param;
     vector<T> param_flat = OperatorBase::GetRepeatedArgument<T>(arg);
+    CAFFE_ENFORCE_EQ(param_flat.size() % denom, 0);
     int num_dim = param_flat.size() / denom;
+    CAFFE_ENFORCE_GT(num_dim, 0);
     param.resize(num_dim);
     for (int i = 0; i < num_dim; i++) {
       param[i] = vector<T>(
@@ -86,6 +123,7 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
   vector<vector<T>> range_;
   vector<vector<T>> W_;
   vector<vector<T>> b_;
+  bool binary_;
 };
 
 } // namespace caffe2
