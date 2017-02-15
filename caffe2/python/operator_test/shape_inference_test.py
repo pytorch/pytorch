@@ -38,7 +38,8 @@ class TestShapeInference(test_util.TestCase):
 
     def testShapeInferenceConvNet(self):
         model = cnn.CNNModelHelper(name="convtest", order="NCHW")
-        model.Conv("data", 'conv1', 3, 64,
+        model.NHWC2NCHW("data", "data_nchw")
+        model.Conv("data_nchw", 'conv1', 3, 64,
                    weight_init=("MSRAFill", {}), kernel=7,
                    stride=2, pad=3, no_bias=0)
         model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
@@ -50,7 +51,7 @@ class TestShapeInference(test_util.TestCase):
 
         workspace.FeedBlob(
             "data",
-            np.random.rand(16, 3, 227, 227).astype(np.float32),
+            np.random.rand(16, 227, 227, 3).astype(np.float32),
         )
         # Then do automatic comparison test: run the next once to
         # initialize everything
