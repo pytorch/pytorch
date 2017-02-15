@@ -163,6 +163,13 @@ PyObject *THPVariable_get_creator(THPVariable *self)
   return functionToPyObject(var.creator);
 }
 
+int THPVariable_set_creator(THPVariable *self, PyObject *obj)
+{
+  THPUtils_assertRet(-1, obj == Py_None, "_creator can be only set to None");
+  self->cdata->creator = nullptr;
+  return 0;
+}
+
 PyObject * THPVariable_get_data(THPVariable *self)
 {
   if (!self->data) {
@@ -335,6 +342,7 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
 static struct PyGetSetDef THPVariable_properties[] = {
   {"_version", (getter)THPVariable_get_version, NULL, NULL, NULL},
   {"creator", (getter)THPVariable_get_creator, NULL, NULL, NULL},
+  {"_creator", (getter)THPVariable_get_creator, (setter)THPVariable_set_creator, NULL, NULL},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, NULL, NULL},
   {"_grad", (getter)THPVariable_get_raw_grad, (setter)THPVariable_set_raw_grad, NULL, NULL},
   {"grad", (getter)THPVariable_get_grad, NULL, NULL, NULL},
