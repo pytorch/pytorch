@@ -1,4 +1,5 @@
 import torch
+from torch.autograd import Variable
 from ..modules import Module
 from .scatter_gather import scatter, gather
 from .replicate import replicate
@@ -36,8 +37,15 @@ class DataParallel(Module):
             self.module.cuda(device_ids[0])
 
     def forward(self, input):
+        def _to_cuda(obj):
+            if isinstance(obj, Variable):
+                return obj.cuda()
+            return tuple((map(_to_cuda, obj)))
+
         if len(self.device_ids) == 1:
-            return self.module(input.cuda(self.device_ids[0]))
+            with torch.cuda.device(self.device_ids[0]):
+                inpcuda = _to_cuda(input)
+            return self.module(inpcuda)
         replicas = self.replicate(self.module, self.device_ids)
         inputs = self.scatter(input, self.device_ids)
         replicas = replicas[:len(inputs)]
