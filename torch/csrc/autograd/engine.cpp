@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/engine.h"
 
 #include <set>
+#include <string>
 #include <THPP/THPP.h>
 
 using thpp::Tensor;
