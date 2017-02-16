@@ -6,10 +6,6 @@ namespace {
 
 REGISTER_CPU_OPERATOR(ConvTranspose, ConvTransposeOp<float, CPUContext>);
 
-REGISTER_CPU_OPERATOR(
-    ConvTransposeGradient,
-    ConvTransposeGradientOp<float, CPUContext>);
-
 OPERATOR_SCHEMA(ConvTranspose)
     .NumInputs(3)
     .NumOutputs(1)
@@ -50,21 +46,6 @@ OPERATOR_SCHEMA(ConvTranspose)
         "Output data blob that contains the result of the "
         "transposed convolution. The output dimensions are functions of the kernel"
         " size, stride size, and pad lengths.");
-
-OPERATOR_SCHEMA(ConvTransposeGradient).NumInputs(3).NumOutputs(2, 3);
-
-class GetConvTransposeGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    CAFFE_ENFORCE(3 == def_.input_size());
-    return SingleGradientDef(
-        "ConvTransposeGradient",
-        "",
-        vector<string>{I(0), I(1), GO(0)},
-        vector<string>{GI(1), GI(2), GI(0)});
-  }
-};
-REGISTER_GRADIENT(ConvTranspose, GetConvTransposeGradient);
 
 } // namespace
 } // namespace caffe2

@@ -4,8 +4,8 @@
 
 namespace caffe2 {
 namespace {
+
 REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ConvGradient, ConvGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Conv)
   .NumInputs(2,3)
@@ -36,30 +36,6 @@ why they are separate files.
   "convolution. The output dimensions are functions of the kernel size, "
   "stride size, and pad lengths."
   "");
-
-OPERATOR_SCHEMA(ConvGradient).NumInputs(2,3).NumOutputs(2, 3);
-
-class GetConvGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    CAFFE_ENFORCE(def_.input_size() == 3 || def_.input_size() == 2);
-    if (def_.input_size() == 3) {
-      return SingleGradientDef(
-          "ConvGradient",
-          "",
-          vector<string>{I(0), I(1), GO(0)},
-          vector<string>{GI(1), GI(2), GI(0)});
-    } else {
-      return SingleGradientDef(
-          "ConvGradient",
-          "",
-          vector<string>{I(0), I(1), GO(0)},
-          vector<string>{GI(1), GI(0)},
-          vector<Argument>{MakeArgument<int>("no_bias", 1)});
-    }
-  }
-};
-REGISTER_GRADIENT(Conv, GetConvGradient);
 
 }  // namespace
 }  // namespace caffe2
