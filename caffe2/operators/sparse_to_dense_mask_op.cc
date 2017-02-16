@@ -18,7 +18,7 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
     dense_.assign(std::min(kMaxDenseSize, biggest + 1), -1);
     for (int i = 0; i < mask.size(); i++) {
       int id = mask[i];
-      CAFFE_ENFORCE(id >= 0, "Only positive IDs are allowed.");
+      CAFFE_ENFORCE_GE(id, 0, "Only positive IDs are allowed.");
       if (id >= kMaxDenseSize) {
         CAFFE_ENFORCE(sparse_.count(id) == 0, "Duplicated id: ", id);
         sparse_[id] = i;
@@ -37,13 +37,13 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
   template <typename TInd>
   bool DoRunWithType() {
     auto& sparse_indices = Input(INDICES);
-    CAFFE_ENFORCE(sparse_indices.ndim() == 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
     auto& sparse_values = Input(VALUES);
-    CAFFE_ENFORCE(sparse_values.ndim() >= 1);
-    CAFFE_ENFORCE(sparse_indices.size() == sparse_values.dim(0));
+    CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.size(), sparse_values.dim(0));
     auto& default_value = Input(DEFAULT);
-    CAFFE_ENFORCE(default_value.ndim() + 1 == sparse_values.ndim());
-    CAFFE_ENFORCE(default_value.size() == sparse_values.size_from_dim(1));
+    CAFFE_ENFORCE_EQ(default_value.ndim() + 1, sparse_values.ndim());
+    CAFFE_ENFORCE_EQ(default_value.size(), sparse_values.size_from_dim(1));
     CAFFE_ENFORCE(sparse_values.meta() == default_value.meta());
 
     const TInd* sparse_indices_vec = sparse_indices.data<TInd>();
@@ -62,7 +62,7 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
     vector<TIndex> shape;
     if (InputSize() == 4) {
       auto& lengths = Input(LENGTHS);
-      CAFFE_ENFORCE(lengths.ndim() == 1);
+      CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
       lengths_vec = lengths.data<int32_t>();
       rows = lengths.dim32(0);
     }
