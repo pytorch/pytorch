@@ -578,6 +578,13 @@ class CopyOp : public Operator<Context> {
   }
 };
 
+template <class Context, class DstContext, class SrcContext>
+class CopyOnDeviceLikeOp : public CopyOp<Context, DstContext, SrcContext> {
+ public:
+  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
+      : CopyOp<Context, DstContext, SrcContext>(operator_def, ws) {}
+};
+
 template <class Context>
 class LengthsToSegmentIdsOp : public Operator<Context> {
  public:
