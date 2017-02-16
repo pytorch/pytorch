@@ -12,6 +12,77 @@ from caffe2.python import workspace, core, cnn
 
 class CopyOpsTest(unittest.TestCase):
 
+    def run_test_copy_gradient(self, device_opt):
+        model = cnn.CNNModelHelper(name="copy_test")
+        with core.DeviceScope(device_opt):
+            x = model.net.AddExternalInputs("x")
+            y = model.Copy(x, "y")
+            loss = model.AveragedLoss(y, "loss")
+            gradient_map = model.AddGradientOperators([loss])
+            workspace.FeedBlob(x, np.random.rand(32).astype(np.float32))
+            workspace.RunNetOnce(model.param_init_net)
+            workspace.RunNetOnce(model.net)
+            self.assertTrue(np.array_equal(
+                workspace.FetchBlob(x),
+                workspace.FetchBlob(y),
+            ))
+            self.assertTrue(np.array_equal(
+                workspace.FetchBlob(gradient_map[x]),
+                workspace.FetchBlob(gradient_map[y]),
+            ))
+
+    def test_copy_gradient_cpu(self):
+        self.run_test_copy_gradient(core.DeviceOption(caffe2_pb2.CPU, 0))
+
+    @unittest.skipIf(workspace.NumCudaDevices() < 1, "Need at least 1 GPU.")
+    def test_copy_gradient_gpu(self):
+        self.run_test_copy_gradient(core.DeviceOption(caffe2_pb2.CUDA, 0))
+
+    @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPU.")
+    def test_copy_gradient_multiple_gpus(self):
+        model = cnn.CNNModelHelper(name="copy_test")
+
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
+            x_cpu = model.net.AddExternalInputs("x_cpu")
+
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            x_gpu_1 = model.CopyCPUToGPU(x_cpu, "x_gpu_1")
+
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 1)):
+            x_gpu_2 = model.Copy(x_gpu_1, "x_gpu_2")
+            loss = model.AveragedLoss(x_gpu_2, "loss")
+            gradient_map = model.AddGradientOperators([loss])
+
+        workspace.FeedBlob("x_cpu", np.random.rand(32).astype(np.float32))
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.RunNetOnce(model.net)
+
+        print(model.net.Proto())
+
+        self.assertTrue(np.array_equal(
+            workspace.FetchBlob("x_gpu_1"),
+            workspace.FetchBlob("x_gpu_2"),
+        ))
+        self.assertTrue(np.array_equal(
+            workspace.FetchBlob(gradient_map["x_gpu_1"]),
+            workspace.FetchBlob(gradient_map["x_gpu_2"]),
+        ))
+
+        def get_op_with_output(model, output_blob_name):
+            for op in model.net.Proto().op:
+                if len(op.output) == 1 and op.output[0] == output_blob_name:
+                    return op
+            return None
+
+        self.assertEqual(
+            get_op_with_output(model, "x_gpu_2_grad").device_option,
+            core.DeviceOption(caffe2_pb2.CUDA, 1),
+        )
+        self.assertEqual(
+            get_op_with_output(model, "x_cpu_grad").device_option,
+            core.DeviceOption(caffe2_pb2.CUDA, 0),
+        )
+
     @unittest.skipIf(workspace.NumCudaDevices() < 1, "Need at least 1 GPU.")
     def test_cpu2gpu_gpu2cpu_gradients(self):
         model = cnn.CNNModelHelper(name="copy_test")
