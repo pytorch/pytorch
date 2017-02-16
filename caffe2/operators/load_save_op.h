@@ -219,9 +219,31 @@ class SaveOp final : public Operator<Context> {
         strip_regex_(
             OperatorBase::GetSingleArgument<string>("strip_regex", "")),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
-        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")) {
+        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
+        blob_names_(
+            OperatorBase::GetRepeatedArgument<string>("blob_name_overrides")) {
     CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
     CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
+    CAFFE_ENFORCE(
+        blob_names_.empty() ||
+            blob_names_.size() == OperatorBase::Inputs().size(),
+        "Number of blobs and blob_name_overrides mismatch.");
+    CAFFE_ENFORCE(
+        blob_names_.empty() || strip_regex_.empty(),
+        "strip_regex and blob_name_overrides are mutually exclusive.");
+
+    if (blob_names_.empty()) {
+      std::regex strip_expr(strip_regex_);
+      std::set<std::string> input_names;
+      blob_names_.resize(OperatorBase::Inputs().size());
+      for (int i = 0; i < blob_names_.size(); ++i) {
+        std::string name =
+            std::regex_replace(def().input(i), strip_expr, string(""));
+        CAFFE_ENFORCE(
+            input_names.insert(name).second, "Duplicated input: ", name);
+        blob_names_[i] = name;
+      }
+    }
   }
 
   bool RunOnDevice() override {
@@ -231,28 +253,19 @@ class SaveOp final : public Operator<Context> {
         caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::NEW));
     CAFFE_ENFORCE(out_db.get(), "Cannot open db for writing: ", full_db_name);
 
-    std::regex strip_expr(strip_regex_);
     BlobSerializerBase::SerializationAcceptor acceptor = [&](
         const std::string& blobName, const std::string& data) {
       // transaction should take care of locking
-      std::string name = std::regex_replace(blobName, strip_expr, string(""));
-      VLOG(2) << "Sending " << name << " blob's data of size "
+      VLOG(2) << "Sending " << blobName << " blob's data of size "
               << data.size() << " to db";
       auto transaction = out_db->NewTransaction();
-      transaction->Put(name, data);
+      transaction->Put(blobName, data);
       transaction->Commit();
     };
 
     const vector<const Blob*>& inputs = OperatorBase::Inputs();
-
-    std::set<std::string> input_names;
     for (int i = 0; i < inputs.size(); ++i) {
-      std::string name = std::regex_replace(def().input(i), strip_expr, string(""));
-      CAFFE_ENFORCE(
-          input_names.insert(name).second, "Duplicated feature: ", name);
-    }
-    for (int i = 0; i < inputs.size(); ++i) {
-      inputs[i]->Serialize(def().input(i), acceptor);
+      inputs[i]->Serialize(blob_names_[i], acceptor);
     }
     out_db->Close();
     return true;
@@ -264,6 +277,7 @@ class SaveOp final : public Operator<Context> {
   string strip_regex_;
   string db_name_;
   string db_type_;
+  std::vector<std::string> blob_names_;
 };
 
 template <typename... Ts>

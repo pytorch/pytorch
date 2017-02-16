@@ -146,7 +146,66 @@ class TestLoadSave(TestLoadSaveBase):
             absolute_path=1,
             db=os.path.join(tmp_folder, "db"), db_type=self._db_type)
         with self.assertRaises(RuntimeError):
-            self.assertRaises(workspace.RunOperatorOnce(op))
+            workspace.RunOperatorOnce(op)
+
+    def testBlobNameOverrides(self):
+        original_names = ['blob_a', 'blob_b', 'blob_c']
+        new_names = ['x', 'y', 'z']
+        blobs = [np.random.permutation(6) for i in range(3)]
+        for i, blob in enumerate(blobs):
+            self.assertTrue(workspace.FeedBlob(original_names[i], blob))
+            self.assertTrue(workspace.HasBlob(original_names[i]))
+        self.assertEqual(len(workspace.Blobs()), 3)
+
+        try:
+            # Saves the blobs to a local db.
+            tmp_folder = tempfile.mkdtemp()
+            with self.assertRaises(RuntimeError):
+                workspace.RunOperatorOnce(
+                    core.CreateOperator(
+                        "Save", original_names, [],
+                        absolute_path=1,
+                        strip_regex='.temp',
+                        blob_name_overrides=new_names,
+                        db=os.path.join(tmp_folder, "db"),
+                        db_type=self._db_type
+                    )
+                )
+            self.assertTrue(
+                workspace.RunOperatorOnce(
+                    core.CreateOperator(
+                        "Save", original_names, [],
+                        absolute_path=1,
+                        blob_name_overrides=new_names,
+                        db=os.path.join(tmp_folder, "db"),
+                        db_type=self._db_type
+                    )
+                )
+            )
+            self.assertTrue(workspace.ResetWorkspace())
+            self.assertEqual(len(workspace.Blobs()), 0)
+            self.assertTrue(
+                workspace.RunOperatorOnce(
+                    core.CreateOperator(
+                        "Load", [], [],
+                        absolute_path=1,
+                        db=os.path.join(tmp_folder, "db"),
+                        db_type=self._db_type,
+                        load_all=1
+                    )
+                )
+            )
+            self.assertEqual(len(workspace.Blobs()), 3)
+            for i, name in enumerate(new_names):
+                self.assertTrue(workspace.HasBlob(name))
+                self.assertTrue((workspace.FetchBlob(name) == blobs[i]).all())
+        finally:
+            # clean up temp folder.
+            try:
+                shutil.rmtree(tmp_folder)
+            except OSError as e:
+                if e.errno != errno.ENOENT:
+                    raise
 
 
 if __name__ == '__main__':
