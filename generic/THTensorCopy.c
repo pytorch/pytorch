@@ -11,9 +11,7 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
 #ifndef TH_REAL_IS_HALF
     THVector_(copy)(rp, sp, sz); 
 #else
-    ptrdiff_t i;
-    for (i=0; i<sz; ++i)
-      rp[i] = sp[i];
+    memcpy(rp, sp, sz * sizeof(real));
 #endif
   } else {
     TH_TENSOR_APPLY2(real, tensor, real, src, *tensor_data = *src_data;)
