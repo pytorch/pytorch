@@ -105,6 +105,16 @@ void Runner::run(BenchmarkFn& fn, int n) {
     auto benchmark = fn(context);
     benchmark->initialize(n);
 
+    // Switch pairs to sync mode if configured to do so
+    if (options_.sync) {
+      for (int i = 0; i < context->size_; i++) {
+        auto& pair = context->getPair(i);
+        if (pair) {
+          pair->setSync(true);
+        }
+      }
+    }
+
     // Verify correctness of initial run
     if (options_.verify) {
       benchmark->run();

@@ -36,7 +36,22 @@ void Buffer::waitRecv() {
 
   // Wait for completion
   while (recvCompletions_ == 0) {
-    recvCv_.wait(lock);
+    // If the pair is in sync mode, the caller is responsible for
+    // doing the reads. Since a single pair potentially serves
+    // multiple buffers, a read might come back with an operation
+    // intended for another buffer. Therefore, we keep calling read
+    // here until a receive completion for this buffer was triggered.
+    if (pair_->sync_) {
+      // Temporarily release lock because pair will call
+      // handleRecvCompletion on this buffer as the recv operations
+      // completes, and this lock is not reentrant.
+      lock.unlock();
+      pair_->recv();
+      lock.lock();
+    } else {
+      // Wait for handleRecvCompletion
+      recvCv_.wait(lock);
+    }
   }
   recvCompletions_--;
 }

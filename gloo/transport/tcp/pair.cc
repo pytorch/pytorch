@@ -31,7 +31,11 @@ namespace transport {
 namespace tcp {
 
 Pair::Pair(const std::shared_ptr<Device>& dev)
-    : dev_(dev), fd_(-1), sendBufferSize_(0), state_(INITIALIZING) {
+    : dev_(dev),
+      state_(INITIALIZING),
+      sync_(false),
+      fd_(-1),
+      sendBufferSize_(0) {
   memset(&rx_, 0, sizeof(rx_));
   memset(&tx_, 0, sizeof(tx_));
   listen();
@@ -51,6 +55,43 @@ const Address& Pair::address() const {
 void Pair::connect(const std::vector<char>& bytes) {
   auto peer = Address(bytes);
   connect(peer);
+}
+
+static void setSocketBlocking(int fd, bool enable) {
+  auto rv = fcntl(fd, F_GETFL);
+  GLOO_ENFORCE_NE(rv, -1);
+  if (enable) {
+    rv &= ~O_NONBLOCK;
+  } else {
+    rv |= O_NONBLOCK;
+  }
+  rv = fcntl(fd, F_SETFL, rv);
+  GLOO_ENFORCE_NE(rv, -1);
+}
+
+void Pair::setSync(bool sync) {
+  std::unique_lock<std::mutex> lock(m_);
+
+  GLOO_ENFORCE(sync, "Can only switch to sync mode");
+
+  // Wait for pair to be connected
+  while (state_ < CONNECTED) {
+    cv_.wait(lock);
+  }
+
+  // Unregister from loop and switch socket to blocking mode
+  dev_->unregisterDescriptor(fd_);
+  setSocketBlocking(fd_, true);
+
+  // If the pair was still flushing a write, finish it.
+  if (tx_.buf_ != nullptr) {
+    auto rv = write(tx_);
+    GLOO_ENFORCE(rv, "Write must always succeed in sync mode");
+    tx_.buf_->handleSendCompletion();
+    memset(&tx_, 0, sizeof(tx_));
+  }
+
+  sync_ = true;
 }
 
 void Pair::listen() {
@@ -188,6 +229,8 @@ bool Pair::write(Op& op) {
   int ioc = 0;
   int nbytes = 0;
 
+  GLOO_ENFORCE_EQ(state_, CONNECTED);
+
   // Include preamble if necessary
   if (op.nwritten_ < sizeof(op.preamble_)) {
     iov[ioc].iov_base = ((char*)&op.preamble_) + op.nwritten_;
@@ -223,9 +266,16 @@ bool Pair::write(Op& op) {
   return true;
 }
 
-// read is only called from the device thread (the handleEvents function).
-// The lock is held from that function and is inherited below.
+// read is called from:
+// 1) the device thread (the handleEvents function).
+// 2) a user thread (the recv function) IFF the pair is in sync mode.
+//
+// In either case, the lock is held and the read function
+// below inherits it.
+//
 bool Pair::read(Op& op) {
+  GLOO_ENFORCE_EQ(state_, CONNECTED);
+
   for (;;) {
     struct iovec iov;
 
@@ -375,10 +425,7 @@ void Pair::handleConnected() {
   peer_ = Address::fromPeerName(fd_);
 
   // Make sure socket is non-blocking
-  rv = fcntl(fd_, F_GETFL);
-  GLOO_ENFORCE_NE(rv, -1);
-  rv = fcntl(fd_, F_SETFL, rv | O_NONBLOCK);
-  GLOO_ENFORCE_NE(rv, -1);
+  setSocketBlocking(fd_, false);
 
   int flag = 1;
   socklen_t optlen = sizeof(flag);
@@ -430,7 +477,9 @@ void Pair::unregisterBuffer(Buffer* buf) {
 void Pair::changeState(state state) {
   // Clean up file descriptor when transitioning to CLOSED
   if (state_ == CONNECTED && state == CLOSED) {
-    dev_->unregisterDescriptor(fd_);
+    if (!sync_) {
+      dev_->unregisterDescriptor(fd_);
+    }
     close(fd_);
     fd_ = -1;
   }
@@ -442,15 +491,13 @@ void Pair::changeState(state state) {
 void Pair::send(Op& op) {
   std::unique_lock<std::mutex> lock(m_);
 
-  // Wait for pair to be connected
-  while (state_ < CONNECTED) {
-    cv_.wait(lock);
-  }
-
+  // The connect function already wait for the pair to become
+  // connected (both in listening and connecting mode).
+  // No need to wait again here.
   GLOO_ENFORCE_EQ(
       CONNECTED,
       state_,
-      "Pair is closed (",
+      "Pair is not connected (",
       self_.str(),
       " <--> ",
       peer_.str(),
@@ -471,19 +518,37 @@ void Pair::send(Op& op) {
   }
 
   // Wait until event loop has finished current write.
-  while (tx_.buf_ != nullptr) {
-    cv_.wait(lock);
+  if (!sync_) {
+    while (tx_.buf_ != nullptr) {
+      cv_.wait(lock);
+    }
   }
 
-  // Write immediately without checking socket for writeability.
-  if (write(op)) {
+  // Write to socket
+  if (sync_) {
+    auto rv = write(op);
+    GLOO_ENFORCE(rv, "Write must always succeed in sync mode");
     op.buf_->handleSendCompletion();
-    return;
-  }
+  } else {
+    // Write immediately without checking socket for writeability.
+    if (write(op)) {
+      op.buf_->handleSendCompletion();
+      return;
+    }
 
-  // Write didn't complete; pass to event loop
-  tx_ = op;
-  dev_->registerDescriptor(fd_, EPOLLIN | EPOLLOUT, this);
+    // Write didn't complete; pass to event loop
+    tx_ = op;
+    dev_->registerDescriptor(fd_, EPOLLIN | EPOLLOUT, this);
+  }
+}
+
+void Pair::recv() {
+  std::unique_lock<std::mutex> lock(m_);
+
+  auto rv = read(rx_);
+  GLOO_ENFORCE(rv, "Read must always succeed in sync mode");
+  rx_.buf_->handleRecvCompletion();
+  memset(&rx_, 0, sizeof(rx_));
 }
 
 std::unique_ptr<::gloo::transport::Buffer>

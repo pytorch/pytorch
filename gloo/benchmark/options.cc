@@ -38,6 +38,7 @@ static void usage(int status, const char* argv0) {
   X("");
   X("Transport:");
   X("  -t, --transport=TRANSPORT Transport to use (tcp, ibverbs, ...)");
+  X("      --sync=BOOL           Switch pairs to sync mode (default: false)");
   X("");
   X("Benchmark parameters:");
   X("      --verify           Verify result first iteration (if applicable)");
@@ -69,6 +70,7 @@ struct options parseOptions(int argc, char** argv) {
       {"elements", required_argument, nullptr, 0x1002},
       {"iteration-count", required_argument, nullptr, 0x1003},
       {"iteration-time", required_argument, nullptr, 0x1004},
+      {"sync", required_argument, nullptr, 0x1005},
       {"help", no_argument, nullptr, 0xffff},
       {nullptr, 0, nullptr, 0}};
 
@@ -124,6 +126,14 @@ struct options parseOptions(int argc, char** argv) {
       {
         long sec = atoi(optarg);
         result.iterationTimeNanos = sec * 1000 * 1000 * 1000;
+        break;
+      }
+      case 0x1005: // --sync
+      {
+        result.sync =
+          atoi(optarg) == 1 ||
+          tolower(optarg[0])== 't' ||
+          tolower(optarg[0])== 'y';
         break;
       }
       case 0xffff: // --help

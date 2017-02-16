@@ -28,6 +28,7 @@ struct options {
   std::string ibverbsDevice = "mlx5_0";
   int ibverbsPort = 1;
   int ibverbsIndex = 1;
+  bool sync = false;
 
   // Suite configuration
   std::string benchmark;

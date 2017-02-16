@@ -141,6 +141,10 @@ void Pair::connect(const std::vector<char>& bytes) {
   GLOO_ENFORCE_NE(rv, -1);
 }
 
+void Pair::setSync(bool sync) {
+  GLOO_ENFORCE(false, "setSync not implemented");
+}
+
 void Pair::receiveMemoryRegion() {
   struct ibv_mr* mr = new struct ibv_mr;
   struct ibv_mr* init;
