@@ -1154,6 +1154,9 @@ class TestNN(NNTestCase):
                 for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
                     if cpu_weight is not None and gpu_weight is not None:
                         self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
+                    else:
+                        self.assertTrue(cpu_weight is None)
+                        self.assertTrue(gpu_weight is None)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias, bidirectional, batch_first, contig, skip_input in product((True, False), repeat=5):

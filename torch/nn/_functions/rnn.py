@@ -7,21 +7,21 @@ except ImportError:
     pass
 
 
-def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
-    xw_ih = input if skip_input else F.linear(input, w_ih, b_ih)
+def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+    xw_ih = input if w_ih is None else F.linear(input, w_ih, b_ih)
     hy = F.relu(xw_ih + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
-def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
-    xw_ih = input if skip_input else F.linear(input, w_ih, b_ih)
+def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+    xw_ih = input if w_ih is None else F.linear(input, w_ih, b_ih)
     hy = F.tanh(xw_ih + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
-def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
+def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
-    xw_ih = input.repeat(1, 4) if skip_input else F.linear(input, w_ih, b_ih)
+    xw_ih = input.repeat(1, 4) if w_ih is None else F.linear(input, w_ih, b_ih)
     gates = xw_ih + F.linear(hx, w_hh, b_hh)
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
@@ -36,8 +36,8 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
     return hy, cy
 
 
-def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
-    gi = input.repeat(1, 3) if skip_input else F.linear(input, w_ih, b_ih)
+def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+    gi = input.repeat(1, 3) if w_ih is None else F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = gi.chunk(3, 1)
     h_r, h_i, h_n = gh.chunk(3, 1)
@@ -50,7 +50,7 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, skip_input=False):
     return hy
 
 
-def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True, skip_input=False):
+def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
 
     num_directions = len(inners)
     total_layers = num_layers * num_directions
@@ -66,7 +66,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True, skip_input
             all_output = []
             for j, inner in enumerate(inners):
                 l = i * num_directions + j
-                hy, output = inner(input, hidden[l], weight[l], (i == 0 and skip_input))
+                hy, output = inner(input, hidden[l], weight[l])
                 next_hidden.append(hy)
                 all_output.append(output)
 
@@ -91,11 +91,11 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True, skip_input
 
 
 def Recurrent(inner, reverse=False):
-    def forward(input, hidden, weight, skip_input=False):
+    def forward(input, hidden, weight):
         output = []
         steps = range(input.size(0) - 1, -1, -1) if reverse else range(input.size(0))
         for i in steps:
-            hidden = inner(input[i], hidden, *weight, skip_input=skip_input)
+            hidden = inner(input[i], hidden, *weight)
             # hack to handle LSTM
             output.append(isinstance(hidden, tuple) and hidden[0] or hidden)
 
@@ -131,8 +131,7 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
                       num_layers,
                       (mode == 'LSTM'),
                       dropout=dropout,
-                      train=train,
-                      skip_input=skip_input)
+                      train=train)
 
     def forward(input, weight, hidden):
         if batch_first:
@@ -214,7 +213,7 @@ class CudnnRNN(NestedIOFunction):
             grad_hx)
 
         if any(self.needs_input_grad[1:]):
-            grad_weight = [tuple(w.new().resize_as_(w).zero_() if w is not None else None for w in layer_weight)
+            grad_weight = [tuple(w.new().resize_as_(w) if w is not None else None for w in layer_weight)
                            for layer_weight in weight]
             cudnn.rnn.backward_weight(
                 self,
