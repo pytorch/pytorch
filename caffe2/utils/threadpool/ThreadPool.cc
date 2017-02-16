@@ -1,6 +1,9 @@
 #include "caffe2/utils/threadpool/ThreadPool.h"
 #include "caffe2/core/logging.h"
 
+CAFFE2_DEFINE_bool(caffe2_threadpool_force_inline, false,
+                   "Force to always run jobs on the calling thread");
+
 #if CAFFE2_THREADPOOL_MOBILE
 
 namespace caffe2 {
@@ -122,7 +125,8 @@ ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
 
   // If there are no worker threads, or if the range is too small (too
   // little work), just run locally
-  bool runLocally = (threads_.empty() || range < minWorkSize_);
+  bool runLocally = threads_.empty() || range < minWorkSize_ ||
+                    FLAGS_caffe2_threadpool_force_inline;
 
   auto numThreads = threadInfo_.size();
   size_t workUnitsPerThread = 0;
