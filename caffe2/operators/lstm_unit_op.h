@@ -22,6 +22,7 @@ void LSTMUnit(
     int N,
     int D,
     int t,
+    const T* H_prev,
     const T* C_prev,
     const T* X,
     const int32_t* seqLengths,
@@ -32,7 +33,7 @@ void LSTMUnit(
     const bool valid = t < seqLengths[n];
     for (int d = 0; d < D; ++d) {
       if (!valid) {
-        H[d] = 0;
+        H[d] = H_prev[d];
         C[d] = C_prev[d];
       } else {
         const T i = sigmoid(X[d]);
@@ -46,6 +47,7 @@ void LSTMUnit(
         H[d] = o * tanh_c;
       }
     }
+    H_prev += D;
     C_prev += D;
     X += 4 * D;
     C += D;
@@ -65,6 +67,7 @@ void LSTMUnitGradient(
     const T* H,
     const T* C_diff,
     const T* H_diff,
+    T* H_prev_diff,
     T* C_prev_diff,
     T* X_diff,
     Context* context) {
@@ -72,12 +75,14 @@ void LSTMUnitGradient(
     const bool valid = t < seqLengths[n];
     for (int d = 0; d < D; ++d) {
       T* c_prev_diff = C_prev_diff + d;
+      T* h_prev_diff = H_prev_diff + d;
       T* i_diff = X_diff + d;
       T* f_diff = X_diff + 1 * D + d;
       T* o_diff = X_diff + 2 * D + d;
       T* g_diff = X_diff + 3 * D + d;
       if (!valid) {
         *c_prev_diff = C_diff[d];
+        *h_prev_diff = H_diff[d];
         *i_diff = 0;
         *f_diff = 0;
         *o_diff = 0;
@@ -92,6 +97,7 @@ void LSTMUnitGradient(
         const T tanh_c = tanh(c);
         const T c_term_diff = C_diff[d] + H_diff[d] * o * (1 - tanh_c * tanh_c);
         *c_prev_diff = c_term_diff * f;
+        *h_prev_diff = 0; // gradient passed back through X_diff
         *i_diff = c_term_diff * g * i * (1 - i);
         *f_diff = c_term_diff * c_prev * f * (1 - f);
         *o_diff = H_diff[d] * tanh_c * o * (1 - o);
@@ -105,6 +111,7 @@ void LSTMUnitGradient(
     C_diff += D;
     H_diff += D;
     X_diff += 4 * D;
+    H_prev_diff += D;
     C_prev_diff += D;
   }
 }
@@ -123,6 +130,7 @@ class LSTMUnitOp : public Operator<Context> {
     const auto G = Input(GATES).dim(2);
     const auto D = Input(CELL_T_M_1).dim(2);
     CAFFE_ENFORCE_EQ(4 * D, G);
+    const auto* H_prev = Input(HIDDEN_T_M_1).template data<T>();
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();
     const auto* X = Input(GATES).template data<T>();
     const auto* seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
@@ -133,12 +141,12 @@ class LSTMUnitOp : public Operator<Context> {
     Output(HIDDEN_T)->ResizeLike(Input(CELL_T_M_1));
     auto* H = Output(HIDDEN_T)->template mutable_data<T>();
     detail::LSTMUnit<T, Context>(
-        N, D, t, C_prev, X, seqLengths, C, H, &context_);
+        N, D, t, H_prev, C_prev, X, seqLengths, C, H, &context_);
     return true;
   }
 
  protected:
-  INPUT_TAGS(CELL_T_M_1, GATES, SEQ_LENGTHS, TIMESTEP);
+  INPUT_TAGS(HIDDEN_T_M_1, CELL_T_M_1, GATES, SEQ_LENGTHS, TIMESTEP);
   OUTPUT_TAGS(HIDDEN_T, CELL_T);
 };
 
@@ -164,6 +172,8 @@ class LSTMUnitGradientOp : public Operator<Context> {
     const auto* C_diff = Input(CELL_T_GRAD).template data<T>();
     const auto* H_diff = Input(HIDDEN_T_GRAD).template data<T>();
     const auto* seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
+    Output(HIDDEN_T_M_1_GRAD)->ResizeLike(Input(HIDDEN_T_M_1));
+    auto* H_prev_diff = Output(HIDDEN_T_M_1_GRAD)->template mutable_data<T>();
     Output(CELL_T_M_1_GRAD)->ResizeLike(Input(CELL_T_M_1));
     auto* C_prev_diff = Output(CELL_T_M_1_GRAD)->template mutable_data<T>();
     Output(GATES_GRAD)->ResizeLike(Input(GATES));
@@ -180,6 +190,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
         H,
         C_diff,
         H_diff,
+        H_prev_diff,
         C_prev_diff,
         X_diff,
         &context_);
@@ -188,6 +199,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
 
  protected:
   INPUT_TAGS(
+      HIDDEN_T_M_1,
       CELL_T_M_1,
       GATES,
       SEQ_LENGTHS,
@@ -196,7 +208,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
       CELL_T,
       HIDDEN_T_GRAD,
       CELL_T_GRAD, );
-  OUTPUT_TAGS(CELL_T_M_1_GRAD, GATES_GRAD);
+  OUTPUT_TAGS(HIDDEN_T_M_1_GRAD, CELL_T_M_1_GRAD, GATES_GRAD);
 };
 
 } // namespace caffe2

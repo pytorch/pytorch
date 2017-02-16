@@ -23,6 +23,7 @@ __global__ void LSTMUnitKernel(
     const int nthreads,
     const int dim,
     const int t,
+    const T* H_prev,
     const T* C_prev,
     const T* X,
     const int32_t* seqLengths,
@@ -33,7 +34,7 @@ __global__ void LSTMUnitKernel(
     const int d = index % dim;
     const bool valid = t < seqLengths[n];
     if (!valid) {
-      H[index] = 0;
+      H[index] = H_prev[index];
       C[index] = C_prev[index];
     } else {
       const T* X_offset = X + 4 * dim * n;
@@ -62,6 +63,7 @@ __global__ void LSTMUnitGradientKernel(
     const int32_t* seqLengths,
     const T* C_diff,
     const T* H_diff,
+    T* H_prev_diff,
     T* C_prev_diff,
     T* X_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -70,6 +72,7 @@ __global__ void LSTMUnitGradientKernel(
     const int d = index % dim;
     const T* X_offset = X + 4 * dim * n;
     T* c_prev_diff = C_prev_diff + index;
+    T* h_prev_diff = H_prev_diff + index;
     T* X_diff_offset = X_diff + 4 * dim * n;
     T* i_diff = X_diff_offset + d;
     T* f_diff = X_diff_offset + 1 * dim + d;
@@ -77,6 +80,7 @@ __global__ void LSTMUnitGradientKernel(
     T* g_diff = X_diff_offset + 3 * dim + d;
     if (!valid) {
       *c_prev_diff = C_diff[index];
+      *h_prev_diff = H_diff[index];
       *i_diff = 0;
       *f_diff = 0;
       *o_diff = 0;
@@ -92,6 +96,7 @@ __global__ void LSTMUnitGradientKernel(
       const T c_term_diff =
           C_diff[index] + H_diff[index] * o * (1 - tanh_c * tanh_c);
       *c_prev_diff = c_term_diff * f;
+      *h_prev_diff = 0;
       *i_diff = c_term_diff * g * i * (1 - i);
       *f_diff = c_term_diff * c_prev * f * (1 - f);
       *o_diff = H_diff[index] * tanh_c * o * (1 - o);
@@ -100,11 +105,12 @@ __global__ void LSTMUnitGradientKernel(
   }
 }
 
-template<>
+template <>
 void LSTMUnit<float, CUDAContext>(
     int N,
     int D,
     int t,
+    const float* H_prev,
     const float* C_prev,
     const float* X,
     const int32_t* seqLengths,
@@ -115,7 +121,8 @@ void LSTMUnit<float, CUDAContext>(
       CAFFE_GET_BLOCKS(N * D),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context->cuda_stream()>>>(N * D, D, t, C_prev, X, seqLengths, C, H);
+      context->cuda_stream()>>>(
+      N * D, D, t, H_prev, C_prev, X, seqLengths, C, H);
 }
 
 template <>
@@ -130,6 +137,7 @@ void LSTMUnitGradient<float, CUDAContext>(
     const float* H,
     const float* C_diff,
     const float* H_diff,
+    float* H_prev_diff,
     float* C_prev_diff,
     float* X_diff,
     CUDAContext* context) {
@@ -138,7 +146,19 @@ void LSTMUnitGradient<float, CUDAContext>(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
-          N * D, D, t, C_prev, X, C, H, seqLengths, C_diff, H_diff, C_prev_diff, X_diff);
+      N * D,
+      D,
+      t,
+      C_prev,
+      X,
+      C,
+      H,
+      seqLengths,
+      C_diff,
+      H_diff,
+      H_prev_diff,
+      C_prev_diff,
+      X_diff);
 }
 }
 
