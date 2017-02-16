@@ -1,7 +1,6 @@
 #include "caffe2/utils/proto_utils.h"
 
 #include <fcntl.h>
-#include <unistd.h>
 #include <cerrno>
 #include <fstream>
 

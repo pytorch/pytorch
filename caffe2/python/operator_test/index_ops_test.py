@@ -22,7 +22,7 @@ class TestIndexOps(TestCase):
         workspace.RunOperatorOnce(core.CreateOperator(
             'IndexLoad',
             ['index', 'entries'],
-            []))
+            ['index']))
         query1 = np.array(
             [entries[0], entries[3], entries[0], entries[4]],
             dtype=dtype)
@@ -38,7 +38,7 @@ class TestIndexOps(TestCase):
         workspace.RunOperatorOnce(core.CreateOperator(
             'IndexFreeze',
             ['index'],
-            []))
+            ['index']))
 
         query2 = np.array(
             [entries[5], entries[4], entries[0], entries[6], entries[7]],
@@ -75,7 +75,7 @@ class TestIndexOps(TestCase):
         workspace.RunOperatorOnce(core.CreateOperator(
             'IndexLoad',
             ['index2', 'stored_entries'],
-            [],
+            ['index2'],
             skip_first_entry=1))
 
         workspace.RunOperatorOnce(core.CreateOperator(

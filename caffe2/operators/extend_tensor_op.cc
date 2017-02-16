@@ -35,7 +35,7 @@ class ExtendTensorOp final : public Operator<Context> {
 
     auto extendSize = (TIndex)maxElem - oldSize;
     if (extendSize > 0) {
-      new_tensor->template Extend(extendSize, growthPct_, &context_);
+      new_tensor->Extend(extendSize, growthPct_, &context_);
       if (!new_tensor->meta().ctor()) {
         auto oldSizeBytes = oldSize * new_tensor->meta().itemsize();
         auto* dst = (char*)new_tensor->raw_mutable_data() + oldSizeBytes;

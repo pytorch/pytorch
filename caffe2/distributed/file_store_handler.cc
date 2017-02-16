@@ -5,7 +5,6 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #include <array>
 #include <chrono>
@@ -23,9 +22,14 @@ FileStoreHandler::FileStoreHandler(std::string& path) {
 FileStoreHandler::~FileStoreHandler() {}
 
 std::string FileStoreHandler::realPath(const std::string& path) {
+#if defined(_MSC_VER)
+  std::array<char, _MAX_PATH> buf;
+  auto ret = _fullpath(buf.data(), path.c_str(), buf.size());
+#else
   std::array<char, PATH_MAX> buf;
-  CHECK_EQ(buf.data(), realpath(path.c_str(), buf.data())) << "realpath: "
-                                                           << strerror(errno);
+  auto ret = realpath(path.c_str(), buf.data());
+#endif
+  CHECK_EQ(buf.data(), ret) << "realpath: " << strerror(errno);
   return std::string(buf.data());
 }
 
@@ -89,6 +93,7 @@ int64_t FileStoreHandler::add(
     const std::string& /* unused */,
     int64_t /* unused */) {
   CHECK(false) << "add not implemented for FileStoreHandler";
+  return 0;
 }
 
 bool FileStoreHandler::check(const std::vector<std::string>& names) {

@@ -50,14 +50,26 @@ REGISTER_CPU_OPERATOR(NHWC2NCHW, NHWC2NCHWOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(NCHW2NHWC, NCHW2NHWCOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(NHWC2NCHW)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .TensorInferenceFunction(
+        [](const OperatorDef& /*unused*/ def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          out[0].add_dims(in[0].dims(0));
+          out[0].add_dims(in[0].dims(3));
+          out[0].add_dims(in[0].dims(1));
+          out[0].add_dims(in[0].dims(2));
+          return out;
+        })
+    .SetDoc(R"DOC(
 The operator switches the order of data in a tensor from NHWC- sample index N,
 height H, width H and channels C, to the NCHW order.
 )DOC")
-  .Input(0, "data", "The input data (Tensor<float>) in the NHWC order.")
-  .Output(0, "output", "The output tensor (Tensor<float>) in the NCHW order.");
+    .Input(0, "data", "The input data (Tensor<float>) in the NHWC order.")
+    .Output(
+        0,
+        "output",
+        "The output tensor (Tensor<float>) in the NCHW order.");
 
 OPERATOR_SCHEMA(NCHW2NHWC).NumInputs(1).NumOutputs(1)
   .SetDoc(R"DOC(

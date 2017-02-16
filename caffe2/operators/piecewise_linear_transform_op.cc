@@ -18,7 +18,8 @@ transformation. Each feature dimension has its own piecewise linear
 transformation function. Therefore the size of piecewise function parameters are
 all (pieces x prediction_dimensions). Note that in each piece, low bound is
 excluded while high bound is included. Also the piecewise linear function
-must be continuous.
+must be continuous. If the input is binary predictions (Nx2 tensor), set
+the binary arg to true (see details below).
 )DOC")
     .Input(
         0,
@@ -42,6 +43,12 @@ must be continuous.
     .Arg(
         "pieces",
         "int value for the number of pieces for the piecewise linear function")
+    .Arg(
+        "binary",
+        "If set true, we assume the input is a Nx2 tensor. Its first column is "
+        "negative predictions and second column is positive and "
+        "negative + positive = 1. We just need one set of transforms for the "
+        "positive column.")
     .Output(
         0,
         "transforms",

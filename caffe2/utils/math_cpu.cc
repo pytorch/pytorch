@@ -11,10 +11,10 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
-#include <unistd.h>
 #include <atomic>
 #include <chrono>
 #include <random>
+#include <unordered_set>
 
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
@@ -25,6 +25,10 @@
 #include "caffe2/core/context.h"
 #include "Eigen/Core"
 #include "Eigen/Dense"
+
+#if defined(_MSC_VER)
+#include <process.h>
+#endif
 
 namespace caffe2 {
 namespace math {
@@ -666,6 +670,36 @@ void RandUniform<int, CPUContext>(
   }
 }
 
+#define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                   \
+  template <>                                                       \
+  void RandUniformUnique<T, CPUContext>(                            \
+      const size_t n,                                               \
+      const T a,                                                    \
+      const T b,                                                    \
+      T* r,                                                         \
+      const size_t m,                                               \
+      const T* avoid,                                               \
+      CPUContext* context) {                                        \
+    CAFFE_ENFORCE_LE(                                               \
+        n, b - a - m + 1, "Cannot satisfy the unique requirement"); \
+    std::unordered_set<T> avoid_set(n);                             \
+    if (m) {                                                        \
+      avoid_set.insert(avoid, avoid + m);                           \
+    }                                                               \
+    std::uniform_int_distribution<T> distribution(a, b);            \
+    T v = 0;                                                        \
+    for (size_t i = 0; i < n; ++i) {                                \
+      do {                                                          \
+        v = distribution(context->RandGenerator());                 \
+      } while (avoid_set.count(v));                                 \
+      r[i] = v;                                                     \
+      avoid_set.insert(v);                                          \
+    }                                                               \
+  }
+
+CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(int32_t);
+CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(int64_t);
+#undef CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE
 
 template <>
 void RandGaussian<float, CPUContext>(

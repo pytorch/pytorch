@@ -99,17 +99,21 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
            n=st.integers(1, 5),
            d=st.integers(1, 5))
     def test_lstm_new(self, t, n, d):
-        model = CNNModelHelper(name='external')
+        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+            model = CNNModelHelper(name='external')
 
-        def create_lstm(
-                model, input_blob, seq_lengths, init, dim_in, dim_out, scope):
-            recurrent.LSTM(
-                model, input_blob, seq_lengths, init,
-                dim_in, dim_out, scope="external/recurrent")
+            def create_lstm(
+                    model, input_blob, seq_lengths,
+                    init, dim_in, dim_out, scope):
+                recurrent.LSTM(
+                    model, input_blob, seq_lengths, init,
+                    dim_in, dim_out, scope="external/recurrent",
+                    outputs_with_grads=outputs_with_grads)
 
-        self.lstm(model, create_lstm, t, n, d, lstm_reference,
-                  gradients_to_check=[0, 1, 2, 3, 4],
-                  outputs_to_check=[0, 1, 2, 3])
+            self.lstm(model, create_lstm, t, n, d, lstm_reference,
+                      gradients_to_check=[0, 1, 2, 3, 4],
+                      outputs_to_check=[0, 1, 2, 3],
+                      outputs_with_grads=outputs_with_grads)
 
     @given(t=st.integers(1, 4),
            n=st.integers(1, 5),
@@ -131,7 +135,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
 
     @debug
     def lstm(self, model, create_lstm, t, n, d, ref, gradients_to_check,
-             outputs_to_check=None):
+             outputs_to_check=None, outputs_with_grads=(0,)):
         input_blob, seq_lengths, hidden_init, cell_init = (
             model.net.AddExternalInputs(
                 'input_blob', 'seq_lengths', 'hidden_init', 'cell_init'))
@@ -159,7 +163,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         workspace.FeedBlob("hidden_init", generate_random_state(n, d))
         workspace.FeedBlob("cell_init", generate_random_state(n, d))
         workspace.FeedBlob(
-            "seq_lengths", np.random.randint(0, t, size=(n,)).astype(np.int32))
+            "seq_lengths", np.random.randint(0, t + 1, size=(n,)).astype(np.int32))
+
         inputs = [workspace.FetchBlob(name) for name in op.input]
 
         print(op.input)
@@ -180,7 +185,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 op=op,
                 inputs=inputs,
                 outputs_to_check=param,
-                outputs_with_grads=[0],
+                outputs_with_grads=outputs_with_grads,
                 threshold=0.01,
                 stepsize=0.005,
             )

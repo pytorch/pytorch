@@ -127,6 +127,9 @@ class Operations(object):
         """
         if op_type.startswith('__'):
             raise AttributeError()
+        # We want hasattr to work properly even if no context is active.
+        if NetBuilder.current(required=False) is None:
+            raise AttributeError('No active NetBuilder.')
         return getattr(self.net(), op_type)
 
     def task_group(self):

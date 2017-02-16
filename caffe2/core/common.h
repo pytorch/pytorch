@@ -15,6 +15,12 @@
 #include <TargetConditionals.h>
 #endif
 
+#if defined(_MSC_VER)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace caffe2 {
 
 // Data type for caffe2 Index/Size. We use size_t to be safe here as well as for

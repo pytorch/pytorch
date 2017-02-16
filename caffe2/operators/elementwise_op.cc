@@ -55,9 +55,6 @@ namespace caffe2 {
 #define EIGEN_SUB(x, y) ((x) - (y))
 EIGEN_FUNCTOR(Sub, EIGEN_SUB, NumericTypes, SameTypeAsInput);
 #undef EIGEN_SUB
-#define EIGEN_MUL(x, y) ((x) * (y))
-EIGEN_FUNCTOR(Mul, EIGEN_MUL, NumericTypes, SameTypeAsInput);
-#undef EIGEN_MUL
 #define EIGEN_DIV(x, y) ((x) / (y))
 EIGEN_FUNCTOR(Div, EIGEN_DIV, NumericTypes, SameTypeAsInput);
 #undef EIGEN_DIV

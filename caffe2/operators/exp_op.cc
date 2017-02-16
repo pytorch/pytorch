@@ -1,6 +1,5 @@
-#include <cmath>
-
 #include "caffe2/operators/elementwise_op.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -8,7 +7,7 @@ struct ExpCPUFunctor {
   template <typename T>
   inline void
   operator()(const int n, const T* x, T* y, CPUContext* device_context) {
-    std::transform(x, x + n, y, exp);
+    math::Exp<T, CPUContext>(n, x, y, device_context);
   }
 };
 

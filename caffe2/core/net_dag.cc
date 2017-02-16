@@ -41,10 +41,6 @@ static void prune(
     int prev_node_idx,
     std::vector<internal::OpGraphNode>& nodes,
     std::vector<bool>& ancestors) {
-  if (nodes[node_idx].visited) {
-    return;
-  }
-  nodes[node_idx].visited = true;
 
   // Check if this has a parent that can be pruned:
   //  if parent is not the previous node visited and is
@@ -71,12 +67,12 @@ static void prune(
 
   // Increase satisfied input count for children
   std::vector<int> children = nodes[node_idx].children_;
-  for (auto child : children) {
-    nodes[child].visited_inputs++;
-  }
 
   // Descend -- but only once from each node
   if (nodes[node_idx].visited_inputs == nodes[node_idx].num_orig_parents) {
+    for (auto child : children) {
+      nodes[child].visited_inputs++;
+    }
     for (auto child : children) {
       prune(child, node_idx, nodes, ancestors);
     }
@@ -353,6 +349,17 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
       (FLAGS_caffe2_disable_chaining ? singleChains(operator_nodes_)
                                      : computeChains(operator_nodes_));
 
+  // Tag operator nodes that start chains
+  for (int i = 0; i < operator_nodes_.size(); ++i) {
+    auto& node = operator_nodes_[i];
+    if (execution_chains_.find(i) != execution_chains_.end()) {
+      node.is_chain_start_ = true;
+    } else {
+      node.is_chain_start_ = false;
+    }
+    node.runtime_parent_count_ = 0;
+  }
+
   LOG(INFO) << "Number of parallel execution chains "
             << execution_chains_.size()
             << " Number of operators = " << net_def.op_size();
@@ -488,12 +495,10 @@ void DAGNetBase::WorkerFunction() {
           continue;
         }
 
-        if (std::find(chain.begin(), chain.end(), child) != chain.end()) {
-          // already executed
-          continue;
+        if (operator_nodes_[child].is_chain_start_) {
+          VLOG(2) << "Pushing chain #" << child << " to queue.";
+          job_queue_.Push(child);
         }
-        VLOG(2) << "Pushing operator #" << child << " to queue.";
-        job_queue_.Push(child);
       }
     }
 
