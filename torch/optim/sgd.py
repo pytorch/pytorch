@@ -21,7 +21,7 @@ class SGD(Optimizer):
     def __init__(self, params, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False):
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay,)
+                        weight_decay=weight_decay,nesterov=nesterov)
         super(SGD, self).__init__(params, defaults)
 
     def step(self, closure=None):
