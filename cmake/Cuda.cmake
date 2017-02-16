@@ -157,6 +157,16 @@ endmacro()
 ###  Non macro section
 ################################################################################################
 
+# Special care for windows platform: we know that 32-bit windows does not support cuda.
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+  if(NOT (CMAKE_SIZEOF_VOID_P EQUAL 8))
+    message(WARNING
+            "CUDA support not available with 32-bit windows. Did you "
+            "forget to set Win64 in the generator target?")
+    return()
+  endif()
+endif()
+
 find_package(CUDA 7.0 QUIET)
 find_cuda_helper_libs(curand)  # cmake 2.8.7 compartibility which doesn't search for curand
 
