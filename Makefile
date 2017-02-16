@@ -1,19 +1,19 @@
-# This makefile does nothing but delegating the actual compilation to build.py.
+# This makefile does nothing but delegating the actual building to cmake.
 
 all:
 	@mkdir -p build && cd build && cmake .. && make
 
-#android:
-#	@python brewtool/build_android.py build
+local:
+	@./scripts/build_local.sh
 
-clean:
-	@rm -r build/
+android:
+	@./scripts/build_android.sh
 
-#test:
-#	@python brewtool/build.py test
+ios:
+	@./scripts/build_ios.sh
 
-#lint:
-#	@find caffe2 -type f -exec python brewtool/cpplint.py {} \;
+clean: # This will remove ALL build folders.
+	@rm -r build*/
 
 linecount:
 	@cloc --read-lang-def=caffe.cloc caffe2 || \

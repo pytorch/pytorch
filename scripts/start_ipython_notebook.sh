@@ -6,4 +6,4 @@
 # GLOG_logtostderr=1 GLOG_v=1 PYTHONPATH=../../../build:$PYTHONPATH ipython notebook --ip='*'
 
 # Use the following command for a normal run.
-PYTHONPATH=../../../build:$PYTHONPATH ipython notebook --ip='*'
+PYTHONPATH=build:$PYTHONPATH ipython notebook --notebook-dir=caffe2/python/tutorial --ip='*'
