@@ -453,6 +453,15 @@ class TestAutograd(TestCase):
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
 
+    def test_isolated_node(self):
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        a = x + y
+        b = torch.max(a, 1)[1].repeat(1, 5).double()
+        o = (b + a).sum()
+        o.backward()
+
     def test_return_leaf(self):
         class Identity(Function):
 
