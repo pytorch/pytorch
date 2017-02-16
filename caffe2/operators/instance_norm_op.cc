@@ -55,6 +55,8 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 template <typename T, typename Context>
 bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
+  const auto& scale = Input(SCALE);
+  const auto& bias = Input(BIAS);
   auto* Y = Output(OUTPUT);
   auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
   auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
@@ -65,24 +67,30 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   Y->ResizeLike(X);
   mean->Resize(N, C);
   inv_stdev->Resize(N, C);
-  ConstEigenArrayMap<T> Xmat(X.template data<T>(), H * W, N * C);
-  ConstEigenVectorArrayMap<T> scale(Input(SCALE).template data<T>(), C);
-  ConstEigenVectorArrayMap<T> bias(Input(BIAS).template data<T>(), C);
-  EigenArrayMap<T> Ymat(Y->template mutable_data<T>(), H * W, N * C);
-  EigenVectorArrayMap<T> mean_arr(mean->template mutable_data<T>(), N * C);
-  EigenVectorArrayMap<T> inv_stdev_arr(
-      inv_stdev->template mutable_data<T>(), N * C);
 
-  mean_arr = Xmat.colwise().mean();
+  const auto* Xdata = X.template data<T>();
+  auto* Ydata = Y->template mutable_data<T>();
+  const auto* scale_data = scale.template data<T>();
+  const auto* bias_data = bias.template data<T>();
+  auto* mean_data = mean->template mutable_data<T>();
+  auto* inv_stdev_data = inv_stdev->template mutable_data<T>();
 
-  // TODO(jiayq): refactor the following 4 lines to be more concise.
-  Ymat = Xmat.rowwise() - mean_arr.transpose();
-  inv_stdev_arr = Ymat.matrix().colwise().squaredNorm();
-  inv_stdev_arr = (inv_stdev_arr / (H * W) + epsilon_).sqrt().inverse();
-  // Vectorizing over H*W
-  for (int i = 0; i < N * C; ++i) {
-    Ymat.col(i) = Ymat.col(i) * (inv_stdev_arr(i) * scale(i % C)) + bias(i % C);
+  auto f = [&](size_t i) {
+    ConstEigenVectorArrayMap<T> Xi(Xdata + H * W * i, H * W);
+    const T mean = Xi.mean();
+    const T squared_norm = (Xi - mean).matrix().squaredNorm();
+    const T inv_stdev = 1.0 / std::sqrt(squared_norm / (H * W) + epsilon_);
+    mean_data[i] = mean;
+    inv_stdev_data[i] = inv_stdev;
+    EigenVectorArrayMap<T> Yi(Ydata + H * W * i, H * W);
+    Yi = (Xi - mean) * (inv_stdev * scale_data[i % C]) + bias_data[i % C];
+  };
+
+  // TODO: benchmark parallelization strategies.
+  for (auto i = 0; i < N * C; ++i) {
+    f(i);
   }
+
   return true;
 }
 
