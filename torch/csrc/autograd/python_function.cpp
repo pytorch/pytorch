@@ -932,9 +932,10 @@ PyObject *THPFunction_previous_functions(THPFunction *self, void *_unused)
     return NULL;
   for (int i = 0; i < size; i++) {
     THPObjectPtr fn_tuple = PyTuple_New(2);
-    if (!fn_tuple)
-      return NULL;
-    PyTuple_SET_ITEM(fn_tuple.get(), 0, functionToPyObject(prev_fns[i].first));
+    if (!fn_tuple) return NULL;
+    PyObject* fn = functionToPyObject(prev_fns[i].first);
+    if (!fn) return NULL;
+    PyTuple_SET_ITEM(fn_tuple.get(), 0, fn);
     PyTuple_SET_ITEM(fn_tuple.get(), 1, PyInt_FromLong(prev_fns[i].second));
     PyTuple_SET_ITEM(result.get(), i, fn_tuple.release());
   }
