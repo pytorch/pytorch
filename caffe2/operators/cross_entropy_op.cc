@@ -33,11 +33,14 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
   auto* Ydata = Y->mutable_data<float>();
+  CAFFE_ENFORCE(
+      (ConstEigenVectorArrayMap<int>(labelData, N) < D).all() &&
+          (ConstEigenVectorArrayMap<int>(labelData, N) >= 0).all(),
+      "Label seems to be outside of supported range. Supported labels are in "
+      "range [0,",
+      D,
+      ")");
   for (int i = 0; i < N; ++i) {
-    CAFFE_ENFORCE(
-        labelData[i] < D,
-        "Label seems incorrect: label value larger than number of classes: ",
-        labelData[i], " vs ", D);
     Ydata[i] = -log(std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD()));
   }
   return true;
