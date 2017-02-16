@@ -548,8 +548,8 @@ OPERATOR_SCHEMA(LengthsToWeights)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("power", "n of 1/pow(length,n) for normalization")
-    .SetDoc(
-        R"DOC( Similar as LengthsToSegmentIds but output vector of segment
+    .SetDoc(R"DOC(
+Similar as LengthsToSegmentIds but output vector of segment
 weights derived by lengths. i.e 1/pow(length, power)
 )DOC")
     .Input(0, "lengths", "1-D int32_t or int64_t tensor of lengths")
