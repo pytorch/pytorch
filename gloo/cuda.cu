@@ -7,43 +7,106 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include "gloo/cuda.h"
 #include "gloo/cuda_private.h"
-
-#include "gloo/common/common.h"
 
 namespace gloo {
 
 template<typename T>
-__global__ void initializeMemory(T* ptr, const T val, const size_t n)
-{
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  for (; i < n; i += blockDim.x) {
-    ptr[i] = val;
+CudaDevicePointer<T>
+CudaDevicePointer<T>::createWithNewStream(
+    T* ptr,
+    size_t count) {
+  CudaDevicePointer p(ptr, count);
+
+  // Create new stream for operations concerning this pointer
+  {
+    CudaDeviceScope scope(p.deviceId_);
+    int loPri, hiPri;
+    CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&loPri, &hiPri));
+    CUDA_CHECK(cudaStreamCreateWithPriority(
+                 &p.stream_, cudaStreamNonBlocking, hiPri));
+    p.streamOwner_ = true;
+  }
+
+  return p;
+}
+
+template<typename T>
+CudaDevicePointer<T>
+CudaDevicePointer<T>::createWithStream(
+    T* ptr,
+    size_t count,
+    cudaStream_t stream) {
+  CudaDevicePointer p(ptr, count);
+  p.stream_ = stream;
+  return p;
+}
+
+template<typename T>
+CudaDevicePointer<T>::CudaDevicePointer(T* ptr, size_t count)
+    : device_(ptr),
+      count_(count),
+      deviceId_(getGPUIDForPointer(device_)) {
+  CudaDeviceScope scope(deviceId_);
+  CUDA_CHECK(cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
+}
+
+template<typename T>
+CudaDevicePointer<T>::CudaDevicePointer(CudaDevicePointer<T>&& other) noexcept
+    : device_(other.device_),
+      count_(other.count_),
+      deviceId_(other.deviceId_),
+      streamOwner_(other.streamOwner_),
+      stream_(other.stream_),
+      event_(other.event_) {
+  // Nullify fields that would otherwise be destructed
+  other.stream_ = nullptr;
+  other.event_ = nullptr;
+}
+
+template<typename T>
+CudaDevicePointer<T>::~CudaDevicePointer() {
+  CudaDeviceScope scope(deviceId_);
+  if (streamOwner_ && stream_ != nullptr) {
+    CUDA_CHECK(cudaStreamDestroy(stream_));
+  }
+  if (event_ != nullptr) {
+    CUDA_CHECK(cudaEventDestroy(event_));
   }
 }
 
 template<typename T>
-CudaMemory<T>::CudaMemory(size_t n, T val): n_(n), bytes_(n * sizeof(T)) {
-  CUDA_CHECK(cudaGetDevice(&device_));
-  CUDA_CHECK(cudaMalloc(&ptr_, bytes_));
-  initializeMemory<<<1, 32>>>(ptr_, val, n);
+void CudaDevicePointer<T>::copyToHostAsync(T* dst) {
+  CudaDeviceScope scope(deviceId_);
+  CUDA_CHECK(cudaMemcpyAsync(
+               dst,
+               device_,
+               count_ * sizeof(T),
+               cudaMemcpyDeviceToHost,
+               stream_));
+  CUDA_CHECK(cudaEventRecord(event_, stream_));
 }
 
 template<typename T>
-CudaMemory<T>::~CudaMemory() {
-  CudaDeviceGuard guard;
-  CUDA_CHECK(cudaSetDevice(device_));
-  CUDA_CHECK(cudaFree(ptr_));
+void CudaDevicePointer<T>::copyFromHostAsync(T* src) {
+  CudaDeviceScope scope(deviceId_);
+  CUDA_CHECK(cudaMemcpyAsync(
+               device_,
+               src,
+               count_ * sizeof(T),
+               cudaMemcpyDeviceToHost,
+               stream_));
+  CUDA_CHECK(cudaEventRecord(event_, stream_));
 }
 
 template<typename T>
-std::unique_ptr<T[]> CudaMemory<T>::copyToHost() {
-  auto host = make_unique<T[]>(n_);
-  cudaMemcpy(host.get(), ptr_, bytes_, cudaMemcpyDefault);
-  return host;
+void CudaDevicePointer<T>::waitAsync() {
+  CudaDeviceScope scope(deviceId_);
+  CUDA_CHECK(cudaEventSynchronize(event_));
 }
 
 // Instantiate template
-template class CudaMemory<float>;
+template class CudaDevicePointer<float>;
 
 } // namespace gloo

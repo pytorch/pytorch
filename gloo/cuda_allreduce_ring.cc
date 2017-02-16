@@ -25,19 +25,11 @@ CudaAllreduceRing<T>::CudaAllreduceRing(
     bytes_(count * sizeof(T)),
     leftPair_(this->getLeftPair()),
     rightPair_(this->getRightPair()) {
+  hostPtrs_.resize(ptrs.size());
   for (int i = 0; i < ptrs.size(); i++) {
-    struct HostDevicePtr tmp;
-    tmp.device = ptrs[i];
-    tmp.deviceId = getGPUIDForPointer(ptrs[i]);
-    CUDA_CHECK(cudaMallocHost(&tmp.host, bytes_));
-
-    int loPri, hiPri;
-    CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&loPri, &hiPri));
-    CUDA_CHECK(cudaStreamCreateWithPriority(
-                 &tmp.stream, cudaStreamNonBlocking, hiPri));
-    CUDA_CHECK(cudaEventCreateWithFlags(
-                 &tmp.event, cudaEventDefault | cudaEventDisableTiming));
-    ptrs_.push_back(tmp);
+    devicePtrs_.push_back(
+        CudaDevicePointer<T>::createWithNewStream(ptrs[i], count_));
+    CUDA_CHECK(cudaMallocHost(&hostPtrs_[i], bytes_));
   }
 
   inbox_ = static_cast<T*>(malloc(bytes_));
@@ -61,13 +53,8 @@ CudaAllreduceRing<T>::CudaAllreduceRing(
 
 template <typename T>
 CudaAllreduceRing<T>::~CudaAllreduceRing() {
-  CudaDeviceGuard guard;
-
-  for (auto& ptr : ptrs_) {
-    CUDA_CHECK(cudaSetDevice(ptr.deviceId));
-    CUDA_CHECK(cudaStreamDestroy(ptr.stream));
-    CUDA_CHECK(cudaEventDestroy(ptr.event));
-    CUDA_CHECK(cudaFreeHost(ptr.host));
+  for (auto& hostPtr : hostPtrs_) {
+    CUDA_CHECK(cudaFreeHost(hostPtr));
   }
   if (inbox_ != nullptr) {
     free(inbox_);
@@ -82,26 +69,19 @@ void CudaAllreduceRing<T>::run() {
   CudaDeviceGuard guard;
 
   // Asynchronously copy all device buffers to host
-  for (auto& ptr : ptrs_) {
-    CUDA_CHECK(cudaSetDevice(ptr.deviceId));
-    CUDA_CHECK(cudaMemcpyAsync(
-                 ptr.host,
-                 ptr.device,
-                 bytes_,
-                 cudaMemcpyDeviceToHost,
-                 ptr.stream));
-    CUDA_CHECK(cudaEventRecord(ptr.event, ptr.stream));
+  for (int i = 0; i < devicePtrs_.size(); i++) {
+    devicePtrs_[i].copyToHostAsync(hostPtrs_[i]);
   }
 
-  // Reduce specified pointers into ptrs_[0]
-  CUDA_CHECK(cudaEventSynchronize(ptrs_[0].event));
-  for (int i = 1; i < ptrs_.size(); i++) {
-    CUDA_CHECK(cudaEventSynchronize(ptrs_[i].event));
-    this->fn_(ptrs_[0].host, ptrs_[i].host, count_);
+  // Reduce specified pointers into hostPtrs_[0]
+  devicePtrs_[0].waitAsync();
+  for (int i = 1; i < devicePtrs_.size(); i++) {
+    devicePtrs_[i].waitAsync();
+    this->fn_(hostPtrs_[0], hostPtrs_[i], count_);
   }
 
   // Intialize outbox with locally reduced values
-  memcpy(outbox_, ptrs_[0].host, bytes_);
+  memcpy(outbox_, hostPtrs_[0], bytes_);
 
   int numRounds = this->contextSize_ - 1;
   for (int round = 0; round < numRounds; round++) {
@@ -112,7 +92,7 @@ void CudaAllreduceRing<T>::run() {
     recvDataBuf_->waitRecv();
 
     // Reduce
-    this->fn_(ptrs_[0].host, inbox_, count_);
+    this->fn_(hostPtrs_[0], inbox_, count_);
 
     // Wait for outbox write to complete
     sendDataBuf_->waitSend();
@@ -131,20 +111,13 @@ void CudaAllreduceRing<T>::run() {
   }
 
   // Asynchronously copy result buffer to all device buffers
-  for (auto& ptr : ptrs_) {
-    CUDA_CHECK(cudaSetDevice(ptr.deviceId));
-    CUDA_CHECK(cudaMemcpyAsync(
-                 ptr.device,
-                 ptrs_[0].host,
-                 bytes_,
-                 cudaMemcpyHostToDevice,
-                 ptr.stream));
-    CUDA_CHECK(cudaEventRecord(ptr.event, ptr.stream));
+  for (int i = 0; i < devicePtrs_.size(); i++) {
+    devicePtrs_[i].copyFromHostAsync(hostPtrs_[0]);
   }
 
   // Wait for memcpy's to complete
-  for (auto& ptr : ptrs_) {
-    CUDA_CHECK(cudaEventSynchronize(ptr.event));
+  for (int i = 0; i < devicePtrs_.size(); i++) {
+    devicePtrs_[i].waitAsync();
   }
 }
 

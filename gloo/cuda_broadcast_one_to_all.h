@@ -19,8 +19,8 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
  public:
   CudaBroadcastOneToAll(
       const std::shared_ptr<Context>& context,
-      T* dataPtr,
-      int dataSize,
+      T* ptr,
+      int count,
       int rootRank = 0);
 
   virtual ~CudaBroadcastOneToAll();
@@ -28,12 +28,8 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
   virtual void run() override;
 
  protected:
-  T* dataPtr_;
+  CudaDevicePointer<T> devicePtr_;
   T* hostPtr_;
-  const int dataSize_;
-  const int dataSizeBytes_;
-
-  int deviceId_;
 
   // For the sender (root)
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBuffers_;

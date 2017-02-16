@@ -27,22 +27,11 @@ class CudaAllreduceRing : public Allreduce<T> {
   virtual void run() override;
 
  protected:
-  struct HostDevicePtr {
-    T* device;
-    T* host;
+  std::vector<CudaDevicePointer<T> > devicePtrs_;
+  std::vector<T*> hostPtrs_;
 
-    // GPU ID the device pointer lives on
-    int deviceId;
-
-    // Kick off memcpy's on non-default stream with high priority.
-    // Use events to wait for memcpy's to complete on host side.
-    cudaStream_t stream;
-    cudaEvent_t event;
-  };
-  std::vector<struct HostDevicePtr> ptrs_;
-
-  int count_;
-  int bytes_;
+  const int count_;
+  const int bytes_;
 
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;

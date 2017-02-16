@@ -16,15 +16,13 @@ namespace gloo {
 template <typename T>
 CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
     const std::shared_ptr<Context>& context,
-    T* dataPtr,
-    int dataSize,
+    T* ptr,
+    int count,
     int rootRank)
     : Broadcast<T>(context, rootRank),
-      dataPtr_(dataPtr),
-      dataSize_(dataSize),
-      dataSizeBytes_(dataSize * sizeof(T)),
-      deviceId_(getGPUIDForPointer(dataPtr)) {
-  CUDA_CHECK(cudaMallocHost(&hostPtr_, dataSizeBytes_));
+      devicePtr_(CudaDevicePointer<T>::createWithNewStream(ptr, count)) {
+  auto bytes = count * sizeof(T);
+  CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes));
   if (this->contextRank_ == this->rootRank_) {
     for (int i = 0; i < this->contextSize_; i++) {
       if (i == this->contextRank_) {
@@ -33,11 +31,11 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
 
       auto& pair = this->context_->getPair(i);
       sendDataBuffers_.push_back(
-          pair->createSendBuffer(0, hostPtr_, dataSizeBytes_));
+          pair->createSendBuffer(0, hostPtr_, bytes));
     }
   } else {
     auto& rootPair = this->context_->getPair(this->rootRank_);
-    recvDataBuffer_ = rootPair->createRecvBuffer(0, hostPtr_, dataSizeBytes_);
+    recvDataBuffer_ = rootPair->createRecvBuffer(0, hostPtr_, bytes);
   }
 }
 
@@ -48,15 +46,10 @@ CudaBroadcastOneToAll<T>::~CudaBroadcastOneToAll() {
 
 template <typename T>
 void CudaBroadcastOneToAll<T>::run() {
-  CudaDeviceGuard guard;
-  CUDA_CHECK(cudaSetDevice(deviceId_));
   if (this->contextRank_ == this->rootRank_) {
     // Copy device buffer to host
-    CUDA_CHECK(cudaMemcpy(
-                hostPtr_,
-                dataPtr_,
-                dataSizeBytes_,
-                cudaMemcpyDeviceToHost));
+    devicePtr_.copyToHostAsync(hostPtr_);
+    devicePtr_.waitAsync();
     // Fire off all send operations concurrently
     for (auto& buf : sendDataBuffers_) {
       buf->send();
@@ -69,11 +62,8 @@ void CudaBroadcastOneToAll<T>::run() {
     // Wait on buffer
     recvDataBuffer_->waitRecv();
     // Copy host buffer to device
-    CUDA_CHECK(cudaMemcpy(
-                dataPtr_,
-                hostPtr_,
-                dataSizeBytes_,
-                cudaMemcpyHostToDevice));
+    devicePtr_.copyFromHostAsync(hostPtr_);
+    devicePtr_.waitAsync();
   }
 }
 

@@ -55,6 +55,16 @@ class CudaDeviceGuard {
   int previous_;
 };
 
+class CudaDeviceScope {
+ public:
+  explicit CudaDeviceScope(int device) : guard_() {
+    CUDA_CHECK(cudaSetDevice(device));
+  }
+
+ private:
+  CudaDeviceGuard guard_;
+};
+
 // Managed chunk of GPU memory.
 // Convience class used for tests and benchmarks.
 template<typename T>
