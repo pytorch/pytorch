@@ -17,7 +17,7 @@ OPERATOR_SCHEMA(FC)
           auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
           const auto canonical_axis =
             canonical_axis_index_(axis, in[0].dims().size());
-          const auto M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
+          const int M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
           const int N = in[1].dims(0);
           out[0] = CreateTensorShape(vector<int> {M, N}, TensorProto::FLOAT);
           return out;

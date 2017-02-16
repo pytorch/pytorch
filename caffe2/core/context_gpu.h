@@ -26,43 +26,7 @@ enum class CudaMemoryPoolType {
  */
 CudaMemoryPoolType GetCudaMemoryPoolType();
 
-/**
- * An allocator that does the CPU memory allocation with pinned memory.
- *
- * This is needed because if we want to do any asynchronous cuda memcpy,
- * the underlying CPU memory also needs to be allocated into pinned memory
- * space. As a result, whenever Caffe2 is built with GPU and there is
- * GPU present during runtime, at global initialization time we will set
- * the CPU memory allocator to allocate pinned memory.
- */
-struct PinnedCPUAllocator final : CPUAllocator {
-  PinnedCPUAllocator() {}
-  ~PinnedCPUAllocator() {}
-  void* New(size_t nbytes) override {
-    void* data;
-    CUDA_CHECK(cudaMallocHost(&data, nbytes));
-    memset(data, 0, nbytes);
-    return data;
-  }
-  void Delete(void* data) override {
-    // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs
-    // or not. If a CUDAContext::New() call is made, inside the CUDAContext
-    // function we will switch the cpu side allocator to a PinnedCPUAllocator.
-    // But, if one calls CPUContext::New() before any cuda allocations,
-    // PinnedCPUAllocator can still delete the corresponding memory.
-    cudaError_t err = cudaFreeHost(data);
-    if (err == cudaErrorInvalidValue) {
-      free(data);
-      // Calling cudaGetLastError will reset the cuda error.
-      cudaGetLastError();
-    } else {
-      // For all other errors, still do a cuda check.
-      CUDA_CHECK(err);
-    }
-  }
-};
 
-class CUDAContext;
 
 /**
  * A struct to host thread-local cuda objects.
@@ -253,6 +217,44 @@ inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
   CUDAContext context(GetGPUIDForPointer(dst));
   context.CopyBytes<CPUContext, CUDAContext>(nbytes, src, dst);
 }
+
+/**
+ * An allocator that does the CPU memory allocation with pinned memory.
+ *
+ * This is needed because if we want to do any asynchronous cuda memcpy,
+ * the underlying CPU memory also needs to be allocated into pinned memory
+ * space. As a result, whenever Caffe2 is built with GPU and there is
+ * GPU present during runtime, at global initialization time we will set
+ * the CPU memory allocator to allocate pinned memory.
+ */
+struct PinnedCPUAllocator final : CPUAllocator {
+  PinnedCPUAllocator() {}
+  ~PinnedCPUAllocator() {}
+  void* New(size_t nbytes) override {
+    void* data;
+    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+    CUDA_CHECK(cudaMallocHost(&data, nbytes));
+    memset(data, 0, nbytes);
+    return data;
+  }
+  void Delete(void* data) override {
+    // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs
+    // or not. If a CUDAContext::New() call is made, inside the CUDAContext
+    // function we will switch the cpu side allocator to a PinnedCPUAllocator.
+    // But, if one calls CPUContext::New() before any cuda allocations,
+    // PinnedCPUAllocator can still delete the corresponding memory.
+    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+    cudaError_t err = cudaFreeHost(data);
+    if (err == cudaErrorInvalidValue) {
+      free(data);
+      // Calling cudaGetLastError will reset the cuda error.
+      cudaGetLastError();
+    } else {
+      // For all other errors, still do a cuda check.
+      CUDA_CHECK(err);
+    }
+  }
+};
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
 typedef Tensor<CUDAContext> TensorCUDA;

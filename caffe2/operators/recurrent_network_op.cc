@@ -45,8 +45,13 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
 
     std::vector<std::string> gradientInputs;
 
-    // Grad output of output (0)
-    gradientInputs.push_back(GO(0));
+    // Argument specifies which outputs have external gradient, (0) by default
+    auto outputs_with_grads =
+        argsHelper.GetRepeatedArgument<int32_t>("outputs_with_grads");
+    CAFFE_ENFORCE(outputs_with_grads.size() > 0);
+    for (auto id : outputs_with_grads) {
+      gradientInputs.push_back(GO(id));
+    }
 
     // All inputs and outputs are passed back
     for (int i = 0; i < def_.input_size(); ++i) {

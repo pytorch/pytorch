@@ -5,22 +5,19 @@ from __future__ import unicode_literals
 
 import threading
 
-_CONTEXT_MANAGER = threading.local()
-
-
-def context_manager():
-    global _CONTEXT_MANAGER
-    if not hasattr(_CONTEXT_MANAGER, 'obj'):
-        _CONTEXT_MANAGER.obj = ContextManager()
-    return _CONTEXT_MANAGER.obj
-
 
 class ContextInfo(object):
     def __init__(self, cls, allow_default, arg_name):
         self.cls = cls
         self.allow_default = allow_default
         self.arg_name = arg_name
-        self._stack = []
+        self._local_stack = threading.local()
+
+    @property
+    def _stack(self):
+        if not hasattr(self._local_stack, 'obj'):
+            self._local_stack.obj = []
+        return self._local_stack.obj
 
     def enter(self, value):
         self._stack.append(value)
@@ -52,6 +49,14 @@ class ContextManager(object):
     def get(self, cls):
         assert cls in self._ctxs, 'Context %s not registered.' % cls
         return self._ctxs[cls]
+
+
+_CONTEXT_MANAGER = ContextManager()
+
+
+def context_manager():
+    global _CONTEXT_MANAGER
+    return _CONTEXT_MANAGER
 
 
 def __enter__(self):

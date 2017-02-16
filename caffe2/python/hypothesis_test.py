@@ -1765,7 +1765,9 @@ class TestOperators(hu.HypothesisTestCase):
             backward_link_offset=backward_link_offset,
             param=map(inputs.index, step_net.params),
             step_net=str(step_net.Proto()),
-            backward_step_net=str(backward_step_net.Proto()))
+            backward_step_net=str(backward_step_net.Proto()),
+            outputs_with_grads=[0],
+        )
         workspace.FeedBlob(
             "input", np.random.randn(t, n, d).astype(np.float32))
         workspace.FeedBlob(
@@ -2075,38 +2077,6 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X], ref_normalize)
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
-
-    @given(n=st.integers(10000, 10003), **hu.gcs_cpu_only)
-    def test_piecewise_linear_transform(self, n, gc, dc):
-        W = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
-        b = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
-        # make sure bucket range are increating!
-        bucket_range = np.random.uniform(0.1, 0.9,
-                                         (2, n + 1)).astype(np.float32)
-        bucket_base = np.array(list(range(n + 1)))
-        bucket_range[0, :] = bucket_range[0, :] + bucket_base
-        bucket_range[1, :] = bucket_range[1, :] + bucket_base
-        # make x[i] inside bucket i, for the ease of testing
-        X = np.random.uniform(0, 0.9, (n, 2)).astype(np.float32)
-        for i in range(len(X)):
-            X[i][0] = X[i][0] * bucket_range[0][i] + \
-                (1 - X[i][0]) * bucket_range[0][i + 1]
-            X[i][1] = X[i][1] * bucket_range[1][i] + \
-                (1 - X[i][1]) * bucket_range[1][i + 1]
-
-        op = core.CreateOperator(
-            "PiecewiseLinearTransform", ["X"], ["Y"],
-            bounds=bucket_range.flatten().tolist(),
-            slopes=W.flatten().tolist(),
-            intercepts=b.flatten().tolist(),
-            pieces=n
-        )
-
-        def piecewise(x, *args, **kw):
-            return [W.transpose() * x + b.transpose()]
-
-        self.assertReferenceChecks(gc, op, [X], piecewise)
-        self.assertDeviceChecks(dc, op, [X], [0])
 
     @given(X=hu.tensor(min_dim=1,
                        max_dim=4,

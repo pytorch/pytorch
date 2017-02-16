@@ -318,9 +318,9 @@ class Model(object):
         self._inputs = inputs
         self._outputs = outputs
         if device_option:
-            self._device_option = device_option.SerializeToString()
+            self._device_option = device_option
         else:
-            self._device_option = net.device_option.SerializeToString()
+            self._device_option = net.device_option
         # For a caffe2 net, before we create it, it needs to have all the
         # parameter blobs ready. The construction is in two steps: feed in all
         # the parameters first, and then create the network object.

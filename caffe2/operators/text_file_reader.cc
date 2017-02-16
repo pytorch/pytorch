@@ -102,7 +102,10 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
             to_string(instance->fieldTypes.size()) + " got " +
             to_string(numFields));
 
-    char* datas[numFields];
+    // char* datas[numFields];
+    // MSVC does not allow using const int, so we will need to dynamically allocate
+    // it.
+    std::vector<char*> datas(numFields);
     for (int i = 0; i < numFields; ++i) {
       Output(i)->Resize(batchSize_);
       datas[i] = (char*)Output(i)->raw_mutable_data(instance->fieldMetas[i]);

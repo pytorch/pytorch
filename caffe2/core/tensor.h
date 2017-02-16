@@ -602,7 +602,7 @@ class Tensor {
     auto old_size = size_;
     dims_.resize(src.size());
     TIndex new_size = 1;
-    for (int i = 0; i < src.size(); ++i) {
+    for (unsigned int i = 0; i < src.size(); ++i) {
       new_size *= src[i];
       dims_[i] = src[i];
     }

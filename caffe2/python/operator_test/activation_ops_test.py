@@ -80,6 +80,30 @@ class TestActivations(hu.HypothesisTestCase):
             # Gradient check wrt W
             self.assertGradientChecks(gc, op, [X, W], 1, [0])
 
+    @given(X=hu.tensor(),
+           alpha=st.floats(min_value=0.1, max_value=2.0),
+           inplace=st.booleans(),
+           **hu.gcs_cpu_only)
+    def test_leaky_relu(self, X, alpha, inplace, gc, dc):
+        # go away from the origin point to avoid kink problems
+        X += 0.04 * np.sign(X)
+        X[X == 0.0] += 0.04
+
+        def leaky_relu_ref(X):
+            Y = X.copy()
+            neg_indices = X <= 0
+            Y[neg_indices] = Y[neg_indices] * alpha
+            return (Y,)
+
+        op = core.CreateOperator(
+            "LeakyRelu",
+            ["X"], ["Y" if not inplace else "X"],
+            alpha=alpha)
+        self.assertReferenceChecks(gc, op, [X], leaky_relu_ref)
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X], [0])
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

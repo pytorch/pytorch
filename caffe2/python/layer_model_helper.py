@@ -117,6 +117,7 @@ class LayerModelHelper(model_helper.ModelHelperBase):
     def add_layer(self, layer):
         self._layers.append(layer)
         for param in layer.get_parameters():
+            assert isinstance(param.parameter, core.BlobReference)
             self.param_to_optim[str(param.parameter)] = param.optimizer
 
         # The primary value of adding everything to self.net - generation of the
@@ -124,6 +125,14 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         # immediately. Other then this - create_x_net should be called.
         layer.add_operators(self.net, self.param_init_net)
         return layer.get_output_schema()
+
+    def get_parameter_blobs(self):
+        param_blobs = []
+        for layer in self._layers:
+            for param in layer.get_parameters():
+                param_blobs.append(param.parameter)
+
+        return param_blobs
 
     @property
     def default_optimizer(self):

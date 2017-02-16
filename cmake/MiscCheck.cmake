@@ -35,3 +35,9 @@ else()
   message(STATUS "This compiler does not have builtin_cpu_supports feature.")
   add_definitions(-DCAFFE2_NO_BUILTIN_CPU_SUPPORTS)
 endif()
+
+# ---[ If we are using msvc, set no warning flags
+if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+  message(STATUS "Adding no warning argument to the compiler")
+  
+endif()
