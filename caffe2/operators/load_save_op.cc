@@ -44,20 +44,27 @@ DBReader to load from, and we ignore the db and db_type arguments.
         "(int, default 0) if nonzero, will load all blobs pointed to by the db "
         "to the workspace overwriting/creating blobs as needed.");
 
-OPERATOR_SCHEMA(Save).NumInputs(1, INT_MAX).NumOutputs(0)
-.SetDoc(R"DOC(
+OPERATOR_SCHEMA(Save)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(0)
+    .SetDoc(R"DOC(
 The Save operator saves a set of blobs to a db. It takes [1, infinity) number
 of inputs and has no output. The contents of the inputs are written into the
 db specified by the arguments.
 )DOC")
-    .Arg("absolute_path",
-         "(int, default 0) if set, use the db path directly and do not prepend "
-         "the current root folder of the workspace.")
-     .Arg(
-         "strip_regex",
-         "(string, default=\"\") if set, characters in the provided blob "
-         " names that match the regex will be removed prior to saving. Useful "
-         " for removing device scope from blob names.")
+    .Arg(
+        "absolute_path",
+        "(int, default 0) if set, use the db path directly and do not prepend "
+        "the current root folder of the workspace.")
+    .Arg(
+        "strip_regex",
+        "(string, default=\"\") if set, characters in the provided blob "
+        " names that match the regex will be removed prior to saving. Useful "
+        " for removing device scope from blob names.")
+    .Arg(
+        "blob_name_overrides",
+        "(list of strings) if set, used instead of original "
+        "blob names. Must be the same length as number of blobs.")
     .Arg("db", "(string) the path to the db to load.")
     .Arg("db_type", "(string) the type of the db.");
 
