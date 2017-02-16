@@ -502,10 +502,10 @@
  * can simply loop for sizeof(A) iterations and perform the operation, without having to
  * follow the order described by the strides of A.
  *
- * 3. We find the contiguous sections in a tensor and compress the counter array.
- * For instance, if A is a 3x3x4x3 tensor, from which we get A' (3x3x3x3). Then, the
- * original counter for A' is the same as A. But actually the first dimension and the
- * second dimension can be collapsed into a single one.
+ * 3. As an optimization, we merge dimensions of A that are contiguous in memory. For
+ * example, if A is a 3x3x3x3 tensor narrowed from a 3x3x4x3 tensor, then the first two
+ * dimensions can be merged for the purposes of APPLY, reducing the number of nested
+ * loops.
  */
 #define TH_TENSOR_APPLY(TYPE, TENSOR, CODE) \
 { \
