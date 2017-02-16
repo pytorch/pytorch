@@ -21,11 +21,11 @@ def tanh(x):
     return 2.0 * sigmoid(2.0 * x) - 1
 
 
-def lstm_unit(cell_t_prev, gates, seq_lengths, timestep):
+def lstm_unit(hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep):
     D = cell_t_prev.shape[2]
     G = gates.shape[2]
     N = gates.shape[1]
-    t = (timestep[0].reshape(1, 1) * np.ones(shape=(N, D))).astype(np.int32)
+    t = (timestep * np.ones(shape=(N, D))).astype(np.int32)
     assert t.shape == (N, D)
     seq_lengths = (np.ones(shape=(N, D)) *
                    seq_lengths.reshape(N, 1)).astype(np.int32)
@@ -47,7 +47,7 @@ def lstm_unit(cell_t_prev, gates, seq_lengths, timestep):
     cell_t = ((f_t * cell_t_prev) + (i_t * g_t)) * (valid) + \
         (1 - valid) * cell_t_prev
     assert cell_t.shape == (N, D)
-    hidden_t = (o_t * tanh(cell_t)) * valid
+    hidden_t = (o_t * tanh(cell_t)) * valid + hidden_t_prev * (1 - valid)
     hidden_t = hidden_t.reshape(1, N, D)
     cell_t = cell_t.reshape(1, N, D)
     return hidden_t, cell_t
@@ -68,14 +68,18 @@ def lstm_reference(input, hidden_input, cell_input,
     cell[0, :, :] = cell_input
     hidden[0, :, :] = hidden_input
     for t in range(T):
-        timestep = np.asarray([t]).astype(np.int32)
         input_t = input[t].reshape(1, N, G)
         hidden_t_prev = hidden[t].reshape(1, N, D)
         cell_t_prev = cell[t].reshape(1, N, D)
         gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
         gates = gates + input_t
-        hidden_t, cell_t = lstm_unit(cell_t_prev, gates, seq_lengths,
-                                     timestep)
+        hidden_t, cell_t = lstm_unit(
+            hidden_t_prev,
+            cell_t_prev,
+            gates,
+            seq_lengths,
+            t,
+        )
         hidden[t + 1] = hidden_t
         cell[t + 1] = cell_t
     return (
@@ -163,8 +167,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         workspace.FeedBlob("hidden_init", generate_random_state(n, d))
         workspace.FeedBlob("cell_init", generate_random_state(n, d))
         workspace.FeedBlob(
-            "seq_lengths", np.random.randint(0, t + 1, size=(n,)).astype(np.int32))
-
+            "seq_lengths", np.random.randint(1, t + 1, size=(n,)).astype(np.int32))
         inputs = [workspace.FetchBlob(name) for name in op.input]
 
         print(op.input)
@@ -267,13 +270,20 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
     def test_lstm_unit_recurrent_network(self, n, d, t, dc, gc):
         op = core.CreateOperator(
             "LSTMUnit",
-            ["cell_t_prev", "gates_t", "seq_lengths", "timestep"],
+            [
+                "hidden_t_prev",
+                "cell_t_prev",
+                "gates_t",
+                "seq_lengths",
+                "timestep",
+            ],
             ["hidden_t", "cell_t"])
         cell_t_prev = np.random.randn(1, n, d).astype(np.float32)
+        hidden_t_prev = np.random.randn(1, n, d).astype(np.float32)
         gates = np.random.randn(1, n, 4 * d).astype(np.float32)
-        seq_lengths = np.random.randint(0, t, size=(n,)).astype(np.int32)
+        seq_lengths = np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
         timestep = np.random.randint(0, t, size=(1,)).astype(np.int32)
-        inputs = [cell_t_prev, gates, seq_lengths, timestep]
+        inputs = [hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep]
         input_device_options = {"timestep": hu.cpu_do}
         self.assertDeviceChecks(
             dc, op, inputs, [0],
