@@ -9,13 +9,14 @@ OPERATOR_SCHEMA(TTContraction)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Tensor contraction C = A * B)DOC")
-    .Input(0, "A", "2D matrix of size (K x M)")
-    .Input(1, "B", "tensor")
-    .Output(0, "C", "contracted tensor")
+Tensor contraction C = A * B
+)DOC")
     .Arg("K", "i_{k-1} * r_k")
     .Arg("M", "r_{k-1} * o_{k-1}")
     .Arg("N", "o_k");
+    .Input(0, "A", "2D matrix of size (K x M)")
+    .Input(1, "B", "tensor")
+    .Output(0, "C", "contracted tensor")
 
 REGISTER_CPU_OPERATOR(
     TTContractionGradient,
