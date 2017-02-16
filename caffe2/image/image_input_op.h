@@ -233,9 +233,6 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
     }
   }
 
-  CAFFE_ENFORCE_GE(src.rows, crop_, "Image height must be bigger than crop.");
-  CAFFE_ENFORCE_GE(src.cols, crop_, "Image width must be bigger than crop.");
-
   //
   // convert source to the color format requested from Op
   //
@@ -265,6 +262,12 @@ void TransformImage(
     const float std,
     std::mt19937* randgen,
     std::bernoulli_distribution* mirror_this_image) {
+
+  CAFFE_ENFORCE_GE(
+      scaled_img.rows, crop, "Image height must be bigger than crop.");
+  CAFFE_ENFORCE_GE(
+      scaled_img.cols, crop, "Image width must be bigger than crop.");
+
   // find the cropped region, and copy it to the destination matrix with
   // mean subtraction and scaling.
   int width_offset =
@@ -299,9 +302,13 @@ void TransformImage(
 // leave in uint8_t dataType
 template <class Context>
 void CropTransposeImage(const cv::Mat& scaled_img, const int channels,
-                        uint8_t *cropped_data, const int crop, const bool mirror,
-                        std::mt19937 *randgen,
+                        uint8_t *cropped_data, const int crop,
+                        const bool mirror, std::mt19937 *randgen,
                         std::bernoulli_distribution *mirror_this_image) {
+  CAFFE_ENFORCE_GE(
+      scaled_img.rows, crop, "Image height must be bigger than crop.");
+  CAFFE_ENFORCE_GE(
+      scaled_img.cols, crop, "Image width must be bigger than crop.");
 
   // find the cropped region, and copy it to the destination matrix with
   // mean subtraction and scaling.
