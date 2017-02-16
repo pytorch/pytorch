@@ -9,8 +9,39 @@ REGISTER_CPU_OPERATOR(
     SoftmaxWithLossGradientOp<float, CPUContext>);
 
 // Input: X (logits), T (labels); Output: P (probs), Y
-// TODO: add Shape inference function (bootcamp)
-OPERATOR_SCHEMA(SoftmaxWithLoss).NumOutputs(2).SetDoc(R"DOC(
+OPERATOR_SCHEMA(SoftmaxWithLoss)
+    .NumInputs(2, 3)
+    .NumOutputs(2)
+    .TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(2);
+
+          auto logits = in[0]; // Tensor with Shape [batch_size, num_classes]
+          auto labels = in[1]; // Tensor with same shape as logits
+
+          auto batch_size = logits.dims().Get(0);
+          auto num_classes = logits.dims().Get(1);
+
+          // Labels must only be 1D or 2D
+          CAFFE_ENFORCE(labels.dims().size() <= 2);
+
+          // If 2D, then must be single column
+          if (labels.dims().size() == 2) {
+            CAFFE_ENFORCE(labels.dims().Get(1) == 1);
+          }
+
+          // Labels must have the same amount of elements as batch_size
+          CAFFE_ENFORCE(batch_size == labels.dims().Get(0));
+
+          out[0].set_data_type(logits.data_type());
+          out[0].add_dims(batch_size);
+          out[0].add_dims(num_classes);
+
+          // Output 2 is scalar shape, so no dims added
+
+          return out;
+        })
+    .SetDoc(R"DOC(
 Combined Softmax and Cross-Entropy loss operator.
 The operator computes the softmax normalized values for each layer in the batch
 of the given input, after which cross-entropy loss is computed. This operator is
@@ -25,7 +56,17 @@ Use parameter label_prob=1 to enable inputting labels as a probability
 distribution.  Currently does not handle spatial=1 case.
 Optional third input blob can be used to weight the samples for the loss.
 For the spatial version, weighting is by x,y position of the input.
-)DOC");
+)DOC")
+    .Input(0, "logits", "Unscaled log probabilities")
+    .Input(1, "labels", "Ground truth")
+    .Input(
+        2,
+        "weight_tensor",
+        "Optional blob to be used to weight the samples for the loss. With\
+        spatial set, weighting is by x,y of the input")
+    .Output(0, "softmax", "Tensor with softmax cross entropy loss")
+    .Output(1, "loss", "Average loss");
+
 // Input: X, T, P, dY; Output: dX
 OPERATOR_SCHEMA(SoftmaxWithLossGradient).NumOutputs(1);
 
