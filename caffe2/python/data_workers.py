@@ -51,6 +51,7 @@ import logging
 import threading
 import atexit
 import numpy as np
+import time
 
 from caffe2.python import workspace, core, scope
 from caffe2.proto import caffe2_pb2
@@ -120,6 +121,8 @@ class DataInputCoordinator(object):
         self._workers = []
         self._input_source_name = input_source_name
         self._create_caffe2_queues_and_ops()
+        self._inputs = 0
+        self._prev_seconds = 0
 
     def is_active(self):
         return self._active
@@ -129,6 +132,8 @@ class DataInputCoordinator(object):
             return
         self._active = True
         self._started = True
+        self._inputs = 0
+        self._prev_seconds = time.time()
 
         for w in self._workers:
             w.daemon = True
@@ -164,6 +169,7 @@ class DataInputCoordinator(object):
                              name=".format(qsize, self._input_source_name))
                 self._counter += 1
                 self._internal_queue.put(chunk, block=True, timeout=0.5)
+                self._log_inputs_per_minute()
                 return
             except Queue.Full:
                 log.debug("Queue full: stalling fetchers...")
@@ -246,6 +252,18 @@ class DataInputCoordinator(object):
 
             # Add operator to the Caffe2 network to dequeue
             self._net.DequeueBlobs(q, blob_name)
+
+    def _log_inputs_per_minute(self):
+        self._inputs += 1
+        current_seconds = time.time()
+        delta_seconds = current_seconds - self._prev_seconds
+        if delta_seconds >= 60:
+            log.info("{}/{}: {} inputs/sec".format(
+                self._input_source_name, self._namescope, self._inputs / delta_seconds
+            ))
+            log.info("queue size: {}".format(self._internal_queue.qsize()))
+            self._inputs = 0
+            self._prev_seconds = current_seconds
 
 
 class GlobalCoordinator(object):
