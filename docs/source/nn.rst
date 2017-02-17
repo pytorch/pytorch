@@ -22,6 +22,12 @@ Containers
 .. autoclass:: Module
     :members:
 
+:hidden:`Sequential`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Sequential
+    :members:
+
 Convolution Layers
 ----------------------------------
 
