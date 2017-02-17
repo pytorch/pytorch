@@ -29,16 +29,21 @@ class BatchLRLoss(ModelLayer):
 
         self.output_schema = schema.Scalar(
             np.float32,
-            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
+            model.net.NextScopedBlob(name + '_output'))
 
     # This should be a bit more complicated than it is right now
     def add_ops(self, net):
         class_probabilities = net.MakeTwoClass(
-            self.input_record.prediction.field_blobs())
+            self.input_record.prediction.field_blobs(),
+            net.NextScopedBlob('two_class_predictions')
+        )
         label = self.input_record.label.field_blobs()
         if self.input_record.label.field_types()[0] != np.int32:
-            label = [net.Cast(label, to='int32')]
+            label = [
+                net.Cast(label, net.NextScopedBlob('int32_label'), to='int32')]
 
         xent = net.LabelCrossEntropy(
-            [class_probabilities] + label)
+            [class_probabilities] + label,
+            net.NextScopedBlob('cross_entropy'),
+        )
         net.AveragedLoss(xent, self.output_schema.field_blobs())

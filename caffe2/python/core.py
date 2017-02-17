@@ -1126,6 +1126,9 @@ class Net(object):
         """
         self._input_record = None
         self._output_record = None
+        # Register blobs so that it's guaranteed that different calls to
+        # NextBlob/NextScopedBlob always return blobs with different names
+        self._registered_blob_names = set()
         self._recreate_lookup_tables = False
         self._op_outputs = set()
         self._external_input_map = set()
@@ -1416,9 +1419,34 @@ class Net(object):
         self._InvalidateLookupTables()
         return self._net
 
+    def NextScopedBlob(self, prefix='unnamed'):
+        """Return the blob that has not been defined or registered in the
+        current net. It returns `ScopedBlobReference(prefix)`, if it's valid,
+        otherwise `ScopedBlobReference(prefix) + '_auto_' + ?`. Different calls
+        is guaranteed to return blob with different names.
+        """
+        output_blob_base = ScopedName(prefix)
+        return self.NextBlob(output_blob_base)
+
+    def NextBlob(self, prefix='unnamed'):
+        """Return the blob that has not been defined or registered in the
+        current net. It returns `BlobReference(prefix)`, if it's valid,
+        otherwise `BlobReference(prefix) + '_auto_' + ?`. Different calls
+        is guaranteed to return blob with different names."""
+        output_blob_base = BlobReference(prefix)
+        output_blob = output_blob_base
+        index = 0
+        while str(output_blob) in self._registered_blob_names or (
+                self.BlobIsDefined(output_blob)):
+            output_blob = output_blob_base + '_auto_' + str(index)
+            index += 1
+
+        self._registered_blob_names.add(str(output_blob))
+        return output_blob
+
     def NextName(self, prefix=None, output_id=None):
         """Returns the next name to be used, if you do not want to explicitly
-        name your blob."""
+        name your blob. [Deprecated, use NextBlob, NextScopedBlob instead]"""
         if prefix:
             output_name_base = self._net.name + '/' + prefix
             output_name = output_name_base
@@ -1471,7 +1499,6 @@ class Net(object):
             self._external_input_map.add(inp)
 
         self._recreate_lookup_tables = False
-
 
     def AddGradientOperators(self, ys, skip=0):
         """Add the gradient for operators in the net.

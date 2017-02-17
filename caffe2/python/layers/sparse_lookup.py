@@ -43,7 +43,8 @@ class SparseLookup(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, inner_shape),
-            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
+            model.net.NextScopedBlob(name + '_output'),
+        )
 
         if self.request_only:
             schema.attach_metadata_to_scalars(
@@ -61,7 +62,7 @@ class SparseLookup(ModelLayer):
         self.weight_init = weight_init if weight_init else (
             'UniformFill', {'min': -scale, 'max': scale})
 
-        self.w = core.ScopedBlobReference(model.net.NextName(self.name + "_w"))
+        self.w = model.net.NextScopedBlob(name + "_w")
         self.params.append(
             LayerParameter(
                 parameter=self.w,
@@ -75,8 +76,7 @@ class SparseLookup(ModelLayer):
             ))
 
         if reducer == 'PositionWeighted':
-            self.pos_w = core.ScopedBlobReference(
-                model.net.NextName(self.name + "_pos_w"))
+            self.pos_w = model.net.NextScopedBlob(name + "_pos_w")
             self.params.append(
                 LayerParameter(
                     parameter=self.pos_w,

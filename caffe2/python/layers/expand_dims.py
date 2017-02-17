@@ -33,7 +33,7 @@ class ExpandDims(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (input_record.field_type().base, output_dims),
-            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
+            model.net.NextScopedBlob(name + '_output'))
 
     def add_ops(self, net):
         net.ExpandDims(

@@ -57,8 +57,8 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         # This is global namescope for constants. They will be created in all
         # init_nets and there should be very few of them.
         assert name not in self.global_constants
-        self.global_constants[name] = core.BlobReference(
-            self.net.NextName(name))
+        self.global_constants[name] = self.net.NextBlob(name)
+
         if array is not None:
             assert initializer is None,\
                 "Only one from array and initializer should be specified"
@@ -109,8 +109,13 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         return init_net
 
     def next_layer_name(self, prefix):
-        name = prefix + "_{}".format(
-            len(filter(lambda x: x.startswith(prefix), self._layer_names)))
+        base_name = core.ScopedName(prefix)
+        name = base_name
+        index = 0
+        while name in self._layer_names:
+            name = base_name + '_auto_' + str(index)
+            index += 1
+
         self._layer_names.add(name)
         return name
 

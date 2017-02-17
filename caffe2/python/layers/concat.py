@@ -23,8 +23,8 @@ class Concat(ModelLayer):
         shapes = []
         for field_name, field_type in input_record.fields.items():
             assert isinstance(field_type, schema.Scalar),\
-                "Incorrect input type. Excpected Scalar, but received: {0}".\
-                format(field_type)
+                "Incorrect input type for {}. Excpected Scalar, but got: {}".\
+                format(field_name, field_type)
             # Assume that first dimension is batch, so actual axis in shape is
             # axis - 1
             assert len(field_type.field_type().shape) >= axis,\
@@ -43,14 +43,14 @@ class Concat(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, output_dims),
-            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
+            model.net.NextScopedBlob(name + '_output'))
 
     def add_ops(self, net):
         net.Concat(
             self.input_record.field_blobs(),
             [
                 self.output_schema.field_blobs()[0],
-                net.NextName(str("_" + self.output_schema.field_blobs()[0] +
-                                 "_concat_dims"))],
+                ("_" + self.output_schema.field_blobs()[0] + "_concat_dims")
+            ],
             axis=self.axis,
         )
