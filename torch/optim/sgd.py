@@ -11,6 +11,7 @@ class SGD(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov(bool, optional): enables Nesterov momentum (default: False)
+        
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
@@ -21,7 +22,7 @@ class SGD(Optimizer):
     def __init__(self, params, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False):
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay,nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov)
         super(SGD, self).__init__(params, defaults)
 
     def step(self, closure=None):
