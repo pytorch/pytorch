@@ -141,7 +141,7 @@ void Pair::connect(const std::vector<char>& bytes) {
   GLOO_ENFORCE_NE(rv, -1);
 }
 
-void Pair::setSync(bool sync) {
+void Pair::setSync(bool /* sync */, bool /* busyPoll */) {
   GLOO_ENFORCE(false, "setSync not implemented");
 }
 

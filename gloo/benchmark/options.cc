@@ -39,6 +39,7 @@ static void usage(int status, const char* argv0) {
   X("Transport:");
   X("  -t, --transport=TRANSPORT Transport to use (tcp, ibverbs, ...)");
   X("      --sync=BOOL           Switch pairs to sync mode (default: false)");
+  X("      --busy-poll=BOOL      Busy-poll in sync mode (default: false)");
   X("");
   X("Benchmark parameters:");
   X("      --verify           Verify result first iteration (if applicable)");
@@ -73,6 +74,7 @@ struct options parseOptions(int argc, char** argv) {
       {"iteration-time", required_argument, nullptr, 0x1004},
       {"sync", required_argument, nullptr, 0x1005},
       {"nanos", no_argument, nullptr, 0x1006},
+      {"busy-poll", required_argument, nullptr, 0x1007},
       {"help", no_argument, nullptr, 0xffff},
       {nullptr, 0, nullptr, 0}};
 
@@ -143,6 +145,14 @@ struct options parseOptions(int argc, char** argv) {
         result.showNanos = true;
         break;
       }
+      case 0x1007: // --busy-poll
+      {
+        result.busyPoll =
+          atoi(optarg) == 1 ||
+          tolower(optarg[0])== 't' ||
+          tolower(optarg[0])== 'y';
+        break;
+      }
       case 0xffff: // --help
       {
         usage(EXIT_SUCCESS, argv[0]);
@@ -153,6 +163,11 @@ struct options parseOptions(int argc, char** argv) {
         break;
       }
     }
+  }
+
+  if (result.busyPoll && !result.sync) {
+    fprintf(stderr, "%s: busy poll can only be used with sync mode\n", argv[0]);
+    usage(EXIT_FAILURE, argv[0]);
   }
 
   if (optind != (argc - 1)) {

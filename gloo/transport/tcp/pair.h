@@ -65,7 +65,7 @@ class Pair : public ::gloo::transport::Pair {
 
   virtual void connect(const std::vector<char>& bytes) override;
 
-  virtual void setSync(bool sync) override;
+  virtual void setSync(bool sync, bool busyPoll) override;
 
   virtual std::unique_ptr<::gloo::transport::Buffer>
   createSendBuffer(int slot, void* ptr, size_t size) override;
@@ -79,6 +79,9 @@ class Pair : public ::gloo::transport::Pair {
   std::shared_ptr<Device> dev_;
   state state_;
   bool sync_;
+  // When set, instructs pair to use busy-polling on receive.
+  // Can only be used with sync receive mode.
+  bool busyPoll_;
   int fd_;
   int sendBufferSize_;
 

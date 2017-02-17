@@ -43,7 +43,7 @@ class Pair : public ::gloo::transport::Pair, public Handler {
 
   virtual void connect(const std::vector<char>& bytes) override;
 
-  virtual void setSync(bool enable) override;
+  virtual void setSync(bool enable, bool busyPoll) override;
 
   virtual std::unique_ptr<::gloo::transport::Buffer>
   createSendBuffer(int slot, void* ptr, size_t size) override;

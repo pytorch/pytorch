@@ -110,7 +110,7 @@ void Runner::run(BenchmarkFn& fn, int n) {
       for (int i = 0; i < context->size_; i++) {
         auto& pair = context->getPair(i);
         if (pair) {
-          pair->setSync(true);
+          pair->setSync(true, options_.busyPoll);
         }
       }
     }

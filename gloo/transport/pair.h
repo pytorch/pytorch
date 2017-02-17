@@ -25,7 +25,7 @@ class Pair {
 
   virtual void connect(const std::vector<char>& bytes) = 0;
 
-  virtual void setSync(bool enable) = 0;
+  virtual void setSync(bool enable, bool busyPoll) = 0;
 
   virtual std::unique_ptr<Buffer>
   createSendBuffer(int slot, void* ptr, size_t size) = 0;

@@ -29,6 +29,7 @@ struct options {
   int ibverbsPort = 1;
   int ibverbsIndex = 1;
   bool sync = false;
+  bool busyPoll = false;
 
   // Suite configuration
   std::string benchmark;

@@ -34,6 +34,7 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
     : dev_(dev),
       state_(INITIALIZING),
       sync_(false),
+      busyPoll_(false),
       fd_(-1),
       sendBufferSize_(0) {
   memset(&rx_, 0, sizeof(rx_));
@@ -69,7 +70,7 @@ static void setSocketBlocking(int fd, bool enable) {
   GLOO_ENFORCE_NE(rv, -1);
 }
 
-void Pair::setSync(bool sync) {
+void Pair::setSync(bool sync, bool busyPoll) {
   std::unique_lock<std::mutex> lock(m_);
 
   GLOO_ENFORCE(sync, "Can only switch to sync mode");
@@ -92,6 +93,7 @@ void Pair::setSync(bool sync) {
   }
 
   sync_ = true;
+  busyPoll_ = busyPoll;
 }
 
 void Pair::listen() {
@@ -297,22 +299,41 @@ bool Pair::read(Op& op) {
       iov.iov_len = op.preamble_.length_ - offset;
     }
 
-    int rv = readv(fd_, &iov, 1);
-    if (rv == -1) {
-      // EAGAIN happens when there are no more bytes left to read
-      if (errno == EAGAIN) {
-        return false;
-      }
+    // If busy-poll has been requested AND sync mode has been enabled for pair
+    // we'll keep spinning calling recv() on socket by supplying MSG_DONTWAIT
+    // flag. This is more efficient in terms of latency than allowing the kernel
+    // to de-schedule this thread waiting for IO event to happen. The tradeoff
+    // is stealing the CPU core just for busy polling.
+    int rv = 0;
+    for (;;) {
+      // Alas, readv does not support flags, so we need to use recv
+      rv = ::recv(fd_, iov.iov_base, iov.iov_len, busyPoll_ ? MSG_DONTWAIT : 0);
+      if (rv == -1) {
+        // EAGAIN happens when there are no more bytes left to read
+        if (errno == EAGAIN) {
+          if (!sync_) {
+            return false;
+          }
+          // Keep looping on EAGAIN if busy-poll flag has been set
+          continue;
+        }
 
-      // ECONNRESET happens when the remote peer unexpectedly terminates
-      if (errno == ECONNRESET) {
-        changeState(CLOSED);
-        return false;
-      }
+        // Retry on EINTR
+        if (errno == EINTR) {
+          continue;
+        }
 
-      // Unexpected error
-      GLOO_ENFORCE_EQ(
-          errno, 0, "reading from ", peer_.str(), ": ", strerror(errno));
+        // ECONNRESET happens when the remote peer unexpectedly terminates
+        if (errno == ECONNRESET) {
+          changeState(CLOSED);
+          return false;
+        }
+
+        // Unexpected error
+        GLOO_ENFORCE_EQ(
+            errno, 0, "reading from ", peer_.str(), ": ", strerror(errno));
+      }
+      break;
     }
 
     // Transition to CLOSED on EOF
