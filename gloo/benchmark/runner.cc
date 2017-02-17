@@ -155,24 +155,41 @@ void Runner::run(BenchmarkFn& fn, int n) {
 }
 
 void Runner::printHeader() {
-  if (options_.contextRank == 0) {
-    std::cout << std::setw(11) << "elements" << std::setw(11) << "min (us)"
-              << std::setw(11) << "p50 (us)" << std::setw(11) << "p99 (us)"
-              << std::setw(11) << "max (us)" << std::setw(11) << "samples"
-              << std::endl;
+  if (options_.contextRank != 0) {
+    return;
   }
+
+  std::string suffix = "(us)";
+  if (options_.showNanos) {
+    suffix = "(ns)";
+  }
+
+  std::cout << std::setw(11) << "elements";
+  std::cout << std::setw(11) << ("min " + suffix);
+  std::cout << std::setw(11) << ("p50 " + suffix);
+  std::cout << std::setw(11) << ("p99 " + suffix);
+  std::cout << std::setw(11) << ("max " + suffix);
+  std::cout << std::setw(11) << "samples";
+  std::cout << std::endl;
 }
 
 void Runner::printDistribution(int elements) {
-  if (options_.contextRank == 0) {
-    std::cout << std::setw(11) << elements << std::setw(11)
-              << samples_.percentile(0.00) / 1000 << std::setw(11)
-              << samples_.percentile(0.50) / 1000 << std::setw(11)
-              << samples_.percentile(0.90) / 1000 << std::setw(11)
-              << samples_.percentile(0.99) / 1000 << std::setw(11)
-              << samples_.size()
-              << std::endl;
+  if (options_.contextRank != 0) {
+    return;
   }
+
+  auto div = 1000;
+  if (options_.showNanos) {
+    div = 1;
+  }
+
+  std::cout << std::setw(11) << elements;
+  std::cout << std::setw(11) << samples_.percentile(0.00) / div;
+  std::cout << std::setw(11) << samples_.percentile(0.50) / div;
+  std::cout << std::setw(11) << samples_.percentile(0.90) / div;
+  std::cout << std::setw(11) << samples_.percentile(0.99) / div;
+  std::cout << std::setw(11) << samples_.size();
+  std::cout << std::endl;
 }
 
 } // namespace benchmark

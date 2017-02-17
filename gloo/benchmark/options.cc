@@ -45,6 +45,7 @@ static void usage(int status, const char* argv0) {
   X("      --elements         Number of floats to use");
   X("      --iteration-count  Number of iterations");
   X("      --iteration-time   Number of seconds to run benchmark");
+  X("      --nanos            Display timing data in nanos instead of micros");
   X("");
   X("BENCHMARK is one of:");
   X("  allreduce_ring");
@@ -71,6 +72,7 @@ struct options parseOptions(int argc, char** argv) {
       {"iteration-count", required_argument, nullptr, 0x1003},
       {"iteration-time", required_argument, nullptr, 0x1004},
       {"sync", required_argument, nullptr, 0x1005},
+      {"nanos", no_argument, nullptr, 0x1006},
       {"help", no_argument, nullptr, 0xffff},
       {nullptr, 0, nullptr, 0}};
 
@@ -134,6 +136,11 @@ struct options parseOptions(int argc, char** argv) {
           atoi(optarg) == 1 ||
           tolower(optarg[0])== 't' ||
           tolower(optarg[0])== 'y';
+        break;
+      }
+      case 0x1006: // --nanos
+      {
+        result.showNanos = true;
         break;
       }
       case 0xffff: // --help
