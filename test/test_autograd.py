@@ -691,6 +691,18 @@ class TestAutograd(TestCase):
 
         self.assertGreater(x.grad.data.abs().sum(), 0)
 
+    def test_stochastic_require_grad(self):
+        # This tests a DSD function sequence (D=deterministic, S=stochastic),
+        # where all functions require grad.
+        x = Variable(torch.randn(2, 10), requires_grad=True)
+        y = Variable(torch.randn(2, 10), requires_grad=True)
+        z = torch.normal(x + 2, 2)
+        o = z + y
+        z.reinforce(torch.randn(2, 10))
+        o.sum().backward()
+        self.assertEqual(y.grad.data, torch.ones(2, 10))
+        self.assertGreater(x.grad.data.abs().sum(), 0)
+
     def test_stochastic_sequence(self):
         x = Variable(torch.rand(10).clamp_(0, 1), requires_grad=True)
         b = x.bernoulli()
