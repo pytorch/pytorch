@@ -317,8 +317,8 @@ class CNNModelHelper(ModelHelperBase):
         bias_init=None, **kwargs
     ):
         """FC"""
-        weight_init = weight_init if weight_init else ('XavierFill', {})
-        bias_init = bias_init if bias_init else ('ConstantFill', {})
+        weight_init = weight_init or ('XavierFill', {})
+        bias_init = bias_init or ('ConstantFill', {})
         blob_out = blob_out or self.net.NextName()
         if self.init_params:
             weight = self.param_init_net.__getattr__(weight_init[0])(
