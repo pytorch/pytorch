@@ -474,8 +474,8 @@ class Scalar(Field):
                 if blob.size == 0:
                     blob = blob.reshape((0, ) + dtype.shape)
             else:
-                assert isinstance(blob, np.ndarray
-                                 ), ('Invalid blob type: %s' % str(type(blob)))
+                assert isinstance(blob, np.ndarray), (
+                    'Invalid blob type: %s' % str(type(blob)))
 
             # reshape scalars into 1D arrays
             # TODO(azzolini): figure out better way of representing this
