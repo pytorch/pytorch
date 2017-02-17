@@ -19,7 +19,7 @@ void rmsprop_update(
     float epsilon,
     const float* lr,
     Context* context) {
-  CAFFE2_OMP_PARALLEL_FOR()
+  // TODO: proper vectorization with Eigen
   for (auto i = 0; i < N; ++i) {
     // Update new mean square estimate
     nms[i] = ms[i] + (1.0f - decay) * (g[i] * g[i] - ms[i]);

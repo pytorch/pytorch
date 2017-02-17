@@ -103,7 +103,7 @@ void ElementWiseDivide(
     const float* dZdata,
     const float* Ydata,
     const float* Zdata) {
-  CAFFE2_OMP_PARALLEL_FOR()
+  // TODO: proper vectorization with Eigen
   for (int i = 0; i < n; ++i) {
     dXdata[i] = dZdata[i] / Ydata[i];
     dYdata[i] = - (dZdata[i] * Zdata[i]) / Ydata[i];

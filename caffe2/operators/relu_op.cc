@@ -38,7 +38,7 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
-  CAFFE2_OMP_PARALLEL_FOR()
+  // TODO: proper vectorization with Eigen
   for (int i = 0; i < Y.size(); ++i) {
     dXdata[i] = Ydata[i] > 0 ? dYdata[i] : 0;
   }
@@ -54,7 +54,7 @@ OPERATOR_SCHEMA(Relu)
   .NumInputs(1)
   .NumOutputs(1)
   .AllowInplace({{0, 0}})
-  .IdenticalTypeAndShape() 
+  .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
 Relu takes one input data (Tensor<T>) and produces one output data
 (Tensor<T>) where the rectified linear function, y = max(0, x), is applied to
