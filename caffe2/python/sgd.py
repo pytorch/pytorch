@@ -51,6 +51,26 @@ def build_sgd(model, base_learning_rate, policy="fixed", **other_lr_params):
             model.WeightedSum([param, ONE, grad, LR], param)
 
 
+def build_ftrl(model, dedup_indices=False, engine="SIMD", **params):
+    if engine == "SIMD":
+        assert core.IsOperator('Ftrl_ENGINE_SIMD')
+        assert core.IsOperator('SparseFtrl_ENGINE_SIMD')
+    for param, grad in model.GetOptimizationPairs().items():
+        # allocate additional args of the same shape as main weights
+        nz = model.param_init_net.ConstantFill(
+            [param],
+            param + "_ftrl_nz",
+            extra_shape=[2],
+            value=0.0
+        )
+        if isinstance(grad, core.GradientSlice):
+            g = _dedup(model, dedup_indices, grad)
+            model.SparseFtrl([param, nz, g.indices, g.values],
+                             [param, nz], engine=engine, **params)
+        else:
+            model.Ftrl([param, nz, grad], [param, nz], engine=engine, **params)
+
+
 def build_adagrad(model, base_learning_rate, dedup_indices=False,
                   parameters=None, **params):
     LR, _ = _build_lr(model, base_learning_rate, policy="fixed")
