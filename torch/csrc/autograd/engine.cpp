@@ -11,7 +11,7 @@ namespace torch { namespace autograd {
 auto Engine::compute_dependencies(function_queue queue, ready_queue_type& ready) -> dependencies_type {
   // First, search the graph and find all stochastic functions. Append them to the queue.
   std::unordered_set<Function*> seen;
-  function_queue search_queue(queue.begin(), queue.end());
+  function_queue search_queue(queue);
   while (search_queue.size() > 0) {
     auto fn = search_queue.back(); search_queue.pop_back();
     for (auto& prev_fn_pair : fn->previous_functions) {
@@ -33,6 +33,8 @@ auto Engine::compute_dependencies(function_queue queue, ready_queue_type& ready)
   // to expand functions that don't require grad.
   dependencies_type dependencies;
   seen.clear();
+  // Just to make sure that they will never be added to the queue again
+  seen.insert(queue.begin(), queue.end());
   while (queue.size() > 0) {
     auto fn = std::move(queue.back()); queue.pop_back();
     // This is needed only to filter out backward roots that don't require grad
@@ -42,9 +44,8 @@ auto Engine::compute_dependencies(function_queue queue, ready_queue_type& ready)
       if (!prev_ptr) continue;
       if (dynamic_cast<Variable*>(prev_ptr)) continue;
       if (!prev_ptr->requires_grad) continue;
-      if (!prev_ptr->is_stochastic) {
-        dependencies[prev_ptr] += 1;
-      }
+      if (prev_ptr->is_stochastic) continue; // Stochastic nodes were in the queue already
+      dependencies[prev_ptr] += 1;
       if (seen.count(prev_ptr) == 0) {
         seen.insert(prev_ptr);
         queue.push_back(prev_ptr);
