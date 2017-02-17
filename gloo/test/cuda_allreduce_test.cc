@@ -14,6 +14,7 @@
 
 #include "gloo/common/common.h"
 #include "gloo/cuda_allreduce_ring.h"
+#include "gloo/cuda_allreduce_ring_chunked.h"
 #include "gloo/cuda_private.h"
 #include "gloo/test/base_test.h"
 
@@ -120,9 +121,25 @@ INSTANTIATE_TEST_CASE_P(
     AllreduceRing,
     CudaAllreduceTest,
     ::testing::Combine(
-        ::testing::Range(2, 16),
-        ::testing::ValuesIn(genMemorySizes()),
-        ::testing::Values(allreduceRing)));
+    ::testing::Range(2, 16),
+    ::testing::ValuesIn(genMemorySizes()),
+    ::testing::Values(allreduceRing)));
+
+static std::function<Func> allreduceRingChunked = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float*> ptrs,
+    int count) {
+  ::gloo::CudaAllreduceRingChunked<float> algorithm(context, ptrs, count);
+  algorithm.run();
+};
+
+INSTANTIATE_TEST_CASE_P(
+    AllreduceRingChunked,
+    CudaAllreduceTest,
+    ::testing::Combine(
+    ::testing::Range(2, 16),
+    ::testing::ValuesIn(genMemorySizes()),
+    ::testing::Values(allreduceRing)));
 
 } // namespace
 } // namespace test
