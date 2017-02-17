@@ -23,12 +23,12 @@ class DotProduct(ModelLayer):
 
         for field_name, field_type in input_record.fields.items():
             assert isinstance(field_type, schema.Scalar),\
-                "Incorrect input type. Excpected Scalar, but received: {0}".\
-                format(field_type)
+                "Incorrect input type for {}. Excpected Scalar, but got: {}".\
+                format(field_name, field_type)
 
         self.output_schema = schema.Scalar(
             (input_record.field_types()[0].base, ()),
-            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
+            model.net.NextScopedBlob(name + '_output'))
 
     def add_ops(self, net):
         net.DotProduct(

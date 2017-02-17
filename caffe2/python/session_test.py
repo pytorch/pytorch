@@ -24,19 +24,22 @@ class TestLocalSession(TestCase):
             ('uid', np.array([2, 4, 12])),
             ('value', np.array([0.0, 0.0, 0.0])))
 
-        src_blobs = NewRecord(init_net, src_values)
-        dst_blobs = InitEmptyRecord(init_net, src_values.clone_schema())
+        with core.NameScope('init'):
+            src_blobs = NewRecord(init_net, src_values)
+            dst_blobs = InitEmptyRecord(init_net, src_values.clone_schema())
 
         def proc1(rec):
             net = core.Net('proc1')
-            out = NewRecord(net, rec)
+            with core.NameScope('proc1'):
+                out = NewRecord(net, rec)
             net.Add([rec.uid(), rec.uid()], [out.uid()])
             out.value.set(blob=rec.value())
             return [net], out
 
         def proc2(rec):
             net = core.Net('proc2')
-            out = NewRecord(net, rec)
+            with core.NameScope('proc2'):
+                out = NewRecord(net, rec)
             out.uid.set(blob=rec.uid())
             net.Sub([rec.value(), rec.value()], [out.value()])
             return [net], out

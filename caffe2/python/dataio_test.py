@@ -21,22 +21,25 @@ class TestReaderWithLimit(TestCase):
 
         """ 1. feed full dataset """
         src_init = core.Net('src_init')
-        src_values = Struct(('label', np.array(range(100))))
-        src_blobs = NewRecord(src_init, src_values)
-        src_ds = Dataset(src_blobs)
-        FeedRecord(src_blobs, src_values, ws)
+        with core.NameScope('src'):
+            src_values = Struct(('label', np.array(range(100))))
+            src_blobs = NewRecord(src_init, src_values)
+            src_ds = Dataset(src_blobs)
+            FeedRecord(src_blobs, src_values, ws)
         ws.run(src_init)
 
         """ 2. Read with limit smaller than size of dataset """
         dst_init = core.Net('dst_init')
-        dst_ds = Dataset(src_values.clone_schema())
-        dst_ds.init_empty(dst_init)
+        with core.NameScope('dst'):
+            dst_ds = Dataset(src_values.clone_schema())
+            dst_ds.init_empty(dst_init)
         ws.run(dst_init)
 
         with TaskGroup() as tg:
             reader = ReaderWithLimit(src_ds.reader(), num_iter=10)
             pipe(reader, dst_ds.writer(), num_threads=8)
         session.run(tg)
+
         self.assertFalse(ws.blobs[str(reader.data_finished())].fetch())
         self.assertEquals(
             sorted(ws.blobs[str(dst_ds.content().label())].fetch()), range(10))

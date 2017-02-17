@@ -36,8 +36,8 @@ class Split(ModelLayer):
         output_scalars = [
             schema.Scalar(
                 (data_type, output_shape),
-                core.ScopedBlobReference(
-                    model.net.NextName(self.name + '_output_{}'.format(i))))
+                model.net.NextScopedBlob(name + '_output_{}'.format(i)),
+            )
             for i in range(num_splits)
         ]
         self.output_schema = schema.Tuple(*output_scalars)

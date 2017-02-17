@@ -230,6 +230,25 @@ class TestAutoNaming(test_util.TestCase):
     Test that operators are named with different names, and that automatically
     named blob names don't clash intra or inter networks.
     """
+    def test_next_blob(self):
+        def create_net():
+            net = core.Net('net')
+            with core.NameScope('foo'):
+                net.Add(['a', 'b'], net.NextScopedBlob('ab'))
+
+            net.Add(['c', 'd'], net.NextBlob('cd'))
+            return net
+
+        net_a = create_net()
+        net_b = create_net()
+        # created net proto is predicatable.
+        self.assertEqual(net_a.Proto().op, net_b.Proto().op)
+        self.assertEqual(net_a.Proto().op[0].output[0], 'foo/ab')
+        self.assertEqual(net_a.Proto().op[1].output[0], 'cd')
+
+        net_c = core.Net('net')
+        # different calls return different blob names
+        self.assertNotEqual(str(net_c.NextBlob('b')), str(net_c.NextBlob('b')))
 
     def test_auto_naming(self):
         a = core.Net('net')

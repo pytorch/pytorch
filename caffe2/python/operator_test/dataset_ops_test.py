@@ -137,12 +137,13 @@ class TestDatasetOps(TestCase):
         """
         ds = dataset.Dataset(schema)
         net = core.Net('init')
-        ds.init_empty(net)
+        with core.NameScope('init'):
+            ds.init_empty(net)
 
-        content_blobs = NewRecord(net, contents)
-        FeedRecord(content_blobs, contents)
-        writer = ds.writer(init_net=net)
-        writer.write_record(net, content_blobs)
+            content_blobs = NewRecord(net, contents)
+            FeedRecord(content_blobs, contents)
+            writer = ds.writer(init_net=net)
+            writer.write_record(net, content_blobs)
         workspace.RunNetOnce(net)
 
         """
@@ -245,7 +246,6 @@ class TestDatasetOps(TestCase):
         field = ds2_data.floats.keys
         field.set(blob=field.get() - [1000, 2000, 2000, 3000, 3000, 3000])
         _assert_records_equal(contents, ds2_data)
-
 
         """
         6. Slicing a dataset
