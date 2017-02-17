@@ -200,6 +200,9 @@
 #include "generic/SpatialAdaptiveMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialAdaptiveAveragePooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 
