@@ -47,7 +47,7 @@ def init_rnn_descriptor(fn, handle):
         handle,
         fn.hidden_size,
         fn.num_layers,
-        fn.dropout_state['desc_'+ str( torch.cuda.current_device() ) ].get(),
+        fn.dropout_state['desc_' + str(torch.cuda.current_device())].get(),
         fn.input_mode,
         fn.bidirectional,
         fn.mode,
@@ -217,7 +217,7 @@ def forward(fn, input, hx, weight, output, hy):
         y = output
 
         # init descriptors
-        desc_name = 'desc_'+ str( torch.cuda.current_device() )
+        desc_name = 'desc_' + str(torch.cuda.current_device())
         if (desc_name not in fn.dropout_state) or (fn.dropout_state[desc_name].get() is None):
             fn.dropout_state[desc_name] = Unserializable(
                 init_dropout_descriptor(fn, handle)
