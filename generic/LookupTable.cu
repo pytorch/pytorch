@@ -12,8 +12,9 @@ void THNN_(LookupTable_accGradParameters)(
            THCIndexTensor *indices,
            bool scaleGradByFreq,
            int paddingValue,
-           real scale)
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sorted, indices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
@@ -119,9 +120,11 @@ void THNN_(LookupTable_renorm)(
            THCState *state,
            THCIndexTensor *idx,
            THCTensor *weight,
-           real maxNorm,
-           real normType)
+           accreal maxNorm_,
+           accreal normType_)
 {
+  real maxNorm = ScalarConvert<accreal, real>::to(maxNorm_);
+  real normType = ScalarConvert<accreal, real>::to(normType_);
   THCUNN_assertSameGPU(state, 2, idx, weight);
   if (!(THCIndexTensor_(isContiguous)(state, idx) &&
         THCTensor_(isContiguous)(state, weight)))
