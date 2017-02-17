@@ -140,6 +140,7 @@ __global__ void SpatialCrossEntropyLossKernel(const int N, const int D, const in
     const int label = static_cast<int>(label_data[index]);
 
     if (label != DONTCARE) {
+      CUDA_KERNEL_ASSERT(label >= 0 && label < D);
       float weight = (weights == NULL ? 1.0 : weights[index]);
       loss_data[index] = -log(max(
         Pdata[i * W * H * D + label * W * H + y * W + x], 1e-20f)) * weight;

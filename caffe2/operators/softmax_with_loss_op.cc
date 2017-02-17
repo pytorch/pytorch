@@ -121,7 +121,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
 
       for (int i = 0; i < N; ++i) {
         CAFFE_ENFORCE(
-            label_data[i] < D,
+            label_data[i] < D && label_data[i] >= 0,
             "Label seems incorrect: label value larger than number of classes: ",
             label_data[i],
             " vs ",
@@ -214,6 +214,12 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
           int label_idx = i * H * W + y * W + x;
           int label = label_data[label_idx];
           if (label != DONT_CARE) {
+            CAFFE_ENFORCE(
+                label < D && label >= 0,
+                "Label seems incorrect: label value larger than number of classes: ",
+                label_data[i],
+                " vs ",
+                D);
             int idx = i * (H * W * D) + label * (H * W) + y * W + x;
             float w = weights ? weights[label_idx] : 1.0;
             total_weight += w;
