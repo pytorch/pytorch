@@ -581,8 +581,9 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
           int kT, int kW, int kH,
           int dT, int dW, int dH,
           int pT, int pW, int pH,
-          real scale)
+          accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   int freeWeight;
   int nOutputPlane = (int)gradWeight->size[0];
 

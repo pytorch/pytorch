@@ -410,8 +410,9 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
 	int dW,
 	int padW,
 	bool featFirst,
-	real scale) {
+	accreal scale_) {
 
+    real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
 	int ndim = input->nDimension;
 
 	THTensor *tinput, *tgradOutput;
