@@ -25,7 +25,7 @@ class FC(ModelLayer):
         input_dims = input_record.field_types()[0].shape[0]
 
         self.output_schema = schema.Scalar(
-            (np.float32, output_dims),
+            (np.float32, (output_dims, )),
             model.net.NextScopedBlob(name + '_output')
         )
 
