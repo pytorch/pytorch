@@ -2,6 +2,33 @@
 #define THC_GENERIC_FILE "generic/SpatialClassNLLCriterion.cu"
 #else
 
+void THNN_(SpatialClassNLLCriterion_shapeCheck)(
+           THCState *state,
+           THCTensor *input,
+           THCIndexTensor *target,
+           THCTensor *weights)
+{
+  THArgCheck(THCIndexTensor_(nDimension)(state, target) == 3, 1,
+             "only batches of spatial targets supported (3D tensors)" \
+             " but got targets of dimension: %d",
+             THCIndexTensor_(nDimension)(state, target));
+  THArgCheck(THCTensor_(nDimension)(state, input) == 4, 2,
+             "only batches of spatial inputs supported (4D tensors), "      \
+             "but got input of dimension: %d", THCTensor_(nDimension)(state, input));
+  if (THCTensor_(size)(state, input, 0) != THCIndexTensor_(size)(state, target, 0) ||
+      THCTensor_(size)(state, input, 2) != THCIndexTensor_(size)(state, target, 1) ||
+      THCTensor_(size)(state, input, 3) != THCIndexTensor_(size)(state, target, 2)) {
+    THCDescBuff input_size = THCTensor_(sizeDesc)(state, input);
+    THCDescBuff target_size = THCIndexTensor_(sizeDesc)(state, target);
+    THError("input and target batch or spatial sizes don't match: target %s, input %s",
+            target_size.str, input_size.str);
+  }
+
+  if (weights && THCTensor_(nElement)(state, weights) != THCTensor_(size)(state, input, 1)) {
+    THError("weight tensor should be defined either for all or no classes");
+  }
+}
+
 void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -11,17 +38,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCTensor *weights,
            THCTensor *total_weight)
 {
-  THArgCheck(THCIndexTensor_(nDimension)(state, target) == 3, 1,
-             "only batches of spatial targets supported (3D tensors)" \
-             " but got targets of dimension: %d",
-             THCIndexTensor_(nDimension)(state, target));
-  THArgCheck(THCTensor_(nDimension)(state, input) == 4, 2,
-             "only batches of spatial inputs supported (4D tensors), "      \
-             "but got input of dimension: %d", THCTensor_(nDimension)(state, input));
-
-  if (weights && THCTensor_(nElement)(state, weights) != THCTensor_(size)(state, input, 1)) {
-    THError("weight tensor should be defined either for all or no classes");
-  }
+  THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
 
   if (weights)
     THCUNN_assertSameGPU(state, 5, input, target, weights, output, total_weight);
@@ -77,15 +94,9 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
            THCTensor *weights,
            THCTensor *total_weight)
 {
-  THArgCheck(THCIndexTensor_(nDimension)(state, target) == 3, 1,
-             "only batches of spatial targets supported (3D tensors)");
-  THArgCheck(THCTensor_(nDimension)(state, input) == 4, 2,
-             "only batches of spatial inputs supported (4D tensors)");
+  THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4,
              "gradInput must be contiguous");
-  if (weights && THCTensor_(nElement)(state, weights) != THCTensor_(size)(state, input, 1)) {
-    THError("weight tensor should be defined either for all or no classes");
-  }
 
   if (weights)
     THCUNN_assertSameGPU(state, 5, weights, input, target, gradInput, total_weight);
