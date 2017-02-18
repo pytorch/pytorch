@@ -1,6 +1,6 @@
 #include "fbcollective/common/logging.h"
 
-#include <algorithm>
+#include <numeric>
 
 namespace fbcollective {
 
