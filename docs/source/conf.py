@@ -48,9 +48,21 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
+    'sphinx_gallery.gen_gallery',
 ]
 
 napoleon_use_ivar = True
+
+
+sphinx_gallery_conf = {
+    # path to your examples scripts
+    'examples_dirs': 'tutorial_source',
+    # path where to save gallery generated examples
+    'gallery_dirs': 'tutorial',
+    'filename_pattern': '/tutorial_'
+}
+
+# exclude_patterns = 'tutorial/index.rst'
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -122,13 +134,11 @@ html_logo = '_static/img/pytorch-logo-dark.svg'
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
-# html_style_path = 'css/pytorch_theme.css'
-html_context = {
-    'css_files': [
-        'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css'
-    ],
-}
+# Add custom CSS
+def setup(app):
+    app.add_stylesheet('css/pytorch_theme.css')
+    app.add_stylesheet('https://fonts.googleapis.com/css?family=Lato')
+
 
 
 # -- Options for HTMLHelp output ------------------------------------------
