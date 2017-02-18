@@ -139,7 +139,7 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::Combine(
     ::testing::Range(2, 16),
     ::testing::ValuesIn(genMemorySizes()),
-    ::testing::Values(allreduceRing)));
+    ::testing::Values(allreduceRingChunked)));
 
 } // namespace
 } // namespace test
