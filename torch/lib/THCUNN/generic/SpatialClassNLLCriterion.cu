@@ -19,6 +19,27 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
              "only batches of spatial inputs supported (4D tensors), "      \
              "but got input of dimension: %d", THCTensor_(nDimension)(state, input));
 
+  long input_batch_size = THCTensor_(size)(state, input, 0);
+  THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
+  THArgCheck(input_batch_size == batch_size, 2,
+             "mismatch between the batch size of input " \
+             "(%ld) and that of target (%ld)",
+             input_batch_size, batch_size);
+
+  long input_map_height = THCTensor_(size)(state, input, 2);
+  THCIndex_t map_height = THCIndexTensor_(size)(state, target, 1);
+  THArgCheck(input_map_height == map_height, 2,
+             "mismatch between the map height of input " \
+             "(%ld) and that of target (%ld)",
+             input_map_height, map_height);
+
+  long input_map_width = THCTensor_(size)(state, input, 3);
+  THCIndex_t map_width = THCIndexTensor_(size)(state, target, 2);
+  THArgCheck(input_map_width == map_width, 2,
+             "mismatch between the map width of input " \
+             "(%ld) and that of target (%ld)",
+             input_map_width, map_width);
+
   if (weights && THCTensor_(nElement)(state, weights) != THCTensor_(size)(state, input, 1)) {
     THError("weight tensor should be defined either for all or no classes");
   }
@@ -38,9 +59,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   real *output_data = THCTensor_(data)(state, output);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
-  THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
-  int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
+  int blocks_per_sample = GET_BLOCKS(map_height * map_width) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
 
@@ -83,6 +102,28 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
              "only batches of spatial inputs supported (4D tensors)");
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4,
              "gradInput must be contiguous");
+
+  long input_batch_size = THCTensor_(size)(state, input, 0);
+  THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
+  THArgCheck(input_batch_size == batch_size, 2,
+             "mismatch between the batch size of input " \
+             "(%ld) and that of target (%ld)",
+             input_batch_size, batch_size);
+
+  long input_map_height = THCTensor_(size)(state, input, 2);
+  THCIndex_t map_height = THCIndexTensor_(size)(state, target, 1);
+  THArgCheck(input_map_height == map_height, 2,
+             "mismatch between the map height of input " \
+             "(%ld) and that of target (%ld)",
+             input_map_height, map_height);
+
+  long input_map_width = THCTensor_(size)(state, input, 3);
+  THCIndex_t map_width = THCIndexTensor_(size)(state, target, 2);
+  THArgCheck(input_map_width == map_width, 2,
+             "mismatch between the map width of input " \
+             "(%ld) and that of target (%ld)",
+             input_map_width, map_width);
+
   if (weights && THCTensor_(nElement)(state, weights) != THCTensor_(size)(state, input, 1)) {
     THError("weight tensor should be defined either for all or no classes");
   }
@@ -101,9 +142,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THCIndex_t *target_data = THCIndexTensor_(data)(state, target);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
-  THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
-  int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
+  int blocks_per_sample = GET_BLOCKS(map_height * map_width) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
 
