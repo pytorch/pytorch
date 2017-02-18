@@ -79,21 +79,21 @@ print(x[:, 1])
 
 ###############################################################
 # **Read later:**
-# 
+#
 #
 # 100+ Tensor operations, including transposing, indexing, slicing,
 # mathematical operations, linear algebra, random numbers, etc.
 #
 # http://pytorch.org/docs/torch.html
-# 
+#
 # Numpy Bridge
 # ------------
-# 
+#
 # Converting a torch Tensor to a numpy array and vice versa is a breeze.
-# 
+#
 # The torch Tensor and numpy array will share their underlying memory
 # locations, and changing one will change the other.
-# 
+#
 # Converting torch Tensor to numpy Array
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -129,11 +129,11 @@ print(b)
 ###############################################################
 # All the Tensors on the CPU except a CharTensor support converting to
 # NumPy and back.
-# 
+#
 # CUDA Tensors
 # ------------
-# 
-# Tensors can be moved onto GPU using the ``.cuda`` function. 
+#
+# Tensors can be moved onto GPU using the ``.cuda`` function.
 
 # let us run this cell only if CUDA is available
 if torch.cuda.is_available():

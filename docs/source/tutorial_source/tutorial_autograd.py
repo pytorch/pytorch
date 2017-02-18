@@ -7,9 +7,9 @@ Let’s first briefly visit this, and we will then go to training our
 first neural network.
 
 
-The ``autograd`` package provides automatic differentiation for all operations 
+The ``autograd`` package provides automatic differentiation for all operations
 on Tensors. It is a define-by-run framework, which means that your backprop is
-defined by how your code is run, and that every single iteration can be 
+defined by how your code is run, and that every single iteration can be
 different.
 
 Let us see this in more simple terms with some examples.
@@ -115,6 +115,6 @@ print(x.grad)
 
 ###############################################################
 # **Read Later:**
-# 
-# You can read more documentation on `Variable` and `Function` here: 
+#
+# You can read more documentation on `Variable` and `Function` here:
 # pytorch.org/docs/autograd.html

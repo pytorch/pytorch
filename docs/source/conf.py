@@ -62,7 +62,7 @@ sphinx_gallery_conf = {
     'filename_pattern': '/tutorial_'
 }
 
-# exclude_patterns = 'tutorial/index.rst'
+exclude_patterns = ['tutorial/index.rst']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -140,9 +140,7 @@ def setup(app):
     app.add_stylesheet('https://fonts.googleapis.com/css?family=Lato')
 
 
-
 # -- Options for HTMLHelp output ------------------------------------------
-
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'PyTorchdoc'
 

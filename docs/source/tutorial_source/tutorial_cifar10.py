@@ -21,7 +21,7 @@ Then you can convert this array into a ``torch.*Tensor``.
 
 Specifically for ``vision``, we have created a package called
 ``torchvision``, that has data loaders for common datasets such as
-Imagenet, CIFAR10, MNIST, etc. and data transformers for images, viz., 
+Imagenet, CIFAR10, MNIST, etc. and data transformers for images, viz.,
 ``torchvision.datasets`` and ``torch.utils.data.DataLoader``.
 
 This provides a huge convenience and avoids writing boilerplate code.
@@ -117,14 +117,14 @@ class Net(nn.Module):
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool  = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1   = nn.Linear(16*5*5, 120)
+        self.fc1   = nn.Linear(16 * 5 * 5, 120)
         self.fc2   = nn.Linear(120, 84)
         self.fc3   = nn.Linear(84, 10)
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 16*5*5)
+        x = x.view(-1, 16 * 5 * 5)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
@@ -139,16 +139,16 @@ net = Net()
 
 import torch.optim as optim
 
-criterion = nn.CrossEntropyLoss() 
+criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
 ########################################################################
 # 4. Train the network
 # ^^^^^^^^^^^^^^^^^^^^
-# 
+#
 # This is when things start to get interesting.
-# 
-# We simply have to loop over our data iterator, and feed the inputs to the 
+#
+# We simply have to loop over our data iterator, and feed the inputs to the
 # network and optimize
 
 for epoch in range(2):  # loop over the dataset multiple times
@@ -181,14 +181,14 @@ print('Finished Training')
 ########################################################################
 # 5. Test the network on the test data
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# 
-# We have trained the network for 2 passes over the training dataset.  
+#
+# We have trained the network for 2 passes over the training dataset.
 # But we need to check if the network has learnt anything at all.
-# 
+#
 # We will check this by predicting the class label that the neural network
-# outputs, and checking it against the ground-truth. If the prediction is 
-# correct, we add the sample to the list of correct predictions. 
-# 
+# outputs, and checking it against the ground-truth. If the prediction is
+# correct, we add the sample to the list of correct predictions.
+#
 # Okay, first step. Let us display an image from the test set to get familiar.
 
 dataiter = iter(testloader)
@@ -196,7 +196,7 @@ images, labels = dataiter.next()
 
 # print images
 imshow(torchvision.utils.make_grid(images))
-print('GroundTruth: ', ' '.join('%5s'%classes[labels[j]] for j in range(4)))
+print('GroundTruth: ', ' '.join('%5s' % classes[labels[j]] for j in range(4)))
 
 ########################################################################
 # Okay, now let us see what the neural network thinks these examples above are:
@@ -204,18 +204,19 @@ print('GroundTruth: ', ' '.join('%5s'%classes[labels[j]] for j in range(4)))
 outputs = net(Variable(images))
 
 ########################################################################
-# The outputs are energies for the 10 classes. 
-# Higher the energy for a class, the more the network 
+# The outputs are energies for the 10 classes.
+# Higher the energy for a class, the more the network
 # thinks that the image is of the particular class
-# 
+#
 # So, let's get the index of the highest energy
 _, predicted = torch.max(outputs.data, 1)
 
-print('Predicted: ', ' '.join('%5s'% classes[predicted[j][0]] for j in range(4)))
+print('Predicted: ', ' '.join('%5s' % classes[predicted[j][0]]
+                              for j in range(4)))
 
 ########################################################################
-# The results seem pretty good. 
-# 
+# The results seem pretty good.
+#
 # Let us look at how the network performs on the whole dataset.
 
 correct = 0
@@ -227,13 +228,16 @@ for data in testloader:
     total += labels.size(0)
     correct += (predicted == labels).sum()
 
-print('Accuracy of the network on the 10000 test images: %d %%' % (100 * correct / total))
+print('Accuracy of the network on the 10000 test images: %d %%' % (
+    100 * correct / total))
 
 ########################################################################
-# That looks waaay better than chance, which is 10% accuracy (randomly picking a class out of 10 classes).  
+# That looks waaay better than chance, which is 10% accuracy (randomly picking
+# a class out of 10 classes).
 # Seems like the network learnt something.
-# 
-# Hmmm, what are the classes that performed well, and the classes that did not perform well:
+#
+# Hmmm, what are the classes that performed well, and the classes that did
+# not perform well:
 
 class_correct = list(0. for i in range(10))
 class_total = list(0. for i in range(10))
@@ -249,46 +253,49 @@ for data in testloader:
 
 
 for i in range(10):
-    print('Accuracy of %5s : %2d %%' % (classes[i], 100 * class_correct[i] / class_total[i]))
+    print('Accuracy of %5s : %2d %%' % (
+        classes[i], 100 * class_correct[i] / class_total[i]))
 
 ########################################################################
 # Okay, so what next?
-# 
+#
 # How do we run these neural networks on the GPU?
-# 
+#
 # Training on GPU
 # ----------------
-# Just like how you transfer a Tensor on to the GPU, you transfer the neural net onto the GPU.
-# 
-# This will recursively go over all modules and convert their parameters and buffers to CUDA tensors.
-# 
+# Just like how you transfer a Tensor on to the GPU, you transfer the neural
+# net onto the GPU.
+#
+# This will recursively go over all modules and convert their parameters and
+# buffers to CUDA tensors.
+#
 # .. code:: python
-# 
+#
 #     net.cuda()
-# 
-# 
+#
+#
 # Remember that you will have to send the inputs and targets at every step
 # to the GPU too:
-# 
+#
 # ::
-# 
+#
 #         inputs, labels = Variable(inputs.cuda()), Variable(labels.cuda())
-# 
+#
 # Why dont I notice MASSIVE speedup compared to CPU? Because your network
 # is realllly small.
-# 
+#
 # **Exercise:** Try increasing the width of your network (argument 2 of
 # the first ``nn.Conv2d``, and argument 1 of the second ``nn.Conv2d`` –
 # they need to be the same number), see what kind of speedup you get.
-# 
+#
 # **Goals achieved**:
-# 
+#
 # - Understanding PyTorch's Tensor library and neural networks at a high level.
 # - Train a small neural network to classify images
-# 
+#
 # Where do I go next?
 # -------------------
-# 
+#
 # -  `Train neural nets to play video games`_
 # -  `Train a state-of-the-art ResNet network on imagenet`_
 # -  `Train an face generator using Generative Adversarial Networks`_
@@ -297,7 +304,7 @@ for i in range(10):
 # -  `More tutorials`_
 # -  `Discuss PyTorch on the Forums`_
 # -  `Chat with other users on Slack`_
-# 
+#
 # .. _Train neural nets to play video games: https://goo.gl/uGOksc
 # .. _Train a state-of-the-art ResNet network on imagenet: https://github.com/pytorch/examples/tree/master/imagenet
 # .. _Train an face generator using Generative Adversarial Networks: https://github.com/pytorch/examples/tree/master/dcgan
@@ -306,4 +313,3 @@ for i in range(10):
 # .. _More tutorials: https://github.com/pytorch/tutorials
 # .. _Discuss PyTorch on the Forums: https://discuss.pytorch.org/
 # .. _Chat with other users on Slack: http://pytorch.slack.com/messages/beginner/
-
