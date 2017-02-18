@@ -1,6 +1,4 @@
 :orphan:
-Tutorials
-=========
 
 Deep Learning with PyTorch
 --------------------------
