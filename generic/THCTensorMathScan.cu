@@ -74,14 +74,14 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
 
 void THCTensor_(cumsum)(THCState *state, THCTensor *self, THCTensor *src, long dimension)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   return THCTensor_(scanDim)(state, self, src, dimension,
                              ScalarConvert<float, real>::to(0.0), AddOp<real>());
 }
 
 void THCTensor_(cumprod)(THCState *state, THCTensor *self, THCTensor *src, long dimension)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   return THCTensor_(scanDim)(state, self, src, dimension,
                              ScalarConvert<float, real>::to(1.0), MulOp<real>());
 }
