@@ -218,6 +218,8 @@ class CudnnRNN(NestedIOFunction):
                 output,
                 weight,
                 grad_weight)
+        else:
+            grad_weight = [(None,) * len(layer_weight) for layer_weight in weight]
 
         if self.retain_variables:
             self.reserve = self._reserve_clone
