@@ -722,7 +722,7 @@ class TestNN(NNTestCase):
         i2 = Variable(torch.randn(2, 10).float().cuda(1))
         expected1 = l1(i1).data
         expected2 = l2(i2).data
-        inputs = (i1, i2)
+        inputs = ((i1,), (i2,))
         modules = (l1, l2)
         expected_outputs = (expected1, expected2)
         outputs = dp.parallel_apply(modules, inputs)
@@ -738,6 +738,31 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, [])
         self.assertEqual(out, l(i))
         self.assertFalse(out.is_cuda)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_multiple_input(self):
+        class TestModule(nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        m = TestModule()
+        x = Variable(torch.randn(5, 5).float())
+        y = Variable(torch.randn(5, 5).float())
+        expected = m(x, y)
+
+        out = dp.data_parallel(m, (x, y), (0, 1))
+        self.assertEqual(out, expected)
+
+        out = dp.data_parallel(m, (x, y), (0,))
+        self.assertEqual(out, expected)
+
+        dpm = nn.DataParallel(TestModule())
+        out = dpm(x, y)
+        self.assertEqual(out, expected)
+
+        dpm = nn.DataParallel(TestModule(), device_ids=[0])
+        out = dpm(x, y)
+        self.assertEqual(out, expected)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_small_back(self):
@@ -785,7 +810,7 @@ class TestNN(NNTestCase):
 
         class Net(nn.Module):
 
-            def forward(self, input):
+            def forward(self, *input):
                 return fn(input)
         i = Variable(torch.randn(20, 3).float().cuda(1))
         input = (i.cos(), (i.sin(), i), i.sin())
