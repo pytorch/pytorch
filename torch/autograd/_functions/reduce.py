@@ -141,18 +141,19 @@ class Kthvalue(_SelectionFunction):
 
 class Norm(Function):
 
-    def __init__(self, norm_type=2, dim=None):
+    def __init__(self, norm_type=2, dim=None, eps=1e-10):
         super(Norm, self).__init__()
         self.norm_type = norm_type
         self.dim = dim
+        self.eps = eps
 
     def forward(self, input):
         if self.dim is None:
-            self.norm = input.norm(self.norm_type)
+            self.norm = input.norm(self.norm_type).add_(self.eps)
             self.save_for_backward(input)
             return input.new((self.norm,))
         else:
-            output = input.norm(self.norm_type, self.dim)
+            output = input.norm(self.norm_type, self.dim).add_(self.eps)
             self.save_for_backward(input, output)
             return output
 
