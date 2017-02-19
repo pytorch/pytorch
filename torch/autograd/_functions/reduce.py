@@ -149,11 +149,11 @@ class Norm(Function):
 
     def forward(self, input):
         if self.dim is None:
-            self.norm = input.norm(self.norm_type).add_(self.eps)
+            self.norm = input.norm(self.norm_type) + self.eps
             self.save_for_backward(input)
             return input.new((self.norm,))
         else:
-            output = input.norm(self.norm_type, self.dim).add_(self.eps)
+            output = input.norm(self.norm_type, self.dim) + self.eps
             self.save_for_backward(input, output)
             return output
 
