@@ -184,6 +184,7 @@ class CudnnRNN(NestedIOFunction):
 
     def backward_extended(self, grad_output, grad_hy):
         input, hx, weight, output = self.saved_tensors
+        input = input.contiguous()
 
         grad_input, grad_weight, grad_hx = None, None, None
 
