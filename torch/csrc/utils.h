@@ -141,8 +141,14 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 #define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
-bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart,
-        Py_ssize_t *ostop, Py_ssize_t *oslicelength);
+// https://bugsfiles.kde.org/attachment.cgi?id=61186
+#if PY_VERSION_HEX >= 0x03020000
+#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
+  (PySlice_GetIndicesEx(SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
+#else
+#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
+  (PySlice_GetIndicesEx((PySliceObject*)SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
+#endif
 
 #define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
