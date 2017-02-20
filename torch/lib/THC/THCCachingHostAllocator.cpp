@@ -168,7 +168,7 @@ struct HostAllocator
 
     Block& block = it->second;
     THAssert(block.allocated);
-    auto res = block.streams.emplace(stream);
+    auto res = block.streams.insert(stream);
     if (res.second == true && stream != NULL) {
       THCStream_retain(stream);
     }
