@@ -21,7 +21,8 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
       const std::shared_ptr<Context>& context,
       T* ptr,
       int count,
-      int rootRank = 0);
+      int rootRank = 0,
+      cudaStream_t stream = kStreamNotSet);
 
   virtual ~CudaBroadcastOneToAll();
 
@@ -30,6 +31,9 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
  protected:
   CudaDevicePointer<T> devicePtr_;
   T* hostPtr_;
+
+  const int count_;
+  const int bytes_;
 
   // For the sender (root)
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBuffers_;

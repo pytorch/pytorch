@@ -70,8 +70,11 @@ class CudaDeviceScope {
 template<typename T>
 class CudaMemory {
  public:
-  CudaMemory(size_t n, T val);
+  explicit CudaMemory(size_t n);
+  CudaMemory(CudaMemory&&) noexcept;
   ~CudaMemory();
+
+  void set(T val, cudaStream_t stream = kStreamNotSet);
 
   T* operator*() const {
     return ptr_;
@@ -80,6 +83,9 @@ class CudaMemory {
   std::unique_ptr<T[]> copyToHost();
 
  protected:
+  CudaMemory(const CudaMemory&) = delete;
+  CudaMemory& operator=(const CudaMemory&) = delete;
+
   size_t n_;
   size_t bytes_;
   int device_;

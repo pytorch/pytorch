@@ -9,68 +9,36 @@
 
 #include <functional>
 #include <memory>
-#include <thread>
 #include <vector>
 
-#include "gloo/common/common.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
-#include "gloo/cuda_private.h"
-#include "gloo/test/base_test.h"
+#include "gloo/test/cuda_base_test.h"
 
 namespace gloo {
 namespace test {
 namespace {
 
 // Function to instantiate and run algorithm.
-using Func = void(
+using Func = std::unique_ptr<::gloo::Algorithm>(
     std::shared_ptr<::gloo::Context>&,
-    std::vector<float*> dataPtrs,
-    int count);
+    std::vector<float*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams);
 
 // Test parameterization.
 using Param = std::tuple<int, int, std::function<Func>>;
 
-// Test fixture.
-class CudaAllreduceTest : public BaseTest,
+// Test case
+class CudaAllreduceTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
-
-  using CudaBuffers = std::vector<std::unique_ptr<CudaMemory<float> > >;
-  using HostBuffers = std::vector<std::unique_ptr<float[]> >;
-
  public:
-  int getDeviceCount() {
-    int n = 0;
-    CUDA_CHECK(cudaGetDeviceCount(&n));
-    return n;
-  }
-
-  std::vector<float*> getFloatPointers(const CudaBuffers& in) {
-    std::vector<float*> out;
-    for (const auto& i : in) {
-      out.push_back(**i);
+  void assertEqual(Fixture& fixture, int expected) {
+    for (const auto& ptr : fixture.getHostBuffers()) {
+      for (int i = 0; i < fixture.count; i++) {
+        ASSERT_EQ(expected, ptr[i]) << "Mismatch at index " << i;
+      }
     }
-    return out;
-  }
-
-  CudaBuffers getDeviceBuffers(int rank, int size, size_t count) {
-    CudaBuffers out;
-
-    auto n = getDeviceCount();
-    for (int i = 0; i < n; i++) {
-      CUDA_CHECK(cudaSetDevice(i));
-      out.push_back(make_unique<CudaMemory<float> >(count, (rank * n) + i));
-    }
-
-    return out;
-  }
-
-  HostBuffers getHostBuffers(const CudaBuffers& in, size_t count) {
-    HostBuffers out;
-    for (const auto& src : in) {
-      out.push_back(src->copyToHost());
-    }
-    return out;
   }
 };
 
@@ -79,25 +47,60 @@ TEST_P(CudaAllreduceTest, SinglePointer) {
   auto count = std::get<1>(GetParam());
   auto fn = std::get<2>(GetParam());
 
-  spawnThreads(size, [&](int rank) {
-    auto context =
-        std::make_shared<::gloo::Context>(rank, size);
-    context->connectFullMesh(*store_, device_);
-
+  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
     // Run algorithm
-    auto in = getDeviceBuffers(rank, size, count);
-    fn(context, getFloatPointers(in), count);
-    auto out = getHostBuffers(in, count);
+    auto fixture = Fixture(1, count);
+    auto ptrs = fixture.getFloatPointers();
+    auto algorithm = fn(context, ptrs, count, {});
+    fixture.setRank(rank);
+    algorithm->run();
 
     // Verify result
-    auto logicalSize = getDeviceCount() * size;
+    auto logicalSize = size;
     auto expected = (logicalSize * (logicalSize - 1)) / 2;
-    for (const auto& ptr : out) {
-      for (int i = 0; i < count; i++) {
-        ASSERT_EQ(expected, ptr[i]) << "Mismatch at index " << i;
-      }
-    }
+    assertEqual(fixture, expected);
   });
+}
+
+TEST_P(CudaAllreduceTest, MultiPointer) {
+  auto size = std::get<0>(GetParam());
+  auto count = std::get<1>(GetParam());
+  auto fn = std::get<2>(GetParam());
+
+  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+      // Run algorithm
+      auto fixture = Fixture(getDeviceCount(), count);
+      auto ptrs = fixture.getFloatPointers();
+      auto algorithm = fn(context, ptrs, count, {});
+      fixture.setRank(rank);
+      algorithm->run();
+
+      // Verify result
+      auto logicalSize = getDeviceCount() * size;
+      auto expected = (logicalSize * (logicalSize - 1)) / 2;
+      assertEqual(fixture, expected);
+    });
+}
+
+TEST_P(CudaAllreduceTest, MultiPointerAsync) {
+  auto size = std::get<0>(GetParam());
+  auto count = std::get<1>(GetParam());
+  auto fn = std::get<2>(GetParam());
+
+  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+      // Run algorithm
+      auto fixture = Fixture(getDeviceCount(), count);
+      auto ptrs = fixture.getFloatPointers();
+      auto streams = fixture.getCudaStreams();
+      auto algorithm = fn(context, ptrs, count, streams);
+      fixture.setRankAsync(rank);
+      algorithm->run();
+
+      // Verify result
+      auto logicalSize = getDeviceCount() * size;
+      auto expected = (logicalSize * (logicalSize - 1)) / 2;
+      assertEqual(fixture, expected);
+    });
 }
 
 std::vector<int> genMemorySizes() {
@@ -112,34 +115,36 @@ std::vector<int> genMemorySizes() {
 static std::function<Func> allreduceRing = [](
     std::shared_ptr<::gloo::Context>& context,
     std::vector<float*> ptrs,
-    int count) {
-  ::gloo::CudaAllreduceRing<float> algorithm(context, ptrs, count);
-  algorithm.run();
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+    new ::gloo::CudaAllreduceRing<float>(context, ptrs, count, streams));
 };
 
 INSTANTIATE_TEST_CASE_P(
     AllreduceRing,
     CudaAllreduceTest,
     ::testing::Combine(
-    ::testing::Range(2, 16),
-    ::testing::ValuesIn(genMemorySizes()),
-    ::testing::Values(allreduceRing)));
+      ::testing::Range(2, 16),
+      ::testing::ValuesIn(genMemorySizes()),
+      ::testing::Values(allreduceRing)));
 
 static std::function<Func> allreduceRingChunked = [](
     std::shared_ptr<::gloo::Context>& context,
     std::vector<float*> ptrs,
-    int count) {
-  ::gloo::CudaAllreduceRingChunked<float> algorithm(context, ptrs, count);
-  algorithm.run();
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+    new ::gloo::CudaAllreduceRingChunked<float>(context, ptrs, count, streams));
 };
 
 INSTANTIATE_TEST_CASE_P(
     AllreduceRingChunked,
     CudaAllreduceTest,
     ::testing::Combine(
-    ::testing::Range(2, 16),
-    ::testing::ValuesIn(genMemorySizes()),
-    ::testing::Values(allreduceRingChunked)));
+      ::testing::Range(2, 16),
+      ::testing::ValuesIn(genMemorySizes()),
+      ::testing::Values(allreduceRingChunked)));
 
 } // namespace
 } // namespace test

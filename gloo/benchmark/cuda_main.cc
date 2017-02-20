@@ -42,11 +42,12 @@ class CudaAllreduceRingBenchmark : public Benchmark {
 
  protected:
   virtual float* allocate(int elements) override {
-    ptrs_.push_back(make_unique<CudaMemory<float> >(elements, context_->rank_));
-    return **ptrs_[0];
+    ptrs_.push_back(CudaMemory<float>(elements));
+    ptrs_[ptrs_.size()-1].set(context_->rank_);
+    return *ptrs_[ptrs_.size()-1];
   }
 
-  std::vector<std::unique_ptr<CudaMemory<float> > > ptrs_;
+  std::vector<CudaMemory<float> > ptrs_;
 };
 
 } // namespace

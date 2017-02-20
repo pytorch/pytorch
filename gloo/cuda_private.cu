@@ -14,8 +14,7 @@
 namespace gloo {
 
 template<typename T>
-__global__ void initializeMemory(T* ptr, const T val, const size_t n)
-{
+__global__ void initializeMemory(T* ptr, const T val, const size_t n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   for (; i < n; i += blockDim.x) {
     ptr[i] = val;
@@ -23,17 +22,37 @@ __global__ void initializeMemory(T* ptr, const T val, const size_t n)
 }
 
 template<typename T>
-CudaMemory<T>::CudaMemory(size_t n, T val): n_(n), bytes_(n * sizeof(T)) {
+CudaMemory<T>::CudaMemory(size_t n): n_(n), bytes_(n * sizeof(T)) {
   CUDA_CHECK(cudaGetDevice(&device_));
   CUDA_CHECK(cudaMalloc(&ptr_, bytes_));
-  initializeMemory<<<1, 32>>>(ptr_, val, n);
+}
+
+template<typename T>
+CudaMemory<T>::CudaMemory(CudaMemory<T>&& other) noexcept
+  : n_(other.n_),
+    bytes_(other.bytes_),
+    device_(other.device_),
+    ptr_(other.ptr_) {
+  // Nullify pointer on move source
+  other.ptr_ = nullptr;
 }
 
 template<typename T>
 CudaMemory<T>::~CudaMemory() {
-  CudaDeviceGuard guard;
-  CUDA_CHECK(cudaSetDevice(device_));
-  CUDA_CHECK(cudaFree(ptr_));
+  CudaDeviceScope scope(device_);
+  if (ptr_ != nullptr) {
+    CUDA_CHECK(cudaFree(ptr_));
+  }
+}
+
+template<typename T>
+void CudaMemory<T>::set(T val, cudaStream_t stream) {
+  CudaDeviceScope scope(device_);
+  if (stream == kStreamNotSet) {
+    initializeMemory<<<1, 32>>>(ptr_, val, n_);
+  } else {
+    initializeMemory<<<1, 32, 0, stream>>>(ptr_, val, n_);
+  }
 }
 
 template<typename T>

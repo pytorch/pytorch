@@ -12,34 +12,28 @@
 
 namespace gloo {
 
+const cudaStream_t kStreamNotSet = (cudaStream_t)(-1);
+
 template<typename T>
 CudaDevicePointer<T>
-CudaDevicePointer<T>::createWithNewStream(
+CudaDevicePointer<T>::create(
     T* ptr,
-    size_t count) {
+    size_t count,
+    cudaStream_t stream) {
   CudaDevicePointer p(ptr, count);
 
   // Create new stream for operations concerning this pointer
-  {
+  if (stream == kStreamNotSet) {
     CudaDeviceScope scope(p.deviceId_);
     int loPri, hiPri;
     CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&loPri, &hiPri));
     CUDA_CHECK(cudaStreamCreateWithPriority(
                  &p.stream_, cudaStreamNonBlocking, hiPri));
     p.streamOwner_ = true;
+  } else {
+    p.stream_ = stream;
   }
 
-  return p;
-}
-
-template<typename T>
-CudaDevicePointer<T>
-CudaDevicePointer<T>::createWithStream(
-    T* ptr,
-    size_t count,
-    cudaStream_t stream) {
-  CudaDevicePointer p(ptr, count);
-  p.stream_ = stream;
   return p;
 }
 

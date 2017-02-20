@@ -14,20 +14,34 @@
 
 namespace gloo {
 
+extern const cudaStream_t kStreamNotSet;
+
 template<typename T>
 class CudaDevicePointer {
  public:
-  static CudaDevicePointer createWithNewStream(
-    T* ptr,
-    size_t count);
-
-  static CudaDevicePointer createWithStream(
+  static CudaDevicePointer create(
     T* ptr,
     size_t count,
-    cudaStream_t stream);
+    cudaStream_t stream = kStreamNotSet);
 
   CudaDevicePointer(CudaDevicePointer&&) noexcept;
   ~CudaDevicePointer();
+
+  T* operator*() const {
+    return device_;
+  }
+
+  int getCount() const {
+    return count_;
+  }
+
+  int getDeviceID() const {
+    return deviceId_;
+  }
+
+  cudaStream_t getStream() const {
+    return stream_;
+  }
 
   // Copy contents of device pointer to host.
   void copyToHostAsync(T* dst);
@@ -42,7 +56,7 @@ class CudaDevicePointer {
   // Instances must be created through static functions
   CudaDevicePointer(T* ptr, size_t count);
 
-  // Instances cannot be copied or assigned
+  // Instances cannot be copied or copy-assigned
   CudaDevicePointer(const CudaDevicePointer&) = delete;
   CudaDevicePointer& operator=(const CudaDevicePointer&) = delete;
 
@@ -60,7 +74,7 @@ class CudaDevicePointer {
   // this pointer lives on. The stream can be specified at
   // construction time if one has already been created outside this
   // library. If it is not specified, a new stream is created.
-  cudaStream_t stream_ = 0;
+  cudaStream_t stream_ = kStreamNotSet;
   cudaEvent_t event_ = 0;
 
   // If no stream is specified at construction time, this class

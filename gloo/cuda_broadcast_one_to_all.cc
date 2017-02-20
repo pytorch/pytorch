@@ -18,11 +18,13 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
     const std::shared_ptr<Context>& context,
     T* ptr,
     int count,
-    int rootRank)
+    int rootRank,
+    cudaStream_t stream)
     : Broadcast<T>(context, rootRank),
-      devicePtr_(CudaDevicePointer<T>::createWithNewStream(ptr, count)) {
-  auto bytes = count * sizeof(T);
-  CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes));
+      devicePtr_(CudaDevicePointer<T>::create(ptr, count, stream)),
+      count_(count),
+      bytes_(count * sizeof(T)) {
+  CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
   if (this->contextRank_ == this->rootRank_) {
     for (int i = 0; i < this->contextSize_; i++) {
       if (i == this->contextRank_) {
@@ -31,11 +33,11 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
 
       auto& pair = this->context_->getPair(i);
       sendDataBuffers_.push_back(
-          pair->createSendBuffer(0, hostPtr_, bytes));
+          pair->createSendBuffer(0, hostPtr_, bytes_));
     }
   } else {
     auto& rootPair = this->context_->getPair(this->rootRank_);
-    recvDataBuffer_ = rootPair->createRecvBuffer(0, hostPtr_, bytes);
+    recvDataBuffer_ = rootPair->createRecvBuffer(0, hostPtr_, bytes_);
   }
 }
 

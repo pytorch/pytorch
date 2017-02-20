@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "gloo/context.h"
 #include "gloo/rendezvous/hash_store.h"
 #include "gloo/transport/tcp/device.h"
 
@@ -51,6 +52,16 @@ class BaseTest : public ::testing::Test {
     if (errors.size() > 0) {
       throw(std::runtime_error(errors[0]));
     }
+  }
+
+  void spawn(
+      int size,
+      std::function<void(int, std::shared_ptr<Context>)> fn) {
+    spawnThreads(size, [&](int rank) {
+        auto context = std::make_shared<::gloo::Context>(rank, size);
+        context->connectFullMesh(*store_, device_);
+        fn(rank, std::move(context));
+      });
   }
 
   std::shared_ptr<::gloo::transport::Device> device_;

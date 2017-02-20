@@ -8,70 +8,81 @@
  */
 
 #include <functional>
-#include <thread>
+#include <memory>
 #include <vector>
 
-#include "gloo/common/common.h"
 #include "gloo/cuda_broadcast_one_to_all.h"
-#include "gloo/cuda_private.h"
-#include "gloo/test/base_test.h"
+#include "gloo/test/cuda_base_test.h"
 
 namespace gloo {
 namespace test {
 namespace {
 
 // Function to instantiate and run algorithm.
-using Func = void(
+using Func = std::unique_ptr<::gloo::Algorithm>(
     std::shared_ptr<::gloo::Context>&,
-    float* dataPtr,
-    int dataSize,
-    int rootRank);
+    float* ptr,
+    int count,
+    int rootRank,
+    cudaStream_t stream);
 
 // Test parameterization.
 using Param = std::tuple<int, int, std::function<Func>>;
 
 // Test fixture.
-class CudaBroadcastTest : public BaseTest,
+class CudaBroadcastTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
-
-  using CudaBuffer = std::unique_ptr<CudaMemory<float>>;
-  using HostBuffer = std::unique_ptr<float[]>;
-
  public:
-  CudaBuffer getDeviceBuffer(int rank, int count) {
-    CudaBuffer out = make_unique<CudaMemory<float> >(count, rank);
-    return out;
-  }
-
-  HostBuffer getHostBuffer(const CudaBuffer& in) {
-    return in->copyToHost();
+  void assertEqual(Fixture& fixture, int rank, int root) {
+    for (const auto& ptr : fixture.getHostBuffers()) {
+      for (int i = 0; i < fixture.count; i++) {
+        ASSERT_EQ(root, ptr[i])
+          << "Mismatch at index " << i
+          << " for rank " << rank;
+      }
+    }
   }
 };
 
 TEST_P(CudaBroadcastTest, SinglePointer) {
-  auto contextSize = std::get<0>(GetParam());
-  auto dataSize = std::get<1>(GetParam());
+  auto size = std::get<0>(GetParam());
+  auto count = std::get<1>(GetParam());
   auto fn = std::get<2>(GetParam());
 
-  spawnThreads(contextSize, [&](int contextRank) {
-    auto context =
-        std::make_shared<::gloo::Context>(contextRank, contextSize);
-    context->connectFullMesh(*store_, device_);
+  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+      // Run with varying root
+      for (int root = 0; root < 1; root++) {
+        auto fixture = Fixture(1, count);
+        auto ptrs = fixture.getFloatPointers();
+        auto algorithm = fn(context, ptrs[0], count, root, kStreamNotSet);
+        fixture.setRank(rank);
+        algorithm->run();
 
-    // Run with varying root
-    for (int rootRank = 0; rootRank < 1; rootRank++) {
-      // Run algorithm
-      auto in = getDeviceBuffer(contextRank, dataSize);
-      fn(context, **in, dataSize, rootRank);
-      auto out = getHostBuffer(in);
-
-      // Verify result
-      for (int i = 0; i < dataSize; i++) {
-        EXPECT_EQ(rootRank, out[i]) << "Mismatch at index " << i <<
-          " for rank " << contextRank;
+        // Verify result
+        assertEqual(fixture, rank, root);
       }
-    }
-  });
+    });
+}
+
+TEST_P(CudaBroadcastTest, SinglePointerAsync) {
+  auto size = std::get<0>(GetParam());
+  auto count = std::get<1>(GetParam());
+  auto fn = std::get<2>(GetParam());
+
+  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+      // Run with varying root
+      for (int root = 0; root < 1; root++) {
+        auto fixture = Fixture(1, count);
+        auto ptrs = fixture.getFloatPointers();
+        auto streams = fixture.getCudaStreams();
+        auto algorithm = fn(context, ptrs[0], count, root, streams[0]);
+        fixture.setRankAsync(rank);
+        algorithm->run();
+
+        // Verify result
+        assertEqual(fixture, rank, root);
+      }
+    });
 }
 
 std::vector<int> genMemorySizes() {
@@ -85,12 +96,13 @@ std::vector<int> genMemorySizes() {
 
 static std::function<Func> broadcastOneToAll = [](
     std::shared_ptr<::gloo::Context>& context,
-    float* dataPtr,
-    int dataSize,
-    int rootRank) {
-  ::gloo::CudaBroadcastOneToAll<float> algorithm(
-      context, dataPtr, dataSize, rootRank);
-  algorithm.run();
+    float* ptr,
+    int count,
+    int rootRank,
+    cudaStream_t stream) {
+  return std::unique_ptr<::gloo::Algorithm>(
+    new ::gloo::CudaBroadcastOneToAll<float>(
+      context, ptr, count, rootRank, stream));
 };
 
 INSTANTIATE_TEST_CASE_P(

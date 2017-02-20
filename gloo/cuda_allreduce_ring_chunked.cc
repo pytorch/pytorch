@@ -18,18 +18,29 @@ namespace gloo {
 template <typename T>
 CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
   const std::shared_ptr<Context>& context,
-  std::vector<T*> ptrs,
-  int count)
+  const std::vector<T*>& ptrs,
+  int count,
+  const std::vector<cudaStream_t>& streams)
     : Allreduce<T>(context, nullptr),
-    count_(count),
-    bytes_(count * sizeof(T)),
-    leftPair_(this->getLeftPair()),
-    rightPair_(this->getRightPair()) {
-  // Setup device and host memory
+      count_(count),
+      bytes_(count * sizeof(T)),
+      leftPair_(this->getLeftPair()),
+      rightPair_(this->getRightPair()) {
+  auto newStream = true;
+  if (streams.size() > 0) {
+    GLOO_ENFORCE_EQ(streams.size(), ptrs.size());
+    newStream = false;
+  }
+
   hostPtrs_.resize(ptrs.size());
   for (int i = 0; i < ptrs.size(); i++) {
-    devicePtrs_.push_back(
-        CudaDevicePointer<T>::createWithNewStream(ptrs[i], count_));
+    if (newStream) {
+      devicePtrs_.push_back(
+        CudaDevicePointer<T>::create(ptrs[i], count_));
+    } else {
+      devicePtrs_.push_back(
+        CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
+    }
     CUDA_CHECK(cudaMallocHost(&hostPtrs_[i], bytes_));
   }
 

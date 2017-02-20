@@ -19,8 +19,9 @@ class CudaAllreduceRingChunked : public Allreduce<T> {
  public:
   CudaAllreduceRingChunked(
     const std::shared_ptr<Context>& context,
-    std::vector<T*> ptrs,
-    int count);
+    const std::vector<T*>& ptrs,
+    int count,
+    const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
 
   virtual ~CudaAllreduceRingChunked();
 
