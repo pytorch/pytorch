@@ -452,6 +452,36 @@ def cross_entropy(input, target, weight=None, size_average=True):
     return nll_loss(log_softmax(input), target, weight, size_average)
 
 
+def cross_entropy2d(input, target, weight=None, size_average=True):
+    r"""Cross entropy function for 2D image.
+
+    Args:
+        input: Variable :math:`(N, C, H, W)` where `C = number of classes`,
+            `H = image height` and `W = image width`.
+        target: Variable :math:`(N, H, W)` where each value is
+            `targets[i] <= C-1` and negative values which will be ignored.
+        weight (Variable, optional): a manual rescaling weight given to each
+                class. If given, has to be a Variable of size "nclasses"
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+    """
+    N, C, H, W = input.size()
+    log_p = F.log_softmax(input)  # (N, C, H, W)
+    log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, C)
+    log_p = log_p[target.view(N, H, W, 1).repeat(1, 1, 1, C) >= 0]
+    log_p = log_p.view(-1, C)  # (M, C) where M = (target >= 0).sum()
+    mask = target >= 0  # (M,)
+    target = target[mask]
+    loss = F.nll_loss(log_p, target, weight=weight, size_average=False)
+    if size_average:
+        loss /= mask.sum().data[0]
+    else:
+        loss /= N
+    return loss
+
+
 def binary_cross_entropy(input, target, weight=None, size_average=True):
     r"""Function that measures the Binary Cross Entropy
     between the target and the output:
