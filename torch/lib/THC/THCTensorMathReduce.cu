@@ -2,7 +2,7 @@
 
 THC_API int
 THCudaByteTensor_logicalall(THCState *state, THCudaByteTensor *self) {
-  THAssert(THCudaByteTensor_checkGPU(state, 1, self));
+  THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 1, self));
   unsigned char result;
   if (!THC_reduceAll(state, self,
                      thrust::identity<unsigned char>(),
@@ -17,7 +17,7 @@ THCudaByteTensor_logicalall(THCState *state, THCudaByteTensor *self) {
 
 THC_API int
 THCudaByteTensor_logicalany(THCState *state, THCudaByteTensor *self) {
-  THAssert(THCudaByteTensor_checkGPU(state, 1, self));
+  THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 1, self));
   unsigned char result;
   if (!THC_reduceAll(state, self,
                      thrust::identity<unsigned char>(),

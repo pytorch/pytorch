@@ -172,6 +172,7 @@ THC_API void* THCState_getDeviceScratchSpace(THCState* state, int device, int st
 THC_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 THC_API size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device);
 
+#define THCAssertSameGPU(expr) if (!expr) THError("arguments are located on different GPUs")
 #define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
 #define THCudaCheckWarn(err)  __THCudaCheckWarn(err, __FILE__, __LINE__)
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)

@@ -386,7 +386,7 @@ THC_API void THCudaTensor_topk(THCState* state,
                                THCudaTensor *input,
                                long k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input != NULL);
-  THAssert(THCudaTensor_checkGPU(state, 3, topK, indices, input));
+  THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, topK, indices, input));
   THCCheckTensorDims(state, topK, 2);
   long dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
