@@ -1867,7 +1867,7 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, 2, 2], 27, 0)
         self.assertEqual(reference[:], self._consecutive((3, 3, 3)), 0)
 
-        # Check Ellipsis
+        # indexing with Ellipsis
         self.assertEqual(reference[..., 2], torch.Tensor([[3, 6, 9],
                                                           [12, 15, 18],
                                                           [21, 24, 27]]), 0)
@@ -1880,6 +1880,11 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, 2, ..., 2], 27, 0)
         self.assertEqual(reference[2, 2, 2, ...], 27, 0)
 
+        reference_5d = self._consecutive((3, 3, 3, 3, 3))
+        self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
+        self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
+        self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
+
         # LongTensor indexing
         reference = self._consecutive((5, 5, 5))
         idx = torch.LongTensor([2, 4])
@@ -1887,10 +1892,26 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, idx], torch.stack([reference[2, 2], reference[2, 4]]))
         self.assertEqual(reference[3, idx, 1], torch.stack([reference[3, 2], reference[3, 4]])[:, 1])
 
-        reference_5d = self._consecutive((3, 3, 3, 3, 3))
-        self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
-        self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
-        self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
+        # None indexing
+        self.assertEqual(reference[2, None], reference[2].unsqueeze(0))
+        self.assertEqual(reference[2, None, None], reference[2].unsqueeze(0).unsqueeze(0))
+        self.assertEqual(reference[2:4, None], reference[2:4].unsqueeze(1))
+        self.assertEqual(reference[None, 2, None, None], reference.unsqueeze(0)[:, 2].unsqueeze(0).unsqueeze(0))
+        self.assertEqual(reference[None, 2:5, None, None], reference.unsqueeze(0)[:, 2:5].unsqueeze(2).unsqueeze(2))
+
+        # indexing with step
+        reference = self._consecutive((10, 10, 10))
+        self.assertEqual(reference[1:5:2], torch.stack([reference[1], reference[3]], 0))
+        self.assertEqual(reference[1:6:2], torch.stack([reference[1], reference[3], reference[5]], 0))
+        self.assertEqual(reference[1:9:4], torch.stack([reference[1], reference[5]], 0))
+        self.assertEqual(reference[2:4, 1:5:2], torch.stack([reference[2:4, 1], reference[2:4, 3]], 1))
+        self.assertEqual(reference[3, 1:6:2], torch.stack([reference[3, 1], reference[3, 3], reference[3, 5]], 0))
+        self.assertEqual(reference[None, 2, 1:9:4], torch.stack([reference[2, 1], reference[2, 5]], 0).unsqueeze(0))
+        self.assertEqual(reference[:, 2, 1:6:2],
+                         torch.stack([reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5]], 1))
+
+        self.assertRaises(ValueError, lambda: reference[1:9:0])
+        self.assertRaises(ValueError, lambda: reference[1:9:-1])
 
         self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1])
         self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1:1])

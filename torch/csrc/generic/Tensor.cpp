@@ -412,32 +412,6 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 #define UNPACK_SCALAR(IDX_VARIABLE) idx = THPUtils_unpackLong(IDX_VARIABLE);
 #endif
 
-#define INDEX_SCALAR(DIM, IDX_VARIABLE, TENSOR_VARIABLE, CASE_1D, CASE_MD)     \
-  int64_t idx;                                                                 \
-  UNPACK_SCALAR(IDX_VARIABLE);                                                 \
-  long dimsize = THTensor_(size)(LIBRARY_STATE TENSOR_VARIABLE, DIM);          \
-  idx = (idx < 0) ? dimsize + idx : idx;                                       \
-                                                                               \
-  if (dimsize <= 0) {                                                          \
-    PyErr_SetString(PyExc_IndexError, "indexing an empty tensor");             \
-    return false;                                                              \
-  }                                                                            \
-  if (idx < 0 || idx >= dimsize) {                                             \
-    PyErr_Format(PyExc_IndexError, "index %lld is out of range for dimension "  \
-        "%lld (of size %lld)", (long long)idx, (long long)DIM, (long long)dimsize); \
-    return false;                                                              \
-  }                                                                            \
-                                                                               \
-  if(THTensor_(nDimension)(LIBRARY_STATE TENSOR_VARIABLE) == 1) {              \
-    CASE_1D;                                                                   \
-  } else {                                                                     \
-    CASE_MD;                                                                   \
-  }
-
-#define GET_OFFSET(t, idx)                                                     \
-  t->storageOffset + t->stride[0] * idx;
-
-
 #ifdef THC_GENERIC_FILE
 #define THIndexTensor THCudaLongTensor
 #define THIndexTensor_(NAME) TH_CONCAT_2(THCudaLongTensor_,NAME)
@@ -452,57 +426,94 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 
 
 template<bool allow_index>
-static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
-    THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
+static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
+        THTensorPtr &tresult, THStorage* &sresult, long &storage_offset)
 {
 #ifdef WITH_NUMPY
   static PyArray_Descr *NumpyLongArrDescr = PyArray_DescrFromType(NPY_INT64);
   bool is_long, is_scalar_array;
 #endif
-  tresult = NULL;
-  sresult = NULL;
-  // Indexing with an integer
+  // Indexing with a scalar
   if(IS_SCALAR(index)) {
-    THTensor *self_t = self->cdata;
-    INDEX_SCALAR(0, index, self_t,
-      // 1D tensor
-      sresult = self_t->storage;
-      storage_offset = GET_OFFSET(self_t, idx),
-      // >1D tensor
-      tresult = THTensor_(newWithTensor)(LIBRARY_STATE self_t);
-      THTensor_(select)(LIBRARY_STATE tresult.get(), NULL, 0, idx)
-    )
-    return true;
+    int64_t idx;
+    UNPACK_SCALAR(index);
+    long dimsize = THTensor_(size)(LIBRARY_STATE tresult.get(), indexed_dim);
+    idx = (idx < 0) ? dimsize + idx : idx;
+
+    if (dimsize <= 0) {
+      PyErr_SetString(PyExc_IndexError, "indexing an empty tensor");
+      throw python_error();
+    }
+    if (idx < 0 || idx >= dimsize) {
+      PyErr_Format(PyExc_IndexError, "index %lld is out of range for dimension "
+          "%lld (of size %lld)", (long long)idx, (long long)indexed_dim, (long long)dimsize);
+      throw python_error();
+    }
+
+    if(THTensor_(nDimension)(LIBRARY_STATE tresult.get()) == 1) {
+      sresult = tresult.get()->storage;
+      storage_offset = tresult->storageOffset + tresult->stride[0] * idx;
+      tresult = NULL;
+    } else {
+      THTensor_(select)(LIBRARY_STATE tresult.get(), NULL, indexed_dim, idx);
+    }
+  } else if (index == Py_None) {
+    // _indexOnce will never be called with tresult == NULL, except for a None index
+    if (!tresult) {
+      tresult = THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, 1);
+      sresult = NULL;
+    } else {
+      THTensor_(unsqueeze1d)(LIBRARY_STATE tresult.get(), NULL, indexed_dim++);
+    }
   // Indexing with a slice
   } else if (PySlice_Check(index)) {
-    tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
-    Py_ssize_t start, end, length;
-    if (!THPUtils_parseSlice(index, THTensor_(size)(LIBRARY_STATE tresult.get(), 0), &start, &end, &length))
-      return false;
-    THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, 0, start, length);
-    return true;
-  } else if (THPIndexTensor_Check(index)) {
-    if (allow_index) {
-      THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
-      tresult = THTensor_(new)(LIBRARY_STATE_NOARGS);
-      THTensor_(indexSelect)(LIBRARY_STATE tresult.get(), self->cdata, 0, index_t);
-      return true;
-    } else {
-      THPUtils_setError("assignments using LongTensors as index aren't supported yet");
-      tresult = NULL;
-      return false;
+    Py_ssize_t start, end, length, step;
+    if (!THPUtils_parseSlice(index, THTensor_(size)(LIBRARY_STATE tresult.get(), indexed_dim), &start, &end, &step, &length))
+      throw python_error();
+    if (step <= 0) {
+      PyErr_SetString(PyExc_ValueError, "slice step has to be greater than 0");
+      throw python_error();
     }
-  // Indexing multiple dimensions
-  } else if(PyTuple_Check(index)) {
+    THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, indexed_dim, start, length * step);
+    tresult->stride[indexed_dim] *= step;
+    tresult->size[indexed_dim] /= step;
+    indexed_dim++;
+  // Indexing with a LongTensor
+  } else if (THPIndexTensor_Check(index)) {
+    if (!allow_index)
+      throw std::runtime_error("assignments using LongTensors as index aren't supported yet");
+    THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
+    THTensorPtr index_result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+    THTensor_(indexSelect)(LIBRARY_STATE index_result.get(), tresult.get(), indexed_dim++, index_t);
+    tresult = index_result.release();
+  } else {
+    return false;
+  }
+  return true;
+}
+
+
+template<bool allow_index>
+static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
+    THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
+{
+  tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
+  sresult = NULL;
+  int indexed_dim = 0;
+  if(PyTuple_Check(index)) {
     long num_index_dim = (long)PyTuple_Size(index);
     long num_effective_index = num_index_dim;
     long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
-    long ellipsis_idx = num_tensor_dim + 1;
+    long ellipsis_idx = -1;
     for (int i = 0; i < num_index_dim; i++) {
-      if (PyTuple_GET_ITEM(index, i) == Py_Ellipsis) {
+      PyObject *dimidx = PyTuple_GET_ITEM(index, i);
+      if (dimidx == Py_Ellipsis) {
+        if (ellipsis_idx != -1) throw std::runtime_error("ellipsis can be used at most once");
         ellipsis_idx = i;
         num_effective_index--;
-        break;
+      }
+      if (dimidx == Py_None) {
+        num_effective_index--;
       }
     }
     if (num_effective_index > num_tensor_dim) {
@@ -512,53 +523,26 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
       return false;
     }
 
-    tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
-    int t_dim = 0;
     bool valid = true;
-    for(int dim = 0; dim < num_index_dim; dim++) {
+    for (int dim = 0; dim < num_index_dim; dim++) {
       if (dim == ellipsis_idx) {
-        t_dim = tresult->nDimension - (num_index_dim - dim - 1);
+        // tresult can be NULL if ellipsis is the last item
+        if (tresult) indexed_dim = tresult->nDimension - (num_index_dim - dim - 1);
         continue;
       }
       PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
-      if(IS_SCALAR(dimidx)) {
-        INDEX_SCALAR(t_dim, dimidx, tresult,
-            // 1D tensor
-            sresult = tresult->storage;
-            storage_offset = GET_OFFSET(tresult, idx);
-            tresult = NULL;
-            return true,
-            // >1D tensor
-            THTensor_(select)(LIBRARY_STATE tresult.get(), NULL, t_dim, idx)
-          )
-      } else if (PySlice_Check(dimidx)) {
-        Py_ssize_t start, end, length;
-        long size_dim = THTensor_(size)(LIBRARY_STATE tresult.get(), t_dim);
-        if (!THPUtils_parseSlice(dimidx, size_dim, &start, &end, &length))
-          return false;
-        THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, t_dim++, start, length);
-      } else if (THPIndexTensor_Check(dimidx)) {
-        if (allow_index) {
-          THIndexTensor *index_t = ((THPIndexTensor*)dimidx)->cdata;
-          THTensorPtr index_result = THTensor_(new)(LIBRARY_STATE_NOARGS);
-          THTensor_(indexSelect)(LIBRARY_STATE index_result.get(), tresult.get(), t_dim++, index_t);
-          tresult = index_result.release();
-        } else {
-          THPUtils_setError("assignments using LongTensors as index aren't supported yet");
-          tresult = NULL;
-          return false;
-        }
-      } else {
+      valid = THPTensor_(_indexOnce)<allow_index>(dimidx, indexed_dim, tresult, sresult, storage_offset);
+      if (!valid) {
         tresult = NULL;
-        valid = false;
         // overwrite this, so the message mentions the incorrect object
         index = dimidx;
         break;
       }
     }
-    if (valid) {
+    if (valid) return true;
+  } else {
+    if (THPTensor_(_indexOnce)<allow_index>(index, indexed_dim, tresult, sresult, storage_offset))
       return true;
-    }
   }
 
   PyErr_Format(PyExc_TypeError, "indexing a tensor with an object of type %s. "
@@ -566,18 +550,15 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
 #ifdef WITH_NUMPY
       ", numpy scalars"
 #endif
-      " and "
 #ifndef THC_GENERIC_FILE
-      "torch.ByteTensor.",
+      "torch.LongTensor and torch.ByteTensor.",
 #else
-      "torch.cuda.ByteTensor.",
+      "torch.cuda.LongTensor and torch.cuda.ByteTensor.",
 #endif
     THPUtils_typename(index));
   return false;
 }
 #undef IS_SCALAR
-#undef INDEX_SCALAR
-#undef GET_OFFSET
 #undef THIndexTensor
 #undef THIndexTensor_
 #undef THPIndexTensor

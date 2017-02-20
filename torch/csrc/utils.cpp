@@ -544,33 +544,6 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   PyErr_SetString(PyExc_TypeError, error_msg.c_str());
 }
 
-
-
-bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart, Py_ssize_t *ostop, Py_ssize_t *oslicelength)
-{
-  Py_ssize_t start, stop, step, slicelength;
-  if (PySlice_GetIndicesEx(
-// https://bugsfiles.kde.org/attachment.cgi?id=61186
-#if PY_VERSION_HEX >= 0x03020000
-         slice,
-#else
-         (PySliceObject *)slice,
-#endif
-         len, &start, &stop, &step, &slicelength) < 0) {
-    return false;
-  }
-  if (step != 1) {
-    THPUtils_setError("Trying to slice with a step of %ld, but only a step of "
-        "1 is supported", (long)step);
-    return false;
-  }
-  *ostart = start;
-  *ostop = stop;
-  if(oslicelength)
-    *oslicelength = slicelength;
-  return true;
-}
-
 template<>
 void THPPointer<THPGenerator>::free() {
   if (ptr)
