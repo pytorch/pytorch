@@ -505,7 +505,7 @@ class GRUCell(RNNCellBase):
 
     Examples::
 
-        >>> rnn = nn.RNNCell(10, 20)
+        >>> rnn = nn.GRUCell(10, 20)
         >>> input = Variable(torch.randn(6, 3, 10))
         >>> hx = Variable(torch.randn(3, 20))
         >>> output = []
