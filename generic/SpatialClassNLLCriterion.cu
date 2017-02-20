@@ -78,6 +78,12 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       blocks_per_sample
   );
   THCudaCheck(cudaGetLastError());
+  if (sizeAverage) {
+    cunn_SpatialClassNLLCriterion_sizeAverage_kernel<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+      output_data, total_weight_data
+    );
+    THCudaCheck(cudaGetLastError());
+  }
 
   if (weights)
     THCTensor_(free)(state, weights);
