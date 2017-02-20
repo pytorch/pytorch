@@ -276,11 +276,6 @@ THCTensor_(prodall)(THCState *state, THCTensor *self) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
 
-  val = THCNumerics<accreal>::div(
-    val,
-    ScalarConvert<long, accreal>::to(THCTensor_(nElement)(state, self)) - 1
-  );
-
   THCudaCheck(cudaGetLastError());
   return val;
 }
