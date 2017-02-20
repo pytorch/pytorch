@@ -5,7 +5,7 @@ from .optimizer import Optimizer
 class Adamax(Optimizer):
     """Implements Adamax algorithm (a variant of Adam based on infinity norm).
 
-    It has been proposed in `ADADELTA: An Adaptive Learning Rate Method`__.
+    It has been proposed in `Adam: A Method for Stochastic Optimization`__.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -17,7 +17,7 @@ class Adamax(Optimizer):
             numerical stability (default: 1e-38)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
-    __ https://arxiv.org/abs/1609.05158
+    __ https://arxiv.org/abs/1412.6980
     """
 
     def __init__(self, params, lr=1e-2, betas=(0.9, 0.999), eps=1e-38,
