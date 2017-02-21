@@ -449,10 +449,10 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
-    ndim = input.ndim()
-    if ndim == 2:
+    dim = input.dim()
+    if dim == 2:
         return nll_loss(log_softmax(input), target, weight, size_average)
-    elif ndim() == 4:
+    elif dim == 4:
         N, C, H, W = input.size()
         log_p = F.log_softmax(input)  # (N, C, H, W)
         log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, C)
@@ -467,7 +467,7 @@ def cross_entropy(input, target, weight=None, size_average=True):
             loss /= N
         return loss
     else:
-        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(ndim))
+        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
