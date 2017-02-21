@@ -8,8 +8,9 @@ void THNN_(MarginCriterion_updateOutput)(
            THCTensor *target,
            THCTensor *output,
            bool sizeAverage,
-           real margin)
+           accreal margin_)
 {
+  real margin = ScalarConvert<accreal, real>::to(margin_);
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_dim_size(state, output, 1, 0, 1);
   THCUNN_assertSameGPU(state, 2, input, target);
@@ -40,8 +41,10 @@ void THNN_(MarginCriterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradInput,
            bool sizeAverage,
-           real margin)
+           accreal margin_)
 {
+  real margin = ScalarConvert<accreal, real>::to(margin_);
+
   THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 

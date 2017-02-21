@@ -335,18 +335,19 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
 
 
 void THNN_(VolumetricFullConvolution_accGradParameters)(
-       THCState *state,
-       THCTensor  *input,
-       THCTensor  *gradOutput,
-       THCTensor  *gradWeight,
-       THCTensor  *gradBias,
-       THCTensor  *finput,
-       THCTensor  *fgradInput,
-       int dT, int dW, int dH,
-       int padT, int padW, int padH,
-       int adjT, int adjW, int adjH,
-       real scale)
+           THCState *state,
+           THCTensor  *input,
+           THCTensor  *gradOutput,
+           THCTensor  *gradWeight,
+           THCTensor  *gradBias,
+           THCTensor  *finput,
+           THCTensor  *fgradInput,
+           int dT, int dW, int dH,
+           int padT, int padW, int padH,
+           int adjT, int adjW, int adjH,
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCTensor  *columns = finput;
   THCTensor  *ones = fgradInput;
 
