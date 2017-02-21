@@ -8,10 +8,8 @@ Readers and Writers must be implemented such that read and write operations
 are atomic and thread safe.
 
 Examples of possible Readers and Writers:
-    HiveReader, HiveWriter,
     QueueReader, QueueWriter,
     DatasetReader, DatasetWriter,
-    DBReader, DBWriter,
 
 See `dataset.py` for an example of implementation.
 """
@@ -32,7 +30,7 @@ class Reader(object):
 
     def schema(self):
         """
-        Return the schema associated with the Hive Reader
+        Return the schema associated with the Reader
         """
         assert self._schema is not None, 'Schema not provided for this reader.'
         return self._schema
@@ -237,7 +235,7 @@ class PipedReaderBuilder(ReaderBuilder):
     E.g.:
 
     PipedReaderBuilder(
-        HiveReaderBuilder(...),
+        ReaderBuilder(...),
         lambda reader: pipe(reader, processor=my_proc))
     """
 
