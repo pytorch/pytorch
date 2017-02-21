@@ -33,25 +33,23 @@ static bool THPModule_loadClasses(PyObject *self)
     THPUtils_setError("class loader couldn't access torch module");
     return false;
   }
-  PyObject* module_dict = PyModule_GetDict(torch_module);
 
-  ASSERT_NOT_NULL(tensor_classes = PyMapping_GetItemString(module_dict, (char*)"_tensor_classes"));
+  ASSERT_NOT_NULL(tensor_classes = PyObject_GetAttrString(torch_module, (char*)"_tensor_classes"));
+  if (!THPDoubleTensor_postInit(torch_module)) return false;
+  if (!THPFloatTensor_postInit(torch_module)) return false;
+  if (!THPLongTensor_postInit(torch_module)) return false;
+  if (!THPIntTensor_postInit(torch_module)) return false;
+  if (!THPShortTensor_postInit(torch_module)) return false;
+  if (!THPCharTensor_postInit(torch_module)) return false;
+  if (!THPByteTensor_postInit(torch_module)) return false;
 
-  ASSERT_NOT_NULL(THPDoubleStorageClass = PyMapping_GetItemString(module_dict,(char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THPFloatStorageClass  = PyMapping_GetItemString(module_dict,(char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THPLongStorageClass   = PyMapping_GetItemString(module_dict,(char*)"LongStorage"));
-  ASSERT_NOT_NULL(THPIntStorageClass    = PyMapping_GetItemString(module_dict,(char*)"IntStorage"));
-  ASSERT_NOT_NULL(THPShortStorageClass  = PyMapping_GetItemString(module_dict,(char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THPCharStorageClass   = PyMapping_GetItemString(module_dict,(char*)"CharStorage"));
-  ASSERT_NOT_NULL(THPByteStorageClass   = PyMapping_GetItemString(module_dict,(char*)"ByteStorage"));
-
-  ASSERT_NOT_NULL(THPDoubleTensorClass  = PyMapping_GetItemString(module_dict,(char*)"DoubleTensor"));
-  ASSERT_NOT_NULL(THPFloatTensorClass   = PyMapping_GetItemString(module_dict,(char*)"FloatTensor"));
-  ASSERT_NOT_NULL(THPLongTensorClass    = PyMapping_GetItemString(module_dict,(char*)"LongTensor"));
-  ASSERT_NOT_NULL(THPIntTensorClass     = PyMapping_GetItemString(module_dict,(char*)"IntTensor"));
-  ASSERT_NOT_NULL(THPShortTensorClass   = PyMapping_GetItemString(module_dict,(char*)"ShortTensor"));
-  ASSERT_NOT_NULL(THPCharTensorClass    = PyMapping_GetItemString(module_dict,(char*)"CharTensor"));
-  ASSERT_NOT_NULL(THPByteTensorClass    = PyMapping_GetItemString(module_dict,(char*)"ByteTensor"));
+  ASSERT_NOT_NULL(THPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
+  ASSERT_NOT_NULL(THPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
+  ASSERT_NOT_NULL(THPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
+  ASSERT_NOT_NULL(THPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
+  ASSERT_NOT_NULL(THPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
+  ASSERT_NOT_NULL(THPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
+  ASSERT_NOT_NULL(THPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
 
   return true;
 #undef ASSERT_NOT_NULL
@@ -92,6 +90,7 @@ static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_
   libshm_init(THPUtils_bytesAsString(shm_manager_path));
   if (!THPModule_loadClasses(self))         return NULL;
   if (!THPModule_assignStateless(self))     return NULL;
+  if (!THPAutograd_initFunctions(self))     return NULL;
   return PyBool_FromLong(true);
 }
 
@@ -243,6 +242,7 @@ IMPLEMENT_STATELESS(topk)
 IMPLEMENT_STATELESS(t)
 IMPLEMENT_STATELESS(transpose)
 IMPLEMENT_STATELESS(squeeze)
+IMPLEMENT_STATELESS(unsqueeze)
 IMPLEMENT_STATELESS(renorm)
 IMPLEMENT_STATELESS(dist)
 IMPLEMENT_STATELESS(linspace)
@@ -593,6 +593,7 @@ static PyMethodDef TorchMethods[] = {
   {"t",               (PyCFunction)THPModule_t,                 METH_VARARGS | METH_KEYWORDS, NULL},
   {"transpose",       (PyCFunction)THPModule_transpose,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"squeeze",         (PyCFunction)THPModule_squeeze,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"unsqueeze",       (PyCFunction)THPModule_unsqueeze,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero",         (PyCFunction)THPModule_nonzero,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"renorm",          (PyCFunction)THPModule_renorm,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"dist",            (PyCFunction)THPModule_dist,              METH_VARARGS | METH_KEYWORDS, NULL},

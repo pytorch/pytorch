@@ -4,7 +4,7 @@ import torch
 import traceback
 import unittest
 from torch.utils.data import Dataset, TensorDataset, DataLoader
-from common import TestCase, run_tests
+from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
 
@@ -27,8 +27,8 @@ class TestTensorDataset(TestCase):
         l = torch.randn(15)
         source = TensorDataset(t, l)
         for i in range(15):
-            self.assertEqual(t[i:i + 1], source[i][0])
-            self.assertEqual(l[i:i + 1], source[i][1])
+            self.assertEqual(t[i], source[i][0])
+            self.assertEqual(l[i], source[i][1])
 
 
 class ErrorDataset(Dataset):
@@ -52,7 +52,7 @@ class TestDataLoader(TestCase):
         for i, (sample, target) in enumerate(loader):
             idx = i * batch_size
             self.assertEqual(sample, self.data[idx:idx + batch_size])
-            self.assertEqual(target, self.labels[idx:idx + batch_size].view(-1, 1))
+            self.assertEqual(target, self.labels[idx:idx + batch_size])
         self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_shuffle(self, loader):
@@ -66,7 +66,7 @@ class TestDataLoader(TestCase):
                         self.assertFalse(found_data[data_point_idx])
                         found_data[data_point_idx] += 1
                         break
-                self.assertEqual(target, self.labels.narrow(0, data_point_idx, 1))
+                self.assertEqual(target, self.labels[data_point_idx])
                 found_labels[data_point_idx] += 1
             self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
             self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
@@ -122,6 +122,22 @@ class TestDataLoader(TestCase):
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_numpy(self):
+        import numpy as np
+
+        class TestDataset(torch.utils.data.Dataset):
+            def __getitem__(self, i):
+                return np.ones((2, 3, 4)) * i
+
+            def __len__(self):
+                return 1000
+
+        loader = DataLoader(TestDataset(), batch_size=12)
+        batch = next(iter(loader))
+        self.assertIsInstance(batch, torch.DoubleTensor)
+        self.assertEqual(batch.size(), torch.Size([12, 2, 3, 4]))
 
     def test_error(self):
         self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))

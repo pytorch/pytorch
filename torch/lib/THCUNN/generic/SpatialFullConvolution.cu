@@ -182,7 +182,6 @@ void THNN_(SpatialFullConvolution_updateOutput)(
           THCTensor_(data)(state, output_n), n_
       );
     }
-
   }
 
   // Free

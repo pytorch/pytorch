@@ -29,6 +29,7 @@ class ConvNd(Function):
     def forward(self, input, weight, bias=None):
         k = input.dim()
         self.save_for_backward(input, weight, bias)
+        input = input.contiguous()
         if k == 3:
             input, weight = _view4d(input, weight)
         output = self._update_output(input, weight, bias)
@@ -38,7 +39,9 @@ class ConvNd(Function):
 
     def backward(self, grad_output):
         k = grad_output.dim()
+        grad_output = grad_output.contiguous()
         input, weight, bias = self.saved_tensors
+        input = input.contiguous()
         if k == 3:
             grad_output, input, weight = _view4d(grad_output, input, weight)
         grad_input = (self._grad_input(input, weight, grad_output)
@@ -68,6 +71,9 @@ class ConvNd(Function):
                     (in_size - 1) * stride - (2 * pad) + kernel + out_pad,)
             else:
                 output_size += ((in_size + (2 * pad) - kernel) // stride + 1,)
+        if not all(map(lambda s: s > 0, output_size)):
+            raise ValueError("convolution input is too small (output would be {})".format(
+                             'x'.join(map(str, output_size))))
         return output_size
 
     def _update_output(self, input, weight, bias):

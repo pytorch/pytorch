@@ -16,7 +16,7 @@ struct TensorATan2Op {
 
 void THCudaTensor_atan2(THCState *state, THCudaTensor *self_, THCudaTensor *tx, THCudaTensor *ty)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, self_, tx, ty));
+  THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, self_, tx, ty));
   THArgCheck(THCudaTensor_nElement(state, tx) ==
              THCudaTensor_nElement(state, ty), 3, "sizes do not match");
   THCudaTensor_resizeAs(state, self_, tx);

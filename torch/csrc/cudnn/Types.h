@@ -6,11 +6,13 @@
 #include <string>
 #include <cudnn.h>
 #include "../Types.h"
+#include <THPP/THPP.h>
 
 namespace torch { namespace cudnn {
 
 PyObject * getTensorClass(PyObject *args);
 cudnnDataType_t getCudnnDataType(PyObject *tensorClass);
+cudnnDataType_t getCudnnDataType(const thpp::Tensor& tensor);
 void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& name);
 
 #define THVoidTensor_assertContiguous(tensor) \

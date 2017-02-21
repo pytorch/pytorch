@@ -21,14 +21,8 @@ class Parameter(Variable):
         requires_grad (bool, optional): if the parameter requires gradient. See
             :ref:`excluding-subgraphs` for more details.
     """
-
-    def __init__(self, data, requires_grad=True):
-        super(Parameter, self).__init__(data, requires_grad=requires_grad)
-
-    def __deepcopy__(self, memo):
-        result = type(self)(self.data.clone(), self.requires_grad)
-        memo[id(self)] = result
-        return result
+    def __new__(cls, data=None, requires_grad=True):
+        return super(Parameter, cls).__new__(cls, data, requires_grad=requires_grad)
 
     def __repr__(self):
         return 'Parameter containing:' + self.data.__repr__()

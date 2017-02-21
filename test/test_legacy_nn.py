@@ -1154,6 +1154,15 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
+    def test_accUpdateGradParameters(self):
+        module = nn.LookupTable(5, 3)
+        module.weight.fill_(2)
+        input = torch.LongTensor([1, 3])
+        output = module.updateOutput(input)
+        module.backwardUpdate(input, output, 0.1)
+        self.assertEqual(module.weight[0, 0], 2)
+        self.assertEqual(module.weight[3, 0], 1.8)
+
     def _build_net(self):
         return (nn.Sequential()
                 .add(nn.Concat(0)

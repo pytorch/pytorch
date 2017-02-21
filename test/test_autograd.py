@@ -74,6 +74,7 @@ class TestAutograd(TestCase):
             counter[0] += inc
 
         z = x ** 2 + x * 2 + x * y + y
+        x.register_hook(lambda *args: bw_hook(0, *args))
         test = z.register_hook(lambda *args: bw_hook(1, *args))
         z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 1)
@@ -253,6 +254,24 @@ class TestAutograd(TestCase):
         y._backward_hooks['test'] = error
         b.backward(torch.ones(5, 5))
 
+    def test_previous_functions(self):
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        a = x + y
+        self.assertIsNotNone(a.creator)
+        previous_functions = a.creator.previous_functions
+        self.assertEqual(len(previous_functions), 2)
+        self.assertIs(previous_functions[0][0], x)
+        self.assertEqual(previous_functions[0][1], 0)
+        self.assertIs(previous_functions[1][0], y)
+        self.assertEqual(previous_functions[1][1], 0)
+
+        b = a + 5
+        previous_functions = b.creator.previous_functions
+        self.assertEqual(len(previous_functions), 1)
+        self.assertIs(previous_functions[0][0], a.creator)
+
     def test_inplace(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
@@ -408,12 +427,29 @@ class TestAutograd(TestCase):
         y = x * 2
         y = y.detach()
         self.assertFalse(y.requires_grad)
-        self.assertFalse(y.creator.requires_grad)
+        self.assertIsNone(y.creator)
         z = x + y
         z.sum().backward()
         # This is an incorrect gradient, but we assume that's what the user
         # wanted. detach() is an advanced option.
         self.assertEqual(x.grad.data, torch.ones(10, 10))
+
+        # detach() should preserve volatile flag
+        x = Variable(torch.randn(10, 10), volatile=True)
+        y = x * 2
+        y = y.detach()
+        self.assertTrue(y.volatile)
+
+        # in-place detach
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        y = Variable(torch.randn(10, 10), requires_grad=True)
+        a = x * 2
+        (y + a).sum().backward(retain_variables=True)
+        a.detach_()
+        self.assertFalse(a.requires_grad)
+        (y + a).sum().backward()  # this won't backprop to x
+        self.assertEqual(x.grad.data, torch.ones(10, 10) * 2)
+        self.assertEqual(y.grad.data, torch.ones(10, 10) * 2)
 
     def test_type_conversions(self):
         import torch.cuda
@@ -434,6 +470,15 @@ class TestAutograd(TestCase):
                 x2 = x2.cuda(1)
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
+
+    def test_isolated_node(self):
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        a = x + y
+        b = torch.max(a, 1)[1].repeat(1, 5).double()
+        o = (b + a).sum()
+        o.backward()
 
     def test_return_leaf(self):
         class Identity(Function):
@@ -609,6 +654,31 @@ class TestAutograd(TestCase):
         y.sum().backward()
         self.assertEqual(x.grad.data, x.data.clone().fill_(1))
 
+    def test_reinforce_check(self):
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+
+        # these should be ok
+        y = torch.normal(x)
+        y.reinforce(torch.randn(5, 5))
+        y = torch.normal(x)
+        y.reinforce(2)
+
+        # can't call reinforce on non-stochastic variables
+        self.assertRaises(RuntimeError, lambda: x.reinforce(2))
+
+        # can't call reinforce twice
+        y = torch.normal(x)
+        y.reinforce(2)
+        self.assertRaises(RuntimeError, lambda: y.reinforce(2))
+
+        # check type of reward
+        y = torch.normal(x)
+        self.assertRaises(TypeError, lambda: y.reinforce(torch.randn(5, 5).long()))
+
+        # check size of reward
+        y = torch.normal(x)
+        self.assertRaises(ValueError, lambda: y.reinforce(torch.randn(4, 5)))
+
     def test_stochastic(self):
         x = Variable(torch.rand(2, 10), requires_grad=True)
         stddevs = Variable(torch.rand(2, 10) * 5, requires_grad=True)
@@ -644,6 +714,18 @@ class TestAutograd(TestCase):
         last_sample.backward(retain_variables=True)
         z.backward()
 
+        self.assertGreater(x.grad.data.abs().sum(), 0)
+
+    def test_stochastic_require_grad(self):
+        # This tests a DSD function sequence (D=deterministic, S=stochastic),
+        # where all functions require grad.
+        x = Variable(torch.randn(2, 10), requires_grad=True)
+        y = Variable(torch.randn(2, 10), requires_grad=True)
+        z = torch.normal(x + 2, 2)
+        o = z + y
+        z.reinforce(torch.randn(2, 10))
+        o.sum().backward()
+        self.assertEqual(y.grad.data, torch.ones(2, 10))
         self.assertGreater(x.grad.data.abs().sum(), 0)
 
     def test_stochastic_sequence(self):
@@ -819,8 +901,8 @@ function_tests = [
     (Norm, (3, 0), ((S, S, S),), '3_dim'),
     (Addcmul, (), ((S, S), (S, S), (S, S))),
     (Addcmul, (0.6,), ((S, S), (S, S), (S, S)), 'scale'),
-    (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 1e-2)),
-    (Addcdiv, (0.6,), ((S, S), (S, S), torch.rand(S, S) + 1e-2), 'scale'),
+    (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2)),
+    (Addcdiv, (0.6,), ((S, S), (S, S), torch.rand(S, S) + 5e-2), 'scale'),
     (IndexAdd, (0,), ((S, S), index_variable(2, S), (2, S))),
     # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill, (0, 2), ((S, S), index_variable(2, S))),

@@ -30,6 +30,11 @@ auto THTensor<real>::clone_shallow() -> THTensor* {
 }
 
 template<>
+auto THTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
+  return std::unique_ptr<Tensor>(new THTensor(THTensor_(newContiguous)(tensor)));
+}
+
+template<>
 int THTensor<real>::nDim() const {
   return tensor->nDimension;
 }
@@ -142,6 +147,20 @@ auto THTensor<real>::set(const Tensor& src) -> THTensor& {
 template<>
 auto THTensor<real>::setStorage(const Storage& storage,
                                 ptrdiff_t storageOffset,
+                                const long_range& size,
+                                const long_range& stride) -> THTensor& {
+  auto raw_storage = dynamic_cast<const THStorage<real>&>(storage).getRaw();
+  int nDimension = size.size();
+  auto raw_size = const_cast<long*>(size.data());
+  auto raw_stride = const_cast<long*>(stride.empty() ? nullptr : stride.data());
+  THTensor_(setStorageNd)(
+      tensor, raw_storage, storageOffset, nDimension, raw_size, raw_stride);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::setStorage(const Storage& storage,
+                                ptrdiff_t storageOffset,
                                 THLongStorage *size,
                                 THLongStorage *stride) -> THTensor& {
   THTensor_(setStorage)(
@@ -193,11 +212,25 @@ auto THTensor<real>::transpose(const Tensor& src, int dimension1,
 
 template<>
 auto THTensor<real>::unfold(const Tensor& src, int dimension,
-                            long size, long step) ->THTensor& {
+                            long size, long step) -> THTensor& {
   auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
   if (tensor != src_raw)
     set(src);
   THTensor_(unfold)(tensor, src_raw, dimension, size, step);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::squeeze(const Tensor& src, int dimension) -> THTensor& {
+  auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
+  THTensor_(squeeze1d)(tensor, src_raw, dimension);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THTensor& {
+  auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
+  THTensor_(unsqueeze1d)(tensor, src_raw, dimension);
   return *this;
 }
 
@@ -221,6 +254,17 @@ auto THTensor<real>::free() -> THTensor& {
 
 #define non_const_cast(tensor) const_cast<THTensor&>(dynamic_cast<const THTensor&>(tensor))
 #define non_const_long_cast(tensor) const_cast<THTensor<long>&>(dynamic_cast<const THTensor<long>&>(tensor))
+
+template<>
+auto THTensor<real>::cat(const std::vector<Tensor*>& src, int dimension) -> THTensor& {
+  int num_inputs = src.size();
+  std::vector<tensor_type*> inputs(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    inputs[i] = non_const_cast(*src[i]).tensor;
+  }
+  THTensor_(catArray)(tensor, inputs.data(), num_inputs, dimension);
+  return *this;
+}
 
 template<>
 auto THTensor<real>::gather(const Tensor& src, int dimension, const Tensor& index) -> THTensor& {

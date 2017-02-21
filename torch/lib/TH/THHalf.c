@@ -2,13 +2,28 @@
 
 /* Copyright 1993-2014 NVIDIA Corporation.  All rights reserved. */
 
+THHalf TH_float2half(float f)
+{
+  THHalf h;
+  TH_float2halfbits(&f, &h.x);
+  return h;
+}
+
+TH_API float TH_half2float(THHalf h)
+{
+  float f;
+  TH_halfbits2float(&h.x, &f);
+  return f;
+}
+
 // Host functions for converting between FP32 and FP16 formats
 
-float TH_half2float(THHalf h)
+void TH_halfbits2float(unsigned short* src, float* res)
 {
-    unsigned sign = ((h.x >> 15) & 1);
-    unsigned exponent = ((h.x >> 10) & 0x1f);
-    unsigned mantissa = ((h.x & 0x3ff) << 13);
+    unsigned h = *src;
+    unsigned sign = ((h >> 15) & 1);
+    unsigned exponent = ((h >> 10) & 0x1f);
+    unsigned mantissa = ((h & 0x3ff) << 13);
 
     if (exponent == 0x1f) {  /* NaN or Inf */
         mantissa = (mantissa ? (sign = 0, 0x7fffff) : 0);
@@ -28,37 +43,31 @@ float TH_half2float(THHalf h)
         exponent += 0x70;
     }
 
-    int temp = ((sign << 31) | (exponent << 23) | mantissa);
-    float x;
-    memcpy(&x,&temp,sizeof(float));
-    return x;
+    *(unsigned*)res = ((sign << 31) | (exponent << 23) | mantissa);
 }
 
-THHalf TH_float2half(float f)
+void TH_float2halfbits(float* src, unsigned short* dest)
 {
-    THHalf ret;
-
-    unsigned x;
-    memcpy(&x,&f,sizeof(f));
+    unsigned x = *(unsigned*)src;
     unsigned u = (x & 0x7fffffff), remainder, shift, lsb, lsb_s1, lsb_m1;
     unsigned sign, exponent, mantissa;
 
     // Get rid of +NaN/-NaN case first.
     if (u > 0x7f800000) {
-        ret.x = 0x7fffU;
-        return ret;
+      *dest = 0x7fffU;
+      return ;
     }
   
     sign = ((x >> 16) & 0x8000);
   
     // Get rid of +Inf/-Inf, +0/-0.
     if (u > 0x477fefff) {
-        ret.x = sign | 0x7c00U;
-        return ret;
+      *dest = sign | 0x7c00U;
+      return; 
     }
     if (u < 0x33000001) {
-        ret.x = (sign | 0x0000);
-        return ret;
+      *dest = (sign | 0x0000);
+      return;
     }
 
     exponent = ((u >> 23) & 0xff);
@@ -87,6 +96,5 @@ THHalf TH_float2half(float f)
         }
     }  
 
-    ret.x = (sign | (exponent << 10) | mantissa);  
-    return ret;
+    *dest = (sign | (exponent << 10) | mantissa);  
 }

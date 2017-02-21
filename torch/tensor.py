@@ -1,27 +1,7 @@
 import torch
 from . import _tensor_str
 from ._utils import _type, _cuda, _range
-from functools import reduce
-from itertools import chain
 import sys
-import math
-
-
-def _infer_sizes(sizes, total):
-    to_infer = -1
-    total_sizes = 1
-    for i, size in enumerate(sizes):
-        total_sizes *= size
-        if size == -1:
-            if to_infer >= 0:
-                raise RuntimeError
-            to_infer = i
-    if to_infer >= 0:
-        assert total % total_sizes == 0, "Can't make sizes have exactly %d elements" % total
-        sizes = list(sizes)
-        sizes[to_infer] = -total // total_sizes
-        return torch.Size(sizes)
-    return sizes
 
 
 class _TensorBase(object):
@@ -175,47 +155,6 @@ class _TensorBase(object):
             return [subt.tolist() for subt in self]
         return []
 
-    def view(self, *args):
-        """Returns a new tensor with the same data but different size.
-
-        The returned tensor shares the same data and must have the same number
-        of elements, but may have a different size. A tensor must be
-        :func:`contiguous` to be viewed.
-
-        Args:
-            args (torch.Size or int...): Desired size
-
-        Example:
-            >>> x = torch.randn(4, 4)
-            >>> x.size()
-            torch.Size([4, 4])
-            >>> y = x.view(16)
-            >>> y.size()
-            torch.Size([16])
-            >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
-            >>> z.size()
-            torch.Size([2, 8])
-        """
-        dst = self.new()
-        if len(args) == 1 and isinstance(args[0], torch.Size):
-            sizes = args[0]
-        else:
-            sizes = torch.Size(args)
-        sizes = _infer_sizes(sizes, self.nelement())
-        numel = reduce(lambda a, b: a * b, sizes) if len(sizes) > 0 else 0
-
-        if numel != self.nelement():
-            def format_size(size):
-                return 'x'.join(str(v) for v in size) if len(size) > 0 else '0'
-            raise ValueError(
-                "view of size '{0}' is invalid for input of size '{1}'"
-                .format(format_size(sizes), format_size(self.size())))
-        if not self.is_contiguous():
-            raise ValueError("input should be contiguous")
-        if self.storage() is not None:
-            dst.set_(self.storage(), self.storage_offset(), sizes)
-        return dst
-
     def view_as(self, tensor):
         """Returns this tensor viewed as the size as the specified tensor.
 
@@ -359,38 +298,6 @@ class _TensorBase(object):
         xxtensor = xtensor.expand_as(urtensor)
         urtensor.copy_(xxtensor)
         return result
-
-    def unsqueeze(self, dim):
-        """Returns a new tensor with a dimension of size one inserted at the
-        specified position.
-
-        The returned tensor shares the same underlying data with this tensor.
-
-        Args:
-            dim (int): The index at which to insert the singleton dimension
-
-        Example:
-            >>> x = torch.Tensor([1, 2, 3, 4])
-            >>> x.unsqueeze(0)
-             1  2  3  4
-            [torch.FloatTensor of size 1x4]
-            >>> x.unsqueeze(1)
-             1
-             2
-             3
-             4
-            [torch.FloatTensor of size 4x1]
-        """
-        return self.new(self).unsqueeze_(dim)
-
-    def unsqueeze_(self, dim):
-        """In-place version of :meth:`unsqueeze`."""
-        sizes = list(self.size())
-        sizes.insert(dim, 1)
-        strides = list(self.stride())
-        strides.insert(dim, strides[dim] if len(strides) < dim else 1)
-        return self.set_(self.storage(), self.storage_offset(),
-                         torch.Size(sizes), tuple(strides))
 
     # TODO: add tests for operators
     def __add__(self, other):

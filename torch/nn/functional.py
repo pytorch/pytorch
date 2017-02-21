@@ -167,7 +167,7 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         raise ValueError('expected 3D input (got {} dimensions)'
                          .format(input.dim()))
     kernel_size = _single(kernel_size) + (1,)
-    stride = _single(stride) + (1,)
+    stride = _single(stride) + (1,) if stride is not None else kernel_size
     padding = _single(padding) + (0,)
     f = _functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                   ceil_mode, count_include_pad)

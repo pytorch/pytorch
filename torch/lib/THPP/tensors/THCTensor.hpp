@@ -47,6 +47,7 @@ public:
 
   virtual THCTensor* clone() const override;
   virtual THCTensor* clone_shallow() override;
+  virtual std::unique_ptr<Tensor> contiguous() const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -71,9 +72,13 @@ public:
   virtual THCTensor& resizeAs(const Tensor& src) override;
   virtual THCTensor& set(const Tensor& src) override;
   virtual THCTensor& setStorage(const Storage& storage,
-                             ptrdiff_t storageOffset,
-                             THLongStorage *size,
-                             THLongStorage *stride) override;
+                                ptrdiff_t storageOffset,
+                                const long_range& size,
+                                const long_range& stride) override;
+  virtual THCTensor& setStorage(const Storage& storage,
+                                ptrdiff_t storageOffset,
+                                THLongStorage *size,
+                                THLongStorage *stride) override;
 
   virtual THCTensor& narrow(const Tensor& src, int dimension,
                            long firstIndex, long size) override;
@@ -83,9 +88,12 @@ public:
                               int dimension2) override;
   virtual THCTensor& unfold(const Tensor& src, int dimension,
                            long size, long step) override;
+  virtual THCTensor& squeeze(const Tensor& src, int dimension) override;
+  virtual THCTensor& unsqueeze(const Tensor& src, int dimension) override;
 
   virtual THCTensor& fill(scalar_type value) override;
 
+  virtual THCTensor& cat(const std::vector<Tensor*>& src, int dimension) override;
   virtual THCTensor& gather(const Tensor& src, int dimension, const Tensor& index) override;
   virtual THCTensor& scatter(int dimension, const Tensor& index, const Tensor& src) override;
   virtual THCTensor& scatterFill(int dimension, const Tensor& index, scalar_type value) override;

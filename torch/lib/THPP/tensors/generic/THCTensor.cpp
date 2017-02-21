@@ -30,6 +30,12 @@ auto THCTensor<real>::clone_shallow() -> THCTensor* {
 }
 
 template<>
+auto THCTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
+  return std::unique_ptr<Tensor>(
+      new THCTensor(state, THCTensor_(newContiguous)(state, tensor)));
+}
+
+template<>
 int THCTensor<real>::nDim() const {
   return tensor->nDimension;
 }
@@ -141,9 +147,23 @@ auto THCTensor<real>::set(const Tensor& src) -> THCTensor& {
 
 template<>
 auto THCTensor<real>::setStorage(const Storage& storage,
-                                ptrdiff_t storageOffset,
-                                THLongStorage *size,
-                                THLongStorage *stride) -> THCTensor& {
+                                 ptrdiff_t storageOffset,
+                                 const long_range& size,
+                                 const long_range& stride) -> THCTensor& {
+  auto raw_storage = dynamic_cast<const THCStorage<real>&>(storage).getRaw();
+  int nDimension = size.size();
+  auto raw_size = const_cast<long*>(size.data());
+  auto raw_stride = const_cast<long*>(stride.empty() ? nullptr : stride.data());
+  THCTensor_(setStorageNd)(
+      state, tensor, raw_storage, storageOffset, nDimension, raw_size, raw_stride);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::setStorage(const Storage& storage,
+                                 ptrdiff_t storageOffset,
+                                 THLongStorage *size,
+                                 THLongStorage *stride) -> THCTensor& {
   THCTensor_(setStorage)(state,
     tensor,
     (dynamic_cast<const THCStorage<real>&>(storage)).getRaw(),
@@ -201,6 +221,20 @@ auto THCTensor<real>::unfold(const Tensor& src, int dimension,
   return *this;
 }
 
+template<>
+auto THCTensor<real>::squeeze(const Tensor& src, int dimension) -> THCTensor& {
+  auto src_raw = (dynamic_cast<const THCTensor<real>&>(src)).tensor;
+  THCTensor_(squeeze1d)(state, tensor, src_raw, dimension);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THCTensor& {
+  auto src_raw = (dynamic_cast<const THCTensor<real>&>(src)).tensor;
+  THCTensor_(unsqueeze1d)(state, tensor, src_raw, dimension);
+  return *this;
+}
+
 #ifdef THC_REAL_IS_HALF
 #define cast_scalar(v) THC_float2half(v)
 #define uncast_scalar(v) THC_half2float(v)
@@ -229,6 +263,17 @@ auto THCTensor<real>::free() -> THCTensor& {
 
 #define non_const_cast(tensor) const_cast<THCTensor&>(dynamic_cast<const THCTensor&>(tensor))
 #define non_const_long_cast(tensor) const_cast<THCTensor<long>&>(dynamic_cast<const THCTensor<long>&>(tensor))
+
+template<>
+auto THCTensor<real>::cat(const std::vector<Tensor*>& src, int dimension) -> THCTensor& {
+  int num_inputs = src.size();
+  std::vector<tensor_type*> inputs(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    inputs[i] = non_const_cast(*src[i]).tensor;
+  }
+  THCTensor_(catArray)(state, tensor, inputs.data(), num_inputs, dimension);
+  return *this;
+}
 
 template<>
 auto THCTensor<real>::gather(const Tensor& src, int dimension, const Tensor& index) -> THCTensor& {

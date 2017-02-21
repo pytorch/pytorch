@@ -5,7 +5,7 @@
 THC_API void
 THCTensor_(fill)(THCState* state, THCTensor *self_, real value)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, self_));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
 
   if (!THC_pointwiseApply1(
         state, self_, TensorFillOp<real>(value))) {
@@ -18,7 +18,7 @@ THCTensor_(fill)(THCState* state, THCTensor *self_, real value)
 THC_API void
 THCTensor_(zero)(THCState *state, THCTensor *self_)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, self_));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   if (THCTensor_(isContiguous)(state, self_)) {
     THCudaCheck(cudaMemsetAsync(THCTensor_(data)(state, self_),
                                 0,
@@ -38,7 +38,7 @@ THCTensor_(zero)(THCState *state, THCTensor *self_)
 THC_API void
 THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, r_));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THCTensor_(resize)(state, r_, size, NULL);
   THCTensor_(zero)(state, r_);
 }
@@ -46,7 +46,7 @@ THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size)
 THC_API void
 THCTensor_(ones)(THCState *state, THCTensor *r_, THLongStorage *size)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, r_));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THCTensor_(resize)(state, r_, size, NULL);
   THCTensor_(fill)(state, r_, ScalarConvert<int, real>::to(1));
 }
@@ -54,7 +54,7 @@ THCTensor_(ones)(THCState *state, THCTensor *r_, THLongStorage *size)
 THC_API void
 THCTensor_(reshape)(THCState *state, THCTensor *r_, THCTensor *t, THLongStorage *size)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, r_, t));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, t));
   THCTensor_(resize)(state, r_, size, NULL);
   THCTensor_(copy)(state, r_, t);
 }
@@ -283,8 +283,8 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
                           THCTensor *self)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, self  ));
-  THAssert(THCudaLongTensor_checkGPU(state, 1, tensor));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self  ));
+  THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, tensor));
 
 
   using namespace thrust::placeholders;
@@ -348,7 +348,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 }
 
 void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, long k){
-  THAssert(THCTensor_(checkGPU)(state, 2, self_, src_));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   int nDimension = THCTensor_(nDimension)(state, src_);
   THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
   if (nDimension == 2) {
@@ -382,7 +382,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, long k
 }
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
-  THAssert(THCTensor_(checkGPU)(state, 1, src_));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, src_));
   THArgCheck((src_->nDimension == 2), 1, "expected a matrix");
   THCTensor *diag = THCTensor_(new)(state);
   THCTensor_(diag)(state, diag, src_, 0);

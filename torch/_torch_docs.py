@@ -3621,7 +3621,6 @@ Example::
     >>> y = torch.squeeze(x, 1)
     >>> y.size()
     (2L, 2L, 1L, 2L)
-
 """)
 
 add_docstr(torch._C.std,
@@ -3992,13 +3991,13 @@ Example::
 
     >>> torch.topk(x, 3)
     (
-     2
-     1
+     5
+     4
      3
     [torch.FloatTensor of size 3]
     ,
-     1
-     0
+     4
+     3
      2
     [torch.LongTensor of size 3]
     )
@@ -4212,6 +4211,33 @@ Example::
     -0
     [torch.FloatTensor of size 4]
 
+""")
+
+add_docstr(torch._C.unsqueeze,
+           """
+unsqueeze(input, dim, out=None)
+
+Returns a new tensor with a dimension of size one inserted at the
+specified position.
+
+The returned tensor shares the same underlying data with this tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+    dim (int): The index at which to insert the singleton dimension
+    out (Tensor, optional): The result `Tensor`
+
+Example:
+    >>> x = torch.Tensor([1, 2, 3, 4])
+    >>> torch.unsqueeze(x, 0)
+     1  2  3  4
+    [torch.FloatTensor of size 1x4]
+    >>> torch.unsqueeze(x, 1)
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 4x1]
 """)
 
 add_docstr(torch._C.var,

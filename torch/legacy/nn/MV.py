@@ -36,6 +36,7 @@ class MV(Module):
         M, v = input
         self.gradInput[0].resize_as_(M)
         self.gradInput[1].resize_as_(v)
+        gradOutput = gradOutput.contiguous()
 
         assert gradOutput.ndimension() == 1 or gradOutput.ndimension() == 2
 

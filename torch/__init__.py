@@ -10,6 +10,7 @@ on an NVIDIA GPU with compute capability >= 2.0.
 
 import sys
 from ._utils import _import_dotted_name
+from .version import __version__
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -75,10 +76,20 @@ def typename(o):
 
 
 def is_tensor(obj):
+    r"""Returns True if `obj` is a pytorch tensor.
+
+    Args:
+        obj (Object): Object to test
+    """
     return obj.__class__ in _tensor_classes
 
 
 def is_storage(obj):
+    r"""Returns True if `obj` is a pytorch storage object.
+
+    Args:
+        obj (Object): Object to test
+    """
     return obj.__class__ in _storage_classes
 
 

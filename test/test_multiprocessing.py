@@ -19,6 +19,7 @@ HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.version_info[0] == 3 and \
     sys.platform != 'darwin'
+TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 
 def simple_fill(queue, event):
@@ -79,9 +80,8 @@ def autograd_sharing(queue, ready, master_modified):
     is_ok = var.data.equal(expected_var)
     var.data[:] = torch.ones(5, 5)
 
-    if var.grad is not None:
-        is_ok &= var.grad.data.equal(torch.ones(5, 5) * 4)
-        var.grad.data[:] = torch.ones(5, 5)
+    is_ok &= var.grad.data.equal(torch.zeros(5, 5))
+    var.grad.data[:] = torch.ones(5, 5)
 
     queue.put(is_ok)
 
@@ -289,6 +289,7 @@ class TestMultiprocessing(TestCase):
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
     def test_cuda_small_tensors(self):
         # Check multiple small tensors which will likely use the same
         # underlying cached allocation
@@ -357,20 +358,19 @@ class TestMultiprocessing(TestCase):
         queue = mp.Queue()
         p = mp.Process(target=autograd_sharing, args=(queue, ready, master_modified))
         p.start()
+        var.grad.data.zero_()
         queue.put(var)
 
         ready.wait()
         var.data[0, 0] = 1000
-        if var.grad is not None:
-            var.grad.data[:] = torch.ones(5, 5) * 4
+        var.grad.data[:] = torch.ones(5, 5) * 4
         master_modified.set()
 
         worker_ok = queue.get()
         self.assertTrue(worker_ok)
 
         self.assertEqual(var.data, torch.ones(5, 5))
-        if var.grad is not None:
-            self.assertEqual(var.grad.data, torch.ones(5, 5))
+        self.assertEqual(var.grad.data, torch.ones(5, 5) * 4)
         p.join()
 
     def test_variable_sharing(self):

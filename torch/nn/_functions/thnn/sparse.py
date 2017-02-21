@@ -71,22 +71,22 @@ class Embedding(Function):
         else:
             indices, = self.saved_tensors
 
+        grad_output = grad_output.contiguous()
         if not self.sparse:
             if indices.dim() == 2:
                 indices = indices.view(-1)
 
-            grad_output = grad_output.contiguous()
-
-            if torch.typename(grad_output) == 'torch.cuda.FloatTensor':
-                _sorted = torch.cuda.LongTensor()
-                _indices = torch.cuda.LongTensor()
-                _count = torch.cuda.LongTensor()
-            else:
-                _count = torch.IntTensor()
-                _sorted = _indices = None
+            with torch.cuda.device_of(grad_output):
+                if torch.typename(grad_output) == 'torch.cuda.FloatTensor':
+                    _sorted = torch.cuda.LongTensor()
+                    _indices = torch.cuda.LongTensor()
+                    _count = torch.cuda.LongTensor()
+                else:
+                    _count = torch.IntTensor()
+                    _sorted = _indices = None
 
             # TODO: sparse updates...
-            grad_weight = type(grad_output)(self._weight_size).zero_()
+            grad_weight = grad_output.new(self._weight_size).zero_()
             self._backend.LookupTable_accGradParameters(
                 self._backend.library_state,
                 indices,

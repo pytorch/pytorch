@@ -7,7 +7,7 @@ THC_API void
 THCTensor_(maskedFill)(THCState* state,
                        THCTensor *tensor, THCudaByteTensor *mask, real value)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, tensor, mask));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, mask));
   THArgCheck(THCTensor_(nElement)(state, tensor) ==
              THCudaByteTensor_nElement(state, mask),
              2, "sizes do not match");
@@ -24,7 +24,7 @@ THC_API void
 THCTensor_(maskedFillByte)(THCState* state,
                            THCTensor *tensor, THByteTensor *mask, real value)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, tensor));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
   THLongStorage_free(maskSizes);
@@ -37,7 +37,7 @@ THC_API void
 THCTensor_(maskedCopy)(THCState* state,
                        THCTensor *tensor, THCudaByteTensor *mask, THCTensor *src)
 {
-  THAssert(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   ptrdiff_t maskSize = THCudaByteTensor_nElement(state, mask);
   ptrdiff_t tensorSize = THCTensor_(nElement)(state, tensor);
   ptrdiff_t srcSize = THCTensor_(nElement)(state, src);
@@ -104,7 +104,7 @@ THCTensor_(maskedCopy)(THCState* state,
 THC_API void
 THCTensor_(maskedCopyByte)(THCState* state,
                            THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
-  THAssert(THCTensor_(checkGPU)(state, 2, tensor, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
   THLongStorage_free(maskSizes);
@@ -116,7 +116,7 @@ THCTensor_(maskedCopyByte)(THCState* state,
 THC_API void
 THCTensor_(maskedSelect)(THCState* state,
                          THCTensor* tensor, THCTensor* src, THCudaByteTensor* mask) {
-  THAssert(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   THArgCheck(THCudaByteTensor_nElement(state, mask) ==
              THCTensor_(nElement)(state, src),
              2, "sizes do not match");
@@ -181,7 +181,7 @@ THC_API void
 THCTensor_(maskedSelectByte)(THCState* state,
                              THCTensor *tensor, THCTensor *src, THByteTensor *mask)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, tensor, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
   THLongStorage_free(maskSizes);

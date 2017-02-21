@@ -36,7 +36,7 @@ class View(Module):
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
             self.gradInput = gradOutput.new()
-        self.gradInput = gradOutput.view(input.size())
+        self.gradInput = gradOutput.contiguous().view(input.size())
         return self.gradInput
 
     def __repr__(self):

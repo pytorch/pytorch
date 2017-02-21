@@ -53,5 +53,5 @@ class Add(Module):
             if input.is_same_size(self.bias):
                 self.gradBias.add_(scale, gradOutput)
             else:
-                gradOutput = gradOutput.view(input.size(0), -1)
+                gradOutput = gradOutput.contiguous().view(input.size(0), -1)
                 self.gradBias.view(-1).addmv_(scale, gradOutput.t(), self._ones)

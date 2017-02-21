@@ -50,6 +50,7 @@ class BatchNormalization(Module):
 
         self.save_mean = None
         self.save_std = None
+        self._gradOutput = None
 
         if self.affine:
             self.weight = torch.Tensor(nOutput)

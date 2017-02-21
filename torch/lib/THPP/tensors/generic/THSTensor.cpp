@@ -30,6 +30,11 @@ auto THSTensor<real>::clone_shallow() -> THSTensor* {
 }
 
 template<>
+auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
+  return std::unique_ptr<Tensor>(new THSTensor(THSTensor_(newContiguous)(tensor)));
+}
+
+template<>
 int THSTensor<real>::nDim() const {
   return tensor->nDimension;
 }
@@ -128,36 +133,55 @@ auto THSTensor<real>::set(const Tensor& src) -> THSTensor& {
 template<>
 auto THSTensor<real>::setStorage(const Storage& storage,
                                  ptrdiff_t storageOffset,
+                                 const long_range& size,
+                                 const long_range& stride) -> THSTensor& {
+  throw std::runtime_error("THSTensor::setStorage not supported");
+}
+
+template<>
+auto THSTensor<real>::setStorage(const Storage& storage,
+                                 ptrdiff_t storageOffset,
                                  THLongStorage *size,
                                  THLongStorage *stride) -> THSTensor& {
-  throw std::runtime_error("THSTensor::setStorage not supported");}
-
+  throw std::runtime_error("THSTensor::setStorage not supported");
+}
 
 template<>
 auto THSTensor<real>::narrow(const Tensor& src,
                              int dimension,
                              long firstIndex,
                              long size) -> THSTensor& {
-  throw std::runtime_error("THSTensor::narrow not supported");}
-
+  throw std::runtime_error("THSTensor::narrow not supported");
+}
 
 template<>
 auto THSTensor<real>::select(const Tensor& src, int dimension,
                              long sliceIndex) -> THSTensor& {
-  throw std::runtime_error("THSTensor::select not supported");}
-
+  throw std::runtime_error("THSTensor::select not supported");
+}
 
 template<>
 auto THSTensor<real>::transpose(const Tensor& src, int dimension1,
                                 int dimension2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::transpose not supported");}
+  throw std::runtime_error("THSTensor::transpose not supported");
+}
 
 
 template<>
 auto THSTensor<real>::unfold(const Tensor& src, int dimension,
                              long size, long step) ->THSTensor& {
-  throw std::runtime_error("THSTensor::unfold not supported");}
+  throw std::runtime_error("THSTensor::unfold not supported");
+}
 
+template<>
+auto THSTensor<real>::squeeze(const Tensor& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::squeeze not supported");
+}
+
+template<>
+auto THSTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::unsqueeze not supported");
+}
 
 template<>
 auto THSTensor<real>::fill(scalar_type value) -> THSTensor& {
@@ -174,6 +198,11 @@ template<>
 auto THSTensor<real>::free() -> THSTensor& {
   THSTensor_(free)(tensor);
   return *this;
+}
+
+template<>
+auto THSTensor<real>::cat(const std::vector<Tensor*>& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::cat() not supported");
 }
 
 template<>

@@ -59,6 +59,13 @@ def small_2d_scaled(t, scale=10):
     return make_tensor(t, S, S).mul(scale)
 
 
+def small_2d_oneish(t):
+    if is_floating(t):
+        return make_tensor(t, S, S).clamp(min=0.99, max=1.01)
+    else:
+        return t(S, S).fill_(1)
+
+
 def small_3d(t):
     return make_tensor(t, S, S, S)
 
@@ -206,7 +213,7 @@ tests = [
     ('norm', small_3d, lambda t: [3, 0], '3_norm_dim'),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
-    ('prod', small_3d, lambda t: [],),
+    ('prod', small_2d_oneish, lambda t: [],),
     ('prod', small_3d, lambda t: [1], 'dim'),
     ('sum', small_2d, lambda t: [],),
     ('sum', small_3d, lambda t: [1], 'dim'),
@@ -233,6 +240,7 @@ tests = [
     ('triu', medium_2d, lambda t: [],),
     ('triu', medium_2d, lambda t: [2], 'positive'),
     ('triu', medium_2d, lambda t: [-2], 'negative'),
+    ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('view', small_3d, lambda t: [100, 10],),
     ('view_as', small_3d, lambda t: [t(100, 10)],),
     ('zero', small_3d, lambda t: [],),
@@ -338,21 +346,21 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 class TestCuda(TestCase):
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_autogpu(self):
-        if torch.cuda.device_count() > 1:
-            x = torch.randn(5, 5).cuda()
-            y = torch.randn(5, 5).cuda()
-            self.assertEqual(x.get_device(), 0)
-            self.assertEqual(x.get_device(), 0)
-            with torch.cuda.device(1):
-                z = torch.randn(5, 5).cuda()
-                self.assertEqual(z.get_device(), 1)
-                q = x.add(y)
-                self.assertEqual(q.get_device(), 0)
-                w = torch.randn(5, 5).cuda()
-                self.assertEqual(w.get_device(), 1)
-            z = z.cuda()
-            self.assertEqual(z.get_device(), 0)
+        x = torch.randn(5, 5).cuda()
+        y = torch.randn(5, 5).cuda()
+        self.assertEqual(x.get_device(), 0)
+        self.assertEqual(x.get_device(), 0)
+        with torch.cuda.device(1):
+            z = torch.randn(5, 5).cuda()
+            self.assertEqual(z.get_device(), 1)
+            q = x.add(y)
+            self.assertEqual(q.get_device(), 0)
+            w = torch.randn(5, 5).cuda()
+            self.assertEqual(w.get_device(), 1)
+        z = z.cuda()
+        self.assertEqual(z.get_device(), 0)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_copy_device(self):
@@ -511,6 +519,13 @@ class TestCuda(TestCase):
             y = x.clone().uniform_()
             self.assertEqual(x, y)
             self.assertEqual(torch.cuda.initial_seed(), 2)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_cat_autogpu(self):
+        x = torch.randn(4, 4).cuda(1)
+        y = torch.randn(4, 4).cuda(1)
+        z = torch.cat([x, y], 0)
+        self.assertEqual(z.get_device(), x.get_device())
 
     def test_serialization(self):
         x = torch.randn(4, 4).cuda()

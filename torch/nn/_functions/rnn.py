@@ -184,6 +184,7 @@ class CudnnRNN(NestedIOFunction):
 
     def backward_extended(self, grad_output, grad_hy):
         input, hx, weight, output = self.saved_tensors
+        input = input.contiguous()
 
         grad_input, grad_weight, grad_hx = None, None, None
 
@@ -194,6 +195,9 @@ class CudnnRNN(NestedIOFunction):
             grad_hx = input.new()
         else:
             grad_hx = tuple(h.new() for h in hx)
+
+        if self.retain_variables:
+            self._reserve_clone = self.reserve.clone()
 
         cudnn.rnn.backward_grad(
             self,
@@ -206,8 +210,8 @@ class CudnnRNN(NestedIOFunction):
             grad_input,
             grad_hx)
 
-        if self.needs_input_grad[1]:
-            grad_weight = [tuple(w.new().resize_as_(w).zero_() for w in layer_weight) for layer_weight in weight]
+        if any(self.needs_input_grad[1:]):
+            grad_weight = [tuple(w.new().resize_as_(w) for w in layer_weight) for layer_weight in weight]
             cudnn.rnn.backward_weight(
                 self,
                 input,
@@ -215,6 +219,12 @@ class CudnnRNN(NestedIOFunction):
                 output,
                 weight,
                 grad_weight)
+        else:
+            grad_weight = [(None,) * len(layer_weight) for layer_weight in weight]
+
+        if self.retain_variables:
+            self.reserve = self._reserve_clone
+            del self._reserve_clone
 
         return grad_input, grad_weight, grad_hx
 

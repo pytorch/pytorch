@@ -126,7 +126,7 @@ class MixtureTable(Module):
                 self.backwardSetup = True
 
             # gater updateGradInput
-            self._expertView = gradOutput.view(torch.Size(self.size2))
+            self._expertView = gradOutput.contiguous().view(torch.Size(self.size2))
             gradOutput = self._expertView.expand_as(expertInputs)
             torch.mul(gradOutput, expertInputs, out=self._expert)
             expert = self._expert.transpose(self.dim, self.dimG)

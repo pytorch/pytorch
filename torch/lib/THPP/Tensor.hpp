@@ -24,6 +24,7 @@ struct Tensor {
 
   virtual Tensor* clone() const = 0;
   virtual Tensor* clone_shallow() = 0;
+  virtual std::unique_ptr<Tensor> contiguous() const = 0;
 
   virtual int nDim() const = 0;
   virtual long_range sizes() const = 0;
@@ -49,6 +50,10 @@ struct Tensor {
   virtual Tensor& set(const Tensor& src) = 0;
   virtual Tensor& setStorage(const Storage& storage,
                              ptrdiff_t storageOffset,
+                             const long_range& size,
+                             const long_range& stride) = 0;
+  virtual Tensor& setStorage(const Storage& storage,
+                             ptrdiff_t storageOffset,
                              THLongStorage *size,
                              THLongStorage *stride) = 0;
   virtual Tensor& narrow(const Tensor& src,
@@ -58,7 +63,10 @@ struct Tensor {
   virtual Tensor& select(const Tensor& src, int dimension, long sliceIndex) = 0;
   virtual Tensor& transpose(const Tensor& src, int dimension1, int dimension2) = 0;
   virtual Tensor& unfold(const Tensor& src, int dimension, long size, long step) = 0;
+  virtual Tensor& squeeze(const Tensor& src, int dimension) = 0;
+  virtual Tensor& unsqueeze(const Tensor& src, int dimension) = 0;
 
+  virtual Tensor& cat(const std::vector<Tensor*>& src, int dimension) = 0;
   virtual Tensor& gather(const Tensor& src, int dimension, const Tensor& index) = 0;
   virtual Tensor& scatter(int dimension, const Tensor& index, const Tensor& src) = 0;
   virtual Tensor& neg(const Tensor& src) = 0;

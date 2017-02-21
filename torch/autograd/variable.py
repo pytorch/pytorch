@@ -56,30 +56,6 @@ class Variable(_C._VariableBase):
         'is_cuda',
     }
 
-    @property
-    def grad(self):
-        if self.requires_grad and self._grad is None:
-            # TODO: this won't have to be zeroed in the future
-            self._grad = Variable(self.data.new(self.data.size()).zero_())
-        return self._grad
-
-    @property
-    def requires_grad(self):
-        return self._requires_grad
-
-    @requires_grad.setter
-    def requires_grad(self, value):
-        if self.creator is not None:
-            if value is False:
-                hint = (" If you want to use a computed variable in a subgraph "
-                        "that doesn't require differentiation use "
-                        "var_no_grad = var.detach().")
-            else:
-                hint = ''
-            raise RuntimeError("you can only change requires_grad flags of "
-                               "leaf variables." + hint)
-        self._requires_grad = value
-
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
             return getattr(self.data, name)
@@ -108,19 +84,30 @@ class Variable(_C._VariableBase):
         if self.creator is not None:
             raise RuntimeError("Only Variables created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
-        result = type(self)(self.data.clone(), requires_grad=self.requires_grad,
-                            volatile=self.volatile)
+        result = type(self)(self.data.clone())
+        result.requires_grad = self.requires_grad
+        result.volatile = self.volatile
         memo[id(self)] = result
         return result
 
     def __reduce_ex__(self, proto):
+        state = (self.requires_grad, self.volatile, self._backward_hooks)
         if proto > 1:
-            return super(Variable, self).__reduce_ex__(proto)
+            return type(self), (self.data,), state
         if sys.version_info[0] == 2:
             from copy_reg import __newobj__
         else:
             from copyreg import __newobj__
-        return __newobj__, (type(self),), self.__getstate__()
+        return __newobj__, (type(self), self.data), state
+
+    def __setstate__(self, state):
+        if len(state) == 5:
+            # legacy serialization of Variable
+            self.data = state[0]
+            state = (state[3], state[4], state[2])
+        if self.creator is not None:
+            raise RuntimeError('__setstate__ can be only called on leaf variables')
+        self.requires_grad, self.volatile, self._backward_hooks = state
 
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
@@ -225,8 +212,25 @@ class Variable(_C._VariableBase):
         self.creator._reinforce(reward)
 
     def detach(self):
-        """Detaches the Variable from the graph that created it."""
-        return NoGrad()(self)
+        """Returns a new Variable, detached from the current graph.
+
+        Result will never require gradient. If the input is volatile, the output
+        will be volatile too.
+
+        .. note::
+
+          Returned Variable uses the same data tensor, as the original one, and
+          in-place modifications on either of them will be seen, and may trigger
+          errors in correctness checks.
+        """
+        result = NoGrad()(self)  # this is needed, because it merges version counters
+        result._creator = None
+        return result
+
+    def detach_(self):
+        """Detaches the Variable from the graph that created it, making it a leaf."""
+        self._creator = None
+        self.requires_grad = False
 
     def contiguous(self):
         self.data = self.data.contiguous()
