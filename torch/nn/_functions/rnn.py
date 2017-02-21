@@ -8,18 +8,21 @@ except ImportError:
 
 
 def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hy = F.relu(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+    xw_ih = input if w_ih is None else F.linear(input, w_ih, b_ih)
+    hy = F.relu(xw_ih + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+    xw_ih = input if w_ih is None else F.linear(input, w_ih, b_ih)
+    hy = F.tanh(xw_ih + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
-    gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+    xw_ih = input.repeat(1, 4) if w_ih is None else F.linear(input, w_ih, b_ih)
+    gates = xw_ih + F.linear(hx, w_hh, b_hh)
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
     ingate = F.sigmoid(ingate)
@@ -34,7 +37,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    gi = F.linear(input, w_ih, b_ih)
+    gi = input.repeat(1, 3) if w_ih is None else F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = gi.chunk(3, 1)
     h_r, h_i, h_n = gh.chunk(3, 1)
@@ -63,7 +66,6 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
             all_output = []
             for j, inner in enumerate(inners):
                 l = i * num_directions + j
-
                 hy, output = inner(input, hidden[l], weight[l])
                 next_hidden.append(hy)
                 all_output.append(output)
@@ -107,7 +109,7 @@ def Recurrent(inner, reverse=False):
 
 
 def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
-                dropout=0, train=True, bidirectional=False, dropout_state=None):
+                dropout=0, train=True, bidirectional=False, dropout_state=None, skip_input=False):
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -149,12 +151,13 @@ class CudnnRNN(NestedIOFunction):
 
     def __init__(self, mode, input_size, hidden_size, num_layers=1,
                  batch_first=False, dropout=0, train=True, bidirectional=False,
-                 dropout_state=None):
+                 dropout_state=None, skip_input=False):
         super(CudnnRNN, self).__init__()
         if dropout_state is None:
             dropout_state = {}
         self.mode = cudnn.rnn.get_cudnn_mode(mode)
-        self.input_mode = cudnn.CUDNN_LINEAR_INPUT
+        self.skip_input = skip_input
+        self.input_mode = cudnn.CUDNN_SKIP_INPUT if skip_input else cudnn.CUDNN_LINEAR_INPUT
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -210,7 +213,8 @@ class CudnnRNN(NestedIOFunction):
             grad_hx)
 
         if any(self.needs_input_grad[1:]):
-            grad_weight = [tuple(w.new().resize_as_(w) for w in layer_weight) for layer_weight in weight]
+            grad_weight = [tuple(w.new().resize_as_(w) if w is not None else None for w in layer_weight)
+                           for layer_weight in weight]
             cudnn.rnn.backward_weight(
                 self,
                 input,
@@ -218,6 +222,8 @@ class CudnnRNN(NestedIOFunction):
                 output,
                 weight,
                 grad_weight)
+        if self.skip_input:
+            grad_weight = [tuple(w for w in layer_grad_weight if w is not None) for layer_grad_weight in grad_weight]
 
         if self.retain_variables:
             self.reserve = self._reserve_clone

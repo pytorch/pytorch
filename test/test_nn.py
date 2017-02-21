@@ -1097,7 +1097,8 @@ class TestNN(NNTestCase):
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
+                    if x is not None and y is not None:
+                        x.data.copy_(y.data)
 
             input = Variable(input_val.clone(), requires_grad=True)
             if is_lstm:
@@ -1151,17 +1152,24 @@ class TestNN(NNTestCase):
             # check grad weights separately, as nested dict
             for cpu_layer_weight, gpu_layer_weight in zip(outputs_cpu['weights'], outputs_gpu['weights']):
                 for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
-                    self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
+                    if cpu_weight is not None and gpu_weight is not None:
+                        self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
+                    else:
+                        self.assertTrue(cpu_weight is None)
+                        self.assertTrue(gpu_weight is None)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bias, bidirectional, batch_first, contig in product((True, False), repeat=4):
+            for bias, bidirectional, batch_first, contig, skip_input in product((True, False), repeat=5):
                 num_directions = 2 if bidirectional else 1
-                if batch_first:
-                    input_val = torch.randn(batch, seq_length, input_size)
-                    grad_output = torch.randn(batch, seq_length, hidden_size * num_directions)
+                grad_output = torch.randn(batch, seq_length, hidden_size * num_directions)
+                if skip_input:
+                    input_val = torch.randn(seq_length, batch, hidden_size)
                 else:
                     input_val = torch.randn(seq_length, batch, input_size)
-                    grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
+                if batch_first:
+                    grad_output = grad_output.transpose(0, 1).contiguous()
+                    input_val = input_val.transpose(0, 1).contiguous()
+
                 hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
                 grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
@@ -1171,24 +1179,26 @@ class TestNN(NNTestCase):
                     input_var = make_noncontig(input_val)
                     hx_val = make_noncontig(hx_val)
 
-                rnn = module(input_size,
+                rnn = module(input_size if not skip_input else hidden_size,
                              hidden_size,
                              num_layers,
                              bias=bias,
                              dropout=dropout,
                              bidirectional=bidirectional,
-                             batch_first=batch_first)
+                             batch_first=batch_first,
+                             skip_input=skip_input)
 
                 outputs_cpu = forward_backward(
                     False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
 
-                rnn_gpu = module(input_size,
+                rnn_gpu = module(input_size if not skip_input else hidden_size,
                                  hidden_size,
                                  num_layers,
                                  bias=bias,
                                  dropout=dropout,
                                  bidirectional=bidirectional,
-                                 batch_first=batch_first)
+                                 batch_first=batch_first,
+                                 skip_input=skip_input)
 
                 outputs_gpu = forward_backward(
                     True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)

@@ -226,7 +226,7 @@ class NestedIOFunction(Function):
         return tuple(_iter_tensors(result))
 
     def save_for_backward(self, *args):
-        self.to_save = tuple(_iter_tensors(args))
+        self.to_save = tuple(_iter_None_tensors(args))
         self._to_save_nested = args
 
     @property
