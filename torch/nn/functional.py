@@ -419,6 +419,28 @@ def nll_loss(input, target, weight=None, size_average=True):
     return _functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
 
 
+def nll_loss2d(input, target, weight=None, size_average=True):
+    r"""The negative log likelihood loss.
+
+    See :class:`~torch.nn.SpatialClassNLLCriterion` for details.
+
+    Args:
+        input: :math:`(N, C, H, W)` where `C = number of classes`
+        target: :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
+        weight (Variable, optional): a manual rescaling weight given to each
+                class. If given, has to be a Variable of size "nclasses"
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+
+    Attributes:
+        weight: the class-weights given as input to the constructor
+
+    """
+    return _functions.thnn.NLLLoss2d(size_average, weight=weight)(input, target)
+
+
 def kl_div(input, target, size_average=True):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
@@ -449,6 +471,24 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 for each minibatch.
     """
     return nll_loss(log_softmax(input), target, weight, size_average)
+
+
+def cross_entropy2d(input, target, weight=None, size_average=True):
+    r"""This criterion combines `log_softmax` and `nll_loss2d` in one single class.
+
+    See :class:`torch.nn.CrossEntropyLoss` for details.
+
+    Args:
+        input: Variable :math:`(N, C, H, W)` where `C = number of classes`
+        target: Variable :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
+        weight (Variable, optional): a manual rescaling weight given to each
+                class. If given, has to be a Variable of size "nclasses"
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+    """
+    return nll_loss2d(log_softmax(input), target, weight, size_average)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):

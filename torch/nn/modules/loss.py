@@ -106,10 +106,8 @@ class NLLLoss(_WeighedLoss):
     pass
 
 
-class NLLLoss2d(_Loss):
+class NLLLoss2d(_WeighedLoss):
     r"""This is negative log likehood loss, but for image inputs. It computes NLL loss per-pixel.
-
-    This loss does not support per-class weights
 
     Args:
         size_average: By default, the losses are averaged over observations for each minibatch.
@@ -312,6 +310,43 @@ class CrossEntropyLoss(_WeighedLoss):
         _assert_no_grad(target)
         return F.cross_entropy(input, target,
                                self.weight, self.size_average)
+
+
+class CrossEntropyLoss2d(_WeighedLoss):
+    r"""This criterion combines `LogSoftMax` and `NLLLoss2d` in one single class.
+
+    It is useful when training a classification problem with `n` classes.
+    If provided, the optional argument `weights` should be a 1D `Tensor`
+    assigning weight to each of the classes.
+    This is particularly useful when you have an unbalanced training set.
+
+    The `input` is expected to contain scores for each class.
+
+    `input` has to be a 2D `Tensor` of size `batch x n`.
+
+    This criterion expects a class index (0 to nClasses-1) as the
+    `target` for each value of a 1D tensor of size `n`
+
+    The loss can be described as::
+
+        loss(x, class) = -log(exp(x[class]) / (\sum_j exp(x[j])))
+                       = -x[class] + log(\sum_j exp(x[j]))
+
+    or in the case of the `weights` argument being specified::
+
+        loss(x, class) = weights[class] * (-x[class] + log(\sum_j exp(x[j])))
+
+    The losses are averaged across observations for each minibatch.
+
+    Shape:
+        - Input: :math:`(N, C)` where `C = number of classes`
+        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+
+    """
+
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.cross_entropy2d(input, target, self.weight, self.size_average)
 
 
 class MultiLabelSoftMarginLoss(_WeighedLoss):
