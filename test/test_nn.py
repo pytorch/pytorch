@@ -1730,6 +1730,17 @@ new_module_tests = [
         test_cuda=False
     ),
     dict(
+        module_name='PairwiseDistance',
+        constructor_args=(2,),
+        input_size=(2, 2, 2),
+    ),
+    dict(
+        module_name='PairwiseDistance',
+        constructor_args=(2, 1),
+        input_size=(2, 2, 2),
+        fullname='PairwiseDistance_dim',
+    ),
+    dict(
         module_name='PixelShuffle',
         constructor_args=(3,),
         input_size=(1, 9, 4, 4),
