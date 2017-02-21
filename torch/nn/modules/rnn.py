@@ -441,7 +441,7 @@ class LSTMCell(RNNCellBase):
         >>> cx = Variable(torch.randn(3, 20))
         >>> output = []
         >>> for i in range(6):
-        ...     hx, cx = rnn(input, (hx, cx))
+        ...     hx, cx = rnn(input[i], (hx, cx))
         ...     output.append(hx)
     """
 
@@ -510,7 +510,7 @@ class GRUCell(RNNCellBase):
         >>> hx = Variable(torch.randn(3, 20))
         >>> output = []
         >>> for i in range(6):
-        ...     hx = rnn(input, hx)
+        ...     hx = rnn(input[i], hx)
         ...     output[i] = hx
     """
 
