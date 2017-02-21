@@ -3991,13 +3991,13 @@ Example::
 
     >>> torch.topk(x, 3)
     (
-     2
-     1
+     5
+     4
      3
     [torch.FloatTensor of size 3]
     ,
-     1
-     0
+     4
+     3
      2
     [torch.LongTensor of size 3]
     )
