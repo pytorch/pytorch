@@ -9,13 +9,22 @@ execute_process(COMMAND
 # Local CMake modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
-# Options
-option(USE_REDIS "Support using Redis for rendezvous" OFF)
-option(USE_IBVERBS "Support ibverbs transport" OFF)
-
 # Build target options
 option(BUILD_TEST "Build test binary (requires gtest)" OFF)
 option(BUILD_BENCHMARK "Build benchmark binary (requires hiredis)" OFF)
+
+# Option defaults (so they can be overwritten before declaring the option)
+set(USE_REDIS_DEFAULT OFF)
+set(USE_IBVERBS_DEFAULT OFF)
+
+# Add Redis support if building benchmark
+if(BUILD_BENCHMARK)
+  set(USE_REDIS_DEFAULT ON)
+endif()
+
+# Options
+option(USE_REDIS "Support using Redis for rendezvous" ${USE_REDIS_DEFAULT})
+option(USE_IBVERBS "Support ibverbs transport" ${USE_IBVERBS_DEFAULT})
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
