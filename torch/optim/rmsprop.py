@@ -64,7 +64,7 @@ class RMSprop(Optimizer):
                 else:
                     avg = square_avg.sqrt().add_(group['eps'])
 
-                momentum.mul_(group['momentum']).addcdiv_(-group['lr'], grad, avg)
+                momentum.mul_(group['momentum']).addcdiv_(group['lr'], grad, avg)
                 p.data.add_(-momentum)
 
         return loss
