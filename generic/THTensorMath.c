@@ -1527,17 +1527,11 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     tempIndices_->size[dimension] = t->size[dimension];
     tempIndices_->stride[dimension] = 0;
 
-    // this shows the flexibility of using TH_TENSOR_APPLY in place of
-    // TH_TENSOR_DIM_APPLY. Unfortunately, I'm leveraging the fact that since
-    // tempIndices has stride 0 and size >1 in dimension, there will definitely
-    // be an instantiated counter dimension there; this might not be true after
-    // some new optimizations to TH_TENSOR_APPLY3, so we'll need a different
-    // set of macros.
-    TH_TENSOR_APPLY3(real, t, real, tempValues_, long, tempIndices_,
-                     if(!(*t_data <= *tempValues__data) && !th_isnan(*tempValues__data)) {
-                       *tempValues__data = *t_data;
-                       *tempIndices__data = tempIndices__counter[dimension];
-                     });
+    TH_TENSOR_APPLY3_D(real, t, real, tempValues_, long, tempIndices_, dimension,
+                          if(!(*t_data <= *tempValues__data) && !th_isnan(*tempValues__data)) {
+                            *tempValues__data = *t_data;
+                            *tempIndices__data = *tempIndices__dimOffset;
+                          });
 
     THTensor_(free)(tempValues_);
     THLongTensor_free(tempIndices_);
@@ -1604,17 +1598,11 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     tempIndices_->size[dimension] = t->size[dimension];
     tempIndices_->stride[dimension] = 0;
 
-    // this shows the flexibility of using TH_TENSOR_APPLY in place of
-    // TH_TENSOR_DIM_APPLY. Unfortunately, I'm leveraging the fact that since
-    // tempIndices has stride 0 and size >1 in dimension, there will definitely
-    // be an instantiated counter dimension there; this might not be true after
-    // some new optimizations to TH_TENSOR_APPLY3, so we'll need a different
-    // set of macros.
-    TH_TENSOR_APPLY3(real, t, real, tempValues_, long, tempIndices_,
-                     if(!(*t_data >= *tempValues__data) && !th_isnan(*tempValues__data)) {
-                       *tempValues__data = *t_data;
-                       *tempIndices__data = tempIndices__counter[dimension];
-                     });
+    TH_TENSOR_APPLY3_D(real, t, real, tempValues_, long, tempIndices_, dimension,
+                          if(!(*t_data >= *tempValues__data) && !th_isnan(*tempValues__data)) {
+                            *tempValues__data = *t_data;
+                            *tempIndices__data = *tempIndices__dimOffset;
+                          });
   }
 }
 
