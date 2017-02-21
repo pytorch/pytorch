@@ -36,7 +36,7 @@ class DataParallel(Module):
         if len(self.device_ids) == 1:
             self.module.cuda(device_ids[0])
 
-    def forward(self, input):
+    def forward(self, *inputs):
         def _to_cuda(obj):
             if isinstance(obj, Variable):
                 return obj.cuda()
@@ -44,12 +44,12 @@ class DataParallel(Module):
 
         if len(self.device_ids) == 1:
             with torch.cuda.device(self.device_ids[0]):
-                inpcuda = _to_cuda(input)
-            return self.module(inpcuda)
+                inputs_cuda = _to_cuda(inputs)
+            return self.module(*inputs_cuda)
         replicas = self.replicate(self.module, self.device_ids)
-        inputs = self.scatter(input, self.device_ids)
-        replicas = replicas[:len(inputs)]
-        outputs = self.parallel_apply(replicas, inputs)
+        scattered = self.scatter(inputs, self.device_ids)
+        replicas = replicas[:len(scattered)]
+        outputs = self.parallel_apply(replicas, scattered)
         return self.gather(outputs, self.output_device)
 
     def replicate(self, module, device_ids):
@@ -65,14 +65,14 @@ class DataParallel(Module):
         return gather(outputs, output_device)
 
 
-def data_parallel(module, input, device_ids, output_device=None):
+def data_parallel(module, inputs, device_ids, output_device=None):
     """Evaluates module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
 
     Args:
         module: the module to evaluate in parallel
-        input: input to the module
+        inputs: inputs to the module
         device_ids: GPU ids on which to replicate module
         output_device: GPU location of the output  Use -1 to indicate the CPU.
             (default: device_ids[0])
@@ -80,14 +80,17 @@ def data_parallel(module, input, device_ids, output_device=None):
         a Variable containing the result of module(input) located on
         output_device
     """
+    if not isinstance(inputs, tuple):
+        inputs = (inputs,)
+
     if not device_ids:
-        return module(input)
+        return module(*inputs)
 
     if output_device is None:
         output_device = device_ids[0]
 
     replicas = replicate(module, device_ids)
-    inputs = scatter(input, device_ids)
-    replicas = replicas[:len(inputs)]
-    outputs = parallel_apply(replicas, inputs)
+    scattered = scatter(inputs, device_ids)
+    replicas = replicas[:len(scattered)]
+    outputs = parallel_apply(replicas, scattered)
     return gather(outputs, output_device)

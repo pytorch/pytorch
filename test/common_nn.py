@@ -248,6 +248,13 @@ criterion_tests = [
         target=torch.rand(2, 5, 5).mul(3).floor().long()
     ),
     dict(
+        module_name='NLLLoss2d',
+        constructor_args=(torch.rand(3),),
+        input_size=(2, 3, 5, 5),
+        target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        desc='weights'
+    ),
+    dict(
         module_name='HingeEmbeddingLoss',
         input=torch.rand(10),
         target=torch.randn(10).gt(0).double().mul_(2).sub(1)

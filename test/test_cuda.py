@@ -59,6 +59,12 @@ def small_2d_scaled(t, scale=10):
     return make_tensor(t, S, S).mul(scale)
 
 
+def small_2d_oneish(t):
+    if is_floating(t):
+        return make_tensor(t, S, S).clamp(min=0.99, max=1.01)
+    else:
+        return t(S, S).fill_(1)
+
 def small_3d(t):
     return make_tensor(t, S, S, S)
 
@@ -82,7 +88,6 @@ def small_3d_ones(t):
 def small_3d_positive(t):
     min_val = 1e-3 if is_floating(t) else 2
     return make_tensor(t, S, S, S).clamp_(min_val, 120)
-
 
 def small_3d_unique(t):
     return t(S, S, S).copy_(torch.range(1, S * S * S))
@@ -206,7 +211,7 @@ tests = [
     ('norm', small_3d, lambda t: [3, 0], '3_norm_dim'),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
-    ('prod', small_3d, lambda t: [],),
+    ('prod', small_2d_oneish, lambda t: [],),
     ('prod', small_3d, lambda t: [1], 'dim'),
     ('sum', small_2d, lambda t: [],),
     ('sum', small_3d, lambda t: [1], 'dim'),

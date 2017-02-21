@@ -4,7 +4,7 @@ import torch
 import traceback
 import unittest
 from torch.utils.data import Dataset, TensorDataset, DataLoader
-from common import TestCase, run_tests
+from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
 
@@ -122,6 +122,22 @@ class TestDataLoader(TestCase):
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_numpy(self):
+        import numpy as np
+
+        class TestDataset(torch.utils.data.Dataset):
+            def __getitem__(self, i):
+                return np.ones((2, 3, 4)) * i
+
+            def __len__(self):
+                return 1000
+
+        loader = DataLoader(TestDataset(), batch_size=12)
+        batch = next(iter(loader))
+        self.assertIsInstance(batch, torch.DoubleTensor)
+        self.assertEqual(batch.size(), torch.Size([12, 2, 3, 4]))
 
     def test_error(self):
         self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))

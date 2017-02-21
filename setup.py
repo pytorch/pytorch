@@ -192,6 +192,7 @@ class clean(distutils.command.clean.clean):
 ################################################################################
 
 include_dirs = []
+library_dirs = []
 extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
@@ -212,7 +213,7 @@ include_dirs += [
     tmp_install_path + "/include/THNN",
 ]
 
-extra_link_args.append('-L' + lib_path)
+library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 TH_LIB = os.path.join(lib_path, 'libTH.so.1')
@@ -295,7 +296,7 @@ if WITH_CUDA:
             break
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
-    extra_link_args.append('-L' + cuda_lib_path)
+    library_dirs.append(cuda_lib_path)
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
@@ -314,7 +315,7 @@ if WITH_CUDA:
 if WITH_CUDNN:
     main_libraries += ['cudnn']
     include_dirs.append(CUDNN_INCLUDE_DIR)
-    extra_link_args.append('-L' + CUDNN_LIB_DIR)
+    library_dirs.append(CUDNN_LIB_DIR)
     main_sources += [
         "torch/csrc/cudnn/BatchNorm.cpp",
         "torch/csrc/cudnn/Conv.cpp",
@@ -348,6 +349,7 @@ C = Extension("torch._C",
               language='c++',
               extra_compile_args=main_compile_args + extra_compile_args,
               include_dirs=include_dirs,
+              library_dirs=library_dirs,
               extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')],
               )
 extensions.append(C)

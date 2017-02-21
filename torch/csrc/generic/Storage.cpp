@@ -186,10 +186,15 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop, slicelength;
+    Py_ssize_t start, stop, slicelength, step;
     long len = THStorage_(size)(LIBRARY_STATE self->cdata);
-    if (!THPUtils_parseSlice(index, len, &start, &stop, &slicelength))
+    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return NULL;
+    if (step != 1) {
+      THPUtils_setError("Trying to slice with a step of %ld, but only a step of "
+          "1 is supported", (long)step);
+      return NULL;
+    }
 
     real *data = THStorage_(data)(LIBRARY_STATE self->cdata);
     THStoragePtr new_storage = THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength);
@@ -223,10 +228,15 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     THStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop;
+    Py_ssize_t start, stop, slicelength, step;
     long len = THStorage_(size)(LIBRARY_STATE self->cdata);
-    if (!THPUtils_parseSlice(index, len, &start, &stop, NULL))
+    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return -1;
+    if (step != 1) {
+      THPUtils_setError("Trying to slice with a step of %ld, but only a step of "
+          "1 is supported", (long)step);
+      return 0;
+    }
     // TODO: check the bounds only once
     // TODO: fill?
     for (;start < stop; start++)

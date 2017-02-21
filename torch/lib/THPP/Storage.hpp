@@ -12,7 +12,7 @@
 
 namespace thpp {
 
-class Tensor;
+struct Tensor;
 
 struct Storage {
   Storage() {};

@@ -10,6 +10,7 @@ from functools import wraps
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
+from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable
 from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -551,6 +552,50 @@ class TestNN(NNTestCase):
         # This should work though
         l2.weight = Parameter(torch.randn(10, 10))
 
+    def test_clip_grad_norm(self):
+        l = nn.Linear(10, 10)
+        max_norm = 2
+
+        def compute_norm(norm_type):
+            norm_type = float(norm_type)
+            if norm_type != float('inf'):
+                total_norm = 0
+                for p in l.parameters():
+                    total_norm += p.grad.data.abs().pow(norm_type).sum()
+                return pow(total_norm, 1. / norm_type)
+            else:
+                return max(p.grad.data.abs().max() for p in l.parameters())
+
+        def compare_scaling(grads):
+            p_scale = [p.grad.data.div(g).view(-1) for p, g in zip(l.parameters(), grads)]
+            scale = torch.cat(p_scale)
+            self.assertEqual(scale.std(), 0)
+            return scale[0]
+
+        grads = torch.range(1, 100), torch.ones(10).div(1000)
+        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
+            for p, g in zip(l.parameters(), grads):
+                p.grad.data.copy_(g)
+            norm_before = compute_norm(norm_type)
+            clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm_after = compute_norm(norm_type)
+            self.assertEqual(norm_after, max_norm)
+            self.assertLessEqual(norm_after, norm_before)
+            compare_scaling(grads)
+
+        # Small gradients should be left unchanged
+        grads = torch.rand(10, 10).div(10000), torch.ones(10).div(500)
+        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
+            for p, g in zip(l.parameters(), grads):
+                p.grad.data.copy_(g)
+            norm_before = compute_norm(norm_type)
+            clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm_after = compute_norm(norm_type)
+            self.assertEqual(norm_before, norm_after)
+            self.assertLessEqual(norm_after, max_norm)
+            scale = compare_scaling(grads)
+            self.assertEqual(scale, 1)
+
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
@@ -722,7 +767,7 @@ class TestNN(NNTestCase):
         i2 = Variable(torch.randn(2, 10).float().cuda(1))
         expected1 = l1(i1).data
         expected2 = l2(i2).data
-        inputs = (i1, i2)
+        inputs = ((i1,), (i2,))
         modules = (l1, l2)
         expected_outputs = (expected1, expected2)
         outputs = dp.parallel_apply(modules, inputs)
@@ -738,6 +783,31 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, [])
         self.assertEqual(out, l(i))
         self.assertFalse(out.is_cuda)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_multiple_input(self):
+        class TestModule(nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        m = TestModule()
+        x = Variable(torch.randn(5, 5).float())
+        y = Variable(torch.randn(5, 5).float())
+        expected = m(x, y)
+
+        out = dp.data_parallel(m, (x, y), (0, 1))
+        self.assertEqual(out, expected)
+
+        out = dp.data_parallel(m, (x, y), (0,))
+        self.assertEqual(out, expected)
+
+        dpm = nn.DataParallel(TestModule())
+        out = dpm(x, y)
+        self.assertEqual(out, expected)
+
+        dpm = nn.DataParallel(TestModule(), device_ids=[0])
+        out = dpm(x, y)
+        self.assertEqual(out, expected)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_small_back(self):
@@ -785,7 +855,7 @@ class TestNN(NNTestCase):
 
         class Net(nn.Module):
 
-            def forward(self, input):
+            def forward(self, *input):
                 return fn(input)
         i = Variable(torch.randn(20, 3).float().cuda(1))
         input = (i.cos(), (i.sin(), i), i.sin())
