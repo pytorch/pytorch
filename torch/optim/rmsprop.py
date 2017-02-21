@@ -8,15 +8,18 @@ class RMSprop(Optimizer):
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
+        momentum (float, optional): momentum factor (default: 0)
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
+        centered (bool, optional) : if True, compute the centered RMSProp, 
+            the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
     """
 
-    def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0):
-        defaults = dict(lr=lr, alpha=alpha, eps=eps, weight_decay=weight_decay)
+    def __init__(self, params, lr=1e-2, momentum=0, alpha=0.99, eps=1e-8, centered=False, weight_decay=0):
+        defaults = dict(lr=lr, momentum=0, alpha=alpha, eps=eps, centered=False, weight_decay=weight_decay)
         super(RMSprop, self).__init__(params, defaults)
 
     def step(self, closure=None):
@@ -38,9 +41,13 @@ class RMSprop(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
+                    state['grad_avg'] = grad.new().resize_as_(grad).zero_()
                     state['square_avg'] = grad.new().resize_as_(grad).zero_()
+                    state['momentum'] = grad.new().resize_as_(grad).zero_()
 
+                grad_avg = state['grad_avg']
                 square_avg = state['square_avg']
+                momentum = state['momentum']
                 alpha = group['alpha']
 
                 state['step'] += 1
@@ -49,7 +56,15 @@ class RMSprop(Optimizer):
                     grad = grad.add(group['weight_decay'], p.data)
 
                 square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
-                avg = square_avg.sqrt().add_(group['eps'])
-                p.data.addcdiv_(-group['lr'], grad, avg)
+
+                avg = None
+                if group['centered']:
+                    grad_avg.mul_(alpha).add_(1 - alpha, grad)
+                    avg = square_avg.addcmul(-1, grad_avg, grad_avg).sqrt().add_(group['eps'])
+                else:
+                    avg = square_avg.sqrt().add_(group['eps'])
+                
+                momentum.mul_(group['momentum']).addcdiv_(-group['lr'], grad, avg)
+                p.data.add_(-momentum)
 
         return loss
