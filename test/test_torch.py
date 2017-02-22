@@ -2534,6 +2534,9 @@ class TestTorch(TestCase):
             self.assertEqual(views[0], views[2])
             self.assertNotEqual(views[0]._cdata, views[2]._cdata)
 
+            rootview = c[8]
+            self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):
         device_count = torch.cuda.device_count()

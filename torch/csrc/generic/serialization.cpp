@@ -54,7 +54,7 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
     if (remaining != 0)
       throw std::system_error(result, std::system_category());
   } else {
-    int64_t buffer_size = std::min(size, (long)5000);
+    int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
@@ -117,7 +117,7 @@ THStorage * THPStorage_(readFileRaw)(int fd, THStorage *_storage)
     if (remaining != 0)
       throw std::system_error(result, std::system_category());
   } else {
-    int64_t buffer_size = std::min(size, (long)5000);
+    int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
