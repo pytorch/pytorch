@@ -378,6 +378,30 @@ def final_output(blob_or_record):
     return cur_task.add_output(blob_or_record)
 
 
+class TaskOutputList(object):
+    """ Keeps a list of outputs for a task """
+    def __init__(self, outputs=None):
+        self.outputs = outputs or []
+
+    def names(self):
+        """
+        Retrive the output names.
+        TODO(azzolini): make this schema-based.
+        """
+        names = []
+        for o in self.outputs:
+            names += o.names
+        return names
+
+    def set_values(self, values, _fetch_func=None):
+        offset = 0
+        for o in self.outputs:
+            num = len(o.names)
+            o.set(values[offset:offset + num], _fetch_func)
+            offset += num
+        assert offset == len(values), 'Wrong number of output values.'
+
+
 @context.define_context()
 class Task(object):
     """
@@ -515,33 +539,11 @@ class Task(object):
             self._step_with_setup = core.execution_step(self.name, [])
         return self._step_with_setup
 
+    def output_list(self):
+        return TaskOutputList(self._outputs)
+
     def outputs(self):
         return self._outputs
-
-    def output_names(self):
-        """
-        Retrive the output names.
-        TODO(azzolini): make this schema-based.
-        """
-        names = []
-        for o in self._outputs:
-            names += o.names
-        return names
-
-    def set_outputs(self, values, _fetch_func):
-        """
-        Set output values.
-        TODO(azzolini): make this schema-based.
-        """
-        offset = 0
-        for o in self._outputs:
-            num = len(o.names)
-            o.set(values[offset:offset + num], _fetch_func)
-            offset += num
-        assert offset == len(values), 'Wrong number of output values.'
-
-    def resolved_outputs(self):
-        return [output.get() for output in self._outputs]
 
     def _notify_used(self):
         self.get_step()
