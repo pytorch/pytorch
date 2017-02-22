@@ -218,7 +218,7 @@ class TaskGroup(object):
     def used_nodes(self):
         # use list to keep order
         used = []
-        for task in self.tasks():
+        for task in self._tasks + self._tasks_to_add:
             if task.node not in used:
                 used.append(task.node)
         return used
