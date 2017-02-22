@@ -20,7 +20,10 @@ class Index(Function):
     def backward(self, grad_output):
         # TODO: this won't have to be zeroed
         grad_input = grad_output.new(self.input_size).zero_()
-        grad_input.index(self.index).copy_(grad_output)
+        if torch.is_tensor(self.index):  # LongTensor case
+            grad_input.index_copy_(0, self.index, grad_output)
+        else:  # list
+            grad_input.index(self.index).copy_(grad_output)
         return grad_input
 
 
