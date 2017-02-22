@@ -19,10 +19,12 @@ class FC(ModelLayer):
                  **kwargs):
         super(FC, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
-        assert len(input_record.field_types()[0].shape) > 0,\
-            "FC expects limited dimensions of the input tensor"
+        assert len(input_record.field_types()[0].shape) > 0, (
+            "FC expects limited dimensions of the input tensor")
 
         input_dims = input_record.field_types()[0].shape[0]
+        assert input_dims > 0, (
+            "FC expects input dimensions > 0, got {}".format(input_dims))
 
         self.output_schema = schema.Scalar(
             (np.float32, (output_dims, )),
