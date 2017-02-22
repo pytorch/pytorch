@@ -208,7 +208,7 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
       "most the number of classes, ",
       D,
       ".");
-  EigenArrayMap<float>(Ydata, N, 1) =
+  EigenArrayMap<float>(Ydata, 1, N) =
       -(ConstEigenArrayMap<float>(labelData, D, N) *
         ConstEigenArrayMap<float>(Xdata, D, N).cwiseMax(kLOG_THRESHOLD()).log())
            .colwise()
