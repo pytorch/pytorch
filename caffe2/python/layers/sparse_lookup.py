@@ -92,6 +92,12 @@ class SparseLookup(ModelLayer):
     def get_memory_usage(self):
         return functools.reduce(operator.mul, self.shape) * 4
 
+    def get_fp16_compatible_parameters(self):
+        if (self.reducer == 'Sum' and
+                schema.equal_schemas(self.input_record, IdList)):
+            return [self.w]
+        return []
+
     def add_ops(self, net):
         if schema.equal_schemas(self.input_record, IdList):
             if self.reducer == 'Sum':
