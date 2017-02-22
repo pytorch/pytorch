@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2017, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -74,18 +74,17 @@ __global__ void ReduceKernel(const KernelArgs<T> args) {
           postReadyToNext);
     } else if (rank == root) {
       Prims::Reduce(
-          prevInput  + boffset,
           thisInput + offset,
+          prevInput + boffset,
           thisOutput + offset,
           sliceSize, maxOffset,
           step,
           waitReadyFromPrev,
           postDoneToPrev);
     } else {
-      Prims::ReduceCopy(
+      Prims::Reduce(
           thisInput + offset,
           prevInput + boffset,
-          thisOutput + offset,
           nextOutput + boffset,
           sliceSize, maxOffset,
           step,
