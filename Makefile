@@ -1,7 +1,7 @@
 # This makefile does nothing but delegating the actual building to cmake.
 
 all:
-	@mkdir -p build && cd build && cmake .. && make
+	@mkdir -p build && cd build && cmake .. $(python ./scripts/get_python_cmake_flags.py) && make
 
 local:
 	@./scripts/build_local.sh
