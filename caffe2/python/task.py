@@ -186,6 +186,7 @@ class TaskGroup(object):
         self._prev_active = None
         self._tasks_to_add = []
         self._report_nets = {}
+        self._report_steps = []
         self._workspace_type = workspace_type
         self._tasks_by_node = None
 
@@ -222,24 +223,22 @@ class TaskGroup(object):
                 used.append(task.node)
         return used
 
+    def report_step(self, step=None, node=None, interval_ms=1000):
+        """
+        Add a "report step" to this TaskGroup. This step will run repeatedly
+        every `interval_ms` milliseconds for the duration of the TaskGroup
+        execution on each of the nodes. It is guaranteed that this step
+        will be run at least once after every Task in the node has finished.
+        """
+        step = core.to_execution_step(step)
+        step.RunEveryMillis(interval_ms)
+        self._report_steps.append((str(node or Node.current(node)), step))
+
     def report_net(self, net=None, node=None, report_interval=5):
         """
-        Get or set the `report_net`, which is a net that runs repeatedly every
-        `report_interval` seconds for the duration of the TaskGroup execution
-        on each of the nodes. Each node has it's own report net.
-
-        Example:
-
-            with TaskGroup() as tg:
-                for i in range(0, 2):
-                    with Node('trainer:%d' % i):
-                        report_net = tg.report_net()
-                        report_net.LogInfo('5s passed in trainer %d' % i)
-
-        This will print '5s passed in trainer {}' every 5s on each one of the
-        trainer nodes.
+        DEPRECATED. Use report_step instead.
         """
-        node = str(Node.current(node))
+        node = str(node or Node.current(node))
         assert net is None or node not in self._report_nets
         if node not in self._report_nets:
             self._report_nets[node] = (
@@ -260,20 +259,29 @@ class TaskGroup(object):
                 'Cannot call tasks_by_node multiple times.')
             return tasks_by_node
 
+        # now we have report_steps. report_net is deprecated
+        for node, (net, interval) in self._report_nets.items():
+            self.report_step(net, node=node, interval_ms=interval * 1000)
+        self._report_nets = {}
+
         tasks_by_node = defaultdict(list)
         for task in self.tasks():
-            tasks_by_node[node_map[task.node]].append(task)
+            mapped_node = node_map[task.node]
+            tasks_by_node[mapped_node].append(task)
+
+        report_steps_by_node = defaultdict(list)
+        for original_node, step in self._report_steps:
+            report_steps_by_node[node_map[original_node]].append(step)
+
         grouped_by_node = TaskGroup()
         for node, tasks in tasks_by_node.items():
-            report_net = (
-                self._report_nets[node][0]
-                if node in self._report_nets else None)
+            report_steps = report_steps_by_node[node]
             node_inits, node_exits = get_setup_nets(
                 TaskGroup.LOCAL_SETUP,
-                [t.get_step() for t in tasks] + [report_net],
+                [t.get_step() for t in tasks] + report_steps,
                 self)
             # shortcut for single task with no queue
-            steps = []
+            steps = report_steps
             outputs = []
             workspace_type = tasks[0].workspace_type()
             for task in tasks:
@@ -290,9 +298,6 @@ class TaskGroup(object):
             else:
                 step = core.execution_step(
                     '%s:body' % node, steps, concurrent_substeps=True)
-            if node in self._report_nets:
-                net, interval = self._report_nets[node]
-                step.SetReportNet(net, interval)
             if len(node_inits) > 0 or len(node_exits) > 0:
                 steps = []
                 if len(node_inits) > 0:
@@ -384,7 +389,7 @@ class Task(object):
     """
 
     TASK_SETUP = 'task_setup'
-    REPORT_NET = 'report_net'
+    REPORT_STEP = 'report_step'
     _global_names_used = set()
 
     @staticmethod
@@ -481,26 +486,28 @@ class Task(object):
 
     def get_step(self):
         if self._step is not None and self._step_with_setup is None:
-            report_net = self._step.get_all_attributes(Task.REPORT_NET)
-            assert len(report_net) <= 1, (
-                'Currently only one report net supported per task.')
-            if report_net:
-                report_net = report_net[0]
-                if not hasattr(report_net, '_report_net_used'):
-                    self._step.SetReportNet(report_net, 1)
-                    report_net._report_net_used = True
+            report_steps = filter(
+                lambda s: not hasattr(s, '_report_step_used'),
+                self._step.get_all_attributes(Task.REPORT_STEP))
+            for step in report_steps:
+                step._report_step_used = True
+                if not step.Proto().run_every_ms:
+                    step.RunEveryMillis(1000)
             init_nets, exit_nets = get_setup_nets(
-                Task.TASK_SETUP, [self._step], self)
+                Task.TASK_SETUP, [self._step] + report_steps, self)
             if len(self._outputs) == 0:
                 output_net = core.Net('%s:output' % self.name)
                 self.add_output(output_net.ConstantFill(
                     [], 1, dtype=core.DataType.INT32, value=0))
                 exit_nets.append(output_net)
+
+            body = self._step if not report_steps else core.execution_step(
+                '%s:body', report_steps + [self._step])
             self._step_with_setup = core.execution_step(
                 self.name,
                 [
                     core.execution_step('%s:init' % self.name, init_nets),
-                    self._step,
+                    body,
                     core.execution_step('%s:exit' % self.name, exit_nets),
                 ]
             )

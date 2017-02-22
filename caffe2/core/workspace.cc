@@ -277,37 +277,41 @@ ThreadPool* Workspace::GetThreadPool() {
 namespace {
 
 struct Reporter {
-  void start(NetBase* net, int reportInterval) {
-    auto interval = std::chrono::seconds(reportInterval);
-    auto reportWorker = [=]() {
-      std::unique_lock<std::mutex> lk(report_mutex);
-      do {
-        report_cv.wait_for(lk, interval);
-        if (!net->Run()) {
-          LOG(WARNING) << "Error running report_net.";
-        }
-      } while (!done);
-    };
-    report_thread = std::thread(reportWorker);
+  struct ReporterInstance {
+    std::mutex report_mutex;
+    std::condition_variable report_cv;
+    std::thread report_thread;
+    ReporterInstance(int intervalMillis, bool* done, std::function<void()> f) {
+      auto interval = std::chrono::milliseconds(intervalMillis);
+      auto reportWorker = [=]() {
+        std::unique_lock<std::mutex> lk(report_mutex);
+        do {
+          report_cv.wait_for(lk, interval, [&]() { return *done; });
+          f();
+        } while (!*done);
+      };
+      report_thread = std::thread(reportWorker);
+    }
+  };
+
+  void start(int64_t intervalMillis, std::function<void()> f) {
+    instances_.emplace_back(new ReporterInstance(intervalMillis, &done, f));
   }
 
   ~Reporter() {
-    if (!report_thread.joinable()) {
-      return;
+    done = true;
+    for (auto& instance : instances_) {
+      if (!instance->report_thread.joinable()) {
+        continue;
+      }
+      instance->report_cv.notify_all();
+      instance->report_thread.join();
     }
-    {
-      std::lock_guard<std::mutex> lk(report_mutex);
-      done = true;
-    }
-    report_cv.notify_all();
-    report_thread.join();
   }
 
  private:
-  std::mutex report_mutex;
-  std::condition_variable report_cv;
+  std::vector<std::unique_ptr<ReporterInstance>> instances_;
   bool done{false};
-  std::thread report_thread;
 };
 
 }
@@ -339,7 +343,21 @@ bool Workspace::ExecuteStepRecursive(
       LOG(ERROR) << "Report net " << step.report_net() << " not found.";
     }
     VLOG(1) << "Starting reporter net";
-    reporter.start(net_map_[step.report_net()].get(), step.report_interval());
+    auto* net = net_map_[step.report_net()].get();
+    reporter.start(step.report_interval() * 1000, [=]() {
+      if (!net->Run()) {
+        LOG(WARNING) << "Error running report_net.";
+      }
+    });
+  }
+  for (auto&& ss : step.substep()) {
+    if (ss.has_run_every_ms()) {
+      reporter.start(ss.run_every_ms(), [=]() {
+        if (!ExecuteStepRecursive(ss, externalShouldContinue)) {
+          LOG(WARNING) << "Error running report step.";
+        }
+      });
+    }
   }
 
   const Blob* shouldStop = nullptr;
@@ -363,10 +381,12 @@ bool Workspace::ExecuteStepRecursive(
         };
 
         for (auto& ss : step.substep()) {
-          if (!ExecuteStepRecursive(ss, substepShouldContinue)) {
-            return false;
+          if (!ss.has_run_every_ms()) {
+            if (!ExecuteStepRecursive(ss, substepShouldContinue)) {
+              return false;
+            }
+            CHECK_SHOULD_STOP(step, shouldStop);
           }
-          CHECK_SHOULD_STOP(step, shouldStop);
         }
       } else {
         VLOG(1) << "Executing step " << step.name() << " iteration " << iter
@@ -410,7 +430,9 @@ bool Workspace::ExecuteStepRecursive(
 
         std::vector<std::thread> threads;
         for (int64_t i = 0; i < step.substep().size(); ++i) {
-          threads.emplace_back(worker);
+          if (!step.substep().Get(i).has_run_every_ms()) {
+            threads.emplace_back(worker);
+          }
         }
         for (auto& thread: threads) {
           thread.join();

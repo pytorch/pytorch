@@ -280,8 +280,47 @@ class Operations(object):
         self.net().add_attribute(TaskGroup.LOCAL_SETUP, setup)
         return setup
 
+    def task_reporter(self, interval_ms=1000, name=None):
+        """
+        Define operations to be executed at every time interval from
+        task start-up to finish. These operations are guaranteed to
+        execute at least once after all other operations of the task are
+        finished.
+
+            Example:
+                with ops.task_reporter(interval_ms=10000):
+                    ops.LogInfo('10s elapsed')
+        """
+        return _ReporterBuilder(interval_ms, net=self.net(), name=name)
+
+    def local_reporter(self, interval_ms=1000, name=None):
+        """
+        Similar to task_report, but operations defined within this block
+        will run repeatedly for as long as any of the tasks in the current
+        TaskGroup have not finished.
+        """
+        return _ReporterBuilder(interval_ms, name=name)
+
 
 ops = Operations()
+
+
+class _ReporterBuilder(NetBuilder):
+    def __init__(self, interval_ms, net=None, name=None):
+        NetBuilder.__init__(self, name)
+        self._net = net
+        self.interval_ms = interval_ms
+
+    def __exit__(self, etype, *args):
+        if etype is None:
+            step = core.to_execution_step(self)
+            step.RunEveryMillis(self.interval_ms)
+            if self._net:
+                self._net.add_attribute(Task.REPORT_STEP, step)
+            else:
+                TaskGroup.current().report_step(
+                    step, interval_ms=self.interval_ms)
+        NetBuilder.__exit__(self, etype, *args)
 
 
 class _SetupBuilder(NetBuilder):

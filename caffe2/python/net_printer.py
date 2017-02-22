@@ -268,7 +268,15 @@ def print_step(text, step):
                 text(step.get_net(proto.report_net))
         substeps = step.Substeps() + [step.get_net(n) for n in proto.network]
         for substep in substeps:
-            substep_ctx = call('step', [str(substep)]) if do_substep else None
+            if (isinstance(substep, ExecutionStep) and
+                    substep.Proto().run_every_ms):
+                substep_ctx = call(
+                    'reporter',
+                    [str(substep), ('interval_ms', substep.Proto().run_every_ms)])
+            elif do_substep:
+                substep_ctx = call('step', [str(substep)])
+            else:
+                substep_ctx = None
             with text.context(substep_ctx):
                 text(substep)
                 if proto.should_stop_blob:

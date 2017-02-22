@@ -219,11 +219,14 @@ message ExecutionStep {
   // execution terminates when the output[0] is `false`.
   optional string criteria_network = 5 [deprecated=true];
 
-  // If specified, run report_net asynchronously every `report_interval`
-  // seconds. Report_net is guaranteed to run at least once after all
-  // substeps have finished.
+  // DEPRECATED. Use `run_every_ms`.
   optional string report_net = 7;
   optional int32 report_interval = 8;
+
+  // If provided, execute this step at every time interval (in millisecs)
+  // while its sibiling execution steps execute in parallel. This step is
+  // guaranteed to run at least once after all non-interval siblings finished.
+  optional int64 run_every_ms = 11;
 
   // If false or not set, execute sub-steps serially.
   // If true, execute all substeps concurrently, each one in a separte thread.
