@@ -301,52 +301,6 @@ class _BlobDict(object):
 blobs = _BlobDict()
 
 
-class Model(object):
-    def __init__(self, net, parameters, inputs, outputs, device_option=None):
-        """Initializes a model.
-
-        Inputs:
-          net: a Caffe2 NetDef protocol buffer.
-          parameters: a TensorProtos object containing the parameters to feed
-              into the network.
-          inputs: a list of strings specifying the input blob names.
-          outputs: a list of strings specifying the output blob names.
-          device_option (optional): the device option used to run the model. If
-              not given, we will use the net's device option.
-        """
-        self._name = net.name
-        self._inputs = inputs
-        self._outputs = outputs
-        if device_option:
-            self._device_option = device_option
-        else:
-            self._device_option = net.device_option
-        # For a caffe2 net, before we create it, it needs to have all the
-        # parameter blobs ready. The construction is in two steps: feed in all
-        # the parameters first, and then create the network object.
-        for param in parameters.protos:
-            print('Feeding parameter {}'.format(param.name))
-            FeedBlob(param.name, param, net.device_option)
-        if not CreateNet(net, inputs):
-            raise RuntimeError("Error when creating the model.")
-
-    def Run(self, input_arrs):
-        """Runs the model with the given input.
-
-        Inputs:
-          input_arrs: an iterable of input arrays.
-        Outputs:
-          output_arrs: a list of output arrays.
-        """
-        if len(input_arrs) != len(self._inputs):
-            raise RuntimeError("Incorrect number of inputs.")
-        for i, input_arr in enumerate(input_arrs):
-            FeedBlob(self._inputs[i], input_arr, self._device_option)
-        if not RunNet(self._name):
-            raise RuntimeError("Error in running the network.")
-        return [FetchBlob(s) for s in self._outputs]
-
-
 ################################################################################
 # Utilities for immediate mode
 #
