@@ -7,6 +7,7 @@
 #include <queue>
 
 #include "caffe2/core/logging.h"
+#include "caffe2/core/stats.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
 
@@ -26,7 +27,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
       size_t capacity,
       size_t numBlobs,
       bool enforceUniqueName)
-      : numBlobs_(numBlobs) {
+      : numBlobs_(numBlobs), stats_(queueName) {
     queue_.reserve(capacity);
     for (auto i = 0; i < capacity; ++i) {
       std::vector<Blob*> blobs;
@@ -58,6 +59,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
       CAFFE_ENFORCE_LE(reader_, writer_);
       return reader_ != writer_;
     };
+    CAFFE_EVENT(stats_, queue_balance, -1);
     cv_.wait(g, [this, canRead]() { return closing_ || canRead(); });
     if (!canRead()) {
       return false;
@@ -69,6 +71,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
       using std::swap;
       swap(*(inputs[i]), *(result[i]));
     }
+    CAFFE_EVENT(stats_, queue_dequeued_records);
     ++reader_;
     cv_.notify_all();
     return true;
@@ -80,6 +83,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     if (!canWrite()) {
       return false;
     }
+    CAFFE_EVENT(stats_, queue_balance, 1);
     DCHECK(canWrite());
     doWrite(inputs);
     return true;
@@ -88,6 +92,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
   bool blockingWrite(const std::vector<Blob*>& inputs) {
     auto keeper = this->shared_from_this();
     std::unique_lock<std::mutex> g(mutex_);
+    CAFFE_EVENT(stats_, queue_balance, 1);
     cv_.wait(g, [this]() { return closing_ || canWrite(); });
     if (!canWrite()) {
       return false;
@@ -136,5 +141,11 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
   int64_t reader_{0};
   int64_t writer_{0};
   std::vector<std::vector<Blob*>> queue_;
+
+  struct QueueStats {
+    CAFFE_STAT_CTOR(QueueStats);
+    CAFFE_EXPORTED_STAT(queue_balance);
+    CAFFE_EXPORTED_STAT(queue_dequeued_records);
+  } stats_;
 };
 }
