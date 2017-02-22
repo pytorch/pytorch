@@ -88,10 +88,13 @@ class OperatorBase {
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
 
-  virtual bool Run() {
+  virtual bool Run(int /* unused */ stream_id = 0) {
     CAFFE_NOT_IMPLEMENTED;
   }
-  virtual bool RunAsync() { return Run(); }
+
+  virtual bool RunAsync(int /* unused */ stream_id = 0) {
+    return Run(stream_id);
+  }
 
   inline const OperatorDef& def() const {
     return operator_def_;
@@ -148,7 +151,7 @@ class Operator : public OperatorBase {
         context_(operator_def.device_option()) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice();
+    context_.SwitchToDevice(0);
   }
   virtual ~Operator() {}
 
@@ -161,9 +164,9 @@ class Operator : public OperatorBase {
   // The run function of Operator switches to the device, and then carries out
   // the actual computation with RunOnDevice(). You should implement RunOnDevice
   // instead of Run().
-  bool Run() final {
+  bool Run(int stream_id = 0) final {
     try {
-      context_.SwitchToDevice();
+      context_.SwitchToDevice(stream_id);
       bool started = RunOnDevice();
       bool finished = context_.FinishDeviceComputation();
       if (!finished) {
@@ -180,9 +183,9 @@ class Operator : public OperatorBase {
     }
   }
 
-  bool RunAsync() final {
+  bool RunAsync(int stream_id = 0) final {
     try {
-      context_.SwitchToDevice();
+      context_.SwitchToDevice(stream_id);
       return RunOnDevice();
     } catch (EnforceNotMet& err) {
       err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));

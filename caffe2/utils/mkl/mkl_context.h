@@ -29,7 +29,7 @@ class MKLContext final {
 
   ~MKLContext() {}
 
-  inline void SwitchToDevice() {}
+  inline void SwitchToDevice(int stream_id = 0) {}
   inline bool FinishDeviceComputation() {
     return true;
   }

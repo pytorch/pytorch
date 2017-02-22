@@ -12,7 +12,9 @@ namespace caffe2 {
 class JustTest : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
-  bool Run() override { return true; }
+  bool Run(int /* unused */ stream_id) override {
+    return true;
+  }
   virtual string type() {
     return "base";
   }
@@ -24,7 +26,7 @@ class JustTestAndNeverConstructs : public JustTest {
       : JustTest(def, ws) {
     throw UnsupportedOperatorFeature("I just don't construct.");
   }
-  bool Run() override {
+  bool Run(int /* unused */ stream_id) override {
     return true;
   }
   string type() override {
@@ -35,7 +37,7 @@ class JustTestAndNeverConstructs : public JustTest {
 class JustTestAndDoesConstruct : public JustTest {
  public:
   using JustTest::JustTest;
-  bool Run() override {
+  bool Run(int /* unused */ stream_id) override {
     return true;
   }
   string type() override {
@@ -46,7 +48,7 @@ class JustTestAndDoesConstruct : public JustTest {
 class JustTestWithSomeOutput : public JustTest {
  public:
   using JustTest::JustTest;
-  bool Run() override {
+  bool Run(int /* unused */ stream_id) override {
     *OperatorBase::Output<int>(0) = 5;
     return true;
   }

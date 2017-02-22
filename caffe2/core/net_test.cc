@@ -18,7 +18,7 @@ static std::atomic<int> counter;
 class NetTestDummyOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
-  bool Run() override {
+  bool Run(int /* unused */ stream_id) override {
     counter.fetch_add(1);
     return true;
   }
