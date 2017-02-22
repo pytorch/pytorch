@@ -73,12 +73,19 @@ class ModelLayer(object):
         self.tags.update(TagContext.current().tags)
         self.params = []
 
+    def get_type(self):
+        return self.__class__.__name__
+
     def get_output_schema(self):
         assert self.output_schema is not None, "Schema is not initialized"
         return self.output_schema
 
     def get_parameters(self):
         return self.params
+
+    def get_fp16_compatible_parameters(self):
+        """Return a subset of parameters which can be converted to fp16"""
+        return []
 
     def get_memory_usage(self):
         return 0
