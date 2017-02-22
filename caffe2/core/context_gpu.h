@@ -50,7 +50,7 @@ class ThreadLocalCUDAObjects {
   cudaStream_t GetStream(int gpu, int stream_id) {
     vector<cudaStream_t> &gpu_streams = cuda_streams_[gpu];
     if (gpu_streams.size() <= stream_id) {
-      gpu_streams.resize(stream_id + 1);
+      gpu_streams.resize(stream_id + 1, nullptr);
     }
     if (!gpu_streams[stream_id]) {
       DeviceGuard guard(gpu);
@@ -62,9 +62,10 @@ class ThreadLocalCUDAObjects {
   }
 
   cublasHandle_t GetHandle(int gpu, int stream_id) {
+    DeviceGuard guard(gpu);
     vector<cublasHandle_t> &gpu_handles = cublas_handles_[gpu];
     if (gpu_handles.size() <= stream_id) {
-      gpu_handles.resize(stream_id + 1);
+      gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
       CUBLAS_CHECK(cublasCreate(&gpu_handles[stream_id]));
@@ -81,14 +82,14 @@ class ThreadLocalCUDAObjects {
 
   ~ThreadLocalCUDAObjects() {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
-      for (auto handle : cublas_handles_[i]) {
+      for (auto& handle : cublas_handles_[i]) {
         if (handle) {
-          cublasDestroy(handle);
+          CUBLAS_CHECK(cublasDestroy(handle));
         }
       }
-      for (auto stream: cuda_streams_[i]) {
+      for (auto& stream : cuda_streams_[i]) {
         if (stream) {
-          cudaStreamDestroy(stream);
+          CUDA_CHECK(cudaStreamDestroy(stream));
         }
       }
     }
@@ -110,8 +111,12 @@ class CUDAContext final {
     CAFFE_ENFORCE(FinishDeviceComputation());
   }
 
-  inline void SwitchToDevice() {
+  inline void SwitchToDevice(int stream_id) {
+    set_stream_id(stream_id);
     CUDA_CHECK(cudaSetDevice(gpu_id_));
+  }
+  inline void SwitchToDevice() {
+    SwitchToDevice(0);
   }
 
   bool FinishDeviceComputation() {
@@ -132,7 +137,7 @@ class CUDAContext final {
     return cuda_stream(gpu_id_, stream_id_);
   }
 
-  inline const cudaStream_t cuda_stream() const {
+  inline cudaStream_t cuda_stream() const {
     return cuda_stream(gpu_id_, stream_id_);
   }
 

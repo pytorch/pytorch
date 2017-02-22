@@ -385,7 +385,7 @@ void TensorDeserializer<Context>::Deserialize(
   // We create a local context for deserializing. Since Caffe2 contexts are
   // usually lightweighted, this should not involve too much overhead.
   Context context(proto.device_detail());
-  context.SwitchToDevice();
+  context.SwitchToDevice(0);
   vector<TIndex> dims;
   for (const TIndex d : proto.dims()) {
     dims.push_back(d);

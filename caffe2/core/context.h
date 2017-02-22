@@ -92,7 +92,11 @@ class CPUContext final {
 
   ~CPUContext() {}
 
-  inline void SwitchToDevice() {}
+  inline void SwitchToDevice(int stream_id) {}
+  inline void SwitchToDevice() {
+    SwitchToDevice(0);
+  }
+
   inline bool FinishDeviceComputation() { return true; }
 
   inline std::mt19937& RandGenerator() {

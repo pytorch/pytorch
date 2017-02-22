@@ -36,6 +36,11 @@ class SimpleQueue {
     return true;
   }
 
+  int size() {
+    std::unique_lock<std::mutex> mutex_lock(mutex_);
+    return queue_.size();
+  }
+
   // Push pushes a value to the queue.
   void Push(const T& value) {
     {

@@ -47,6 +47,48 @@ class AsyncDAGNet : public DAGNetBase {
   DISABLE_COPY_AND_ASSIGN(AsyncDAGNet);
 };
 
+namespace gpu_single_thread {
+
+struct Task {
+  std::vector<std::unique_ptr<OperatorBase>>* ops_;
+  std::condition_variable* cv_;
+  std::mutex* mtx_;
+  int stream_id_;
+  bool done_ = false;
+};
+
+class GPUExecutor {
+ public:
+  explicit GPUExecutor(int gpu_id) : gpu_id_(gpu_id) {}
+
+  ~GPUExecutor() {
+    queue_.NoMoreJobs();
+    thread_.join();
+  }
+
+  void RunJob(Task* task) {
+    queue_.Push(task);
+  }
+
+  void start() {
+    thread_ = std::thread(&GPUExecutor::WorkerFunction, this);
+  }
+
+  static std::shared_ptr<GPUExecutor> Get(int gpu);
+  static void Release(int gpu);
+
+ private:
+  void set_affinity();
+  void WorkerFunction();
+
+  std::thread thread_;
+  int gpu_id_;
+  SimpleQueue<Task*> queue_;
+  static std::shared_ptr<GPUExecutor> executors_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  static std::mutex gpu_mtx_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+};
+}
+
 } // namespace caffe2
 
 #endif // CAFFE2_CORE_NET_GPU_H_
