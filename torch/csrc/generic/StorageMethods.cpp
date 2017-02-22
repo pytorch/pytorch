@@ -190,10 +190,33 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
       "descriptor from given object");
-  THStoragePtr storage = THPStorage_(readFileRaw)(fd);
+  THStorage *storage = THPStorage_(readFileRaw)(fd, nullptr);
+  if (storage == nullptr)
+    return nullptr;
   PyObject *result = THPStorage_(New)(storage);
-  storage.release();
   return result;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject *file = PyTuple_GET_ITEM(args, 0);
+  int fd = PyObject_AsFileDescriptor(file);
+
+  PyObject *offset = PyTuple_GET_ITEM(args, 1);
+  if (offset != Py_None) {
+    lseek(fd, THPUtils_unpackLong(offset), SEEK_SET);
+  }
+
+  THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
+      "descriptor from given object");
+  THStorage *storage = THPStorage_(readFileRaw)(fd, self->cdata);
+  if (storage == nullptr)
+    return nullptr;
+  Py_INCREF(self);
+
+  return (PyObject *) self;
   END_HANDLE_TH_ERRORS
 }
 
@@ -250,6 +273,7 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, NULL},
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_O, NULL},
   {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, NULL},
+  {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, NULL},
 #ifndef THC_GENERIC_FILE
   {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
 #endif

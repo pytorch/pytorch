@@ -103,7 +103,16 @@ class _TensorBase(object):
         return new_tensor
 
     def __reduce__(self):
-        return type(self), (self.tolist(),)
+        return (type(self), (), self.__getstate__())
+
+    def __getstate__(self):
+        return (self.storage(),
+                self.storage_offset(),
+                tuple(self.size()),
+                self.stride())
+
+    def __setstate__(self, state):
+        self.set_(*state)
 
     def __repr__(self):
         return str(self)
