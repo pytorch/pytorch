@@ -272,11 +272,11 @@
       TENSOR3##_i = 0; \
     } \
   } \
-  if(TH_TENSOR1_contiguous) \
+  if(!TH_TENSOR1_contiguous) \
     THFree(TENSOR1##_counter); \
-  if(TH_TENSOR2_contiguous) \
+  if(!TH_TENSOR2_contiguous) \
     THFree(TENSOR2##_counter); \
-  if(TH_TENSOR3_contiguous) \
+  if(!TH_TENSOR3_contiguous) \
     THFree(TENSOR3##_counter); \
 }
 
