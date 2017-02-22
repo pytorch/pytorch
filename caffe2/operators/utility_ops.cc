@@ -47,6 +47,7 @@ REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToWeights, LengthsToWeightsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(EnsureDense, EnsureDenseOp<CPUContext>);
 
 OPERATOR_SCHEMA(WallClockTime)
     .NumInputs(0)
@@ -645,6 +646,46 @@ This is 'unsafe' as the output vectors are aliased, so use with
 caution.
 
 )DOC");
+
+OPERATOR_SCHEMA(EnsureDense)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .EnforceInplace({{0, 0}})
+    .SetDoc(R"DOC(
+This operator converts dense or sparse gradients to dense ones.
+Therefore, sparse gradient can be back propagated to Operators that consume
+dense gradients only (e.g., FCGradient).
+
+The operator's behaviors:
+- In forward, simply pass input to the output in place.
+- In backward, if the gradient passed-in is sparse gradient, change it to
+  dense gradient in linear time; otherwise, simply pass the dense gradient.
+)DOC")
+    .Input(0, "input", "Input tensors.")
+    .Output(0, "output", "Output tensor. Same dimension as inputs.");
+
+class GetEnsureDenseGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    CAFFE_ENFORCE(
+        GradOut(0).IsSparse() || GradOut(0).IsDense(),
+        "Input gradient ",
+        O(0),
+        " should be either sparse or dense.");
+
+    if (GradOut(0).IsDense()) {
+      SetDense(0, GO(0));
+      return vector<OperatorDef>();
+    } else {
+      return SingleGradientDef(
+          "SparseToDense",
+          "",
+          vector<string>{GO_I(0), GO_V(0)},
+          vector<string>{GI(0)});
+    }
+  }
+};
+REGISTER_GRADIENT(EnsureDense, GetEnsureDenseGradient);
 
 SHOULD_NOT_DO_GRADIENT(Print);
 SHOULD_NOT_DO_GRADIENT(Shape);
