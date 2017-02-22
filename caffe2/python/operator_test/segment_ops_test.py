@@ -37,14 +37,18 @@ class TesterBase:
         ]
         return self.unsplit(data.shape[1:], segment_grads, segment_ids)
 
-    def test(self, prefix, input_strategy, refs):
+    def test(self, prefix, input_strategy, refs, **kwargs):
         tester = self
+        operator_args = kwargs.pop('operator_args', {})
+        threshold = kwargs.pop('threshold', 1e-4)
 
         @given(X=input_strategy, **hu.gcs_cpu_only)
         def test_segment_ops(self, X, gc, dc):
             for op_name, ref, grad_ref in refs:
                 inputs = ['input%d' % i for i in range(0, len(X))]
-                op = core.CreateOperator(prefix + op_name, inputs, ['output'])
+                op = core.CreateOperator(
+                    prefix + op_name, inputs, ['output'], **operator_args
+                )
 
                 def seg_reduce(data, *args):
                     indices, segments = (
@@ -82,6 +86,7 @@ class TesterBase:
                     reference=seg_reduce,
                     output_to_grad='output',
                     grad_reference=seg_reduce_grad,
+                    threshold=threshold,
                 )
 
         return test_segment_ops

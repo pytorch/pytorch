@@ -107,7 +107,8 @@ class SparseLookup(ModelLayer):
                         self.input_record.items(),
                         self.input_record.lengths()
                     ],
-                    self.output_schema.field_blobs()
+                    self.output_schema.field_blobs(),
+                    engine='fp16'
                 )
             elif self.reducer == 'PositionWeighted':
                 inc_seq = net.LengthsRangeFill(
