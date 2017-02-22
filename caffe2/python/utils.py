@@ -25,15 +25,39 @@ def CaffeBlobToNumpyArray(blob):
 
 
 def Caffe2TensorToNumpyArray(tensor):
-    return np.asarray(tensor.float_data, dtype=np.float32).reshape(tensor.dims)
+    if tensor.data_type == caffe2_pb2.TensorProto.FLOAT:
+        return np.asarray(
+            tensor.float_data, dtype=np.float32).reshape(tensor.dims)
+    elif tensor.data_type == caffe2_pb2.TensorProto.DOUBLE:
+        return np.asarray(
+            tensor.double_data, dtype=np.float64).reshape(tensor.dims)
+    elif tensor.data_type == caffe2_pb2.TensorProto.INT32:
+        return np.asarray(
+            tensor.double_data, dtype=np.int).reshape(tensor.dims)
+    else:
+        # TODO: complete the data type.
+        raise RuntimeError(
+            "Tensor data type not supported yet: " + str(tensor.data_type))
 
 
-def NumpyArrayToCaffe2Tensor(arr, name):
+def NumpyArrayToCaffe2Tensor(arr, name=None):
     tensor = caffe2_pb2.TensorProto()
-    tensor.data_type = caffe2_pb2.TensorProto.FLOAT
-    tensor.name = name
     tensor.dims.extend(arr.shape)
-    tensor.float_data.extend(list(arr.flatten().astype(float)))
+    if name:
+        tensor.name = name
+    if arr.dtype == np.float32:
+        tensor.data_type = caffe2_pb2.TensorProto.FLOAT
+        tensor.float_data.extend(list(arr.flatten().astype(float)))
+    elif arr.dtype == np.float64:
+        tensor.data_type = caffe2_pb2.TensorProto.DOUBLE
+        tensor.double_data.extend(list(arr.flatten().astype(np.float64)))
+    elif arr.dtype == np.int:
+        tensor.data_type = caffe2_pb2.TensorProto.INT32
+        tensor.int32_data.extend(list(arr.flatten().astype(np.int)))
+    else:
+        # TODO: complete the data type.
+        raise RuntimeError(
+            "Numpy data type not supported yet: " + str(arr.dtype))
     return tensor
 
 

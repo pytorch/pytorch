@@ -477,6 +477,10 @@ void addObjectMethods(py::module& m) {
       .def("new_cursor", &db::DB::NewCursor)
       .def("close", &db::DB::Close);
   m.def("create_db", &db::CreateDB);
+  m.def("registered_dbs", []() {
+    return caffe2::db::Caffe2DBRegistry()->Keys();
+  });
+
 
   // OpSchema
   py::class_<OpSchema>(m, "OpSchema")

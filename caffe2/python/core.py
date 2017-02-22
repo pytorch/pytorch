@@ -10,8 +10,17 @@ from caffe2.proto import caffe2_pb2
 from collections import defaultdict
 from caffe2.python import scope, utils, workspace
 import numpy as np
+import sys
 
 import caffe2.python._import_c_extension as C
+
+
+# Mac os specific message
+if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):
+    print('If you are using homebrew leveldb on a Mac OS, you might see an '
+          'error warning you that malloc_zone_unregister() failed. This is '
+          'not a caffe2 issue but is due to the homebrew leveldb having an '
+          'incompatible memory allocator. It does not affect usage.')
 
 # Convenience redirections to functions inside scope.
 DeviceScope = scope.DeviceScope
