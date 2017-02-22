@@ -1806,7 +1806,18 @@ class ExecutionStep(object):
         self._assert_can_mutate()
         self._step.should_stop_blob = str(should_stop_blob)
 
+    def RunEveryMillis(self, interval):
+        """
+        Run this step every interval millisecods, as long as its
+        siblings are still running. It is guaranteed that, after all
+        siblings finish, this step will run at least one.
+
+        This property is ignored for top-level ExecutionSteps.
+        """
+        self._step.run_every_ms = interval
+
     def SetReportNet(self, report_net, report_interval):
+        """ DEPRECATED. Use RunEveryMillis instead. """
         self._assert_can_mutate()
         _add_net_to_dict(self._net_dict, report_net)
         self._step.report_net = get_net_name(report_net)
