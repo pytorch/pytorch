@@ -90,7 +90,7 @@ def dims(min_value=1, max_value=5):
 
 def elements_of_type(dtype=np.float32, filter_=None):
     elems = None
-    if dtype in (np.float32, np.float64):
+    if dtype in (np.float16, np.float32, np.float64):
         elems = st.floats(min_value=-1.0, max_value=1.0)
     elif dtype is np.int32:
         elems = st.integers(min_value=0, max_value=2 ** 31 - 1)
