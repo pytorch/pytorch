@@ -61,8 +61,8 @@ import argparse
 from caffe2.python import cnn, workspace
 
 
-def MLP(order):
-    model = cnn.CNNModelHelper()
+def MLP(order, cudnn_ws):
+    model = cnn.CNNModelHelper(ws_nbytes_limit=cudnn_ws)
     d = 256
     depth = 20
     width = 3
@@ -85,10 +85,11 @@ def MLP(order):
     return model, d
 
 
-def AlexNet(order):
+def AlexNet(order, cudnn_ws):
     model = cnn.CNNModelHelper(
         order, name="alexnet",
-        use_cudnn=True, cudnn_exhaustive_search=True)
+        use_cudnn=True, cudnn_exhaustive_search=True,
+        ws_nbytes_limit=cudnn_ws)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -166,10 +167,11 @@ def AlexNet(order):
     return model, 224
 
 
-def OverFeat(order):
+def OverFeat(order, cudnn_ws):
     model = cnn.CNNModelHelper(
         order, name="overfeat",
-        use_cudnn=True, cudnn_exhaustive_search=True)
+        use_cudnn=True, cudnn_exhaustive_search=True,
+        ws_nbytes_limit=cudnn_ws)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -239,10 +241,11 @@ def OverFeat(order):
     return model, 231
 
 
-def VGGA(order):
+def VGGA(order, cudnn_ws):
     model = cnn.CNNModelHelper(
         order, name='vgg-a',
-        use_cudnn=True, cudnn_exhaustive_search=True)
+        use_cudnn=True, cudnn_exhaustive_search=True,
+        ws_nbytes_limit=cudnn_ws)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -416,10 +419,11 @@ def _InceptionModule(
     return output
 
 
-def Inception(order):
+def Inception(order, cudnn_ws):
     model = cnn.CNNModelHelper(
         order, name="inception",
-        use_cudnn=True, cudnn_exhaustive_search=True)
+        use_cudnn=True, cudnn_exhaustive_search=True,
+        ws_nbytes_limit=cudnn_ws)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -504,7 +508,7 @@ def AddParameterUpdate(model):
 
 
 def Benchmark(model_gen, arg):
-    model, input_size = model_gen(arg.order)
+    model, input_size = model_gen(arg.order, arg.cudnn_ws)
     model.Proto().type = arg.net_type
     model.Proto().num_workers = arg.num_workers
 
