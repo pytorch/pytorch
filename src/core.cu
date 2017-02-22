@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2017, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -823,7 +823,7 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
 
   showVersion();
 
-  NCCLCHECK(PtrCheck(comms, "CommInitRank", "comms"));
+  NCCLCHECK(PtrCheck(comms, "CommInitAll", "comms"));
 
   if (ndev < 1) {
     WARN("Invalid device count requested : %d", ndev);
