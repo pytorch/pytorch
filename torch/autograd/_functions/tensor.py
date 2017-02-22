@@ -99,7 +99,7 @@ class View(Function):
 
     def backward(self, grad_output):
         # TODO: not sure if this clone is necessary
-        return grad_output.clone().view(self.input_size)
+        return grad_output.contiguous().view(self.input_size)
 
 
 class Expand(Function):
