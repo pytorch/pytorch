@@ -55,13 +55,16 @@ class TestCheckpoint(TestCase):
             return output_fetcher.outputs()[0].fetch()
 
         session, checkpoint = builder()
-        num_epochs = JobRunner(job, checkpoint)(session)
+        compiled_job = job.compile(LocalSession)
+        num_epochs = JobRunner(compiled_job, checkpoint)(session)
         self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
         self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
         for initial_epoch in range(1, num_epochs + 1):
             session, checkpoint = builder()
-            JobRunner(job, checkpoint, resume_from_epoch=initial_epoch)(session)
+            JobRunner(
+                compiled_job,
+                checkpoint, resume_from_epoch=initial_epoch)(session)
             self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
         for epoch in range(1, num_epochs + 1):

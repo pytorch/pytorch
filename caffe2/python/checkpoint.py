@@ -58,11 +58,30 @@ class Job(object):
         model = build_model(params)
         build_hogwild_trainer(reader, model)
     """
-    def __init__(self):
-        self.init_group = TaskGroup(workspace_type=WorkspaceType.GLOBAL)
-        self.epoch_group = TaskGroup()
-        self.exit_group = TaskGroup()
-        self.stop_signals = []
+    def __init__(self,
+                 init_group=None, epoch_group=None,
+                 exit_group=None, stop_signals=None,
+                 nodes_to_checkpoint=None):
+        self.init_group = init_group or TaskGroup(
+            workspace_type=WorkspaceType.GLOBAL)
+        self.epoch_group = epoch_group or TaskGroup()
+        self.exit_group = exit_group or TaskGroup()
+        self.stop_signals = stop_signals or []
+        self._nodes_to_checkpoint = nodes_to_checkpoint
+
+    def nodes_to_checkpoint(self):
+        if self._nodes_to_checkpoint:
+            return self._nodes_to_checkpoint
+        else:
+            return self.init_group.used_nodes()
+
+    def compile(self, session_class):
+        return Job(
+            init_group=session_class.compile(self.init_group),
+            epoch_group=session_class.compile(self.epoch_group),
+            exit_group=session_class.compile(self.exit_group),
+            stop_signals=self.stop_signals,
+            nodes_to_checkpoint=self.nodes_to_checkpoint())
 
     def __enter__(self):
         self.epoch_group.__enter__()
@@ -225,7 +244,7 @@ class JobRunner(object):
         if self.checkpoint:
             logger.info('Preparing checkpoint ...')
             client.run(self.checkpoint.init(
-                self.job.init_group.used_nodes(),
+                self.job.nodes_to_checkpoint(),
                 retrieve_from_epoch=self.resume_from_epoch))
             if from_scratch:
                 logger.info('Saving first checkpoint ...')
