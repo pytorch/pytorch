@@ -131,6 +131,28 @@ class AliasOp final : public Operator<Context> {
   }
 };
 
+/**
+ * @brief Pass inputs to outputs.
+ * Input:
+ *   DATA - dense tensor.
+ * Output:
+ *   DATA - same tensor as input.
+ */
+template <class Context>
+class EnsureDenseOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(EnsureDenseOp)
+
+  bool RunOnDevice() override {
+    const auto& input = Input(0);
+    auto* output = Output(0);
+    CAFFE_ENFORCE_EQ(&input, output, "In place operation is required.");
+    CAFFE_ENFORCE_GT(input.ndim(), 0, "Input has to be at least a vector.");
+    return true;
+  }
+};
+
 template <class Context>
 class FlattenOp : public Operator<Context> {
  public:

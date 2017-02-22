@@ -534,6 +534,25 @@ class TestSparseGradientsAccumulation(test_util.TestCase):
         self.assertEqual(sum_op_v.input[1], "x4_grad")
         self.assertEqual(sum_op_v.output[0], "x2_grad_values_concat")
 
+    def testSparseGradientToDense(self):
+        #
+        #                                        x1-->Gather-->x4-->
+        #                                                 |        |
+        # x0, w, b-->FC-->x2-->EnsureDenseGradient-->x2---+  DotProduct-->x6
+        #                                                 |        |
+        #                                        x3-->Gather-->x5-->
+        net = core.Net("test_net")
+        net.FC(["x0", "w", "b"], "x2")
+        net.EnsureDense(["x2"], "x2")
+        net.Gather(["x2", "x1"], "x4")
+        net.Gather(["x2", "x3"], "x5")
+        net.DotProduct(["x4", "x5"], "x6")
+        net.AddGradientOperators(["x6"])
+        ensure_dense_op = net.Proto().op[-2]
+        self.assertEqual(ensure_dense_op.input[0], "x2_grad_indices_concat")
+        self.assertEqual(ensure_dense_op.input[1], "x2_grad_values_concat")
+        self.assertEqual(ensure_dense_op.output[0], "x2_grad")
+
     def testSparseAccumulationWithIndicesAndValues(self):
         # The gradient for "SparseFunHash" computes both indices and values
         #
