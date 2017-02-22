@@ -11,6 +11,7 @@ template <typename T, typename Context>
 bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
   auto* Y = Output(OUTPUT);
+  CAFFE_ENFORCE(Y != &X, "Can't run InstanceNorm NHWC in-place");
   auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
   auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
   const int N = X.dim32(0);
@@ -83,7 +84,9 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     mean_data[i] = mean;
     inv_stdev_data[i] = inv_stdev;
     EigenVectorArrayMap<T> Yi(Ydata + H * W * i, H * W);
-    Yi = (Xi - mean) * (inv_stdev * scale_data[i % C]) + bias_data[i % C];
+    const T channel_scale = inv_stdev * scale_data[i % C];
+    const T channel_shift = bias_data[i % C] - mean * channel_scale;
+    Yi = Xi * channel_scale + channel_shift;
   };
 
   // TODO: benchmark parallelization strategies.
@@ -101,6 +104,7 @@ REGISTER_CPU_OPERATOR(InstanceNorm, InstanceNormOp<float, CPUContext>);
 OPERATOR_SCHEMA(InstanceNorm)
     .NumInputs(3)
     .NumOutputs(1, 3)
+    .AllowInplace({{0,0}})
     .SetDoc(R"DOC(
 Carries out instance normalization as described in the paper
 https://arxiv.org/abs/1607.08022. Depending on the mode it is being run,

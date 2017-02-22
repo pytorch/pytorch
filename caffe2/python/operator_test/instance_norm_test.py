@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-from hypothesis import given
+from hypothesis import given, assume
 import hypothesis.strategies as st
 from itertools import izip
 
@@ -29,8 +29,8 @@ class TestInstanceNorm(hu.HypothesisTestCase):
         return input_data, scale_data, bias_data
 
     def _get_op(self, device_option, store_mean, store_inv_stdev, epsilon,
-                order):
-        outputs = ['output']
+                order, inplace=False):
+        outputs = ['output' if not inplace else "input"]
         if store_mean or store_inv_stdev:
             outputs += ['mean']
         if store_inv_stdev:
@@ -138,15 +138,18 @@ class TestInstanceNorm(hu.HypothesisTestCase):
            epsilon=st.floats(1e-6, 1e-4),
            store_mean=st.booleans(),
            seed=st.integers(0, 1000),
-           store_inv_stdev=st.booleans())
+           store_inv_stdev=st.booleans(),
+           inplace=st.booleans())
     def test_instance_norm_reference_check(
             self, gc, dc, N, C, H, W, order, store_mean, store_inv_stdev,
-            epsilon, seed):
+            epsilon, seed, inplace):
         np.random.seed(seed)
 
         # force store_inv_stdev if store_mean to match existing forward pass
         # implementation
         store_inv_stdev |= store_mean
+        if order != "NCHW":
+            assume(not inplace)
 
         inputs = self._get_inputs(N, C, H, W, order)
         op = self._get_op(
@@ -154,7 +157,8 @@ class TestInstanceNorm(hu.HypothesisTestCase):
             store_mean=store_mean,
             store_inv_stdev=store_inv_stdev,
             epsilon=epsilon,
-            order=order)
+            order=order,
+            inplace=inplace)
 
         def ref(input_blob, scale_blob, bias_blob):
             if order == 'NHWC':
