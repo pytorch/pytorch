@@ -19,11 +19,11 @@ class Linear(Function):
 
         grad_input = grad_weight = grad_bias = None
         if self.needs_input_grad[0]:
-            grad_input = torch.mm(grad_output, weight)
+             grad_input = grad_output.mm(weight)
         if self.needs_input_grad[1]:
-            grad_weight = torch.mm(grad_output.t(), input)
+            grad_weight = grad_output.t().mm(input)
         if bias is not None and self.needs_input_grad[2]:
-            grad_bias = torch.mv(grad_output.t(), self.add_buffer)
+            grad_bias = grad_output.t().mv(self.add_buffer)
 
         if bias is not None:
             return grad_input, grad_weight, grad_bias
