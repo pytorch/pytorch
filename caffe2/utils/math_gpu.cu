@@ -188,20 +188,45 @@ void RandUniform<int, CUDAContext>(
       n, min, max, reinterpret_cast<unsigned int*>(r));
 }
 
+template <typename T>
+int HandleOddLengthRandGaussian(
+    const int n,
+    const T mean,
+    const T std,
+    T* r,
+    CUDAContext* context) {
+  if (n % 2 == 1) {
+    std::default_random_engine generator;
+    std::normal_distribution<T> distribution(mean, std);
+    const T random_value = distribution(generator);
+    math::Set<T, CUDAContext>(
+        1, random_value, r + sizeof(T) * (n - 1), context);
+    return n - 1;
+  }
+  return n;
+}
+
 template <>
 void RandGaussian<float, CUDAContext>(
     const int n, const float mean, const float std, float* r,
     CUDAContext* context) {
-  CURAND_CHECK(curandGenerateNormal(
-      context->curand_generator(), r, n, mean, std));
+  // If n is odd, we add a random Gaussian value at the end manually
+  // and generate n-1 random values using curandGenerateNormal.
+  // curandGenerateNormal requires n to be even.
+  const int even_n =
+      HandleOddLengthRandGaussian<float>(n, mean, std, r, context);
+  CURAND_CHECK(
+      curandGenerateNormal(context->curand_generator(), r, even_n, mean, std));
 }
 
 template <>
 void RandGaussian<double, CUDAContext>(
     const int n, const double mean, const double std, double* r,
     CUDAContext* context) {
+  const int even_n =
+      HandleOddLengthRandGaussian<double>(n, mean, std, r, context);
   CURAND_CHECK(curandGenerateNormalDouble(
-      context->curand_generator(), r, n, mean, std));
+      context->curand_generator(), r, even_n, mean, std));
 }
 
 
