@@ -318,6 +318,7 @@ class ModelHelperBase(object):
             "Tanh",
             "UnpackSegments",
             "WeightedSum",
+            "ReduceFrontSum",
         ]
         if op_type not in known_working_ops:
             if not self.allow_not_known_ops:
