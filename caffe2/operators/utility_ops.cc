@@ -366,6 +366,14 @@ Context (GPU or CPU). This may involves cross-device MemCpy.
     .Input(0, "input", "The input CPU tensor.")
     .Output(0, "output", "either a TensorCUDA or a TensorCPU");
 
+OPERATOR_SCHEMA(CopyOnDeviceLike)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .SetDoc("Copy input tensor into output to the specific device.")
+    .Input(0, "input", "The input tensor.")
+    .Input(1, "dst", "Tensor, on which device the copy will be performed.")
+    .Output(0, "output", "Tensor that will contain a copy of the input.");
+
 OPERATOR_SCHEMA(Shape)
     .NumInputs(1)
     .NumOutputs(1)
