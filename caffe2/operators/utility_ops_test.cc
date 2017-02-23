@@ -51,4 +51,23 @@ TEST(UtilityOpTest, testEnsureCPUOutput) {
   }
 }
 
+TEST(UtilityOpTest, testReshapeWithScalar) {
+  Workspace ws;
+  OperatorDef def;
+  def.set_name("test_reshape");
+  def.set_type("Reshape");
+  def.add_input("X");
+  def.add_output("XNew");
+  def.add_output("OldShape");
+  def.add_arg()->CopyFrom(MakeArgument("shape", vector<int64_t>{1}));
+  AddConstInput(vector<TIndex>(), 3.14, "X", &ws);
+  // execute the op
+  unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
+  EXPECT_TRUE(op->Run());
+  Blob* XNew = ws.GetBlob("XNew");
+  const TensorCPU& XNewTensor = XNew->Get<Tensor<CPUContext>>();
+  EXPECT_EQ(1, XNewTensor.ndim());
+  EXPECT_EQ(1, XNewTensor.size());
+}
+
 } // namespace caffe2
