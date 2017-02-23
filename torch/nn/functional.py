@@ -441,8 +441,8 @@ def cross_entropy(input, target, weight=None, size_average=True):
     Args:
         input: Variable :math:`(N, C)` where `C = number of classes`
         target: Variable :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-        weight (Variable, optional): a manual rescaling weight given to each
-                class. If given, has to be a Variable of size "nclasses"
+        weight (Tensor, optional): a manual rescaling weight given to each
+                class. If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
