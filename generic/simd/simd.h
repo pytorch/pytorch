@@ -4,12 +4,12 @@
 #include <stdint.h>
 #if defined(_MSC_VER)
 #include <intrin.h>
-#elif defined(HAVE_GCC_GET_CPUID)
+#elif defined(HAVE_GCC_GET_CPUID) && defined(USE_GCC_GET_CPUID)
 #include <cpuid.h>
 #endif
 
 // Can be found on Intel ISA Reference for CPUID
-#define CPUID_AVX2_BIT 0x10       // Bit 5 of EBX for EAX=0x7
+#define CPUID_AVX2_BIT 0x20       // Bit 5 of EBX for EAX=0x7
 #define CPUID_AVX_BIT  0x10000000 // Bit 28 of ECX for EAX=0x1
 #define CPUID_SSE_BIT  0x2000000  // bit 25 of EDX for EAX=0x1
 
@@ -99,13 +99,13 @@ static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *
   *ebx = cpuInfo[1];
   *ecx = cpuInfo[2];
   *edx = cpuInfo[3];
-#elif defined(HAVE_GCC_GET_CPUID)
+#elif defined(HAVE_GCC_GET_CPUID) && defined(USE_GCC_GET_CPUID)
   uint32_t level = *eax;
   __get_cpuid (level, eax, ebx, ecx, edx);
 #else
-  uint32_t a = *eax, b, c, d;
+  uint32_t a = *eax, b, c = *ecx, d;
   asm volatile ( "cpuid\n\t"
-                 : "+a"(a), "=b"(b), "=c"(c), "=d"(d) );
+		 : "+a"(a), "=b"(b), "+c"(c), "=d"(d) );
   *eax = a;
   *ebx = b;
   *ecx = c;
@@ -120,6 +120,7 @@ static inline uint32_t detectHostSIMDExtensions()
 
   // Check for AVX2. Requires separate CPUID
   eax = 0x7;
+  ecx = 0x0;
   cpuid(&eax, &ebx, &ecx, &edx);
   if (ebx & CPUID_AVX2_BIT)
     hostSimdExts |= SIMDExtension_AVX2;
