@@ -133,6 +133,7 @@ class LSTMUnitOp : public Operator<Context> {
     const auto* H_prev = Input(HIDDEN_T_M_1).template data<T>();
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();
     const auto* X = Input(GATES).template data<T>();
+    CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).size(), N);
     const auto* seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
     const auto t = OperatorBase::Input<Tensor<CPUContext>>(TIMESTEP)
                        .template data<int32_t>()[0];

@@ -148,7 +148,10 @@ class CharRNN(object):
         progress = 0
         while True:
             workspace.FeedBlob(
-                "seq_lengths", np.array([self.seq_length]).astype(np.int32))
+                "seq_lengths",
+                np.array([self.seq_length] * self.batch_size,
+                         dtype=np.int32)
+            )
             workspace.RunNet(self.prepare_state.Name())
 
             input = np.zeros(
@@ -217,7 +220,7 @@ class CharRNN(object):
         text = '' + ch
         for i in range(num_characters):
             workspace.FeedBlob(
-                "seq_lengths", np.array([1]).astype(np.int32))
+                "seq_lengths", np.array([1] * self.batch_size, dtype=np.int32))
             workspace.RunNet(self.prepare_state.Name())
 
             input = np.zeros([1, self.batch_size, self.D]).astype(np.float32)
