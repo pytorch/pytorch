@@ -1029,7 +1029,6 @@ class ReshapeOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& input = Input(0);
-    CAFFE_ENFORCE(input.ndim() >= 1, "DATA should be at least 1-D");
 
     vector<int64_t> actual_new_shape = new_shape_;
     if (InputSize() == 2) {
