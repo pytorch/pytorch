@@ -342,7 +342,10 @@ class HypothesisTestCase(test_util.TestCase):
             input_device_options=input_device_options
         )
         self.assertEqual(grad.shape, grad_estimated.shape)
-        self.assertTrue(res, "Gradient checks failed")
+        self.assertTrue(
+            res,
+            "Gradient check failed for input " + str(op.input[outputs_to_check])
+        )
 
     def _assertGradReferenceChecks(
         self,

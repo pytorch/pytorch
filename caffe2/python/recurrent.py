@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core
 from caffe2.python.cnn import CNNModelHelper
+from caffe2.python.attention import apply_regular_attention
 
 
 def recurrent_net(
@@ -132,7 +133,7 @@ def recurrent_net(
 
         recurrent_states.append(state)
 
-    for input_id, (input_t, input_blob) in enumerate(inputs):
+    for input_t, input_blob in inputs:
         forward_links.append((str(input_t), str(input_blob), 0))
         backward_links.append((
             backward_mapping[str(input_t)], str(input_blob) + "_grad", 0
@@ -249,3 +250,180 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         outputs_with_grads=outputs_with_grads,
     )
     return output, last_output, all_states, last_state
+
+
+def LSTMWithAttention(
+    model,
+    decoder_inputs,
+    decoder_input_lengths,
+    initial_decoder_hidden_state,
+    initial_decoder_cell_state,
+    initial_attention_weighted_encoder_context,
+    encoder_output_dim,
+    encoder_outputs,
+    decoder_input_dim,
+    decoder_state_dim,
+    batch_size,
+    scope,
+    outputs_with_grads=(0, 4),
+    weighted_encoder_outputs=None,
+):
+    '''
+    Adds a LSTM with attention mechanism to a model.
+
+    The implementation is based on https://arxiv.org/abs/1409.0473, with
+    a small difference in the order
+    how we compute new attention context and new hidden state, similarly to
+    https://arxiv.org/abs/1508.04025.
+
+    The model uses encoder-decoder naming conventions,
+    where the decoder is the sequence the op is iterating over,
+    while computing the attention context over the encoder.
+
+    model: CNNModelHelper object new operators would be added to
+
+    decoder_inputs: the input sequence in a format T x N x D
+    where T is sequence size, N - batch size and D - input dimention
+
+    decoder_input_lengths: blob containing sequence lengths
+    which would be passed to LSTMUnit operator
+
+    initial_decoder_hidden_state: initial hidden state of LSTM
+
+    initial_decoder_cell_state: initial cell state of LSTM
+
+    initial_attention_weighted_encoder_context: initial attention context
+
+    encoder_output_dim: dimension of encoder outputs
+
+    encoder_outputs: the sequence, on which we compute the attention context
+    at every iteration
+
+    decoder_input_dim: input dimention (last dimension on decoder_inputs)
+
+    decoder_state_dim: size of hidden states of LSTM
+
+    batch_size: batch size
+
+    outputs_with_grads : position indices of output blobs which will receive
+    external error gradient during backpropagation
+
+    weighted_encoder_outputs: encoder outputs to be used to compute attention
+    weights. In the basic case it's just linear transformation of
+    encoder outputs (that the default, when weighted_encoder_outputs is None).
+    However, it can be something more complicated - like a separate
+    encoder network (for example, in case of convolutional encoder)
+    '''
+
+    def s(name):
+        # We have to manually scope due to our internal/external blob
+        # relationships.
+        return "{}/{}".format(str(scope), str(name))
+
+    decoder_inputs = model.FC(
+        decoder_inputs,
+        s('i2h'),
+        dim_in=decoder_input_dim,
+        dim_out=4 * decoder_state_dim,
+        axis=2,
+    )
+    # [batch_size, encoder_output_dim, encoder_length]
+    encoder_outputs_transposed = model.net.Transpose(
+        encoder_outputs,
+        s('encoder_outputs_transposed'),
+        axes=[1, 2, 0],
+    )
+    if weighted_encoder_outputs is None:
+        weighted_encoder_outputs = model.FC(
+            encoder_outputs,
+            s('weighted_encoder_outputs'),
+            dim_in=encoder_output_dim,
+            dim_out=encoder_output_dim,
+            axis=2,
+        )
+    step_model = CNNModelHelper(
+        name='lstm_with_attention_cell',
+        param_model=model,
+    )
+    (
+        input_t,
+        timestep,
+        cell_t_prev,
+        hidden_t_prev,
+        _,
+        _,
+        attention_weighted_encoder_context_t_prev,
+    ) = (
+        step_model.net.AddExternalInputs(
+            'input_t',
+            'timestep',
+            'cell_t_prev',
+            'hidden_t_prev',
+            encoder_outputs_transposed,
+            weighted_encoder_outputs,
+            'attention_weighted_encoder_context_t_prev',
+        )
+    )
+    gates_concatenated_input_t, _ = step_model.net.Concat(
+        [hidden_t_prev, attention_weighted_encoder_context_t_prev],
+        [
+            s('gates_concatenated_input_t'),
+            s('_gates_concatenated_input_t_concat_dims'),
+        ],
+        axis=2,
+    )
+    gates_t = step_model.FC(
+        gates_concatenated_input_t,
+        s('gates_t'),
+        dim_in=decoder_state_dim + encoder_output_dim,
+        dim_out=4 * decoder_state_dim,
+        axis=2,
+    )
+    step_model.net.Sum([gates_t, input_t], gates_t)
+
+    hidden_t_intermediate, cell_t = step_model.net.LSTMUnit(
+        [hidden_t_prev, cell_t_prev, gates_t, decoder_input_lengths, timestep],
+        ['hidden_t_intermediate', s('cell_t')],
+    )
+    attention_weighted_encoder_context_t = apply_regular_attention(
+        model=step_model,
+        encoder_output_dim=encoder_output_dim,
+        encoder_outputs_transposed=encoder_outputs_transposed,
+        weighted_encoder_outputs=weighted_encoder_outputs,
+        decoder_hidden_state_t=hidden_t_intermediate,
+        decoder_hidden_state_dim=decoder_state_dim,
+        batch_size=batch_size,
+        scope=scope,
+    )
+    hidden_t = step_model.Copy(hidden_t_intermediate, s('hidden_t'))
+    step_model.net.AddExternalOutputs(
+        cell_t,
+        hidden_t,
+        attention_weighted_encoder_context_t,
+    )
+
+    return recurrent_net(
+        net=model.net,
+        cell_net=step_model.net,
+        inputs=[
+            (input_t, decoder_inputs),
+        ],
+        initial_cell_inputs=[
+            (hidden_t_prev, initial_decoder_hidden_state),
+            (cell_t_prev, initial_decoder_cell_state),
+            (
+                attention_weighted_encoder_context_t_prev,
+                initial_attention_weighted_encoder_context,
+            ),
+        ],
+        links={
+            hidden_t_prev: hidden_t,
+            cell_t_prev: cell_t,
+            attention_weighted_encoder_context_t_prev: (
+                attention_weighted_encoder_context_t
+            ),
+        },
+        timestep=timestep,
+        scope=scope,
+        outputs_with_grads=outputs_with_grads,
+    )
