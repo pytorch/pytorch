@@ -342,21 +342,37 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - THBoolTensor* mask
 ]]
 
+THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int dim1)
+{
+  int ndim = self->nDimension;
+  if (dim0 < 0)
+    dim0 += ndim;
+  if (dim1 < 0)
+    dim1 += ndim;
+  if (src != NULL) {
+    THTensor_(transpose)(self, src, dim0, dim1);
+    return NULL;
+  } else {
+    return THTensor_(newTranspose)(self, dim0, dim1);
+  }
+}
+
 [[
   name: transpose
   with_stateless: True
-  cname: newTranspose
+  cname: transpose_neg
   cpu_half: True
   return: THTensor*
   arguments:
     - THTensor* self
+    - CONSTANT NULL
     - long dim0
     - long dim1
 ]]
 
 [[
   name: transpose_
-  cname: transpose
+  cname: transpose_neg
   cpu_half: True
   return: self
   arguments:
