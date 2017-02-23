@@ -17,7 +17,7 @@ class MaxPool1d(Function):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
-        if ( input.dim() != 3 ):
+        if (input.dim() != 3):
             raise ValueError('expected 3D input (got {}D input)'
                              .format(input.dim()))
 
@@ -51,7 +51,7 @@ class MaxPool1d(Function):
 
         input2d = input.unsqueeze(2)
         indices2d = indices.unsqueeze(2)
-        grad_input2d = grad_output.unsqueeze(2)
+        grad_output2d = grad_output.unsqueeze(2)
         grad_input = grad_output2d.new()
         backend = type2backend[type(input)]
         backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
@@ -61,7 +61,7 @@ class MaxPool1d(Function):
                                                          self.pad, 0,
                                                          self.dilation, 1,
                                                          self.ceil_mode)
-        grad_input = grad_input.sequeeze(2)
+        grad_input = grad_input.squeeze(2)
         return grad_input
 
 
