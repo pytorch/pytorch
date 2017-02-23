@@ -2102,6 +2102,70 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
         self.assertDeviceChecks(dc, op, [I, X, D], [0])
 
+    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs)
+    def test_dot_product(self, inputs, gc, dc):
+        X, Y = inputs
+        op = core.CreateOperator("DotProduct", ["X", "Y"], 'out')
+
+        def dotproduct(X, Y):
+            return (np.sum(X * Y, axis=1), )
+
+        self.assertReferenceChecks(gc, op, [X, Y], dotproduct)
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+    @given(N=st.integers(min_value=2, max_value=10),
+           M=st.integers(min_value=2, max_value=10),
+           K=st.integers(min_value=2, max_value=10),
+           pad_value=st.floats(min_value=0.1, max_value=1.0),
+           **hu.gcs)
+    def test_dot_product_with_paddding(self, N, M, K, pad_value, gc, dc):
+        X = np.random.rand(N, M).astype(np.float32) - 0.5
+        Y = np.random.rand(N, K).astype(np.float32) - 0.5
+        op = core.CreateOperator("DotProductWithPadding", ["X", "Y"], 'out',
+                                 pad_value=pad_value)
+
+        def dotproduct(X, Y):
+            Z = np.ones((N, max(M, K))).astype(np.float32) * pad_value
+            if M < K:
+                Z[:, :M] = X
+                return (np.sum(Z * Y, axis=1), )
+            else:
+                Z[:, :K] = Y
+                return (np.sum(Z * X, axis=1), )
+
+        self.assertReferenceChecks(gc, op, [X, Y], dotproduct)
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+    @given(N=st.integers(min_value=2, max_value=10),
+           M=st.integers(min_value=2, max_value=10),
+           pad_value=st.floats(min_value=0.1, max_value=1.0),
+           **hu.gcs)
+    def test_dot_product_with_rep_paddding(self, N, M, pad_value, gc, dc):
+        K = 2 * M
+        X = np.random.rand(N, M).astype(np.float32) - 0.5
+        Y = np.random.rand(N, K).astype(np.float32) - 0.5
+        op = core.CreateOperator("DotProductWithPadding", ["X", "Y"], 'out',
+                                 replicate=True,
+                                 pad_value=pad_value)
+
+        def dotproduct(X, Y):
+            import numpy.matlib as npm
+            if M < K:
+                Z = npm.repmat(X, 1, K // M)
+                return (np.sum(Z * Y, axis=1), )
+            else:
+                Z = npm.repmat(Y, 1, M // K)
+                return (np.sum(Z * X, axis=1), )
+
+        self.assertReferenceChecks(gc, op, [X, Y], dotproduct)
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
 
 if __name__ == "__main__":
     unittest.main()
