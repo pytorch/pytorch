@@ -15,6 +15,13 @@ class DataParallel(Module):
     the input. During the backwards pass, gradients from each replica are
     summed into the original module.
 
+    Arbitrary positional inputs are allowed to be passed into DataParallel.
+    All variables will be scattered on dim specified (default 0). Tensors will
+    be broadcasted across devices, however any modifications in model's forward
+    will not be saved. Primitive types will be similarly broadcasted, but all
+    other types will be a shallow copy and can be corrupted if written to in
+    the model's forward pass. Keyword arguments are not allowed as input.
+
     Args:
         module: module to be parallelized
         device_ids: CUDA devices (default: all devices)
@@ -24,12 +31,13 @@ class DataParallel(Module):
         >>> output = net(input)
     """
 
-    def __init__(self, module, device_ids=None, output_device=None):
+    def __init__(self, module, device_ids=None, output_device=None, dim=0):
         super(DataParallel, self).__init__()
         if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
         if output_device is None:
             output_device = device_ids[0]
+        self.dim = dim
         self.module = module
         self.device_ids = device_ids
         self.output_device = output_device
@@ -37,10 +45,13 @@ class DataParallel(Module):
             self.module.cuda(device_ids[0])
 
     def forward(self, *inputs):
+        #leave non-Variable/non-tuples in place
         def _to_cuda(obj):
             if isinstance(obj, Variable):
                 return obj.cuda()
-            return tuple((map(_to_cuda, obj)))
+            if isinstance(obj, tuple):
+                return tuple((map(_to_cuda, obj)))
+            return obj
 
         if len(self.device_ids) == 1:
             with torch.cuda.device(self.device_ids[0]):
@@ -56,16 +67,16 @@ class DataParallel(Module):
         return replicate(module, device_ids)
 
     def scatter(self, input, device_ids):
-        return scatter(input, device_ids)
+        return scatter(input, device_ids, dim=self.dim)
 
     def parallel_apply(self, replicas, inputs):
         return parallel_apply(replicas, inputs)
 
     def gather(self, outputs, output_device):
-        return gather(outputs, output_device)
+        return gather(outputs, output_device, dim=self.dim)
 
 
-def data_parallel(module, inputs, device_ids, output_device=None):
+def data_parallel(module, inputs, device_ids, output_device=None, dim=0):
     """Evaluates module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
@@ -90,7 +101,7 @@ def data_parallel(module, inputs, device_ids, output_device=None):
         output_device = device_ids[0]
 
     replicas = replicate(module, device_ids)
-    scattered = scatter(inputs, device_ids)
+    scattered = scatter(inputs, device_ids, dim)
     replicas = replicas[:len(scattered)]
     outputs = parallel_apply(replicas, scattered)
-    return gather(outputs, output_device)
+    return gather(outputs, output_device, dim)

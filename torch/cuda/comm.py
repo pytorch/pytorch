@@ -94,6 +94,7 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0):
         assert min(chunk_sizes) > 0, "got a negative chunk_size"
         chunks = [tensor.narrow(dim, start - size, size)
                   for start, size in zip(_accumulate(chunk_sizes), chunk_sizes)]
+    chunks = tuple(chunk.contiguous() for chunk in chunks)
     # TODO: copy to a pinned buffer first (if copying from CPU)
     return tuple(chunk.cuda(gpu_id, async=chunk.is_contiguous())
                  for gpu_id, chunk in zip(devices, chunks))
