@@ -4,6 +4,9 @@ from .optimizer import Optimizer
 class RMSprop(Optimizer):
     """Implements RMSprop algorithm.
 
+    Proposed by G. Hinton in its `course <http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_.
+    The centered version first appears in `Generating Sequences With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
+
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
