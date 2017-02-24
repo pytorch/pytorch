@@ -29,6 +29,8 @@ function (Caffe2_print_configuration_summary)
   message(STATUS "")
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
   message(STATUS "  BUILD_PYTHON          : ${BUILD_PYTHON}")
+  message(STATUS "    Python version      : ${PYTHONLIBS_VERSION_STRING}")
+  message(STATUS "    Python library      : ${PYTHON_LIBRARIES}")
 
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
