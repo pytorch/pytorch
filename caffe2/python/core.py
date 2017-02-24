@@ -1578,7 +1578,8 @@ class Net(object):
         assert self._input_record is None, (
             'Input schema cannot be reset')
         if not input_record.has_blobs():
-            self._input_record = schema.NewRecord(self, input_record)
+            with NameScope(self.Name()):
+                self._input_record = schema.NewRecord(self, input_record)
         else:
             self._input_record = input_record
             for blob in input_record.field_blobs():
