@@ -636,20 +636,22 @@ class CNNModelHelper(ModelHelperBase):
         return self.net.Iter(blob_out, blob_out, **kwargs)
 
     def Accuracy(self, blob_in, blob_out, **kwargs):
-        dev = kwargs['device_option'] if 'device_option' in kwargs else scope.CurrentDeviceScope()
+        dev = kwargs['device_option'] if 'device_option' in kwargs \
+            else scope.CurrentDeviceScope()
+        is_cpu = dev is None or dev.device_type == caffe2_pb2.CPU
 
-        blobs_in_dev = []
-        # if device_option is CPU (or None, so assumed to be CPU), nothing needs to be done
-        if dev == None or dev.device_type == caffe2_pb2.CPU:
-            blobs_in_dev = blob_in
+        # We support top_k > 1 only on CPU
+        if not is_cpu and 'top_k' in kwargs and kwargs['top_k'] > 1:
+            pred_host = self.net.CopyGPUToCPU(blob_in[0], blob_in[0] + "_host")
+            label_host = self.net.CopyGPUToCPU(blob_in[1], blob_in[1] + "_host")
+
+            # Now use the Host version of the accuracy op
+            self.net.Accuracy([pred_host, label_host],
+                              blob_out,
+                              device_option=core.DeviceOption(caffe2_pb2.CPU, 0),
+                              **kwargs)
         else:
-            # Otherwise insert copy operators
-            pred_host = self.net.CopyGPUToCPU(blob_in[0], blob_in[0]+"_host")
-            label_host = self.net.CopyGPUToCPU(blob_in[1], blob_in[1]+"_host")
-            blobs_in_dev = [pred_host, label_host]
-
-        # Now use the Host version of the accuracy op
-        self.net.Accuracy(blobs_in_dev, blob_out, device_option=core.DeviceOption(caffe2_pb2.CPU, 0), **kwargs)
+            self.net.Accuracy(blob_in, blob_out)
 
     def PadImage(
         self, blob_in, blob_out, **kwargs
