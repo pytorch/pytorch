@@ -1593,11 +1593,11 @@ class TestNNInit(unittest.TestCase):
                 for dims in [2, 4]:
                     input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25, as_variable=as_variable)
                     receptive_field = np.prod(input_tensor.size()[2:])
-                    gain = 1
                     if use_gain:
                         gain = self._random_float(0.1, 2)
                         init.kaiming_uniform(input_tensor, gain=gain)
                     else:
+                        gain = np.sqrt(2.0)
                         init.kaiming_uniform(input_tensor)
 
                     if as_variable:
@@ -1613,11 +1613,11 @@ class TestNNInit(unittest.TestCase):
                 for dims in [2, 4]:
                     input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25, as_variable=as_variable)
                     receptive_field = np.prod(input_tensor.size()[2:])
-                    gain = 1
                     if use_gain:
                         gain = self._random_float(0.1, 2)
                         init.kaiming_normal(input_tensor, gain=gain)
                     else:
+                        gain = np.sqrt(2.0)
                         init.kaiming_normal(input_tensor)
 
                     if as_variable:

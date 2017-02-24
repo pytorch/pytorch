@@ -124,7 +124,7 @@ def xavier_normal(tensor, gain=1):
         return tensor.normal_(0, std)
 
 
-def kaiming_uniform(tensor, gain=1):
+def kaiming_uniform(tensor, gain=np.sqrt(2.0)):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers: Surpassing
        human-level performance on ImageNet classification" - He, K. et al using a uniform distribution.
 
@@ -149,7 +149,7 @@ def kaiming_uniform(tensor, gain=1):
         return tensor.uniform_(-a, a)
 
 
-def kaiming_normal(tensor, gain=1):
+def kaiming_normal(tensor, gain=np.sqrt(2.0)):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
        Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal distribution.
 
@@ -158,7 +158,7 @@ def kaiming_normal(tensor, gain=1):
 
     Args:
         tensor: a n-dimension torch.Tensor
-        gain: an optional scaling factor to be applied
+        gain: an optional scaling factor to be applied.
 
     Examples:
         >>> w = torch.Tensor(3, 5)
