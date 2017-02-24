@@ -378,6 +378,7 @@ class SingleThreadAsyncNet : public SimpleNet {
     gpu_id_ = (-1);
     for (auto& op : operators_) {
       if (op->def().has_device_option() &&
+          op->def().device_option().device_type() == 1 &&
           op->def().device_option().has_cuda_gpu_id()) {
         if (gpu_id_ < 0) {
           gpu_id_ = op->def().device_option().cuda_gpu_id();
