@@ -1573,7 +1573,7 @@ class TestNNInit(unittest.TestCase):
                     expected_std = gain * np.sqrt(2.0 / ((tensor_shape[1] + tensor_shape[0]) * receptive_field))
                     assert self._is_normal(input_tensor, 0, expected_std)
 
-    def test_kaiming_unifrom_errors_on_inputs_smaller_than_2d(self):
+    def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
             for dims in [0, 1]:
                 with self.assertRaises(ValueError):
