@@ -79,13 +79,11 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
         X = X + 1e-2
         for i in range(b):
             X[i] = X[i] / np.sum(X[i])
-        # X = np.expand_dims((X / np.sum(X)), axis=0)
 
         # Initialize label
         label = np.random.rand(b, n).astype(np.float32)
         for i in range(b):
             label[i] = label[i] / np.sum(label[i])
-        # label = np.expand_dims((label / np.sum(label)), axis=0)
 
         # Reference implementation of cross entropy with soft labels
         def soft_label_xentr_ref(X, label):
