@@ -101,6 +101,7 @@ struct Tensor {
 
 template<typename real>
 struct TensorScalarInterface : public Tensor {
+  using Tensor::cadd;
   using scalar_type = real;
   virtual TensorScalarInterface& fill(scalar_type value) = 0;
 
