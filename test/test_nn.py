@@ -1,3 +1,9 @@
+TEST_SCIPY = True
+try:
+    from scipy import stats
+except ImportError:
+    TEST_SCIPY = False
+
 import math
 
 import torch
@@ -8,7 +14,6 @@ from itertools import repeat, product
 from functools import wraps
 from numpy.random import randint, random_sample
 import numpy as np
-from scipy import stats
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1485,6 +1490,7 @@ class TestNNInit(unittest.TestCase):
     def _random_float(self, a, b):
         return (b - a) * random_sample() + a
 
+    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_uniform(self):
         for as_variable in [True, False]:
             for dims in [1, 2, 4]:
@@ -1494,6 +1500,7 @@ class TestNNInit(unittest.TestCase):
                 init.uniform(input_tensor, a=a, b=b)
                 assert self._is_uniform(input_tensor, a, b)
 
+    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_normal(self):
         for as_variable in [True, False]:
             for dims in [1, 2, 4]:
@@ -1529,6 +1536,7 @@ class TestNNInit(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     init.xavier_normal(tensor)
 
+    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_xavier_uniform(self):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
@@ -1551,6 +1559,7 @@ class TestNNInit(unittest.TestCase):
                     bounds = expected_std * np.sqrt(3)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
+    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_xavier_normal(self):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
@@ -1587,6 +1596,7 @@ class TestNNInit(unittest.TestCase):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
                     init.kaiming_normal(tensor)
 
+    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_kaiming_uniform(self):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
@@ -1607,6 +1617,7 @@ class TestNNInit(unittest.TestCase):
                     bounds = expected_std * np.sqrt(3.0)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
+    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_kaiming_normal(self):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
@@ -1634,6 +1645,7 @@ class TestNNInit(unittest.TestCase):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
                     init.sparse(tensor, sparsity)
 
+    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_sparse_default_std(self):
         for as_variable in [True, False]:
             for use_random_std in [True, False]:

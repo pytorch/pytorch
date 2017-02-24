@@ -19,6 +19,7 @@ install:
     - export CXX="ccache g++-4.8"
     - ccache --show-stats
     - travis_retry pip install -r requirements.txt
+    - travis_retry pip install scipy
     - python setup.py install
 
 script:
