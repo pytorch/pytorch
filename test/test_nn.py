@@ -790,26 +790,41 @@ class TestNN(NNTestCase):
                 return float1 * (var1 * var2 + tens1)
 
         m = TestModule()
-        var1 = Variable(torch.randn(5, 5).float())
-        var2 = Variable(torch.randn(5, 5).float())
-        tens1 = Variable(torch.randn(5,5).float())
+        var1 = Variable(torch.randn(5, 5).float(), requires_grad=True)
+        var2 = Variable(torch.randn(5, 5).float(), requires_grad=True)
+        tens1 = Variable(torch.randn(5,5).float(), requires_grad=True)
         float1 = torch.randn(1)[0]
+        target = Variable(torch.randn(5,5).float()).cuda()
+        crit = nn.MSELoss()
 
         expected = m(var1, var2, tens1, float1)
+        loss = expected.sum()
+        loss.backward()
+        gvar1_exp = var1.grad.clone()
+        gvar2_exp = var2.grad.clone()
+
+        def local_test(out):
+            var1.grad.data.fill_(0.0)
+            var2.grad.data.fill_(0.0)
+            loss = out.sum()
+            loss.backward()
+            self.assertEqual(out, expected)
+            self.assertEqual(gvar1_exp, var1.grad)
+            self.assertEqual(gvar2_exp, var2.grad)
 
         out = dp.data_parallel(m, (var1, var2, tens1, float1), (0, 1))
-        self.assertEqual(out, expected)
+        local_test(out)
 
         out = dp.data_parallel(m, (var1, var2, tens1, float1), (0,))
-        self.assertEqual(out, expected)
+        local_test(out)
 
         dpm = nn.DataParallel(TestModule())
         out = dpm(var1, var2, tens1, float1)
-        self.assertEqual(out, expected)
+        local_test(out)
 
         dpm = nn.DataParallel(TestModule(), device_ids=[0])
         out = dpm(var1, var2, tens1, float1)
-        self.assertEqual(out, expected)
+        local_test(out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_small_back(self):

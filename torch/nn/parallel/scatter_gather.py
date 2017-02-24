@@ -13,10 +13,8 @@ def scatter(input, target_gpus, dim=0):
     def scatter_map(obj):
         if isinstance(obj, Variable):
             return Scatter(target_gpus, dim=dim)(obj)
-        if isinstance(obj, tuple):
-            return tuple(zip(*map(scatter_map, obj)))
-        if isinstance(obj, list):
-            return list(zip(*map(scatter_map, obj)))
+        if isinstance(obj, tuple) or isinstance(obj, list):
+            return type(obj)(zip(*map(scatter_map, obj)))
         if torch.is_tensor(obj):
             return broadcast(obj, target_gpus)
         return tuple(obj for targets in target_gpus)
@@ -31,9 +29,7 @@ def gather(outputs, target_device, dim=0):
         out = outputs[0]
         if isinstance(out, Variable):
             return Gather(target_device, dim=dim)(*outputs)
-        if isinstance(out, tuple):
-            return type(out)(map(gather_map, zip(*outputs)))
-        if isinstance(out, list):
+        if isinstance(out, tuple) or isinstance(out, list):
             return type(out)(map(gather_map, zip(*outputs)))
 
     return gather_map(outputs)
