@@ -1088,7 +1088,7 @@ class TestNN(NNTestCase):
         model_cp = deepcopy(model)
         self.assertEqual(model(input).data, model_cp(input).data)
 
-        model_cp.linear.weight[:] = 2
+        model_cp.linear.weight.data[:] = 2
         self.assertNotEqual(model(input).data, model_cp(input).data)
 
     def test_RNN_cell(self):
