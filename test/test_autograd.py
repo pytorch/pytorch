@@ -6,9 +6,9 @@ import torch
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
+from torch.autograd import gradcheck
 
-from common import make_jacobian, TestCase, iter_tensors, \
-    get_numerical_jacobian, run_tests
+from common import TestCase, run_tests
 from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
@@ -18,37 +18,6 @@ else:
     import pickle
 
 PRECISION = 1e-4
-
-
-def iter_gradients(x):
-    if isinstance(x, Variable):
-        if x.requires_grad:
-            yield x.grad.data
-    else:
-        for elem in x:
-            for result in iter_gradients(elem):
-                yield result
-
-
-def zero_gradients(i):
-    for t in iter_gradients(i):
-        t.zero_()
-
-
-def get_analytical_jacobian(input, output):
-    jacobian = make_jacobian(input, output.numel())
-    grad_output = output.data.clone().zero_()
-    flat_grad_output = grad_output.view(-1)
-
-    for i in range(flat_grad_output.numel()):
-        flat_grad_output.zero_()
-        flat_grad_output[i] = 1
-        zero_gradients(input)
-        output.backward(grad_output, retain_variables=True)
-        for jacobian_x, d_x in zip(jacobian, iter_gradients(input)):
-            jacobian_x[:, i] = d_x
-
-    return jacobian
 
 
 @contextlib.contextmanager
@@ -1093,26 +1062,12 @@ for test in function_tests:
     def do_test(self, cls=cls, constructor_args=constructor_args,
                 call_args=call_args, test_name=test_name):
         input = create_input(call_args)
-        output = cls(*constructor_args)(*input)
-        if not isinstance(output, tuple):
-            output = (output,)
-        for i, o in enumerate(output):
-            if not o.requires_grad:
-                continue
-            analytical = get_analytical_jacobian(input, o)
-
-            def fn(input):
-                tmp = cls(*constructor_args)(*input)
-                if not isinstance(tmp, tuple):
-                    tmp = (tmp,)
-                return tmp[i].data
-            numerical = get_numerical_jacobian(fn, input, input)
-            self.assertLessEqual(
-                max(a.add(-1, n).abs().max() for a, n in zip(analytical, numerical)),
-                PRECISION
-            )
+        self.assertEqual(gradcheck(cls(*constructor_args), input, eps=1e-6, atol=PRECISION), True)
 
         if test_name not in ignore_inplace and issubclass(cls, InplaceFunction):
+            output = cls(*constructor_args)(*input)
+            if not isinstance(output, tuple):
+                output = (output,)
             inplace_input = deepcopy(input)
             inplace_input_copy = tuple(i + 0 for i in inplace_input)
             fn = cls(*constructor_args, inplace=True)
