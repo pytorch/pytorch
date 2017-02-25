@@ -627,30 +627,36 @@ class TestNN(NNTestCase):
     def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
             if dim == 1:
-                return torch.DoubleTensor([1, 3])
+                return torch.DoubleTensor([1, 3]).repeat(2, 2, 1)
             lower_dim = expected_indices(dim - 1)
             lower_dim = lower_dim.view(1, *lower_dim.size())
             return torch.cat((lower_dim + 4, lower_dim + 12), 0)
 
         def expected_grad(dim):
             if dim == 1:
-                return torch.DoubleTensor([0, 1, 0, 1])
-            lower_dim_grad = expected_grad(dim - 1)
-            grad = lower_dim_grad.view(1, *lower_dim_grad.size())
+                return torch.DoubleTensor([0, 1, 0, 1]).repeat(2, 2, 1)
+            grad = expected_grad(dim - 1)
             zero = torch.zeros(grad.size())
-            return torch.cat((zero, grad, zero, grad), 0)
+            return torch.stack((zero, grad, zero, grad), 2)
+
+        def expected_output(dim):
+            if dim == 1:
+                return torch.range(2, 16, 2).view(2, 2, 2)
+            if dim == 2:
+                col = torch.range(6, 62, 8)
+                return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         module_cls = getattr(nn, 'MaxPool{}d'.format(num_dim))
         module = module_cls(2, return_indices=True).type(type)
-        numel = 4 ** num_dim
-        input = torch.range(1, numel).view(1, 1, *repeat(4, num_dim)).type(type)
+        numel = 4 ** (num_dim + 1)
+        input = torch.range(1, numel).view(2, 2, *repeat(4, num_dim)).type(type)
         input_var = Variable(input, requires_grad=True)
 
         # Check forward
         output, indices = module(input_var)
         if num_dim != 3:
             expected_indices = expected_indices(num_dim)
-            expected_output = expected_indices + 1
+            expected_output = expected_output(num_dim)
             self.assertEqual(indices.dim(), input.dim())
             self.assertEqual(indices.data.squeeze(), expected_indices)
             self.assertEqual(output.data.squeeze(), expected_output)
