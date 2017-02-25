@@ -1,4 +1,5 @@
 #include "THCTensor.hpp"
+#include "THCHalf.h"
 #include "../TraitsCuda.hpp"
 
 namespace thpp {
