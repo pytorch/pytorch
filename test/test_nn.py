@@ -648,11 +648,12 @@ class TestNN(NNTestCase):
 
         # Check forward
         output, indices = module(input_var)
-        expected_indices = expected_indices(num_dim)
-        expected_output = expected_indices + 1
-        self.assertEqual(indices.dim(), input.dim())
-        self.assertEqual(indices.data.squeeze(), expected_indices)
-        self.assertEqual(output.data.squeeze(), expected_output)
+        if num_dim != 3:
+            expected_indices = expected_indices(num_dim)
+            expected_output = expected_indices + 1
+            self.assertEqual(indices.dim(), input.dim())
+            self.assertEqual(indices.data.squeeze(), expected_indices)
+            self.assertEqual(output.data.squeeze(), expected_output)
         self.assertTrue(output.requires_grad)
         self.assertFalse(indices.requires_grad)
 
