@@ -28,6 +28,18 @@ Containers
 .. autoclass:: Sequential
     :members:
 
+:hidden:`ModuleList`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleList
+    :members:
+
+:hidden:`ParameterList`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterList
+    :members:
+
 Convolution Layers
 ----------------------------------
 
