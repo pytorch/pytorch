@@ -1024,18 +1024,18 @@ method_tests = [
 # TODO: clamp with min/max
 
 
-def create_input(call_args):
+def create_input(call_args, requires_grad=True):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
     def map_arg(arg):
         if isinstance(arg, tuple) and not isinstance(arg[0], Variable):
-            return Variable(torch.randn(*arg).double(), requires_grad=True)
+            return Variable(torch.randn(*arg).double(), requires_grad=requires_grad)
         elif torch.is_tensor(arg):
             if isinstance(arg, torch.FloatTensor):
-                return Variable(arg.double(), requires_grad=True)
+                return Variable(arg.double(), requires_grad=requires_grad)
             else:
-                return Variable(arg, requires_grad=True)
+                return Variable(arg, requires_grad=requires_grad)
         else:
             return arg
     return tuple(map_arg(arg) for arg in call_args)
@@ -1105,8 +1105,8 @@ for test in method_tests:
 
     def do_test(self, name=name, self_size=self_size, args=args, test_name=test_name):
         def check(name):
-            self_variable = create_input((self_size,))[0]
-            args_variable = create_input(args)
+            self_variable = create_input((self_size,), requires_grad=False)[0]
+            args_variable = create_input(args, requires_grad=False)
             self_tensor = deepcopy(self_variable.data)
             args_tensor = deepcopy(unpack_variables(args_variable))
             output_variable = getattr(self_variable, name)(*args_variable)
