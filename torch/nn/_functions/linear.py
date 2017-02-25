@@ -29,3 +29,24 @@ class Linear(Function):
             return grad_input, grad_weight, grad_bias
         else:
             return grad_input, grad_weight
+
+
+class BiasAdd(Function):
+
+    def forward(self, input, bias=None):
+        self.save_for_backward(bias)
+        self.mark_dirty(input)
+        # cuBLAS doesn't support 0 strides in sger, so we can't use expand
+        self.add_buffer = input.new(1).resize_(input.size(0)).fill_(1)
+        input.addr_(self.add_buffer, bias)
+        return input
+
+    def backward(self, grad_output):
+        bias = self.saved_tensors[0]
+        grad_input = grad_bias = None
+        if self.needs_input_grad[0]:
+            grad_input = grad_output
+        if self.needs_input_grad[1]:
+            grad_bias = torch.mv(grad_output.t(), self.add_buffer)
+        return grad_input, grad_bias
+

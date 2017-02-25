@@ -377,9 +377,39 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
+    r"""Applies a linear transformation to the incoming data: :math:`y = Ax + b`
+
+    Args:
+        input: x matrix of shape (batch_size x in_features)
+        weight: A matrix of shape (out_features x in_features)
+        bias: b vector of shape (out_features)
+
+    Examples::
+
+        >>> input = autograd.Variable(torch.randn(128, 20))
+        >>> weight = autograd.Variable(torch.randn(10,20))
+        >>> bias = autograd.Variable(torch.randn(10))
+        >>> output = F.linear(input, weight, bias)
+        >>> print(output.size())
+    """
     state = _functions.linear.Linear()
     return bias and state(input, weight, bias) or state(input, weight)
 
+def bias_add(input, bias):
+    r"""Adds bias to a matrix (inplace)
+
+    Args:
+        input: matrix of shape (batch_size x n_features)
+        bias: vector of shape (n_features)
+    
+    Examples::
+        
+        >>> input = autograd.Variable(torch.randn(128,20))
+        >>> bias = autograd.Variable(torch.randn(20))
+        >>> output = F.bias_add(input, bias)
+        >>> print(output.size())
+    """
+    return _functions.linear.BiasAdd()(input, bias)
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
