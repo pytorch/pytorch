@@ -18,6 +18,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     TEST_CUDNN_VERSION, PRECISION
 from common import freeze_rng_state, run_tests
 
+
 def default_tensor_type(type):
     type_str = torch.typename(type)
 
@@ -792,9 +793,9 @@ class TestNN(NNTestCase):
         m = TestModule()
         var1 = Variable(torch.randn(5, 5).float(), requires_grad=True)
         var2 = Variable(torch.randn(5, 5).float(), requires_grad=True)
-        tens1 = Variable(torch.randn(5,5).float(), requires_grad=True)
+        tens1 = Variable(torch.randn(5, 5).float(), requires_grad=True)
         float1 = torch.randn(1)[0]
-        target = Variable(torch.randn(5,5).float()).cuda()
+        target = Variable(torch.randn(5, 5).float()).cuda()
         crit = nn.MSELoss()
 
         expected = m(var1, var2, tens1, float1)
