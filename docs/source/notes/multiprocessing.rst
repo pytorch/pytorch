@@ -33,6 +33,8 @@ by the CUDA runtime.
     kinds of data should be done with care. Note that this restriction doesn't
     apply to shared CPU memory.
 
+See also: :ref:`cuda-nn-dataparallel-instead`
+
 
 Best practices and tips
 -----------------------
