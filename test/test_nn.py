@@ -1541,7 +1541,8 @@ class TestNNInit(unittest.TestCase):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
                 for dims in [2, 4]:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25, as_variable=as_variable)
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
+                                                                 as_variable=as_variable)
                     gain = 1
 
                     if use_gain:
@@ -1564,7 +1565,8 @@ class TestNNInit(unittest.TestCase):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
                 for dims in [2, 4]:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25, as_variable=as_variable)
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
+                                                                 as_variable=as_variable)
                     gain = 1
 
                     if use_gain:
@@ -1601,7 +1603,8 @@ class TestNNInit(unittest.TestCase):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
                 for dims in [2, 4]:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25, as_variable=as_variable)
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
+                                                                 as_variable=as_variable)
                     receptive_field = np.prod(input_tensor.size()[2:])
                     if use_gain:
                         gain = self._random_float(0.1, 2)
@@ -1622,7 +1625,8 @@ class TestNNInit(unittest.TestCase):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
                 for dims in [2, 4]:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25, as_variable=as_variable)
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
+                                                                 as_variable=as_variable)
                     receptive_field = np.prod(input_tensor.size()[2:])
                     if use_gain:
                         gain = self._random_float(0.1, 2)
@@ -1689,13 +1693,13 @@ class TestNNInit(unittest.TestCase):
                         input_tensor = input_tensor.data
 
                     rows, cols = tensor_size[0], int(np.prod(tensor_size[1:]))
-                    flattened_tensor = input_tensor.view(rows, cols).numpy()
+                    flattened_tensor = input_tensor.view(rows, cols)
                     if rows > cols:
-                        assert np.allclose(np.dot(flattened_tensor.T, flattened_tensor), np.eye(cols) * gain ** 2,
-                                           atol=1e-6)
+                        assert torch.dist(torch.mm(flattened_tensor.t(), flattened_tensor),
+                                          torch.eye(cols) * gain ** 2) <= 1e-6
                     else:
-                        assert np.allclose(np.dot(flattened_tensor, flattened_tensor.T), np.eye(rows) * gain ** 2,
-                                           atol=1e-6)
+                        assert torch.dist(torch.mm(flattened_tensor, flattened_tensor.t()),
+                                          torch.eye(rows) * gain ** 2) <= 1e-6
 
 def add_test(test):
     test_name = test.get_name()

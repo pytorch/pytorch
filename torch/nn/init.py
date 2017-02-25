@@ -1,4 +1,8 @@
-import numpy as np
+from functools import reduce
+from operator import mul
+import math
+import random
+
 import torch
 from torch.autograd import Variable
 
@@ -69,7 +73,7 @@ def _calculate_fan_in_and_fan_out(tensor):
     else:
         num_input_fmaps = tensor.size(1)
         num_output_fmaps = tensor.size(0)
-        receptive_field_size = np.prod(tensor.numpy().shape[2:])
+        receptive_field_size = reduce(mul, (tensor.numpy().shape[2:]))
         fan_in = num_input_fmaps * receptive_field_size
         fan_out = num_output_fmaps * receptive_field_size
 
@@ -80,7 +84,7 @@ def xavier_uniform(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the difficulty of training
        deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform distribution.
 
-       The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in + fan_out))
+       The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in + fan_out)) * sqrt(3)
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -88,15 +92,15 @@ def xavier_uniform(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.xavier_uniform(w, gain=np.sqrt(2.0))
+        >>> nninit.xavier_uniform(w, gain=math.sqrt(2.0))
     """
     if isinstance(tensor, Variable):
         xavier_uniform(tensor.data, gain=gain)
         return tensor
     else:
         fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * np.sqrt(2.0 / (fan_in + fan_out))
-        a = np.sqrt(3.0) * std
+        std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+        a = math.sqrt(3.0) * std
         return tensor.uniform_(-a, a)
 
 
@@ -113,22 +117,22 @@ def xavier_normal(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.xavier_normal(w, gain=np.sqrt(2.0))
+        >>> nninit.xavier_normal(w)
     """
     if isinstance(tensor, Variable):
         xavier_normal(tensor.data, gain=gain)
         return tensor
     else:
         fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * np.sqrt(2.0 / (fan_in + fan_out))
+        std = gain * math.sqrt(2.0 / (fan_in + fan_out))
         return tensor.normal_(0, std)
 
 
-def kaiming_uniform(tensor, gain=np.sqrt(2.0)):
+def kaiming_uniform(tensor, gain=math.sqrt(2.0)):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers: Surpassing
        human-level performance on ImageNet classification" - He, K. et al using a uniform distribution.
 
-       The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(1/(fan_in))
+       The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(1/(fan_in)) * sqrt(3)
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -136,7 +140,7 @@ def kaiming_uniform(tensor, gain=np.sqrt(2.0)):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_uniform(w, gain=np.sqrt(2.0))
+        >>> nninit.kaiming_uniform(w)
     """
 
     if isinstance(tensor, Variable):
@@ -144,12 +148,12 @@ def kaiming_uniform(tensor, gain=np.sqrt(2.0)):
         return tensor
     else:
         fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * np.sqrt(1.0 / fan_in)
-        a = np.sqrt(3.0) * std
+        std = gain * math.sqrt(1.0 / fan_in)
+        a = math.sqrt(3.0) * std
         return tensor.uniform_(-a, a)
 
 
-def kaiming_normal(tensor, gain=np.sqrt(2.0)):
+def kaiming_normal(tensor, gain=math.sqrt(2.0)):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
        Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal distribution.
 
@@ -162,14 +166,14 @@ def kaiming_normal(tensor, gain=np.sqrt(2.0)):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_normal(w, gain=np.sqrt(2.0))
+        >>> nninit.kaiming_normal(w)
     """
     if isinstance(tensor, Variable):
         kaiming_normal(tensor.data, gain=gain)
         return tensor
     else:
         fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * np.sqrt(1.0 / fan_in)
+        std = gain * math.sqrt(1.0 / fan_in)
         return tensor.normal_(0, std)
 
 
@@ -195,14 +199,14 @@ def orthogonal(tensor, gain=1):
         if tensor.ndimension() < 2:
             raise ValueError("Only tensors with 2 or more dimensions are supported.")
 
-        flattened_shape = (tensor.size(0), int(np.prod(tensor.numpy().shape[1:])))
+        flattened_shape = (tensor.size(0), int(reduce(mul, tensor.numpy().shape[1:])))
         flattened = torch.Tensor(flattened_shape[0], flattened_shape[1]).normal_(0, 1)
 
-        u, s, v = np.linalg.svd(flattened.numpy(), full_matrices=False)
-        if u.shape == flattened.numpy().shape:
-            tensor.view_as(flattened).copy_(torch.from_numpy(u))
+        u, s, v = torch.svd(flattened, some=True)
+        if u.is_same_size(flattened):
+            tensor.view_as(u).copy_(u)
         else:
-            tensor.view_as(flattened).copy_(torch.from_numpy(v))
+            tensor.view_as(v.t()).copy_(v.t())
 
         tensor.mul_(gain)
         return tensor
@@ -229,11 +233,11 @@ def sparse(tensor, sparsity, std=0.01):
             raise ValueError("Sparse initialization only supported for 2D inputs")
         tensor.normal_(0, std)
         rows, cols = tensor.size(0), tensor.size(1)
-        num_zeros = int(np.ceil(cols * sparsity))
+        num_zeros = int(math.ceil(cols * sparsity))
 
         for col_idx in range(tensor.size(1)):
-            row_indices = np.arange(rows)
-            np.random.shuffle(row_indices)
+            row_indices = list(range(rows))
+            random.shuffle(row_indices)
             zero_indices = row_indices[:num_zeros]
             tensor.numpy()[zero_indices, col_idx] = 0
 
