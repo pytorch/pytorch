@@ -628,9 +628,8 @@ class TestNN(NNTestCase):
         def expected_indices(dim):
             if dim == 1:
                 return torch.DoubleTensor([1, 3]).repeat(2, 2, 1)
-            lower_dim = expected_indices(dim - 1)
-            lower_dim = lower_dim.view(1, *lower_dim.size())
-            return torch.cat((lower_dim + 4, lower_dim + 12), 0)
+            if dim == 2:
+                return torch.DoubleTensor([[5, 7], [13, 15]]).repeat(2, 2, 1, 1)
 
         def expected_grad(dim):
             if dim == 1:
