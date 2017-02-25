@@ -128,15 +128,16 @@ def xavier_normal(tensor, gain=1):
         return tensor.normal_(0, std)
 
 
-def kaiming_uniform(tensor, gain=math.sqrt(2.0)):
-    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers: Surpassing
-       human-level performance on ImageNet classification" - He, K. et al using a uniform distribution.
+def kaiming_uniform(tensor, a=0):
+    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
+       Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform distribution.
 
-       The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(1/(fan_in)) * sqrt(3)
+       The resulting tensor will have values sampled from U(-bound, bound)
+       where bound = sqrt(2/((1 + a^2) * fan_in)) * sqrt(3)
 
     Args:
         tensor: a n-dimension torch.Tensor
-        gain: an optional scaling factor to be applied
+        a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
 
     Examples:
         >>> w = torch.Tensor(3, 5)
@@ -144,36 +145,36 @@ def kaiming_uniform(tensor, gain=math.sqrt(2.0)):
     """
 
     if isinstance(tensor, Variable):
-        kaiming_uniform(tensor.data, gain=gain)
+        kaiming_uniform(tensor.data, a=a)
         return tensor
     else:
         fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * math.sqrt(1.0 / fan_in)
-        a = math.sqrt(3.0) * std
-        return tensor.uniform_(-a, a)
+        std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
+        bound = math.sqrt(3.0) * std
+        return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal(tensor, gain=math.sqrt(2.0)):
+def kaiming_normal(tensor, a=0):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
        Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal distribution.
 
        The resulting tensor will have values sampled from normal distribution with mean=0 and
-       std = gain * sqrt(1/(fan_in))
+       std = sqrt(2/((1 + a^2) * fan_in))
 
     Args:
         tensor: a n-dimension torch.Tensor
-        gain: an optional scaling factor to be applied.
+        a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
 
     Examples:
         >>> w = torch.Tensor(3, 5)
         >>> nninit.kaiming_normal(w)
     """
     if isinstance(tensor, Variable):
-        kaiming_normal(tensor.data, gain=gain)
+        kaiming_normal(tensor.data, a=a)
         return tensor
     else:
         fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * math.sqrt(1.0 / fan_in)
+        std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
         return tensor.normal_(0, std)
 
 

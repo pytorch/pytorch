@@ -1601,44 +1601,46 @@ class TestNNInit(unittest.TestCase):
     @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_kaiming_uniform(self):
         for as_variable in [True, False]:
-            for use_gain in [True, False]:
+            for use_a in [True, False]:
                 for dims in [2, 4]:
                     input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
                                                                  as_variable=as_variable)
                     receptive_field = np.prod(input_tensor.size()[2:])
-                    if use_gain:
-                        gain = self._random_float(0.1, 2)
-                        init.kaiming_uniform(input_tensor, gain=gain)
+                    if use_a:
+                        a = self._random_float(0.1, 2)
+                        init.kaiming_uniform(input_tensor, a=a)
                     else:
-                        gain = np.sqrt(2.0)
+                        a = 0
                         init.kaiming_uniform(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
 
-                    expected_std = gain * np.sqrt(1.0 / (input_tensor.size(1) * receptive_field))
+                    fan_in = (input_tensor.size(1) * receptive_field)
+                    expected_std = np.sqrt(2.0/((1 + a**2) * fan_in))
                     bounds = expected_std * np.sqrt(3.0)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
     def test_kaiming_normal(self):
         for as_variable in [True, False]:
-            for use_gain in [True, False]:
+            for use_a in [True, False]:
                 for dims in [2, 4]:
                     input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
                                                                  as_variable=as_variable)
                     receptive_field = np.prod(input_tensor.size()[2:])
-                    if use_gain:
-                        gain = self._random_float(0.1, 2)
-                        init.kaiming_normal(input_tensor, gain=gain)
+                    if use_a:
+                        a = self._random_float(0.1, 2)
+                        init.kaiming_normal(input_tensor, a=a)
                     else:
-                        gain = np.sqrt(2.0)
+                        a = 0
                         init.kaiming_normal(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
 
-                    expected_std = gain * np.sqrt(1.0 / (input_tensor.size(1) * receptive_field))
+                    fan_in = (input_tensor.size(1) * receptive_field)
+                    expected_std = np.sqrt(2.0 / ((1 + a**2) * fan_in))
                     assert self._is_normal(input_tensor, 0, expected_std)
 
     def test_sparse_only_works_on_2d_inputs(self):
