@@ -11,6 +11,14 @@
 #define const_byte_cast(tensor) \
   dynamic_cast<const THCTensor<unsigned char>&>(tensor)
 
+#ifdef THC_REAL_IS_HALF
+#define cast_scalar(v) THC_float2half(v)
+#define uncast_scalar(v) THC_half2float(v)
+#else
+#define cast_scalar(v) v
+#define uncast_scalar(v) v
+#endif
+
 template<>
 THCTensor<real>::THCTensor(THCState* state):
   tensor(THCTensor_(new)(state)), state(state)
@@ -246,14 +254,6 @@ auto THCTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THCTensor& 
   return *this;
 }
 
-#ifdef THC_REAL_IS_HALF
-#define cast_scalar(v) THC_float2half(v)
-#define uncast_scalar(v) THC_half2float(v)
-#else
-#define cast_scalar(v) v
-#define uncast_scalar(v) v
-#endif
-
 template<>
 auto THCTensor<real>::fill(scalar_type value) -> THCTensor& {
   THCTensor_(fill)(state, tensor, cast_scalar(value));
@@ -274,28 +274,26 @@ auto THCTensor<real>::free() -> THCTensor& {
 
 template<>
 auto THCTensor<real>::diag(const Tensor& src, int k) -> THCTensor& {
-  THCTensor_(diag)(tensor, const_tensor_cast(src).tensor, k);
+  THCTensor_(diag)(state, tensor, const_tensor_cast(src).tensor, k);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::eye(long n, long m) -> THCTensor& {
-  THCTensor_(eye)(tensor, n, m);
-  return *this;
+  throw std::runtime_error("THCTensor::eye() not implemented");
 }
 
 template<>
 auto THCTensor<real>::range(scalar_type xmin, scalar_type xmax,
                             scalar_type step) -> THCTensor& {
-  THCTensor_(range)(tensor, scalar_cast(xmin), scalar_cast(xmax),
-      scalar_cast(step));
-  return *this;
+  throw std::runtime_error("THCTensor::range() not implemented");
 }
 
 template<>
 auto THCTensor<real>::sort(const Tensor& ri, const Tensor& src,
                            int dimension, int desc) -> THCTensor& {
   THCTensor_(sort)(
+    state,
     tensor,
     const_long_cast(ri).tensor,
     const_tensor_cast(src).tensor,
@@ -308,7 +306,9 @@ auto THCTensor<real>::sort(const Tensor& ri, const Tensor& src,
 template<>
 auto THCTensor<real>::topk(const Tensor& ri, const Tensor& src,
                            long k, int dim, int dir, int sorted) -> THCTensor& {
+#ifdef THC_REAL_IS_FLOAT
   THCTensor_(topk)(
+    state,
     tensor,
     const_long_cast(ri).tensor,
     const_tensor_cast(src).tensor,
@@ -318,17 +318,20 @@ auto THCTensor<real>::topk(const Tensor& ri, const Tensor& src,
     sorted
   );
   return *this;
+#else
+  throw std::runtime_error("THCTensor::topk() is implemented only for float type");
+#endif
 }
 
 template<>
 auto THCTensor<real>::tril(const Tensor& src, long k) -> THCTensor& {
-  THCTensor_(tril)(tensor, const_tensor_cast(src).tensor, k);
+  THCTensor_(tril)(state, tensor, const_tensor_cast(src).tensor, k);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::triu(const Tensor& src, long k) -> THCTensor& {
-  THCTensor_(triu)(tensor, const_tensor_cast(src).tensor, k);
+  THCTensor_(triu)(state, tensor, const_tensor_cast(src).tensor, k);
   return *this;
 }
 
@@ -339,13 +342,13 @@ auto THCTensor<real>::catArray(const std::vector<Tensor*>& inputs_vec,
   tensor_type *inputs[numInputs];
   for (std::size_t i = 0; i < numInputs; i++)
     inputs[i] = const_tensor_cast(*inputs_vec[i]).tensor;
-  THCTensor_(catArray)(tensor, inputs, numInputs, dimension);
+  THCTensor_(catArray)(state, tensor, inputs, numInputs, dimension);
   return *this;
 }
 
 template<>
 int THCTensor<real>::equal(const Tensor& other) const {
-  return THCTensor_(equal)(tensor, const_tensor_cast(other).tensor);
+  return THCTensor_(equal)(state, tensor, const_tensor_cast(other).tensor);
 }
 
   // Note: the order in *Value and *Tensor is reversed compared to
@@ -361,9 +364,10 @@ int THCTensor<real>::equal(const Tensor& other) const {
     if (r.type() != Type::UCHAR)                                     \
       throw std::invalid_argument("logical operator called on non-byte tensor"); \
     THCTensor_(NAME##Value)(                                         \
+      state,                                                         \
       const_byte_cast(r).tensor,                                     \
       tensor,                                                        \
-      scalar_cast(value)                                             \
+      cast_scalar(value)                                             \
     );                                                               \
     return *this;                                                    \
   }                                                                  \
@@ -372,9 +376,10 @@ int THCTensor<real>::equal(const Tensor& other) const {
   auto THCTensor<real>::NAME##ValueT(const Tensor& t,                \
                                      scalar_type value) -> THCTensor& { \
     THCTensor_(NAME##ValueT)(                                        \
+      state,                                                         \
       tensor,                                                        \
       const_tensor_cast(t).tensor,                                   \
-      scalar_cast(value)                                             \
+      cast_scalar(value)                                             \
     );                                                               \
     return *this;                                                    \
   }                                                                  \
@@ -385,6 +390,7 @@ int THCTensor<real>::equal(const Tensor& other) const {
     if (r.type() != Type::UCHAR)                                     \
       throw std::invalid_argument("logical operator called on non-byte tensor"); \
     THCTensor_(NAME##Tensor)(                                        \
+      state,                                                         \
       const_byte_cast(r).tensor,                                     \
       tensor,                                                        \
       const_tensor_cast(tb).tensor                                   \
@@ -396,6 +402,7 @@ int THCTensor<real>::equal(const Tensor& other) const {
   auto THCTensor<real>::NAME##TensorT(const Tensor& ta,              \
                                       const Tensor& tb) -> THCTensor& { \
     THCTensor_(NAME##TensorT)(                                       \
+      state,                                                         \
       tensor,                                                        \
       const_tensor_cast(ta).tensor,                                  \
       const_tensor_cast(tb).tensor                                   \
@@ -416,7 +423,7 @@ template<>
 auto THCTensor<real>::abs(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) ||\
     defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-  THCTensor_(abs)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(abs)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("absolute value is only available for\
@@ -427,7 +434,7 @@ auto THCTensor<real>::abs(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::sigmoid(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(sigmoid)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(sigmoid)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -438,7 +445,7 @@ auto THCTensor<real>::sigmoid(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::log(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(log)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(log)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -449,7 +456,7 @@ auto THCTensor<real>::log(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::log1p(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(log1p)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(log1p)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -460,7 +467,7 @@ auto THCTensor<real>::log1p(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::exp(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(exp)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(exp)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -471,7 +478,7 @@ auto THCTensor<real>::exp(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::cos(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(cos)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(cos)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -482,7 +489,7 @@ auto THCTensor<real>::cos(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::acos(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(acos)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(acos)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -493,7 +500,7 @@ auto THCTensor<real>::acos(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::cosh(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(cosh)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(cosh)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -504,7 +511,7 @@ auto THCTensor<real>::cosh(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::sin(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(sin)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(sin)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -515,7 +522,7 @@ auto THCTensor<real>::sin(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::asin(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(asin)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(asin)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -526,7 +533,7 @@ auto THCTensor<real>::asin(const Tensor& src) -> THCTensor& {
 template<>
 auto THCTensor<real>::sinh(const Tensor& src) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(sinh)(tensor, const_tensor_cast(src).tensor);
+  THCTensor_(sinh)(state, tensor, const_tensor_cast(src).tensor);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\

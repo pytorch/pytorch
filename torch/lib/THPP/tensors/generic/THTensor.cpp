@@ -658,14 +658,14 @@ auto THTensor<real>::clamp(const Tensor &src, scalar_type min_value,
 
 template<>
 auto THTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& src2) -> THTensor& {
-  THTensor &src1_t = const_tensor_cast(src1);
+  const THTensor &src1_t = const_tensor_cast(src1);
 
-  THSTensor<real>* src2_sparse;
-  if ((src2_sparse = dynamic_cast<THSTensor<real>*>(const_cast<Tensor*>(&src2)))) {
+  const THSTensor<real>* src2_sparse;
+  if ((src2_sparse = dynamic_cast<const THSTensor<real>*>(&src2))) {
     THSTensor_(spcadd)(tensor, src1_t.tensor, value, src2_sparse->tensor);
     return *this;
   } else {
-    THTensor &src2_t = const_tensor_cast(src2);
+    const THTensor &src2_t = const_tensor_cast(src2);
     THTensor_(cadd)(tensor, src1_t.tensor, value, src2_t.tensor);
   }
   return *this;

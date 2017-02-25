@@ -85,10 +85,6 @@ mkdir -p tmp_install
 build TH
 build THS
 build THNN
-if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
-    build THD
-fi
-
 if [[ $WITH_CUDA -eq 1 ]]; then
     build THC
     build THCS
@@ -104,6 +100,9 @@ build THPP
 CPP_FLAGS=" -std=c++11 "
 build libshm
 
+if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
+    build THD
+fi
 
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .
