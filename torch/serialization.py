@@ -103,6 +103,29 @@ def storage_to_tensor_type(storage):
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
 
+    There are two main approaches for serializing and restoring a model.
+
+    The first (recommended) saves and loads only the model parameters::
+
+        torch.save(the_model.state_dict(), PATH)
+
+    Then later::
+
+        the_model = TheModelClass(*args, **kwargs)
+        the_model.load_state_dict(torch.load(PATH))
+
+    The second saves and loads the entire model::
+
+        torch.save(the_model, PATH)
+
+    Then later::
+    
+        the_model = torch.load(PATH))
+
+    The second relies on both the shape of the model, as well as the class
+    definition. This results in it being more fragile, since if the source code
+    of the class changes, the model will no longer load.
+
     Args:
         obj: saved object
         f: a file-like object (has to implement fileno that returns a file descriptor)
