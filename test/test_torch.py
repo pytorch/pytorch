@@ -1880,11 +1880,13 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, ..., 2, 2], 27, 0)
         self.assertEqual(reference[2, 2, ..., 2], 27, 0)
         self.assertEqual(reference[2, 2, 2, ...], 27, 0)
+        self.assertEqual(reference[...], reference, 0)
 
         reference_5d = self._consecutive((3, 3, 3, 3, 3))
         self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
+        self.assertEqual(reference_5d[...], reference_5d, 0)
 
         # LongTensor indexing
         reference = self._consecutive((5, 5, 5))
