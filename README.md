@@ -148,6 +148,9 @@ There is no wrapper code that needs to be written. [You can see an example here]
 - Anaconda
 ```bash
 conda install pytorch torchvision -c soumith
+
+# For cuda binaries
+conda install pytorch torchvision cuda80 -c soumith
 ```
 
 ### From source
