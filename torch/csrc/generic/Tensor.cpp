@@ -540,7 +540,8 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
       }
     }
     if (valid) return true;
-  } else {
+  } else if (index == Py_Ellipsis) return true;
+  else {
     if (THPTensor_(_indexOnce)<allow_index>(index, indexed_dim, tresult, sresult, storage_offset))
       return true;
   }
@@ -551,9 +552,9 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
       ", numpy scalars"
 #endif
 #ifndef THC_GENERIC_FILE
-      "torch.LongTensor and torch.ByteTensor.",
+      ", torch.LongTensor and torch.ByteTensor.",
 #else
-      "torch.cuda.LongTensor and torch.cuda.ByteTensor.",
+      ", torch.cuda.LongTensor and torch.cuda.ByteTensor.",
 #endif
     THPUtils_typename(index));
   return false;
