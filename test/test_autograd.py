@@ -225,14 +225,34 @@ class TestAutograd(TestCase):
 
     def test_indexing(self):
         x = torch.range(1, 16).resize_(4, 4)
-        y = Variable(x)
-        self.assertEqual(x[1], y[1].data)
-        self.assertEqual(x[1, 1], y[1, 1].data[0])
-        self.assertEqual(x[1:], y[1:].data)
-        self.assertEqual(x[:2], y[:2].data)
-        self.assertEqual(x[:2, 2], y[:2, 2].data)
-        self.assertEqual(x[1:2, 2], y[1:2, 2].data)
-        self.assertEqual(x[1, 2:], y[1, 2:].data)
+        y = Variable(x, requires_grad=True)
+
+        def check_index(idx):
+            y.grad.data.zero_()
+            indexed_tensor = x[idx]
+            indexed_var = y[idx]
+
+            indexed_var_t = indexed_var.data
+            if not torch.is_tensor(indexed_tensor):
+                indexed_var_t = indexed_var_t[0]
+            self.assertEqual(indexed_tensor, indexed_var)
+
+            indexed_var.sum().backward()
+            expected_grad = torch.zeros(4, 4)
+            expected_grad[idx] = 1
+            self.assertEqual(y.grad.data, expected_grad)
+
+        check_index(1)
+        check_index((1, 1))
+        check_index(slice(1, None))
+        check_index(slice(None, 2))
+        check_index((slice(None, 2), 2))
+        check_index((slice(1, 2), 2))
+        check_index((1, slice(2, None)))
+        check_index((slice(None, None), slice(2, None)))
+        check_index(torch.LongTensor([0, 2]))
+        check_index(torch.rand(4, 4).bernoulli().byte())
+        check_index((Ellipsis, slice(2, None)))
 
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))
