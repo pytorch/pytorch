@@ -18,9 +18,8 @@ class Index(Function):
         return result
 
     def backward(self, grad_output):
-        # TODO: this won't have to be zeroed
         grad_input = grad_output.new(self.input_size).zero_()
-        grad_input.index(self.index).copy_(grad_output)
+        grad_input._set_index(self.index, grad_output)
         return grad_input
 
 
