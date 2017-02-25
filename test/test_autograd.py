@@ -487,7 +487,6 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, torch.ones(10, 10) * 2)
 
     def test_type_conversions(self):
-        import torch.cuda
         x = Variable(torch.randn(5, 5))
         self.assertIs(type(x.float().data), torch.FloatTensor)
         self.assertIs(type(x.int().data), torch.IntTensor)
@@ -871,7 +870,10 @@ function_tests = [
     (Index, (slice(0, 3),), (torch.rand(S, S, S),), 'slice'),
     (Index, ((slice(0, 3), 1),), (torch.rand(S, S, S),), 'slice_index'),
     (View, (S * S, S), (torch.rand(S, S, S),)),
-    (Expand, ((S, 5, S, 5),), ((S, 1, S, 1),)),
+    (Expand, ((5, S, 5, S, 5),), ((1, S, 1, S, 1),)),
+    (Expand, ((S, S, S),), ((S, 1),), 'new_dim'),
+    (Expand, ((S, S, S),), ((1, S),), 'new_dim_front'),
+    (Expand, ((S, S, S),), ((1,),), 'scalar'),
     (Exp, (), (torch.rand(S, S, S),)),
     (Log, (), (torch.rand(S, S, S) + 1e-2,)),
     (Log1p, (), (torch.rand(S, S, S),)),
@@ -921,7 +923,7 @@ function_tests = [
     (Addr, (0.1, 0.4), ((S, M), (S,), (M,)), 'coef'),
     (Dot, (), ((L,), (L,)),),
     (Max, (), ((S, S, S),),),
-    (Repeat, (torch.Size([2, 3, 1, 4]),), ((S, S, S, S),)),
+    (Repeat, (torch.Size([2, 3, 1, 2]),), ((S, S, S, S),)),
     (Min, (), ((S, S, S),),),
     (Max, (0,), ((S, S, S),), 'dim'),
     (Min, (0,), ((S, S, S),), 'dim'),
@@ -987,8 +989,10 @@ method_tests = [
     ('t', (1, 2), ()),
     ('view', (S, S, S), (S * S, S),),
     ('view_as', (S, S, S), ((S * S, S),)),
-    ('expand', (S, 1, S), (S, S, S)),
+    ('expand', (S, 1, 1), (S, S, S)),
     ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),
+    ('expand', (S, 1), (S, S, S), 'new_dim'),
+    ('expand', (1,), (S, S, S), 'scalar'),
     ('exp', (S, S, S), ()),
     ('log', (S, S, S), ()),
     ('log1p', (S, S, S), ()),

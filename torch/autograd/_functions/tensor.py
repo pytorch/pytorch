@@ -109,10 +109,11 @@ class Expand(Function):
         self.expanded_dims = []
 
     def forward(self, i):
-        self.expanded_dims = [dim for dim, (expanded, original)
-                              in enumerate(zip(self.sizes, i.size()))
-                              if expanded != original]
         result = i.expand(*self.sizes)
+        unsqueezed = (1,) * (len(self.sizes) - len(i.size()))
+        self.expanded_dims = [dim for dim, (expanded, original)
+                              in enumerate(zip(self.sizes, unsqueezed + i.size()))
+                              if expanded != original]
         self.mark_shared_storage((i, result))
         return result
 
