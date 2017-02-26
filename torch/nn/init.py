@@ -20,8 +20,7 @@ def uniform(tensor, a=0, b=1):
     if isinstance(tensor, Variable):
         uniform(tensor.data, a=a, b=b)
         return tensor
-    else:
-        return tensor.uniform_(a, b)
+    return tensor.uniform_(a, b)
 
 
 def normal(tensor, mean=0, std=1):
@@ -39,8 +38,7 @@ def normal(tensor, mean=0, std=1):
     if isinstance(tensor, Variable):
         normal(tensor.data, mean=mean, std=std)
         return tensor
-    else:
-        return tensor.normal_(mean, std)
+    return tensor.normal_(mean, std)
 
 
 def constant(tensor, val):
@@ -57,8 +55,7 @@ def constant(tensor, val):
     if isinstance(tensor, Variable):
         constant(tensor.data, val)
         return tensor
-    else:
-        return tensor.fill_(val)
+    return tensor.fill_(val)
 
 
 def _calculate_fan_in_and_fan_out(tensor):
@@ -97,11 +94,11 @@ def xavier_uniform(tensor, gain=1):
     if isinstance(tensor, Variable):
         xavier_uniform(tensor.data, gain=gain)
         return tensor
-    else:
-        fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-        a = math.sqrt(3.0) * std
-        return tensor.uniform_(-a, a)
+
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+    a = math.sqrt(3.0) * std
+    return tensor.uniform_(-a, a)
 
 
 def xavier_normal(tensor, gain=1):
@@ -122,10 +119,10 @@ def xavier_normal(tensor, gain=1):
     if isinstance(tensor, Variable):
         xavier_normal(tensor.data, gain=gain)
         return tensor
-    else:
-        fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-        std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-        return tensor.normal_(0, std)
+
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+    return tensor.normal_(0, std)
 
 
 def kaiming_uniform(tensor, a=0):
@@ -147,11 +144,11 @@ def kaiming_uniform(tensor, a=0):
     if isinstance(tensor, Variable):
         kaiming_uniform(tensor.data, a=a)
         return tensor
-    else:
-        fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-        std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
-        bound = math.sqrt(3.0) * std
-        return tensor.uniform_(-bound, bound)
+
+    fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
+    std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
+    bound = math.sqrt(3.0) * std
+    return tensor.uniform_(-bound, bound)
 
 
 def kaiming_normal(tensor, a=0):
@@ -172,10 +169,10 @@ def kaiming_normal(tensor, a=0):
     if isinstance(tensor, Variable):
         kaiming_normal(tensor.data, a=a)
         return tensor
-    else:
-        fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-        std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
-        return tensor.normal_(0, std)
+
+    fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
+    std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
+    return tensor.normal_(0, std)
 
 
 def orthogonal(tensor, gain=1):
@@ -196,21 +193,21 @@ def orthogonal(tensor, gain=1):
     if isinstance(tensor, Variable):
         orthogonal(tensor.data, gain=gain)
         return tensor
+
+    if tensor.ndimension() < 2:
+        raise ValueError("Only tensors with 2 or more dimensions are supported.")
+    rows = tensor.size(0)
+    cols = tensor[0].view(-1).size(0)
+    flattened = torch.Tensor(rows, cols).normal_(0, 1)
+
+    u, s, v = torch.svd(flattened, some=True)
+    if u.is_same_size(flattened):
+        tensor.view_as(u).copy_(u)
     else:
-        if tensor.ndimension() < 2:
-            raise ValueError("Only tensors with 2 or more dimensions are supported.")
-        rows = tensor.size(0)
-        cols = tensor[0].view(-1).size(0)
-        flattened = torch.Tensor(rows, cols).normal_(0, 1)
+        tensor.view_as(v.t()).copy_(v.t())
 
-        u, s, v = torch.svd(flattened, some=True)
-        if u.is_same_size(flattened):
-            tensor.view_as(u).copy_(u)
-        else:
-            tensor.view_as(v.t()).copy_(v.t())
-
-        tensor.mul_(gain)
-        return tensor
+    tensor.mul_(gain)
+    return tensor
 
 
 def sparse(tensor, sparsity, std=0.01):
@@ -229,18 +226,18 @@ def sparse(tensor, sparsity, std=0.01):
     if isinstance(tensor, Variable):
         sparse(tensor.data, sparsity, std=std)
         return tensor
-    else:
-        if tensor.ndimension() != 2:
-            raise ValueError("Sparse initialization only supported for 2D inputs")
-        tensor.normal_(0, std)
-        rows, cols = tensor.size(0), tensor.size(1)
-        num_zeros = int(math.ceil(cols * sparsity))
 
-        for col_idx in range(tensor.size(1)):
-            row_indices = list(range(rows))
-            random.shuffle(row_indices)
-            zero_indices = row_indices[:num_zeros]
-            for row_idx in zero_indices:
-                tensor[row_idx, col_idx] = 0
+    if tensor.ndimension() != 2:
+        raise ValueError("Sparse initialization only supported for 2D inputs")
+    tensor.normal_(0, std)
+    rows, cols = tensor.size(0), tensor.size(1)
+    num_zeros = int(math.ceil(cols * sparsity))
 
-        return tensor
+    for col_idx in range(tensor.size(1)):
+        row_indices = list(range(rows))
+        random.shuffle(row_indices)
+        zero_indices = row_indices[:num_zeros]
+        for row_idx in zero_indices:
+            tensor[row_idx, col_idx] = 0
+
+    return tensor

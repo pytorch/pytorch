@@ -11,9 +11,8 @@ import random
 import unittest
 from copy import deepcopy
 from itertools import repeat, product
-from functools import wraps
-from numpy.random import randint, random_sample
-import numpy as np
+from functools import wraps, reduce
+from operator import mul
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,7 +24,7 @@ from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
-from common import freeze_rng_state, run_tests
+from common import freeze_rng_state, run_tests, TestCase
 
 
 def default_tensor_type(type):
@@ -1463,34 +1462,36 @@ class TestNN(NNTestCase):
             self.assertEqual(grad1, grad2)
 
 
-class TestNNInit(unittest.TestCase):
+class TestNNInit(TestCase):
     def setUp(self):
-        np.random.seed(123)
+        random.seed(123)
         torch.manual_seed(123)
 
     def _is_normal(self, tensor, mean, std):
         if isinstance(tensor, Variable):
             tensor = tensor.data
-        p_value = stats.kstest(tensor.numpy().flatten(), 'norm', args=(mean, std)).pvalue
+        samples = list(tensor.view(-1))
+        p_value = stats.kstest(samples, 'norm', args=(mean, std)).pvalue
         return p_value > 0.0001
 
     def _is_uniform(self, tensor, a, b):
         if isinstance(tensor, Variable):
             tensor = tensor.data
-        p_value = stats.kstest(tensor.numpy().flatten(), 'uniform', args=(a, (b - a))).pvalue
+        samples = list(tensor.view(-1))
+        p_value = stats.kstest(samples, 'uniform', args=(a, (b - a))).pvalue
         return p_value > 0.0001
 
     def _create_random_nd_tensor(self, dims, size_min, size_max, as_variable):
-        size = [randint(size_min, size_max + 1) for _ in range(dims)]
+        size = [random.randint(size_min, size_max) for _ in range(dims)]
         tensor = torch.zeros(size)
         if as_variable:
             tensor = Variable(tensor)
         return tensor
 
     def _random_float(self, a, b):
-        return (b - a) * random_sample() + a
+        return (b - a) * random.random() + a
 
-    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_uniform(self):
         for as_variable in [True, False]:
             for dims in [1, 2, 4]:
@@ -1500,7 +1501,7 @@ class TestNNInit(unittest.TestCase):
                 init.uniform(input_tensor, a=a, b=b)
                 assert self._is_uniform(input_tensor, a, b)
 
-    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_normal(self):
         for as_variable in [True, False]:
             for dims in [1, 2, 4]:
@@ -1520,7 +1521,7 @@ class TestNNInit(unittest.TestCase):
                 if as_variable:
                     input_tensor = input_tensor.data
 
-                assert np.allclose(input_tensor.numpy(), input_tensor.clone().fill_(val).numpy())
+                self.assertEqual(input_tensor, input_tensor.clone().fill_(val))
 
     def test_xavier_uniform_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
@@ -1536,7 +1537,7 @@ class TestNNInit(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     init.xavier_normal(tensor)
 
-    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_uniform(self):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
@@ -1554,13 +1555,17 @@ class TestNNInit(unittest.TestCase):
                     if as_variable:
                         input_tensor = input_tensor.data
 
-                    tensor_shape = input_tensor.numpy().shape
-                    receptive_field = np.prod(tensor_shape[2:])
-                    expected_std = gain * np.sqrt(2.0 / ((tensor_shape[1] + tensor_shape[0]) * receptive_field))
-                    bounds = expected_std * np.sqrt(3)
+                    fan_in = input_tensor.size(1)
+                    fan_out = input_tensor.size(0)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0][0].view(-1).size(0)
+                        fan_out *= input_tensor[0][0].view(-1).size(0)
+
+                    expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+                    bounds = expected_std * math.sqrt(3)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
-    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_normal(self):
         for as_variable in [True, False]:
             for use_gain in [True, False]:
@@ -1578,10 +1583,13 @@ class TestNNInit(unittest.TestCase):
                     if as_variable:
                         input_tensor = input_tensor.data
 
-                    tensor_shape = input_tensor.numpy().shape
-                    receptive_field = np.prod(tensor_shape[2:])
+                    fan_in = input_tensor.size(1)
+                    fan_out = input_tensor.size(0)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0][0].view(-1).size(0)
+                        fan_out *= input_tensor[0][0].view(-1).size(0)
 
-                    expected_std = gain * np.sqrt(2.0 / ((tensor_shape[1] + tensor_shape[0]) * receptive_field))
+                    expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                     assert self._is_normal(input_tensor, 0, expected_std)
 
     def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
@@ -1598,14 +1606,13 @@ class TestNNInit(unittest.TestCase):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
                     init.kaiming_normal(tensor)
 
-    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
         for as_variable in [True, False]:
             for use_a in [True, False]:
                 for dims in [2, 4]:
                     input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
                                                                  as_variable=as_variable)
-                    receptive_field = np.prod(input_tensor.size()[2:])
                     if use_a:
                         a = self._random_float(0.1, 2)
                         init.kaiming_uniform(input_tensor, a=a)
@@ -1616,19 +1623,21 @@ class TestNNInit(unittest.TestCase):
                     if as_variable:
                         input_tensor = input_tensor.data
 
-                    fan_in = (input_tensor.size(1) * receptive_field)
-                    expected_std = np.sqrt(2.0/((1 + a**2) * fan_in))
-                    bounds = expected_std * np.sqrt(3.0)
+                    fan_in = input_tensor.size(1)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0][0].view(-1).size(0)
+
+                    expected_std = math.sqrt(2.0/((1 + a**2) * fan_in))
+                    bounds = expected_std * math.sqrt(3.0)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
-    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_normal(self):
         for as_variable in [True, False]:
             for use_a in [True, False]:
                 for dims in [2, 4]:
                     input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
                                                                  as_variable=as_variable)
-                    receptive_field = np.prod(input_tensor.size()[2:])
                     if use_a:
                         a = self._random_float(0.1, 2)
                         init.kaiming_normal(input_tensor, a=a)
@@ -1639,8 +1648,11 @@ class TestNNInit(unittest.TestCase):
                     if as_variable:
                         input_tensor = input_tensor.data
 
-                    fan_in = (input_tensor.size(1) * receptive_field)
-                    expected_std = np.sqrt(2.0 / ((1 + a**2) * fan_in))
+                    fan_in = input_tensor.size(1)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0][0].view(-1).size(0)
+
+                    expected_std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
                     assert self._is_normal(input_tensor, 0, expected_std)
 
     def test_sparse_only_works_on_2d_inputs(self):
@@ -1651,7 +1663,7 @@ class TestNNInit(unittest.TestCase):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
                     init.sparse(tensor, sparsity)
 
-    @unittest.skipIf(not TEST_SCIPY, "SCIPY unavailable")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_sparse_default_std(self):
         for as_variable in [True, False]:
             for use_random_std in [True, False]:
@@ -1671,7 +1683,7 @@ class TestNNInit(unittest.TestCase):
 
                 for col_idx in range(input_tensor.size(1)):
                     column = input_tensor[:, col_idx]
-                    assert column[column == 0].nelement() >= np.ceil(sparsity * cols)
+                    assert column[column == 0].nelement() >= math.ceil(sparsity * cols)
 
                 assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
 
@@ -1694,14 +1706,15 @@ class TestNNInit(unittest.TestCase):
                     if as_variable:
                         input_tensor = input_tensor.data
 
-                    rows, cols = tensor_size[0], int(np.prod(tensor_size[1:]))
+                    rows, cols = tensor_size[0], reduce(mul, tensor_size[1:])
                     flattened_tensor = input_tensor.view(rows, cols)
                     if rows > cols:
-                        assert torch.dist(torch.mm(flattened_tensor.t(), flattened_tensor),
-                                          torch.eye(cols) * gain ** 2) <= 1e-6
+                        self.assertEqual(torch.mm(flattened_tensor.t(), flattened_tensor),
+                                         torch.eye(cols) * gain ** 2, prec=1e-6)
                     else:
-                        assert torch.dist(torch.mm(flattened_tensor, flattened_tensor.t()),
-                                          torch.eye(rows) * gain ** 2) <= 1e-6
+                        self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
+                                         torch.eye(rows) * gain ** 2, prec=1e-6)
+
 
 def add_test(test):
     test_name = test.get_name()
