@@ -237,8 +237,10 @@ class LSTM(RNNBase):
                          `(input_size x 4*hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hi|W_hf|W_hg|W_ho)`, of shape
                          `(hidden_size x 4*hidden_size)`
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ii|b_if|b_ig|b_io)`, of shape `(4*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(W_hi|W_hf|W_hg|b_ho)`, of shape `(4*hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ii|b_if|b_ig|b_io)`, of shape 
+                         `(4*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(W_hi|W_hf|W_hg|b_ho)`, of shape 
+                         `(4*hidden_size)`
 
     Examples::
 
@@ -294,11 +296,11 @@ class GRU(RNNBase):
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape
-                         (input_size x 3*hidden_size)
+                         `(input_size x 3*hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape
-                         (hidden_size x 3*hidden_size)
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
+                         `(hidden_size x 3*hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape `(3*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape `(3*hidden_size)`
     Examples::
 
         >>> rnn = nn.GRU(10, 20, 2)
