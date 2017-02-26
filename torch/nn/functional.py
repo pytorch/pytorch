@@ -4,6 +4,7 @@ import torch
 from . import _functions
 from .modules import utils
 from torch.nn._functions.conv import ConvNd
+from ._functions.padding import ConstantPad2d
 from .modules.utils import _single, _pair, _triple
 # Convolutions
 
@@ -531,3 +532,36 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
+
+
+def pad(input, pad, mode='constant', value=0):
+    """Pads tensor.
+
+    Currently only 2D and 3D padding supported.
+    In case of 4D input tensor pad should be in form (pad_l, pad_r, pad_t, pad_b )
+    In case of 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
+
+    Args
+        input (Variable): 4D or 5D tensor
+        pad (tuple): 4-elem or 6-elem tuple
+        mode: 'constant', 'reflect' or 'replicate'
+        value: fill value for 'constant' padding
+    """
+    if input.dim() == 4:
+        assert len(pad) == 4, '4D tensors expect 4 values for padding'
+        if mode == 'constant':
+            return ConstantPad2d(pad, value)(input)
+        elif mode == 'reflect':
+            return _functions.thnn.ReflectionPad2d(*pad)(input)
+        elif mode == 'replicate':
+            return _functions.thnn.ReplicationPad2d(*pad)(input)
+    elif input.dim() == 5:
+        assert len(pad) == 6, '5D tensors expect 6 values for padding'
+        if mode == 'constant':
+            raise NotImplementedError
+        elif mode == 'reflect':
+            raise NotImplementedError
+        elif mode == 'replicate':
+            return _functions.thnn.ReplicationPad3d(*pad)(input)
+    else:
+        raise NotImplemented("Only 4D and 5D padding is supported for now")
