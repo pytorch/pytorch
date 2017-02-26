@@ -299,8 +299,10 @@ class GRU(RNNBase):
                          `(input_size x 3*hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape
                          `(hidden_size x 3*hidden_size)`
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape `(3*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape `(3*hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape 
+                         `(3*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape
+                         `(3*hidden_size)`
     Examples::
 
         >>> rnn = nn.GRU(10, 20, 2)
