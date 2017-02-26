@@ -29,6 +29,6 @@ Then later::
 
     the_model = torch.load(PATH))
 
-The second relies on both the shape of the model, as well as the class
-definition. This results in it being more fragile, since if the source code
-of the class changes, the model will no longer load.
+However in this case, the serialized data is bound to the specific classes
+and the exact directory structure used, so it can break in various ways when
+used in other projects, or after some serious refactors.
