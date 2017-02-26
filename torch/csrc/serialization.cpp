@@ -5,3 +5,6 @@
 
 #include "generic/serialization.cpp"
 #include <TH/THGenerateAllTypes.h>
+
+#include "generic/serialization.cpp"
+#include <TH/THGenerateHalfType.h>

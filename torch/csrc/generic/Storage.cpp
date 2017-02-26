@@ -314,6 +314,7 @@ void THPStorage_(initCopyMethods)()
   THPInsertCopyFunction(h, &THStorage_(copyShort));
   THPInsertCopyFunction(h, &THStorage_(copyInt));
   THPInsertCopyFunction(h, &THStorage_(copyLong));
+  THPInsertCopyFunction(h, &THStorage_(copyHalf));
   THPInsertCopyFunction(h, &THStorage_(copyFloat));
   THPInsertCopyFunction(h, &THStorage_(copyDouble));
 #ifdef THC_GENERIC_FILE
@@ -328,7 +329,6 @@ void THPStorage_(initCopyMethods)()
 #ifdef CUDA_HALF_TENSOR
   THPInsertCopyFunction(h, &THStorage_(copyCudaHalf));
 #endif
-#ifndef THC_REAL_IS_HALF
   // add CPU <- GPU copies to base type
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
   extern THPCopyList THCpuStorage_(copy_functions);
@@ -344,7 +344,6 @@ void THPStorage_(initCopyMethods)()
   THPInsertCopyFunction(b, &THCpuStorage_(copyCudaHalf));
 #endif
   #undef THCpuStorage_
-#endif
 #endif
 }
 
