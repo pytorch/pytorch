@@ -1,12 +1,4 @@
-TEST_SCIPY = True
-try:
-    from scipy import stats
-except ImportError:
-    TEST_SCIPY = False
-
 import math
-
-import torch
 import random
 import unittest
 from copy import deepcopy
@@ -14,6 +6,7 @@ from itertools import repeat, product
 from functools import wraps, reduce
 from operator import mul
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
@@ -24,7 +17,10 @@ from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
-from common import freeze_rng_state, run_tests, TestCase
+from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, TEST_SCIPY
+
+if TEST_SCIPY:
+    from scipy import stats
 
 
 def default_tensor_type(type):
@@ -1558,8 +1554,8 @@ class TestNNInit(TestCase):
                     fan_in = input_tensor.size(1)
                     fan_out = input_tensor.size(0)
                     if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].view(-1).size(0)
-                        fan_out *= input_tensor[0][0].view(-1).size(0)
+                        fan_in *= input_tensor[0][0].numel()
+                        fan_out *= input_tensor[0][0].numel()
 
                     expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                     bounds = expected_std * math.sqrt(3)
@@ -1586,8 +1582,8 @@ class TestNNInit(TestCase):
                     fan_in = input_tensor.size(1)
                     fan_out = input_tensor.size(0)
                     if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].view(-1).size(0)
-                        fan_out *= input_tensor[0][0].view(-1).size(0)
+                        fan_in *= input_tensor[0][0].numel()
+                        fan_out *= input_tensor[0][0].numel()
 
                     expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                     assert self._is_normal(input_tensor, 0, expected_std)
@@ -1625,7 +1621,7 @@ class TestNNInit(TestCase):
 
                     fan_in = input_tensor.size(1)
                     if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].view(-1).size(0)
+                        fan_in *= input_tensor[0][0].numel()
 
                     expected_std = math.sqrt(2.0/((1 + a**2) * fan_in))
                     bounds = expected_std * math.sqrt(3.0)
@@ -1650,7 +1646,7 @@ class TestNNInit(TestCase):
 
                     fan_in = input_tensor.size(1)
                     if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].view(-1).size(0)
+                        fan_in *= input_tensor[0][0].numel()
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
                     assert self._is_normal(input_tensor, 0, expected_std)
@@ -1687,6 +1683,7 @@ class TestNNInit(TestCase):
 
                 assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
 
+    @skipIfNoLapack
     def test_orthogonal(self):
         for as_variable in [True, False]:
             for use_gain in [True, False]:

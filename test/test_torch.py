@@ -7,26 +7,13 @@ import torch.cuda
 import tempfile
 import unittest
 import warnings
-from itertools import product, chain
-from functools import wraps
-from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file
+from itertools import product
+from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack
 
 if TEST_NUMPY:
     import numpy as np
 
 SIZE = 100
-
-
-def skipIfNoLapack(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        try:
-            fn(*args, **kwargs)
-        except Exception as e:
-            if 'Lapack library not found' in e.args[0]:
-                raise unittest.SkipTest('Compiled without Lapack')
-            raise
-    return wrapper
 
 
 class TestTorch(TestCase):

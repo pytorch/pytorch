@@ -70,7 +70,7 @@ def _calculate_fan_in_and_fan_out(tensor):
         num_output_fmaps = tensor.size(0)
         receptive_field_size = 1
         if tensor.dim() > 2:
-            receptive_field_size = tensor[0][0].view(-1).size(0)
+            receptive_field_size = tensor[0][0].numel()
         fan_in = num_input_fmaps * receptive_field_size
         fan_out = num_output_fmaps * receptive_field_size
 
@@ -197,7 +197,7 @@ def orthogonal(tensor, gain=1):
     if tensor.ndimension() < 2:
         raise ValueError("Only tensors with 2 or more dimensions are supported.")
     rows = tensor.size(0)
-    cols = tensor[0].view(-1).size(0)
+    cols = tensor[0].numel()
     flattened = torch.Tensor(rows, cols).normal_(0, 1)
 
     u, s, v = torch.svd(flattened, some=True)
