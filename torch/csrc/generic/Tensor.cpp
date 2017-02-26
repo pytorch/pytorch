@@ -559,6 +559,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
 
+#ifndef TH_REAL_IS_HALF
 #ifndef THC_GENERIC_FILE
   THPByteTensor *mask = THPByteTensor_Check(index) ? (THPByteTensor*)index : NULL;
 #else
@@ -576,6 +577,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
     THTensor_(indexSelect)(LIBRARY_STATE index_result.get(), self->cdata, 0, index_t);
     return THPTensor_(New)(index_result.release());
   }
+#endif
 
   THTensorPtr tresult;
   THStorage *sresult;
@@ -603,6 +605,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
 {
   HANDLE_TH_ERRORS
 
+#ifndef TH_REAL_IS_HALF
 #ifndef THC_GENERIC_FILE
   THPByteTensor *mask = THPByteTensor_Check(index) ? (THPByteTensor*)index : NULL;
 #else
@@ -636,6 +639,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
     }
     return 0;
   }
+#endif
 
   THTensorPtr tresult;
   THStorage *sresult;
@@ -657,7 +661,11 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
   }
   if (tresult) {
     if (THPUtils_(checkReal)(value)) {
+#ifndef TH_REAL_IS_HALF
       THTensor_(fill)(LIBRARY_STATE tresult.get(), THPUtils_(unpackReal)(value));
+#else
+      throw std::runtime_error("torch.HalfTensors don't support scalar assignments");
+#endif
     } else {
       // TODO: try to do this without creating a temporary object
       THPTensorPtr tmp = (THPTensor*)THPTensor_(New)(tresult.release());
@@ -794,7 +802,9 @@ PyTypeObject THPTensorStatelessType = {
   0,                                     /* tp_weaklist */
 };
 
+#ifndef TH_REAL_IS_HALF
 #include "SparseTensor.cpp"
+#endif
 
 void THPTensor_(initCopyMethods)()
 {
@@ -806,6 +816,7 @@ void THPTensor_(initCopyMethods)()
   THPInsertCopyFunction(h, &THTensor_(copyInt));
   THPInsertCopyFunction(h, &THTensor_(copyLong));
   THPInsertCopyFunction(h, &THTensor_(copyFloat));
+  THPInsertCopyFunction(h, &THTensor_(copyHalf));
   THPInsertCopyFunction(h, &THTensor_(copyDouble));
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
@@ -819,7 +830,6 @@ void THPTensor_(initCopyMethods)()
 #ifdef CUDA_HALF_TENSOR
   THPInsertCopyFunction(h, &THTensor_(copyCudaHalf));
 #endif
-#ifndef THC_REAL_IS_HALF
   THPInsertCopyFunction(h, &THCTensor_(copyAsyncCPU), true);
   // add CPU <- GPU copies to base type
   #define THCpuTensor_(name) TH_CONCAT_4(TH, Real, Tensor_, name)
@@ -838,12 +848,11 @@ void THPTensor_(initCopyMethods)()
   THPInsertCopyFunction(b, &THCpuTensor_(copyAsyncCuda), true);
   #undef THCpuTensor_
 #endif
-#endif
 }
 
 bool THPTensor_(init)(PyObject *module)
 {
-#ifndef THC_GENERIC_FILE
+#if !defined(THC_GENERIC_FILE) && !defined(TH_REAL_IS_HALF)
   THVector_(vectorDispatchInit)();
 #endif
   THPTensorType.tp_methods = THPTensor_(methods);

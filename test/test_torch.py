@@ -2577,6 +2577,35 @@ class TestTorch(TestCase):
             rootview = c[8]
             self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
+    def test_half_tensor(self):
+        x = torch.randn(5, 5).float()
+        y = torch.randn(5, 5).float()
+        xh, yh = x.half(), y.half()
+
+        self.assertEqual(x.half().float(), x, 1e-3)
+
+        z = torch.Tensor(5, 5)
+        self.assertEqual(z.copy_(xh), x, 1e-3)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(xh, f)
+            f.seek(0)
+            xh2 = torch.load(f)
+            self.assertEqual(xh, xh2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_half_tensor_cuda(self):
+        x = torch.randn(5, 5).half()
+        self.assertEqual(x.cuda().cpu(), x)
+
+        xc = x.cuda()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(xc, f)
+            f.seek(0)
+            xc2 = torch.load(f)
+            self.assertIsInstance(xc2, type(xc))
+            self.assertEqual(xc, xc2)
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):
         device_count = torch.cuda.device_count()

@@ -4,4 +4,7 @@
 #include "generic/serialization.h"
 #include <TH/THGenerateAllTypes.h>
 
+#include "generic/serialization.h"
+#include <TH/THGenerateHalfType.h>
+
 #endif
