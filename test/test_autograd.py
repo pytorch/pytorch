@@ -804,6 +804,7 @@ function_tests = [
     (Index, ((1, 2),), (torch.rand(S, S, S),)),
     (Index, (slice(0, 3),), (torch.rand(S, S, S),), 'slice'),
     (Index, ((slice(0, 3), 1),), (torch.rand(S, S, S),), 'slice_index'),
+    (Index, (torch.LongTensor([1, 3]),), (torch.rand(S, S, S),), 'longtensor'),
     (View, (S * S, S), (torch.rand(S, S, S),)),
     (Expand, ((S, 5, S, 5),), ((S, 1, S, 1),)),
     (Exp, (), (torch.rand(S, S, S),)),
