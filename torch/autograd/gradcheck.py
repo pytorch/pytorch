@@ -109,15 +109,22 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     """Check gradients computed via small finite differences
        against analytical gradients
 
+    The check between numerical and analytical has the same behaviour as
+    numpy.allclose https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html
+    meaning it check that
+        absolute(a - n) <= (atol + rtol * absolute(n))
+    is true for all elements of analytical jacobian a and numerical jacobian n.
+
     Args:
         func: Python function that takes Variable inputs and returns
             a tuple of Variables
         inputs: tuple of Variables
         eps: perturbation for finite differences
-        atol: absolute tolerance, if max abs violated return False
+        atol: absolute tolerance
+        rtol: relative tolerance
 
     Returns:
-        True if all differences are within atol
+        True if all differences satisfy allclose condition
     """
     output = func(*inputs)
     output = _as_tuple(output)
