@@ -395,21 +395,23 @@ def linear(input, weight, bias=None):
     state = _functions.linear.Linear()
     return bias and state(input, weight, bias) or state(input, weight)
 
+
 def bias_add(input, bias):
     r"""Adds bias to a matrix (inplace)
 
     Args:
         input: matrix of shape (batch_size x n_features)
         bias: vector of shape (n_features)
-    
+
     Examples::
-        
+
         >>> input = autograd.Variable(torch.randn(128,20))
         >>> bias = autograd.Variable(torch.randn(20))
         >>> output = F.bias_add(input, bias)
         >>> print(output.size())
     """
     return _functions.linear.BiasAdd()(input, bias)
+
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):

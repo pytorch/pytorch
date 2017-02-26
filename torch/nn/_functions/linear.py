@@ -49,4 +49,3 @@ class BiasAdd(Function):
         if self.needs_input_grad[1]:
             grad_bias = torch.mv(grad_output.t(), self.add_buffer)
         return grad_input, grad_bias
-

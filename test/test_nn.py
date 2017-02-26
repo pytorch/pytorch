@@ -630,7 +630,6 @@ class TestNN(NNTestCase):
             b = Variable(torch.randn(7), requires_grad=b_need)
             gradcheck(F.bias_add, (a, b))
 
-
     def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
             if dim == 1:
