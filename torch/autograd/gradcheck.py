@@ -105,7 +105,7 @@ def _as_tuple(x):
         return x,
 
 
-def gradcheck(func, inputs, eps=1e-3, atol=1e-5):
+def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     """Check gradients computed via small finite differences
        against analytical gradients
 
@@ -132,6 +132,7 @@ def gradcheck(func, inputs, eps=1e-3, atol=1e-5):
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
         analytical = get_analytical_jacobian(_as_tuple(inputs), o)
 
-        if max(a.add(-1, n).abs().max() for a, n in zip(analytical, numerical)) >= atol:
-            return False
+        for a, n in zip(analytical, numerical):
+            if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
+                return False
     return True
