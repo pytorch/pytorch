@@ -202,14 +202,32 @@ class ConstantFillOp final : public FillerOp<Context> {
       case TensorProto_DataType_FLOAT:
         body_ = &ConstantFillOp::FillWithType<float>;
         break;
-      case TensorProto_DataType_INT32:
-        body_ = &ConstantFillOp::FillWithType<int>;
+      case TensorProto_DataType_DOUBLE:
+        body_ = &ConstantFillOp::FillWithType<double>;
         break;
       case TensorProto_DataType_BOOL:
         body_ = &ConstantFillOp::FillWithType<bool>;
         break;
+      case TensorProto_DataType_INT8:
+        body_ = &ConstantFillOp::FillWithType<int8_t>;
+        break;
+      case TensorProto_DataType_INT16:
+        body_ = &ConstantFillOp::FillWithType<int16_t>;
+        break;
+      case TensorProto_DataType_INT32:
+        body_ = &ConstantFillOp::FillWithType<int>;
+        break;
       case TensorProto_DataType_INT64:
         body_ = &ConstantFillOp::FillWithType<int64_t>;
+        break;
+      case TensorProto_DataType_UINT8:
+        body_ = &ConstantFillOp::FillWithType<uint8_t>;
+        break;
+      case TensorProto_DataType_UINT16:
+        body_ = &ConstantFillOp::FillWithType<uint16_t>;
+        break;
+      case TensorProto_DataType_STRING:
+        body_ = &ConstantFillOp::FillWithString;
         break;
       case TensorProto_DataType_UNDEFINED:
         CAFFE_THROW("ConstantFill op cannot have undefined 'dtype' argument");
@@ -229,6 +247,15 @@ class ConstantFillOp final : public FillerOp<Context> {
     auto* data = output->template mutable_data<T>();
     if (output->size()) {
       math::Set<T, Context>(output->size(), value, data, &context_);
+    }
+    return true;
+  }
+
+  bool FillWithString(Tensor<Context>* output) {
+    auto value = OperatorBase::GetSingleArgument<std::string>("value", "");
+    auto* data = output->template mutable_data<std::string>();
+    for (int i = 0; i < output->size(); ++i) {
+      data[i] = value;
     }
     return true;
   }
