@@ -71,9 +71,11 @@ Use nn.DataParallel instead of multiprocessing
 
 Most use cases involving batched input and multiple GPUs should default to using
 :class:`~torch.nn.DataParallel` to utilize more than one GPU. Even with the GIL,
-a single python process can saturate multiple GPUs, though at very large numbers
-of GPUs (8+) utilization might drop. Test your use case before investing the
-time to develop something more complicated.
+a single python process can saturate multiple GPUs.
+
+As of version 0.1.9, large numbers of GPUs (8+) might not be fully utilized.
+However, this is a known issue that is under active development. As always,
+test your use case.
 
 There are significant caveats to using CUDA models with
 :mod:`~torch.multiprocessing`; unless care is taken to meet the data handling

@@ -35,6 +35,7 @@ class DataParallel(Module):
         >>> output = net(input_var)
     """
 
+    # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
     def __init__(self, module, device_ids=None, output_device=None):
         super(DataParallel, self).__init__()
         if device_ids is None:
