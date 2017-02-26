@@ -407,7 +407,7 @@ class MultiMarginLoss(Module):
     a 1D `weights` tensor into the constructor.
 
     The loss function then becomes:
-    
+
         loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] - x[i]))^p) / x.size(0)
 
     By default, the losses are averaged over observations for each minibatch.

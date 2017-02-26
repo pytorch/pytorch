@@ -119,7 +119,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         torch.save(the_model, PATH)
 
     Then later::
-    
+
         the_model = torch.load(PATH))
 
     The second relies on both the shape of the model, as well as the class
