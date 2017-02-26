@@ -1,5 +1,3 @@
-from functools import reduce
-from operator import mul
 import math
 import random
 
@@ -73,7 +71,9 @@ def _calculate_fan_in_and_fan_out(tensor):
     else:
         num_input_fmaps = tensor.size(1)
         num_output_fmaps = tensor.size(0)
-        receptive_field_size = reduce(mul, (tensor.numpy().shape[2:]))
+        receptive_field_size = 1
+        if tensor.dim() > 2:
+            receptive_field_size = tensor[0][0].view(-1).size(0)
         fan_in = num_input_fmaps * receptive_field_size
         fan_out = num_output_fmaps * receptive_field_size
 
@@ -199,9 +199,9 @@ def orthogonal(tensor, gain=1):
     else:
         if tensor.ndimension() < 2:
             raise ValueError("Only tensors with 2 or more dimensions are supported.")
-
-        flattened_shape = (tensor.size(0), int(reduce(mul, tensor.numpy().shape[1:])))
-        flattened = torch.Tensor(flattened_shape[0], flattened_shape[1]).normal_(0, 1)
+        rows = tensor.size(0)
+        cols = tensor[0].view(-1).size(0)
+        flattened = torch.Tensor(rows, cols).normal_(0, 1)
 
         u, s, v = torch.svd(flattened, some=True)
         if u.is_same_size(flattened):
@@ -240,6 +240,7 @@ def sparse(tensor, sparsity, std=0.01):
             row_indices = list(range(rows))
             random.shuffle(row_indices)
             zero_indices = row_indices[:num_zeros]
-            tensor.numpy()[zero_indices, col_idx] = 0
+            for row_idx in zero_indices:
+                tensor[row_idx, col_idx] = 0
 
         return tensor
