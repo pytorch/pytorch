@@ -143,6 +143,9 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         else:
             self.save_for_backward(input, *params)
 
+        if not self.requires_grad:
+            del self.buffers
+
         getattr(self._backend, update_output.name)(self._backend.library_state, input, output, *args)
         return output
 

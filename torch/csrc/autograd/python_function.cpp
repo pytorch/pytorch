@@ -486,6 +486,12 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
       if (self->cdata.requires_grad || self->cdata.is_stochastic) {
         _save_variables(self, t2var);
         _mark_non_differentiable(self, t2var);
+      } else {
+        // Remove unnecessary attributes
+        Py_XDECREF(self->to_save);
+        self->to_save = NULL;
+        Py_XDECREF(self->non_differentiable);
+        self->non_differentiable = NULL;
       }
     }
 
