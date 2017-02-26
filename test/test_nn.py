@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
 from torch.nn.utils import clip_grad_norm
-from torch.autograd import Variable
+from torch.autograd import Variable, gradcheck
 from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -623,6 +623,13 @@ class TestNN(NNTestCase):
         num_features = 1000
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, input)
+
+    def test_bias_add(self):
+        for a_need, b_need in [(True, False), (False, True), (True, True)]:
+            a = Variable(torch.randn(4, 7), requires_grad=a_need)
+            b = Variable(torch.randn(7), requires_grad=b_need)
+            gradcheck(F.bias_add, (a, b))
+
 
     def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
