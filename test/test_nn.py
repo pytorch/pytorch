@@ -1073,8 +1073,7 @@ class TestNN(NNTestCase):
                         size = torch.LongStorage((1, 1) + size)
                     mu(output_small, indices_small, output_size=size)
                 else:
-                    self.assertRaises(ValueError, lambda:
-                    mu(output_small, indices_small, (h, w)))
+                    self.assertRaises(ValueError, lambda: mu(output_small, indices_small, (h, w)))
 
     def test_container_copy(self):
         class Model(nn.Module):
@@ -1623,7 +1622,7 @@ class TestNNInit(TestCase):
                     if input_tensor.dim() > 2:
                         fan_in *= input_tensor[0][0].numel()
 
-                    expected_std = math.sqrt(2.0/((1 + a**2) * fan_in))
+                    expected_std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
                     bounds = expected_std * math.sqrt(3.0)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 

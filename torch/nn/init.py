@@ -78,8 +78,8 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method described in "Understanding the difficulty of training
-       deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform distribution.
+    """Fills the input Tensor or Variable with values according to the method described in "Understanding the difficulty
+       of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform distribution.
 
        The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in + fan_out)) * sqrt(3)
 
@@ -102,8 +102,8 @@ def xavier_uniform(tensor, gain=1):
 
 
 def xavier_normal(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method described in "Understanding the difficulty of training
-       deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal distribution.
+    """Fills the input Tensor or Variable with values according to the method described in "Understanding the difficulty
+       of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal distribution.
 
        The resulting tensor will have values sampled from normal distribution with mean=0 and
        std = gain * sqrt(2/(fan_in + fan_out))
@@ -146,7 +146,7 @@ def kaiming_uniform(tensor, a=0):
         return tensor
 
     fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-    std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
+    std = math.sqrt(2.0 / ((1 + a ** 2) * fan_in))
     bound = math.sqrt(3.0) * std
     return tensor.uniform_(-bound, bound)
 
@@ -171,16 +171,16 @@ def kaiming_normal(tensor, a=0):
         return tensor
 
     fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-    std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
+    std = math.sqrt(2.0 / ((1 + a ** 2) * fan_in))
     return tensor.normal_(0, std)
 
 
 def orthogonal(tensor, gain=1):
     """Fills the input Tensor or Variable with a (semi) orthogonal matrix. The input tensor must have at least 2 dimensions,
-       and for tensors with more than 2 dimensions the trailing dimensions are flattened. viewed as 2D representation with
-       rows equal to the first dimension and columns equal to the product of  as a sparse matrix, where the non-zero elements
-       will be drawn from a normal distribution with mean=0 and std=`std`.
-       Reference: "Exact solutions to the nonlinear dynamics of learning in deep linear neural networks" - Saxe, A. et al.
+       and for tensors with more than 2 dimensions the trailing dimensions are flattened. viewed as 2D representation
+       with rows equal to the first dimension and columns equal to the product of  as a sparse matrix, where the
+       non-zero elements will be drawn from a normal distribution with mean=0 and std=`std`.
+       Reference: "Exact solutions to the nonlinear dynamics of learning in deep linear neural networks"-Saxe, A. et al.
 
     Args:
         tensor: a n-dimension torch.Tensor, where n >= 2
