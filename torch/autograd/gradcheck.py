@@ -127,13 +127,11 @@ def gradcheck(func, inputs, eps=1e-3, atol=1e-5):
             continue
 
         def fn(input):
-            tmp = _as_tuple(func(*input))
-            return tmp[i].data
+            return _as_tuple(func(*input))[i].data
 
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
         analytical = get_analytical_jacobian(_as_tuple(inputs), o)
 
-        if max(a.add(-1, n).abs().max()
-               for a, n in zip(analytical, numerical)) >= atol:
+        if max(a.add(-1, n).abs().max() for a, n in zip(analytical, numerical)) >= atol:
             return False
     return True
