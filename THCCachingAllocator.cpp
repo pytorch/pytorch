@@ -69,8 +69,11 @@ struct THCCachingAllocator
   typedef bool (*Comparison)(const Block*, const Block*);
   typedef std::set<Block*, Comparison> FreeBlocks;
 
-  // lock around malloc and free
+  // lock around all operations
   std::mutex mutex;
+
+  // lock around calls to cudaFree (to prevent deadlocks with NCCL)
+  std::mutex cuda_free_mutex;
 
   // cached blocks larger than 1 MB
   FreeBlocks large_blocks;
@@ -303,6 +306,7 @@ struct THCCachingAllocator
   cudaError_t free_blocks(FreeBlocks& blocks, FreeBlocks::iterator it, FreeBlocks::iterator end)
   {
     // Frees all non-split blocks between `it` and `end`
+    std::lock_guard<std::mutex> lock(cuda_free_mutex);
     while (it != end) {
       Block* block = *it;
       if (!block->prev && !block->next) {
@@ -373,4 +377,9 @@ THC_API THCDeviceAllocator* THCCachingAllocator_get(void)
 THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
 {
   return caching_allocator.getBaseAllocation(ptr, size);
+}
+
+THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex()
+{
+  return &caching_allocator.cuda_free_mutex;
 }
