@@ -143,6 +143,11 @@ class DataInputCoordinator(object):
         self._active = False
         if reason is not None:
             log.error("Data input failed due to an error: {}".format(reason))
+
+        for q in self._queues:
+            workspace.RunOperatorOnce(
+                core.CreateOperator("CloseBlobsQueue", [q], [])
+            )
         self._started = False
 
     def _wait_finish(self):
@@ -150,7 +155,11 @@ class DataInputCoordinator(object):
         for w in self._workers:
             if w != threading.current_thread():
                 w.join(1.0)  # don't wait forever, thread may be blocked in i/o
-        log.info("...finished")
+        for w in self._workers:
+            if w.isAlive():
+                log.info("Worker {} failed to close while waiting".format(w))
+                return False
+        return True
 
     def _get(self):
         while self.is_active():
@@ -285,11 +294,14 @@ class GlobalCoordinator(object):
             c._start()
 
     def stop(self):
+        all_success = True
         for c in self._coordinators:
             c._stop()
         for c in self._coordinators:
-            c._wait_finish()
+            success = c._wait_finish()
+            all_success = all_success and success
         self._coordinators = []
+        return all_success
 
     def register_shutdown_handler(self):
         def cleanup():
