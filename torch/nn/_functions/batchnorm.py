@@ -25,22 +25,26 @@ class BatchNorm(Function):
 
         # temporary buffers used in forward and backward
         num_features = input.size(1)
-        self._save_mean = input.new(num_features)
-        self._save_std = input.new(num_features)
+        _save_mean = input.new(num_features)
+        _save_std = input.new(num_features)
 
         output = input.new(input.size())
 
         if self.use_cudnn:
             torch._C._cudnn_batch_norm_forward(
                 input, output, weight, bias,
-                self.running_mean, self.running_var, self._save_mean,
-                self._save_std, self.training, self.momentum, self.eps)
+                self.running_mean, self.running_var, _save_mean,
+                _save_std, self.training, self.momentum, self.eps)
         else:
             backend = type2backend[type(input)]
             backend.BatchNormalization_updateOutput(
                 backend.library_state, input, output, weight, bias,
-                self.running_mean, self.running_var, self._save_mean,
-                self._save_std, self.training, self.momentum, self.eps)
+                self.running_mean, self.running_var, _save_mean,
+                _save_std, self.training, self.momentum, self.eps)
+
+        if self.requires_grad:
+            self._save_mean = _save_mean
+            self._save_std = _save_std
 
         return output
 
