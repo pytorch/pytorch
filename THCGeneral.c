@@ -293,6 +293,11 @@ THAllocator* THCState_getCudaUVAAllocator(THCState* state)
   return state->cudaUVAAllocator;
 }
 
+THC_API THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state)
+{
+  return state->cudaDeviceAllocator;
+}
+
 void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator)
 {
   state->cudaDeviceAllocator = allocator;
