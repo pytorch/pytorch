@@ -2436,6 +2436,10 @@ new_module_tests = [
         test_cuda=False
     ),
     dict(
+        constructor=lambda: nn.CosineDistance(),
+        input_size=(2,5,5),
+    ),
+    dict(
         module_name='PixelShuffle',
         constructor_args=(3,),
         input_size=(1, 9, 4, 4),
