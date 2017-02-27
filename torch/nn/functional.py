@@ -531,3 +531,20 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
+
+def cosine_similarity(input, eps=1e-12):
+    """
+    Function: cosine_similarity
+    Summary: Returns cosine similarity between two vectors ( here batches of vectors )
+    Examples: F.cosine_similarity(Variable(torch.randn(2,5,7)))
+    Attributes: 
+        @param (input): Tensor with size (2, batch, dim)
+        @param (eps) default=1e-12: Epsilon to avoid division by zero
+    Returns: Tensor of size (batch,), each index representing the cosine similarity between the two inputs
+    """
+    assert len(input) == 2,"Input needs to be of size (2, batch, dim)"
+    x1, x2 = input
+    w12 = torch.sum(x1*x2, 1)
+    w1 = torch.norm(x1, 2, 1)
+    w2 = torch.norm(x2, 2, 1)
+    return (w12 / (w1 * w2) + eps).squeeze()
