@@ -473,7 +473,8 @@ class TestNN(NNTestCase):
             module_list.extend(nn.ReLU())
 
     def test_ParameterList(self):
-        make_param = lambda: Parameter(torch.randn(10, 10))
+        def make_param():
+            return Parameter(torch.randn(10, 10))
         parameters = [make_param(), make_param()]
         param_list = nn.ParameterList(parameters)
 
