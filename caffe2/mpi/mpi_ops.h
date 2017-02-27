@@ -172,8 +172,16 @@ class MPISendTensorOp final : public Operator<Context> {
       tag_ = OperatorBase::Input<TensorCPU>(TAG).template data<int>()[0];
     }
     if (raw_buffer_) {
+      // We need to do a const cast to cope with the fact that, before OpenMPI
+      // 1.7, MPI_Send expects a non-const pointer although it uses it in a
+      // const way.
       MPI_CHECK(MPI_Send(
-          input.raw_data(), input.nbytes(), MPI_CHAR, dst_, tag_, comm));
+          const_cast<void*>(input.raw_data()),
+          input.nbytes(),
+          MPI_CHAR,
+          dst_,
+          tag_,
+          comm));
     } else {
       CAFFE_NOT_IMPLEMENTED;
     }
