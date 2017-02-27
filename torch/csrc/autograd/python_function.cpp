@@ -219,6 +219,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
         Py_INCREF(input_var);
         output_var = input_var;
         input_var_.creator = THPFunction_asFunction(self);
+        input_var_.requires_grad = self->cdata.requires_grad;
       } else {
         // If the leaf Variable has been returned, we have to move it after the
         // current function to ensure the gradient is computed correctly.
@@ -247,7 +248,13 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
             output_var_.requires_grad = self->cdata.requires_grad;
             auto dummy_prev_fn = std::make_shared<Variable>(
                 std::unique_ptr<Tensor>(output_var_.data->clone_shallow()), false, false);
-            self->cdata.previous_functions[i] = std::make_pair<>(dummy_prev_fn, 0);
+            // Replace all references to the variable
+            auto& previous_functions = self->cdata.previous_functions;
+            for (int inp = 0; inp < self->num_inputs; inp++) {
+              if (previous_functions[inp].first.get() == &output_var_) {
+                previous_functions[inp] = std::make_pair<>(dummy_prev_fn, 0);
+              }
+            }
           } else { // output_var_.requires_grad
             throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
           }
