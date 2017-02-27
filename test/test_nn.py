@@ -1800,8 +1800,8 @@ new_module_tests = [
         test_cuda=False
     ),
     dict(
-        constructor=lambda: nn.CosineDistance(),
-        input_size=(2,5,5),
+        constructor=lambda: nn.CosineSimilarity(),
+        input_size=(2,5,7),
     ),
     dict(
         module_name='PixelShuffle',
