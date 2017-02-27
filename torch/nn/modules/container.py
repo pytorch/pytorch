@@ -74,7 +74,7 @@ class ModuleList(Module):
     Arguments:
         modules (list, optional): a list of modules to add
 
-    Example:
+    Example::
 
         class MyModule(nn.Module):
             def __init__(self):
@@ -143,7 +143,7 @@ class ParameterList(Module):
     Arguments:
         modules (list, optional): a list of :class:`nn.Parameter`` to add
 
-    Example:
+    Example::
 
         class MyModule(nn.Module):
             def __init__(self):
