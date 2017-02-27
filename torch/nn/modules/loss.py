@@ -167,7 +167,7 @@ class MSELoss(_Loss):
     r"""Creates a criterion that measures the mean squared error between
     `n` elements in the input `x` and target `y`:
 
-    ..math:: loss(x, y) = 1/n \sum |x_i - y_i|^2
+    :math:`{loss}(x, y)  = 1/n \sum |x_i - y_i|^2`
 
     `x` and `y` arbitrary shapes with a total of `n` elements each.
 
@@ -407,6 +407,7 @@ class MultiMarginLoss(Module):
     a 1D `weights` tensor into the constructor.
 
     The loss function then becomes:
+
         loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] - x[i]))^p) / x.size(0)
 
     By default, the losses are averaged over observations for each minibatch.

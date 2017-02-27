@@ -1,4 +1,5 @@
 import sys
+import os
 import math
 import random
 import torch
@@ -8,7 +9,7 @@ import unittest
 import warnings
 from itertools import product, chain
 from functools import wraps
-from common import TestCase, iter_indices, TEST_NUMPY, run_tests
+from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file
 
 if TEST_NUMPY:
     import numpy as np
@@ -1879,18 +1880,21 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, ..., 2, 2], 27, 0)
         self.assertEqual(reference[2, 2, ..., 2], 27, 0)
         self.assertEqual(reference[2, 2, 2, ...], 27, 0)
+        self.assertEqual(reference[...], reference, 0)
 
         reference_5d = self._consecutive((3, 3, 3, 3, 3))
         self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
+        self.assertEqual(reference_5d[...], reference_5d, 0)
 
         # LongTensor indexing
         reference = self._consecutive((5, 5, 5))
         idx = torch.LongTensor([2, 4])
         self.assertEqual(reference[idx], torch.stack([reference[2], reference[4]]))
-        self.assertEqual(reference[2, idx], torch.stack([reference[2, 2], reference[2, 4]]))
-        self.assertEqual(reference[3, idx, 1], torch.stack([reference[3, 2], reference[3, 4]])[:, 1])
+        # TODO: enable one indexing is implemented like in numpy
+        # self.assertEqual(reference[2, idx], torch.stack([reference[2, 2], reference[2, 4]]))
+        # self.assertEqual(reference[3, idx, 1], torch.stack([reference[3, 2], reference[3, 4]])[:, 1])
 
         # None indexing
         self.assertEqual(reference[2, None], reference[2].unsqueeze(0))
@@ -1941,6 +1945,7 @@ class TestTorch(TestCase):
         checkPartialAssign((0, 1))
         checkPartialAssign((1, 2))
         checkPartialAssign((0, 2))
+        checkPartialAssign(torch.LongTensor((0, 2)))
 
         with self.assertRaises(IndexError):
             reference[1, 1, 1, 1] = 1
@@ -1961,10 +1966,8 @@ class TestTorch(TestCase):
         with self.assertRaises(TypeError):
             reference[0.0, :, 0.0] = 1
 
-        # LongTensor assignments are not supported yet
-        with self.assertRaises(RuntimeError):
-            reference[torch.LongTensor([2, 4])] = 1
-        with self.assertRaises(RuntimeError):
+        # LongTensor assignments are not fully supported yet
+        with self.assertRaises(TypeError):
             reference[0, torch.LongTensor([2, 4])] = 1
 
     def test_index_copy(self):
@@ -2178,13 +2181,30 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
 
     def test_expand(self):
-        result = torch.Tensor()
-        tensor = torch.rand(8, 1)
-        template = torch.rand(8, 5)
+        tensor = torch.rand(1, 8, 1)
+        tensor2 = torch.rand(5)
+        template = torch.rand(4, 8, 5)
         target = template.size()
         self.assertEqual(tensor.expand_as(template).size(), target)
-        self.assertEqual(tensor.expand(8, 5).size(), target)
-        self.assertEqual(tensor.expand(torch.Size([8, 5])).size(), target)
+        self.assertEqual(tensor.expand(4, 8, 5).size(), target)
+        self.assertEqual(tensor.expand(target).size(), target)
+        self.assertEqual(tensor2.expand_as(template).size(), target)
+        self.assertEqual(tensor2.expand(4, 8, 5).size(), target)
+        self.assertEqual(tensor2.expand(target).size(), target)
+
+        # test double expand
+        self.assertEqual(tensor2.expand(1, 5).expand(2, 2, 5), tensor2.repeat(2, 2, 1))
+
+        # test non-contiguous
+        noncontig = torch.randn(5, 2, 1, 3)[:, 0]
+        assert not noncontig.is_contiguous()
+        self.assertEqual(noncontig.expand(2, 5, 4, 3), noncontig.contiguous().repeat(2, 1, 4, 1))
+
+        # make sure it's compatible with unsqueeze
+        expanded = tensor2.expand(1, 1, 5)
+        unsqueezed = tensor2.unsqueeze(0).unsqueeze(1)
+        self.assertEqual(expanded, unsqueezed)
+        self.assertEqual(expanded.stride(), unsqueezed.stride())
 
     def test_repeat(self):
         result = torch.Tensor()
@@ -2449,7 +2469,9 @@ class TestTorch(TestCase):
         a_clone = a.clone()
         b = copy(a)
         b.fill_(1)
-        self.assertEqual(a, a_clone)
+        # copy is a shallow copy, only copies the tensor view,
+        # not the data
+        self.assertEqual(a, b)
 
     def test_pickle(self):
         if sys.version_info[0] == 2:
@@ -2521,6 +2543,11 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
+        b += [torch.range(1, 10).int()]
+        t1 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
+        t2 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
+        b += [(t1.storage(), t1.storage(), t2.storage())]
+        b += [a[0].storage()[0:2]]
         for use_name in (False, True):
             with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
@@ -2539,6 +2566,60 @@ class TestTorch(TestCase):
             c[1].fill_(20)
             self.assertEqual(c[1], c[3], 0)
             self.assertEqual(c[4], c[5][1:4], 0)
+
+            # check that serializing the same storage view object unpickles
+            # it as one object not two (and vice versa)
+            views = c[7]
+            self.assertEqual(views[0]._cdata, views[1]._cdata)
+            self.assertEqual(views[0], views[2])
+            self.assertNotEqual(views[0]._cdata, views[2]._cdata)
+
+            rootview = c[8]
+            self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_serialization_cuda(self):
+        device_count = torch.cuda.device_count()
+        t0 = torch.cuda.FloatTensor(5).fill_(1)
+        torch.cuda.set_device(device_count - 1)
+        tn = torch.cuda.FloatTensor(3).fill_(2)
+        torch.cuda.set_device(0)
+        b = (t0, tn)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(b, f)
+            f.seek(0)
+            c = torch.load(f)
+            self.assertEqual(b, c, 0)
+            u0, un = c
+            self.assertEqual(u0.get_device(), 0)
+            self.assertEqual(un.get_device(), device_count - 1)
+
+    def test_serialization_backwards_compat(self):
+        a = [torch.range(1 + i, 25 + i).view(5, 5).float() for i in range(2)]
+        b = [a[i % 2] for i in range(4)]
+        b += [a[0].storage()]
+        b += [a[0].storage()[1:4]]
+        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_serialized.pt'
+        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        test_file_path = os.path.join(data_dir, 'legacy_serialized.pt')
+        succ = download_file(DATA_URL, test_file_path)
+        if not succ:
+            warnings.warn(("Couldn't download the test file for backwards compatibility! "
+                           "Tests will be incomplete!"), RuntimeWarning)
+            return
+        c = torch.load(test_file_path)
+        self.assertEqual(b, c, 0)
+        self.assertTrue(isinstance(c[0], torch.FloatTensor))
+        self.assertTrue(isinstance(c[1], torch.FloatTensor))
+        self.assertTrue(isinstance(c[2], torch.FloatTensor))
+        self.assertTrue(isinstance(c[3], torch.FloatTensor))
+        self.assertTrue(isinstance(c[4], torch.FloatStorage))
+        c[0].fill_(10)
+        self.assertEqual(c[0], c[2], 0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        c[1].fill_(20)
+        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[4], c[5][1:4], 0)
 
     def test_serialization_container(self):
         def import_module(name, filename):

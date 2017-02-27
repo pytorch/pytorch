@@ -35,23 +35,25 @@ struct DataChannelTCP : DataChannel {
   int getRank() override;
   int getNumProcesses() override;
 
-  void allGather(std::vector<Tensor*>& output, Tensor& input, THDGroup group_id = THDGroupWORLD) override;
-  void gather(std::vector<Tensor*>& output, Tensor& input,
-              int dst_rank, THDGroup group_id = THDGroupWORLD) override;
-  void scatter(std::vector<Tensor*>& input, Tensor& output,
-               int src_rank, THDGroup group_id = THDGroupWORLD) override;
-  void allReduce(Tensor& data, THDReduceOp operation,
+  void allGather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
                  THDGroup group_id = THDGroupWORLD) override;
-  void reduce(Tensor& data, THDReduceOp operation, int dst_rank,
+  void gather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
+              int dst_rank, THDGroup group_id = THDGroupWORLD) override;
+  void scatter(std::vector<thpp::Tensor*>& input, thpp::Tensor& output,
+               int src_rank, THDGroup group_id = THDGroupWORLD) override;
+  void allReduce(thpp::Tensor& data, THDReduceOp operation,
+                 THDGroup group_id = THDGroupWORLD) override;
+  void reduce(thpp::Tensor& data, THDReduceOp operation, int dst_rank,
               THDGroup group_id = THDGroupWORLD) override;
-  void broadcast(Tensor& data, int src_id, THDGroup group_id = THDGroupWORLD) override;
+  void broadcast(thpp::Tensor& data, int src_id,
+                 THDGroup group_id = THDGroupWORLD) override;
   void send(const Scalar& data, int dst_id) override;
-  void send(Tensor& data, int dst_id) override;
+  void send(thpp::Tensor& data, int dst_id) override;
   void receive(Scalar& data, int src_id) override;
-  void receive(Tensor& data) override;
-  void receive(Tensor& data, int src_id) override;
-  RequestTCP* isend(Tensor& data, int dst_rank) override;
-  RequestTCP* ireceive(Tensor& data, int src_rank) override;
+  void receive(thpp::Tensor& data) override;
+  void receive(thpp::Tensor& data, int src_id) override;
+  RequestTCP* isend(thpp::Tensor& data, int dst_rank) override;
+  RequestTCP* ireceive(thpp::Tensor& data, int src_rank) override;
 
   void barrier(THDGroup group_id = THDGroupWORLD) override;
 
@@ -75,12 +77,14 @@ private:
   bool initWorker();
 
   void _send(const Scalar& data, int dst_id);
-  void _send(Tensor& data, int dst_id);
+  void _send(thpp::Tensor& data, int dst_id);
   void _receive(Scalar& data, int src_id);
-  void _receive(Tensor& data, int src_id);
-  void _reduce(Tensor& result, Tensor& data, THDReduceOp operation) const;
+  void _receive(thpp::Tensor& data, int src_id);
+  void _reduce(thpp::Tensor& result, thpp::Tensor& data,
+               THDReduceOp operation) const;
   template<typename T>
-  void _reduce(Tensor& result, Tensor& data, THDReduceOp operation) const;
+  void _reduce(thpp::Tensor& result, thpp::Tensor& data,
+               THDReduceOp operation) const;
 
 
   int _rank; // Rank of current process, range: [0.._processes.size()-1]

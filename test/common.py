@@ -1,4 +1,5 @@
 import sys
+import os
 import argparse
 import unittest
 import contextlib
@@ -7,7 +8,7 @@ from copy import deepcopy
 
 import torch
 import torch.cuda
-from torch.autograd import Variable, Function
+from torch.autograd import Variable
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -150,65 +151,23 @@ class TestCase(unittest.TestCase):
         raise AssertionError("object not found in iterable")
 
 
-def make_jacobian(input, num_out):
-    if isinstance(input, Variable) and not input.requires_grad:
-        return None
-    if torch.is_tensor(input) or isinstance(input, Variable):
-        return torch.zeros(input.nelement(), num_out)
+def download_file(url, path, binary=True):
+    if sys.version_info < (3,):
+        import urllib2
+        request = urllib2
+        error = urllib2
     else:
-        return type(input)(filter(lambda x: x is not None,
-                                  (make_jacobian(elem, num_out) for elem in input)))
+        import urllib.request
+        import urllib.error
+        request = urllib.request
+        error = urllib.error
 
-
-def iter_tensors(x, only_requiring_grad=False):
-    if torch.is_tensor(x):
-        yield x
-    elif isinstance(x, Variable):
-        if x.requires_grad or not only_requiring_grad:
-            yield x.data
-    else:
-        for elem in x:
-            for result in iter_tensors(elem, only_requiring_grad):
-                yield result
-
-
-def contiguous(input):
-    if torch.is_tensor(input):
-        return input.contiguous()
-    elif isinstance(input, Variable):
-        return input.contiguous()
-    else:
-        return type(input)(contiguous(e) for e in input)
-
-
-def get_numerical_jacobian(fn, input, target):
-    perturbation = 1e-6
-    # To be able to use .view(-1) input must be contiguous
-    input = contiguous(input)
-    output_size = fn(input).numel()
-    jacobian = make_jacobian(target, output_size)
-
-    # It's much easier to iterate over flattened lists of tensors.
-    # These are reference to the same objects in jacobian, so any changes
-    # will be reflected in it as well.
-    x_tensors = [t for t in iter_tensors(target, True)]
-    j_tensors = [t for t in iter_tensors(jacobian)]
-
-    outa = torch.DoubleTensor(output_size)
-    outb = torch.DoubleTensor(output_size)
-
-    # TODO: compare structure
-    for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        flat_tensor = x_tensor.view(-1)
-        for i in range(flat_tensor.nelement()):
-            orig = flat_tensor[i]
-            flat_tensor[i] = orig - perturbation
-            outa.copy_(fn(input))
-            flat_tensor[i] = orig + perturbation
-            outb.copy_(fn(input))
-            flat_tensor[i] = orig
-
-            outb.add_(-1, outa).div_(2 * perturbation)
-            d_tensor[i] = outb
-
-    return jacobian
+    if os.path.exists(path):
+        return True
+    try:
+        data = request.urlopen(url, timeout=15).read()
+        with open(path, 'wb' if binary else 'w') as f:
+            f.write(data)
+        return True
+    except error.URLError as e:
+        return False

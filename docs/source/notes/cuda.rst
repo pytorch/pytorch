@@ -1,3 +1,5 @@
+.. _cuda-semantics:
+
 CUDA semantics
 ==============
 
@@ -61,3 +63,21 @@ call. This can be used to overlap data transfers with computation.
 
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing ``pinned=True`` to its constructor.
+
+.. _cuda-nn-dataparallel-instead:
+
+Use nn.DataParallel instead of multiprocessing
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Most use cases involving batched input and multiple GPUs should default to using
+:class:`~torch.nn.DataParallel` to utilize more than one GPU. Even with the GIL,
+a single python process can saturate multiple GPUs.
+
+As of version 0.1.9, large numbers of GPUs (8+) might not be fully utilized.
+However, this is a known issue that is under active development. As always,
+test your use case.
+
+There are significant caveats to using CUDA models with
+:mod:`~torch.multiprocessing`; unless care is taken to meet the data handling
+requirements exactly, it is likely that your program will have incorrect or
+undefined behavior.
