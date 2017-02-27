@@ -170,6 +170,43 @@ class TestShapeInference(test_util.TestCase):
         )
         self.InferTensorRunAndCompare(model)
 
+    def testShapeInferenceIm2Col(self):
+        # Test with NCHW
+        model = cnn.CNNModelHelper()
+        model.Im2Col("X", "Y", pad=1, kernel=4, dilation=2, stride=2,
+                     order="NCHW")
+
+        workspace.FeedBlob(
+            "X",
+            np.random.rand(16, 3, 228, 228).astype(np.float32),
+        )
+
+        self.InferTensorRunAndCompare(model)
+
+        # Test with NHWC
+        model = cnn.CNNModelHelper()
+        model.Im2Col("X", "Y", pad=1, kernel=4, dilation=2, stride=2,
+                     order="NHWC")
+
+        workspace.FeedBlob(
+            "X",
+            np.random.rand(16, 228, 228, 3).astype(np.float32),
+        )
+
+        self.InferTensorRunAndCompare(model)
+
+        # Test with different width and height
+        model = cnn.CNNModelHelper()
+        model.Im2Col("X", "Y", pad=1, kernel_h=8, kernel_w=4,
+                     dilation=2, stride=2)
+
+        workspace.FeedBlob(
+            "X",
+            np.random.rand(16, 3, 228, 114).astype(np.float32),
+        )
+
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model):
         '''
         Runs shape inference, and then the model to check
@@ -230,7 +267,6 @@ class TestShapeInference(test_util.TestCase):
                     b, types[b], correct_types[b],
                 )
             )
-
 
 
 if __name__ == "__main__":
