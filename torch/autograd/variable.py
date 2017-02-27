@@ -430,12 +430,6 @@ class Variable(_C._VariableBase):
     def trunc(self):
         return Trunc()(self)
 
-    def floor(self):
-        return Floor()(self)
-
-    def ceil(self):
-        return Ceil()(self)
-
     def fmod(self, value):
         return Fmod(value)(self)
 
@@ -490,9 +484,6 @@ class Variable(_C._VariableBase):
 
     def split(self, split_size, dim=0):
         return torch.split(self, split_size, dim)
-
-    def chunk(self, n_chunks, dim=0):
-        return torch.chunk(self, n_chunks, dim)
 
     def repeat(self, *repeats):
         if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
