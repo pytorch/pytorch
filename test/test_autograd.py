@@ -258,6 +258,18 @@ class TestAutograd(TestCase):
         y._backward_hooks['test'] = error
         b.backward(torch.ones(5, 5))
 
+    def test_requires_grad_inplace(self):
+        a = Variable(torch.randn(5, 5))
+        b = Variable(torch.randn(5, 5), requires_grad=True)
+        a += b
+        self.assertTrue(a.requires_grad)
+
+        # non-leaf Variable
+        a = Variable(torch.randn(5, 5)) + 0
+        b = Variable(torch.randn(5, 5), requires_grad=True)
+        a += b
+        self.assertTrue(a.requires_grad)
+
     def test_previous_functions(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5), requires_grad=True)
