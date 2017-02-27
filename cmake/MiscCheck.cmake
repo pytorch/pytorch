@@ -36,8 +36,23 @@ else()
   add_definitions(-DCAFFE2_NO_BUILTIN_CPU_SUPPORTS)
 endif()
 
+# Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
+# is being deprecated. As a result, we will test if this is the environment we
+# are building under. If yes, we will turn off deprecation warning for a
+# cleaner build output.
+CHECK_CXX_SOURCE_COMPILES(
+    "#include <glog/stl_logging.h>
+    int main(int argc, char** argv) {
+      return 0;
+    }" CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
+    FAIL_REGEX ".*-Wno-deprecated.*")
+
+if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING)
+  message(STATUS "Turning off deprecation warning due to glog.")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
+endif()
+
 # ---[ If we are using msvc, set no warning flags
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   message(STATUS "Adding no warning argument to the compiler")
-  
 endif()
