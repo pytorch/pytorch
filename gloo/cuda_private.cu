@@ -13,8 +13,6 @@
 
 namespace gloo {
 
-std::mutex gCudaMutex;
-
 template<typename T>
 __global__ void initializeMemory(T* ptr, const T val, const size_t n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -27,7 +25,7 @@ template<typename T>
 CudaMemory<T>::CudaMemory(size_t n): n_(n), bytes_(n * sizeof(T)) {
   CUDA_CHECK(cudaGetDevice(&device_));
   // Sychronize memory allocation with NCCL operations
-  std::lock_guard<std::mutex> lock(gCudaMutex);
+  std::lock_guard<std::mutex> lock(CudaShared::getMutex());
   CUDA_CHECK(cudaMalloc(&ptr_, bytes_));
 }
 
@@ -46,7 +44,7 @@ CudaMemory<T>::~CudaMemory() {
   CudaDeviceScope scope(device_);
   if (ptr_ != nullptr) {
     // Sychronize memory allocation with NCCL operations
-    std::lock_guard<std::mutex> lock(gCudaMutex);
+    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
     CUDA_CHECK(cudaFree(ptr_));
   }
 }

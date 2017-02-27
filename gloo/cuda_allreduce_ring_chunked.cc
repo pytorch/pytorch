@@ -90,7 +90,7 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
   // Setup host and device memory
   {
     // Synchronize memory allocation with NCCL operations
-    std::lock_guard<std::mutex> lock(gCudaMutex);
+    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
     CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
   }
   for (auto offset = 0; offset < count_; offset += chunkSize_) {
@@ -157,7 +157,7 @@ template <typename T>
 CudaAllreduceRingChunked<T>::~CudaAllreduceRingChunked() {
   {
     // Synchronize memory allocation with NCCL operations
-    std::lock_guard<std::mutex> lock(gCudaMutex);
+    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
     CUDA_CHECK(cudaFreeHost(hostPtr_));
   }
   for (auto i = 0; i < 2; i++) {

@@ -14,6 +14,10 @@ namespace gloo {
 
 const cudaStream_t kStreamNotSet = (cudaStream_t)(-1);
 
+// Default mutex to synchronize contentious CUDA and NCCL operations
+static std::mutex defaultCudaMutex;
+std::atomic<std::mutex*> CudaShared::mutex_(&defaultCudaMutex);
+
 template<typename T>
 CudaDevicePointer<T>
 CudaDevicePointer<T>::create(

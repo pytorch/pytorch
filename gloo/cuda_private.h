@@ -17,9 +17,6 @@
 
 namespace gloo {
 
-// Default mutex to synchronize contentious CUDA and NCCL operations
-extern std::mutex gCudaMutex;
-
 #define CUDA_CHECK(condition)                   \
   do {                                          \
     cudaError_t error = condition;              \

@@ -11,10 +11,27 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <mutex>
 
 namespace gloo {
 
 extern const cudaStream_t kStreamNotSet;
+
+class CudaShared {
+ public:
+  // Get the mutex used to synchronize CUDA and NCCL operations
+  static std::mutex& getMutex() {
+    return *mutex_;
+  }
+
+  // Set the mutex used to synchronize CUDA and NCCL operations
+  static void SetMutex(std::mutex* m) {
+    mutex_ = m;
+  }
+
+ private:
+  static std::atomic<std::mutex*> mutex_;
+};
 
 template<typename T>
 class CudaDevicePointer {

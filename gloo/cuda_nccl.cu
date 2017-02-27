@@ -30,7 +30,7 @@ NCCLContext::NCCLContext(
   }
   {
     // Initialze comms. Synchronize with conflicting CUDA and NCCL operations.
-    std::lock_guard<std::mutex> lock(gCudaMutex);
+    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
     comms_.resize(elements_.size());
     NCCL_CHECK(ncclCommInitAll(comms_.data(), devices.size(), devices.data()));
   }
@@ -63,7 +63,7 @@ NCCLContext::~NCCLContext() {
     CUDA_CHECK(cudaEventDestroy(events_[i]));
     {
       // Synchronize memory allocation with NCCL operations
-      std::lock_guard<std::mutex> lock(gCudaMutex);
+      std::lock_guard<std::mutex> lock(CudaShared::getMutex());
       ncclCommDestroy(comms_[i]);
     }
   }
@@ -102,7 +102,7 @@ void NCCLOp<T>::runNCCL(F&& f) {
   // Kick off the NCCL operation on each device
   {
     // Synchronize memory allocation with NCCL operations
-    std::lock_guard<std::mutex> lock(gCudaMutex);
+    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
 
     const auto& elements = context_.elements_;
     for (auto i = 0; i < elements.size(); i++) {
