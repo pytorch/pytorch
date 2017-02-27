@@ -6,7 +6,6 @@ import shutil
 import random
 import tempfile
 import unittest
-import sys
 import traceback
 import torch
 import torch.cuda

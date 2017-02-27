@@ -382,7 +382,7 @@ class TestCuda(TestCase):
             self.assertEqual(z.get_device(), 0)
             self.assertIs(z.cuda(0), z)
 
-    def test_serialization(self):
+    def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()
         q = [x, y, x, y.storage()]
@@ -537,7 +537,7 @@ class TestCuda(TestCase):
         self.assertIs(type(x_copy), type(x))
         self.assertEqual(x_copy.get_device(), x.get_device())
 
-    def test_serialization_empty(self):
+    def test_serialization_array_with_empty(self):
         x = [torch.randn(4, 4).cuda(), torch.cuda.FloatTensor()]
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
