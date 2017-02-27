@@ -79,7 +79,7 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
-        >>> F.conv3d(inputs)
+        >>> F.conv3d(inputs, filters)
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
                _triple(0), groups)
@@ -441,8 +441,8 @@ def cross_entropy(input, target, weight=None, size_average=True):
     Args:
         input: Variable :math:`(N, C)` where `C = number of classes`
         target: Variable :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-        weight (Variable, optional): a manual rescaling weight given to each
-                class. If given, has to be a Variable of size "nclasses"
+        weight (Tensor, optional): a manual rescaling weight given to each
+                class. If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed

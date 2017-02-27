@@ -60,6 +60,7 @@ static bool THCPModule_assignStateless()
   PyObject *stateless;
   INIT_STATELESS(Double);
   INIT_STATELESS_DETAIL(Float, Cuda);
+  INIT_STATELESS(Half);
   INIT_STATELESS(Long);
   INIT_STATELESS(Int);
   INIT_STATELESS(Short);

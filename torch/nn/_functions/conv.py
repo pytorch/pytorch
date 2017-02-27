@@ -91,10 +91,15 @@ class ConvNd(Function):
                 self._cudnn_info = torch._C._cudnn_convolution_full_forward(
                     input, weight, bias, output, self.padding, self.stride, self.dilation,
                     self.groups, cudnn.benchmark)
+            if not self.requires_grad:
+                del self._cudnn_info
             return output
 
         self._bufs = [[] for g in range(self.groups)]
-        return self._thnn('update_output', input, weight, bias)
+        output = self._thnn('update_output', input, weight, bias)
+        if not self.requires_grad:
+            del self._bufs
+        return output
 
     def _grad_input(self, input, weight, grad_output):
         if self.use_cudnn:

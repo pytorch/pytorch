@@ -28,6 +28,18 @@ Containers
 .. autoclass:: Sequential
     :members:
 
+:hidden:`ModuleList`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleList
+    :members:
+
+:hidden:`ParameterList`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterList
+    :members:
+
 Convolution Layers
 ----------------------------------
 
@@ -451,13 +463,13 @@ Vision layers
     :members:
 
 :hidden:`UpsamplingNearest2d`
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: UpsamplingNearest2d
     :members:
 
 :hidden:`UpsamplingBilinear2d`
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: UpsamplingBilinear2d
     :members:

@@ -21,6 +21,8 @@ struct thc_storage_traits {};
 
 template<typename real>
 struct THCStorage : public interface_traits<real>::storage_interface_type {
+  template<typename U>
+  friend class THCTensor;
 private:
   using interface_type = typename interface_traits<real>::storage_interface_type;
 public:
