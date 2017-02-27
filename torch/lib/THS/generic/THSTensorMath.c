@@ -9,10 +9,62 @@ void THSTensor_(zero)(THSTensor *self) {
   self->nnz = 0;
 }
 
-// TODO factor out common parts in cadd/cmul/cdiv
+void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value) {
+  if (r_ == t) {
+    THTensor *r_values_ = THSTensor_(values)(r_);
+    THTensor_(mul)(r_values_, r_values_, value);
+    THTensor_(free)(r_values_);
+  } else {
+    THSTensor_(resizeAs)(r_, t);
+
+    THLongTensor *r_indices_ = THSTensor_(indices)(r_);
+    THTensor *r_values_ = THSTensor_(values)(r_);
+    THLongTensor *t_indices_ = THSTensor_(indices)(t);
+    THTensor *t_values_ = THSTensor_(values)(t);
+
+    THLongTensor_resizeAs(r_indices_, t_indices_);
+    THLongTensor_copy(r_indices_, t_indices_);
+    THTensor_(mul)(r_values_, t_values_, value);
+    r_->nnz = t->nnz;
+    r_->contiguous = t->contiguous;
+
+    THLongTensor_free(r_indices_);
+    THTensor_(free)(r_values_);
+    THLongTensor_free(t_indices_);
+    THTensor_(free)(t_values_);
+  }
+}
+
+void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value) {
+  if (r_ == t) {
+    THTensor *r_values_ = THSTensor_(values)(r_);
+    THTensor_(div)(r_values_, r_values_, value);
+    THTensor_(free)(r_values_);
+  } else {
+    THSTensor_(resizeAs)(r_, t);
+
+    THLongTensor *r_indices_ = THSTensor_(indices)(r_);
+    THTensor *r_values_ = THSTensor_(values)(r_);
+    THLongTensor *t_indices_ = THSTensor_(indices)(t);
+    THTensor *t_values_ = THSTensor_(values)(t);
+
+    THLongTensor_resizeAs(r_indices_, t_indices_);
+    THLongTensor_copy(r_indices_, t_indices_);
+    THTensor_(div)(r_values_, t_values_, value);
+    r_->nnz = t->nnz;
+    r_->contiguous = t->contiguous;
+
+    THLongTensor_free(r_indices_);
+    THTensor_(free)(r_values_);
+    THLongTensor_free(t_indices_);
+    THTensor_(free)(t_values_);
+  }
+}
 
 void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
-
+  if(!THSTensor_(isSameSizeAs)(t, src)) {
+    THError("cadd operands have incompatible sizes or dimension types");
+  }
   THSTensor_(contiguous)(t);
   THSTensor_(contiguous)(src);
 
@@ -21,7 +73,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
     return;
   }
   if (t->nnz == 0) {
-    THSTensor_(copy)(r_, src);
+    THSTensor_(mul)(r_, src, value);
     return;
   }
 
@@ -90,7 +142,14 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   THTensor_(free)(dstBuffer);
 }
 
+void THSTensor_(csub)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
+  THSTensor_(cadd)(r_, t, -value, src);
+}
+
 void THSTensor_(cmul)(THSTensor *r_, THSTensor *t, THSTensor *src) {
+  if(!THSTensor_(isSameSizeAs)(t, src)) {
+    THError("cadd operands have incompatible sizes or dimension types");
+  }
   THSTensor_(contiguous)(t);
   THSTensor_(contiguous)(src);
 
@@ -155,85 +214,12 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t, THSTensor *src) {
   THTensor_(free)(dstBuffer);
 }
 
-void THSTensor_(cdiv)(THSTensor *r_, THSTensor *t, THSTensor *src) {
-  THSTensor_(contiguous)(t);
-  THSTensor_(contiguous)(src);
-
-  if (src->nnz == 0 || t->nnz == 0) {
-    THSTensor_(zero)(r_);
-    return;
-  }
-
-  // saving those because they can be overwritten when doing in-place operations
-  ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz;
-  ptrdiff_t max_nnz = t_nnz < s_nnz ? t_nnz : s_nnz;
-  long nDimI = THSTensor_(nDimensionI)(src);
-  long nDimV = THSTensor_(nDimensionV)(src);
-  THLongTensor *t_indices_ = THSTensor_(indices)(t);
-  THTensor *t_values_ = THSTensor_(values)(t);
-  THLongTensor *src_indices_ = THSTensor_(indices)(src);
-  THTensor *s_values_ = THSTensor_(values)(src);
-  THLongTensor *r_indices_ = THLongTensor_newWithSize2d(nDimI, max_nnz);
-  THTensor *r_values_ = THSTensor_(newValuesWithSizeOf)(s_values_, max_nnz);
-  THTensor_(zero)(r_values_);
-  THSTensor_(resizeAs)(r_, src);
-  THSTensor_(move)(r_, r_indices_, r_values_);
-
-  THTensor *src1Buffer = THTensor_(new)();
-  THTensor *src2Buffer = THTensor_(new)();
-  THTensor *dstBuffer = THTensor_(new)();
-  long match, d;
-  long r_i = 0, t_i = 0, s_i = 0;
-  while (t_i < t_nnz && s_i < s_nnz) {
-    match = 1;
-    for (d = 0; d < nDimI; d++) {
-      if (THTensor_fastGet2d(t_indices_, d, t_i) < THTensor_fastGet2d(src_indices_, d, s_i)) {
-        t_i++;
-        match = 0;
-        break;
-      }
-      if (THTensor_fastGet2d(t_indices_, d, t_i) > THTensor_fastGet2d(src_indices_, d, s_i)) {
-        s_i++;
-        match = 0;
-        break;
-      }
-    }
-    if (!match) continue;
-    for (d = 0; d < nDimI; d++) {
-      THTensor_fastSet2d(r_indices_, d, r_i, THTensor_fastGet2d(t_indices_, d, t_i));
-    }
-    THSTensor_(divSlice)(dstBuffer, src1Buffer, src2Buffer, r_values_, t_values_, s_values_, 0, r_i, t_i, s_i);
-    r_i++;
-    t_i++;
-    s_i++;
-  }
-
-  r_->nnz = r_i;
-  r_->contiguous = 1;
-
-  THLongTensor_free(t_indices_);
-  THTensor_(free)(t_values_);
-  THLongTensor_free(src_indices_);
-  THTensor_(free)(s_values_);
-  THTensor_(free)(src1Buffer);
-  THTensor_(free)(src2Buffer);
-  THTensor_(free)(dstBuffer);
-}
-
 void THTensor_(spaddcmul)(THTensor *r_, THTensor *t, real value, THSTensor *src1, THSTensor *src2) {
   THSTensor *intermediate = THSTensor_(new)();
   THSTensor_(cmul)(intermediate, src1, src2);
   THSTensor_(spcadd)(r_, t, value, intermediate);
   THSTensor_(free)(intermediate);
 }
-
-void THTensor_(spaddcdiv)(THTensor *r_, THTensor *t, real value, THSTensor *src1, THSTensor *src2) {
-  THSTensor *intermediate = THSTensor_(new)();
-  THSTensor_(cdiv)(intermediate, src1, src2);
-  THSTensor_(spcadd)(r_, t, value, intermediate);
-  THSTensor_(free)(intermediate);
-}
-
 
 THLongTensor *THSTensor_(toCSR)(long const *indices, long dim, long nnz) {
   long h, i, hp0, hp1;

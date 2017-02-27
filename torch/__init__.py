@@ -322,6 +322,7 @@ del SparseByteTensorBase
 ################################################################################
 
 import torch.cuda
+import torch.cuda.sparse
 import torch.autograd
 import torch.nn
 import torch.optim

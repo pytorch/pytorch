@@ -1604,25 +1604,15 @@
 
 [[
   name: addcdiv_
-  options:
-    - cname: addcdiv
-      return: argument 0
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - arg: real value
-          default: AS_REAL(1)
-        - THTensor* tensor1
-        - THTensor* tensor2
-    - cname: spaddcdiv
-      return: argument 0
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - arg: real value
-          default: AS_REAL(1)
-        - THSTensor* tensor1
-        - THSTensor* tensor2
+  cname: addcdiv
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THTensor* self
+    - arg: real value
+      default: AS_REAL(1)
+    - THTensor* tensor1
+    - THTensor* tensor2
 ]]
 
 #ifndef THP_LAPACK_CONSTANTS

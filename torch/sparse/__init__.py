@@ -49,6 +49,33 @@ class _SparseTensorBase(object):
         memo[self._cdata] = new_tensor
         return new_tensor
 
+    def __add__(self, other):
+        return self.add(other)
+    __radd__ = __add__
+
+    def __iadd__(self, other):
+        return self.add_(other)
+
+    def __sub__(self, other):
+        return self.sub(other)
+
+    def __isub__(self, other):
+        return self.sub_(other)
+
+    def __mul__(self, other):
+        return self.mul(other)
+    __rmul__ = __mul__
+
+    def __imul__(self, other):
+        return self.mul_(other)
+
+    def __div__(self, other):
+        return self.div(other)
+    __truediv__ = __div__
+
+    def __idiv__(self, other):
+        return self.div_(other)
+
 
 class DoubleTensor(_SparseTensorBase, _C.SparseDoubleTensorBase):
     def is_signed(self):

@@ -1,5 +1,4 @@
-// Sparse Tensors not supported for CUDA
-
+#if IS_CUDA || !defined(TH_REAL_IS_HALF)
 PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -36,10 +35,10 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   only_register: True
   sparse: yes
 ]]
+#endif
 
 [[
   name: nDimension
-  defined_if: "!IS_CUDA"
   sparse: yes
   python_name: ndimension
   return: long
@@ -56,7 +55,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: nnz
-  defined_if: "!IS_CUDA"
   sparse: yes
   return: long
   arguments:
@@ -65,7 +63,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: isContiguous
-  defined_if: "!IS_CUDA"
   sparse: yes
   python_name: is_contiguous
   return: bool
@@ -83,8 +80,17 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: indices
+  defined_if: "IS_CUDA"
+  sparse: yes
+  return: THCudaLongTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+
+[[
   name: values
-  defined_if: "!IS_CUDA"
   sparse: yes
   return: THTensor*
   arguments:
@@ -93,7 +99,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: contiguous
-  defined_if: "!IS_CUDA"
   sparse: yes
   return: argument 0
   arguments:
@@ -102,7 +107,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: clone
-  defined_if: "!IS_CUDA"
   sparse: yes
   cname: newClone
   return: THSTensor*
@@ -112,7 +116,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: toDense
-  defined_if: "!IS_CUDA"
   sparse: yes
   python_name: to_dense
   return: THTensor*
@@ -121,8 +124,18 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: resizeAs_
+  python_name: resize_as_
+  sparse: yes
+  cname: resizeAs
+  return: self
+  arguments:
+    - THSTensor* self
+    - THSTensor* template
+]]
+
+[[
   name: transpose
-  defined_if: "!IS_CUDA"
   sparse: yes
   cname: newTranspose
   return: THSTensor*
@@ -134,7 +147,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: transpose_
-  defined_if: "!IS_CUDA"
   sparse: yes
   cname: transpose
   return: argument 0
@@ -146,7 +158,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: mm
-  defined_if: "!IS_CUDA"
   sparse: yes
   only_stateless: True
   cname: spaddmm
@@ -167,7 +178,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: spmm
-  defined_if: "!IS_CUDA"
   only_stateless: True
   sparse: yes
   cname: spaddmm
@@ -189,7 +199,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: sspmm
-  defined_if: "!IS_CUDA"
   only_stateless: True
   sparse: yes
   cname: sspaddmm
@@ -210,7 +219,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: sspaddmm
-  defined_if: "!IS_CUDA"
   sparse: yes
   with_stateless: True
   return: argument 0
@@ -228,7 +236,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: spadd
-  defined_if: "!IS_CUDA"
   sparse: yes
   cname: spcadd
   with_stateless: True
@@ -244,7 +251,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: zero_
-  defined_if: "!IS_CUDA"
   sparse: yes
   cname: zero
   return: self
@@ -254,11 +260,10 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: add
-  defined_if: "!IS_CUDA"
   sparse: yes
-  cname: cadd
   with_stateless: True
   return: argument 0
+  cname: cadd
   arguments:
     - arg: THSTensor* result
       output: True
@@ -270,10 +275,37 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: add_
-  defined_if: "!IS_CUDA"
   sparse: yes
-  cname: cadd
   return: argument 0
+  cname: cadd
+  arguments:
+    - THSTensor* self
+    - THSTensor* self
+    - arg: real value
+      default: AS_REAL(1)
+    - THSTensor* other
+]]
+
+[[
+  name: sub
+  sparse: yes
+  with_stateless: True
+  return: argument 0
+  cname: csub
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - THSTensor* self
+    - arg: real value
+      default: AS_REAL(1)
+    - THSTensor* other
+]]
+
+[[
+  name: sub_
+  sparse: yes
+  return: argument 0
+  cname: csub
   arguments:
     - THSTensor* self
     - THSTensor* self
@@ -284,59 +316,67 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: mul
-  defined_if: "!IS_CUDA"
   sparse: yes
-  cname: cmul
   return: argument 0
   with_stateless: True
-  arguments:
-    - arg: THSTensor* result
-      output: True
-    - THSTensor* self
-    - THSTensor* other
+  options:
+    - cname: mul
+      arguments:
+        - arg: THSTensor* result
+          output: True
+        - THSTensor* self
+        - real value
+    - cname: cmul
+      arguments:
+        - arg: THSTensor* result
+          output: True
+        - THSTensor* self
+        - THSTensor* other
 ]]
 
 [[
   name: mul_
-  defined_if: "!IS_CUDA"
   sparse: yes
-  cname: cmul
   return: argument 0
-  arguments:
-    - THSTensor* self
-    - THSTensor* self
-    - THSTensor* other
+  options:
+    - cname: mul
+      arguments:
+        - THSTensor* self
+        - THSTensor* self
+        - real value
+    - cname: cmul
+      arguments:
+        - THSTensor* self
+        - THSTensor* self
+        - THSTensor* other
 ]]
 
 [[
   name: div
-  defined_if: "!IS_CUDA"
   sparse: yes
-  cname: cdiv
+  cname: div
   with_stateless: True
   return: argument 0
   arguments:
     - arg: THSTensor* result
       output: True
     - THSTensor* self
-    - THSTensor* other
+    - real value
 ]]
 
 [[
   name: div_
-  defined_if: "!IS_CUDA"
   sparse: yes
-  cname: cdiv
+  cname: div
   return: argument 0
   arguments:
     - THSTensor* self
     - THSTensor* self
-    - THSTensor* other
+    - real value
 ]]
 
 [[
   name: sparse_mask
-  defined_if: "!IS_CUDA"
   cname: sparseMask
   return: argument 0
   arguments:

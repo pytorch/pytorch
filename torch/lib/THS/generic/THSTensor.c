@@ -92,9 +92,9 @@ static void THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, long *s
       self->size[nDimI_++] = size[d];
     }
   }
-  for (d = 0; d < nDimV; d++) {
+  for (d = nDimI; d < nDimI + nDimV; d++) {
     if (size[d] > 0) {
-      self->size[nDimV_++] = size[d];
+      self->size[nDimI_ + nDimV_++] = size[d];
     }
   }
   self->nDimensionI = nDimI_;
@@ -156,14 +156,24 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   nDimV = THTensor_(nDimension)(values) - 1;
   if (!sizes) {
     ignore = THLongTensor_new();
-    THLongTensor *computed_sizes = THLongTensor_new();
-    THLongTensor_max(computed_sizes, ignore, indices, 1);
-    THLongTensor_add(computed_sizes, computed_sizes, 1);
+    THLongTensor *computed_indices_sizes = THLongTensor_new();
+    THLongTensor *computed_sizes = THLongTensor_newWithSize1d(nDimI + nDimV);
+    THLongTensor_max(computed_indices_sizes, ignore, indices, 1);
+    THLongTensor_add(computed_indices_sizes, computed_indices_sizes, 1);
+    for (int d = 0; d < nDimI; d++) {
+        THTensor_fastSet1d(computed_sizes, d, THTensor_fastGet1d(computed_indices_sizes, d));
+    }
+    for (int d = 0; d < nDimV; d++) {
+        THTensor_fastSet1d(computed_sizes, nDimI + d, THTensor_(size)(values, d + 1));
+    }
     THSTensor_(rawResize)(self, nDimI, nDimV, THLongTensor_data(computed_sizes));
+    THLongTensor_free(computed_indices_sizes);
     THLongTensor_free(computed_sizes);
     THLongTensor_free(ignore);
   }
   else {
+    THArgCheck(THLongStorage_size(sizes) == nDimI + nDimV, 2,
+        "number of dimensions must be nDimI + nDimV");
     THSTensor_(rawResize)(self, nDimI, nDimV, THLongStorage_data(sizes));
   }
 
@@ -281,9 +291,9 @@ THSTensor *THSTensor_(resize4d)(THSTensor *self, long size0, long size1, long si
 }
 
 THTensor *THSTensor_(toDense)(THSTensor *self) {
-  int d, k, index;
+  int d, k, l, index;
   ptrdiff_t nnz;
-  long ndim, indskip;
+  long nDimI, nDimV, indskip, blocksize = 1;
   long *sizes;
   THLongStorage *storage;
 
@@ -302,8 +312,12 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
 
   // Some necessary dimensions and sizes
   nnz = THSTensor_(nnz)(self);
-  ndim = THSTensor_(nDimensionI)(self);
+  nDimI = THSTensor_(nDimensionI)(self);
+  nDimV = THSTensor_(nDimensionV)(self);
   sizes = storage->data;
+  for (int i = 0; i < nDimV; i++) {
+    blocksize *= sizes[nDimI + i];
+  }
 
   // These should be contiguous...
   values_ = THSTensor_(values)(self);
@@ -312,11 +326,13 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
   indices = THLongTensor_data(indices_);
   indskip = THLongTensor_size(indices_, 1); // To index indices
 
-  #pragma omp parallel for private(k, index)
+  #pragma omp parallel for private(k, d, l, index)
   for (k = 0; k < nnz; k++) {
-    for (d = 0, index = 0; d < ndim; d++)
+    for (d = 0, index = 0; d < nDimI; d++)
       index = sizes[d] * index + indices[d * indskip + k];
-    other[index] = values[k];
+    for (l = 0; l < blocksize; l++) {
+      other[index * blocksize + l] = values[k * blocksize + l];
+    }
   }
 
   THTensor_(free)(values_);

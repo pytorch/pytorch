@@ -95,6 +95,7 @@ def _lazy_init():
             "Cannot re-initialize CUDA in forked subprocess. " + msg)
     _check_driver()
     assert torch._C._cuda_init()
+    assert torch._C._cuda_sparse_init()
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
@@ -259,6 +260,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
 
 class _CudaBase(object):
     is_cuda = True
+    is_sparse = False
 
     def type(self, *args, **kwargs):
         with device(self.get_device()):
