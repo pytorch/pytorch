@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <string>
+#include <unordered_map>
 
 #include "cub/util_allocator.cuh"
 #include "cnmem.h"
@@ -58,6 +59,19 @@ CudaMemoryPoolType g_cuda_memory_pool_type;
 vector<bool> g_cnmem_available_for_device;
 // For cub allocator
 unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
+// an unordered map that holds the map from the cuda memory pointer to the
+// device id that it is allocated from. This is used in the cuda memory pool
+// cases, where we need the device id to carry out the deletion.
+// Note(jiayq): an alternate approach is to use cudaGetPointerAttributes, but
+// that is usually quite slow. We might want to benchmark the speed difference
+// though.
+// Note(jiayq): another alternate approach is to augment the Tensor class that
+// would allow one to record the device id. However, this does not address any
+// non-tensor allocation and deallocation.
+// Ideally, a memory pool should already have the device id information, as
+// long as we are using UVA (as of CUDA 5 and later) so the addresses are
+// unique.
+static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 
 CudaMemoryPoolType GetCudaMemoryPoolType() {
   return g_cuda_memory_pool_type;
@@ -298,10 +312,16 @@ void* CUDAContext::New(size_t nbytes) {
         gpuId,
         " but cnmem pool is not set up for it.");
     CNMEM_CHECK(cnmemMalloc(&ptr, nbytes, nullptr));
+    g_cuda_device_affiliation[ptr] = GetCurrentGPUID();
+    VLOG(2) << "CNMEM allocating pointer " << ptr << " on device "
+            << GetCurrentGPUID();
     return ptr;
   }
   case CudaMemoryPoolType::CUB:
     CUDA_CHECK(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+    g_cuda_device_affiliation[ptr] = GetCurrentGPUID();
+    VLOG(2) << "CUB allocating pointer " << ptr << " on device "
+            << GetCurrentGPUID();
     return ptr;
   }
   return nullptr;
@@ -324,14 +344,25 @@ void CUDAContext::Delete(void* ptr) {
     if (error != cudaSuccess && error != cudaErrorCudartUnloading) {
       LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
                  << cudaGetErrorString(error);
-		}
+    }
     break; }
-  case CudaMemoryPoolType::CNMEM:
-  	CNMEM_CHECK(cnmemFree(ptr, nullptr));
+  case CudaMemoryPoolType::CNMEM: {
+    auto it = g_cuda_device_affiliation.find(ptr);
+    DCHECK(it != g_cuda_device_affiliation.end());
+    DeviceGuard guard(it->second);
+    VLOG(2) << "CNMEM freeing pointer " << ptr << " on device " << it->second;
+    CNMEM_CHECK(cnmemFree(ptr, nullptr));
+    g_cuda_device_affiliation.erase(it);
     break;
-  case CudaMemoryPoolType::CUB:
-    CUDA_CHECK(g_cub_allocator->DeviceFree(ptr));
+  }
+  case CudaMemoryPoolType::CUB: {
+    auto it = g_cuda_device_affiliation.find(ptr);
+    DCHECK(it != g_cuda_device_affiliation.end());
+    VLOG(2) << "CUB freeing pointer " << ptr << " on device " << it->second;
+    CUDA_CHECK(g_cub_allocator->DeviceFree(it->second, ptr));
+    g_cuda_device_affiliation.erase(it);
     break;
+  }
   }
 }
 
