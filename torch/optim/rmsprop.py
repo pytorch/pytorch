@@ -27,6 +27,12 @@ class RMSprop(Optimizer):
         defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, weight_decay=weight_decay)
         super(RMSprop, self).__init__(params, defaults)
 
+    def __setstate__(self, state):
+        super(RMSprop, self).__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('momentum', 0)
+            group.setdefault('centered', False)
+
     def step(self, closure=None):
         """Performs a single optimization step.
 
