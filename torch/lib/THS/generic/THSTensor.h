@@ -6,7 +6,8 @@ typedef struct THSTensor
 {  // Stored in COO format, indices + values
     long *size;
     ptrdiff_t nnz;
-    int nDimension;
+    int nDimensionI; // dimension of indices
+    int nDimensionV; // dimension of values
 
     // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
     // as buffer, so we keep track of both
@@ -20,6 +21,8 @@ typedef struct THSTensor
 
 /**** access methods ****/
 TH_API int THSTensor_(nDimension)(const THSTensor *self);
+TH_API int THSTensor_(nDimensionI)(const THSTensor *self);
+TH_API int THSTensor_(nDimensionV)(const THSTensor *self);
 TH_API long THSTensor_(size)(const THSTensor *self, int dim);
 TH_API ptrdiff_t THSTensor_(nnz)(const THSTensor *self);
 TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self);
@@ -43,16 +46,21 @@ TH_API THSTensor *THSTensor_(newTranspose)(THSTensor *self, int dimension1_, int
 
 /**** reshaping methods ***/
 TH_API THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size);
+TH_API THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src);
 TH_API THSTensor *THSTensor_(resize1d)(THSTensor *self, long size0);
 TH_API THSTensor *THSTensor_(resize2d)(THSTensor *self, long size0, long size1);
 TH_API THSTensor *THSTensor_(resize3d)(THSTensor *self, long size0, long size1, long size2);
 TH_API THSTensor *THSTensor_(resize4d)(THSTensor *self, long size0, long size1, long size2, long size3);
 
 TH_API THTensor *THSTensor_(toDense)(THSTensor *self);
+TH_API void THSTensor_(copy)(THSTensor *self, THSTensor *src);
 
 TH_API void THSTensor_(transpose)(THSTensor *self, int dimension1_, int dimension2_);
 TH_API int THSTensor_(isContiguous)(const THSTensor *self);
+TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src);
 TH_API void THSTensor_(contiguous)(THSTensor *self);
+
+TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask);
 
 TH_API void THSTensor_(free)(THSTensor *self);
 TH_API void THSTensor_(retain)(THSTensor *self);
@@ -64,5 +72,9 @@ TH_API void THSTensor_(freeCopyTo)(THSTensor *self, THSTensor *dst);
 TH_API void THSTensor_(narrow)(THSTensor *self, THSTensor *src, int dimension_, long firstIndex_, long size_);
 TH_API void THSTensor_(select)(THSTensor *self, THSTensor *src, int dimension_, long sliceIndex_);
 */
+
+// internal methods
+THSTensor* THSTensor_(move)(THSTensor *self, THLongTensor *indices, THTensor *values);
+THSTensor* THSTensor_(set)(THSTensor *self, THLongTensor *indices, THTensor *values);
 
 #endif

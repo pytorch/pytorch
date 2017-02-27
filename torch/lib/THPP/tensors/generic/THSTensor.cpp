@@ -36,12 +36,12 @@ auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 
 template<>
 int THSTensor<real>::nDim() const {
-  return tensor->nDimension;
+  return tensor->nDimensionI;
 }
 
 template<>
 auto THSTensor<real>::sizes() const -> long_range {
-  return std::vector<long>(tensor->size, tensor->size + tensor->nDimension);
+  return std::vector<long>(tensor->size, tensor->size + tensor->nDimensionI);
 }
 
 template<>
@@ -91,12 +91,12 @@ const void* THSTensor<real>::data() const {
 
 template<>
 void* THSTensor<real>::cdata() {
-  throw std::runtime_error("THSTensor::cdata() not supported");
+  return tensor;
 }
 
 template<>
 const void* THSTensor<real>::cdata() const {
-  throw std::runtime_error("THSTensor::cdata() not supported");
+  return tensor;
 }
 
 template<>
@@ -199,6 +199,8 @@ auto THSTensor<real>::free() -> THSTensor& {
   THSTensor_(free)(tensor);
   return *this;
 }
+
+#define non_const_cast(tensor) const_cast<THSTensor&>(dynamic_cast<const THSTensor&>(tensor))
 
 template<>
 auto THSTensor<real>::diag(const Tensor& src, int k) -> THSTensor& {
@@ -442,11 +444,15 @@ auto THSTensor<real>::clamp(const Tensor &src, scalar_type min_value, scalar_typ
 
 template<>
 auto THSTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cadd() not supported");
+  THSTensor &src1_t = non_const_cast(src1);
+  THSTensor &src2_t = non_const_cast(src2);
+  THSTensor_(cadd)(tensor, src1_t.tensor, value, src2_t.tensor);
+  return *this;
 }
 
 template<>
 auto THSTensor<real>::cadd(const Tensor& src1, const Tensor& src2) -> THSTensor& {
+  return cadd(src1, static_cast<scalar_type>(1), src2);
   throw std::runtime_error("THSTensor::cadd() not supported");
 }
 
@@ -457,7 +463,10 @@ auto THSTensor<real>::csub(const Tensor& src1, scalar_type value, const Tensor& 
 
 template<>
 auto THSTensor<real>::cmul(const Tensor& src1, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cmul() not supported");
+  THSTensor &src1_t = non_const_cast(src1);
+  THSTensor &src2_t = non_const_cast(src2);
+  THSTensor_(cmul)(tensor, src1_t.tensor, src2_t.tensor);
+  return *this;
 }
 
 template<>
@@ -467,7 +476,10 @@ auto THSTensor<real>::cpow(const Tensor& src1, const Tensor& src2) -> THSTensor&
 
 template<>
 auto THSTensor<real>::cdiv(const Tensor& src1, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cdiv() not supported");
+  THSTensor &src1_t = non_const_cast(src1);
+  THSTensor &src2_t = non_const_cast(src2);
+  THSTensor_(cdiv)(tensor, src1_t.tensor, src2_t.tensor);
+  return *this;
 }
 
 template<>

@@ -196,7 +196,8 @@ class TestNN(NNTestCase):
     def _backward_criterion(self, criterion, input, target):
         input_tuple = input if isinstance(input, tuple) else (input,)
         for i in input_tuple:
-            i.grad.data.zero_()
+            if i.grad is not None:
+                i.grad.data.zero_()
         args = input_tuple + (target,)
         criterion(*args).backward()
         if isinstance(input, tuple):
@@ -206,18 +207,24 @@ class TestNN(NNTestCase):
 
     def _zero_grad_parameters(self, module):
         if hasattr(module, 'weight') and module.weight is not None:
-            module.weight.grad.data.zero_()
+            if module.weight.grad is not None:
+                module.weight.grad.data.zero_()
         if hasattr(module, 'bias') and module.bias is not None:
-            module.bias.grad.data.zero_()
+            if module.bias.grad is not None:
+                module.bias.grad.data.zero_()
 
     def _get_parameters(self, module):
         params = []
         d_params = []
         if hasattr(module, 'weight') and module.weight is not None:
             params += [module.weight.data]
+            if module.weight.grad is None:
+                module.weight._grad = Variable(module.weight.data.clone().zero_())
             d_params += [module.weight.grad.data]
         if hasattr(module, 'bias') and module.bias is not None:
             params += [module.bias.data]
+            if module.bias.grad is None:
+                module.bias._grad = Variable(module.bias.data.clone().zero_())
             d_params += [module.bias.grad.data]
         return params, d_params
 
@@ -356,13 +363,13 @@ class TestNN(NNTestCase):
         module.zero_grad()
 
         module.weight.requires_grad = True
-        module.weight.grad.data.fill_(1)
+        module.weight._grad = Variable(module.weight.data.clone().fill_(1))
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
 
         module.bias.requires_grad = True
-        module.weight.grad.data.fill_(1)
-        module.bias.grad.data.fill_(1)
+        module.weight._grad = Variable(module.weight.data.clone().fill_(1))
+        module.bias._grad = Variable(module.bias.data.clone().fill_(1))
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
@@ -586,7 +593,7 @@ class TestNN(NNTestCase):
         grads = torch.range(1, 100), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
-                p.grad.data.copy_(g)
+                p._grad = Variable(g.clone())
             norm_before = compute_norm(norm_type)
             clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
@@ -1576,11 +1583,12 @@ class TestNN(NNTestCase):
         grad = torch.randn(2, 2, 5, 10, 10).cuda()[:, 1]
         assert not grad.is_contiguous()
         output.backward(grad, retain_variables=True)
-        result = output.grad.data.clone()
-        output.grad.data.zero_()
+        assert input.grad is not None
+        result = input.grad.data.clone()
+        input.grad.data.zero_()
 
         output.backward(grad.contiguous())
-        self.assertEqual(result, output.grad.data)
+        self.assertEqual(result, input.grad.data)
 
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)
@@ -1613,7 +1621,8 @@ class TestNN(NNTestCase):
             grad1 = data.grad.data.clone()
 
             # 2nd pass
-            data.grad.data.zero_()
+            if data.grad is not None:
+                data.grad.data.zero_()
 
             res2 = module(data)
             res2.backward(grad)

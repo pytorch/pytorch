@@ -906,10 +906,10 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* mat1
+        - THTensor* self
         - arg: real value
           default: AS_REAL(1)
-        - THSTensor* mat2
+        - THSTensor* other
 ]]
 
 [[
@@ -1567,15 +1567,25 @@
 
 [[
   name: addcmul_
-  cname: addcmul
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: real value
-      default: AS_REAL(1)
-    - THTensor* tensor1
-    - THTensor* tensor2
+  options:
+    - cname: addcmul
+      return: argument 0
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THTensor* tensor1
+        - THTensor* tensor2
+    - cname: spaddcmul
+      return: argument 0
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THSTensor* tensor1
+        - THSTensor* tensor2
 ]]
 
 [[
@@ -1594,15 +1604,25 @@
 
 [[
   name: addcdiv_
-  cname: addcdiv
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: real value
-      default: AS_REAL(1)
-    - THTensor* tensor1
-    - THTensor* tensor2
+  options:
+    - cname: addcdiv
+      return: argument 0
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THTensor* tensor1
+        - THTensor* tensor2
+    - cname: spaddcdiv
+      return: argument 0
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THSTensor* tensor1
+        - THSTensor* tensor2
 ]]
 
 #ifndef THP_LAPACK_CONSTANTS

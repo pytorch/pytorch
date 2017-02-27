@@ -19,6 +19,9 @@ auto GradBuffer::addGrad(size_t pos, std::shared_ptr<Variable>&& var) -> void {
   if (!item.first) {
     buffer[pos] = std::make_pair<>(std::move(tensor), true);
   } else {
+    if (item.first->isSparse() && !tensor->isSparse()) {
+      throw std::runtime_error("mixing sparse and dense gradients is not yet supported");
+    }
 #ifdef WITH_CUDA
     THCPAutoGPU auto_gpu(tensor->getDevice());
 #endif

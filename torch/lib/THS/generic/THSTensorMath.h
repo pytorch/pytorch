@@ -10,6 +10,20 @@
  * Everything is is up to discretion
  */
 
+TH_API void THSTensor_(zero)(THSTensor *r_);
+TH_API void THSTensor_(sqrt)(THSTensor *r_, THSTensor *t);
+TH_API void THSTensor_(rsqrt)(THSTensor *r_, THSTensor *t);
+
+TH_API void THSTensor_(add)(THSTensor *r_, THSTensor *t, real value);
+TH_API void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value);
+TH_API void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value);
+TH_API void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src);
+TH_API void THSTensor_(cmul)(THSTensor *r_, THSTensor *t, THSTensor *src);
+TH_API void THSTensor_(cdiv)(THSTensor *r_, THSTensor *t, THSTensor *src);
+
+TH_API void THTensor_(spaddcmul)(THTensor *r_, THTensor *t, real value, THSTensor *src1, THSTensor *src2);
+TH_API void THTensor_(spaddcdiv)(THTensor *r_, THTensor *t, real value, THSTensor *src1, THSTensor *src2);
+
 // dense = beta * dense + alpha * sparse * dense
 TH_API void THSTensor_(spaddmm)(THTensor *r_, real beta, THTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
 // sparse = beta * sparse + alpha * sparse * dense
@@ -17,4 +31,3 @@ TH_API void THSTensor_(sspaddmm)(THSTensor *r_, real beta, THSTensor *t, real al
 TH_API void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse);
 
 #endif
-

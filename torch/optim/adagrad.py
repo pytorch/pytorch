@@ -1,3 +1,5 @@
+import torch
+
 from .optimizer import Optimizer
 
 
@@ -21,6 +23,18 @@ class Adagrad(Optimizer):
         defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay)
         super(Adagrad, self).__init__(params, defaults)
 
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['sum'] = p.data.new().resize_as_(p.data).zero_()
+
+    def share_memory(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['sum'].share_memory_()
+
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -37,20 +51,32 @@ class Adagrad(Optimizer):
                 grad = p.grad.data
                 state = self.state[p]
 
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['sum'] = grad.new().resize_as_(grad).zero_()
-
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
+                    if p.grad.data.is_sparse:
+                        raise RuntimeError("weight_decay option is not compatible with sparse gradients ")
                     grad = grad.add(group['weight_decay'], p.data)
 
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
-                state['sum'].addcmul_(1, grad, grad)
-                std = state['sum'].sqrt().add_(1e-10)
-                p.data.addcdiv_(-clr, grad, std)
+                if p.grad.data.is_sparse:
+                    grad_indices = grad.indices()
+                    grad_values = grad.values()
+                    size = torch.Size([x for x in grad.size()])
+
+                    def make_sparse(values):
+                        constructor = type(p.grad.data)
+                        if grad_indices.dim() == 0 or values.dim() == 0:
+                            return constructor()
+                        return constructor(grad_indices, values, size)
+                    state['sum'].add_(make_sparse(grad_values.pow(2)))
+                    std = state['sum'].sparse_mask(grad)
+                    std_values = std.values().sqrt_().add_(1e-10)
+                    p.data.add_(-clr, make_sparse(grad_values / std_values))
+                else:
+                    state['sum'].addcmul_(1, grad, grad)
+                    std = state['sum'].sqrt().add_(1e-10)
+                    p.data.addcdiv_(-clr, grad, std)
 
         return loss

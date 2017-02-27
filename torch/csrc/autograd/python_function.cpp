@@ -859,7 +859,7 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
 
     // self.backward(*grad_output)
     THPObjectPtr backward_fn = PyObject_GetAttrString((PyObject*)self, "backward");
-    THPUtils_assert(backward_fn.get(), "function %s doesn't cdataement a required "
+    THPUtils_assert(backward_fn.get(), "function %s doesn't implement a required "
         "'backward' method", THPUtils_typename((PyObject*)self));
     THPObjectPtr grad_input = PyObject_CallObject(backward_fn, grad_output.get());
     if (!grad_input) return NULL;
