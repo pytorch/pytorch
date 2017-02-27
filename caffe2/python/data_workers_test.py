@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 import unittest
+import time
 
 from caffe2.python import workspace, cnn
 from caffe2.python import timeout_guard
@@ -56,3 +57,33 @@ class DataWorkersTest(unittest.TestCase):
                 self.assertEqual(labels[j], data[j, 2])
 
         coordinator.stop()
+
+    def testGracefulShutdown(self):
+        model = cnn.CNNModelHelper(name="test")
+        coordinator = data_workers.init_data_input_workers(
+            model,
+            ["data", "label"],
+            dummy_fetcher,
+            32,
+            2,
+        )
+        self.assertEqual(coordinator._fetcher_id_seq, 2)
+        coordinator.start()
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.CreateNet(model.net)
+
+        while coordinator._coordinators[0]._inputs < 100:
+            time.sleep(0.01)
+
+        # Run a couple of rounds
+        workspace.RunNet(model.net.Proto().name)
+        workspace.RunNet(model.net.Proto().name)
+
+        # Wait for the enqueue thread to get blocked
+        time.sleep(0.2)
+
+        # We don't dequeue on caffe2 side (as we don't run the net)
+        # so the enqueue thread should be blocked.
+        # Let's now shutdown and see it succeeds.
+        self.assertTrue(coordinator.stop())
