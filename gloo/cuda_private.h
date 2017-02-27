@@ -10,11 +10,15 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 
 #include "gloo/common/logging.h"
 #include "gloo/cuda.h"
 
 namespace gloo {
+
+// Default mutex to synchronize contentious CUDA and NCCL operations
+extern std::mutex gCudaMutex;
 
 #define CUDA_CHECK(condition)                   \
   do {                                          \

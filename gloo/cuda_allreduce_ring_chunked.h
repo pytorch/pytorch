@@ -18,21 +18,21 @@ template <typename T>
 class CudaAllreduceRingChunked : public Allreduce<T> {
  public:
   CudaAllreduceRingChunked(
-    const std::shared_ptr<Context>& context,
-    const std::vector<T*>& ptrs,
-    int count,
-    const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
+      const std::shared_ptr<Context>& context,
+      const std::vector<T*>& ptrs,
+      int count,
+      const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
 
   virtual ~CudaAllreduceRingChunked();
 
   virtual void run() override;
 
  protected:
+  int getChunkOffset(int round);
   void copyChunkAtOffset(int chunkOffset);
 
-  std::vector<CudaDevicePointer<T> > devicePtrs_;
-  std::vector<T*> hostPtrs_;
-
+  std::vector<CudaDevicePointer<T>> devicePtrs_;
+  T* hostPtr_;
   const int count_;
   const int bytes_;
 
@@ -42,6 +42,9 @@ class CudaAllreduceRingChunked : public Allreduce<T> {
   size_t chunks_;
   size_t chunkSize_;
   size_t chunkBytes_;
+
+  struct ChunkContext;
+  std::vector<ChunkContext> chunkContext_;
 
   std::array<T*, 2> inbox_;
   std::array<std::unique_ptr<transport::Buffer>, 2> sendDataBuf_;

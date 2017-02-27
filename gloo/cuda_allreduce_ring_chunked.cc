@@ -11,16 +11,55 @@
 
 #include <string.h>
 
+#include "gloo/cuda_nccl.h"
 #include "gloo/cuda_private.h"
 
 namespace gloo {
 
 template <typename T>
+struct CudaAllreduceRingChunked<T>::ChunkContext {
+  ChunkContext(
+      CudaDevicePointer<T>&& rootDevicePtr,
+      T* hostPtr,
+      size_t length,
+      std::vector<nccl::NCCLElement>&& reduceElements,
+      std::vector<nccl::NCCLElement>&& broadcastElements)
+      : rootDevicePtr(std::move(rootDevicePtr)),
+        hostPtr(hostPtr),
+        length(length),
+        reduceOp(nccl::NCCLContext(
+            this->rootDevicePtr.getDeviceID(),
+            this->rootDevicePtr.getStream(),
+            std::move(reduceElements),
+            this->rootDevicePtr.getDeviceID())),
+        broadcastOp(nccl::NCCLContext(
+            this->rootDevicePtr.getDeviceID(),
+            this->rootDevicePtr.getStream(),
+            std::move(broadcastElements),
+            this->rootDevicePtr.getDeviceID())) {
+  }
+  ChunkContext(ChunkContext&& other) = default;
+
+  // Instances cannot be copied or copy-assigned
+  ChunkContext(const ChunkContext&) = delete;
+  ChunkContext& operator=(const ChunkContext&) = delete;
+
+  // Pointers for copying between the device and host
+  CudaDevicePointer<T> rootDevicePtr;
+  T* hostPtr;
+  const size_t length;
+  // The NCCL operations used for local device reduce before running the
+  // algorithm and local device broadcast after.
+  nccl::ReduceOp<T> reduceOp;
+  nccl::BroadcastOp<T> broadcastOp;
+};
+
+template <typename T>
 CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
-  const std::shared_ptr<Context>& context,
-  const std::vector<T*>& ptrs,
-  int count,
-  const std::vector<cudaStream_t>& streams)
+    const std::shared_ptr<Context>& context,
+    const std::vector<T*>& ptrs,
+    int count,
+    const std::vector<cudaStream_t>& streams)
     : Allreduce<T>(context, nullptr),
       count_(count),
       bytes_(count * sizeof(T)),
@@ -32,16 +71,13 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     newStream = false;
   }
 
-  hostPtrs_.resize(ptrs.size());
   for (int i = 0; i < ptrs.size(); i++) {
     if (newStream) {
-      devicePtrs_.push_back(
-        CudaDevicePointer<T>::create(ptrs[i], count_));
+      devicePtrs_.push_back(CudaDevicePointer<T>::create(ptrs[i], count_));
     } else {
       devicePtrs_.push_back(
-        CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
+          CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
     }
-    CUDA_CHECK(cudaMallocHost(&hostPtrs_[i], bytes_));
   }
 
   // Determine chunk size. Use chunks of no less than 1024 bytes
@@ -51,14 +87,58 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
   chunkSize_ = std::max(minSize, (count_ + chunks_ - 1) / chunks_);
   chunkBytes_ = chunkSize_ * sizeof(T);
 
+  // Setup host and device memory
+  {
+    // Synchronize memory allocation with NCCL operations
+    std::lock_guard<std::mutex> lock(gCudaMutex);
+    CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
+  }
+  for (auto offset = 0; offset < count_; offset += chunkSize_) {
+    auto length = chunkSize_;
+    if (offset + length <= count_) {
+      // Chunk completely in range, full chunk.
+    } else {
+      // Chunk partially in range, partial chunk.
+      length = count_ - offset;
+    }
+
+    // Create NCCL elements for the chunk on each device
+    std::vector<nccl::NCCLElement> reduceElements;
+    std::vector<nccl::NCCLElement> broadcastElements;
+    for (auto i = 0; i < ptrs.size(); i++) {
+      auto chunkPtr = *devicePtrs_[i] + offset;
+      nccl::NCCLElement el(
+          chunkPtr,
+          chunkPtr,
+          length,
+          devicePtrs_[i].getDeviceID(),
+          devicePtrs_[i].getStream());
+      reduceElements.push_back(el);
+      broadcastElements.push_back(el);
+    }
+
+    // Create a device pointer for the chunk on device ptrs[0]. We will use the
+    // associated stream to serialize NCCL operations and device-host memcpys.
+    // The NCCL operation will synchronize the independent device streams with
+    // this master stream.
+    CudaDevicePointer<T> rootDevicePtr =
+        CudaDevicePointer<T>::create(ptrs[0] + offset, length);
+    chunkContext_.push_back(ChunkContext(
+        std::move(rootDevicePtr),
+        hostPtr_ + offset,
+        length,
+        std::move(reduceElements),
+        std::move(broadcastElements)));
+  }
+
   // Allocate inboxes
-  for (int i = 0; i < 2; i++) {
+  for (auto i = 0; i < 2; i++) {
     inbox_[i] = static_cast<T*>(malloc(bytes_));
   }
 
-  for (int i = 0; i < 2; i++) {
+  for (auto i = 0; i < 2; i++) {
     // Buffer to send to (rank+1).
-    sendDataBuf_[i] = rightPair_->createSendBuffer(i, hostPtrs_[0], bytes_);
+    sendDataBuf_[i] = rightPair_->createSendBuffer(i, hostPtr_, bytes_);
     // Buffer that (rank-1) writes to.
     recvDataBuf_[i] = leftPair_->createRecvBuffer(i, inbox_[i], chunkBytes_);
   }
@@ -68,17 +148,19 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
   // on the right is done using the inbox that's about to be written
   // into. No need for a global barrier.
   sendNotificationBuf_ =
-    leftPair_->createSendBuffer(2, &dummy_, sizeof(dummy_));
+      leftPair_->createSendBuffer(2, &dummy_, sizeof(dummy_));
   recvNotificationBuf_ =
-    rightPair_->createRecvBuffer(2, &dummy_, sizeof(dummy_));
+      rightPair_->createRecvBuffer(2, &dummy_, sizeof(dummy_));
 }
 
 template <typename T>
 CudaAllreduceRingChunked<T>::~CudaAllreduceRingChunked() {
-  for (auto& hostPtr : hostPtrs_) {
-    CUDA_CHECK(cudaFreeHost(hostPtr));
+  {
+    // Synchronize memory allocation with NCCL operations
+    std::lock_guard<std::mutex> lock(gCudaMutex);
+    CUDA_CHECK(cudaFreeHost(hostPtr_));
   }
-  for (int i = 0; i < 2; i++) {
+  for (auto i = 0; i < 2; i++) {
     if (inbox_[i] != nullptr) {
       free(inbox_[i]);
     }
@@ -89,102 +171,87 @@ template <typename T>
 void CudaAllreduceRingChunked<T>::run() {
   CudaDeviceGuard guard;
 
-  // Asynchronously copy all device buffers to host
-  for (int i = 0; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].copyToHostAsync(hostPtrs_[i]);
+  // Kick off local reduction for each chunk, then copy result to host.
+  // Make sure to iterate over the chunks in the order they will be sent.
+  for (auto i = 0; i < chunks_; i++) {
+    const auto chunkOffset = getChunkOffset(i);
+    if (chunkOffset < chunkContext_.size()) {
+      auto& context = chunkContext_[chunkOffset];
+      context.reduceOp.runAsync();
+      context.rootDevicePtr.copyToHostAsync(context.hostPtr);
+    }
   }
 
-  // Reduce specified pointers into hostPtrs_[0]
-  devicePtrs_[0].waitAsync();
-  for (int i = 1; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].waitAsync();
-    this->fn_(hostPtrs_[0], hostPtrs_[i], count_);
-  }
+  // First pass reduces a chunk in each round
+  for (auto round = 0; round < chunks_; round++) {
+    const auto chunkOffset = getChunkOffset(round);
 
-  // Kick off copying initial chunks
-  copyChunkAtOffset(2 * this->contextRank_);
-  copyChunkAtOffset(2 * this->contextRank_ + 1);
+    if (chunkOffset < chunkContext_.size()) {
+      auto& context = chunkContext_[chunkOffset];
 
-  // Start with reduction of previously copied chunk
-  for (int round = 2; round < chunks_; round++) {
-    // We loop over all chunks starting at 2, since we just sent two
-    // chunks to fill both buffers. Imagine a square grid with
-    // chunks of memory laid out vertically and nodes horizontally.
-    // The diagonal of this grid marks which nodes sends which
-    // chunks of memory in the prelude. Processing happens by moving
-    // this diagonal forward and have it wrap around the edge. This
-    // means that node with rank 0 at round 2 will process the last
-    // chunk. This explains why we subtract the round in the offset
-    // equation below.
-    //
-    // Because we're dealing with double buffering in this
-    // implementation, we have twice the number of chunks and
-    // process them in pairs. This explains why we ignore the LSB on
-    // the round number when subtracting it. The LSB is later added
-    // to flip back and forth between the two buffers for this pair
-    // of chunks. The number of chunks is finally added to make sure
-    // we can wrap correctly (no modulo against negative number).
-    //
-    auto chunkOffset = ((2 * this->contextRank_) - (round & ~0x1) +
-                        (round & 0x1) + chunks_) % chunks_;
-    auto offset = chunkOffset * chunkSize_;
-    auto length = chunkSize_;
-    if (offset + length <= count_) {
-      // Chunk completely in range, copy full chunk.
-    } else if (offset < count_) {
-      // Chunk partially in range, copy partial chunk.
-      length = count_ - offset;
+      // Wait for the local reduction and copy to host memory to complete
+      context.rootDevicePtr.waitAsync();
+
+      // Reduce chunk from previous round. Nothing to do for initial rounds.
+      if (round >= 2) {
+        // Wait for inbox write to complete
+        recvDataBuf_[chunkOffset & 1]->waitRecv();
+
+        // Reduce
+        this->fn_(context.hostPtr, inbox_[chunkOffset & 1], context.length);
+      }
     } else {
-      // Chunk out of range, copy nothing.
-      length = 0;
+      // Empty chunk but still need to wait on the inbox write to ensure the
+      // algorithm progresses. Nothing to do for initial rounds.
+      if (round >= 2) {
+        recvDataBuf_[chunkOffset & 1]->waitRecv();
+      }
     }
 
-    // Wait for inbox write to complete
-    recvDataBuf_[chunkOffset & 1]->waitRecv();
+    // Skip buffer passing notifications in initial rounds
+    if (round >= 2) {
+      // Send notification to node on the left that
+      // this node is ready for an inbox write.
+      sendNotificationBuf_->send();
 
-    // Reduce
-    if (length > 0) {
-      this->fn_(&hostPtrs_[0][offset], inbox_[chunkOffset & 1], length);
+      // Wait for notification from node on the right
+      // to be sure this node can start an inbox write.
+      recvNotificationBuf_->waitRecv();
     }
-
-    // Send notification to node on the left that
-    // this node is ready for an inbox write.
-    sendNotificationBuf_->send();
-
-    // Wait for notification from node on the right
-    // to be sure this node can start an inbox write.
-    recvNotificationBuf_->waitRecv();
 
     // Copy accumulated chunk
     copyChunkAtOffset(chunkOffset);
   }
 
   // Second pass around the ring to broadcast result.
-  // End at chunks_-2 since that's where the accumulation
-  // stopped in the previous set of rounds.
-  for (int round = 0; round < (chunks_ - 2); round++) {
-    auto chunkOffset = ((2 * this->contextRank_) - (round & ~0x1) +
-                        (round & 0x1) + chunks_) %
-        chunks_;
-    auto offset = chunkOffset * chunkSize_;
-    auto length = chunkSize_;
-    if (offset + length <= count_) {
-      // Chunk completely in range, copy full chunk.
-    } else if (offset < count_) {
-      // Chunk partially in range, copy partial chunk.
-      length = count_ - offset;
+  for (int round = 0; round < chunks_; round++) {
+    const auto chunkOffset = getChunkOffset(round);
+
+    if (chunkOffset < chunkContext_.size()) {
+      auto& context = chunkContext_[chunkOffset];
+
+      // End at chunks_-2 since that's where the accumulation
+      // stopped in the previous set of rounds.
+      if (round < (chunks_ - 2)) {
+        // Wait for inbox write to complete
+        recvDataBuf_[chunkOffset & 1]->waitRecv();
+
+        // Copy from inbox
+        memcpy(
+            context.hostPtr,
+            inbox_[chunkOffset & 1],
+            context.length * sizeof(T));
+      }
+
+      // Broadcast chunk to devices. Do this in all rounds with non-empty chunk.
+      context.rootDevicePtr.copyFromHostAsync(context.hostPtr);
+      context.broadcastOp.runAsync();
     } else {
-      // Chunk out of range, copy nothing.
-      length = 0;
-    }
-
-    // Wait for inbox write to complete
-    recvDataBuf_[chunkOffset & 1]->waitRecv();
-
-    // Copy
-    if (length > 0) {
-      memcpy(
-        &hostPtrs_[0][offset], inbox_[chunkOffset & 1], length * sizeof(T));
+      // Empty chunk but still need to wait on the inbox write to ensure the
+      // algorithm progresses.
+      if (round < (chunks_ - 2)) {
+        recvDataBuf_[chunkOffset & 1]->waitRecv();
+      }
     }
 
     // Skip copying in the last two rounds
@@ -208,39 +275,54 @@ void CudaAllreduceRingChunked<T>::run() {
   sendNotificationBuf_->send();
   recvNotificationBuf_->waitRecv();
 
-  // Asynchronously copy result buffer to all device buffers
-  for (int i = 0; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].copyFromHostAsync(hostPtrs_[0]);
+  // Wait for all chunk broadcasts to complete
+  for (auto i = 0; i < chunks_; i++) {
+    const auto chunkOffset = getChunkOffset(i);
+    if (chunkOffset < chunkContext_.size()) {
+      chunkContext_[chunkOffset].broadcastOp.wait();
+    }
   }
+}
 
-  // Wait for memcpy's to complete
-  for (int i = 0; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].waitAsync();
-  }
+template <typename T>
+int CudaAllreduceRingChunked<T>::getChunkOffset(int round) {
+  // Imagine a square grid with chunks of memory laid out vertically and nodes
+  // horizontally. The diagonal of this grid marks which nodes sends which
+  // chunks of memory in the prelude. Processing happens by moving this
+  // diagonal forward and have it wrap around the edge. This means that node
+  // with rank 0 at round 2 will process the last chunk. This explains why
+  // we subtract the round in the offset equation below.
+  //
+  // Because we're dealing with double buffering in this implementation, we
+  // have twice the number of chunks and process them in pairs. This explains
+  // why we ignore the LSB on the round number when subtracting it. The LSB is
+  // later added to flip back and forth between the two buffers for this pair
+  // of chunks. The number of chunks is finally added to make sure we can wrap
+  // correctly (no modulo against negative number).
+  return ((2 * this->contextRank_) - (round & ~0x1) + (round & 0x1) + chunks_) %
+      chunks_;
 }
 
 template <typename T>
 void CudaAllreduceRingChunked<T>::copyChunkAtOffset(int chunkOffset) {
   // Populate inbox of next participant in the ring.
-  auto offset = (chunkOffset % chunks_) * chunkSize_;
-  auto length = chunkSize_;
-  if (offset + length <= count_) {
-   // Chunk completely in range, copy full chunk.
-  } else if (offset < count_) {
-   // Chunk partially in range, copy partial chunk.
-   length = count_ - offset;
+  size_t offset;
+  size_t length;
+  if (chunkOffset < chunkContext_.size()) {
+    const auto& context = chunkContext_[chunkOffset];
+    offset = chunkOffset * chunkSize_;
+    length = context.length;
   } else {
-   // Chunk out of range, copy _something_.
-   // When nothing is put on the wire for empty chunks. @pietern
-   // has seen this algorithm hang. This is probably related to the
-   // chunk iteration order described in the run function.
-   offset = 0;
-   length = 1;
+    // When nothing is put on the wire for empty chunks. @pietern
+    // has seen this algorithm hang. This is probably related to the
+    // chunk iteration order described in the run function.
+    // Chunk out of range, copy _something_.
+    offset = 0;
+    length = 1;
   }
 
   // Initiate write to inbox of node on the right.
-  sendDataBuf_[chunkOffset & 0x1]->send(
-    offset * sizeof(T), length * sizeof(T));
+  sendDataBuf_[chunkOffset & 0x1]->send(offset * sizeof(T), length * sizeof(T));
 }
 
 // Instantiate template
