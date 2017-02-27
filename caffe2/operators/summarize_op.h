@@ -21,8 +21,13 @@ class SummarizeOp final : public Operator<Context> {
       // We will output to file instead of printing on screen.
       const string& target_folder = ws->RootFolder();
       // We will write each individual tensor to its individual file.
+      // Also, since the namescope is currently represented by "/", we will
+      // need to replace it with a symbol that does not conflict with the
+      // folder separator in Linux.
+      string proper_name = def.input(0);
+      std::replace(proper_name.begin(), proper_name.end(), '/', '#');
       log_file_.reset(new std::ofstream(
-          target_folder + "/" + def.input(0) + kSummaryzeOpExtension,
+          target_folder + "/" + proper_name + kSummaryzeOpExtension,
           std::ofstream::out | std::ofstream::trunc));
       CAFFE_ENFORCE(
           log_file_->good(),
