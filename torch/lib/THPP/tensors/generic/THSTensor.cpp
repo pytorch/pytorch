@@ -346,6 +346,11 @@ auto THSTensor<real>::sinh(const Tensor& src) -> THSTensor& {
 }
 
 template<>
+auto THSTensor<real>::copy(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::copy() not supported");
+}
+
+template<>
 auto THSTensor<real>::cat(const std::vector<Tensor*>& src, int dimension) -> THSTensor& {
   throw std::runtime_error("THSTensor::cat() not supported");
 }

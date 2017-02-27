@@ -542,6 +542,14 @@ auto THCTensor<real>::sinh(const Tensor& src) -> THCTensor& {
 }
 
 template<>
+auto THCTensor<real>::copy(const Tensor& src) -> THCTensor& {
+  // TODO: polymorphic copy
+  const THCTensor &src_t = const_tensor_cast(src);
+  THCTensor_(copy)(state, tensor, src_t.tensor);
+  return *this;
+}
+
+template<>
 auto THCTensor<real>::cat(const std::vector<Tensor*>& src, int dimension) -> THCTensor& {
   int num_inputs = src.size();
   std::vector<tensor_type*> inputs(num_inputs);

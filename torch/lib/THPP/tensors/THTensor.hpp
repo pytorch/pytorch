@@ -144,6 +144,7 @@ public:
   virtual THTensor& eqValueT(const Tensor& t, scalar_type value) override;
   virtual THTensor& fill(scalar_type value) override;
 
+  virtual THTensor& copy(const Tensor& src) override;
   virtual THTensor& cat(const std::vector<Tensor*>& src, int dimension) override;
   virtual THTensor& gather(const Tensor& src, int dimension,
                            const Tensor& index) override;

@@ -148,6 +148,7 @@ public:
 
   virtual THSTensor& fill(scalar_type value) override;
 
+  virtual THSTensor& copy(const Tensor& src) override;
   virtual THSTensor& cat(const std::vector<Tensor*>& src, int dimension) override;
   virtual THSTensor& gather(const Tensor& src, int dimension, const Tensor& index) override;
   virtual THSTensor& scatter(int dimension, const Tensor& index, const Tensor& src) override;
