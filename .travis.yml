@@ -43,5 +43,5 @@ matrix:
         env: LINT_CHECK
         python: "2.7"
         addons: true
-        install: pip install pep8
-        script: pep8
+        install: pip install flake8
+        script: flake8
