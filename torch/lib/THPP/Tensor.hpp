@@ -66,6 +66,7 @@ struct Tensor {
   virtual Tensor& squeeze(const Tensor& src, int dimension) = 0;
   virtual Tensor& unsqueeze(const Tensor& src, int dimension) = 0;
 
+  virtual Tensor& copy(const Tensor& src) = 0;
   virtual Tensor& cat(const std::vector<Tensor*>& src, int dimension) = 0;
   virtual Tensor& gather(const Tensor& src, int dimension, const Tensor& index) = 0;
   virtual Tensor& scatter(int dimension, const Tensor& index, const Tensor& src) = 0;
