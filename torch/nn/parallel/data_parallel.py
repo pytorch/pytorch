@@ -15,12 +15,11 @@ class DataParallel(Module):
     the input. During the backwards pass, gradients from each replica are
     summed into the original module.
 
-    Arbitrary positional inputs are allowed to be passed into DataParallel.
-    All variables will be scattered on dim specified (default 0). Tensors will
-    be broadcasted across devices, however any modifications in model's forward
-    will not be saved. Primitive types will be similarly broadcasted, but all
+    Arbitrary positional and keyword inputs are allowed to be passed into
+    DataParallel EXCEPT Tensors. All variables will be scattered on dim
+    specified (default 0). Primitive types will be broadcasted, but all
     other types will be a shallow copy and can be corrupted if written to in
-    the model's forward pass. Keyword arguments are not allowed as input.
+    the model's forward pass.
 
     Args:
         module: module to be parallelized
@@ -44,23 +43,40 @@ class DataParallel(Module):
         if len(self.device_ids) == 1:
             self.module.cuda(device_ids[0])
 
-    def forward(self, *inputs):
-        #leave non-Variable/non-tuples in place
+    def forward(self, *inputs, **kwargs):
+
         def _to_cuda(obj):
             if isinstance(obj, Variable):
                 return obj.cuda()
-            if isinstance(obj, tuple):
-                return tuple((map(_to_cuda, obj)))
+            if isinstance(obj, tuple) or isinstance(obj, list):
+                return type(obj)((map(_to_cuda, obj)))
             return obj
 
         if len(self.device_ids) == 1:
             with torch.cuda.device(self.device_ids[0]):
                 inputs_cuda = _to_cuda(inputs)
-            return self.module(*inputs_cuda)
+            if kwargs:
+                gpu_dict = {}
+                for key in kwargs.keys():
+                    gpu_dict[key] = _to_cuda(kwargs[key])
+                return self.module(*inputs_cuda, **gpu_dict)
+            else:
+                return self.module(*inputs_cuda)
+
         replicas = self.replicate(self.module, self.device_ids)
         scattered = self.scatter(inputs, self.device_ids)
+
+        gpu_dicts = None
+        if kwargs:
+            scatter_kwargs = {}
+            for key  in kwargs.keys():
+                scatter_kwargs[key] = self.scatter(_to_cuda(kwargs[key]), self.device_ids)
+            gpu_dicts = tuple([
+                dict([(key, values[i]) for key, values in scatter_kwargs.items()])
+                for i in self.device_ids
+            ])
         replicas = replicas[:len(scattered)]
-        outputs = self.parallel_apply(replicas, scattered)
+        outputs = self.parallel_apply(replicas, scattered, gpu_dicts)
         return self.gather(outputs, self.output_device)
 
     def replicate(self, module, device_ids):
@@ -69,14 +85,14 @@ class DataParallel(Module):
     def scatter(self, input, device_ids):
         return scatter(input, device_ids, dim=self.dim)
 
-    def parallel_apply(self, replicas, inputs):
-        return parallel_apply(replicas, inputs)
+    def parallel_apply(self, replicas, inputs, kwargs):
+        return parallel_apply(replicas, inputs, kwargs)
 
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
 
 
-def data_parallel(module, inputs, device_ids, output_device=None, dim=0):
+def data_parallel(module, inputs, device_ids, module_kwargs=None, output_device=None, dim=0):
     """Evaluates module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
@@ -95,13 +111,28 @@ def data_parallel(module, inputs, device_ids, output_device=None, dim=0):
         inputs = (inputs,)
 
     if not device_ids:
-        return module(*inputs)
+        if module_kwargs is None:
+            return module(*inputs)
+        else:
+            return module(*inputs, **module_kwargs)
 
     if output_device is None:
         output_device = device_ids[0]
 
     replicas = replicate(module, device_ids)
     scattered = scatter(inputs, device_ids, dim)
+
+
+    gpu_dicts = None
+    if module_kwargs:
+        scatter_kwargs = {}
+        for key  in module_kwargs.keys():
+            scatter_kwargs[key] = scatter(module_kwargs[key], device_ids, dim)
+        gpu_dicts = tuple([
+            dict([(key, values[i]) for key, values in scatter_kwargs.items()])
+            for i in device_ids
+        ])
+
     replicas = replicas[:len(scattered)]
-    outputs = parallel_apply(replicas, scattered)
+    outputs = parallel_apply(replicas, scattered, gpu_dicts)
     return gather(outputs, output_device, dim)
