@@ -103,11 +103,11 @@ void ElementWiseDivide(
     const float* dZdata,
     const float* Ydata,
     const float* Zdata) {
-  // TODO: proper vectorization with Eigen
-  for (int i = 0; i < n; ++i) {
-    dXdata[i] = dZdata[i] / Ydata[i];
-    dYdata[i] = - (dZdata[i] * Zdata[i]) / Ydata[i];
-  }
+  ConstEigenVectorArrayMap<float> dZdataVec(dZdata, n);
+  ConstEigenVectorArrayMap<float> YdataVec(Ydata, n);
+  ConstEigenVectorArrayMap<float> ZdataVec(Zdata, n);
+  EigenVectorArrayMap<float>(dXdata, n) = dZdataVec / YdataVec;
+  EigenVectorArrayMap<float>(dYdata, n) = - (dZdataVec * ZdataVec) / YdataVec;
 }
 
 REGISTER_CPU_OPERATOR(DivGradient, DivGradientOp<CPUContext>);
