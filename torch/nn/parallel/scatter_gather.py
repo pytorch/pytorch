@@ -33,5 +33,6 @@ def gather(outputs, target_device, dim=0):
             return Gather(target_device, dim=dim)(*outputs)
         if isinstance(out, tuple) or isinstance(out, list):
             return type(out)(map(gather_map, zip(*outputs)))
-
+        if out is None:
+            return None
     return gather_map(outputs)

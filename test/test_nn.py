@@ -798,6 +798,7 @@ class TestNN(NNTestCase):
         var1 = Variable(torch.randn(5, 5).float(), requires_grad=True)
         var2 = Variable(torch.randn(5, 5).float(), requires_grad=True)
         var3 = Variable(torch.randn(5, 5).float(), requires_grad=False)
+
         float1 = torch.randn(1)[0]
         target = Variable(torch.randn(5, 5).float()).cuda()
         crit = nn.MSELoss()
