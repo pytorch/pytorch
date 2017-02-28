@@ -92,8 +92,8 @@ def StartMint(root_folder=None, port=None):
     return process
 
 
-def StringfyProto(obj):
-    """Stringfy a protocol buffer object.
+def StringifyProto(obj):
+    """Stringify a protocol buffer object.
 
   Inputs:
     obj: a protocol buffer object, or a Pycaffe2 object that has a Proto()
@@ -113,7 +113,7 @@ def StringfyProto(obj):
         elif hasattr(obj, 'Proto'):
             return obj.Proto().SerializeToString()
         else:
-            raise ValueError("Unexpected argument to StringfyProto of type " +
+            raise ValueError("Unexpected argument to StringifyProto of type " +
                              type(obj).__name__)
 
 
@@ -132,11 +132,11 @@ def CreateNet(net, input_blobs=None):
         input_blobs = []
     for input_blob in input_blobs:
         C.create_blob(input_blob)
-    return C.create_net(StringfyProto(net))
+    return C.create_net(StringifyProto(net))
 
 
 def RunOperatorOnce(operator):
-    return C.run_operator_once(StringfyProto(operator))
+    return C.run_operator_once(StringifyProto(operator))
 
 
 def RunOperatorsOnce(operators):
@@ -148,7 +148,7 @@ def RunOperatorsOnce(operators):
 
 
 def RunNetOnce(net):
-    return C.run_net_once(StringfyProto(net))
+    return C.run_net_once(StringifyProto(net))
 
 
 def RunNet(name, num_iter=1):
@@ -168,7 +168,7 @@ def RunPlan(plan_or_step):
     import caffe2.python.core as core
     if isinstance(plan_or_step, core.ExecutionStep):
         plan_or_step = core.Plan(plan_or_step)
-    return C.run_plan(StringfyProto(plan_or_step))
+    return C.run_plan(StringifyProto(plan_or_step))
 
 
 def InferShapesAndTypes(nets, blob_dimensions=None):
@@ -181,7 +181,7 @@ def InferShapesAndTypes(nets, blob_dimensions=None):
     Returns:
       A tuple of (shapes, types) dictionaries keyed by blob name.
     """
-    net_protos = [StringfyProto(n.Proto()) for n in nets]
+    net_protos = [StringifyProto(n.Proto()) for n in nets]
     if blob_dimensions is None:
         blobdesc_prototxt = C.infer_shapes_and_types_from_workspace(net_protos)
     else:
@@ -247,7 +247,7 @@ def FeedBlob(name, arr, device_option=None):
 
     name = StringifyBlobName(name)
     if device_option is not None:
-        return C.feed_blob(name, arr, StringfyProto(device_option))
+        return C.feed_blob(name, arr, StringifyProto(device_option))
     else:
         return C.feed_blob(name, arr)
 
@@ -425,7 +425,7 @@ def FeedImmediate(*args, **kwargs):
 # CWorkspace utilities
 
 def _Workspace_create_net(ws, net):
-    return ws._create_net(StringfyProto(net))
+    return ws._create_net(StringifyProto(net))
 C.Workspace.create_net = _Workspace_create_net
 
 
@@ -446,7 +446,7 @@ C.Workspace.run = _Workspace_run
 
 def _Blob_feed(blob, arg, device_option=None):
     if device_option is not None:
-        device_option = StringfyProto(device_option)
+        device_option = StringifyProto(device_option)
     return blob._feed(arg, device_option)
 
 C.Blob.feed = _Blob_feed
