@@ -564,4 +564,4 @@ def pad(input, pad, mode='constant', value=0):
         elif mode == 'replicate':
             return _functions.thnn.ReplicationPad3d(*pad)(input)
     else:
-        raise NotImplemented("Only 4D and 5D padding is supported for now")
+        raise NotImplementedError("Only 4D and 5D padding is supported for now")
