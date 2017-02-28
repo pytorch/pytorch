@@ -36,7 +36,7 @@ static void THDoubleVector_cadd_SSE(double *z, const double *x, const double *y,
   }
 }
 
-static void THDoubleVector_add_SSE(double *y, const double *x, const double c, const ptrdiff_t n) {
+static void THDoubleVector_adds_SSE(double *y, const double *x, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m128d XMM7 = _mm_set1_pd(c);
   __m128d XMM0, XMM2;
@@ -78,7 +78,7 @@ static void THDoubleVector_cmul_SSE(double *z, const double *x, const double *y,
   }
 }
 
-static void THDoubleVector_mul_SSE(double *y, const double *x, const double c, const ptrdiff_t n) {
+static void THDoubleVector_muls_SSE(double *y, const double *x, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m128d XMM15 = _mm_set1_pd(c);
   for (i=0; i<=((n)-8); i+=8) {
@@ -118,7 +118,7 @@ static void THDoubleVector_cdiv_SSE(double *z, const double *x, const double *y,
   }
 }
 
-static void THDoubleVector_div_SSE(double *y, const double *x, const double c, const ptrdiff_t n) {
+static void THDoubleVector_divs_SSE(double *y, const double *x, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m128d XMM7 = _mm_set1_pd(c);
   __m128d XMM0, XMM1;
@@ -168,7 +168,7 @@ static void THFloatVector_cadd_SSE(float *z, const float *x, const float *y, con
   }
 }
 
-static void THFloatVector_add_SSE(float *y, const float *x, const float c, const ptrdiff_t n) {
+static void THFloatVector_adds_SSE(float *y, const float *x, const float c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m128 XMM7 = _mm_set1_ps(c);
   __m128 XMM0, XMM2;
@@ -210,7 +210,7 @@ static void THFloatVector_cmul_SSE(float *z, const float *x, const float *y, con
   }
 }
 
-static void THFloatVector_mul_SSE(float *y, const float *x, const float c, const ptrdiff_t n) {
+static void THFloatVector_muls_SSE(float *y, const float *x, const float c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m128 XMM15 = _mm_set_ps1(c);
   for (i=0; i<=((n)-16); i+=16) {
@@ -250,7 +250,7 @@ static void THFloatVector_cdiv_SSE(float *z, const float *x, const float *y, con
   }
 }
 
-static void THFloatVector_div_SSE(float *y, const float *x, const float c, const ptrdiff_t n) {
+static void THFloatVector_divs_SSE(float *y, const float *x, const float c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m128 XMM7 = _mm_set1_ps(c);
   __m128 XMM0, XMM1;

@@ -48,7 +48,7 @@ void THVector_(cadd_DEFAULT)(real *z, const real *x, const real *y, const real c
     z[i] = x[i] + c * y[i];
 }
 
-void THVector_(add_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
+void THVector_(adds_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -80,7 +80,7 @@ void THVector_(cmul_DEFAULT)(real *z, const real *x, const real *y, const ptrdif
     z[i] = x[i] * y[i];
 }
 
-void THVector_(mul_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
+void THVector_(muls_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -112,7 +112,7 @@ void THVector_(cdiv_DEFAULT)(real *z, const real *x, const real *y, const ptrdif
     z[i] = x[i] / y[i];
 }
 
-void THVector_(div_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
+void THVector_(divs_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 

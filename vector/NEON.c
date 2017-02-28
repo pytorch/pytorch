@@ -29,7 +29,7 @@ static void THFloatVector_cmul_NEON(float *z, const float *x, const float* y, co
     z[i] = x[i] * y[i];
 }
 
-static void THFloatVector_mul_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
+static void THFloatVector_muls_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
   long i = 0;
 
   for(; i < n-4; i += 4)
@@ -59,7 +59,7 @@ static void THFloatVector_cadd_NEON(float *z, const float *x, const float *y, co
     z[i] = x[i] + c * y[i];
 }
 
-static void THFloatVector_add_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
+static void THFloatVector_adds_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
   long i = 0;
 
   for(;i < n-4; i += 4)
@@ -89,7 +89,7 @@ static void THFloatVector_cdiv_NEON(float *z, const float *x, const float *y, co
     z[i] = x[i] / y[i];
 }
 
-static void THFloatVector_div_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
+static void THFloatVector_divs_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
   long i = 0;
 
   for(;i < n-4; i += 4)

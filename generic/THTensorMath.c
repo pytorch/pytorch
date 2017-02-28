@@ -97,6 +97,7 @@ void THTensor_(fill)(THTensor *r_, real value)
     TH_TENSOR_APPLY(real, r_,
       if (r__stride == 1) {
         THVector_(fill)(r__data, value, r__size);
+	r__i = r__size;
 	r__data += r__stride * r__size;
 	break;
       } else {
@@ -559,7 +560,7 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
-    TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(add)(r__data, t_data, value, r__len););
+    TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(adds)(r__data, t_data, value, r__len););
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
   }
@@ -574,7 +575,7 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
-    TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(mul)(r__data, t_data, value, r__len););
+    TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(muls)(r__data, t_data, value, r__len););
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * value;);
   }
@@ -584,7 +585,7 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
-    TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(div)(r__data, t_data, value, r__len););
+    TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(divs)(r__data, t_data, value, r__len););
   } else {
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data / value;);
   }
