@@ -49,6 +49,7 @@ static void addClass(PyObject* module, PyTypeObject& type, const char* name)
 bool THPAutograd_initFunctions(PyObject* _unused)
 {
   THPObjectPtr module = PyImport_ImportModule("torch.nn._functions.thnn");
+  if (!module) return false;
   addClass<BatchNormForward, BatchNormCtor>(module, BatchNormClass, "BatchNorm");
   addClass<BatchNormBackward, NoCtor>(module, BatchNormBackwardClass, "BatchNormBackward");
   return true;

@@ -3,6 +3,7 @@ import torch
 
 from .module import Module
 from ..parameter import Parameter
+from ..utils.rnn import PackedSequence
 
 
 class RNNBase(Module):
@@ -58,15 +59,24 @@ class RNNBase(Module):
             weight.data.uniform_(-stdv, stdv)
 
     def forward(self, input, hx=None):
+        is_packed = isinstance(input, PackedSequence)
+        if is_packed:
+            input, batch_sizes = input
+            max_batch_size = batch_sizes[0]
+        else:
+            batch_sizes = None
+            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+
         if hx is None:
-            batch_sz = input.size(0) if self.batch_first else input.size(1)
             num_directions = 2 if self.bidirectional else 1
             hx = torch.autograd.Variable(input.data.new(self.num_layers *
                                                         num_directions,
-                                                        batch_sz,
+                                                        max_batch_size,
                                                         self.hidden_size).zero_())
             if self.mode == 'LSTM':
                 hx = (hx, hx)
+
+
         func = self._backend.RNN(
             self.mode,
             self.input_size,
@@ -76,9 +86,13 @@ class RNNBase(Module):
             dropout=self.dropout,
             train=self.training,
             bidirectional=self.bidirectional,
+            batch_sizes=batch_sizes,
             dropout_state=self.dropout_state
         )
-        return func(input, self.all_weights, hx)
+        output, hidden = func(input, self.all_weights, hx)
+        if is_packed:
+            output = PackedSequence(output, batch_sizes)
+        return output, hidden
 
     def __repr__(self):
         s = '{name}({input_size}, {hidden_size}'

@@ -179,17 +179,19 @@ class TensorDescriptorArray(object):
     def __getitem__(self, key):
         return ctypes.c_void_p(self.ptrs[key])
 
-    def set(self, tensor):
-        self._type = tensor.type()
-        self._size = tensor.size()
-        self._stride = tensor.stride()
+    def set_all(self, tensor):
+        _type = _typemap[tensor.type()]
+        _ndim = tensor.dim()
+        _size = int_array(tensor.size())
+        _stride = int_array(tensor.stride())
         for ptr in self.ptrs:
             check_error(lib.cudnnSetTensorNdDescriptor(
-                ctypes.c_void_p(ptr), _typemap[tensor.type()], tensor.dim(),
-                int_array(tensor.size()), int_array(tensor.stride())))
+                ctypes.c_void_p(ptr), _type, _ndim, _size, _stride))
 
-    def as_tuple(self):
-        return (self._type, tuple(self._size), tuple(self._stride))
+    def set_raw(self, i, _type, _ndim, _size, _stride):
+        ptr = self.ptrs[i]
+        check_error(lib.cudnnSetTensorNdDescriptor(
+            ctypes.c_void_p(ptr), _type, _ndim, _size, _stride))
 
 
 class ConvolutionDescriptor(object):
@@ -376,8 +378,24 @@ def descriptor(tensor, N=None):
         tensor = tensor.view(tensor.size(0), tensor.size(1), 1, 1)
     elif tensor.dim() == 3:
         tensor = tensor.view(tensor.size(0), tensor.size(1), tensor.size(2), 1)
-    descriptor.set(tensor)
+    if N is not None:
+        descriptor.set_all(tensor)
+    else:
+        descriptor.set(tensor)
     return descriptor
+
+
+def descriptor_sequence(tensor, batch_sizes):
+    descriptors = TensorDescriptorArray(len(batch_sizes))
+    _type = _typemap[tensor.type()]
+    _ndim = tensor.dim() + 2
+    _size = int_array(tensor.size() + (1, 1))
+    _stride = int_array(tensor.stride() + (1, 1))
+    for i, batch_size in enumerate(batch_sizes):
+        _size[0] = batch_size
+        descriptors.set_raw(i, _type, _ndim, _size, _stride)
+    return descriptors
+
 
 _autotuner_forward = {}
 _autotuner_backward_data = {}
