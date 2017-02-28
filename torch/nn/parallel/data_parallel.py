@@ -68,13 +68,13 @@ class DataParallel(Module):
         if len(self.device_ids) == 1:
             with torch.cuda.device(self.device_ids[0]):
                 inputs_cuda = _to_cuda(inputs)
-            if kwargs:
-                gpu_dict = {}
-                for key in kwargs.keys():
-                    gpu_dict[key] = _to_cuda(kwargs[key])
-                return self.module(*inputs_cuda, **gpu_dict)
-            else:
-                return self.module(*inputs_cuda)
+                if kwargs:
+                    gpu_dict = {}
+                    for key in kwargs.keys():
+                        gpu_dict[key] = _to_cuda(kwargs[key])
+                    return self.module(*inputs_cuda, **gpu_dict)
+                else:
+                    return self.module(*inputs_cuda)
 
         replicas = self.replicate(self.module, self.device_ids)
         scattered = self.scatter(inputs, self.device_ids)
