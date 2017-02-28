@@ -167,9 +167,11 @@ void THNN_(SparseLinear_accGradParameters)(
           THTensor *gradBias,
           THTensor *weight,
           THTensor *bias,
-          real weightDecay,
-          real scale)
+          accreal weightDecay_,
+          accreal scale_)
 {
+  real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   long h, i, col, hp0, hp1;
   long outDim = THTensor_(size)(weight, 0);
   long inDim = THTensor_(size)(weight, 1);
@@ -243,9 +245,11 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
           THTensor *gradBias,
           THTensor *weight,
           THTensor *bias,
-          real weightDecay,
-          real scale)
+          accreal weightDecay_,
+          accreal scale_)
 {
+  real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   long h, i;
   long outDim = THTensor_(size)(weight, 0);
   long inDim = THTensor_(size)(weight, 1);
@@ -308,8 +312,9 @@ void THNN_(SparseLinear_updateParameters)(
           THTensor *gradWeight,
           THTensor *gradBias,
           THTensor *lastInput,
-          real learningRate)
+          accreal learningRate_)
 {
+  real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   long h, i;
   long outDim = weight->size[0];
   long inDim = weight->size[1];
@@ -381,8 +386,9 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
           THTensor *gradWeight,
           THTensor *gradBias,
           THTensor *lastInput,
-          real learningRate)
+          accreal learningRate_)
 {
+  real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   long h, i;
   long outDim = weight->size[0];
   long inDim = weight->size[1];

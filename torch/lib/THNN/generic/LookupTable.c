@@ -32,8 +32,9 @@ void THNN_(LookupTable_accGradParameters)(
           THIndexTensor *indices,
           bool scaleGradByFreq,
           int paddingValue,
-          real scale)
+          accreal ascale)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(ascale);
   ptrdiff_t i;
   THInteger_t *count_data = NULL;
 
@@ -163,9 +164,11 @@ void THNN_(LookupTable_renorm)(
           THNNState *state,
           THIndexTensor *idx,
           THTensor *weight,
-          real maxNorm,
-          real normType)
+          accreal maxNorm_,
+          accreal normType_)
 {
+  real maxNorm = TH_CONVERT_ACCREAL_TO_REAL(maxNorm_);
+  real normType = TH_CONVERT_ACCREAL_TO_REAL(normType_);
   if (!THTensor_(isContiguous)(weight))
     THError("weight must be contiguous");
   if (!THIndexTensor_(isContiguous)(idx))

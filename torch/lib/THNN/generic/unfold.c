@@ -52,14 +52,17 @@ void THNN_(unfolded_acc)(
                  ix = (long long)(0 - padW + kw);
                  lpad = fmaxf(0,(int)(padW-kw));
                  rpad = fmaxf(0,(int)(padW-(kW-kw-1)));
-                 THVector_(add)(dst+(size_t)(iy*inputWidth+ix+lpad), src+(size_t)(y*outputWidth+lpad), 1, outputWidth - lpad - rpad); /* note: THVector_add could handle 1 value better */
+                 real *dst_slice = dst+(size_t)(iy*inputWidth+ix+lpad);
+                 THVector_(cadd)(dst_slice, dst_slice, src+(size_t)(y*outputWidth+lpad), 1, outputWidth - lpad - rpad); /* note: THVector_add could handle 1 value better */
               }
               else{
                 for (x=0; x<outputWidth; x++){
                    ix = (long long)(x*dW - padW + kw);
                    if (ix < 0 || ix >= inputWidth){
-                   }else
-                     THVector_(add)(dst+(size_t)(iy*inputWidth+ix), src+(size_t)(y*outputWidth+x), 1, 1);
+                   }else{
+                     real *dst_slice = dst+(size_t)(iy*inputWidth+ix);
+                     THVector_(cadd)(dst_slice, dst_slice, src+(size_t)(y*outputWidth+x), 1, 1);
+                   }
                 }
               }
             }
@@ -68,11 +71,14 @@ void THNN_(unfolded_acc)(
           for(y = 0; y < outputHeight; y++) {
             iy = (long long)(y*dH + kh);
             ix = (long long)(0 + kw);
-            if (dW == 1 )
-               THVector_(add)(dst+(size_t)(iy*inputWidth+ix), src+(size_t)(y*outputWidth), 1, outputWidth); /* note: THVector_add could handle 1 value better */
-            else{
-              for(x = 0; x < outputWidth; x++)
-                THVector_(add)(dst+(size_t)(iy*inputWidth+ix+x*dW), src+(size_t)(y*outputWidth+x), 1, 1);
+            if (dW == 1 ) {
+               real *dst_slice = dst+(size_t)(iy*inputWidth+ix);
+               THVector_(cadd)(dst_slice, dst_slice, src+(size_t)(y*outputWidth), 1, outputWidth); /* note: THVector_add could handle 1 value better */
+            }else{
+              for(x = 0; x < outputWidth; x++) {
+                real *dst_slice = dst+(size_t)(iy*inputWidth+ix+x*dW);
+                THVector_(cadd)(dst_slice, dst_slice, src+(size_t)(y*outputWidth+x), 1, 1);
+              }
             }
           }
         }
