@@ -3,24 +3,36 @@ import torch
 from torch.autograd import Variable
 
 
-PackedSequence = namedtuple('PackedSequence', ['data', 'batch_sizes'])
+PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
+
+
+class PackedSequence(PackedSequence_):
+    """Holds the data and list of batch_sizes of a packed sequence.
+
+    Attributes:
+        data (Variable): Variable containing packed sequence
+        batch_sizes (list[int]): list of integers holding information about
+            the batch size at each sequence step
+    """
+    pass
 
 
 def pack_padded_sequence(input, lengths, batch_first=False):
-    """Packes a Variable containing padded sequences of variable length.
+    """Packs a Variable containing padded sequences of variable length.
 
-    Input can be of size TxBx* where T is the length of the longest sequence
-    (equal to lengths[0]), and B is batch size. If batch_first is True BxTx*
-    inputs are expected.
+    Input can be of size ``TxBx*`` where T is the length of the longest sequence
+    (equal to lengths[0]), B is the batch size, and * is any number of dimensions
+    (including 0). If ``batch_first`` is True ``BxTx*`` inputs are expected.
 
     The sequences should be sorted by length in a decreasing order, i.e.
-    input[:,0] should be the longest sequence, and input[:,B-1] the shortest one.
+    ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the
+    shortest one.
 
     Note:
         This function accept any input that has at least two dimensions. You
         can apply it to pack the labels, and use the output of the RNN with
         them to compute the loss directly. A Variable can be retrieved from
-        a :class:`PaddedSequence` object by accessing its ``.data`` attribute.
+        a :class:`PackedSequence` object by accessing its ``.data`` attribute.
 
     Arguments:
         input (Variable): padded batch of variable length sequences.

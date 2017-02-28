@@ -159,7 +159,7 @@ class RNN(RNNBase):
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
-          The input can also be a packed variable sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
           for details.
         - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial hidden state
           for each element in the batch.
@@ -236,7 +236,7 @@ class LSTM(RNNBase):
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
-          The input can also be a packed variable sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
           for details.
         - **h_0** (num_layers \* num_directions, batch, hidden_size): tensor containing
           the initial hidden state for each element in the batch.
@@ -306,7 +306,7 @@ class GRU(RNNBase):
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
-          The input can also be a packed variable sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
           for details.
         - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial
           hidden state for each element in the batch.

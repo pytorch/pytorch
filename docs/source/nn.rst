@@ -494,6 +494,24 @@ Utilities
 .. autofunction:: torch.nn.utils.clip_grad_norm
 
 
+:hidden:`PackedSequence`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.PackedSequence
+
+
+:hidden:`pack_padded_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pack_padded_sequence
+
+
+:hidden:`pad_packed_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pad_packed_sequence
+
+
 torch.nn.functional
 ===================
 
