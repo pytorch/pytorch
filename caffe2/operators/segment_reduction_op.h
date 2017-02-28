@@ -18,7 +18,8 @@ class BaseInputAccessor {
     return dataInput.template IsType<TData>();
   }
 
-  inline const TData* getBlockPtr(TIndex in_block_size, TIndex idx) {
+  inline const TData*
+  getBlockPtr(TIndex in_block_size, TIndex idx, TIndex /* blocks */ = 1) {
     return static_cast<const TData*>(data_) + in_block_size * idx;
   }
 
@@ -39,14 +40,19 @@ class BaseInputAccessor {
  *
  * Assumes that segments are sorted and there are no skip indices
  */
-template <typename T, typename SIndex, class Context, class RangeReducer>
+template <
+    typename T,
+    typename SIndex,
+    class Context,
+    class RangeReducer,
+    class InputAccessor = BaseInputAccessor<T>>
 class AbstractSortedSegmentRangeOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AbstractSortedSegmentRangeOp);
 
   bool RunOnDevice() override {
-    auto& data = Input(DATA);
+    auto& dataInput = Input(DATA);
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
@@ -54,14 +60,19 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
     auto N = segment_ids.dim(0);
     CAFFE_ENFORCE_EQ(
         N,
-        data.dim(0),
+        dataInput.dim(0),
         "SEGMENT_IDS must have the same length as outer dimension of DATA");
 
+    OPERATOR_NEEDS_FEATURE(
+        inputAccessor_.observeInput(dataInput),
+        "Unsupported input type: ",
+        dataInput.meta().name(),
+        ".");
+
     const SIndex* s_ids = segment_ids.template data<SIndex>();
-    const T* d = data.template data<T>();
 
     const SIndex K = N > 0 ? s_ids[N - 1] + 1 : 0;
-    auto shape = data.dims();
+    auto shape = dataInput.dims();
     shape[0] = K;
     output->Resize(shape);
 
@@ -71,7 +82,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
       return true;
     }
 
-    TIndex block_size = data.size() / N;
+    TIndex block_size = dataInput.size() / N;
 
     // Assume the segments are sorted and there are no gaps
     CAFFE_ENFORCE_EQ(0, s_ids[0], "Indices must be sorted and not have gaps");
@@ -83,7 +94,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
       RangeReducer()(
           block_size,
           i - start,
-          d + block_size * start,
+          inputAccessor_.getBlockPtr(block_size, start, i - start),
           out + block_size * s_ids[start],
           &context_);
 
@@ -100,6 +111,9 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
 
   static constexpr int kNumInputs = 2;
   INPUT_TAGS(DATA, SEGMENT_IDS);
+
+ private:
+  InputAccessor inputAccessor_;
 };
 
 template <
@@ -260,7 +274,11 @@ i.e. `SEGMENT_IDS[-1]+1`. Other dimensions are inherited from the input tensor.
  * Output:
  *   Tensor without the first `num_dim` dimensions of DATA
  */
-template <typename T, class Context, class Reducer>
+template <
+    typename T,
+    class Context,
+    class Reducer,
+    class InputAccessor = BaseInputAccessor<T>>
 class AbstractReduceFrontOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -292,7 +310,11 @@ class AbstractReduceFrontOp : public Operator<Context> {
       ctx.observeInput(i, aux_in, num_reduce_dims_);
     }
 
-    const T* d = data.template data<T>();
+    OPERATOR_NEEDS_FEATURE(
+        inputAccessor_.observeInput(data),
+        "Unsupported input type: ",
+        data.meta().name(),
+        ".");
 
     vector<TIndex> shape;
     ctx.appendOutputShape(&shape);
@@ -304,7 +326,8 @@ class AbstractReduceFrontOp : public Operator<Context> {
 
     Reducer r(ctx, out, &context_);
     for (TIndex i = 0; i < block_num; ++i) {
-      r.template process<FixedSize>(ctx, d + in_block_size * i, i, &context_);
+      r.template process<FixedSize>(
+          ctx, inputAccessor_.getBlockPtr(in_block_size, i), i, &context_);
     }
     r.template finish<FixedSize>(ctx, &context_);
     return true;
@@ -314,6 +337,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
 
  private:
   int num_reduce_dims_;
+  InputAccessor inputAccessor_;
 };
 
 template <typename T, class Context, class ReducerGradient>
@@ -464,7 +488,8 @@ template <
     typename SIndex,
     class Context,
     class Reducer,
-    bool SparseFused = true>
+    bool SparseFused = true,
+    class InputAccessor = BaseInputAccessor<T>>
 class AbstractSortedSegmentOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -480,13 +505,13 @@ class AbstractSortedSegmentOp : public Operator<Context> {
 
   template <int FixedSize>
   bool DoRunWithValue() {
-    auto& data = Input(0);
+    auto& dataInput = Input(0);
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     TIndex N = segment_ids.dim(0);
-    const TIndex M = data.dim(0);
+    const TIndex M = dataInput.dim(0);
 
     const TIndex* idxs;
     if (SparseFused) { // static if
@@ -505,7 +530,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     // It would probably look nicer with varargs templates but it's too much
     // metaprogramming
     typename Reducer::Meta ctx;
-    ctx.observeInput(0, data, 1);
+    ctx.observeInput(0, dataInput, 1);
     for (int i = 1; i < Reducer::kInputCount; ++i) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
@@ -517,8 +542,13 @@ class AbstractSortedSegmentOp : public Operator<Context> {
       ctx.observeInput(i, aux_in, 1);
     }
 
+    OPERATOR_NEEDS_FEATURE(
+        inputAccessor_.observeInput(dataInput),
+        "Unsupported input type: ",
+        dataInput.meta().name(),
+        ".");
+
     const SIndex* s_ids = segment_ids.template data<SIndex>();
-    const T* d = data.template data<T>();
 
     const SIndex K = N > 0 ? s_ids[N - 1] + 1 : 0;
     vector<TIndex> shape;
@@ -530,7 +560,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     if (N == 0) {
       return true;
     }
-    TIndex in_block_size = data.size_from_dim(1);
+    TIndex in_block_size = dataInput.size_from_dim(1);
     TIndex out_block_size = output->size_from_dim(1);
 
     // Assume the segments are sorted and there are no gaps
@@ -553,7 +583,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
           idx = i;
         }
         r.template process<FixedSize>(
-            ctx, d + in_block_size * idx, i, &context_);
+            ctx, inputAccessor_.getBlockPtr(in_block_size, idx), i, &context_);
       }
 
       r.template finish<FixedSize>(ctx, &context_);
@@ -574,6 +604,9 @@ class AbstractSortedSegmentOp : public Operator<Context> {
   };
   static constexpr int kSelfInputs = SparseFused ? 2 : 1;
   static constexpr int kNumInputs = Reducer::kInputCount + kSelfInputs;
+
+ private:
+  InputAccessor inputAccessor_;
 };
 
 // Gradient actually doesn't depend on whether sparse lookup is fused or not
@@ -845,7 +878,8 @@ template <
     typename SIndex,
     class Context,
     class Reducer,
-    bool SparseFused = true>
+    bool SparseFused = true,
+    class InputAccessor = BaseInputAccessor<T>>
 class AbstractUnsortedSegmentOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -902,7 +936,11 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     }
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
-    const T* d = data.template data<T>();
+    OPERATOR_NEEDS_FEATURE(
+        inputAccessor_.observeInput(data),
+        "Unsupported input type: ",
+        data.meta().name(),
+        ".");
 
     // determine the number of segments
     SIndex K;
@@ -951,7 +989,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
         idx = i;
       }
       reducers_[s_id].template process<FixedSize>(
-          ctx, d + in_block_size * idx, i, &context_);
+          ctx, inputAccessor_.getBlockPtr(in_block_size, idx), i, &context_);
     }
 
     for (TIndex i = 0; i < K; ++i) {
@@ -973,6 +1011,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
   TIndex num_segments_;
   // member field to reuse memory
   vector<Reducer> reducers_;
+  InputAccessor inputAccessor_;
 };
 
 // Gradient actually doesn't depend on whether sparse lookup is fused or not
@@ -1276,7 +1315,7 @@ class AbstractLengthsOp : public Operator<Context> {
     const TLengths* lengths = lengthsInput.template data<TLengths>();
 
     OPERATOR_NEEDS_FEATURE(
-        inputAccessor.observeInput(dataInput),
+        inputAccessor_.observeInput(dataInput),
         "Unsupported input type: ",
         dataInput.meta().name(),
         ".");
@@ -1317,7 +1356,7 @@ class AbstractLengthsOp : public Operator<Context> {
               dataSize);
         }
 
-        const TData* input = inputAccessor.getBlockPtr(in_block_size, idx);
+        const TData* input = inputAccessor_.getBlockPtr(in_block_size, idx);
         reducer.template process<FixedSize>(ctx, input, dataIndex, &context_);
       }
       reducer.template finish<FixedSize>(ctx, &context_);
@@ -1335,7 +1374,7 @@ class AbstractLengthsOp : public Operator<Context> {
   static constexpr int kNumInputs = Reducer::kInputCount + kSelfInputs;
 
  private:
-  InputAccessor inputAccessor;
+  InputAccessor inputAccessor_;
 };
 
 // Gradient actually doesn't depend on whether sparse lookup is fused or not

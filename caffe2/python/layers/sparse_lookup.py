@@ -93,10 +93,7 @@ class SparseLookup(ModelLayer):
         return functools.reduce(operator.mul, self.shape) * 4
 
     def get_fp16_compatible_parameters(self):
-        if (self.reducer == 'Sum' and
-                schema.equal_schemas(self.input_record, IdList)):
-            return [self.w]
-        return []
+        return [self.w]
 
     def add_ops(self, net):
         if schema.equal_schemas(self.input_record, IdList):
@@ -126,7 +123,8 @@ class SparseLookup(ModelLayer):
                         self.input_record.lengths()
                     ],
                     self.output_schema.field_blobs(),
-                    grad_on_weights=1
+                    grad_on_weights=1,
+                    engine='fp16'
                 )
             else:
                 table_rows = net.Gather([self.w, self.input_record.keys()])
@@ -134,7 +132,8 @@ class SparseLookup(ModelLayer):
                     self.input_record.lengths())
                 net.__getattr__('SortedSegmentRange' + self.reducer)(
                     [table_rows, segment_ids],
-                    self.output_schema.field_blobs()
+                    self.output_schema.field_blobs(),
+                    engine='fp16'
                 )
         elif schema.equal_schemas(self.input_record, IdScoreList):
             if self.reducer == 'Sum':
@@ -145,7 +144,8 @@ class SparseLookup(ModelLayer):
                         self.input_record.keys(),
                         self.input_record.lengths()
                     ],
-                    self.output_schema.field_blobs()
+                    self.output_schema.field_blobs(),
+                    engine='fp16'
                 )
             else:
                 raise "Only Sum is supported for IdScoreList input." +\
