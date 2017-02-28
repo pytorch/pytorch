@@ -73,7 +73,7 @@ void Buffer::send(size_t offset, size_t length) {
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = (uint64_t)((Handler*)this);
+  wr.wr_id = slot_;
   wr.sg_list = &list;
   wr.num_sge = 1;
   wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
@@ -103,7 +103,7 @@ void Buffer::handleCompletion(struct ibv_wc* wc) {
   } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
     if (debug_) {
       std::cout << "[" << getpid() << "] ";
-      std::cout << "sent " << wc->byte_len << " bytes";
+      std::cout << "send complete";
       std::cout << std::endl;
     }
     std::unique_lock<std::mutex> lock(m_);

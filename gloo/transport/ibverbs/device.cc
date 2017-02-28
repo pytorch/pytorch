@@ -83,16 +83,6 @@ Device::Device(const struct attr& attr, ibv_context* context)
   comp_channel_ = ibv_create_comp_channel(context_);
   GLOO_ENFORCE(comp_channel_);
 
-  // Completion queue
-  cq_ = ibv_create_cq(context_, 64, nullptr, comp_channel_, 0);
-  GLOO_ENFORCE(cq_);
-
-  // Arm notification mechanism for completion queue
-  // The second argument is named solicited_only and is
-  // set to 0 because we want notifications for everything.
-  rv = ibv_req_notify_cq(cq_, 0);
-  GLOO_ENFORCE_NE(rv, -1);
-
   // Start thread to poll completion queue and dispatch
   // completions for completed work requests.
   done_ = false;
@@ -104,9 +94,6 @@ Device::~Device() {
 
   done_ = true;
   loop_->join();
-
-  rv = ibv_destroy_cq(cq_);
-  GLOO_ENFORCE_NE(rv, -1);
 
   rv = ibv_destroy_comp_channel(comp_channel_);
   GLOO_ENFORCE_NE(rv, -1);
@@ -137,9 +124,6 @@ void Device::loop() {
   pfd.events = POLLIN;
   pfd.revents = 0;
 
-  // Keep array for completed work requests on stack
-  std::array<struct ibv_wc, capacity_> wc;
-
   while (!done_) {
     do {
       rv = poll(&pfd, 1, 10);
@@ -150,32 +134,15 @@ void Device::loop() {
       break;
     }
 
-    ibv_cq* cq;
-    void* cq_context;
-    rv = ibv_get_cq_event(comp_channel_, &cq, &cq_context);
+    struct ibv_cq* cq;
+    void* cqContext;
+    rv = ibv_get_cq_event(comp_channel_, &cq, &cqContext);
     GLOO_ENFORCE_NE(rv, -1);
 
-    // Only handle CQEs from our own CQ
-    GLOO_ENFORCE_EQ(cq, cq_);
-    ibv_ack_cq_events(cq_, 1);
-
-    // Arm notification mechanism for completion queue
-    // The second argument is named solicited_only and is
-    // set to 0 because we want notifications for everything.
-    rv = ibv_req_notify_cq(cq_, 0);
-    GLOO_ENFORCE_NE(rv, -1);
-
-    // Invoke handler for every work completion.
-    auto nwc = ibv_poll_cq(cq_, capacity_, wc.data());
-    GLOO_ENFORCE_GE(nwc, 0);
-    for (int i = 0; i < nwc; i++) {
-      if (wc[i].status != IBV_WC_SUCCESS) {
-        continue;
-      }
-
-      auto h = reinterpret_cast<Handler*>(wc[i].wr_id);
-      h->handleCompletion(&wc[i]);
-    }
+    // Completion queue context is a Pair*.
+    // Delegate handling of this event to the pair itself.
+    Pair* pair = static_cast<Pair*>(cqContext);
+    pair->handleCompletions();
   }
 }
 } // namespace ibverbs

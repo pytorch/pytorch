@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gloo/common/common.h"
 #include "gloo/common/logging.h"
 
 namespace gloo {
@@ -20,20 +21,41 @@ namespace transport {
 namespace ibverbs {
 
 Pair::Pair(const std::shared_ptr<Device>& dev)
-    : dev_(dev), peer_memory_regions_ready_(0) {
+    : dev_(dev),
+      peerMemoryRegionsReady_(0) {
   int rv;
 
-  memset(peer_memory_regions_.data(), 0, sizeof(peer_memory_regions_));
-  memset(completion_handlers_.data(), 0, sizeof(completion_handlers_));
+  memset(peerMemoryRegions_.data(), 0, sizeof(peerMemoryRegions_));
+  memset(sendCompletionHandlers_.data(), 0, sizeof(sendCompletionHandlers_));
+  memset(recvCompletionHandlers_.data(), 0, sizeof(recvCompletionHandlers_));
+
+  // Create completion queue
+  {
+    // Have to register this completion queue with the device's
+    // completion channel to support asynchronous completion handling.
+    // Pairs use asynchronous completion handling by default so
+    // we call ibv_req_notify_cq(3) to request the first notification.
+    cq_ = ibv_create_cq(
+      dev_->context_,
+      kCompletionQueueCapacity,
+      this,
+      dev_->comp_channel_,
+      0);
+    GLOO_ENFORCE(cq_);
+
+    // Arm notification mechanism for completion queue.
+    rv = ibv_req_notify_cq(cq_, kNotifyOnAnyCompletion);
+    GLOO_ENFORCE_NE(rv, -1);
+  }
 
   // Create queue pair
   {
     struct ibv_qp_init_attr attr;
     memset(&attr, 0, sizeof(struct ibv_qp_init_attr));
-    attr.send_cq = dev_->cq_;
-    attr.recv_cq = dev_->cq_;
-    attr.cap.max_send_wr = Pair::MAX_BUFFERS;
-    attr.cap.max_recv_wr = Pair::MAX_BUFFERS;
+    attr.send_cq = cq_;
+    attr.recv_cq = cq_;
+    attr.cap.max_send_wr = Pair::kMaxBuffers;
+    attr.cap.max_recv_wr = Pair::kMaxBuffers;
     attr.cap.max_send_sge = 1;
     attr.cap.max_recv_sge = 1;
     attr.qp_type = IBV_QPT_RC;
@@ -80,7 +102,7 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
   // The remote side of this pair will call the 'recv' function to
   // register a receive buffer. The memory region will be registered
   // and the identifier sent to this side of the pair.
-  for (int i = 0; i < MAX_BUFFERS; ++i) {
+  for (int i = 0; i < kMaxBuffers; ++i) {
     receiveMemoryRegion();
   }
 }
@@ -89,6 +111,9 @@ Pair::~Pair() {
   int rv;
 
   rv = ibv_destroy_qp(qp_);
+  GLOO_ENFORCE_NE(rv, -1);
+
+  rv = ibv_destroy_cq(cq_);
   GLOO_ENFORCE_NE(rv, -1);
 }
 
@@ -146,88 +171,63 @@ void Pair::setSync(bool /* sync */, bool /* busyPoll */) {
 }
 
 void Pair::receiveMemoryRegion() {
-  struct ibv_mr* mr = new struct ibv_mr;
-  struct ibv_mr* init;
-  int rv;
-
-  // Keep list of ibv_mr's that the other side of this pair can write
-  // into. They are written in a FIFO order so the handler can always
-  // pop off the first entry upon receiving a write.
-  tmp_memory_regions_.push_back(mr);
-
-  // Map the memory region struct itself so the other side of this
-  // pair can write into it.
-  init = ibv_reg_mr(dev_->pd_, mr, sizeof(*mr), IBV_ACCESS_LOCAL_WRITE);
-  mapped_recv_regions_.push_back(init);
-
-  struct ibv_sge list;
-  list.addr = (uint64_t)mr;
-  list.length = sizeof(*mr);
-  list.lkey = init->lkey;
-
+  auto mr = make_unique<MemoryRegion>(dev_->pd_);
+  struct ibv_sge list = mr->sge();
   struct ibv_recv_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = (uint64_t)((Handler*)this);
   wr.sg_list = &list;
   wr.num_sge = 1;
 
   // The work request is serialized and sent to the driver so it
-  // doesn't need to live beyond the ibv_post_recv call (and be kept
-  // on the stack).
+  // doesn't need to be valid after the ibv_post_recv call.
   struct ibv_recv_wr* bad_wr;
-  rv = ibv_post_recv(qp_, &wr, &bad_wr);
+  int rv = ibv_post_recv(qp_, &wr, &bad_wr);
   GLOO_ENFORCE_NE(rv, -1);
+
+  // Keep memory region around so that the other side of this pair can
+  // write into it. They are written in a FIFO order so the handler
+  // can always pop off the first entry upon handling the completion.
+  mappedRecvRegions_.push_back(std::move(mr));
 }
 
-void Pair::sendMemoryRegion(Handler* h, struct ibv_mr* mr, int slot) {
-  struct ibv_mr* init;
-  int rv;
-
-  // Register completion handler for this memory region.
-  completion_handlers_[slot] = h;
-
-  // First post receive work request to avoid racing with
-  // a send to this region from the other side of this pair.
-  postReceive();
-
-  // Map the memory region struct itself so it can be sent to
-  // the other side of this pair.
-  init =
-      ibv_reg_mr(dev_->pd_, mr, sizeof(struct ibv_mr), IBV_ACCESS_LOCAL_WRITE);
-  mapped_send_regions_.push_back(init);
-
-  struct ibv_sge list;
-  list.addr = (uint64_t)mr;
-  list.length = sizeof(struct ibv_mr);
-  list.lkey = init->lkey;
-
+void Pair::sendMemoryRegion(struct ibv_mr* src, int slot) {
+  auto mr = make_unique<MemoryRegion>(dev_->pd_, src);
+  struct ibv_sge list = mr->sge();
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = (uint64_t)((Handler*)this);
   wr.sg_list = &list;
   wr.num_sge = 1;
   wr.opcode = IBV_WR_SEND_WITH_IMM;
   wr.send_flags = IBV_SEND_SIGNALED;
   wr.imm_data = slot;
 
+  // First post receive work request to avoid racing with
+  // a send to this region from the other side of this pair.
+  postReceive();
+
   // The work request is serialized and sent to the driver so it
   // doesn't need to be valid after the ibv_post_send call.
   struct ibv_send_wr* bad_wr;
-  rv = ibv_post_send(qp_, &wr, &bad_wr);
+  int rv = ibv_post_send(qp_, &wr, &bad_wr);
   GLOO_ENFORCE_NE(rv, -1);
+
+  // Keep memory region around until this send operation completes.
+  // They are posted in a FIFO order so the handler can always pop off
+  // the first entry upon handling the completion.
+  mappedSendRegions_.push_back(std::move(mr));
 }
 
 const struct ibv_mr* Pair::getMemoryRegion(int slot) {
-  if (peer_memory_regions_ready_.load() & (1 << slot)) {
-    return peer_memory_regions_[slot];
+  if (peerMemoryRegionsReady_.load() & (1 << slot)) {
+    return &peerMemoryRegions_[slot];
   }
 
   std::unique_lock<std::mutex> lock(m_);
-  while (peer_memory_regions_[slot] == nullptr) {
+  while (peerMemoryRegions_[slot].addr == nullptr) {
     cv_.wait(lock);
   }
-  peer_memory_regions_ready_ &= (1 << slot);
-  return peer_memory_regions_[slot];
+  peerMemoryRegionsReady_ &= (1 << slot);
+  return &peerMemoryRegions_[slot];
 }
 
 void Pair::postReceive() {
@@ -235,7 +235,6 @@ void Pair::postReceive() {
 
   struct ibv_recv_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = (uint64_t)((Handler*)this);
   struct ibv_recv_wr* bad_wr;
   rv = ibv_post_recv(qp_, &wr, &bad_wr);
   GLOO_ENFORCE_NE(rv, -1);
@@ -244,55 +243,99 @@ void Pair::postReceive() {
 std::unique_ptr<::gloo::transport::Buffer>
 Pair::createSendBuffer(int slot, void* ptr, size_t size) {
   auto buffer = new Buffer(this, slot, ptr, size);
+  sendCompletionHandlers_[slot] = buffer;
   return std::unique_ptr<::gloo::transport::Buffer>(buffer);
 }
 
 std::unique_ptr<::gloo::transport::Buffer>
 Pair::createRecvBuffer(int slot, void* ptr, size_t size) {
   auto buffer = new Buffer(this, slot, ptr, size);
-  sendMemoryRegion(buffer, buffer->mr_, buffer->slot_);
+  recvCompletionHandlers_[slot] = buffer;
+  sendMemoryRegion(buffer->mr_, buffer->slot_);
   return std::unique_ptr<::gloo::transport::Buffer>(buffer);
 }
 
-void Pair::handleCompletion(struct ibv_wc* wc) {
-  if (wc->opcode & IBV_WC_RECV) {
-    int slot = wc->imm_data & MASK_BUFFER_SLOT;
-    if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
-      // Regular RDMA write.
-      // Post new receive work request to backfill for this
-      // completed work request.
-      postReceive();
-      // Forward to appropriate buffer completion handler.
-      completion_handlers_[slot]->handleCompletion(wc);
-    } else {
-      // Memory region write.
-      // The first receive work request has taken a write
-      // containing the ibv_mr of the other side of the peer.
-      struct ibv_mr* mr;
-      int rv;
+// handleCompletions is called by the device thread when it
+// received an event for this pair's completion queue on its
+// completion channel.
+void Pair::handleCompletions() {
+  std::array<struct ibv_wc, kCompletionQueueCapacity> wc;
+  int rv;
 
-      // The buffer trying to write to this slot might be waiting for
-      // the other side of this pair to send its memory region.
-      // Lock access, and notify anybody waiting afterwards.
-      {
-        std::lock_guard<std::mutex> lock(m_);
+  ibv_ack_cq_events(cq_, 1);
 
-        // Move ibv_mr from memory region 'inbox' to final slot.
-        mr = tmp_memory_regions_.front();
-        tmp_memory_regions_.pop_front();
-        peer_memory_regions_[slot] = mr;
+  // Arm notification mechanism for completion queue.
+  rv = ibv_req_notify_cq(cq_, kNotifyOnAnyCompletion);
+  GLOO_ENFORCE_NE(rv, -1);
 
-        // Deregister mapping for this ibv_mr.
-        mr = mapped_recv_regions_.front();
-        mapped_recv_regions_.pop_front();
-        rv = ibv_dereg_mr(mr);
-        GLOO_ENFORCE_NE(rv, -1);
-      }
+  // Invoke handler for every work completion.
+  auto nwc = ibv_poll_cq(cq_, wc.size(), wc.data());
 
-      cv_.notify_all();
+  GLOO_ENFORCE_GE(nwc, 0);
+  for (int i = 0; i < nwc; i++) {
+    if (wc[i].status != IBV_WC_SUCCESS) {
+      continue;
     }
+
+    handleCompletion(&wc[i]);
+  }
+}
+
+void Pair::handleCompletion(struct ibv_wc* wc) {
+  if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
+    // Incoming RDMA write completed. Post new receive work request to
+    // backfill for this completed work request.
+    postReceive();
+
+    // Slot is encoded in immediate data on receive work completion.
+    // It is set in the Buffer::send function.
+    // Bits outside of kBufferSlotMask are currently unused.
+    int slot = wc->imm_data & kBufferSlotMask;
+    GLOO_ENFORCE_EQ(wc->imm_data & ~kBufferSlotMask, 0);
+    GLOO_ENFORCE(recvCompletionHandlers_[slot] != nullptr);
+    recvCompletionHandlers_[slot]->handleCompletion(wc);
+  } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
+    // Outbound RDMA write completed.
+    // Slot is encoded in wr_id fields on send work request. Unlike
+    // the receive work completions, the immediate data field on send
+    // work requests are not pass to the respective work completion.
+    int slot = wc->wr_id & kBufferSlotMask;
+    GLOO_ENFORCE_EQ(wc->wr_id & ~kBufferSlotMask, 0);
+    GLOO_ENFORCE(sendCompletionHandlers_[slot] != nullptr);
+    sendCompletionHandlers_[slot]->handleCompletion(wc);
+  } else if (wc->opcode == IBV_WC_RECV) {
+    // Memory region recv completed.
+    //
+    // Only used by the remote side of the pair to pass ibv_mr's.
+    // They are written to in FIFO order, so we can pick up
+    // and use the first MemoryRegion instance in the list of
+    // mapped receive regions.
+    //
+    // The buffer trying to write to this slot might be waiting for
+    // the other side of this pair to send its memory region.
+    // Lock access, and notify anybody waiting afterwards.
+    //
+    {
+      std::lock_guard<std::mutex> lock(m_);
+      GLOO_ENFORCE_GT(mappedRecvRegions_.size(), 0);
+      auto mr = std::move(mappedRecvRegions_.front());
+      mappedRecvRegions_.pop_front();
+
+      // Slot is encoded in immediate data on receive work completion.
+      // It is set in the Pair::sendMemoryRegion function.
+      // Bits outside of kBufferSlotMask are currently unused.
+      int slot = wc->imm_data & kBufferSlotMask;
+      GLOO_ENFORCE_EQ(wc->imm_data & ~kBufferSlotMask, 0);
+
+      // Move ibv_mr from memory region 'inbox' to final slot.
+      peerMemoryRegions_[slot] = mr->mr();
+    }
+
+    // Notify any buffer waiting for the details of its remote peer.
+    cv_.notify_all();
   } else if (wc->opcode == IBV_WC_SEND) {
-    // Nop
+    // Memory region send completed.
+    mappedSendRegions_.pop_front();
   } else {
     GLOO_ENFORCE(false, "Unexpected completion with opcode: ", wc->opcode);
   }

@@ -33,14 +33,6 @@ std::shared_ptr<::gloo::transport::Device> CreateDevice(
 class Pair;
 class Buffer;
 
-// Pure virtual base class for Pair/Buffer.
-// Used to dispatch completion handling from device loop.
-class Handler {
- public:
-  virtual ~Handler() {}
-  virtual void handleCompletion(struct ibv_wc* wc) = 0;
-};
-
 class Device : public ::gloo::transport::Device,
                public std::enable_shared_from_this<Device> {
   static const int capacity_ = 64;
@@ -57,7 +49,6 @@ class Device : public ::gloo::transport::Device,
   ibv_context* context_;
   ibv_pd* pd_;
   ibv_comp_channel* comp_channel_;
-  ibv_cq* cq_;
 
   void loop();
 

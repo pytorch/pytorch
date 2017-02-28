@@ -23,7 +23,7 @@ namespace gloo {
 namespace transport {
 namespace ibverbs {
 
-class Buffer : public ::gloo::transport::Buffer, public Handler {
+class Buffer : public ::gloo::transport::Buffer {
  public:
   virtual ~Buffer();
 
@@ -32,7 +32,7 @@ class Buffer : public ::gloo::transport::Buffer, public Handler {
   virtual void waitRecv() override;
   virtual void waitSend() override;
 
-  virtual void handleCompletion(struct ibv_wc* wc) override;
+  void handleCompletion(struct ibv_wc* wc);
 
  protected:
   // May only be constructed from helper function in pair.cc

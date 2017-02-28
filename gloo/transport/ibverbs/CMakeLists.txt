@@ -2,6 +2,7 @@ list(APPEND GLOO_TRANSPORT_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/address.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/buffer.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/device.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/memory_region.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/pair.cc"
   )
 
