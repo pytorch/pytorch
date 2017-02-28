@@ -1553,8 +1553,8 @@ class TestNNInit(TestCase):
                     fan_in = input_tensor.size(1)
                     fan_out = input_tensor.size(0)
                     if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].numel()
-                        fan_out *= input_tensor[0][0].numel()
+                        fan_in *= input_tensor[0, 0].numel()
+                        fan_out *= input_tensor[0, 0].numel()
 
                     expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                     bounds = expected_std * math.sqrt(3)
@@ -1581,8 +1581,8 @@ class TestNNInit(TestCase):
                     fan_in = input_tensor.size(1)
                     fan_out = input_tensor.size(0)
                     if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].numel()
-                        fan_out *= input_tensor[0][0].numel()
+                        fan_in *= input_tensor[0, 0].numel()
+                        fan_out *= input_tensor[0, 0].numel()
 
                     expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                     assert self._is_normal(input_tensor, 0, expected_std)
@@ -1606,49 +1606,65 @@ class TestNNInit(TestCase):
         for as_variable in [True, False]:
             for use_a in [True, False]:
                 for dims in [2, 4]:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
-                                                                 as_variable=as_variable)
-                    if use_a:
-                        a = self._random_float(0.1, 2)
-                        init.kaiming_uniform(input_tensor, a=a)
-                    else:
-                        a = 0
-                        init.kaiming_uniform(input_tensor)
+                    for mode in ['fan_in', 'fan_out']:
+                        input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
+                                                                     as_variable=as_variable)
+                        if use_a:
+                            a = self._random_float(0.1, 2)
+                            init.kaiming_uniform(input_tensor, a=a, mode=mode)
+                        else:
+                            a = 0
+                            init.kaiming_uniform(input_tensor, mode=mode)
 
-                    if as_variable:
-                        input_tensor = input_tensor.data
+                        if as_variable:
+                            input_tensor = input_tensor.data
 
-                    fan_in = input_tensor.size(1)
-                    if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].numel()
+                        fan_in = input_tensor.size(1)
+                        fan_out = input_tensor.size(0)
+                        if input_tensor.dim() > 2:
+                            fan_in *= input_tensor[0, 0].numel()
+                            fan_out *= input_tensor[0, 0].numel()
 
-                    expected_std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
-                    bounds = expected_std * math.sqrt(3.0)
-                    assert self._is_uniform(input_tensor, -bounds, bounds)
+                        if mode == 'fan_in':
+                            n = fan_in
+                        else:
+                            n = fan_out
+
+                        expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
+                        bounds = expected_std * math.sqrt(3.0)
+                        assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_normal(self):
         for as_variable in [True, False]:
             for use_a in [True, False]:
                 for dims in [2, 4]:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
-                                                                 as_variable=as_variable)
-                    if use_a:
-                        a = self._random_float(0.1, 2)
-                        init.kaiming_normal(input_tensor, a=a)
-                    else:
-                        a = 0
-                        init.kaiming_normal(input_tensor)
+                    for mode in ['fan_in', 'fan_out']:
+                        input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25,
+                                                                     as_variable=as_variable)
+                        if use_a:
+                            a = self._random_float(0.1, 2)
+                            init.kaiming_normal(input_tensor, a=a, mode=mode)
+                        else:
+                            a = 0
+                            init.kaiming_normal(input_tensor, mode=mode)
 
-                    if as_variable:
-                        input_tensor = input_tensor.data
+                        if as_variable:
+                            input_tensor = input_tensor.data
 
-                    fan_in = input_tensor.size(1)
-                    if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0][0].numel()
+                        fan_in = input_tensor.size(1)
+                        fan_out = input_tensor.size(0)
+                        if input_tensor.dim() > 2:
+                            fan_in *= input_tensor[0, 0].numel()
+                            fan_out *= input_tensor[0, 0].numel()
 
-                    expected_std = math.sqrt(2.0 / ((1 + a**2) * fan_in))
-                    assert self._is_normal(input_tensor, 0, expected_std)
+                        if mode == 'fan_in':
+                            n = fan_in
+                        else:
+                            n = fan_out
+
+                        expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
+                        assert self._is_normal(input_tensor, 0, expected_std)
 
     def test_sparse_only_works_on_2d_inputs(self):
         for as_variable in [True, False]:

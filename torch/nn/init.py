@@ -125,7 +125,20 @@ def xavier_normal(tensor, gain=1):
     return tensor.normal_(0, std)
 
 
-def kaiming_uniform(tensor, a=0):
+def _calculate_correct_fan(tensor, mode):
+    mode = mode.lower()
+    valid_modes = ['fan_in', 'fan_out']
+    if mode not in valid_modes:
+        raise ValueError("mode {} not supported, please use one of {}".format(mode, valid_modes))
+
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    if mode == 'fan_in':
+        return fan_in
+    else:
+        return fan_out
+
+
+def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
        Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform distribution.
 
@@ -135,23 +148,24 @@ def kaiming_uniform(tensor, a=0):
     Args:
         tensor: a n-dimension torch.Tensor
         a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
+        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the weights
+              in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_uniform(w)
+        >>> nninit.kaiming_uniform(w, mode='fan_in')
     """
-
     if isinstance(tensor, Variable):
-        kaiming_uniform(tensor.data, a=a)
+        kaiming_uniform(tensor.data, a=a, mode=mode)
         return tensor
 
-    fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-    std = math.sqrt(2.0 / ((1 + a ** 2) * fan_in))
+    fan = _calculate_correct_fan(tensor, mode)
+    std = math.sqrt(2.0 / ((1 + a ** 2) * fan))
     bound = math.sqrt(3.0) * std
     return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal(tensor, a=0):
+def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
        Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal distribution.
 
@@ -161,17 +175,19 @@ def kaiming_normal(tensor, a=0):
     Args:
         tensor: a n-dimension torch.Tensor
         a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
+        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the weights
+              in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_normal(w)
+        >>> nninit.kaiming_normal(w, mode='fan_out')
     """
     if isinstance(tensor, Variable):
-        kaiming_normal(tensor.data, a=a)
+        kaiming_normal(tensor.data, a=a, mode=mode)
         return tensor
 
-    fan_in, _ = _calculate_fan_in_and_fan_out(tensor)
-    std = math.sqrt(2.0 / ((1 + a ** 2) * fan_in))
+    fan = _calculate_correct_fan(tensor, mode)
+    std = math.sqrt(2.0 / ((1 + a ** 2) * fan))
     return tensor.normal_(0, std)
 
 
