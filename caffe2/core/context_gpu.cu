@@ -247,6 +247,7 @@ void Caffe2UsePinnedCPUAllocator() {
 #else
   if (!HasCudaGPU()) {
     VLOG(1) << "No GPU present. I won't use pinned allocator then.";
+    return;
   }
   VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
   SetCPUAllocator(new PinnedCPUAllocator());
