@@ -27,7 +27,7 @@ class CudaShared {
   }
 
   // Set the mutex used to synchronize CUDA and NCCL operations
-  static void SetMutex(std::mutex* m) {
+  static void setMutex(std::mutex* m) {
     mutex_ = m;
   }
 
