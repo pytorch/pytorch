@@ -9,9 +9,11 @@
 
 #pragma once
 
+#include <atomic>
+#include <mutex>
+
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <mutex>
 
 namespace gloo {
 
