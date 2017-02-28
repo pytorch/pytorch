@@ -48,11 +48,6 @@ Variable::Variable(
   previous_functions[0] = std::make_pair<>(creator, output_nr);
 }
 
-bool Variable::is_cuda()
-{
-  return data->isCuda();
-}
-
 auto Variable::backward(std::shared_ptr<Variable> gradOutput) -> void {
   if (backward_hook) {
     gradOutput = (*backward_hook)(gradOutput);

@@ -22,6 +22,7 @@ struct PyFunction : public Function {
 
   virtual variable_list apply(const variable_list& inputs) override;
   virtual void releaseVariables() override;
+  virtual std::string name() override;
 
   PyObject* obj;
 };

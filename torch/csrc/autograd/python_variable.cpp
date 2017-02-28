@@ -6,6 +6,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
+#include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
@@ -173,13 +174,7 @@ int THPVariable_set_creator(THPVariable *self, PyObject *obj)
 PyObject * THPVariable_get_data(THPVariable *self)
 {
   if (!self->data) {
-    auto& var = *self->cdata;
-    PyTypeObject* type = torch::getPyTypeObject(*var.data);
-    self->data = type->tp_alloc(type, 0);
-    if (self->data) {
-      ((torch::THPVoidTensor*)self->data)->cdata =
-          (torch::THVoidTensor *)var.data->retain().cdata();
-    }
+    self->data = torch::createPyObject(*self->cdata->data);
   }
   Py_INCREF(self->data);
   return self->data;
@@ -275,40 +270,6 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
   return 0;
 }
 
-struct PyVariableHook : public VariableHook {
-  PyVariableHook(PyObject* dict) : dict(dict) {
-    Py_INCREF(dict);
-  }
-  ~PyVariableHook() {
-    AutoGIL gil;
-    Py_DECREF(dict);
-  }
-
-  std::shared_ptr<Variable> operator()(const std::shared_ptr<Variable>& _grad) override {
-    AutoGIL gil;
-
-    THPObjectPtr grad = THPVariable_Wrap(_grad);
-    if (!grad) throw python_error();
-
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while (PyDict_Next(dict, &pos, &key, &value)) {
-      THPObjectPtr res = PyObject_CallFunctionObjArgs(value, grad.get(), nullptr);
-      if (!res) throw python_error();
-      if (res == Py_None) continue;
-      if (!PyObject_IsInstance(res.get(), THPVariableClass)) {
-        PyErr_Format(PyExc_TypeError, "expected Variable, but hook returned '%s'",
-            THPUtils_typename(res.get()));
-        throw python_error();
-      }
-      grad = std::move(res);
-    }
-    return ((THPVariable*)grad.get())->cdata;
-  }
-
-  PyObject* dict;
-};
-
 PyObject *THPVariable_get_backwards_hooks(THPVariable *self)
 {
   if (self->backward_hooks) {
@@ -327,7 +288,7 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
   Py_XDECREF(self->backward_hooks);
   self->backward_hooks = obj;
   if (obj) {
-    self->cdata->backward_hook.reset(new PyVariableHook(obj));
+    self->cdata->backward_hook.reset(new PyGradHook(obj));
   } else {
     self->cdata->backward_hook.reset();
   }

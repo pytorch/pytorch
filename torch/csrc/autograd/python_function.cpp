@@ -78,6 +78,12 @@ auto PyFunction::releaseVariables() -> void {
   f->has_freed_buffers = 1;
 }
 
+auto PyFunction::name() -> std::string {
+  AutoGIL gil;
+  auto f = (THPFunction*) obj;
+  return std::string(Py_TYPE(f)->tp_name);
+}
+
 }} // namespace torch::autograd
 
 // Traverse and clear are required for supporting Python's GC cycle handling.

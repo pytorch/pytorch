@@ -9,6 +9,7 @@
 
 #include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -65,6 +66,20 @@ void THPCppFunction_dealloc(PyObject* self)
   Py_TYPE(self)->tp_free(self);
 }
 
+PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
+{
+  if (!THPVariable_Check(_var)) {
+    return PyErr_Format(PyExc_TypeError, "_register_hook_dict expected a variable");
+  }
+  auto var = (THPVariable*)_var;
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  if (fn.hooks.empty()) {
+    fn.hooks.resize(fn.num_outputs);
+  }
+  fn.hooks[var->cdata->output_nr] = std::make_shared<PyGradHook>(var->backward_hooks);
+  Py_RETURN_NONE;
+}
+
 } // namespace
 
 int TensorConverter(PyObject* obj, std::unique_ptr<thpp::Tensor>* address)
@@ -79,12 +94,18 @@ int TensorConverter(PyObject* obj, std::unique_ptr<thpp::Tensor>* address)
   return 1;
 }
 
+static struct PyMethodDef THPCppFunction_methods[] = {
+  {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, NULL},
+  {NULL}
+};
+
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name)
 {
   type.tp_flags = Py_TPFLAGS_DEFAULT;
   type.tp_name = name;
   type.tp_basicsize = sizeof(THPCppFunction);
   type.tp_call = THPCppFunction_call;
+  type.tp_methods = THPCppFunction_methods;
   type.tp_dealloc = THPCppFunction_dealloc;
   if (PyType_Ready(&type) < 0) {
     auto msg = std::string("Unable to instantiate PyTypeObject for ") + name;

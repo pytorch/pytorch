@@ -6,6 +6,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/Exceptions.h"
 
 namespace torch { namespace autograd {
 
@@ -20,7 +21,9 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   THPObjectPtr obj = type->tp_alloc(type, 0);
   if (!obj) return NULL;
   THPCppFunction* f = (THPCppFunction*)obj.get();
+  HANDLE_TH_ERRORS
   new (&f->cdata) std::shared_ptr<Function>(Ctor()(args));
+  END_HANDLE_TH_ERRORS
   if (!f->cdata) {
     return NULL;
   }
@@ -33,7 +36,7 @@ template<typename Ctor>
 PyTypeObject* createForwardFunctionPyTypeObject(PyTypeObject& type, const char* name)
 {
   type.tp_new = &CppFunction_pynew<Ctor>;
-    return _initFunctionPyTypeObject(type, name);
+  return _initFunctionPyTypeObject(type, name);
 }
 
 // conversion utilities for PyArg_ParseTuple

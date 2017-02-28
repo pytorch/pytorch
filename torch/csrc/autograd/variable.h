@@ -10,7 +10,6 @@
 
 namespace torch { namespace autograd {
 
-struct VariableHook;
 struct VariableVersion;
 
 struct Variable : public Function {
@@ -22,8 +21,6 @@ struct Variable : public Function {
       bool requires_grad,
       bool is_volatile);
 
-  bool is_cuda();
-  bool is_sparse();
   void backward(std::shared_ptr<Variable> gradOutput);
   virtual variable_list apply(const variable_list& gradOutputs) override;
 
@@ -42,12 +39,8 @@ struct Variable : public Function {
   std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
   int output_nr;
-  std::unique_ptr<VariableHook> backward_hook;
+  std::unique_ptr<GradHook> backward_hook;
   PyObject *pyobj;  // weak reference
-};
-
-struct VariableHook {
-  virtual std::shared_ptr<Variable> operator()(const std::shared_ptr<Variable>& grad) = 0;
 };
 
 struct VariableVersion {

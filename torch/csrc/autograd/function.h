@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/grad_hook.h"
 
 namespace torch { namespace autograd {
 
@@ -35,14 +36,16 @@ struct Function {
     , requires_grad(false)
     , is_volatile(false)
     , is_stochastic(false)
+    , hooks()
     {}
 
-  Function(FunctionFlags flags)
+  Function(FunctionFlags&& flags)
     : num_outputs(0)
     , previous_functions(std::move(flags.previous_functions))
     , requires_grad(flags.requires_grad)
     , is_volatile(flags.is_volatile)
     , is_stochastic(false)
+    , hooks()
     {}
 
   Function(const Function& other) = delete;
@@ -52,12 +55,23 @@ struct Function {
   // Implements the operation
   virtual variable_list apply(const variable_list& inputs) = 0;
 
+  // Calls the hooks on each input
+  virtual variable_list call_hooks(variable_list inputs);
+
   // Computes requires_grad, is_volatile, and previous_functions from a list
   // of input variables
   static FunctionFlags flags(const variable_list& inputs);
 
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
+
+  // Function name for debugging
+  virtual std::string name();
+
+  inline bool needs_input_grad(int i) const {
+    auto& fn = previous_functions[i].first;
+    return fn && fn->requires_grad;
+  }
 
   // These variables are usually only meaningful for "backward" functions.
   // num_outputs is the number of outputs of corresponding "forward" function;
@@ -67,6 +81,7 @@ struct Function {
   bool requires_grad;
   bool is_volatile;
   bool is_stochastic;
+  std::vector<std::shared_ptr<GradHook>> hooks;
 };
 
 

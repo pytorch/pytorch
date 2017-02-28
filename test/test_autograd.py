@@ -70,6 +70,25 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5))
         self.assertEqual(y.grad.data, (x.data + 1) * 4)
 
+    def test_hooks_cpp(self):
+        # Tests hooks for autograd function implemented in C++
+        bn = torch.nn.BatchNorm1d(5, affine=False)
+        bn.eval()
+
+        counter = [0]
+
+        def bw_hook(grad):
+            counter[0] += 1
+            return grad * 2
+
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+        z = bn(x)
+        z.register_hook(bw_hook)
+        z.sum().backward()
+
+        self.assertEqual(counter[0], 1, 'bw_hook not called')
+        self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
+
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
         # You should never have to use such things in your code.
