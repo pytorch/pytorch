@@ -52,22 +52,27 @@ TYPE_TRANSFORMS = {
     'Float': {
         'THTensor*': 'THFloatTensor*',
         'real': 'float',
+        'accreal': 'double',
     },
     'Double': {
         'THTensor*': 'THDoubleTensor*',
         'real': 'double',
+        'accreal': 'double',
     },
     'CudaHalf': {
         'THCTensor*': 'THCudaHalfTensor*',
         'real': 'half',
+        'accreal': 'float',
     },
     'Cuda': {
         'THCTensor*': 'THCudaTensor*',
         'real': 'float',
+        'accreal': 'float',
     },
     'CudaDouble': {
         'THCTensor*': 'THCudaDoubleTensor*',
         'real': 'double',
+        'accreal': 'double',
     },
 }
 for t, transforms in TYPE_TRANSFORMS.items():

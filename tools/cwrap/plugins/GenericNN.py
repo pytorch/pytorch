@@ -65,7 +65,7 @@ void $name($args)
         'THCTensor*': 'thpp::Tensor*',
         'THIndexTensor*': 'thpp::Tensor*',
         'THIndex_t': 'long',
-        'real': 'double',
+        'accreal': 'double',
     }
 
     def __init__(self, header=False):
