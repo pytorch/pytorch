@@ -145,7 +145,6 @@ IF(C_AVX2_FOUND)
   SET(CMAKE_C_FLAGS "-DUSE_AVX2 ${CMAKE_C_FLAGS}")
 ENDIF(C_AVX2_FOUND)
 
-
 CHECK_C_SOURCE_RUNS("
 #include <stdatomic.h>
 int main()
@@ -243,10 +242,15 @@ SET(src ${src} ${hdr} ${simd})
 ##### build section
 ######################################################################
 
-ADD_LIBRARY(TH SHARED ${src})
-if(BUILD_STATIC)
-  ADD_LIBRARY(TH_static STATIC ${src})
-endif()
+ADD_TORCH_LIBRARY(TH SHARED "${src}")
+
+IF (BUILD_STATIC OR "$ENV{STATIC_TH}" STREQUAL "YES")
+  ADD_TORCH_LIBRARY(TH_static STATIC "${src}")
+  SET_TARGET_PROPERTIES(TH_static PROPERTIES
+    COMPILE_FLAGS "-fPIC")
+  SET_TARGET_PROPERTIES(TH_static PROPERTIES
+    PREFIX "lib" IMPORT_PREFIX "lib" OUTPUT_NAME "TH")
+ENDIF()
 
 IF(NOT TH_SO_VERSION)
   SET(TH_SO_VERSION 0)
