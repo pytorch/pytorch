@@ -105,6 +105,7 @@ sampleMultinomialOnce(long* dest,
                       T* sampled,
                       T* dist) {
   extern __shared__ __align__(sizeof(AccT)) unsigned char my_smem[];
+  __shared__ bool found;
 
   // Shared Memory hold blockdim.x T for holding the cumulative sum,
   // blockDim.x AccT for normalizing the probabilities,
@@ -153,8 +154,9 @@ sampleMultinomialOnce(long* dest,
 
     int chunks = THCCeilDiv(categories, (int) blockDim.x);
     T prevHighProb = zero;
+    found = false;
 
-    for (int chunk = 0; chunk < chunks; ++chunk) {
+    for (int chunk = 0; chunk < chunks && !found; ++chunk) {
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
@@ -197,14 +199,29 @@ sampleMultinomialOnce(long* dest,
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
-        // FIXME: broadcast exit flag?
         dest[curDist] = cat + TH_INDEX_BASE;
+        found = true;
       }
 
       // Store the previous scan's high value for future use
       prevHighProb = THCNumerics<T>::add(prevHighProb, smem[blockDim.x - 1]);
 
       __syncthreads();
+    }
+
+    if (threadIdx.x == 0 && !found) {
+      // This should address a rare bug where we don't select a valid index. This likely occurs when
+      // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
+      // and our uniform sample is greater than this value. In this case we likely have unitialized memory
+      // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
+      // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
+      // rarity in which this occurs, this should not be an issue.
+      for (int cat = categories - 1; cat >= 0; --cat) {
+        if (THCNumerics<T>::gt(dist[curDist * categories + cat], zero)) {
+          dest[curDist] = cat + TH_INDEX_BASE;
+          break;
+        }
+      }
     }
   }
 }
