@@ -354,20 +354,6 @@ static void tensorProdall(rpc::RPCMessage& raw_message) {
   }
 }
 
-static void tensorNeg(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  finalize(raw_message);
-  tensor->neg(*src);
-}
-
-static void tensorCinv(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  finalize(raw_message);
-  tensor->cinv(*src);
-}
-
 static void tensorAdd(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);

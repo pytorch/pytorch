@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Generator.hpp"
 #include "Storage.hpp"
 #include "Type.hpp"
 
@@ -95,7 +96,7 @@ struct Tensor {
 
   virtual Tensor& diag(const Tensor& src, int k) = 0;
   virtual Tensor& eye(long n, long m) = 0;
-  // virtual Tensor& randperm() = 0; TODO
+  virtual Tensor& randperm(const Generator& _generator, long n) = 0;
   virtual Tensor& sort(const Tensor& ri, const Tensor& src,
                        int dimension, int desc) = 0;
   virtual Tensor& topk(const Tensor& ri, const Tensor& src,
@@ -127,6 +128,45 @@ struct Tensor {
   virtual Tensor& sin(const Tensor& src) = 0;
   virtual Tensor& asin(const Tensor& src) = 0;
   virtual Tensor& sinh(const Tensor& src) = 0;
+
+  virtual Tensor& tan(const Tensor& src) = 0;
+  virtual Tensor& atan(const Tensor& src) = 0;
+  virtual Tensor& atan2(const Tensor& src1, const Tensor& src2) = 0;
+  virtual Tensor& tanh(const Tensor& src) = 0;
+  virtual Tensor& sqrt(const Tensor& src) = 0;
+  virtual Tensor& rsqrt(const Tensor& src) = 0;
+  virtual Tensor& ceil(const Tensor& src) = 0;
+  virtual Tensor& floor(const Tensor& src) = 0;
+  virtual Tensor& round(const Tensor& src) = 0;
+  virtual Tensor& trunc(const Tensor& src) = 0;
+  virtual Tensor& frac(const Tensor& src) = 0;
+  virtual Tensor& mean(const Tensor& src, int dimension) = 0;
+  virtual Tensor& std(const Tensor& src, int dimension, int flag) = 0;
+  virtual Tensor& var(const Tensor& src, int dimension, int flag) = 0;
+  virtual Tensor& rand(const Generator& _generator, THLongStorage *size) = 0;
+  virtual Tensor& randn(const Generator& _generator, THLongStorage *size) = 0;
+
+  virtual int logicalall() = 0;
+  virtual int logicalany() = 0;
+  virtual Tensor& random(const Generator& _generator) = 0;
+  virtual Tensor& geometric(const Generator& _generator, double p) = 0;
+  virtual Tensor& bernoulli(const Generator& _generator, double p) = 0;
+  virtual Tensor& bernoulli_FloatTensor(const Generator& _generator, const Tensor& p) = 0;
+  virtual Tensor& bernoulli_DoubleTensor(const Generator& _generator, const Tensor& p) = 0;
+  virtual Tensor& uniform(const Generator& _generator, double a, double b) = 0;
+  virtual Tensor& normal(const Generator& _generator, double mean, double stdv) = 0;
+  virtual Tensor& exponential(const Generator& _generator, double lambda) = 0;
+  virtual Tensor& cauchy(const Generator& _generator, double median, double sigma) = 0;
+  virtual Tensor& logNormal(const Generator& _generator, double mean, double stdv) = 0;
+
+  // Note: the order of *Tensor and *Prob_dist is reversed compared to
+  // the declarations in TH/generic/THTensorMath.h, so for instance
+  // the call:
+  // THRealTensor_multinomial(r, _generator, prob_dist, n_sample, with_replacement)
+  // is equivalent to `prob_dist->multinomial(r, _generator, n_sample, with_replacement)`.
+  // It is done this way so that the first argument can be casted onto a float tensor type.
+  virtual Tensor& multinomial(const Tensor& r, const Generator& _generator,
+                              int n_sample, int with_replacement) = 0;
 
   virtual thpp::Type type() const = 0;
   virtual bool isCuda() const = 0;
@@ -202,6 +242,22 @@ struct TensorScalarInterface : public Tensor {
   virtual TensorScalarInterface& geValueT(const Tensor& t, scalar_type value) = 0;
   virtual TensorScalarInterface& neValueT(const Tensor& t, scalar_type value) = 0;
   virtual TensorScalarInterface& eqValueT(const Tensor& t, scalar_type value) = 0;
+
+  virtual TensorScalarInterface& pow(const Tensor& src, scalar_type value) = 0;
+  virtual TensorScalarInterface& tpow(scalar_type value, const Tensor& src) = 0;
+  virtual TensorScalarInterface& lerp(const Tensor& a, const Tensor& b, scalar_type weight) = 0;
+  virtual TensorScalarInterface& norm(const Tensor& src, scalar_type value, int dimension) = 0;
+  virtual TensorScalarInterface& renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) = 0;
+  virtual TensorScalarInterface& histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
+  virtual TensorScalarInterface& bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
+
+  virtual scalar_type dist(const Tensor& src, scalar_type value) = 0;
+  virtual scalar_type meanall() = 0;
+  virtual scalar_type varall() = 0;
+  virtual scalar_type stdall() = 0;
+  virtual scalar_type normall(scalar_type value) = 0;
+  virtual TensorScalarInterface& linspace(scalar_type a, scalar_type b, long n) = 0;
+  virtual TensorScalarInterface& logspace(scalar_type a, scalar_type b, long n) = 0;
 };
 
 using FloatTensor = TensorScalarInterface<double>;

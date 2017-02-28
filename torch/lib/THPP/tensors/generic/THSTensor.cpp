@@ -226,6 +226,11 @@ auto THSTensor<real>::range(scalar_type xmin, scalar_type xmax,
 }
 
 template<>
+auto THSTensor<real>::randperm(const Generator& _generator, long n) -> THSTensor& {
+  throw std::runtime_error("THSTensor::randperm() not supported");
+}
+
+template<>
 auto THSTensor<real>::sort(const Tensor& ri, const Tensor& src,
                           int dimension, int desc) -> THSTensor& {
   throw std::runtime_error("THSTensor::sort() not supported");
@@ -357,6 +362,228 @@ auto THSTensor<real>::sinh(const Tensor& src) -> THSTensor& {
 template<>
 auto THSTensor<real>::copy(const Tensor& src) -> THSTensor& {
   throw std::runtime_error("THSTensor::copy() not supported");
+}
+
+template<>
+auto THSTensor<real>::tan(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::tan() not supported");
+}
+
+template<>
+auto THSTensor<real>::atan(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::atan() not supported");
+}
+
+template<>
+auto THSTensor<real>::atan2(const Tensor& src1, const Tensor& src2) -> THSTensor& {
+  throw std::runtime_error("THSTensor::atan2() not supported");
+}
+
+template<>
+auto THSTensor<real>::tanh(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::tanh() not supported");
+}
+
+template<>
+auto THSTensor<real>::pow(const Tensor& src, scalar_type value) -> THSTensor& {
+  throw std::runtime_error("THSTensor::pow() not supported");
+}
+
+template<>
+auto THSTensor<real>::tpow(scalar_type value, const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::tpow() not supported");
+}
+
+template<>
+auto THSTensor<real>::sqrt(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::sqrt() not supported");
+}
+
+template<>
+auto THSTensor<real>::rsqrt(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::rsqrt() not supported");
+}
+
+template<>
+auto THSTensor<real>::ceil(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::ceil() not supported");
+}
+
+template<>
+auto THSTensor<real>::floor(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::floor() not supported");
+}
+
+template<>
+auto THSTensor<real>::round(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::round() not supported");
+}
+
+template<>
+auto THSTensor<real>::trunc(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::trunc() not supported");
+}
+
+template<>
+auto THSTensor<real>::frac(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::frac() not supported");
+}
+
+template<>
+auto THSTensor<real>::lerp(const Tensor& a, const Tensor& b, scalar_type weight) -> THSTensor& {
+  throw std::runtime_error("THSTensor::lerp() not supported");
+}
+
+template<>
+auto THSTensor<real>::mean(const Tensor& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::mean() not supported");
+}
+
+template<>
+auto THSTensor<real>::std(const Tensor& src, int dimension, int flag) -> THSTensor& {
+  throw std::runtime_error("THSTensor::std() not supported");
+}
+
+template<>
+auto THSTensor<real>::var(const Tensor& src, int dimension, int flag) -> THSTensor& {
+  throw std::runtime_error("THSTensor::var() not supported");
+}
+
+template<>
+auto THSTensor<real>::norm(const Tensor& src, scalar_type value, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::norm() not supported");
+}
+
+template<>
+auto THSTensor<real>::renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) -> THSTensor& {
+  throw std::runtime_error("THSTensor::renorm() not supported");
+}
+
+template<>
+auto THSTensor<real>::histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) -> THSTensor& {
+  throw std::runtime_error("THSTensor::histc() not supported");
+}
+
+template<>
+auto THSTensor<real>::bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) -> THSTensor& {
+  throw std::runtime_error("THSTensor::bhistc() not supported");
+}
+
+template<>
+auto THSTensor<real>::dist(const Tensor& src, scalar_type value) -> scalar_type {
+  throw std::runtime_error("THSTensor::dist() not supported");
+}
+
+template<>
+auto THSTensor<real>::meanall() -> scalar_type {
+  throw std::runtime_error("THSTensor::meanall() not supported");
+}
+
+template<>
+auto THSTensor<real>::varall() -> scalar_type {
+  throw std::runtime_error("THSTensor::varall() not supported");
+}
+
+template<>
+auto THSTensor<real>::stdall() -> scalar_type {
+  throw std::runtime_error("THSTensor::stdall() not supported");
+}
+
+template<>
+auto THSTensor<real>::normall(scalar_type value) -> scalar_type {
+  throw std::runtime_error("THSTensor::normall() not supported");
+}
+
+template<>
+auto THSTensor<real>::linspace(scalar_type a, scalar_type b, long n) -> THSTensor& {
+  throw std::runtime_error("THSTensor::linspace() not supported");
+}
+
+template<>
+auto THSTensor<real>::logspace(scalar_type a, scalar_type b, long n) -> THSTensor& {
+  throw std::runtime_error("THSTensor::logspace() not supported");
+}
+
+template<>
+auto THSTensor<real>::rand(const Generator& _generator, THLongStorage *size) -> THSTensor& {
+  throw std::runtime_error("THSTensor::rand() not supported");
+}
+
+template<>
+auto THSTensor<real>::randn(const Generator& _generator, THLongStorage *size) -> THSTensor& {
+  throw std::runtime_error("THSTensor::randn() not supported");
+}
+
+template<>
+int THSTensor<real>::logicalall() {
+  throw std::runtime_error("THSTensor::logicalall() not supported");
+}
+
+template<>
+int THSTensor<real>::logicalany() {
+  throw std::runtime_error("THSTensor::logicalany() not supported");
+}
+
+template<>
+auto THSTensor<real>::random(const Generator& _generator) -> THSTensor& {
+  throw std::runtime_error("THSTensor::random() not supported");
+}
+
+template<>
+auto THSTensor<real>::geometric(const Generator& _generator, double p) -> THSTensor& {
+  throw std::runtime_error("THSTensor::geometric() not supported");
+}
+
+template<>
+auto THSTensor<real>::bernoulli(const Generator& _generator, double p) -> THSTensor& {
+  throw std::runtime_error("THSTensor::bernoulli() not supported");
+}
+
+template<>
+auto THSTensor<real>::bernoulli_FloatTensor(const Generator& _generator, const Tensor& p) -> THSTensor& {
+  throw std::runtime_error("THSTensor::bernoulli_FloatTensor() not supported");
+}
+
+template<>
+auto THSTensor<real>::bernoulli_DoubleTensor(const Generator& _generator, const Tensor& p) -> THSTensor& {
+  throw std::runtime_error("THSTensor::bernoulli_DoubleTensor() not supported");
+}
+
+template<>
+auto THSTensor<real>::uniform(const Generator& _generator, double a, double b) -> THSTensor& {
+  throw std::runtime_error("THSTensor::uniform() not supported");
+}
+
+template<>
+auto THSTensor<real>::normal(const Generator& _generator, double mean, double stdv) -> THSTensor& {
+  throw std::runtime_error("THSTensor::normal() not supported");
+}
+
+template<>
+auto THSTensor<real>::exponential(const Generator& _generator, double lambda) -> THSTensor& {
+  throw std::runtime_error("THSTensor::exponential() not supported");
+}
+
+template<>
+auto THSTensor<real>::cauchy(const Generator& _generator, double median, double sigma) -> THSTensor& {
+  throw std::runtime_error("THSTensor::cauchy() not supported");
+}
+
+template<>
+auto THSTensor<real>::logNormal(const Generator& _generator, double mean, double stdv) -> THSTensor& {
+  throw std::runtime_error("THSTensor::logNormal() not supported");
+}
+
+// Note: the order of *Tensor and *Prob_dist is reversed compared to
+// the declarations in TH/generic/THTensorMath.h, so for instance
+// the call:
+// THRealTensor_multinomial(r, _generator, prob_dist, n_sample, with_replacement)
+// is equivalent to `prob_dist->multinomial(r, _generator, n_sample, with_replacement)`.
+// It is done this way so that the first argument can be casted onto a float tensor type.
+template<>
+auto THSTensor<real>::multinomial(const Tensor& r, const Generator& _generator,
+                                  int n_sample, int with_replacement) -> THSTensor& {
+  throw std::runtime_error("THSTensor::multinomial() not supported");
 }
 
 template<>
