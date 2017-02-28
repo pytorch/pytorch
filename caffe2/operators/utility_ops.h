@@ -567,7 +567,6 @@ class ScatterAssignOp : public Operator<Context> {
     T* data = output->template mutable_data<T>();
     const Index* idxs = indices.template data<Index>();
     const T* slicesData = slices.template data<T>();
-    // TODO: proper vectorization with Eigen
     for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only

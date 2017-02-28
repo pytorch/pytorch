@@ -330,7 +330,6 @@ bool PoolOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   int pooled_width = Y->dim32(2);
 
   // The main loop
-  // TODO: proper vectorization with Eigen
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       int hstart = ph * stride_h_ - pad_t_;
