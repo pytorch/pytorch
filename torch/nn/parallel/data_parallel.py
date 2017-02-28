@@ -7,6 +7,7 @@ from .parallel_apply import parallel_apply
 
 
 class DataParallel(Module):
+
     """Implements data parallelism at the module level.
 
     This container parallelizes the application of the given module by
@@ -42,6 +43,7 @@ class DataParallel(Module):
     """
 
     # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
+
     def __init__(self, module, device_ids=None, output_device=None, dim=0):
 
         super(DataParallel, self).__init__()
@@ -82,10 +84,12 @@ class DataParallel(Module):
         gpu_dicts = None
         if kwargs:
             scatter_kwargs = {}
-            for key  in kwargs.keys():
-                scatter_kwargs[key] = self.scatter(_to_cuda(kwargs[key]), self.device_ids)
+            for key in kwargs.keys():
+                scatter_kwargs[key] = self.scatter(
+                    _to_cuda(kwargs[key]), self.device_ids)
             gpu_dicts = tuple([
-                dict([(key, values[i]) for key, values in scatter_kwargs.items()])
+                dict([(key, values[i])
+                     for key, values in scatter_kwargs.items()])
                 for i in self.device_ids
             ])
         replicas = replicas[:len(scattered)]
@@ -135,11 +139,10 @@ def data_parallel(module, inputs, device_ids, module_kwargs=None, output_device=
     replicas = replicate(module, device_ids)
     scattered = scatter(inputs, device_ids, dim)
 
-
     gpu_dicts = None
     if module_kwargs:
         scatter_kwargs = {}
-        for key  in module_kwargs.keys():
+        for key in module_kwargs.keys():
             scatter_kwargs[key] = scatter(module_kwargs[key], device_ids, dim)
         gpu_dicts = tuple([
             dict([(key, values[i]) for key, values in scatter_kwargs.items()])

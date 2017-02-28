@@ -42,13 +42,12 @@ def parallel_apply(modules, inputs, kwargs):
                 results[input] = e
     if kwargs is None:
         threads = [threading.Thread(target=_worker,
-                                args=(module, input, kwargs, results, lock))
-               for module, input in zip(modules, inputs)]
+                                    args=(module, input, kwargs, results, lock))
+                   for module, input in zip(modules, inputs)]
     else:
         threads = [threading.Thread(target=_worker,
-                                args=(module, input, kwargs, results, lock))
-               for module, input, kwargs in zip(modules, inputs, kwargs)]
-
+                                    args=(module, input, kwargs, results, lock))
+                   for module, input, kwargs in zip(modules, inputs, kwargs)]
 
     for thread in threads:
         thread.start()
