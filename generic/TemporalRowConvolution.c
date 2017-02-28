@@ -81,11 +81,13 @@ static void THNN_(unfolded_acc_row)(
 
 			ix = (long long)(kw);
 			if (dW == 1) {
-				THVector_(add)(dst + (size_t)(ix), src, 1, nOutputFrame);
+			  real *dst_slice = dst + (size_t)(ix);
+			  THVector_(cadd)(dst_slice, dst_slice, src, 1, nOutputFrame);
 			} else {
 				for (x = 0; x < nOutputFrame; x++) {
-					THVector_(add)(dst + (size_t)(ix + x * dW),
-					               src + (size_t)(x), 1, 1);
+				  real *dst_slice = dst + (size_t)(ix + x * dW);
+				  THVector_(cadd)(dst_slice, dst_slice,
+						  src + (size_t)(x), 1, 1);
 				}
 			}
 		}
