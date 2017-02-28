@@ -6,21 +6,6 @@ using namespace thd;
 using namespace rpc;
 using namespace master;
 
-real THDStorage_(receiveValueFromWorker)(int worker_id) {
-  thpp::Type type = thpp::type_traits<real>::type;
-  if (thpp::isInteger(type)) {
-    IntScalar wrapped_value;
-    dataChannel->receive(wrapped_value, worker_id);
-    return static_cast<real>(wrapped_value.value());
-  } else if (thpp::isFloat(type)) {
-    FloatScalar wrapped_value;
-    dataChannel->receive(wrapped_value, worker_id);
-    return static_cast<real>(wrapped_value.value());
-  } else {
-    throw std::invalid_argument("expected scalar type");
-  }
-}
-
 static THDStorage* THDStorage_(_alloc)() {
   THDStorage* new_storage = new THDStorage();
   std::memset(reinterpret_cast<void*>(new_storage), 0, sizeof(new_storage));
@@ -71,7 +56,7 @@ real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
     ),
     THDState::s_current_worker
   );
-  return THDStorage_(receiveValueFromWorker)(storage->node_id);
+  return receiveValueFromWorker<real>(storage->node_id);
 }
 
 THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {

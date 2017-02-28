@@ -123,6 +123,14 @@ object_id_type unpackStorage(RPCMessage& raw_message) {
   throw std::invalid_argument("expected storage in the raw message");
 }
 
+object_id_type unpackGenerator(RPCMessage& raw_message) {
+  thpp::Type type = unpackType(raw_message);
+  if (type == thpp::Type::GENERATOR) {
+    return unpackScalar<object_id_type>(raw_message);
+  }
+  throw std::invalid_argument("expected generator in the raw message");
+}
+
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
   // TODO this might leak on errors
   thpp::Type type = unpackType(raw_message);

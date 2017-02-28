@@ -6,22 +6,6 @@ using namespace thd;
 using namespace rpc;
 using namespace master;
 
-template<typename T>
-T THDTensor_(receiveValueFromWorker)(int worker_id) {
-  thpp::Type type = thpp::type_traits<real>::type;
-  if (thpp::isInteger(type)) {
-    IntScalar wrapped_value;
-    dataChannel->receive(wrapped_value, worker_id);
-    return static_cast<T>(wrapped_value.value());
-  } else if (thpp::isFloat(type)) {
-    FloatScalar wrapped_value;
-    dataChannel->receive(wrapped_value, worker_id);
-    return static_cast<T>(wrapped_value.value());
-  } else {
-    throw std::invalid_argument("expected scalar type");
-  }
-}
-
 // taken from TH (generic/THTensor.c)
 THDDescBuff THDTensor_(sizeDesc)(const THDTensor *tensor) {
   const int L = THD_DESC_BUFF_LEN;
@@ -717,7 +701,7 @@ accreal THDTensor_(dot)(THDTensor *self, THDTensor *src) {
     THDState::s_current_worker
   );
 
-  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
+  return receiveValueFromWorker<accreal>(THDState::s_current_worker);
 }
 
 real THDTensor_(minall)(THDTensor *self) {
@@ -726,7 +710,7 @@ real THDTensor_(minall)(THDTensor *self) {
     THDState::s_current_worker
   );
 
-  return THDTensor_(receiveValueFromWorker)<real>(THDState::s_current_worker);
+  return receiveValueFromWorker<real>(THDState::s_current_worker);
 }
 
 real THDTensor_(maxall)(THDTensor *self) {
@@ -735,7 +719,7 @@ real THDTensor_(maxall)(THDTensor *self) {
     THDState::s_current_worker
   );
 
-  return THDTensor_(receiveValueFromWorker)<real>(THDState::s_current_worker);
+  return receiveValueFromWorker<real>(THDState::s_current_worker);
 }
 
 accreal THDTensor_(sumall)(THDTensor *self) {
@@ -744,7 +728,7 @@ accreal THDTensor_(sumall)(THDTensor *self) {
     THDState::s_current_worker
   );
 
-  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
+  return receiveValueFromWorker<accreal>(THDState::s_current_worker);
 }
 
 accreal THDTensor_(prodall)(THDTensor *self) {
@@ -753,23 +737,7 @@ accreal THDTensor_(prodall)(THDTensor *self) {
     THDState::s_current_worker
   );
 
-  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
-}
-
-void THDTensor_(neg)(THDTensor *self, THDTensor *src) {
-  THDTensor_(resizeAs)(self, src);
-  masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorNeg, self, src),
-    THDState::s_current_worker
-  );
-}
-
-void THDTensor_(cinv)(THDTensor *self, THDTensor *src) {
-  THDTensor_(resizeAs)(self, src);
-  masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorCinv, self, src),
-    THDState::s_current_worker
-  );
+  return receiveValueFromWorker<accreal>(THDState::s_current_worker);
 }
 
 void THDTensor_(add)(THDTensor *self, THDTensor *src, real value) {
@@ -1187,7 +1155,7 @@ accreal THDTensor_(trace)(THDTensor *self) {
     THDState::s_current_worker
   );
 
-  return THDTensor_(receiveValueFromWorker)<accreal>(THDState::s_current_worker);
+  return receiveValueFromWorker<accreal>(THDState::s_current_worker);
 }
 
 void THDTensor_(cross)(THDTensor *self, THDTensor *src1, THDTensor *src2, int dimension) {

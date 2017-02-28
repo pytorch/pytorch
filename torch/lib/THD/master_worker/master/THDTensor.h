@@ -17,5 +17,8 @@ typedef struct {
 #include "generic/THDTensorCopy.h"
 #include <TH/THGenerateAllTypes.h>
 
+#include "generic/THDTensorRandom.h"
+#include <TH/THGenerateAllTypes.h>
+
 #include "generic/THDTensorMath.h"
 #include <TH/THGenerateAllTypes.h>

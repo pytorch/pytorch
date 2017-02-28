@@ -26,7 +26,7 @@ namespace thpp {
 template<typename real>
 struct THCTensor : public interface_traits<real>::tensor_interface_type {
   template<typename U>
-  friend class THCTensor;
+  friend struct THCTensor;
 
 private:
   using interface_type = typename interface_traits<real>::tensor_interface_type;
@@ -89,7 +89,7 @@ public:
   virtual THCTensor& eye(long n, long m) override;
   virtual THCTensor& range(scalar_type xmin, scalar_type xmax,
                           scalar_type step) override;
-  // virtual Tensor& randperm() override; TODO
+  virtual THCTensor& randperm(const Generator& _generator, long n) override;
   virtual THCTensor& sort(const Tensor& ri, const Tensor& src,
                        int dimension, int desc) override;
   virtual THCTensor& topk(const Tensor& ri, const Tensor& src,
@@ -102,7 +102,7 @@ public:
   virtual int equal(const Tensor& other) const override;
 
   // Note: the order in *Value and *Tensor is reversed compared to
-  // the declarations in TH/generic/THCTensorMath.h, so for instance
+  // the declarations in TH/generic/THTensorMath.h, so for instance
   // the call THRealTensor_ltTensor(r, ta, tb) is equivalent to
   // ta->ltTensor(r, tb). It is done this way so that the first
   // argument can be casted onto a byte tensor type
@@ -130,6 +130,58 @@ public:
   virtual THCTensor& sin(const Tensor& src) override;
   virtual THCTensor& asin(const Tensor& src) override;
   virtual THCTensor& sinh(const Tensor& src) override;
+
+  virtual THCTensor& tan(const Tensor& src) override;
+  virtual THCTensor& atan(const Tensor& src) override;
+  virtual THCTensor& atan2(const Tensor& src1, const Tensor& src2) override;
+  virtual THCTensor& tanh(const Tensor& src) override;
+  virtual THCTensor& pow(const Tensor& src, scalar_type value) override;
+  virtual THCTensor& tpow(scalar_type value, const Tensor& src) override;
+  virtual THCTensor& sqrt(const Tensor& src) override;
+  virtual THCTensor& rsqrt(const Tensor& src) override;
+  virtual THCTensor& ceil(const Tensor& src) override;
+  virtual THCTensor& floor(const Tensor& src) override;
+  virtual THCTensor& round(const Tensor& src) override;
+  virtual THCTensor& trunc(const Tensor& src) override;
+  virtual THCTensor& frac(const Tensor& src) override;
+  virtual THCTensor& lerp(const Tensor& a, const Tensor& b, scalar_type weight) override;
+  virtual THCTensor& mean(const Tensor& src, int dimension) override;
+  virtual THCTensor& std(const Tensor& src, int dimension, int flag) override;
+  virtual THCTensor& var(const Tensor& src, int dimension, int flag) override;
+  virtual THCTensor& norm(const Tensor& src, scalar_type value, int dimension) override;
+  virtual THCTensor& renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) override;
+  virtual THCTensor& histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
+  virtual THCTensor& bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
+  virtual scalar_type dist(const Tensor& src, scalar_type value) override;
+  virtual scalar_type meanall() override;
+  virtual scalar_type varall() override;
+  virtual scalar_type stdall() override;
+  virtual scalar_type normall(scalar_type value) override;
+  virtual THCTensor& linspace(scalar_type a, scalar_type b, long n) override;
+  virtual THCTensor& logspace(scalar_type a, scalar_type b, long n) override;
+  virtual THCTensor& rand(const Generator& _generator, THLongStorage *size) override;
+  virtual THCTensor& randn(const Generator& _generator, THLongStorage *size) override;
+  virtual int logicalall() override;
+  virtual int logicalany() override;
+  virtual THCTensor& random(const Generator& _generator) override;
+  virtual THCTensor& geometric(const Generator& _generator, double p) override;
+  virtual THCTensor& bernoulli(const Generator& _generator, double p) override;
+  virtual THCTensor& bernoulli_FloatTensor(const Generator& _generator, const Tensor& p) override;
+  virtual THCTensor& bernoulli_DoubleTensor(const Generator& _generator, const Tensor& p) override;
+  virtual THCTensor& uniform(const Generator& _generator, double a, double b) override;
+  virtual THCTensor& normal(const Generator& _generator, double mean, double stdv) override;
+  virtual THCTensor& exponential(const Generator& _generator, double lambda) override;
+  virtual THCTensor& cauchy(const Generator& _generator, double median, double sigma) override;
+  virtual THCTensor& logNormal(const Generator& _generator, double mean, double stdv) override;
+
+  // Note: the order of *Tensor and *Prob_dist is reversed compared to
+  // the declarations in TH/generic/THTensorMath.h, so for instance
+  // the call:
+  // THRealTensor_multinomial(r, _generator, prob_dist, n_sample, with_replacement)
+  // is equivalent to `prob_dist->multinomial(r, _generator, n_sample, with_replacement)`.
+  // It is done this way so that the first argument can be casted onto a float tensor type.
+  virtual THCTensor& multinomial(const Tensor& r, const Generator& _generator,
+                                 int n_sample, int with_replacement) override;
 
   virtual THCTensor& ltValue(const Tensor& t, scalar_type value) override;
   virtual THCTensor& leValue(const Tensor& t, scalar_type value) override;
@@ -236,7 +288,7 @@ private:
   THCTensor& resize(const iterator& size_begin, const iterator& size_end,
                    const iterator& stride_begin, const iterator& stride_end);
 
-public:
+protected:
   tensor_type *tensor;
   THCState *state;
 };

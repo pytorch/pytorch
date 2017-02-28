@@ -8,6 +8,10 @@
   dynamic_cast<const THCStorage<real>&>(storage)
 #define const_long_cast(tensor) \
   dynamic_cast<const THCTensor<long>&>(tensor)
+#define const_float_cast(tensor) \
+  dynamic_cast<const THCTensor<float>&>(tensor)
+#define const_double_cast(tensor) \
+  dynamic_cast<const THCTensor<double>&>(tensor)
 #define const_byte_cast(tensor) \
   dynamic_cast<const THCTensor<unsigned char>&>(tensor)
 
@@ -290,6 +294,11 @@ auto THCTensor<real>::range(scalar_type xmin, scalar_type xmax,
 }
 
 template<>
+auto THCTensor<real>::randperm(const Generator& _generator, long n) -> THCTensor& {
+  throw std::runtime_error("THCTensor::randperm() not implemented");
+}
+
+template<>
 auto THCTensor<real>::sort(const Tensor& ri, const Tensor& src,
                            int dimension, int desc) -> THCTensor& {
   THCTensor_(sort)(
@@ -547,6 +556,484 @@ auto THCTensor<real>::copy(const Tensor& src) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
   THCTensor_(copy)(state, tensor, src_t.tensor);
   return *this;
+}
+
+template<>
+auto THCTensor<real>::tan(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(tan)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::atan(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(atan)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::atan2(const Tensor& src1, const Tensor& src2) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(atan2)(state,
+    tensor,
+    const_tensor_cast(src1).tensor,
+    const_tensor_cast(src2).tensor
+  );
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::tanh(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(tanh)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::pow(const Tensor& src, scalar_type value) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(pow)(state, tensor, const_tensor_cast(src).tensor, value);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::tpow(scalar_type value, const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(tpow)(state, tensor, value, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::sqrt(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(sqrt)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::rsqrt(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(rsqrt)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::ceil(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(ceil)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::floor(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(floor)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::round(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(round)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::trunc(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(trunc)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::frac(const Tensor& src) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor(frac)(state, tensor, const_tensor_cast(src).tensor);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::lerp(const Tensor& a, const Tensor& b, scalar_type weight) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(lerp)(state,
+    tensor,
+    const_tensor_cast(a).tensor,
+    const_tensor_cast(b).tensor,
+    weight
+  );
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::mean(const Tensor& src, int dimension) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(mean)(state, tensor, const_tensor_cast(src).tensor, dimension);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::std(const Tensor& src, int dimension, int flag) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(std)(state, tensor, const_tensor_cast(src).tensor, dimension, flag);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::var(const Tensor& src, int dimension, int flag) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(var)(state, tensor, const_tensor_cast(src).tensor, dimension, flag);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::norm(const Tensor& src, scalar_type value, int dimension) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(norm)(state, tensor, const_tensor_cast(src).tensor, value, dimension);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::renorm(const Tensor& src,
+                             scalar_type value,
+                             int dimension,
+                             scalar_type maxnorm) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  const THCTensor& src_t = const_tensor_cast(src);
+  THCTensor_(renorm)(state, tensor, src_t.tensor, value, dimension, maxnorm);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::histc(const Tensor& src,
+                            long nbins,
+                            scalar_type minvalue,
+                            scalar_type maxvalue) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  const THCTensor& src_t = const_tensor_cast(src);
+  THCTensor_(histc)(state, tensor, src_t.tensor, nbins, minvalue, maxvalue);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::bhistc(const Tensor& src,
+                             long nbins,
+                             scalar_type minvalue,
+                             scalar_type maxvalue) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  const THCTensor& src_t = const_tensor_cast(src);
+  THCTensor_(bhistc)(state, tensor, src_t.tensor, nbins, minvalue, maxvalue);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::dist(const Tensor& src, scalar_type value) -> scalar_type {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return THCTensor_(dist)(state, tensor, const_tensor_cast(src).tensor, value);
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::meanall() -> scalar_type {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return THCTensor_(meanall)(state, tensor);
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::varall() -> scalar_type {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return THCTensor_(varall)(state, tensor);
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::stdall() -> scalar_type {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return THCTensor_(stdall)(state, tensor);
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::normall(scalar_type value) -> scalar_type {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return THCTensor_(normall)(state, tensor, value);
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::linspace(scalar_type a, scalar_type b, long n) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(linspace)(state, tensor, a, b, n);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::logspace(scalar_type a, scalar_type b, long n) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(logspace)(state, tensor, a, b, n);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::rand(const Generator& _generator, THLongStorage *size) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(rand)(state, tensor, size);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::randn(const Generator& _generator, THLongStorage *size) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(randn)(state, tensor, size);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+int THCTensor<real>::logicalall() {
+#if defined(TH_REAL_IS_BYTE)
+  return THCTensor_(logicalall)(state, tensor);
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+int THCTensor<real>::logicalany() {
+#if defined(TH_REAL_IS_BYTE)
+  return THCTensor_(logicalany)(state, tensor);
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::random(const Generator& _generator) -> THCTensor& {
+  throw std::runtime_error("THCTensor::random() not implemented");
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::geometric(const Generator& _generator, double p) -> THCTensor& {
+  THCTensor_(geometric)(state, tensor, p);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::bernoulli(const Generator& _generator, double p) -> THCTensor& {
+  THCTensor_(bernoulli)(state, tensor, p);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::bernoulli_FloatTensor(const Generator& _generator,
+                                            const Tensor& p) -> THCTensor& {
+  THCTensor_(bernoulli_FloatTensor)(state, tensor, const_float_cast(p).tensor);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::bernoulli_DoubleTensor(const Generator& _generator,
+                                             const Tensor& p) -> THCTensor& {
+  THCTensor_(bernoulli_DoubleTensor)(state, tensor, const_double_cast(p).tensor);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::uniform(const Generator& _generator, double a,
+                              double b) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(uniform)(state, tensor, a, b);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::normal(const Generator& _generator, double mean,
+                             double stdv) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(normal)(state, tensor, mean, stdv);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::exponential(const Generator& _generator,
+                                  double lambda) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(exponential)(state, tensor, lambda);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::cauchy(const Generator& _generator, double median,
+                             double sigma) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(cauchy)(state, tensor, median, sigma);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+template<>
+auto THCTensor<real>::logNormal(const Generator& _generator, double mean,
+                                double stdv) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  THCTensor_(logNormal)(state, tensor, mean, stdv);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
+}
+
+// Note: the order of *Tensor and *Prob_dist is reversed compared to
+// the declarations in TH/generic/THTensorMath.h, so for instance
+// the call:
+// THRealTensor_multinomial(r, _generator, prob_dist, n_sample, with_replacement)
+// is equivalent to `prob_dist->multinomial(r, _generator, n_sample, with_replacement)`.
+// It is done this way so that the first argument can be casted onto a float tensor type.
+template<>
+auto THCTensor<real>::multinomial(const Tensor& r, const Generator& _generator,
+                                  int n_sample,
+                                  int with_replacement) -> THCTensor& {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  const THCTensor& r_t = const_long_cast(prob_dist).tensor;
+  THCTensor_(multinomial)(state, r_t.tensor, tensor, n_sample, with_replacement);
+  return *this;
+#else
+  throw std::runtime_error("floating point functions are available only for\
+      floating point tensors");
+#endif
 }
 
 template<>
