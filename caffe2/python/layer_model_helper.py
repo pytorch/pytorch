@@ -176,14 +176,30 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         self._loss = loss
 
     def __getattr__(self, layer):
-        if not layers.layer_exists(layer):
+        # TODO(amalevich): Add add support for ifbpy inline documentation
+        if layers.layer_exists(layer):
+            def wrapper(*args, **kwargs):
+                return self.add_layer(
+                    layers.create_layer(layer, self, *args, **kwargs))
+            return wrapper
+        elif core.IsOperator(layer):
+            def wrapper(*args, **kwargs):
+                def apply_operator(net, in_record, out_record):
+                    # TODO(amalevich): Switch to net.operator as soon as it gets
+                    # landed
+                    net.__getattr__(layer)(in_record.field_blobs(),
+                                           out_record.field_blobs(),
+                                           **kwargs)
+                if 'name' not in kwargs:
+                    kwargs['name'] = layer
+                return self.add_layer(
+                    layers.create_layer('Functional',
+                                        self, *args, function=apply_operator,
+                                        **kwargs))
+            return wrapper
+        else:
             raise ValueError(
                 "Tring to create non-registered layer: {0}".format(layer))
-
-        def wrapper(*args, **kwargs):
-            return self.add_layer(
-                layers.create_layer(layer, self, *args, **kwargs))
-        return wrapper
 
     @property
     def layers(self):
