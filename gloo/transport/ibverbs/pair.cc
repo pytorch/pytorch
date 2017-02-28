@@ -22,6 +22,9 @@ namespace ibverbs {
 
 Pair::Pair(const std::shared_ptr<Device>& dev)
     : dev_(dev),
+      sync_(false),
+      busyPoll_(false),
+      completionEventsHandled_(0),
       peerMemoryRegionsReady_(0) {
   int rv;
 
@@ -110,6 +113,10 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
 Pair::~Pair() {
   int rv;
 
+  // Acknowledge number of completion events handled by this
+  // pair's completion queue (also see ibv_get_cq_event(3)).
+  ibv_ack_cq_events(cq_, completionEventsHandled_);
+
   rv = ibv_destroy_qp(qp_);
   GLOO_ENFORCE_NE(rv, -1);
 
@@ -166,8 +173,30 @@ void Pair::connect(const std::vector<char>& bytes) {
   GLOO_ENFORCE_NE(rv, -1);
 }
 
-void Pair::setSync(bool /* sync */, bool /* busyPoll */) {
-  GLOO_ENFORCE(false, "setSync not implemented");
+// Switches the pair into synchronous mode.
+//
+// Note: busy polling is NOT optional. Currently, since all pairs
+// share a single completion channel, busy polling is mandatory
+// through ibv_poll_cq(3). If a use case comes up for supporting
+// synchronous mode where the calling thread should be suspended, this
+// can be revisited and we can add a completion channel per pair.
+//
+void Pair::setSync(bool sync, bool busyPoll) {
+  GLOO_ENFORCE(
+    sync,
+    "Can only switch to sync mode");
+  GLOO_ENFORCE(
+    busyPoll,
+    "The ibverbs transport only supports busy polling in sync mode");
+
+  // The notification mechanism for this pair's completion queue is
+  // still armed. This means the device thread will still call
+  // handleCompletions() one more time, but this is ignored.
+  //
+  // No need to lock a mutex; these are atomics.
+  //
+  sync_ = true;
+  busyPoll_ = true;
 }
 
 void Pair::receiveMemoryRegion() {
@@ -224,7 +253,13 @@ const struct ibv_mr* Pair::getMemoryRegion(int slot) {
 
   std::unique_lock<std::mutex> lock(m_);
   while (peerMemoryRegions_[slot].addr == nullptr) {
-    cv_.wait(lock);
+    if (sync_) {
+      lock.unlock();
+      pollCompletions();
+      lock.lock();
+    } else {
+      cv_.wait(lock);
+    }
   }
   peerMemoryRegionsReady_ &= (1 << slot);
   return &peerMemoryRegions_[slot];
@@ -255,29 +290,50 @@ Pair::createRecvBuffer(int slot, void* ptr, size_t size) {
   return std::unique_ptr<::gloo::transport::Buffer>(buffer);
 }
 
-// handleCompletions is called by the device thread when it
+// handleCompletionEvent is called by the device thread when it
 // received an event for this pair's completion queue on its
 // completion channel.
-void Pair::handleCompletions() {
-  std::array<struct ibv_wc, kCompletionQueueCapacity> wc;
+void Pair::handleCompletionEvent() {
   int rv;
 
-  ibv_ack_cq_events(cq_, 1);
+  completionEventsHandled_++;
+
+  // If in sync mode, the pair was just switched and this is
+  // the last notification from the device thread because
+  // the notification mechanism is not re-armed below.
+  if (sync_) {
+    return;
+  }
 
   // Arm notification mechanism for completion queue.
   rv = ibv_req_notify_cq(cq_, kNotifyOnAnyCompletion);
   GLOO_ENFORCE_NE(rv, -1);
 
-  // Invoke handler for every work completion.
-  auto nwc = ibv_poll_cq(cq_, wc.size(), wc.data());
+  // Now poll for work completions to drain the completion queue.
+  pollCompletions();
+}
 
-  GLOO_ENFORCE_GE(nwc, 0);
-  for (int i = 0; i < nwc; i++) {
-    if (wc[i].status != IBV_WC_SUCCESS) {
-      continue;
+void Pair::pollCompletions() {
+  std::array<struct ibv_wc, kCompletionQueueCapacity> wc;
+
+  // Invoke handler for every work completion.
+  for (;;) {
+    auto nwc = ibv_poll_cq(cq_, wc.size(), wc.data());
+    GLOO_ENFORCE_GE(nwc, 0);
+
+    // Handle work completions
+    for (int i = 0; i < nwc; i++) {
+      if (wc[i].status != IBV_WC_SUCCESS) {
+        continue;
+      }
+
+      handleCompletion(&wc[i]);
     }
 
-    handleCompletion(&wc[i]);
+    // Break unless wc was filled
+    if (nwc == 0 || nwc < wc.size()) {
+      break;
+    }
   }
 }
 

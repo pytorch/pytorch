@@ -37,24 +37,50 @@ Buffer::~Buffer() {
   ibv_dereg_mr(mr_);
 }
 
+// Wait for a receive operation to finish.
 void Buffer::waitRecv() {
-  std::unique_lock<std::mutex> lock(m_);
-
-  // Wait for completion
-  while (recvCompletions_ == 0) {
-    recvCv_.wait(lock);
+  // If the pair is in synchronous mode, the current thread is
+  // responsible for polling for work completions.
+  // Since a single pair potentially serves multiple buffers, a
+  // completion may be intended for another buffer.
+  if (pair_->sync_) {
+    // We can assume a single pair is never used by more than one
+    // thread, so there is no need to acquire the mutex here.
+    while (recvCompletions_ == 0) {
+      pair_->pollCompletions();
+    }
+    recvCompletions_--;
+  } else {
+    // The device thread will signal completion. If the completion
+    // hasn't arrived yet, wait until it does.
+    std::unique_lock<std::mutex> lock(m_);
+    while (recvCompletions_ == 0) {
+      recvCv_.wait(lock);
+    }
+    recvCompletions_--;
   }
-  recvCompletions_--;
 }
 
+// Wait for the previous send operation to finish.
 void Buffer::waitSend() {
-  std::unique_lock<std::mutex> lock(m_);
-
-  // Wait for completion
-  while (sendCompletions_ == 0) {
-    sendCv_.wait(lock);
+  // If the pair is in synchronous mode, the current thread is
+  // responsible for polling for work completions.
+  if (pair_->sync_) {
+    // We can assume a single pair is never used by more than one
+    // thread, so there is no need to acquire the mutex here.
+    while (sendCompletions_ == 0) {
+      pair_->pollCompletions();
+    }
+    sendCompletions_--;
+  } else {
+    // The device thread will signal completion. If the completion
+    // hasn't arrived yet, wait until it does.
+    std::unique_lock<std::mutex> lock(m_);
+    while (sendCompletions_ == 0) {
+      sendCv_.wait(lock);
+    }
+    sendCompletions_--;
   }
-  sendCompletions_--;
 }
 
 void Buffer::send(size_t offset, size_t length) {

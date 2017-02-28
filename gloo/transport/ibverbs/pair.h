@@ -72,12 +72,26 @@ class Pair : public ::gloo::transport::Pair {
   virtual std::unique_ptr<::gloo::transport::Buffer>
   createRecvBuffer(int slot, void* ptr, size_t size) override;
 
-  void handleCompletions();
+  void handleCompletionEvent();
+
+  void pollCompletions();
 
   void handleCompletion(struct ibv_wc* wc);
 
  protected:
   std::shared_ptr<Device> dev_;
+
+  // Whether or not this pair is running in sync mode.
+  std::atomic<bool> sync_;
+
+  // Whether or not this pair is busy polling in sync mode.
+  std::atomic<bool> busyPoll_;
+
+  // Number of completion events handled by this pair's completion
+  // queue (also see ibv_get_cq_event(3)). This many events need to be
+  // acknowledged prior to destructing the completion queue.
+  // Otherwise, destruction will hang (see ibv_get_cq_event(3)).
+  int completionEventsHandled_;
 
   Address self_;
   Address peer_;

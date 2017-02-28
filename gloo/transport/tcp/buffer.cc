@@ -11,6 +11,8 @@
 
 #include <string.h>
 
+#include "gloo/common/logging.h"
+
 namespace gloo {
 namespace transport {
 namespace tcp {
@@ -32,28 +34,26 @@ void Buffer::handleRecvCompletion() {
 }
 
 void Buffer::waitRecv() {
-  std::unique_lock<std::mutex> lock(m_);
-
-  // Wait for completion
-  while (recvCompletions_ == 0) {
-    // If the pair is in sync mode, the caller is responsible for
-    // doing the reads. Since a single pair potentially serves
-    // multiple buffers, a read might come back with an operation
-    // intended for another buffer. Therefore, we keep calling read
-    // here until a receive completion for this buffer was triggered.
-    if (pair_->sync_) {
-      // Temporarily release lock because pair will call
-      // handleRecvCompletion on this buffer as the recv operations
-      // completes, and this lock is not reentrant.
-      lock.unlock();
+  // If the pair is in synchronous mode, the current thread is
+  // responsible for doing reads.
+  // Since a single pair potentially serves multiple buffers, a
+  // read may be intended for another buffer.
+  if (pair_->sync_) {
+    // We can assume a single pair is never used by more than one
+    // thread, so there is no need to acquire the mutex here.
+    while (recvCompletions_ == 0) {
       pair_->recv();
-      lock.lock();
-    } else {
-      // Wait for handleRecvCompletion
+    }
+    recvCompletions_--;
+  } else {
+    // The device thread will signal completion. If the completion
+    // hasn't arrived yet, wait until it does.
+    std::unique_lock<std::mutex> lock(m_);
+    while (recvCompletions_ == 0) {
       recvCv_.wait(lock);
     }
+    recvCompletions_--;
   }
-  recvCompletions_--;
 }
 
 void Buffer::handleSendCompletion() {
@@ -63,13 +63,21 @@ void Buffer::handleSendCompletion() {
 }
 
 void Buffer::waitSend() {
-  std::unique_lock<std::mutex> lock(m_);
-
-  // Wait for completion
-  while (sendCompletions_ == 0) {
-    sendCv_.wait(lock);
+  if (pair_->sync_) {
+    // The send operation must flush all data to the underlying socket
+    // and then call handleSendCompletion. Therefore, the number of
+    // send completions must always be positive when calling waitSend.
+    GLOO_ENFORCE_GE(1, sendCompletions_);
+    sendCompletions_--;
+  } else {
+    // The device thread will signal completion. If the completion
+    // hasn't arrived yet, wait until it does.
+    std::unique_lock<std::mutex> lock(m_);
+    while (sendCompletions_ == 0) {
+      sendCv_.wait(lock);
+    }
+    sendCompletions_--;
   }
-  sendCompletions_--;
 }
 
 void Buffer::send(size_t offset, size_t length) {

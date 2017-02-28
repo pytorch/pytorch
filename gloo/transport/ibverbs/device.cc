@@ -142,7 +142,7 @@ void Device::loop() {
     // Completion queue context is a Pair*.
     // Delegate handling of this event to the pair itself.
     Pair* pair = static_cast<Pair*>(cqContext);
-    pair->handleCompletions();
+    pair->handleCompletionEvent();
   }
 }
 } // namespace ibverbs
