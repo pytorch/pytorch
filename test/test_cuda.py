@@ -680,6 +680,31 @@ class TestCuda(TestCase):
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
         self.assertEqual(list(gpu_tensor), [1])
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_caching_pinned_memory_multi_gpu(self):
+        # checks that the events preventing pinned memory from being re-used
+        # too early are recorded on the correct GPU
+        cycles_per_ms = get_cycles_per_ms()
+
+        t = torch.FloatTensor([1]).pin_memory()
+        ptr = t.data_ptr()
+        gpu_tensor0 = torch.cuda.FloatTensor([0], device=0)
+        gpu_tensor1 = torch.cuda.FloatTensor([0], device=1)
+
+        with torch.cuda.device(1):
+            torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
+            gpu_tensor1.copy_(t, async=True)
+
+        del t
+        t = torch.FloatTensor([2]).pin_memory()
+        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+
+        with torch.cuda.device(0):
+            gpu_tensor0.copy_(t, async=True)
+
+        self.assertEqual(gpu_tensor1[0], 1)
+        self.assertEqual(gpu_tensor0[0], 2)
+
 
 for decl in tests:
     for t in types:
