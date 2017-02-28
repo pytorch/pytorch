@@ -604,9 +604,20 @@ class CNNModelHelper(ModelHelperBase):
         def init_blob(value, suffix):
             return self.param_init_net.ConstantFill(
                 [], blob_out + "_" + suffix, shape=[dim_in], value=value)
-        scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
-        running_mean = init_blob(0.0, "rm")
-        running_inv_var = init_blob(1.0, "riv")
+
+        if self.init_params:
+            scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
+            running_mean = init_blob(0.0, "rm")
+            running_inv_var = init_blob(1.0, "riv")
+        else:
+            scale = core.ScopedBlobReference(
+                    blob_out + '_s', self.param_init_net)
+            bias = core.ScopedBlobReference(
+                    blob_out + '_b', self.param_init_net)
+            running_mean = core.ScopedBlobReference(
+                    blob_out + '_rm', self.param_init_net)
+            running_inv_var = core.ScopedBlobReference(
+                    blob_out + '_riv', self.param_init_net)
 
         self.params.extend([scale, bias])
         self.computed_params.extend([running_mean, running_inv_var])
