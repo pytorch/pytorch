@@ -41,6 +41,7 @@ class TesterBase:
         tester = self
         operator_args = kwargs.pop('operator_args', {})
         threshold = kwargs.pop('threshold', 1e-4)
+        grad_check = kwargs.pop('grad_check', True)
 
         @given(X=input_strategy, **hu.gcs_cpu_only)
         def test_segment_ops(self, X, gc, dc):
@@ -79,14 +80,17 @@ class TesterBase:
                     # other inputs don't have gradient
                     return (data_grad_slice, ) + (None, ) * (len(inputs) - 1)
 
+                kwargs = {}
+                if grad_check:
+                    kwargs['output_to_grad'] = 'output'
+                    kwargs['grad_reference'] = seg_reduce_grad
                 self.assertReferenceChecks(
                     device_option=gc,
                     op=op,
                     inputs=X,
                     reference=seg_reduce,
-                    output_to_grad='output',
-                    grad_reference=seg_reduce_grad,
                     threshold=threshold,
+                    **kwargs
                 )
 
         return test_segment_ops
