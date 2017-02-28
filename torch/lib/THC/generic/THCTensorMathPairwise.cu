@@ -81,6 +81,54 @@ THCTensor_(div)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
 }
 
 THC_API void
+THCTensor_(lshift)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  THCTensor_(mul)(state, self_, src_, pow(2, value));
+#elif defined(THC_REAL_IS_HALF)
+  return THError("lshift not supported for torch.CudaHalfTensor");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1(state, self_, TensorLShiftConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2(state, self_, src_, TensorLShiftConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
+THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  THCTensor_(mul)(state, self_, src_, pow(2, value));
+#elif defined(THC_REAL_IS_HALF)
+  return THError("rshift not supported for torch.CudaHalfTensor");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1(state, self_, TensorRShiftConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2(state, self_, src_, TensorRShiftConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
 THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, real value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
@@ -208,6 +256,72 @@ THC_API int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_
   THCudaByteTensor_free(state, buf);
 
   return min != 0;
+}
+
+THC_API void
+THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+  return THError("bitand only supported for integer type tensors");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1(state, self_, TensorBitAndConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2(state, self_, src_, TensorBitAndConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
+THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+  return THError("bitor only supported for integer type tensors");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1(state, self_, TensorBitOrConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2(state, self_, src_, TensorBitOrConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
+THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+  return THError("bitxor only supported for integer type tensors");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1(state, self_, TensorBitXorConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2(state, self_, src_, TensorBitXorConstantOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
 }
 
 #endif
