@@ -35,6 +35,7 @@ function (Caffe2_print_configuration_summary)
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
   message(STATUS "    CUDA version        : ${CUDA_VERSION}")
+  message(STATUS "  USE_CNMEM             : ${USE_CNMEM}")
   endif()
 
   message(STATUS "  USE_NERVANA_GPU       : ${USE_NERVANA_GPU}")

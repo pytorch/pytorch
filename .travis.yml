@@ -22,6 +22,10 @@ matrix:
       env: COMPILER=clang++
     - os: linux
       compiler: gcc
+      env: COMPILER=g++
+      env: BLAS=MKL
+    - os: linux
+      compiler: gcc
       addons:
         apt:
           sources:
@@ -53,6 +57,7 @@ matrix:
     - env: COMPILER=g++-4.8
     - env: BUILD_TARGET=android
     - env: BUILD_TARGET=ios
+    - env: BLAS=MKL
 
 cache:
   apt: true
