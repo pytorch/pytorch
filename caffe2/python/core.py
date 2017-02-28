@@ -195,7 +195,9 @@ class BlobReference(object):
                 'explicit net object.')
         if not IsOperator(op_type):
             raise RuntimeError(
-                'Method ' + op_type + ' is not a registered operator.'
+                'Method ' + op_type + ' is not a registered operator.' +
+                ' Did you mean: [' +
+                ",".join(workspace.C.nearby_opnames(op_type)) + ']'
             )
         return lambda *args, **kwargs: self._CreateAndAddToNet(
             op_type, *args, **kwargs)
@@ -1662,7 +1664,9 @@ class Net(object):
             raise AttributeError('Attribute {} not found.'.format(op_type))
         if not IsOperator(op_type):
             raise RuntimeError(
-                'Method ' + op_type + ' is not a registered operator.'
+                'Method ' + op_type + ' is not a registered operator.' +
+                ' Did you mean: [' +
+                ",".join(workspace.C.nearby_opnames(op_type)) + ']'
             )
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             op_type, *args, **kwargs)

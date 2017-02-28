@@ -8,6 +8,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/predictor.h"
 #include "caffe2/utils/mkl_utils.h"
+#include "caffe2/utils/string_utils.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 
@@ -613,6 +614,16 @@ void addGlobalMethods(py::module& m) {
       names.push_back(kv.first);
     }
     return names;
+  });
+  m.def("nearby_opnames", [](const std::string& name) {
+    std::vector<std::string> alternatives;
+    int editTolerance = 3;
+    for (auto it : caffe2::CPUOperatorRegistry()->Keys()) {
+      if(editDistance(it, name, editTolerance) < editTolerance + 1) {
+        alternatives.push_back(it);
+      }
+    }
+    return alternatives;
   });
   m.def("local_blobs", []() {
     CAFFE_ENFORCE(gWorkspace);

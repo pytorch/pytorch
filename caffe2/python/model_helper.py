@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, scope
+from caffe2.python import core, scope, workspace
 import numpy as np
 
 import logging
@@ -275,7 +275,9 @@ class ModelHelperBase(object):
 
         if not core.IsOperator(op_type):
             raise RuntimeError(
-                'Method ' + op_type + ' is not a registered operator.'
+                'Method ' + op_type + ' is not a registered operator.' +
+                ' Did you mean: [' +
+                ','.join(workspace.C.nearby_opnames(op_type)) + ']'
             )
         # known_working_ops are operators that do not need special care.
         known_working_ops = [
