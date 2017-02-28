@@ -1,45 +1,28 @@
 import torch
 from torch import _C
-from .._utils import _type, _cuda
+from ..tensor import _TensorBase
 
 _sparse_tensor_classes = set()
 
 
-class _SparseTensorBase(object):
+class _SparseBase(object):
     is_cuda = False
     is_sparse = True
 
-    def double(self):
-        """Casts this tensor to double type"""
-        return self.type(type(self).__module__ + '.DoubleTensor')
+    def cpu(self):
+        return self.type(getattr(torch.sparse, self.__class__.__name__))
 
-    def float(self):
-        """Casts this tensor to float type"""
-        return self.type(type(self).__module__ + '.FloatTensor')
+    def is_pinned(self):
+        raise NotImplementedError
 
-    def half(self):
-        """Casts this tensor to half-precision float type"""
-        return self.type(type(self).__module__ + '.HalfTensor')
+    def pin_memory(self):
+        raise NotImplementedError
 
-    def long(self):
-        """Casts this tensor to long type"""
-        return self.type(type(self).__module__ + '.LongTensor')
+    def share_memory_(self):
+        raise NotImplementedError
 
-    def int(self):
-        """Casts this tensor to int type"""
-        return self.type(type(self).__module__ + '.IntTensor')
-
-    def short(self):
-        """Casts this tensor to short type"""
-        return self.type(type(self).__module__ + '.ShortTensor')
-
-    def char(self):
-        """Casts this tensor to char type"""
-        return self.type(type(self).__module__ + '.CharTensor')
-
-    def byte(self):
-        """Casts this tensor to byte type"""
-        return self.type(type(self).__module__ + '.ByteTensor')
+    def is_shared(self):
+        raise NotImplementedError
 
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
@@ -49,66 +32,139 @@ class _SparseTensorBase(object):
         memo[self._cdata] = new_tensor
         return new_tensor
 
-    def __add__(self, other):
-        return self.add(other)
-    __radd__ = __add__
+    def __reduce__(self):
+        raise NotImplementedError
 
-    def __iadd__(self, other):
-        return self.add_(other)
+    def __getstate__(self):
+        raise NotImplementedError
 
-    def __sub__(self, other):
-        return self.sub(other)
+    def __setstate__(self, state):
+        raise NotImplementedError
 
-    def __isub__(self, other):
-        return self.sub_(other)
+    def __bool__(self):
+        # TODO (easy) implement numel and remove this override
+        raise NotImplementedError
 
-    def __mul__(self, other):
-        return self.mul(other)
-    __rmul__ = __mul__
+    def __iter__(self):
+        raise NotImplementedError
 
-    def __imul__(self, other):
-        return self.mul_(other)
+    def split(self, split_size, dim=0):
+        raise NotImplementedError
 
-    def __div__(self, other):
-        return self.div(other)
-    __truediv__ = __div__
+    def chunk(self, n_chunks, dim=0):
+        raise NotImplementedError
+
+    def tolist(self):
+        raise NotImplementedError
+
+    def view_as(self, tensor):
+        raise NotImplementedError
+
+    def permute(self, *dims):
+        raise NotImplementedError
+
+    def expand(self, *sizes):
+        raise NotImplementedError
+
+    def expand_as(self, tensor):
+        raise NotImplementedError
+
+    def repeat(self, *sizes):
+        raise NotImplementedError
+
+    def __rsub__(self, other):
+        raise NotImplementedError
+
+    def __matmul__(self, other):
+        raise NotImplementedError
+
+    def __pow__(self, other):
+        raise NotImplementedError
+
+    def __ipow__(self, other):
+        raise NotImplementedError
+
+    def __rdiv__(self, other):
+        raise NotImplementedError
 
     def __idiv__(self, other):
-        return self.div_(other)
+        raise NotImplementedError
+
+    def __mod__(self, other):
+        raise NotImplementedError
+
+    def __neg__(self):
+        raise NotImplementedError
+
+    def __eq__(self, other):
+        raise NotImplementedError
+
+    def __ne__(self, other):
+        raise NotImplementedError
+
+    def __lt__(self, other):
+        raise NotImplementedError
+
+    def __le__(self, other):
+        raise NotImplementedError
+
+    def __gt__(self, other):
+        raise NotImplementedError
+
+    def __ge__(self, other):
+        raise NotImplementedError
+
+    def __and__(self, other):
+        raise NotImplementedError
+
+    def __or__(self, other):
+        raise NotImplementedError
+
+    def __xor__(self, other):
+        raise NotImplementedError
+
+    def __iand__(self, other):
+        raise NotImplementedError
+
+    def __ior__(self, other):
+        raise NotImplementedError
+
+    def __ixor__(self, other):
+        raise NotImplementedError
 
 
-class DoubleTensor(_SparseTensorBase, _C.SparseDoubleTensorBase):
+class DoubleTensor(_SparseBase, _C.SparseDoubleTensorBase, _TensorBase):
     def is_signed(self):
         return True
 
 
-class FloatTensor(_SparseTensorBase, _C.SparseFloatTensorBase):
+class FloatTensor(_SparseBase, _C.SparseFloatTensorBase, _TensorBase):
     def is_signed(self):
         return True
 
 
-class LongTensor(_SparseTensorBase, _C.SparseLongTensorBase):
+class LongTensor(_SparseBase, _C.SparseLongTensorBase, _TensorBase):
     def is_signed(self):
         return True
 
 
-class IntTensor(_SparseTensorBase, _C.SparseIntTensorBase):
+class IntTensor(_SparseBase, _C.SparseIntTensorBase, _TensorBase):
     def is_signed(self):
         return True
 
 
-class ShortTensor(_SparseTensorBase, _C.SparseShortTensorBase):
+class ShortTensor(_SparseBase, _C.SparseShortTensorBase, _TensorBase):
     def is_signed(self):
         return True
 
 
-class CharTensor(_SparseTensorBase, _C.SparseCharTensorBase):
+class CharTensor(_SparseBase, _C.SparseCharTensorBase, _TensorBase):
     def is_signed(self):
         # TODO
         return False
 
 
-class ByteTensor(_SparseTensorBase, _C.SparseByteTensorBase):
+class ByteTensor(_SparseBase, _C.SparseByteTensorBase, _TensorBase):
     def is_signed(self):
         return False
 
@@ -121,8 +177,5 @@ _sparse_tensor_classes.add(ShortTensor)
 _sparse_tensor_classes.add(CharTensor)
 _sparse_tensor_classes.add(ByteTensor)
 torch._tensor_classes.update(_sparse_tensor_classes)
-
-_SparseTensorBase.type = _type
-_SparseTensorBase.cuda = _cuda
 
 _C._sparse_init()

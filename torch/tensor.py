@@ -99,7 +99,7 @@ class _TensorBase(object):
             return memo[self._cdata]
         new_storage = self.storage().__deepcopy__(_memo)
         new_tensor = self.new()
-        new_tensor.set_(new_storage, self.storage_offset(), torch.Size(self.size()), self.stride())
+        new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
         memo[self._cdata] = new_tensor
         return new_tensor
 

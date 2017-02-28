@@ -1,6 +1,7 @@
 import torch
 from torch import _C
-from torch.sparse import _SparseTensorBase, _sparse_tensor_classes
+from ..tensor import _TensorBase
+from torch.sparse import _SparseBase, _sparse_tensor_classes
 from . import _lazy_init, device
 
 
@@ -26,50 +27,50 @@ class _CudaSparseBase(object):
         return super(_CudaSparseBase, cls).__new__(cls, *args, **kwargs)
 
 
-class DoubleTensor(_CudaSparseBase, torch._C.CudaSparseDoubleTensorBase, _SparseTensorBase):
+class DoubleTensor(_CudaSparseBase, torch._C.CudaSparseDoubleTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         return True
 
 
-class FloatTensor(_CudaSparseBase, torch._C.CudaSparseFloatTensorBase, _SparseTensorBase):
+class FloatTensor(_CudaSparseBase, torch._C.CudaSparseFloatTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         return True
 
 
-class LongTensor(_CudaSparseBase, torch._C.CudaSparseLongTensorBase, _SparseTensorBase):
+class LongTensor(_CudaSparseBase, torch._C.CudaSparseLongTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         return True
 
 
-class IntTensor(_CudaSparseBase, torch._C.CudaSparseIntTensorBase, _SparseTensorBase):
+class IntTensor(_CudaSparseBase, torch._C.CudaSparseIntTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         return True
 
 
-class ShortTensor(_CudaSparseBase, torch._C.CudaSparseShortTensorBase, _SparseTensorBase):
+class ShortTensor(_CudaSparseBase, torch._C.CudaSparseShortTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         return True
 
 
-class CharTensor(_CudaSparseBase, torch._C.CudaSparseCharTensorBase, _SparseTensorBase):
+class CharTensor(_CudaSparseBase, torch._C.CudaSparseCharTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         # TODO
         return False
 
 
-class ByteTensor(_CudaSparseBase, torch._C.CudaSparseByteTensorBase, _SparseTensorBase):
+class ByteTensor(_CudaSparseBase, torch._C.CudaSparseByteTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         return False
 
 
-class HalfTensor(_CudaSparseBase, torch._C.CudaSparseHalfTensorBase, _SparseTensorBase):
+class HalfTensor(_CudaSparseBase, torch._C.CudaSparseHalfTensorBase, _SparseBase, _TensorBase):
 
     def is_signed(self):
         return True

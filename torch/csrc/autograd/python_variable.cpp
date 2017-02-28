@@ -224,7 +224,7 @@ PyObject *THPVariable_get_grad(THPVariable *self)
 {
   auto& var = *self->cdata;
   if (!var.grad) {
-    return Py_None;
+    Py_RETURN_NONE;
   }
   return THPVariable_Wrap(var.grad);
 }
