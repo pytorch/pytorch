@@ -309,8 +309,9 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
            int padW, int padH,
            long inputWidth, long inputHeight,
            long outputWidth, long outputHeight,
-           real scale)
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight,
                        gradBias, finput);
 

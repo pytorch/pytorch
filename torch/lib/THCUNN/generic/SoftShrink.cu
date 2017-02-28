@@ -8,8 +8,9 @@ void THNN_(SoftShrink_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           real lambda)
+           accreal lambda_)
 {
+  real lambda = ScalarConvert<accreal, real>::to(lambda_);
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resizeAs)(state, output, input);
   THC_pointwiseApply2(state, output, input, SoftShrinkUpdateOutput<real>(lambda));
@@ -21,8 +22,9 @@ void THNN_(SoftShrink_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           real lambda)
+           accreal lambda_)
 {
+  real lambda = ScalarConvert<accreal, real>::to(lambda_);
   THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
   THCTensor_(resizeAs)(state, gradInput, input);
