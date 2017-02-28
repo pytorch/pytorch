@@ -11,8 +11,6 @@ else:
 def parallel_apply(modules, inputs, kwargs):
     assert len(modules) == len(inputs)
     if kwargs:
-        if len(modules) != len(kwargs):
-            print("ERR: ", len(modules), len(kwargs), kwargs)
         assert len(modules) == len(kwargs)
 
     # Fast track
