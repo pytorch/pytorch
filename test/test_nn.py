@@ -1122,15 +1122,14 @@ class TestNN(NNTestCase):
             return torch.cat([tensor, tensor.new(length - tensor.size(0), *tensor.size()[1:]).zero_()])
         lengths = [10, 8, 4, 2, 2, 2, 1]
         max_length = lengths[0]
-        batch_sizes = [sum(map(bool, filter(lambda x: x >= i, lengths))) for i in range(1, max_length+1)]
+        batch_sizes = [sum(map(bool, filter(lambda x: x >= i, lengths))) for i in range(1, max_length + 1)]
         offset = 0
-        padded = torch.cat([pad(i * 100 + torch.range(1, 5*l).view(l, 1, 5), max_length)
+        padded = torch.cat([pad(i * 100 + torch.range(1, 5 * l).view(l, 1, 5), max_length)
                             for i, l in enumerate(lengths, 1)], 1)
         padded = Variable(padded, requires_grad=True)
         expected_data = [[torch.range(1, 5) + i * 100 for i in range(batch_size)] for batch_size in batch_sizes]
         expected_data = list(itertools.chain.from_iterable(expected_data))
         expected_data = torch.cat(expected_data)
-
 
         for batch_first in (True, False):
             src = padded
@@ -1143,8 +1142,9 @@ class TestNN(NNTestCase):
             self.assertEqual(packed.batch_sizes, batch_sizes)
 
             # test inverse
-            unpacked = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first)
+            unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first)
             self.assertEqual(unpacked, src)
+            self.assertEqual(unpacked_len, lengths)
 
             # check grad
             padded.grad.data.zero_()
@@ -1163,7 +1163,7 @@ class TestNN(NNTestCase):
                 return var
             return torch.cat([var, Variable(var.data.new(length - var.size(0), *var.size()[1:]).zero_())])
 
-        lengths = [10, 8, 4, 2, 2, 1, 1]
+        lengths = [10, 10, 6, 2, 2, 1, 1]
         max_length = lengths[0]
         x = Variable(torch.randn(max_length, len(lengths), 3), requires_grad=True)
         lstm = nn.LSTM(3, 4, bidirectional=True, num_layers=2)
@@ -1177,7 +1177,7 @@ class TestNN(NNTestCase):
         seq_outs = []
         seq_hiddens = []
         for i, l in enumerate(lengths):
-            out, hid = lstm2(x[:l, i:i+1])
+            out, hid = lstm2(x[:l, i:i + 1])
             out_pad = pad(out, max_length)
             seq_outs.append(out_pad)
             seq_hiddens.append(hid)
@@ -1187,11 +1187,12 @@ class TestNN(NNTestCase):
         # Use packed format
         packed = rnn_utils.pack_padded_sequence(x, lengths)
         packed_out, packed_hidden = lstm(packed)
-        unpacked = rnn_utils.pad_packed_sequence(packed_out)
+        unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed_out)
 
         # Check forward
         self.assertEqual(packed_hidden, seq_hidden)
         self.assertEqual(unpacked, seq_out)
+        self.assertEqual(unpacked_len, lengths)
 
         # Check backward
         seq_out.sum().backward()

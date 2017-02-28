@@ -370,17 +370,13 @@ def int_array(itr):
 
 
 def descriptor(tensor, N=None):
+    padded_size = tensor.size() + ((1,) * (5 - tensor.dim()))
+    tensor = tensor.view(padded_size)
     if N is not None:
         descriptor = TensorDescriptorArray(N)
-    else:
-        descriptor = TensorDescriptor()
-    if tensor.dim() == 2:
-        tensor = tensor.view(tensor.size(0), tensor.size(1), 1, 1)
-    elif tensor.dim() == 3:
-        tensor = tensor.view(tensor.size(0), tensor.size(1), tensor.size(2), 1)
-    if N is not None:
         descriptor.set_all(tensor)
     else:
+        descriptor = TensorDescriptor()
         descriptor.set(tensor)
     return descriptor
 
@@ -388,9 +384,10 @@ def descriptor(tensor, N=None):
 def descriptor_sequence(tensor, batch_sizes):
     descriptors = TensorDescriptorArray(len(batch_sizes))
     _type = _typemap[tensor.type()]
-    _ndim = tensor.dim() + 2
-    _size = int_array(tensor.size() + (1, 1))
-    _stride = int_array(tensor.stride() + (1, 1))
+    _ndim = 5
+    dim_pad = (1,) * (5 - tensor.dim())
+    _size = int_array(tensor.size() + dim_pad)
+    _stride = int_array(tensor.stride() + dim_pad)
     for i, batch_size in enumerate(batch_sizes):
         _size[0] = batch_size
         descriptors.set_raw(i, _type, _ndim, _size, _stride)
