@@ -145,7 +145,7 @@ sampleMultinomialOnce(long* dest,
     if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
-        dest[curDist] = 1;
+        dest[curDist] = TH_INDEX_BASE;
       }
 
       continue;
