@@ -2,6 +2,7 @@
 
 #include <cuda_runtime_api.h>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <stdint.h>
@@ -11,6 +12,8 @@
 
 
 namespace {
+
+typedef std::shared_ptr<THCStream> THCStreamPtr;
 
 struct BlockSize
 {
@@ -24,25 +27,12 @@ struct Block : public BlockSize
 {
   bool  allocated;    // true if the block is currently allocated
   int   event_count;  // number of outstanding cuda events
-  std::unordered_set<THCStream *> streams;
+  std::unordered_set<THCStreamPtr> streams;
 
   Block(size_t size, void* ptr, bool allocated) :
-      BlockSize(size, ptr), allocated(allocated), event_count(0) { }
+      BlockSize(size, ptr), allocated(allocated), event_count(0), streams() {}
 };
 
-struct BlockStreamCleaner {
-  std::unordered_set<THCStream *> &streams;
-
-  BlockStreamCleaner(std::unordered_set<THCStream *> &streams) : streams(streams) {}
-  ~BlockStreamCleaner() {
-    for(auto it = streams.begin(); it != streams.end(); ++it) {
-      if (*it != NULL) {
-        THCStream_free(*it);
-      }
-    }
-    streams.clear();
-  }
-};
 static bool BlockComparator(const BlockSize& a, const BlockSize& b)
 {
   // sort by size, break ties with pointer
@@ -129,25 +119,12 @@ struct HostAllocator
     // we process the streams.
     block.allocated = false;
 
-    // since the block has been deallocated, no point in keeping around the
-    // streams, even in case of error.
-    BlockStreamCleaner sc(block.streams);
-    for (auto it = block.streams.begin(); it != block.streams.end(); ++it) {
-      cudaEvent_t event;
-      err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
-      if (err != cudaSuccess) {
-        return err;
-      }
-
-      err = cudaEventRecord(event, (*it) == NULL ? NULL : (*it)->stream);
-      if (err != cudaSuccess) {
-        return err;
-      }
-
-      // the block will not be re-used until all associated events have occured
-      block.event_count++;
-      cuda_events.emplace_back(event, ptr);
+    // insert CUDA events for each stream on which this block was used. This
+    err = insertEvents(block);
+    if (err != cudaSuccess) {
+      return err;
     }
+
     if (block.event_count == 0) {
       // the block can be re-used if there are no outstanding cuda events
       available.insert(block);
@@ -168,11 +145,11 @@ struct HostAllocator
 
     Block& block = it->second;
     THAssert(block.allocated);
-    auto res = block.streams.insert(stream);
-    if (res.second == true && stream != NULL) {
-      THCStream_retain(stream);
-    }
 
+    THCStreamPtr stream_ptr(stream, &THCStream_free);
+    THCStream_retain(stream);
+
+    block.streams.insert(std::move(stream_ptr));
     return cudaSuccess;
   }
 
@@ -238,6 +215,36 @@ struct HostAllocator
         ++it;
       }
     }
+  }
+
+  cudaError_t insertEvents(Block& block)
+  {
+    cudaError_t err;
+
+    int prev_device;
+    err = cudaGetDevice(&prev_device);
+    if (err != cudaSuccess) return err;
+
+    std::unordered_set<THCStreamPtr> streams(std::move(block.streams));
+    for (auto it = streams.begin(); it != streams.end(); ++it) {
+      auto& stream = *it;
+
+      err = cudaSetDevice(stream->device);
+      if (err != cudaSuccess) break;
+
+      cudaEvent_t event;
+      err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+      if (err != cudaSuccess) break;
+
+      err = cudaEventRecord(event, stream->stream);
+      if (err != cudaSuccess) break;
+
+      block.event_count++;
+      cuda_events.emplace_back(event, block.ptr);
+    }
+
+    cudaSetDevice(prev_device);
+    return err;
   }
 };
 

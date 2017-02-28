@@ -154,12 +154,13 @@ def all_reduce(inputs, outputs=None, op=SUM):
     comm = communicator(inputs, outputs)
     count = inputs[0].numel()
     data_type = nccl_types[inputs[0].type()]
-    for i in range(len(inputs)):
-        with torch.cuda.device(comm.devices[i]):
-            check_error(lib.ncclAllReduce(
-                ctypes.c_void_p(inputs[i].data_ptr()),
-                ctypes.c_void_p(outputs[i].data_ptr()),
-                count, data_type, op, comm[i], cudaStream()))
+    with torch.cuda._free_mutex():
+        for i in range(len(inputs)):
+            with torch.cuda.device(comm.devices[i]):
+                check_error(lib.ncclAllReduce(
+                    ctypes.c_void_p(inputs[i].data_ptr()),
+                    ctypes.c_void_p(outputs[i].data_ptr()),
+                    count, data_type, op, comm[i], cudaStream()))
 
 
 def reduce(inputs, outputs=None, root=0, op=SUM):
@@ -170,12 +171,13 @@ def reduce(inputs, outputs=None, root=0, op=SUM):
     comm = communicator(inputs)
     count = inputs[0].numel()
     data_type = nccl_types[inputs[0].type()]
-    for i in range(len(inputs)):
-        with torch.cuda.device(comm.devices[i]):
-            check_error(lib.ncclReduce(
-                ctypes.c_void_p(inputs[i].data_ptr()),
-                ctypes.c_void_p(outputs[i].data_ptr()), count,
-                data_type, op, root, comm[i], cudaStream()))
+    with torch.cuda._free_mutex():
+        for i in range(len(inputs)):
+            with torch.cuda.device(comm.devices[i]):
+                check_error(lib.ncclReduce(
+                    ctypes.c_void_p(inputs[i].data_ptr()),
+                    ctypes.c_void_p(outputs[i].data_ptr()), count,
+                    data_type, op, root, comm[i], cudaStream()))
 
 
 def broadcast(inputs, root=0):
@@ -184,11 +186,12 @@ def broadcast(inputs, root=0):
     comm = communicator(inputs)
     count = inputs[0].numel()
     data_type = nccl_types[inputs[0].type()]
-    for i in range(len(inputs)):
-        with torch.cuda.device(comm.devices[i]):
-            check_error(lib.ncclBcast(
-                ctypes.c_void_p(inputs[i].data_ptr()), count,
-                data_type, root, comm[i], cudaStream()))
+    with torch.cuda._free_mutex():
+        for i in range(len(inputs)):
+            with torch.cuda.device(comm.devices[i]):
+                check_error(lib.ncclBcast(
+                    ctypes.c_void_p(inputs[i].data_ptr()), count,
+                    data_type, root, comm[i], cudaStream()))
 
 
 def all_gather(inputs, outputs):
@@ -196,11 +199,13 @@ def all_gather(inputs, outputs):
     comm = communicator(inputs, outputs)
     count = inputs[0].numel()
     data_type = nccl_types[inputs[0].type()]
-    for i in range(len(inputs)):
-        with torch.cuda.device(comm.devices[i]):
-            check_error(lib.ncclAllGather(
-                ctypes.c_void_p(inputs[i].data_ptr()), count, data_type,
-                ctypes.c_void_p(outputs[i].data_ptr()), comm[i], cudaStream()))
+    with torch.cuda._free_mutex():
+        for i in range(len(inputs)):
+            with torch.cuda.device(comm.devices[i]):
+                check_error(lib.ncclAllGather(
+                    ctypes.c_void_p(inputs[i].data_ptr()), count, data_type,
+                    ctypes.c_void_p(outputs[i].data_ptr()), comm[i],
+                    cudaStream()))
 
 
 def reduce_scatter(inputs, outputs, op=SUM):
@@ -208,12 +213,13 @@ def reduce_scatter(inputs, outputs, op=SUM):
     comm = communicator(inputs, outputs)
     count = inputs[0].numel() // len(inputs)
     data_type = nccl_types[inputs[0].type()]
-    for i in range(len(inputs)):
-        with torch.cuda.device(comm.devices[i]):
-            check_error(lib.ncclReduceScatter(
-                ctypes.c_void_p(inputs[i].data_ptr()),
-                ctypes.c_void_p(outputs[i].data_ptr()), count, data_type,
-                op, comm[i], cudaStream()))
+    with torch.cuda._free_mutex():
+        for i in range(len(inputs)):
+            with torch.cuda.device(comm.devices[i]):
+                check_error(lib.ncclReduceScatter(
+                    ctypes.c_void_p(inputs[i].data_ptr()),
+                    ctypes.c_void_p(outputs[i].data_ptr()), count, data_type,
+                    op, comm[i], cudaStream()))
 
 
 def _check_inputs(inputs, outputs=None, size_multiplier=1):

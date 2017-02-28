@@ -123,7 +123,7 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
                               THTensor_(data)(src),
                               THTensor_(nElement)(src) * sizeof(real),
                               cudaMemcpyHostToDevice,
-                              stream == NULL ? NULL : stream->stream));
+                              stream->stream));
 
   THCudaCheck(THCCachingHostAllocator_recordEvent(src->storage->data, stream));
 

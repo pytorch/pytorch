@@ -239,6 +239,20 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaLockMutex(PyObject *module)
+{
+  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  mutex->lock();
+  Py_RETURN_NONE;
+}
+
+PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
+{
+  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  mutex->unlock();
+  Py_RETURN_NONE;
+}
+
 PyObject * THCPModule_getLibPath(PyObject *_unused)
 {
 #define _STR(x) #x
