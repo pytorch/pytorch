@@ -19,15 +19,17 @@ void rmsprop_update(
     float epsilon,
     const float* lr,
     Context* context) {
-  // TODO: proper vectorization with Eigen
-  for (auto i = 0; i < N; ++i) {
-    // Update new mean square estimate
-    nms[i] = ms[i] + (1.0f - decay) * (g[i] * g[i] - ms[i]);
-    // Update momentum estimate
-    nmom[i] = mom[i] * momentum + lr[0] * g[i] / std::sqrt(epsilon + nms[i]);
-    // New gradient is the momentum
-    ng[i] = nmom[i];
-  }
+  ConstEigenVectorArrayMap<float> gVec(g, N);
+  ConstEigenVectorArrayMap<float> msVec(ms, N);
+  ConstEigenVectorArrayMap<float> momVec(mom, N);
+  // Update new mean square estimate
+  EigenVectorArrayMap<float> nmsVec(nms, N);
+  nmsVec = msVec + (1.0f - decay) * (gVec * gVec - msVec);
+  // Update momentum estimate
+  EigenVectorArrayMap<float> nmomVec(nmom, N);
+  nmomVec = momVec * momentum + lr[0] * gVec / (epsilon + nmsVec).sqrt();
+  // New gradient is the momentum
+  EigenVectorArrayMap<float>(ng, N) = nmomVec;
 }
 
 template <typename T, class Context>
