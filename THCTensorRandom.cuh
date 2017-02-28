@@ -97,41 +97,52 @@ __device__ int binarySearchForMultinomial(T* dist,
   return start;
 }
 
-template <typename T>
+template <typename T, typename AccT>
 __global__ void
 sampleMultinomialOnce(long* dest,
                       long distributions,
                       int categories,
                       T* sampled,
                       T* dist) {
-  extern __shared__ __align__(sizeof(T)) unsigned char my_smem[];
+  extern __shared__ __align__(sizeof(AccT)) unsigned char my_smem[];
+
+  // Shared Memory hold blockdim.x T for holding the cumulative sum,
+  // blockDim.x AccT for normalizing the probabilities,
   T *smem = reinterpret_cast<T *>(my_smem);
+  AccT *asmem = reinterpret_cast<AccT *>(&my_smem[blockDim.x * sizeof(T)]);
+
+  AccT accZero = ScalarConvert<int, AccT>::to(0);
   T zero = ScalarConvert<int, T>::to(0);
 
   for (long curDist = blockIdx.x;
        curDist < distributions; curDist += gridDim.x) {
     // Each block handles one distribution
     // First pass, find the total sum of the distribution
-    T sum = zero;
+    AccT sum = accZero;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
-      sum = THCNumerics<T>::add(sum, dist[curDist * categories + cat]);
+      sum = THCNumerics<AccT>::add(
+        sum,
+        ScalarConvert<T, AccT>::to(dist[curDist * categories + cat]));
     }
 
     // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T, T>(), zero);
+    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<AccT, AccT>(), accZero);
 
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
-      smem[0] = sum;
-      smem[1] = sampled[curDist];
+      // Make sure the sum of our distribution didn't overflow
+      assert(!isinf(sum));
+
+      asmem[0] = sum;
+      smem[0] = sampled[curDist];
     }
     __syncthreads();
 
-    sum = smem[0];
-    T sample = smem[1];
+    sum = asmem[0];
+    T sample = smem[0];
     __syncthreads();
 
-    if (THCNumerics<T>::eq(sum,  zero) || THCNumerics<T>::eq(sample, zero)) {
+    if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
         dest[curDist] = 1;
@@ -147,11 +158,14 @@ sampleMultinomialOnce(long* dest,
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
-      T val =
-        cat < categories ? THCNumerics<T>::div(dist[curDist * categories + cat], sum) :
-        zero;
+      AccT val =
+        cat < categories ?
+          THCNumerics<AccT>::div(
+              ScalarConvert<T, AccT>::to(dist[curDist * categories + cat]),
+              sum) :
+          accZero;
 
-      smem[threadIdx.x] = val;
+      smem[threadIdx.x] = ScalarConvert<AccT, T>::to(val);
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
