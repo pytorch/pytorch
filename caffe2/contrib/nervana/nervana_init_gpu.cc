@@ -27,7 +27,7 @@ bool Caffe2InitializeNervanaKernels(int*, char***) {
       nervana_loadKernels(FLAGS_nervana_cubin_path.c_str());
   if (g_nervana_kernel_loaded) {
     VLOG(1) << "Loaded nervana kernels from path "
-                  << FLAGS_nervana_cubin_path;
+            << FLAGS_nervana_cubin_path;
   } else {
     // Since this is not a critical error we will just vlog it.
     VLOG(1) << "Cannot load nervana gpu kernels from path "

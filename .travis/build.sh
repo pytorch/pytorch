@@ -24,5 +24,9 @@ else
 #*************#
 # Linux build #
 #*************#
-  cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON && make
+  if [[ $BLAS == 'MKL' ]]; then
+    cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON -DBLAS=MKL && make
+  else
+    cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON && make
+  fi
 fi

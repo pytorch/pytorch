@@ -47,6 +47,20 @@ else
   sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev
   pip install numpy
 
+
+  #########################
+  # Install MKL if needed #
+  #########################
+
+
+  if [[ $BLAS == 'MKL' ]]; then
+    wget http://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+    sudo apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+    sudo sh -c 'echo deb http://apt.repos.intel.com/mkl stable main > /etc/apt/sources.list.d/intel-mkl.list'
+    sudo apt-get update
+    sudo apt-get install intel-mkl
+  fi
+
   ################
   # Install CUDA #
   ################
