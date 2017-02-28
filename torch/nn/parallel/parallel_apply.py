@@ -8,44 +8,37 @@ else:
     import Queue as queue
 
 
-def parallel_apply(modules, inputs, kwargs):
+def parallel_apply(modules, inputs, kwargs_tup=None):
     assert len(modules) == len(inputs)
-    if kwargs:
-        assert len(modules) == len(kwargs)
-
+    if kwargs_tup:
+        assert len(modules) == len(kwargs_tup)
+    else:
+        kwargs_tup = tuple({} for gpu in modules)
     # Fast track
     if len(modules) == 1:
-        if kwargs is None:
-            return (modules[0](*inputs[0]),)
-        else:
-            return (modules[0](*inputs[0], **kwargs[0]),)
+        return (wrap(modules[0], *inputs[0], **kwargs_tup[0]), )
 
     lock = threading.Lock()
     results = {}
 
-    def _worker(module, input, kwargs, results, lock):
+    def _worker(module, input, results, lock, **kwargs):
         var_input = input
         while not isinstance(var_input, Variable):
             var_input = var_input[0]
         try:
             with torch.cuda.device_of(var_input):
-                if kwargs is not None:
-                    output = module(*input, **kwargs)
-                else:
-                    output = module(*input)
+                output = module(*input, **kwargs)
             with lock:
                 results[input] = output
         except Exception as e:
             with lock:
                 results[input] = e
-    if kwargs is None:
-        threads = [threading.Thread(target=_worker,
-                                    args=(module, input, kwargs, results, lock))
-                   for module, input in zip(modules, inputs)]
-    else:
-        threads = [threading.Thread(target=_worker,
-                                    args=(module, input, kwargs, results, lock))
-                   for module, input, kwargs in zip(modules, inputs, kwargs)]
+
+    threads = [threading.Thread(target=_worker,
+                                args=(module, input, results, lock),
+                                kwargs=kwargs
+                                )
+               for module, input, kwargs in zip(modules, inputs, kwargs_tup)]
 
     for thread in threads:
         thread.start()
