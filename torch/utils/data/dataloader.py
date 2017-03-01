@@ -60,8 +60,14 @@ def _pin_memory_loop(in_queue, out_queue, done_event):
 
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
+    if sys.version_info[0] < 3:
+        # handle the case of unicode in python 2.7
+        if isinstance(batch[0], unicode):
+            return batch
     if torch.is_tensor(batch[0]):
-        return torch.cat([t.unsqueeze(0) for t in batch], 0)
+        return torch.stack(batch, 0)
+    elif type(batch[0]).__module__ == 'numpy':  # this allows to not import numpy
+        return torch.stack([torch.from_numpy(b) for b in batch], 0)
     elif isinstance(batch[0], int):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):

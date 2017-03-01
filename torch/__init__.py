@@ -10,6 +10,7 @@ on an NVIDIA GPU with compute capability >= 2.0.
 
 import sys
 from ._utils import _import_dotted_name
+from .version import __version__
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -150,6 +151,10 @@ class FloatStorage(_C.FloatStorageBase, _StorageBase):
     pass
 
 
+class HalfStorage(_C.HalfStorageBase, _StorageBase):
+    pass
+
+
 class LongStorage(_C.LongStorageBase, _StorageBase):
     pass
 
@@ -188,6 +193,16 @@ class FloatTensor(_C.FloatTensorBase, _TensorBase):
     @classmethod
     def storage_type(cls):
         return FloatStorage
+
+
+class HalfTensor(_C.HalfTensorBase, _TensorBase):
+
+    def is_signed(self):
+        return True
+
+    @classmethod
+    def storage_type(cls):
+        return HalfStorage
 
 
 class LongTensor(_C.LongTensorBase, _TensorBase):

@@ -291,8 +291,9 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
     THCState *state, THCTensor *input, THCTensor *gradOutput,
     THCTensor *gradWeight, THCTensor *gradBias, THCTensor *finput,
     THCTensor *fgradInput, int kW, int dW, int padW, bool featFirst,
-    real scale) {
+    accreal scale_) {
 
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   // Aliases
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;

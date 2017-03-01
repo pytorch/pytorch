@@ -30,15 +30,32 @@ We are in an early-release Beta. Expect some adventures and rough edges.
 
 At a granular level, PyTorch is a library that consists of the following components:
 
-| \_                       | \_ |
-| ------------------------ | --- |
-| torch                    | a Tensor library like NumPy, with strong GPU support |
-| torch.autograd           | a tape based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| torch.nn                 | a neural networks library deeply integrated with autograd designed for maximum flexibility |
-| torch.optim              | an optimization package to be used with torch.nn with standard optimization methods such as SGD, RMSProp, LBFGS, Adam etc. |
-| torch.multiprocessing    | python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and hogwild training. |
-| torch.utils              | DataLoader, Trainer and other utility functions for convenience |
-| torch.legacy(.nn/.optim) | legacy code that has been ported over from torch for backward compatibility reasons |
+<table>
+<tr>
+    <td><b> torch </b></td>
+    <td> a Tensor library like NumPy, with strong GPU support </td>
+</tr>
+<tr>
+    <td><b> torch.autograd </b></td>
+    <td> a tape based automatic differentiation library that supports all differentiable Tensor operations in torch </td>
+</tr>
+<tr>
+    <td><b> torch.nn </b></td>
+    <td> a neural networks library deeply integrated with autograd designed for maximum flexibility </td>
+</tr>
+<tr>
+    <td><b> torch.multiprocessing  </b></td>
+    <td> python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and hogwild training. </td>
+</tr>
+<tr>
+    <td><b> torch.utils </b></td>
+    <td> DataLoader, Trainer and other utility functions for convenience </td>
+</tr>
+<tr>
+    <td><b> torch.legacy(.nn/.optim) </b></td>
+    <td> legacy code that has been ported over from torch for backward compatibility reasons </td>
+</tr>
+</table>
 
 Usually one uses PyTorch either as:
 
@@ -128,10 +145,9 @@ There is no wrapper code that needs to be written. [You can see an example here]
 ## Installation
 
 ### Binaries
-- Anaconda
-```bash
-conda install pytorch torchvision -c soumith
-```
+Commands to install from binaries via Conda or pip wheels are on our website:
+
+[http://pytorch.org](http://pytorch.org)
 
 ### From source
 

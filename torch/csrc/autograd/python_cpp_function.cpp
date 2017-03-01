@@ -97,11 +97,14 @@ static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
 {
-  auto pfw = dynamic_cast<PyFunction*>(cdata.get());
-  if (pfw) {
+  if (auto pfw = dynamic_cast<PyFunction*>(cdata.get())) {
     PyObject* obj = pfw->obj;
     Py_INCREF(obj);
     return obj;
+  }
+
+  if (auto var = std::dynamic_pointer_cast<Variable>(cdata)) {
+    return THPVariable_Wrap(var);
   }
 
   auto it = cpp_function_types.find(std::type_index(typeid(*cdata)));

@@ -59,6 +59,13 @@ def small_2d_scaled(t, scale=10):
     return make_tensor(t, S, S).mul(scale)
 
 
+def small_2d_oneish(t):
+    if is_floating(t):
+        return make_tensor(t, S, S).clamp(min=0.99, max=1.01)
+    else:
+        return t(S, S).fill_(1)
+
+
 def small_3d(t):
     return make_tensor(t, S, S, S)
 
@@ -206,7 +213,7 @@ tests = [
     ('norm', small_3d, lambda t: [3, 0], '3_norm_dim'),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
-    ('prod', small_3d, lambda t: [],),
+    ('prod', small_2d_oneish, lambda t: [],),
     ('prod', small_3d, lambda t: [1], 'dim'),
     ('sum', small_2d, lambda t: [],),
     ('sum', small_3d, lambda t: [1], 'dim'),
@@ -375,7 +382,7 @@ class TestCuda(TestCase):
             self.assertEqual(z.get_device(), 0)
             self.assertIs(z.cuda(0), z)
 
-    def test_serialization(self):
+    def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()
         q = [x, y, x, y.storage()]
@@ -530,7 +537,7 @@ class TestCuda(TestCase):
         self.assertIs(type(x_copy), type(x))
         self.assertEqual(x_copy.get_device(), x.get_device())
 
-    def test_serialization_empty(self):
+    def test_serialization_array_with_empty(self):
         x = [torch.randn(4, 4).cuda(), torch.cuda.FloatTensor()]
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
@@ -672,6 +679,31 @@ class TestCuda(TestCase):
         t = torch.FloatTensor([1]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
         self.assertEqual(list(gpu_tensor), [1])
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_caching_pinned_memory_multi_gpu(self):
+        # checks that the events preventing pinned memory from being re-used
+        # too early are recorded on the correct GPU
+        cycles_per_ms = get_cycles_per_ms()
+
+        t = torch.FloatTensor([1]).pin_memory()
+        ptr = t.data_ptr()
+        gpu_tensor0 = torch.cuda.FloatTensor([0], device=0)
+        gpu_tensor1 = torch.cuda.FloatTensor([0], device=1)
+
+        with torch.cuda.device(1):
+            torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
+            gpu_tensor1.copy_(t, async=True)
+
+        del t
+        t = torch.FloatTensor([2]).pin_memory()
+        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+
+        with torch.cuda.device(0):
+            gpu_tensor0.copy_(t, async=True)
+
+        self.assertEqual(gpu_tensor1[0], 1)
+        self.assertEqual(gpu_tensor0[0], 2)
 
 
 for decl in tests:

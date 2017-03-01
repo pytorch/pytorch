@@ -4,7 +4,18 @@
 
 void THTensor_(copy)(THTensor *tensor, THTensor *src)
 {
-  TH_TENSOR_APPLY2(real, tensor, real, src, *tensor_data = *src_data;)
+  if (THTensor_(isContiguous)(tensor) && THTensor_(isContiguous)(src) && THTensor_(nElement)(tensor) == THTensor_(nElement)(src)) {
+    real *sp = THTensor_(data)(src);
+    real *rp = THTensor_(data)(tensor);
+    ptrdiff_t sz = THTensor_(nElement)(tensor);
+#ifndef TH_REAL_IS_HALF
+    THVector_(copy)(rp, sp, sz); 
+#else
+    memcpy(rp, sp, sz * sizeof(real));
+#endif
+  } else {
+    TH_TENSOR_APPLY2(real, tensor, real, src, *tensor_data = *src_data;)
+  }
 }
 
 #define IMPLEMENT_THTensor_COPY(TYPENAMESRC, TYPE_SRC) \

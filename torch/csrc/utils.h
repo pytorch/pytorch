@@ -70,7 +70,6 @@
 #endif
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
-#define THPUtils_newReal_HALF(value) PyFloat_FromDouble(THC_half2float(value))
 // TODO: handle int overflows for py2
 #define THPUtils_newReal_INT(value) PyInt_FromLong(value)
 
@@ -87,8 +86,13 @@
 #define THPFloatUtils_unpackAccreal(object)   (double)THPUtils_unpackReal_FLOAT(object)
 #define THPFloatUtils_newAccreal(value)       THPUtils_newReal_FLOAT(value)
 #define THPHalfUtils_checkReal(object)        THPUtils_checkReal_FLOAT(object)
+#ifndef THP_HOST_HALF
 #define THPHalfUtils_unpackReal(object)       (half)THC_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           THPUtils_newReal_HALF(value)
+#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(THC_half2float(value))
+#else
+#define THPHalfUtils_unpackReal(object)       TH_float2half(THPUtils_unpackReal_FLOAT(object))
+#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(TH_half2float(value))
+#endif
 #define THPHalfUtils_checkAccreal(object)     THPUtils_checkReal_FLOAT(object)
 #define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
@@ -141,8 +145,14 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 #define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
-bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart,
-        Py_ssize_t *ostop, Py_ssize_t *oslicelength);
+// https://bugsfiles.kde.org/attachment.cgi?id=61186
+#if PY_VERSION_HEX >= 0x03020000
+#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
+  (PySlice_GetIndicesEx(SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
+#else
+#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
+  (PySlice_GetIndicesEx((PySliceObject*)SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
+#endif
 
 #define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
@@ -158,6 +168,9 @@ struct THPUtils_typeTraits {};
 
 #include "generic/utils.h"
 #include <TH/THGenerateAllTypes.h>
+
+#include "generic/utils.h"
+#include <TH/THGenerateHalfType.h>
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);

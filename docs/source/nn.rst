@@ -22,6 +22,24 @@ Containers
 .. autoclass:: Module
     :members:
 
+:hidden:`Sequential`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Sequential
+    :members:
+
+:hidden:`ModuleList`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleList
+    :members:
+
+:hidden:`ParameterList`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterList
+    :members:
+
 Convolution Layers
 ----------------------------------
 
@@ -445,13 +463,13 @@ Vision layers
     :members:
 
 :hidden:`UpsamplingNearest2d`
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: UpsamplingNearest2d
     :members:
 
 :hidden:`UpsamplingBilinear2d`
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: UpsamplingBilinear2d
     :members:
@@ -465,6 +483,16 @@ Multi-GPU layers
 
 .. autoclass:: DataParallel
     :members:
+
+
+Utilities
+---------
+
+:hidden:`clip_grad_norm`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.clip_grad_norm
+
 
 torch.nn.functional
 ===================

@@ -149,7 +149,7 @@ class RNN(RNNBase):
         num_layers: Number of recurrent layers.
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-        batch_first: If True, then the input tensor is provided as (batch, seq, feature)
+        batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
         skip_input: If True, The MM with the input is skipped for the first layer. Default: False
@@ -224,7 +224,7 @@ class LSTM(RNNBase):
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-        batch_first: If True, then the input tensor is provided as (batch, seq, feature)
+        batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
         skip_input: If True, The MM with the input is skipped for the first layer. Default: False
@@ -244,12 +244,14 @@ class LSTM(RNNBase):
         - **c_n** (num_layers * num_directions, batch, hidden_size): tensor containing the cell state for t=seq_len
 
     Attributes:
-        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ir|W_ii|W_in)`, of shape
-                         `(input_size x 3*hidden_size)`
-        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hr|W_hi|W_hn)`, of shape
-                         `(hidden_size x 3*hidden_size)`
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ir|b_ii|b_in)`, of shape `(3*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(W_hr|W_hi|W_hn)`, of shape `(3*hidden_size)`
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ii|W_if|W_ig|W_io)`, of shape
+                         `(input_size x 4*hidden_size)`
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hi|W_hf|W_hg|W_ho)`, of shape
+                         `(hidden_size x 4*hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ii|b_if|b_ig|b_io)`, of shape
+                         `(4*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(W_hi|W_hf|W_hg|b_ho)`, of shape
+                         `(4*hidden_size)`
 
     Examples::
 
@@ -289,7 +291,7 @@ class GRU(RNNBase):
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-        batch_first: If True, then the input tensor is provided as (batch, seq, feature)
+        batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
         skip_input: If True, The first MM with the input is skipped for the first layer. Default: False
@@ -306,11 +308,13 @@ class GRU(RNNBase):
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape
-                         (input_size x 3*hidden_size)
+                         `(input_size x 3*hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape
-                         (hidden_size x 3*hidden_size)
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
+                         `(hidden_size x 3*hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape
+                         `(3*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape
+                         `(3*hidden_size)`
     Examples::
 
         >>> rnn = nn.GRU(10, 20, 2)
@@ -453,7 +457,7 @@ class LSTMCell(RNNCellBase):
         >>> cx = Variable(torch.randn(3, 20))
         >>> output = []
         >>> for i in range(6):
-        ...     hx, cx = rnn(input, (hx, cx))
+        ...     hx, cx = rnn(input[i], (hx, cx))
         ...     output.append(hx)
     """
 
@@ -517,13 +521,13 @@ class GRUCell(RNNCellBase):
 
     Examples::
 
-        >>> rnn = nn.RNNCell(10, 20)
+        >>> rnn = nn.GRUCell(10, 20)
         >>> input = Variable(torch.randn(6, 3, 10))
         >>> hx = Variable(torch.randn(3, 20))
         >>> output = []
         >>> for i in range(6):
-        ...     hx = rnn(input, hx)
-        ...     output[i] = hx
+        ...     hx = rnn(input[i], hx)
+        ...     output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True):

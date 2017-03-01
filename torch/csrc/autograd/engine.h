@@ -16,7 +16,7 @@ namespace torch { namespace autograd {
 
 struct Engine {
   using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, GradBuffer>>;
-  using function_queue = std::vector<std::shared_ptr<Function>>;
+  using function_queue = std::vector<Function*>;
   using dependencies_type = std::unordered_map<Function*, int>;
 
   // Given a list of output variables and their gradients, computes the
@@ -28,7 +28,7 @@ struct Engine {
 
 private:
   static dependencies_type compute_dependencies(
-      function_queue& queue,
+      function_queue queue,
       ready_queue_type& ready);
 };
 

@@ -3,9 +3,16 @@ from ..function import Function, InplaceFunction
 import math
 
 
+def maybe_view(tensor, size):
+    if tensor.size() == size:
+        return tensor
+    return tensor.contiguous().view(size)
+
+
 class Add(InplaceFunction):
 
     def forward(self, a, b):
+        self.b_size = b.size()
         if self.inplace:
             self.mark_dirty(a)
             return a.add_(b)
@@ -13,12 +20,13 @@ class Add(InplaceFunction):
             return a.add(b)
 
     def backward(self, grad_output):
-        return grad_output, grad_output
+        return grad_output, maybe_view(grad_output, self.b_size)
 
 
 class Sub(InplaceFunction):
 
     def forward(self, a, b):
+        self.b_size = b.size()
         if self.inplace:
             self.mark_dirty(a)
             return a.sub_(b)
@@ -26,40 +34,43 @@ class Sub(InplaceFunction):
             return a.sub(b)
 
     def backward(self, grad_output):
-        return grad_output, grad_output.neg()
+        return grad_output, maybe_view(grad_output.neg(), self.b_size)
 
 
 class Mul(Function):
 
     def forward(self, a, b):
+        self.b_size = b.size()
         self.save_for_backward(a, b)
         return a.mul(b)
 
     def backward(self, grad_output):
         a, b = self.saved_tensors
-        return grad_output.mul(b), grad_output.mul(a)
+        return grad_output.mul(b), maybe_view(grad_output.mul(a), self.b_size)
 
 
 class Div(Function):
 
     def forward(self, a, b):
+        self.b_size = b.size()
         self.save_for_backward(a, b)
         return a.div(b)
 
     def backward(self, grad_output):
         a, b = self.saved_tensors
-        return grad_output.div(b), grad_output.neg().mul(a).div_(b).div_(b)
+        return grad_output.div(b), maybe_view(grad_output.neg().mul(a).div_(b).div_(b), self.b_size)
 
 
 class Pow(Function):
 
     def forward(self, a, b):
+        self.b_size = b.size()
         self.save_for_backward(a, b)
         return a.pow(b)
 
     def backward(self, grad_output):
         a, b = self.saved_tensors
-        return grad_output.mul(b).mul_(a.pow(b - 1)), grad_output.mul(a.pow(b)).mul_(a.log())
+        return grad_output.mul(b).mul_(a.pow(b - 1)), maybe_view(grad_output.mul(a.pow(b)).mul_(a.log()), self.b_size)
 
 
 class AddConstant(InplaceFunction):

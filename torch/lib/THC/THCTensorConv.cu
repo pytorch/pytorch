@@ -296,7 +296,7 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
 THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
                                    THCudaTensor *kernel, long srow, long scol, const char *type)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, output, input, kernel));
+  THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, output, input, kernel));
   long nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
   long nOutputPlane, nOutputRows, nOutputCols;
@@ -416,7 +416,7 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
 THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
                                    THCudaTensor *kernel, long srow, long scol, const char *type)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, output, input, kernel));
+  THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, output, input, kernel));
   long nbatch, nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
   long nOutputPlane, nOutputRows, nOutputCols;
@@ -549,7 +549,7 @@ THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, fl
                                        THCudaTensor *input, THCudaTensor *kernel,
                                        long srow, long scol)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, output, input, kernel));
+  THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, output, input, kernel));
   long nInputPlane, nInputRows, nInputCols;
   long nKernelPlane, nKernelRows, nKernelCols;
   long nOutputRows, nOutputCols;
@@ -883,7 +883,7 @@ THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCud
                                     THCudaTensor *kernel, long stride_x, long stride_y,
                                     THCudaTensor *table, long fanin)
 {
-  THAssert(THCudaTensor_checkGPU(state, 4, output, input, kernel, table));
+  THCAssertSameGPU(THCudaTensor_checkGPU(state, 4, output, input, kernel, table));
   long nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
   long nOutputPlane, nOutputRows, nOutputCols;

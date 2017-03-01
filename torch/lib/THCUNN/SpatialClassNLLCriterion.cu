@@ -48,11 +48,17 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
 
   if (threadIdx.x == 0) {
     atomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
-    if (size_average && acc_weight > 0)
-      atomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum / acc_weight / gridDim.x));
-    else
-      atomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
+    atomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
   }
+}
+
+template<typename T>
+__global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
+          T *output,
+          T *total_weight)
+{
+  if (*total_weight > 0)
+    *output = THCNumerics<T>::div(*output, *total_weight);
 }
 
 template<typename T>

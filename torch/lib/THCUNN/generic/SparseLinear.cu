@@ -127,8 +127,8 @@ void THNN_(SparseLinear_accGradParameters)(
            THCTensor *gradBias,
            THCTensor *weight,
            THCTensor *bias,
-           double weightDecay,
-           double scale)
+           accreal weightDecay,
+           accreal scale)
 {
   long outDim = THCTensor_(size)(state, weight, 0);
   long inDim = THCTensor_(size)(state, weight, 1);
@@ -237,8 +237,8 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
            THCTensor *gradBias,
            THCTensor *weight,
            THCTensor *bias,
-           double weightDecay,
-           double scale) {
+           accreal weightDecay,
+           accreal scale) {
   THError("CUDA does not support legacy input format, please use a table of nnz x 2 vectors");
 }
 
@@ -259,7 +259,7 @@ void THNN_(SparseLinear_updateParameters)(
            THCTensor *gradWeight,
            THCTensor *gradBias,
            THCTensor *lastInput,
-           double learningRate) {
+           accreal learningRate) {
   THCTensor_(cadd)(state, weight, weight, -learningRate, gradWeight);
   THCTensor_(cadd)(state, bias, bias, -learningRate, gradBias);
 }

@@ -212,8 +212,25 @@ class Variable(_C._VariableBase):
         self.creator._reinforce(reward)
 
     def detach(self):
-        """Detaches the Variable from the graph that created it."""
-        return NoGrad()(self)
+        """Returns a new Variable, detached from the current graph.
+
+        Result will never require gradient. If the input is volatile, the output
+        will be volatile too.
+
+        .. note::
+
+          Returned Variable uses the same data tensor, as the original one, and
+          in-place modifications on either of them will be seen, and may trigger
+          errors in correctness checks.
+        """
+        result = NoGrad()(self)  # this is needed, because it merges version counters
+        result._creator = None
+        return result
+
+    def detach_(self):
+        """Detaches the Variable from the graph that created it, making it a leaf."""
+        self._creator = None
+        self.requires_grad = False
 
     def contiguous(self):
         self.data = self.data.contiguous()
@@ -413,12 +430,6 @@ class Variable(_C._VariableBase):
     def trunc(self):
         return Trunc()(self)
 
-    def floor(self):
-        return Floor()(self)
-
-    def ceil(self):
-        return Ceil()(self)
-
     def fmod(self, value):
         return Fmod(value)(self)
 
@@ -473,9 +484,6 @@ class Variable(_C._VariableBase):
 
     def split(self, split_size, dim=0):
         return torch.split(self, split_size, dim)
-
-    def chunk(self, n_chunks, dim=0):
-        return torch.chunk(self, n_chunks, dim)
 
     def repeat(self, *repeats):
         if len(repeats) == 1 and isinstance(repeats[0], torch.Size):

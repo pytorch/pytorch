@@ -2,6 +2,7 @@
 
 #include <cuda_runtime_api.h>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <stdint.h>
@@ -10,6 +11,8 @@
 
 
 namespace {
+
+typedef std::shared_ptr<THCStream> THCStreamPtr;
 
 struct BlockSize
 {
@@ -23,9 +26,10 @@ struct Block : public BlockSize
 {
   bool  allocated;    // true if the block is currently allocated
   int   event_count;  // number of outstanding cuda events
+  std::set<THCStreamPtr> streams;
 
   Block(size_t size, void* ptr, bool allocated) :
-      BlockSize(size, ptr), allocated(allocated), event_count(0) { }
+      BlockSize(size, ptr), allocated(allocated), event_count(0), streams() {}
 };
 
 static bool BlockComparator(const BlockSize& a, const BlockSize& b)
@@ -98,13 +102,28 @@ struct HostAllocator
       return cudaSuccess;
     }
 
+    // process outstanding cuda events which may have occurred
+    cudaError_t err = processEvents();
+    if (err != cudaSuccess) {
+      return err;
+    }
+
     auto it = blocks.find(ptr);
     THAssert(it != blocks.end());
 
     Block& block = it->second;
     THAssert(block.allocated);
 
+    // free (on valid memory) shouldn't fail, so mark unallocated before
+    // we process the streams.
     block.allocated = false;
+
+    // insert CUDA events for each stream on which this block was used. This
+    err = insertEvents(block);
+    if (err != cudaSuccess) {
+      return err;
+    }
+
     if (block.event_count == 0) {
       // the block can be re-used if there are no outstanding cuda events
       available.insert(block);
@@ -112,7 +131,7 @@ struct HostAllocator
     return cudaSuccess;
   }
 
-  cudaError_t recordEvent(void* ptr, cudaStream_t stream)
+  cudaError_t recordEvent(void* ptr, THCStream *stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
     cudaError_t err;
@@ -126,26 +145,10 @@ struct HostAllocator
     Block& block = it->second;
     THAssert(block.allocated);
 
-    // process outstanding cuda events which may have occurred
-    err = processEvents();
-    if (err != cudaSuccess) {
-      return err;
-    }
+    THCStreamPtr stream_ptr(stream, &THCStream_free);
+    THCStream_retain(stream);
 
-    // create and record an event in the given stream
-    cudaEvent_t event;
-    err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
-    if (err != cudaSuccess) {
-      return err;
-    }
-    err = cudaEventRecord(event, stream);
-    if (err != cudaSuccess) {
-      return err;
-    }
-
-    // the block will not be re-used until all associated events have occured
-    block.event_count++;
-    cuda_events.emplace_back(event, ptr);
+    block.streams.insert(std::move(stream_ptr));
     return cudaSuccess;
   }
 
@@ -186,18 +189,17 @@ struct HostAllocator
     std::lock_guard<std::mutex> lock(mutex);
 
     // remove events for freed blocks
-    std::deque<std::pair<cudaEvent_t, void*>> new_events;
     for (auto it = cuda_events.begin(); it != cuda_events.end(); ++it) {
       cudaEvent_t event = it->first;
       Block& block = blocks.at(it->second);
       if (!block.allocated) {
         THCudaCheckWarn(cudaEventDestroy(event));
         block.event_count--;
-      } else {
-        new_events.push_back(*it);
       }
     }
-    cuda_events.swap(new_events);
+
+    // all cuda_events have been processed
+    cuda_events.clear();
 
     // clear list of available blocks
     available.clear();
@@ -212,6 +214,36 @@ struct HostAllocator
         ++it;
       }
     }
+  }
+
+  cudaError_t insertEvents(Block& block)
+  {
+    cudaError_t err;
+
+    int prev_device;
+    err = cudaGetDevice(&prev_device);
+    if (err != cudaSuccess) return err;
+
+    std::set<THCStreamPtr> streams(std::move(block.streams));
+    for (auto it = streams.begin(); it != streams.end(); ++it) {
+      auto& stream = *it;
+
+      err = cudaSetDevice(stream->device);
+      if (err != cudaSuccess) break;
+
+      cudaEvent_t event;
+      err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+      if (err != cudaSuccess) break;
+
+      err = cudaEventRecord(event, stream->stream);
+      if (err != cudaSuccess) break;
+
+      block.event_count++;
+      cuda_events.emplace_back(event, block.ptr);
+    }
+
+    cudaSetDevice(prev_device);
+    return err;
   }
 };
 
@@ -232,7 +264,7 @@ static void THCCachingHostAllocator_free(void* ctx, void* ptr)
   allocator.free(ptr);
 }
 
-cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, cudaStream_t stream)
+cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream)
 {
   return allocator.recordEvent(ptr, stream);
 }

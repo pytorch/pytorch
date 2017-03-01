@@ -52,6 +52,10 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
 #if !defined(WITH_NUMPY)
   THPUtils_setError("PyTorch was compiled without numpy support\n");
   return NULL;
+#elif defined(THC_GENERIC_FILE)
+  THPUtils_setError("can't convert CUDA tensor to numpy (it doesn't support GPU arrays). "
+    "Use .cpu() to move the tensor to host memory first.");
+  return NULL;
 #elif !defined(NUMPY_TYPE_ENUM)
   THPUtils_setError("numpy conversion for %s is not supported\n", THPUtils_typename(self));
   return NULL;

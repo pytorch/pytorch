@@ -1,6 +1,8 @@
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
+import setuptools.command.develop
+import setuptools.command.build_py
 import distutils.unixccompiler
 import distutils.command.build
 import distutils.command.clean
@@ -94,6 +96,28 @@ class build_module(Command):
         self.run_command('build_ext')
 
 
+class build_py(setuptools.command.build_py.build_py):
+
+    def run(self):
+        self.create_version_file()
+        setuptools.command.build_py.build_py.run(self)
+
+    @staticmethod
+    def create_version_file():
+        global version, cwd
+        print('-- Building version ' + version)
+        version_path = os.path.join(cwd, 'torch', 'version.py')
+        with open(version_path, 'w') as f:
+            f.write("__version__ = '{}'\n".format(version))
+
+
+class develop(setuptools.command.develop.develop):
+
+    def run(self):
+        build_py.create_version_file()
+        setuptools.command.develop.develop.run(self)
+
+
 class build_ext(setuptools.command.build_ext.build_ext):
 
     def run(self):
@@ -168,6 +192,7 @@ class clean(distutils.command.clean.clean):
 ################################################################################
 
 include_dirs = []
+library_dirs = []
 extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
@@ -188,7 +213,7 @@ include_dirs += [
     tmp_install_path + "/include/THNN",
 ]
 
-extra_link_args.append('-L' + lib_path)
+library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 TH_LIB = os.path.join(lib_path, 'libTH.so.1')
@@ -271,7 +296,7 @@ if WITH_CUDA:
             break
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
-    extra_link_args.append('-L' + cuda_lib_path)
+    library_dirs.append(cuda_lib_path)
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
@@ -290,7 +315,7 @@ if WITH_CUDA:
 if WITH_CUDNN:
     main_libraries += ['cudnn']
     include_dirs.append(CUDNN_INCLUDE_DIR)
-    extra_link_args.append('-L' + CUDNN_LIB_DIR)
+    library_dirs.append(CUDNN_LIB_DIR)
     main_sources += [
         "torch/csrc/cudnn/BatchNorm.cpp",
         "torch/csrc/cudnn/Conv.cpp",
@@ -324,6 +349,7 @@ C = Extension("torch._C",
               language='c++',
               extra_compile_args=main_compile_args + extra_compile_args,
               include_dirs=include_dirs,
+              library_dirs=library_dirs,
               extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')],
               )
 extensions.append(C)
@@ -362,18 +388,28 @@ if WITH_CUDA:
                        )
     extensions.append(THCUNN)
 
-version = "0.1"
+version = '0.1.9'
 if os.getenv('PYTORCH_BUILD_VERSION'):
+    assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     version = os.getenv('PYTORCH_BUILD_VERSION') \
         + '_' + os.getenv('PYTORCH_BUILD_NUMBER')
+else:
+    try:
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+        version += '+' + sha[:7]
+    except subprocess.CalledProcessError:
+        pass
+
 
 setup(name="torch", version=version,
       ext_modules=extensions,
       cmdclass={
           'build': build,
+          'build_py': build_py,
           'build_ext': build_ext,
           'build_deps': build_deps,
           'build_module': build_module,
+          'develop': develop,
           'install': install,
           'clean': clean,
       },

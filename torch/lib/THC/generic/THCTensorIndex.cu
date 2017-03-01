@@ -4,7 +4,7 @@
 
 void THCTensor_(indexCopy_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
 
   THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
   THCudaLongTensor_copyLong(state, indices_, indices);
@@ -16,8 +16,8 @@ void THCTensor_(indexCopy_long)(THCState *state, THCTensor *dst, int dim, THLong
 
 void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
-  THAssert(THCudaLongTensor_checkGPU(state, 1, indices));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
+  THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
 
   long dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
@@ -132,7 +132,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
 void THCTensor_(indexAdd_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
 
   THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
   THCudaLongTensor_copyLong(state, indices_, indices);
@@ -144,8 +144,8 @@ void THCTensor_(indexAdd_long)(THCState *state, THCTensor *dst, int dim, THLongT
 
 void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
-  THAssert(THCudaLongTensor_checkGPU(state, 1, indices));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
+  THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
 
   long dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
@@ -260,7 +260,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
 
 void THCTensor_(indexFill_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, real val)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, dst));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
 
   THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
   THCudaLongTensor_copyLong(state, indices_, indices);
@@ -272,8 +272,8 @@ void THCTensor_(indexFill_long)(THCState *state, THCTensor *dst, int dim, THLong
 
 void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, real val)
 {
-  THAssert(THCTensor_(checkGPU)(state, 1, dst));
-  THAssert(THCudaLongTensor_checkGPU(state, 1, indices));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
+  THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
   long dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCudaLongTensor_nDimension(state, indices);
@@ -374,7 +374,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
 void THCTensor_(indexSelect_long)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THLongTensor *indices)
 {
-  THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THArgCheck(indices->nDimension == 1, 3, "Index is supposed to be a vector");
 
   THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
@@ -387,7 +387,7 @@ void THCTensor_(indexSelect_long)(THCState *state, THCTensor *dst, THCTensor *sr
 
 void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THCudaLongTensor *indices)
 {
-  THAssert(THCTensor_(checkGPU)(state, 3, dst, src, indices));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, dst, src, indices));
 
   long dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);

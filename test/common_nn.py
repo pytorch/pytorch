@@ -7,8 +7,8 @@ from itertools import product
 import torch
 import torch.cuda
 from torch.autograd import Variable
-from common import TestCase, to_gpu, get_numerical_jacobian, iter_tensors, contiguous, \
-    freeze_rng_state
+from common import TestCase, to_gpu, freeze_rng_state
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
 
 # tarfile module tries to obtain a file object name in python 3.3
@@ -248,6 +248,13 @@ criterion_tests = [
         target=torch.rand(2, 5, 5).mul(3).floor().long()
     ),
     dict(
+        module_name='NLLLoss2d',
+        constructor_args=(torch.rand(3),),
+        input_size=(2, 3, 5, 5),
+        target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        desc='weights'
+    ),
+    dict(
         module_name='HingeEmbeddingLoss',
         input=torch.rand(10),
         target=torch.randn(10).gt(0).double().mul_(2).sub(1)
@@ -403,9 +410,9 @@ class NNTestCase(TestCase):
         # TODO: enable non-contig tests
         input = contiguous(input)
         if jacobian_input:
-            res += get_numerical_jacobian(fw, input, input),
+            res += get_numerical_jacobian(fw, input, input, eps=1e-6),
         if jacobian_parameters:
-            res += torch.cat(list(get_numerical_jacobian(fw, input, p) for p in param), 0),
+            res += torch.cat(list(get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param), 0),
         return res
 
     def check_jacobian(self, module, input, jacobian_input=True):
@@ -573,7 +580,7 @@ class ModuleTest(TestBase):
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
-                test_case.assertEqual(grad, d_input)
+                test_case.assertEqual(grad, d_input, 1e-4)
                 test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
 
     def test_cuda(self, test_case):

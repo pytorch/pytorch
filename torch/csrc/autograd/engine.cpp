@@ -1,6 +1,6 @@
 #include "torch/csrc/autograd/engine.h"
 
-#include <set>
+#include <unordered_set>
 #include <string>
 #include <THPP/THPP.h>
 
@@ -8,26 +8,47 @@ using thpp::Tensor;
 
 namespace torch { namespace autograd {
 
-auto Engine::compute_dependencies(function_queue& queue, ready_queue_type& ready) -> dependencies_type {
-  dependencies_type dependencies;
-  std::set<Function*> seen;
-  while (queue.size() > 0) {
-    auto fn = std::move(queue.back()); queue.pop_back();
+auto Engine::compute_dependencies(function_queue queue, ready_queue_type& ready) -> dependencies_type {
+  // First, search the graph and find all stochastic functions. Append them to the queue.
+  std::unordered_set<Function*> seen;
+  function_queue search_queue(queue);
+  while (search_queue.size() > 0) {
+    auto fn = search_queue.back(); search_queue.pop_back();
     for (auto& prev_fn_pair : fn->previous_functions) {
       auto& prev_fn = prev_fn_pair.first;
-      if (!prev_fn)
-        continue;
-      if (dynamic_cast<Variable*>(prev_fn.get()))
-        continue;
-      // check for stochastic function
-      if (prev_fn->is_stochastic && seen.count(prev_fn.get()) == 0 && prev_fn->requires_grad) {
+      Function* prev_ptr = prev_fn.get();
+      if (!prev_ptr) continue;
+      if (prev_ptr->is_stochastic && prev_ptr->requires_grad && seen.count(prev_ptr) == 0) {
         ready.emplace_back(prev_fn, GradBuffer(0));
-      } else if (fn->requires_grad && prev_fn->requires_grad) {
-        dependencies[prev_fn.get()] += 1;
+        queue.push_back(prev_ptr);
       }
-      if (seen.count(prev_fn.get()) == 0) {
-        seen.insert(prev_fn.get());
-        queue.push_back(prev_fn);
+      if (seen.count(prev_ptr) == 0) {
+        seen.insert(prev_ptr);
+        search_queue.push_back(prev_ptr);
+      }
+    }
+  }
+
+  // Now, queue contains all nodes that will start propagating gradients. We no longer have
+  // to expand functions that don't require grad.
+  dependencies_type dependencies;
+  seen.clear();
+  // Just to make sure that they will never be added to the queue again
+  seen.insert(queue.begin(), queue.end());
+  while (queue.size() > 0) {
+    auto fn = std::move(queue.back()); queue.pop_back();
+    // This is needed only to filter out backward roots that don't require grad
+    if (!fn->requires_grad) continue;
+    for (auto& prev_fn_pair : fn->previous_functions) {
+      Function* prev_ptr = prev_fn_pair.first.get();
+      if (!prev_ptr) continue;
+      if (dynamic_cast<Variable*>(prev_ptr)) continue;
+      if (!prev_ptr->requires_grad) continue;
+      if (prev_ptr->is_stochastic) continue; // Stochastic nodes were in the queue already
+      dependencies[prev_ptr] += 1;
+      if (seen.count(prev_ptr) == 0) {
+        seen.insert(prev_ptr);
+        queue.push_back(prev_ptr);
       }
     }
   }
@@ -52,7 +73,7 @@ auto Engine::backward(const variable_list& variables,
         did_leaf_backward = true;
       }
     } else {
-      creators.push_back(var->creator);
+      creators.push_back(var->creator.get());
       if (var->creator->requires_grad) {
         GradBuffer buf(var->creator->num_outputs);
         buf.addGrad(var->output_nr, Variable::of(std::move(grad)));
@@ -61,7 +82,7 @@ auto Engine::backward(const variable_list& variables,
     }
   }
 
-  auto dependencies = compute_dependencies(creators, ready);
+  auto dependencies = compute_dependencies(std::move(creators), ready);
 
   if (!did_leaf_backward && ready.size() == 0) {
     throw std::runtime_error(
