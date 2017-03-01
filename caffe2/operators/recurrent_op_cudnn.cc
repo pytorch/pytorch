@@ -301,6 +301,11 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
       Output(GRAD_WEIGHT)->template mutable_data<T>(),
       &context_);
 
+#if CUDNN_VERSION_MIN(6,0,0)
+  auto * reserve = Output(RNN_SCRATCH_OUT)->template mutable_data<T>();
+#else
+  const auto * reserve = Output(RNN_SCRATCH_OUT)->template data<T>();
+#endif
   cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
     CUDNN_CHECK(cudnnRNNBackwardData(
         state->cudnn_handle(),
@@ -328,7 +333,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
         Output(GRAD_CELL_INPUT)->template mutable_data<T>(),
         state->workspace().get(cudnnWsNbytes_),
         cudnnWsNbytes_,
-        Input(RNN_SCRATCH).template data<T>(),
+        reserve,
         reserveNbytes_));
     CUDNN_CHECK(cudnnRNNBackwardWeights(
         state->cudnn_handle(),
@@ -344,7 +349,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
         cudnnWsNbytes_,
         wDesc_,
         Output(GRAD_WEIGHT)->template mutable_data<T>(),
-        Input(RNN_SCRATCH).template data<T>(),
+        reserve,
         reserveNbytes_));
   });
   return true;
@@ -426,7 +431,7 @@ input_mode) are passed directly through to CuDNN.
 
 )DOC");
 REGISTER_CUDNN_OPERATOR(RecurrentGradient, RecurrentGradientOp<float>);
-OPERATOR_SCHEMA(RecurrentGradient).NumInputs(9).NumOutputs(5);
+OPERATOR_SCHEMA(RecurrentGradient).NumInputs(9).NumOutputs(6);
 REGISTER_CUDNN_OPERATOR(RecurrentInit, RecurrentInitOp<float>);
 OPERATOR_SCHEMA(RecurrentInit).NumInputs(1).NumOutputs(2);
 
@@ -450,7 +455,8 @@ struct GetRecurrentGradient : public GradientMakerBase {
             GI(1), // GRAD_HIDDEN_INPUT
             GI(2), // GRAD_CELL_INPUT
             GI(3), // GRAD_WEIGHT
-            O(4) // DROPOUT_STATES
+            O(4), // DROPOUT_STATES
+            O(3) // RNN_SCRATCH
         });
   }
 };

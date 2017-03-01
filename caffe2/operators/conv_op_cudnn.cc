@@ -56,9 +56,12 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
         pad_l_ == pad_r_,
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
+    // dilated convolution supported by some algorithms in cuDNN v6
+#if !(CUDNN_VERSION_MIN(6,0,0))
     OPERATOR_NEEDS_FEATURE(
         dilation_h_ == 1 && dilation_w_ == 1,
         "The cudnn convolution does not support dilation yet.");
+#endif
 
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
@@ -270,9 +273,15 @@ bool CudnnConvOp<T>::RunOnDevice() {
         H_out,
         W_out));
     // Set the convolution descriptor
+#if CUDNN_VERSION_MIN(6,0,0)
+    CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
+          conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, dilation_h_, dilation_w_,
+          CUDNN_CROSS_CORRELATION, cudnnTypeWrapper<T>::type));
+#else
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
           conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, 1, 1,
           CUDNN_CROSS_CORRELATION));
+#endif
     if (deterministic_) {
       algo_ = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
     } else if (exhaustive_search_) {
@@ -450,9 +459,15 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         H_out,
         W_out));
     // Set the convolution descriptor
+#if CUDNN_VERSION_MIN(6,0,0)
+    CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
+          conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, dilation_h_, dilation_w_,
+          CUDNN_CROSS_CORRELATION, cudnnTypeWrapper<T>::type));
+#else
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
           conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, 1, 1,
           CUDNN_CROSS_CORRELATION));
+#endif
     // Set the workspace
 
     size_t bwd_filter_ws_size, bwd_data_ws_size;

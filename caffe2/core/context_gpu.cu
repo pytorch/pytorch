@@ -10,6 +10,7 @@
 #endif // CAFFE2_USE_CNMEM
 
 #include "caffe2/core/asan.h"
+#include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
@@ -139,6 +140,9 @@ static void Caffe2InitializeCuda() {
     TypeMeta::Id<Tensor<CUDAContext>>(),
     GetTensorShape<CUDAContext>
   );
+
+  // Check the versions of cuDNN that were compiled and linked with are compatible
+  CheckCuDNNVersions();
 }
 
 #ifdef CAFFE2_USE_CNMEM

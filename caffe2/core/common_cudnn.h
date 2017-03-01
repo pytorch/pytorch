@@ -18,6 +18,9 @@ static_assert(
     CUDNN_VERSION >= 5000,
     "Caffe2 requires cudnn version 5.0 or above.");
 
+#define CUDNN_VERSION_MIN(major, minor, patch) \
+  (CUDNN_VERSION >= ((major) * 1000 + (minor) * 100 + (patch)))
+
 namespace caffe2 {
 
 namespace internal {
@@ -69,6 +72,25 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
         ": ",                                             \
         ::caffe2::internal::cudnnGetErrorString(status)); \
   } while (0)
+
+// report the version of cuDNN Caffe2 was compiled with
+inline size_t cudnnCompiledVersion() {
+  return CUDNN_VERSION;
+}
+// report the runtime version of cuDNN
+inline size_t cudnnRuntimeVersion() {
+  return cudnnGetVersion();
+}
+
+// Check compatibility of compiled and runtime cuDNN versions
+inline void CheckCuDNNVersions() {
+  // Version format is major*1000 + minor*100 + patch
+  // Major, minor and patch versions must all match
+  bool version_match = cudnnCompiledVersion() == cudnnRuntimeVersion();
+  CAFFE_ENFORCE(version_match,
+                "cuDNN compiled (", cudnnCompiledVersion(), ") and"
+                "runtime (", cudnnRuntimeVersion(), ") versions mismatch");
+}
 
 /**
  * cudnnTypeWrapper is a wrapper class that allows us to refer to the cudnn type

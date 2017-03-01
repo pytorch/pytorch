@@ -34,6 +34,7 @@ if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
     SetDefaultGPUID = C.set_default_gpu_id
     GetDefaultGPUID = C.get_default_gpu_id
+    GetCuDNNVersion = C.get_cudnn_version
 
     def GetCudaPeerAccessPattern():
         return np.asarray(C.get_cuda_peer_access_pattern())
