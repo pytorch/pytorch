@@ -59,6 +59,7 @@ auto Engine::backward(const variable_list& variables,
                       tensor_list& grad_variables,
                       bool retain_variables) -> void {
   function_queue creators;
+  std::unordered_map<std::shared_ptr<Function>, std::unique_ptr<GradBuffer>> creator_grad;
   ready_queue_type ready;
 
   bool did_leaf_backward = false;
@@ -73,14 +74,23 @@ auto Engine::backward(const variable_list& variables,
         did_leaf_backward = true;
       }
     } else {
-      creators.push_back(var->creator.get());
-      if (var->creator->requires_grad) {
-        GradBuffer buf(var->creator->num_outputs);
-        buf.addGrad(var->output_nr, Variable::of(std::move(grad)));
-        ready.emplace_front(var->creator, std::move(buf));
+      auto& creator = var->creator;
+      auto& buf = creator_grad[creator];
+      if (creator->requires_grad) {
+        if (!buf) buf.reset(new GradBuffer(creator->num_outputs));
+        buf->addGrad(var->output_nr, Variable::of(std::move(grad)));
       }
     }
   }
+  for (auto& entry: creator_grad) {
+    const auto& creator = entry.first;
+    auto& buf = entry.second; // WARNING: this is nullptr if !creator->requires_grad
+    creators.push_back(creator.get());
+    if (creator->requires_grad) {
+      ready.emplace_back(creator, std::move(*buf));
+    }
+  }
+  creator_grad.clear(); // Clear the shared pointers
 
   auto dependencies = compute_dependencies(std::move(creators), ready);
 
