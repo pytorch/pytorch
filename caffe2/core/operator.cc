@@ -207,7 +207,7 @@ static TensorShapes InferBlobShapesAndTypes(
       std::vector<TensorShape> out = op_schema->InferTensor(op, input_desc);
       if (out.size() != op.output_size()) {
         CAFFE_THROW(
-            "Invalid shape inference for operator",
+            "Invalid shape inference for operator ",
             op.type(),
             " Expected ",
             op.output_size(),
