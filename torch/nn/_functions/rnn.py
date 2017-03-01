@@ -21,7 +21,7 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
-    x_h = input.unsqueeze(1).expand(input.size(0), 4, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
+    x_h = input.expand(input.size(0), 4, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
     gates = x_h + F.linear(hx, w_hh, b_hh)
     ingate, forgetgate, cellgate, outgate = [x.squeeze(1) for x in gates.chunk(4, 1)]
 
@@ -37,7 +37,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    gi = input.unsqueeze(1).expand(input.size(0), 3, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
+    gi = input.expand(input.size(0), 3, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = [x.squeeze(1) for x in gi.chunk(3, 1)]
     h_r, h_i, h_n = gh.chunk(3, 1)
