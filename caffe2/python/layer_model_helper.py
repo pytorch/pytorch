@@ -36,6 +36,7 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         self._default_optimizer = None
         self._loss = None
         self._output_schema = None
+        self._preproc_output_schema = None
 
         # Connect Schema to self.net. That particular instance of schmea will be
         # use for generation of the Layers accross the network and would be used
@@ -154,6 +155,16 @@ class LayerModelHelper(model_helper.ModelHelperBase):
     @property
     def trainer_extra_schema(self):
         return self._trainer_extra_schema
+
+    @property
+    def preproc_output_schema(self):
+        assert self._preproc_output_schema is not None
+        return self._preproc_output_schema
+
+    @preproc_output_schema.setter
+    def preproc_output_schema(self, schema):
+        assert self._preproc_output_schema is None
+        self._preproc_output_schema = schema
 
     @property
     def output_schema(self):

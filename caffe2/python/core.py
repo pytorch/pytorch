@@ -1077,7 +1077,7 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
         # TODO(azzolini): improve schema type checking
         diff = set(original.field_names()) - set(inputs.field_names())
         assert len(diff) == 0, \
-            'Schemas do not match, extra fields found in the net'.format(diff)
+            "Schemas don't match, extra fields {} found in the net".format(diff)
         original_mapping = dict(zip(original.field_names(),
                                     original.field_blobs()))
         for fn, fb in zip(inputs.field_names(), inputs.field_blobs()):
