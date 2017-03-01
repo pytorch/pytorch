@@ -3,6 +3,7 @@ import torch
 
 from .module import Module
 from ..parameter import Parameter
+from ..utils.rnn import PackedSequence
 
 
 class RNNBase(Module):
@@ -66,15 +67,23 @@ class RNNBase(Module):
             weight.data.uniform_(-stdv, stdv)
 
     def forward(self, input, hx=None):
+        is_packed = isinstance(input, PackedSequence)
+        if is_packed:
+            input, batch_sizes = input
+            max_batch_size = batch_sizes[0]
+        else:
+            batch_sizes = None
+            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+
         if hx is None:
-            batch_sz = input.size(0) if self.batch_first else input.size(1)
             num_directions = 2 if self.bidirectional else 1
             hx = torch.autograd.Variable(input.data.new(self.num_layers *
                                                         num_directions,
-                                                        batch_sz,
+                                                        max_batch_size,
                                                         self.hidden_size).zero_())
             if self.mode == 'LSTM':
                 hx = (hx, hx)
+
         func = self._backend.RNN(
             self.mode,
             self.input_size,
@@ -86,8 +95,12 @@ class RNNBase(Module):
             bidirectional=self.bidirectional,
             dropout_state=self.dropout_state,
             skip_input=self.skip_input,
+            batch_sizes=batch_sizes
         )
-        return func(input, self.all_weights, hx)
+        output, hidden = func(input, self.all_weights, hx)
+        if is_packed:
+            output = PackedSequence(output, batch_sizes)
+        return output, hidden
 
     def __repr__(self):
         s = '{name}({input_size}, {hidden_size}'
@@ -156,12 +169,15 @@ class RNN(RNNBase):
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
+          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          for details.
         - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial hidden state
           for each element in the batch.
 
     Outputs: output, h_n
         - **output** (seq_len, batch, hidden_size * num_directions): tensor containing the output features (h_k)
-          from the last layer of the RNN, for each k.
+          from the last layer of the RNN, for each k.  If a :class:`torch.nn.utils.rnn.PackedSequence` has been given
+          as the input, the output will also be a packed sequence.
         - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for k=seq_len.
 
     Attributes:
@@ -231,6 +247,8 @@ class LSTM(RNNBase):
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
+          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          for details.
         - **h_0** (num_layers \* num_directions, batch, hidden_size): tensor containing
           the initial hidden state for each element in the batch.
         - **c_0** (num_layers \* num_directions, batch, hidden_size): tensor containing
@@ -239,7 +257,9 @@ class LSTM(RNNBase):
 
     Outputs: output, (h_n, c_n)
         - **output** (seq_len, batch, hidden_size * num_directions): tensor containing
-          the output features `(h_t)` from the last layer of the RNN, for each t.
+          the output features `(h_t)` from the last layer of the RNN, for each t. If a
+          :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output will also be a
+          packed sequence.
         - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
         - **c_n** (num_layers * num_directions, batch, hidden_size): tensor containing the cell state for t=seq_len
 
@@ -298,12 +318,15 @@ class GRU(RNNBase):
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
+          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          for details.
         - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial
           hidden state for each element in the batch.
 
     Outputs: output, h_n
         - **output** (seq_len, batch, hidden_size * num_directions): tensor containing the output features h_t from
-          the last layer of the RNN, for each t.
+          the last layer of the RNN, for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been given as the
+          input, the output will also be a packed sequence.
         - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
 
     Attributes:
