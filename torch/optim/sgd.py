@@ -3,6 +3,9 @@ from .optimizer import Optimizer, required
 
 class SGD(Optimizer):
     """Implements stochastic gradient descent (optionally with momentum).
+
+    Nesterov momentum is based on the formula from `Nesterov’s Momentum Made Simple`__.
+
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -10,20 +13,22 @@ class SGD(Optimizer):
         momentum (float, optional): momentum factor (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
-        nesterov(bool, optional): enables Nesterov momentum (default: False)
+        nesterov (bool, optional): enables Nesterov momentum (default: False)
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
+
+    __ https://github.com/fidlej/optim/raw/master/dok/nesterov_simple.pdf
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False):
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov)
-        if nesterov and (momentum <= 0 and dampening != 0):
+        if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
 
@@ -55,14 +60,14 @@ class SGD(Optimizer):
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
-                        param_state['momentum_buffer'] = d_p.clone()
+                        buf = param_state['momentum_buffer'] = d_p.clone()
                     else:
                         buf = param_state['momentum_buffer']
                         buf.mul_(momentum).add_(1 - dampening, d_p)
-                        if nesterov:
-                            d_p.add_(momentum, buf)
-                        else:
-                            d_p = buf
+                    if nesterov:
+                        d_p.add_(momentum, buf)
+                    else:
+                        d_p = buf
 
                 p.data.add_(-group['lr'], d_p)
 
