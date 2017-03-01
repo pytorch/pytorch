@@ -76,12 +76,11 @@ class WatcherThread(threading.Thread):
             import traceback
             code = []
             for threadId, stack in sys._current_frames().items():
-                if threadId == self.caller_thread.ident:
-                    code.append("\n# ThreadID: %s" % threadId)
-                    for filename, lineno, name, line in traceback.extract_stack(stack):
-                        code.append('File: "%s", line %d, in %s' % (filename, lineno, name))
-                        if line:
-                            code.append("  %s" % (line.strip()))
+                code.append("\n# ThreadID: %s" % threadId)
+                for filename, lineno, name, line in traceback.extract_stack(stack):
+                    code.append('File: "%s", line %d, in %s' % (filename, lineno, name))
+                    if line:
+                        code.append("  %s" % (line.strip()))
 
             print("\n".join(code))
             os.kill(os.getpid(), signal.SIGINT)
@@ -96,3 +95,12 @@ def CompleteInTimeOrDie(timeout_secs):
     watcher.condition.acquire()
     watcher.condition.notify()
     watcher.condition.release()
+
+
+def EuthanizeIfNecessary(timeout_secs=120):
+    '''
+    Call this if you have problem with process getting stuck at shutdown.
+    It will kill the process if it does not terminate in timeout_secs.
+    '''
+    watcher = WatcherThread(timeout_secs)
+    watcher.start()
