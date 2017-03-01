@@ -90,14 +90,15 @@ def init_data_input_workers(
     workers = [
         threading.Thread(
             target=fetcher,
-            args=[coordinator, global_coordinator._fetcher_id_seq + i,
-                  fetch_fun, batch_size, input_blob_names],
+            name="data_workers fetcher id {}".format(global_coordinator._fetcher_id_seq + i),
+            args=[coordinator, global_coordinator._fetcher_id_seq + i, fetch_fun, batch_size, input_blob_names],
         ) for i in range(num_worker_threads)
     ]
     global_coordinator._fetcher_id_seq += num_worker_threads
 
     workers.append(threading.Thread(
         target=enqueuer,
+        name="Enqueuer {} {}".format(input_source_name, scope.CurrentNameScope()),
         args=[coordinator]))
     coordinator._workers = workers
     global_coordinator.add(coordinator)
@@ -152,15 +153,18 @@ class DataInputCoordinator(object):
         self._started = False
 
     def _wait_finish(self):
-        log.info("Wait for workers to die")
+        print("Wait for workers to die")
         for w in self._workers:
             if w != threading.current_thread():
-                w.join(1.0)  # don't wait forever, thread may be blocked in i/o
+                w.join(5.0)  # don't wait forever, thread may be blocked in i/o
+        success = True
         for w in self._workers:
             if w.isAlive():
-                log.info("Worker {} failed to close while waiting".format(w))
-                return False
-        return True
+                print("Worker {} failed to close while waiting".format(w))
+                success = False
+
+        print("All workers terminated: {}".format(success))
+        return success
 
     def _get(self):
         while self.is_active():
@@ -172,13 +176,13 @@ class DataInputCoordinator(object):
 
     def put(self, chunk):
         if len(chunk) == 0:
-            log.warning("Worker provided zero length input")
+            print("Worker provided zero length input")
             return
         while self.is_active():
             try:
                 qsize = self._internal_queue.qsize()
                 if qsize < 2 and (time.time() - self._last_warning) > LOG_INT_SECS:
-                    log.warn("Warning, data loading lagging behind: " +
+                    print("Warning, data loading lagging behind: " +
                              "name={}".format(qsize, self._input_source_name))
                     self._last_warning = time.time()
                 self._counter += 1
@@ -230,6 +234,7 @@ class DataInputCoordinator(object):
         scratch_name = self._namescope + blob_name + \
             "_scratch_" + self._input_source_name
         blob = core.BlobReference(scratch_name)
+        status = core.BlobReference(scratch_name + "_status")
         workspace.FeedBlob(
             blob,
             data_arr,
@@ -237,9 +242,9 @@ class DataInputCoordinator(object):
         )
 
         op = core.CreateOperator(
-            "EnqueueBlobs",
+            "SafeEnqueueBlobs",
             [queue, blob],
-            [blob],
+            [blob, status],
             device_option=self._device_option
         )
         workspace.RunOperatorOnce(op)
@@ -262,7 +267,7 @@ class DataInputCoordinator(object):
             qname = blob_name + "_c2queue" + "_" + self._input_source_name
             q = create_queue(qname, num_blobs=1, capacity=4)
             self._queues.append(q)
-            log.info("Created queue: {}".format(q))
+            print("Created queue: {}".format(q))
 
             # Add operator to the Caffe2 network to dequeue
             self._net.DequeueBlobs(q, blob_name)
@@ -272,12 +277,12 @@ class DataInputCoordinator(object):
         current_seconds = time.time()
         delta_seconds = current_seconds - self._prev_seconds
         if delta_seconds >= LOG_INT_SECS:
-            log.info("{}/{}: {} inputs/sec".format(
+            print("{}/{}: {} inputs/sec".format(
                 self._input_source_name,
                 self._namescope,
                 int(self._inputs / delta_seconds),
             ))
-            log.info("-- queue: {} batches".format(self._internal_queue.qsize()))
+            print("-- queue: {} batches".format(self._internal_queue.qsize()))
             self._inputs = 0
             self._prev_seconds = current_seconds
 
@@ -327,7 +332,7 @@ def fetcher(coordinator, worker_id, fetch_fun, batch_size, input_blob_names):
         try:
             input_data = fetch_fun(worker_id, batch_size)
             if input_data is None:
-                log.warn("Fetcher function returned None")
+                print("Fetcher function returned None")
                 continue
 
             assert len(input_data) == len(input_blob_names), \
