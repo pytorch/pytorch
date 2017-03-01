@@ -367,6 +367,26 @@ void Scale<double, CUDAContext>(
                        0, context->cuda_stream()>>>(n, alpha, x, y);
 }
 
+template <>
+void Axpy<float, CUDAContext>(
+    const int N,
+    const float alpha,
+    const float* X,
+    float* Y,
+    CUDAContext* context) {
+  CUBLAS_CHECK(cublasSaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
+}
+
+template <>
+void Axpy<double, CUDAContext>(
+    const int N,
+    const double alpha,
+    const double* X,
+    double* Y,
+    CUDAContext* context) {
+  CUBLAS_CHECK(cublasDaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
+}
+
 namespace detail {
 template <>
 void ScaleDynamic<float, CUDAContext>(
@@ -387,19 +407,26 @@ void ScaleDynamic<double, CUDAContext>(
     CUDAContext* context) {
   return math::Scale<double, CUDAContext>(n, alpha, x, y, context);
 }
+
+template <>
+void AxpyDynamic<float, CUDAContext>(
+    const int n,
+    const float alpha,
+    const float* x,
+    float* y,
+    CUDAContext* context) {
+  return math::Axpy<float, CUDAContext>(n, alpha, x, y, context);
 }
 
 template <>
-void Axpy<float, CUDAContext>(const int N, const float alpha, const float* X,
-                              float* Y, CUDAContext* context) {
-  CUBLAS_CHECK(cublasSaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
+void AxpyDynamic<double, CUDAContext>(
+    const int n,
+    const double alpha,
+    const double* x,
+    double* y,
+    CUDAContext* context) {
+  return math::Axpy<double, CUDAContext>(n, alpha, x, y, context);
 }
-
-template <>
-void Axpy<double, CUDAContext>(
-    const int N, const double alpha, const double* X,
-    double* Y, CUDAContext* context) {
-  CUBLAS_CHECK(cublasDaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
 }
 
 namespace {
