@@ -26,7 +26,7 @@ class TestShapeInference(test_util.TestCase):
         self.assertEquals(shapes['fc2_b'], [55])
         self.assertEquals(shapes['fc2'], [64, 55])
 
-    def testShapeInferencDistances(self):
+    def testShapeInferenceDistances(self):
         model = cnn.CNNModelHelper()
         model.SquaredL2Distance(["x", "y"], "zsq")
         model.CosineSimilarity(["x", "y"], "zcos")
