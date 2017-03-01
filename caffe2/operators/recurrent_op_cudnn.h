@@ -119,7 +119,8 @@ class RecurrentGradientOp : public RecurrentBaseOp<T> {
       GRAD_HIDDEN_INPUT,
       GRAD_CELL_INPUT,
       GRAD_WEIGHT,
-      DROPOUT_STATES);
+      DROPOUT_STATES,
+      RNN_SCRATCH_OUT);
 };
 
 template <typename T>

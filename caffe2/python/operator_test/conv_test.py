@@ -153,7 +153,9 @@ class TestConvolution(hu.HypothesisTestCase):
                                    order, engine, use_bias, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
 
-        assume("" == engine or 1 == dilation)
+        # cuDNN v6+ supports dilated convolutions
+        if (workspace.GetCuDNNVersion() < 6000):
+            assume("" == engine or 1 == dilation)
         assume(engine != "MKLDNN" or use_bias is True)
 
         op = core.CreateOperator(
@@ -211,8 +213,12 @@ class TestConvolution(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         Output = collections.namedtuple("Output", ["Y", "engine", "order"])
         outputs = []
+
+        # cuDNN v6+ supports dilated convolutions
+        engine_list = ["", "CUDNN"] if ((dilation == 1) or (workspace.GetCuDNNVersion() >= 6000)) else [""]
+
         for order in ["NCHW", "NHWC"]:
-            for engine in (["", "CUDNN"] if dilation == 1 else [""]):
+            for engine in engine_list:
                 op = core.CreateOperator(
                     "Conv",
                     ["X", "w", "b"] if use_bias else ["X", "w"],
