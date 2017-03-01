@@ -9,10 +9,11 @@ import torch.cuda.comm as comm
 
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests
 
+HAS_CUDA = True
 if not torch.cuda.is_available():
     print('CUDA not available, skipping tests')
-    import sys
-    sys.exit()
+    TestCase = object  # noqa: F811
+    HAS_CUDA = False
 
 
 def is_floating(t):
@@ -706,39 +707,41 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor0[0], 2)
 
 
-for decl in tests:
-    for t in types:
-        tensor = t()
-        gpu_tensor = get_gpu_type(t)()
-        if len(decl) == 3:
-            name, constr, arg_constr = decl
-            desc = ''
-        elif len(decl) == 4:
-            name, constr, arg_constr, desc = decl
-        elif len(decl) == 5:
-            name, constr, arg_constr, desc, type_subset = decl
-            if t not in type_subset:
-                continue
+if HAS_CUDA:
+    for decl in tests:
+        for t in types:
+            tensor = t()
+            gpu_tensor = get_gpu_type(t)()
+            if len(decl) == 3:
+                name, constr, arg_constr = decl
+                desc = ''
+            elif len(decl) == 4:
+                name, constr, arg_constr, desc = decl
+            elif len(decl) == 5:
+                name, constr, arg_constr, desc, type_subset = decl
+                if t not in type_subset:
+                    continue
 
-        precision = custom_precision.get(name, TestCuda.precision)
-        for inplace in (True, False):
-            if inplace:
-                name_inner = name + '_'
-            else:
-                name_inner = name
-            if not hasattr(tensor, name_inner):
-                continue
-            if not hasattr(gpu_tensor, name_inner):
-                print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(
-                    name_inner, gpu_tensor.__class__.__name__))
-                continue
+            precision = custom_precision.get(name, TestCuda.precision)
+            for inplace in (True, False):
+                if inplace:
+                    name_inner = name + '_'
+                else:
+                    name_inner = name
+                if not hasattr(tensor, name_inner):
+                    continue
+                if not hasattr(gpu_tensor, name_inner):
+                    print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(
+                        name_inner, gpu_tensor.__class__.__name__))
+                    continue
 
-            test_name = 'test_' + t.__name__ + '_' + name_inner
-            if desc:
-                test_name += '_' + desc
+                test_name = 'test_' + t.__name__ + '_' + name_inner
+                if desc:
+                    test_name += '_' + desc
 
-            assert not hasattr(TestCuda, test_name), "Duplicated test name: " + test_name
-            setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
+                assert not hasattr(TestCuda, test_name), "Duplicated test name: " + test_name
+                setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
+
 
 if __name__ == '__main__':
     run_tests()
