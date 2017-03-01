@@ -2,12 +2,18 @@
 #define TH_GENERIC_FILE "generic/Tensor.h"
 #else
 
+#if defined(TH_REAL_IS_HALF) || defined(THD_GENERIC_FILE)
+#define GENERATE_SPARSE 0
+#else
+#define GENERATE_SPARSE 1
+#endif
+
 struct THPTensor {
   PyObject_HEAD
   THTensor *cdata;
 };
 
-#ifndef THD_GENERIC_FILE
+#if GENERATE_SPARSE
 struct THSPTensor {
   PyObject_HEAD
   THSTensor *cdata;
@@ -21,7 +27,7 @@ struct THSPTensor {
  * count is decremented.
  */
 THP_API PyObject * THPTensor_(New)(THTensor *ptr);
-#ifndef THD_GENERIC_FILE
+#if GENERATE_SPARSE
 THP_API PyObject * THSPTensor_(New)(THSTensor *ptr);
 #endif
 
@@ -29,12 +35,12 @@ THP_API PyObject * THSPTensor_(New)(THSTensor *ptr);
  * Creates a new empty Python Tensor object
  */
 THP_API PyObject * THPTensor_(NewEmpty)(void);
-#ifndef THD_GENERIC_FILE
+#if GENERATE_SPARSE
 THP_API PyObject * THSPTensor_(NewEmpty)(void);
 #endif
 
 extern PyObject *THPTensorClass;
-#ifndef THD_GENERIC_FILE
+#if GENERATE_SPARSE
 extern PyObject *THSPTensorClass;
 #endif
 
@@ -43,13 +49,14 @@ extern PyObject *THSPTensorClass;
 
 // TODO: init stateless in THPTensor_(init) and remove this
 extern PyTypeObject THPTensorStatelessType;
-#ifndef THD_GENERIC_FILE
+#if GENERATE_SPARSE
 extern PyTypeObject THSPTensorStatelessType;
 #endif
+
 bool THPTensor_(init)(PyObject *module);
-#ifndef THD_GENERIC_FILE
-bool THSPTensor_(init)(PyObject *module);
 bool THPTensor_(postInit)(PyObject *module);
+#if GENERATE_SPARSE
+bool THSPTensor_(init)(PyObject *module);
 bool THSPTensor_(postInit)(PyObject *module);
 #endif
 
@@ -59,5 +66,7 @@ template <> struct THPTypeInfo<THTensor> {
   static THTensor* cdata(PyObject* p) { return ((THPTensor*)p)->cdata; }
 };
 #endif
+
+#undef GENERATE_SPARSE
 
 #endif

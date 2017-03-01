@@ -198,6 +198,8 @@ Workspace chooseAlgorithm(
 
   if (!cache.find(conv.params, algo)) {
     if (benchmark) {
+      // findAlgorithm may call cudaFree()
+      std::lock_guard<std::mutex> lock(*THCCachingAllocator_getCudaFreeMutex());
       auto perfResults = search::findAlgorithm(handle, conv);
       if (perfResults.status == CUDNN_STATUS_SUCCESS) {
         *algo = perfResults.algo;

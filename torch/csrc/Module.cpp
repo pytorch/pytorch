@@ -37,6 +37,7 @@ static bool THPModule_loadClasses(PyObject *self)
   ASSERT_NOT_NULL(tensor_classes = PyObject_GetAttrString(torch_module, (char*)"_tensor_classes"));
   if (!THPDoubleTensor_postInit(torch_module)) return false;
   if (!THPFloatTensor_postInit(torch_module)) return false;
+  if (!THPHalfTensor_postInit(torch_module)) return false;
   if (!THPLongTensor_postInit(torch_module)) return false;
   if (!THPIntTensor_postInit(torch_module)) return false;
   if (!THPShortTensor_postInit(torch_module)) return false;
@@ -45,6 +46,7 @@ static bool THPModule_loadClasses(PyObject *self)
 
   ASSERT_NOT_NULL(THPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
   ASSERT_NOT_NULL(THPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
+  ASSERT_NOT_NULL(THPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
   ASSERT_NOT_NULL(THPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
   ASSERT_NOT_NULL(THPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
   ASSERT_NOT_NULL(THPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
@@ -70,6 +72,7 @@ static bool THPModule_assignStateless(PyObject *self)
   PyObject *stateless;
   INIT_STATELESS(Double);
   INIT_STATELESS(Float);
+  INIT_STATELESS(Half);
   INIT_STATELESS(Long);
   INIT_STATELESS(Int);
   INIT_STATELESS(Short);
@@ -492,6 +495,8 @@ extern PyObject * THCPModule_cudaHostAllocator(PyObject *_unused);
 extern PyObject * THCPModule_cudaSynchronize(PyObject *_unused);
 extern PyObject * THCPModule_getLibPath(PyObject *_unused);
 extern PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles);
+extern PyObject * THCPModule_cudaLockMutex(PyObject *module);
+extern PyObject * THCPModule_cudaUnlockMutex(PyObject *module);
 
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
@@ -522,6 +527,8 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_getLibPath", (PyCFunction)THCPModule_getLibPath, METH_NOARGS, NULL},
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
   {"_cuda_sparse_init",  (PyCFunction)THCSPModule_initExtension,    METH_NOARGS,  NULL},
+  {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  NULL},
+  {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  NULL},
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
@@ -765,6 +772,7 @@ PyMODINIT_FUNC PyInit__C()
 
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
+  ASSERT_TRUE(THPHalfStorage_init(module));
   ASSERT_TRUE(THPLongStorage_init(module));
   ASSERT_TRUE(THPIntStorage_init(module));
   ASSERT_TRUE(THPShortStorage_init(module));
@@ -773,6 +781,7 @@ PyMODINIT_FUNC PyInit__C()
 
   ASSERT_TRUE(THPDoubleTensor_init(module));
   ASSERT_TRUE(THPFloatTensor_init(module));
+  ASSERT_TRUE(THPHalfTensor_init(module));
   ASSERT_TRUE(THPLongTensor_init(module));
   ASSERT_TRUE(THPIntTensor_init(module));
   ASSERT_TRUE(THPShortTensor_init(module));

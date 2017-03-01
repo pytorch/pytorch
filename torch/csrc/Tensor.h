@@ -8,6 +8,7 @@
 
 #define THPDoubleTensor_Check(obj)  PyObject_IsInstance(obj, THPDoubleTensorClass)
 #define THPFloatTensor_Check(obj)   PyObject_IsInstance(obj, THPFloatTensorClass)
+#define THPHalfTensor_Check(obj)    PyObject_IsInstance(obj, THPHalfTensorClass)
 #define THPLongTensor_Check(obj)    PyObject_IsInstance(obj, THPLongTensorClass)
 #define THPIntTensor_Check(obj)     PyObject_IsInstance(obj, THPIntTensorClass)
 #define THPShortTensor_Check(obj)   PyObject_IsInstance(obj, THPShortTensorClass)
@@ -16,6 +17,7 @@
 
 #define THPDoubleTensor_CData(obj)  (obj)->cdata
 #define THPFloatTensor_CData(obj)   (obj)->cdata
+#define THPHalfTensor_CData(obj)    (obj)->cdata
 #define THPLongTensor_CData(obj)    (obj)->cdata
 #define THPIntTensor_CData(obj)     (obj)->cdata
 #define THPShortTensor_CData(obj)   (obj)->cdata
@@ -62,5 +64,8 @@
 
 #include "generic/Tensor.h"
 #include <TH/THGenerateAllTypes.h>
+
+#include "generic/Tensor.h"
+#include <TH/THGenerateHalfType.h>
 
 #endif

@@ -1,6 +1,7 @@
 #include "THAtomic.h"
 #include "THTensor.h"
 #include "THVector.h"
+#include "generic/simd/simd.h"
 
 #include "THBlas.h"
 #include "THLapack.h"

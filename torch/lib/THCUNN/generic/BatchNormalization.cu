@@ -69,7 +69,7 @@ void THNN_(BatchNormalization_backward)(
   THCState *state, THCTensor *input_, THCTensor *gradOutput_,
   THCTensor *gradInput_, THCTensor *gradWeight_, THCTensor *gradBias_,
   THCTensor *weight_, THCTensor *runningMean_, THCTensor *runningVar_,
-  THCTensor *saveMean_, THCTensor *saveStd_, bool train, float scale, double eps) {
+  THCTensor *saveMean_, THCTensor *saveStd_, bool train, double scale, double eps) {
 
   THCUNN_check_shape(state, input_, gradOutput_);
   DeviceTensor3 input = devicetensor<3>(state, input_);

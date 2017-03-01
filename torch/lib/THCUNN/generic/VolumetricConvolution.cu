@@ -366,8 +366,9 @@ void THNN_(VolumetricConvolution_accGradParameters)(
            THCTensor *fgradInput,
            int dT, int dW, int dH,
            int padT, int padW, int padH,
-           real scale)
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones);

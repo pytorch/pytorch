@@ -10,6 +10,9 @@
 #include "generic/utils.cpp"
 #include <TH/THGenerateAllTypes.h>
 
+#include "generic/utils.cpp"
+#include <TH/THGenerateHalfType.h>
+
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
     return 0;

@@ -399,5 +399,75 @@ struct TensorTriOp {
   const long stride0, stride1, k;
 };
 
+template <typename T>
+struct TensorLShiftConstantOp {
+  TensorLShiftConstantOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = *in << val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v <<= val;
+  }
+
+  const T val;
+};
+
+template <typename T>
+struct TensorRShiftConstantOp {
+  TensorRShiftConstantOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = *in >> val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v >>= val;
+  }
+
+  const T val;
+};
+
+template <typename T>
+struct TensorBitAndConstantOp {
+  TensorBitAndConstantOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = *in & val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v &= val;
+  }
+
+  const T val;
+};
+
+template <typename T>
+struct TensorBitOrConstantOp {
+  TensorBitOrConstantOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = *in | val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v |= val;
+  }
+
+  const T val;
+};
+
+template <typename T>
+struct TensorBitXorConstantOp {
+  TensorBitXorConstantOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = *in ^ val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v ^= val;
+  }
+
+  const T val;
+};
+
 #include "generic/THCTensorMathPairwise.cu"
 #include "THCGenerateAllTypes.h"

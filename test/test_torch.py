@@ -798,9 +798,11 @@ class TestTorch(TestCase):
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = 4
         if order == 'descending':
-            check_order = lambda a, b: a >= b
+            def check_order(a, b):
+                return a >= b
         elif order == 'ascending':
-            check_order = lambda a, b: a <= b
+            def check_order(a, b):
+                return a <= b
         else:
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
@@ -1653,7 +1655,7 @@ class TestTorch(TestCase):
         self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k), reference)
 
     @unittest.skip("Not implemented yet")
-    def test_xcorr3_xcorr2_eq(self):
+    def test_xcorr3_xcorr2_eq_full(self):
         def reference(x, k, o3, o32):
             for i in range(x.size(1)):
                 for j in range(k.size(1)):
@@ -1661,7 +1663,7 @@ class TestTorch(TestCase):
         self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k, 'F'), reference)
 
     @unittest.skip("Not implemented yet")
-    def test_conv3_conv2_eq(self):
+    def test_conv3_conv2_eq_valid(self):
         def reference(x, k, o3, o32):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
@@ -2576,6 +2578,35 @@ class TestTorch(TestCase):
 
             rootview = c[8]
             self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
+
+    def test_half_tensor(self):
+        x = torch.randn(5, 5).float()
+        y = torch.randn(5, 5).float()
+        xh, yh = x.half(), y.half()
+
+        self.assertEqual(x.half().float(), x, 1e-3)
+
+        z = torch.Tensor(5, 5)
+        self.assertEqual(z.copy_(xh), x, 1e-3)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(xh, f)
+            f.seek(0)
+            xh2 = torch.load(f)
+            self.assertEqual(xh, xh2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_half_tensor_cuda(self):
+        x = torch.randn(5, 5).half()
+        self.assertEqual(x.cuda().cpu(), x)
+
+        xc = x.cuda()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(xc, f)
+            f.seek(0)
+            xc2 = torch.load(f)
+            self.assertIsInstance(xc2, type(xc))
+            self.assertEqual(xc, xc2)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):
