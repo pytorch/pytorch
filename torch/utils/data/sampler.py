@@ -53,24 +53,6 @@ class RandomSampler(Sampler):
         return self.num_samples
 
 
-class SubsetSequentialSampler(Sampler):
-    """Samples elements sequentially from a given list of indices, always in the same order.
-
-    Arguments:
-        indices (list): a list of indices
-    """
-
-    def __init__(self, indices):
-        self.num_samples = len(indices)
-        self.indices = indices
-
-    def __iter__(self):
-        return iter(self.indices)
-
-    def __len__(self):
-        return self.num_samples
-
-
 class SubsetRandomSampler(Sampler):
     """Samples elements randomly from a given list of indices, without replacement.
 
@@ -79,11 +61,10 @@ class SubsetRandomSampler(Sampler):
     """
 
     def __init__(self, indices):
-        self.num_samples = len(indices)
         self.indices = indices
 
     def __iter__(self):
-        return iter([self.indices[i] for i in torch.randperm(self.num_samples).long()])
+        return iter([self.indices[i] for i in torch.randperm(self.num_samples)])
 
     def __len__(self):
-        return self.num_samples
+        return len(self.indices)
