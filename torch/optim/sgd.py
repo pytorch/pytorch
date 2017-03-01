@@ -18,14 +18,20 @@ class SGD(Optimizer):
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
     """
+    
+    defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
+                    weight_decay=weight_decay, nesterov=nesterov)
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False):
-        defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
         if nesterov and (momentum <= 0 and dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
+        
+    def __setstate__(self, state):
+        super(SGD, self).__setstate__(state)
+        for group in self.parameter_groups:
+            group.set_default('nesterov', False)
 
     def step(self, closure=None):
         """Performs a single optimization step.
