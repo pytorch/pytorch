@@ -207,6 +207,20 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+    def testShapeInferenceTile(self):
+        m = cnn.CNNModelHelper()
+
+        workspace.FeedBlob(
+            "tensor",
+            np.random.rand(4, 2, 3, 3, 5).astype(np.float32)
+        )
+
+        # Testing with axes undefined
+        for i in range(0, 4):
+            m.net.Tile(
+                "tensor", "tiled_tensor_{}".format(i), tiles=5, axis=i)
+        self.InferTensorRunAndCompare(m)
+
     def InferTensorRunAndCompare(self, model):
         '''
         Runs shape inference, and then the model to check
