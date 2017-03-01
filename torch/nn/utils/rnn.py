@@ -9,6 +9,12 @@ PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 class PackedSequence(PackedSequence_):
     """Holds the data and list of batch_sizes of a packed sequence.
 
+    All RNN modules accept packed sequences as inputs.
+
+    Note:
+        Instances of this class should never be created manually. They are meant
+        to be instantiated by functions like :func:`pack_padded_sequence`.
+
     Attributes:
         data (Variable): Variable containing packed sequence
         batch_sizes (list[int]): list of integers holding information about
@@ -21,8 +27,8 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     """Packs a Variable containing padded sequences of variable length.
 
     Input can be of size ``TxBx*`` where T is the length of the longest sequence
-    (equal to lengths[0]), B is the batch size, and * is any number of dimensions
-    (including 0). If ``batch_first`` is True ``BxTx*`` inputs are expected.
+    (equal to ``lengths[0]``), B is the batch size, and * is any number of
+    dimensions (including 0). If ``batch_first`` is True ``BxTx*`` inputs are expected.
 
     The sequences should be sorted by length in a decreasing order, i.e.
     ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the
@@ -41,7 +47,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
             format.
 
     Returns:
-        a PackedSequence object
+        a :class:`PackedSequence` object
     """
     if batch_first:
         input = input.transpose(0, 1)
@@ -79,9 +85,9 @@ def pad_packed_sequence(sequence, batch_first=False):
 
     It is an inverse operation to :func:`pack_padded_sequence`.
 
-    The return Variable data will be of size TxBx*, where T is the length of the
-    longest sequence and B is the batch size. If ``batch_size`` is True, the
-    data will be transposed into BxTx* format.
+    The returned Variable's data will be of size TxBx*, where T is the length
+    of the longest sequence and B is the batch size. If ``batch_size`` is True,
+    the data will be transposed into BxTx* format.
 
     Batch elements will be ordered decreasingly by their length.
 

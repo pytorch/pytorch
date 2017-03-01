@@ -494,6 +494,8 @@ Utilities
 .. autofunction:: torch.nn.utils.clip_grad_norm
 
 
+.. currentmodule:: torch.nn.utils.rnn
+
 :hidden:`PackedSequence`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
