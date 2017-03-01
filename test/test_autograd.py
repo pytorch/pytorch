@@ -270,6 +270,23 @@ class TestAutograd(TestCase):
         a += b
         self.assertTrue(a.requires_grad)
 
+    def test_duplicate_backward_root(self):
+        a = Variable(torch.randn(5, 5), requires_grad=True)
+        b = Variable(torch.randn(5, 5), requires_grad=True)
+
+        x = a * b
+        grad_output = x.data.clone().normal_()
+        torch.autograd.backward([x, x], [grad_output, grad_output])
+
+        self.assertEqual(a.grad.data, b.data * grad_output * 2)
+        self.assertEqual(b.grad.data, a.data * grad_output * 2)
+
+    def test_backward_no_grad(self):
+        a = Variable(torch.randn(5, 5), requires_grad=True)
+        b = a + 2
+        with self.assertRaises(RuntimeError):
+            torch.autograd.backward([b], [None])
+
     def test_previous_functions(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5), requires_grad=True)

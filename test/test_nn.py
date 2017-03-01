@@ -1301,9 +1301,9 @@ class TestNN(NNTestCase):
                 output = output.data
 
             if is_lstm:
-                torch.autograd.backward([output + 0, hy[0] + 0, hy[1] + 0], [grad_output, grad_hy, grad_hy + 1])
+                torch.autograd.backward([output, hy[0], hy[1]], [grad_output, grad_hy, grad_hy + 1])
             else:
-                torch.autograd.backward([output + 0, hy + 0], [grad_output, grad_hy])
+                torch.autograd.backward([output, hy], [grad_output, grad_hy])
 
             return {'output': output.data,
                     'hy': hy[0].data if is_lstm else hy.data,
