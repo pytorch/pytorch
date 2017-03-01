@@ -452,6 +452,8 @@ class TestGradientCalculation(test_util.TestCase):
             CreateOperator('FCGradient', ['in', 'w', 'fc_grad'],
                            ['w_grad', 'b_grad', 'in_grad']),
         ]
+        for g in desired_grad_operators:
+            g.is_gradient_op = 1
         # This should run correctly.
         gradient_ops, _ = GradientRegistry.GetBackwardPass(
             operators, {'loss': 'loss_grad'})

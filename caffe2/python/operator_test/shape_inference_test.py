@@ -48,10 +48,32 @@ class TestShapeInference(test_util.TestCase):
         model.FC('pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=100)
         model.Sigmoid('fc', 'fc_sigm')
         model.Softmax('fc_sigm', 'softmax')
+        model.LabelCrossEntropy(['softmax', 'label'], 'xent')
+        loss = model.AveragedLoss('xent', 'loss')
+
+        model.AddGradientOperators([loss])
+
+        LR = model.param_init_net.ConstantFill(
+            [], 'LR', shape=[1], value=0.1
+        )
+
+        for param in model.GetParams():
+            param_grad = model.param_to_grad[param]
+            param_momentum = model.param_init_net.ConstantFill(
+                [param], param + '_momentum', value=0.0
+            )
+            model.net.MomentumSGDUpdate(
+                [param_grad, param_momentum, LR, param],
+                [param_grad, param_momentum, param],
+            )
 
         workspace.FeedBlob(
             "data",
             np.random.rand(16, 227, 227, 3).astype(np.float32),
+        )
+        workspace.FeedBlob(
+            "label",
+            (100 * np.random.rand(16)).astype(np.int32),
         )
         # Then do automatic comparison test: run the next once to
         # initialize everything
@@ -91,6 +113,12 @@ class TestShapeInference(test_util.TestCase):
             np.random.rand(16, 3, 228, 228).astype(np.float32),
         )
 
+        self.InferTensorRunAndCompare(model)
+
+    def testShapeInferenceTwoClass(self):
+        model = cnn.CNNModelHelper(name="twoclass")
+        model.MakeTwoClass("v", "v2")
+        workspace.FeedBlob("v", np.random.rand(32).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferencePadZero(self):

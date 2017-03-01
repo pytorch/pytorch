@@ -187,11 +187,20 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfInput(int idx) {
       });
 }
 
+OpSchema& OpSchema::IdenticalTypeAndShapeOfInputDim(int idx, int dim) {
+  return TensorInferenceFunction(
+      [idx, dim](const OperatorDef&, const vector<TensorShape>& input_types) {
+        vector<TensorShape> out(1);
+        out[0].add_dims(input_types[idx].dims(dim));
+        out[0].set_data_type(input_types[idx].data_type());
+        return out;
+      });
+}
+
 OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
   return TensorInferenceFunction(
      [dt](const OperatorDef&, const vector<TensorShape>& input_types) {
        vector<TensorShape> out(1);
-       out[0].add_dims(1);
        out[0].set_data_type(dt);
        return out;
      });
