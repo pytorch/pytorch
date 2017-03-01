@@ -34,20 +34,20 @@ class Unserializable(object):
         self.inner = None
 
 
-def init_dropout_descriptor(fn, handle):
-    return cudnn.DropoutDescriptor(
-        handle,
-        fn.dropout,
-        fn.dropout_seed
-    )
-
-
 def init_rnn_descriptor(fn, handle):
+    dropout_desc_name = 'desc_' + str(torch.cuda.current_device())
+    dropout_p = fn.dropout if fn.train else 0
+    if (dropout_desc_name not in fn.dropout_state) or (fn.dropout_state[dropout_desc_name].get() is None):
+        fn.dropout_state[dropout_desc_name] = Unserializable(
+            cudnn.DropoutDescriptor(handle, dropout_p, fn.dropout_seed)
+        )
+    dropout_desc = fn.dropout_state[dropout_desc_name].get()
+    dropout_desc.set_dropout(dropout_p, fn.dropout_seed)
     return cudnn.RNNDescriptor(
         handle,
         fn.hidden_size,
         fn.num_layers,
-        fn.dropout_state['desc_' + str(torch.cuda.current_device())].get(),
+        dropout_desc,
         fn.input_mode,
         fn.bidirectional,
         fn.mode,
@@ -229,11 +229,6 @@ def forward(fn, input, hx, weight, output, hy):
         y = output
 
         # init descriptors
-        desc_name = 'desc_' + str(torch.cuda.current_device())
-        if (desc_name not in fn.dropout_state) or (fn.dropout_state[desc_name].get() is None):
-            fn.dropout_state[desc_name] = Unserializable(
-                init_dropout_descriptor(fn, handle)
-            )
         fn.rnn_desc = init_rnn_descriptor(fn, handle)
         if is_input_packed:
             fn.x_descs = cudnn.descriptor_sequence(x, fn.batch_sizes)
@@ -275,7 +270,7 @@ def forward(fn, input, hx, weight, output, hy):
             ctypes.byref(workspace_size)
         ))
         fn.workspace = torch.cuda.ByteTensor(workspace_size.value)
-        if fn.train:
+        if fn.requires_grad:
             reserve_size = ctypes.c_long()
             check_error(lib.cudnnGetRNNTrainingReserveSize(
                 handle,
@@ -354,8 +349,8 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
 
         if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v 5.1 and above')
-        if not fn.train:
-            raise RuntimeError('backward_grad can only be called when training!')
+        if not fn.requires_grad:
+            raise RuntimeError('backward_grad can only be called when the function requires grad!')
         if tuple(input.size()) != input_size:
             raise RuntimeError('Expected input size {}, got {}'.format(
                 input_size, tuple(input.size())))
@@ -427,8 +422,8 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
             output = output.transpose(0, 1)
         input_size = _input_size(fn, input)
         hidden_size = _hidden_size(fn)
-        if not fn.train:
-            raise RuntimeError('backward_weight can only be called when training!')
+        if not fn.requires_grad:
+            raise RuntimeError('backward_weight can only be called when the function requires grad!')
         if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v 5.1 and above')
         if tuple(input.size()) != input_size:
