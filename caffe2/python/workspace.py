@@ -39,8 +39,12 @@ if has_gpu_support:
     def GetCudaPeerAccessPattern():
         return np.asarray(C.get_cuda_peer_access_pattern())
 else:
-    def NumCudaDevices():
-        return 0
+    NumCudaDevices = lambda: 0 # noqa
+    SetDefaultGPUID = lambda x: None # noqa
+    GetDefaultGPUID = lambda: 0 # noqa
+    GetCuDNNVersion = lambda: 0 # noqa
+    GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
+
 
 # Python 2 and 3 compatibility: test if basestring exists
 try:
@@ -427,6 +431,8 @@ def FeedImmediate(*args, **kwargs):
 
 def _Workspace_create_net(ws, net):
     return ws._create_net(StringifyProto(net))
+
+
 C.Workspace.create_net = _Workspace_create_net
 
 
@@ -442,6 +448,7 @@ def _Workspace_run(ws, obj):
     raise ValueError(
         "Don't know how to do Workspace.run() on {}".format(type(obj)))
 
+
 C.Workspace.run = _Workspace_run
 
 
@@ -449,5 +456,6 @@ def _Blob_feed(blob, arg, device_option=None):
     if device_option is not None:
         device_option = StringifyProto(device_option)
     return blob._feed(arg, device_option)
+
 
 C.Blob.feed = _Blob_feed
