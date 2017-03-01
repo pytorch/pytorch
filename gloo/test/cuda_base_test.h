@@ -29,7 +29,9 @@ class CudaBaseTest : public BaseTest {
 
 class Fixture {
  public:
-  Fixture(int devices, int count) : count(count) {
+  Fixture(const std::shared_ptr<Context> context, int devices, int count)
+      : context(context),
+        count(count) {
     for (int i = 0; i < devices; i++) {
       CudaDeviceScope scope(i);
       srcs.push_back(CudaMemory<float>(count));
@@ -43,22 +45,24 @@ class Fixture {
     ptrs = std::move(other.ptrs);
   }
 
-  void setRank(int rank) {
+  void assignValues() {
+    const auto stride = context->size_ * srcs.size();
     for (int i = 0; i < srcs.size(); i++) {
       const auto& stream = ptrs[i].getStream();
-      srcs[i].set((rank * srcs.size()) + i, stream);
+      srcs[i].set((context->rank_ * srcs.size()) + i, stride, stream);
       CUDA_CHECK(cudaStreamSynchronize(stream));
     }
   }
 
-  void setRankAsync(int rank) {
+  void assignValuesAsync() {
+    const auto stride = context->size_ * srcs.size();
     for (int i = 0; i < srcs.size(); i++) {
       const auto& stream = ptrs[i].getStream();
       // Insert sleep on stream to force to artificially delay the
       // kernel that actually populates the memory to surface
       // synchronization errors.
       cudaSleep(stream, 100000);
-      srcs[i].set((rank * srcs.size()) + i, stream);
+      srcs[i].set((context->rank_ * srcs.size()) + i, stride, stream);
     }
   }
 
@@ -86,6 +90,7 @@ class Fixture {
     return out;
   }
 
+  std::shared_ptr<Context> context;
   const int count;
   std::vector<CudaDevicePointer<float> > ptrs;
   std::vector<CudaMemory<float> > srcs;

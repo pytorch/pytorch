@@ -56,11 +56,11 @@ class BaseTest : public ::testing::Test {
 
   void spawn(
       int size,
-      std::function<void(int, std::shared_ptr<Context>)> fn) {
+      std::function<void(std::shared_ptr<Context>)> fn) {
     spawnThreads(size, [&](int rank) {
         auto context = std::make_shared<::gloo::Context>(rank, size);
         context->connectFullMesh(*store_, device_);
-        fn(rank, std::move(context));
+        fn(std::move(context));
       });
   }
 

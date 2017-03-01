@@ -75,7 +75,7 @@ class CudaMemory {
   CudaMemory(CudaMemory&&) noexcept;
   ~CudaMemory();
 
-  void set(T val, cudaStream_t stream = kStreamNotSet);
+  void set(T val, size_t stride = 0, cudaStream_t stream = kStreamNotSet);
 
   T* operator*() const {
     return ptr_;

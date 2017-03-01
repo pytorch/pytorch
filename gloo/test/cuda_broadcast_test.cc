@@ -33,12 +33,13 @@ using Param = std::tuple<int, int, std::function<Func>>;
 class CudaBroadcastTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
  public:
-  void assertEqual(Fixture& fixture, int rank, int root) {
+  void assertEqual(Fixture& fixture, int root) {
+    const auto stride = fixture.context->size_;
     for (const auto& ptr : fixture.getHostBuffers()) {
       for (int i = 0; i < fixture.count; i++) {
-        ASSERT_EQ(root, ptr[i])
+        ASSERT_EQ((i * stride) + root, ptr[i])
           << "Mismatch at index " << i
-          << " for rank " << rank;
+          << " for rank " << fixture.context->rank_;
       }
     }
   }
@@ -49,17 +50,17 @@ TEST_P(CudaBroadcastTest, SinglePointer) {
   auto count = std::get<1>(GetParam());
   auto fn = std::get<2>(GetParam());
 
-  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+  spawn(size, [&](std::shared_ptr<Context> context) {
       // Run with varying root
       for (int root = 0; root < 1; root++) {
-        auto fixture = Fixture(1, count);
+        auto fixture = Fixture(context, 1, count);
         auto ptrs = fixture.getFloatPointers();
         auto algorithm = fn(context, ptrs[0], count, root, kStreamNotSet);
-        fixture.setRank(rank);
+        fixture.assignValues();
         algorithm->run();
 
         // Verify result
-        assertEqual(fixture, rank, root);
+        assertEqual(fixture, root);
       }
     });
 }
@@ -69,18 +70,18 @@ TEST_P(CudaBroadcastTest, SinglePointerAsync) {
   auto count = std::get<1>(GetParam());
   auto fn = std::get<2>(GetParam());
 
-  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+  spawn(size, [&](std::shared_ptr<Context> context) {
       // Run with varying root
       for (int root = 0; root < 1; root++) {
-        auto fixture = Fixture(1, count);
+        auto fixture = Fixture(context, 1, count);
         auto ptrs = fixture.getFloatPointers();
         auto streams = fixture.getCudaStreams();
         auto algorithm = fn(context, ptrs[0], count, root, streams[0]);
-        fixture.setRankAsync(rank);
+        fixture.assignValuesAsync();
         algorithm->run();
 
         // Verify result
-        assertEqual(fixture, rank, root);
+        assertEqual(fixture, root);
       }
     });
 }

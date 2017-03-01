@@ -14,10 +14,14 @@
 namespace gloo {
 
 template<typename T>
-__global__ void initializeMemory(T* ptr, const T val, const size_t n) {
+__global__ void initializeMemory(
+    T* ptr,
+    const T val,
+    const size_t count,
+    const size_t stride) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  for (; i < n; i += blockDim.x) {
-    ptr[i] = val;
+  for (; i < count; i += blockDim.x) {
+    ptr[i] = (i * stride) + val;
   }
 }
 
@@ -50,12 +54,12 @@ CudaMemory<T>::~CudaMemory() {
 }
 
 template<typename T>
-void CudaMemory<T>::set(T val, cudaStream_t stream) {
+void CudaMemory<T>::set(T val, size_t stride, cudaStream_t stream) {
   CudaDeviceScope scope(device_);
   if (stream == kStreamNotSet) {
-    initializeMemory<<<1, 32>>>(ptr_, val, n_);
+    initializeMemory<<<1, 32>>>(ptr_, val, n_, stride);
   } else {
-    initializeMemory<<<1, 32, 0, stream>>>(ptr_, val, n_);
+    initializeMemory<<<1, 32, 0, stream>>>(ptr_, val, n_, stride);
   }
 }
 

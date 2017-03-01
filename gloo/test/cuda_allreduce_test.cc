@@ -33,10 +33,20 @@ using Param = std::tuple<int, int, std::function<Func>>;
 class CudaAllreduceTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
  public:
-  void assertEqual(Fixture& fixture, int expected) {
+  void assertResult(Fixture& fixture) {
+    // Size is the total number of pointers across the context
+    const auto size = fixture.ptrs.size() * fixture.context->size_;
+    // Expected is set to the expected value at ptr[0]
+    const auto expected = (size * (size - 1)) / 2;
+    // The stride between values at subsequent indices is equal to
+    // "size", and we have "size" of them. Therefore, after
+    // allreduce, the stride between expected values is "size^2".
+    const auto stride = size * size;
+    // Verify all buffers passed by this instance
     for (const auto& ptr : fixture.getHostBuffers()) {
       for (int i = 0; i < fixture.count; i++) {
-        ASSERT_EQ(expected, ptr[i]) << "Mismatch at index " << i;
+        ASSERT_EQ((i * stride) + expected, ptr[i])
+          << "Mismatch at index " << i;
       }
     }
   }
@@ -47,19 +57,17 @@ TEST_P(CudaAllreduceTest, SinglePointer) {
   auto count = std::get<1>(GetParam());
   auto fn = std::get<2>(GetParam());
 
-  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
-    // Run algorithm
-    auto fixture = Fixture(1, count);
-    auto ptrs = fixture.getFloatPointers();
-    auto algorithm = fn(context, ptrs, count, {});
-    fixture.setRank(rank);
-    algorithm->run();
+  spawn(size, [&](std::shared_ptr<Context> context) {
+      // Run algorithm
+      auto fixture = Fixture(context, 1, count);
+      auto ptrs = fixture.getFloatPointers();
+      auto algorithm = fn(context, ptrs, count, {});
+      fixture.assignValues();
+      algorithm->run();
 
-    // Verify result
-    auto logicalSize = size;
-    auto expected = (logicalSize * (logicalSize - 1)) / 2;
-    assertEqual(fixture, expected);
-  });
+      // Verify result
+      assertResult(fixture);
+    });
 }
 
 TEST_P(CudaAllreduceTest, MultiPointer) {
@@ -67,18 +75,16 @@ TEST_P(CudaAllreduceTest, MultiPointer) {
   auto count = std::get<1>(GetParam());
   auto fn = std::get<2>(GetParam());
 
-  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+  spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = Fixture(getDeviceCount(), count);
+      auto fixture = Fixture(context, getDeviceCount(), count);
       auto ptrs = fixture.getFloatPointers();
       auto algorithm = fn(context, ptrs, count, {});
-      fixture.setRank(rank);
+      fixture.assignValues();
       algorithm->run();
 
       // Verify result
-      auto logicalSize = getDeviceCount() * size;
-      auto expected = (logicalSize * (logicalSize - 1)) / 2;
-      assertEqual(fixture, expected);
+      assertResult(fixture);
     });
 }
 
@@ -87,19 +93,17 @@ TEST_P(CudaAllreduceTest, MultiPointerAsync) {
   auto count = std::get<1>(GetParam());
   auto fn = std::get<2>(GetParam());
 
-  spawn(size, [&](int rank, std::shared_ptr<Context> context) {
+  spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = Fixture(getDeviceCount(), count);
+      auto fixture = Fixture(context, getDeviceCount(), count);
       auto ptrs = fixture.getFloatPointers();
       auto streams = fixture.getCudaStreams();
       auto algorithm = fn(context, ptrs, count, streams);
-      fixture.setRankAsync(rank);
+      fixture.assignValuesAsync();
       algorithm->run();
 
       // Verify result
-      auto logicalSize = getDeviceCount() * size;
-      auto expected = (logicalSize * (logicalSize - 1)) / 2;
-      assertEqual(fixture, expected);
+      assertResult(fixture);
     });
 }
 
