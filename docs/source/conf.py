@@ -21,6 +21,8 @@
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 import torch
+import glob
+import shutil
 try:
     import torchvision
 except ImportError:
@@ -53,7 +55,6 @@ extensions = [
 
 napoleon_use_ivar = True
 
-
 sphinx_gallery_conf = {
     # path to your examples scripts
     'examples_dirs': 'tutorial_source',
@@ -61,6 +62,17 @@ sphinx_gallery_conf = {
     'gallery_dirs': 'tutorial',
     'filename_pattern': '/tutorial_'
 }
+
+# Create tutorial folder if it doesn't exist 
+try:
+    import os
+    os.mkdir('tutorial')
+except FileExistsError:
+    pass
+
+# Copy rst files from tutorial_source folder to tutorial
+for f in glob.glob('tutorial_source/*.rst'):
+    shutil.copy(f, 'tutorial')
 
 exclude_patterns = ['tutorial/index.rst']
 

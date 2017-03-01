@@ -7,7 +7,6 @@ multiple smaller mini-batches and run the computation for each of the
 smaller mini-batches in parallel.
 
 Data Parallelism is implemented using ``torch.nn.DataParallel``.
-
 One can wrap a Module in ``DataParallel`` and it will be parallelized
 over multiple GPUs in the batch dimension.
 
@@ -42,10 +41,10 @@ class DataParallelModel(nn.Module):
 #
 # .. _The documentation for DataParallel is here: http://pytorch.org/docs/nn.html#torch.nn.DataParallel
 #
-# **Primitives on which DataParallel is implemented upon**
+# **Primitives on which DataParallel is implemented upon:**
 #
 #
-# In general, pytorch’s nn.parallel primitives can be used independently.
+# In general, pytorch’s `nn.parallel` primitives can be used independently.
 # We have implemented simple MPI-like primitives:
 #
 # - replicate: replicate a Module on multiple devices
@@ -101,7 +100,6 @@ class DistributedModel(nn.Module):
 ########################################################################
 #
 # This was a small introduction to PyTorch for former Torch users.
-#
 # There’s a lot more to learn.
 #
 # Look at our more comprehensive introductory tutorial which introduces

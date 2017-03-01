@@ -48,10 +48,10 @@ print(a, b)
 # Zero Indexing
 # -------------
 #
-# Another difference is that Tensors are zero-indexed. (Torch tensors are
+# Another difference is that Tensors are zero-indexed. (In lua, tensors are
 # one-indexed)
 
-b = a[0, 3]	 # select 1st row, 4th column from a
+b = a[0, 3]  # select 1st row, 4th column from a
 
 ###############################################################
 # Tensors can be also indexed with Python's slicing

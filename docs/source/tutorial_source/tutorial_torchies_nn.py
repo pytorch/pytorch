@@ -5,20 +5,19 @@ nn package
 We’ve redesigned the nn package, so that it’s fully integrated with
 autograd.
 
-**Replace containers with autograd**
+**Replace containers with autograd:**
 
 
-You no longer have to use Containers like ConcatTable, or modules like
-CAddTable, or use and debug with nngraph. We will seamlessly use
+You no longer have to use Containers like `ConcatTable`, or modules like
+`CAddTable`, or use and debug with nngraph. We will seamlessly use
 autograd to define our neural networks. For example,
 
-``output = nn.CAddTable():forward({input1, input2})`` simply becomes
-``output = input1 + input2``
+* ``output = nn.CAddTable():forward({input1, input2})`` simply becomes
+  ``output = input1 + input2``
+* ``output = nn.MulConstant(0.5):forward(input)`` simply becomes
+  ``output = input * 0.5``
 
-``output = nn.MulConstant(0.5):forward(input)`` simply becomes
-``output = input * 0.5``
-
-**State is no longer held in the module, but in the network graph**
+**State is no longer held in the module, but in the network graph:**
 
 Using recurrent networks should be simpler because of this reason. If
 you want to create a recurrent network, simply use the same Linear layer
@@ -40,7 +39,7 @@ Example 1: ConvNet
 
 Let’s see how to create a small ConvNet.
 
-All of your networks are derived from the base class ``nn.Module``.
+All of your networks are derived from the base class ``nn.Module``:
 
 -  In the constructor, you declare all the layers you want to use.
 -  In the forward function, you define how your model is going to be
@@ -209,7 +208,7 @@ err.backward()
 # Example 2: Recurrent Net
 # ------------------------
 #
-# Next, let’s lookm at building recurrent nets with PyTorch.
+# Next, let’s look at building recurrent nets with PyTorch.
 #
 # Since the state of the network is held in the graph and not in the
 # layers, you can simply create an nn.Linear and reuse it over and over

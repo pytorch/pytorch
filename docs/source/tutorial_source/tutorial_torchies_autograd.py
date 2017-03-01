@@ -3,7 +3,6 @@ Autograd
 ========
 
 Autograd is now a core torch package for automatic differentiation.
-
 It uses a tape based system for automatic differentiation.
 
 In the forward phase, the autograd tape will remember all the operations
@@ -52,7 +51,7 @@ print(x.grad)
 ###############################################################
 #
 
-print(x.creator is None)  # we've created x ourselves
+print(x.creator)  # we've created x ourselves
 
 ###############################################################
 # Do an operation of x:
@@ -63,7 +62,7 @@ print(y)
 ###############################################################
 # y was created as a result of an operation,
 # so it has a creator
-y.creator
+print(y.creator)
 
 ###############################################################
 # More operations on y:

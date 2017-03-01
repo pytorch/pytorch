@@ -1,4 +1,3 @@
-"""
 Custom C extensions for pytorch
 ===============================
 
@@ -124,5 +123,5 @@ import your extension just like a regular python file.
     input1, input2 = Variable(torch.randn(5, 5)), Variable(torch.randn(5, 5))
     print(model(input1, input2))
     print(input1 + input2)
-"""
+
 
