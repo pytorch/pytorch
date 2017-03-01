@@ -1,3 +1,4 @@
+import torch
 import torch.cuda.comm as comm
 from torch.autograd import Function
 
@@ -51,7 +52,35 @@ class Scatter(Function):
 
     def forward(self, input):
         self.input_device = input.get_device() if input.is_cuda else -1
-        return comm.scatter(input, self.target_gpus, self.chunk_sizes, self.dim)
+        streams = None
+        if self.input_device == -1:
+            # Perform CPU to GPU copies in a background stream
+            streams = [_get_stream(device) for device in self.target_gpus]
+        outputs = comm.scatter(input, self.target_gpus, self.chunk_sizes, self.dim, streams)
+        # Synchronize with the copy stream
+        if streams is not None:
+            for i, output in enumerate(outputs):
+                with torch.cuda.device(self.target_gpus[i]):
+                    main_stream = torch.cuda.current_stream()
+                    main_stream.wait_stream(streams[i])
+                    output.record_stream(main_stream)
+        return outputs
 
     def backward(self, *grad_output):
         return comm.gather(grad_output, self.dim, self.input_device)
+
+
+# background streams used for copying
+_streams = None
+
+
+def _get_stream(device):
+    """Gets a background stream for copying between CPU and GPU"""
+    global _streams
+    if device == -1:
+        return None
+    if _streams is None:
+        _streams = [None] * torch.cuda.device_count()
+    if _streams[device] is None:
+        _streams[device] = torch.cuda.Stream(device)
+    return _streams[device]

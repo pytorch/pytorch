@@ -126,7 +126,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     return tuple(output)
 
 
-def scatter(tensor, devices, chunk_sizes=None, dim=0):
+def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
     """Scatters tensor across multiple GPUs.
 
     Arguments:
@@ -154,8 +154,13 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0):
                   for start, size in zip(_accumulate(chunk_sizes), chunk_sizes)]
     chunks = tuple(chunk.contiguous() for chunk in chunks)
     # TODO: copy to a pinned buffer first (if copying from CPU)
-    return tuple(chunk.cuda(gpu_id, async=chunk.is_contiguous())
-                 for gpu_id, chunk in zip(devices, chunks))
+    if streams is None:
+        streams = [None] * len(devices)
+    outputs = []
+    for device, chunk, stream in zip(devices, chunks, streams):
+        with torch.cuda.device(device), torch.cuda.stream(stream):
+            outputs.append(chunk.cuda(device, async=True))
+    return tuple(outputs)
 
 
 def gather(tensors, dim=0, destination=None):

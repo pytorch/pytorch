@@ -1,11 +1,6 @@
-import sys
 import threading
 import torch
 from torch.autograd import Variable
-if sys.version_info[0] == 3:
-    import queue
-else:
-    import Queue as queue
 
 
 def parallel_apply(modules, inputs, kwargs_tup=None):
