@@ -146,6 +146,7 @@ class OpSchema {
    */
   OpSchema& IdenticalTypeAndShape();
   OpSchema& IdenticalTypeAndShapeOfInput(int idx);
+  OpSchema& IdenticalTypeAndShapeOfInputDim(int idx, int dim);
   OpSchema& ScalarType(::caffe2::TensorProto_DataType dt);
 
   /**

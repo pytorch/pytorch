@@ -73,6 +73,9 @@ class GradientMakerBase {
    */
   virtual GradientOpsMeta Get() {
     vector<OperatorDef> new_defs = GetGradientDefs();
+    for (auto& opdef : new_defs) {
+      opdef.set_is_gradient_op(true);
+    }
     return GradientOpsMeta(new_defs, g_input_);
   };
 
@@ -182,11 +185,35 @@ class GradientMakerBase {
     return vector<OperatorDef>{CreateOperatorDef(args...)};
   }
 
+ public:
+  /**
+    * Returns map that returns the parameters that the gradients are for.
+    */
+  static CaffeMap<string, string> MatchGradsToParams(const OperatorDef& op) {
+    // NOTE: how to go beyond string-matching?
+    CaffeMap<string, string> m;
+    for (auto& out : op.output()) {
+      if (IsGradientBlob(out)) {
+        m[out] = out.substr(0, out.length() - 5);
+      }
+    }
+    return m;
+  }
+
  private:
   // Utility functions for gradient name computation. We don't expose them
   // in order to discourage the use of such names explicitly.
   static string GradientName(const string& name) {
     return name + "_grad";
+  }
+
+  static bool IsGradientBlob(const string& name) {
+    return name.length() > 5 && name.find("_grad") == name.length() - 5;
+  }
+
+  static string GradientNameToParam(const string& name) {
+    CHECK(IsGradientBlob(name));
+    return name.substr(0, name.length() - 5);
   }
 
   static string GradientSliceIndices(const string& name) {

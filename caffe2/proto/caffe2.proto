@@ -146,6 +146,10 @@ message OperatorDef {
   // Operator implementation, and are only used by the Net class for
   // scheduling purposes.
   repeated string control_input = 8;
+
+  // is_gradient_op argument is only used as a hint in shape inference
+  // and has no runtime significance
+  optional bool is_gradient_op = 9 [default = false];
 }
 
 // Network definition.
