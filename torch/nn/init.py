@@ -148,8 +148,8 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
     Args:
         tensor: a n-dimension torch.Tensor
         a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
-        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the weights
-              in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
+        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the
+              weights in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
     Examples:
         >>> w = torch.Tensor(3, 5)
@@ -175,8 +175,8 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
     Args:
         tensor: a n-dimension torch.Tensor
         a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
-        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the weights
-              in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
+        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the
+              weights in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
     Examples:
         >>> w = torch.Tensor(3, 5)
