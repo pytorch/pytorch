@@ -31,6 +31,7 @@ class WatcherThread(threading.Thread):
         self.completed = False
         self.condition = threading.Condition()
         self.daemon = True
+        self.caller_thread = threading.current_thread()
 
     def run(self):
         started = time.time()
@@ -40,20 +41,50 @@ class WatcherThread(threading.Thread):
         self.condition.release()
         if not self.completed:
             log = logging.getLogger("timeout_guard")
-            log.error("Call did not finish in time. Timeout:{}s".format(
-                self.timeout_secs
+            log.error("Call did not finish in time. Timeout:{}s PID: {}".format(
+                self.timeout_secs,
+                os.getpid(),
             ))
 
             # First try dying cleanly, but in 10 secs, exit properly
             def forcequit():
                 time.sleep(10.0)
+                log.info("Prepared output, dumping threads. ")
+                print("Caller thread was: {}".format(self.caller_thread))
+                print("-----After force------")
+                import sys
+                import traceback
+                code = []
+                for threadId, stack in sys._current_frames().items():
+                    if threadId == self.caller_thread.ident:
+                        code.append("\n# ThreadID: %s" % threadId)
+                        for filename, lineno, name, line in traceback.extract_stack(stack):
+                            code.append('File: "%s", line %d, in %s' % (filename, lineno, name))
+                            if line:
+                                code.append("  %s" % (line.strip()))
+
+                print("\n".join(code))
                 log.error("Process did not terminate cleanly in 10 s, forcing")
                 os._exit(1)
+
             forcet = threading.Thread(target=forcequit, args=())
             forcet.daemon = True
             forcet.start()
-            os.kill(os.getpid(), signal.SIGINT)
+            print("Caller thread was: {}".format(self.caller_thread))
+            print("-----Before forcing------")
+            import sys
+            import traceback
+            code = []
+            for threadId, stack in sys._current_frames().items():
+                if threadId == self.caller_thread.ident:
+                    code.append("\n# ThreadID: %s" % threadId)
+                    for filename, lineno, name, line in traceback.extract_stack(stack):
+                        code.append('File: "%s", line %d, in %s' % (filename, lineno, name))
+                        if line:
+                            code.append("  %s" % (line.strip()))
 
+            print("\n".join(code))
+            os.kill(os.getpid(), signal.SIGINT)
 
 
 @contextlib.contextmanager
