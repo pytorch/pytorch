@@ -4,7 +4,8 @@ from .optimizer import Optimizer, required
 class SGD(Optimizer):
     """Implements stochastic gradient descent (optionally with momentum).
 
-    Nesterov momentum is based on the formula from `Nesterov’s Momentum Made Simple`__.
+    Nesterov momentum is based on the formula from
+    `On the importance of initialization and momentum in deep learning`__.
 
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -21,7 +22,7 @@ class SGD(Optimizer):
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
 
-    __ https://github.com/fidlej/optim/raw/master/dok/nesterov_simple.pdf
+    __ http://www.cs.toronto.edu/%7Ehinton/absps/momentum.pdf
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
@@ -39,6 +40,7 @@ class SGD(Optimizer):
 
     def step(self, closure=None):
         """Performs a single optimization step.
+
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
@@ -65,7 +67,7 @@ class SGD(Optimizer):
                         buf = param_state['momentum_buffer']
                         buf.mul_(momentum).add_(1 - dampening, d_p)
                     if nesterov:
-                        d_p.add_(momentum, buf)
+                        d_p = d_p.add(momentum, buf)
                     else:
                         d_p = buf
 
