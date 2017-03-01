@@ -312,7 +312,8 @@ class CudnnRNN(NestedIOFunction):
                 weight,
                 grad_weight)
             if self.skip_input:
-                grad_weight = [tuple(w for w in layer_grad_weight if w is not None) for layer_grad_weight in grad_weight]
+                grad_weight = [tuple(w for w in layer_grad_weight if w is not None)
+                               for layer_grad_weight in grad_weight]
         else:
             grad_weight = [(None,) * len(layer_weight) for layer_weight in weight]
 
