@@ -243,23 +243,41 @@ class DropoutDescriptor(object):
     def __init__(self, handle, dropout, seed):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateDropoutDescriptor(ctypes.byref(ptr)))
+
         self._as_parameter_ = ptr
+        self.state = None
+        self.dropout = dropout
+        self.handle = handle
 
-        dropout_states_size = ctypes.c_long()
-        check_error(lib.cudnnDropoutGetStatesSize(
-            handle,
-            ctypes.byref(dropout_states_size)))
+        self._set(dropout, seed)
 
-        self.state = torch.cuda.ByteTensor(dropout_states_size.value)
+    def set_dropout(self, dropout, seed):
+        if dropout != self.dropout:
+            self._set(dropout, seed)
+
+    def _set(self, dropout, seed):
+        if self.state is None and dropout > 0:
+            dropout_states_size = ctypes.c_long()
+            check_error(lib.cudnnDropoutGetStatesSize(
+                self.handle,
+                ctypes.byref(dropout_states_size)))
+            self.state = torch.cuda.ByteTensor(dropout_states_size.value)
+            state_ptr = self.state.data_ptr()
+            state_size = self.state.size(0)
+        else:
+            state_ptr = None
+            state_size = 0
 
         check_error(lib.cudnnSetDropoutDescriptor(
             self,
-            handle,
+            self.handle,
             ctypes.c_float(dropout),
-            ctypes.c_void_p(self.state.data_ptr()),
-            ctypes.c_size_t(self.state.size(0)),
+            ctypes.c_void_p(state_ptr),
+            ctypes.c_size_t(state_size),
             ctypes.c_ulonglong(seed),
         ))
+
+        self.dropout = dropout
 
     def __del__(self):
         check_error(lib.cudnnDestroyDropoutDescriptor(self))
