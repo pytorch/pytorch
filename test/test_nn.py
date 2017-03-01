@@ -839,13 +839,6 @@ class TestNN(NNTestCase):
         inputs = (i1, Variable(i2.data.new()))
         expected_outputs = (expected1, expected2.new())
 
-    def test_data_parallel_noop(self):
-        l = nn.Linear(10, 5).float()
-        i = Variable(torch.randn(20, 10).float())
-        out = dp.data_parallel(l, i, [])
-        self.assertEqual(out, l(i))
-        self.assertFalse(out.is_cuda)
-
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
@@ -862,8 +855,6 @@ class TestNN(NNTestCase):
         var3 = Variable(torch.randn(5, 5).float(), requires_grad=False)
 
         float1 = torch.randn(1)[0]
-        target = Variable(torch.randn(5, 5).float()).cuda()
-        crit = nn.MSELoss()
 
         expected = m(var1, var2, float1)
         loss = expected.sum()

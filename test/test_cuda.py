@@ -662,6 +662,38 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+    def test_record_stream(self):
+        cycles_per_ms = get_cycles_per_ms()
+
+        t = torch.FloatTensor([1, 2, 3, 4]).pin_memory()
+        result = torch.cuda.FloatTensor(t.size())
+        stream = torch.cuda.Stream()
+        ptr = [None]
+
+        # Performs the CPU->GPU copy in a background stream
+        def perform_copy():
+            with torch.cuda.stream(stream):
+                tmp = t.cuda(async=True)
+                ptr[0] = tmp.data_ptr()
+            torch.cuda.current_stream().wait_stream(stream)
+            tmp.record_stream(torch.cuda.current_stream())
+            torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
+            result.copy_(tmp)
+
+        perform_copy()
+        with torch.cuda.stream(stream):
+            tmp2 = torch.cuda.FloatTensor(t.size())
+            tmp2.zero_()
+            self.assertNotEqual(tmp2.data_ptr(), ptr[0], 'allocation re-used to soon')
+
+        self.assertEqual(result.tolist(), [1, 2, 3, 4])
+
+        # Check that the block will be re-used after the main stream finishes
+        torch.cuda.current_stream().synchronize()
+        with torch.cuda.stream(stream):
+            tmp3 = torch.cuda.FloatTensor(t.size())
+            self.assertEqual(tmp3.data_ptr(), ptr[0], 'allocation not re-used')
+
     def test_caching_pinned_memory(self):
         cycles_per_ms = get_cycles_per_ms()
 
