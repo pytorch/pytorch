@@ -3,6 +3,7 @@ import os
 import argparse
 import unittest
 import contextlib
+from functools import wraps
 from itertools import product
 from copy import deepcopy
 
@@ -30,6 +31,24 @@ try:
     import numpy
 except ImportError:
     TEST_NUMPY = False
+
+TEST_SCIPY = True
+try:
+    import scipy
+except ImportError:
+    TEST_SCIPY = False
+
+
+def skipIfNoLapack(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            if 'Lapack library not found' in e.args[0]:
+                raise unittest.SkipTest('Compiled without Lapack')
+            raise
+    return wrapper
 
 
 def get_cpu_type(t):
