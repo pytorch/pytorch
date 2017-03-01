@@ -1340,7 +1340,7 @@ class TestNN(NNTestCase):
                         self.assertTrue(gpu_weight is None)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bias, bidirectional, batch_first, contig, skip_input, variable_len  in product((True, False), repeat=5):
+            for bias, bidirectional, batch_first, contig, skip_input, variable_len in product((True, False), repeat=6):
                 num_directions = 2 if bidirectional else 1
                 grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
                 if skip_input:
