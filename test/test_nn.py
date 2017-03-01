@@ -1357,11 +1357,8 @@ class TestNN(NNTestCase):
                 if not contig:
                     grad_output = make_noncontig(grad_output)
                     grad_hy = make_noncontig(grad_hy)
-                    input_var = make_noncontig(input_val)
+                    input_val = make_noncontig(input_val)
                     hx_val = make_noncontig(hx_val)
-
-                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
-                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
                 if variable_len:
                     batch_sizes = [7, 5, 5, 2, 1, 1]
