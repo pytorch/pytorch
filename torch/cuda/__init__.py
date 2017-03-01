@@ -196,8 +196,11 @@ def stream(stream):
 
 def device_count():
     """Returns the number of GPUs available."""
-    _lazy_init()
-    return torch._C._cuda_getDeviceCount()
+    if is_available():
+        _lazy_init()
+        return torch._C._cuda_getDeviceCount()
+    else:
+        return 0
 
 
 def current_device():
