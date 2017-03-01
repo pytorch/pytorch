@@ -2,15 +2,13 @@
 #define THCP_AUTOGPU_INC
 
 #include <Python.h>
+#include "torch/csrc/utils/auto_gpu.h"
 
-class THCPAutoGPU {
+class THCPAutoGPU : public AutoGPU {
 public:
-  THCPAutoGPU(int device_id=-1);
+  explicit THCPAutoGPU(int device_id=-1);
   THCPAutoGPU(PyObject *args, PyObject *self=NULL);
-  ~THCPAutoGPU();
-  bool setObjDevice(PyObject *obj);
-  bool setDevice(int new_device);
-  int device = -1;
+  void setObjDevice(PyObject *obj);
 };
 
 #endif

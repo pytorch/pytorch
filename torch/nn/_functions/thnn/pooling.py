@@ -17,18 +17,22 @@ class MaxPool1d(Function):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
+        if (input.dim() != 3):
+            raise ValueError('expected 3D input (got {}D input)'
+                             .format(input.dim()))
+
+        input2d = input.unsqueeze(2)    # size = N*C*1*L
         backend = type2backend[type(input)]
-        indices, output = input.new().long(), input.new()
+        indices, output = input2d.new().long(), input2d.new()
         backend.SpatialDilatedMaxPooling_updateOutput(backend.library_state,
-                                                      input, output, indices,
+                                                      input2d, output, indices,
                                                       self.kernel_size, 1,
                                                       self.stride, 1,
                                                       self.pad, 0,
                                                       self.dilation, 1,
                                                       self.ceil_mode)
-        if indices.dim() == 4:
-            # TODO: fix when THCUNN handles 3D indices properly
-            indices = indices.squeeze(0)
+        indices = indices.squeeze(2)
+        output = output.squeeze(2)
         if self.return_indices:
             self.save_for_backward(input, indices)
             self.mark_non_differentiable(indices)
@@ -44,18 +48,20 @@ class MaxPool1d(Function):
         else:
             input, = self.saved_tensors
             indices = self.indices
-        if indices.is_cuda and indices.dim() == 3:
-            # TODO: fix when THCUNN handles 3D indices properly
-            indices = indices.unsqueeze(0)
-        grad_input = grad_output.new()
+
+        input2d = input.unsqueeze(2)
+        indices2d = indices.unsqueeze(2)
+        grad_output2d = grad_output.unsqueeze(2)
+        grad_input = grad_output2d.new()
         backend = type2backend[type(input)]
         backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
-                                                         input, grad_output, grad_input, indices,
+                                                         input2d, grad_output2d, grad_input, indices2d,
                                                          self.kernel_size, 1,
                                                          self.stride, 1,
                                                          self.pad, 0,
                                                          self.dilation, 1,
                                                          self.ceil_mode)
+        grad_input = grad_input.squeeze(2)
         return grad_input
 
 

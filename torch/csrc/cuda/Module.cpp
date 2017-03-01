@@ -60,6 +60,7 @@ static bool THCPModule_assignStateless()
   PyObject *stateless;
   INIT_STATELESS(Double);
   INIT_STATELESS_DETAIL(Float, Cuda);
+  INIT_STATELESS(Half);
   INIT_STATELESS(Long);
   INIT_STATELESS(Int);
   INIT_STATELESS(Short);
@@ -236,6 +237,20 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
   THC_sleep(LIBRARY_STATE THPUtils_unpackLong(cycles));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaLockMutex(PyObject *module)
+{
+  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  mutex->lock();
+  Py_RETURN_NONE;
+}
+
+PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
+{
+  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  mutex->unlock();
+  Py_RETURN_NONE;
 }
 
 PyObject * THCPModule_getLibPath(PyObject *_unused)

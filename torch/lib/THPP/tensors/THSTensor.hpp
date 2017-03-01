@@ -88,8 +88,67 @@ public:
   virtual THSTensor& squeeze(const Tensor& src, int dimension) override;
   virtual THSTensor& unsqueeze(const Tensor& src, int dimension) override;
 
+  virtual THSTensor& diag(const Tensor& src, int k) override;
+  virtual THSTensor& eye(long n, long m) override;
+  virtual THSTensor& range(scalar_type xmin, scalar_type xmax,
+                          scalar_type step) override;
+  virtual THSTensor& sort(const Tensor& ri, const Tensor& src,
+                       int dimension, int desc) override;
+  virtual THSTensor& topk(const Tensor& ri, const Tensor& src,
+                       long k, int dim, int dir, int sorted) override;
+  virtual THSTensor& tril(const Tensor& src, long k) override;
+  virtual THSTensor& triu(const Tensor& src, long k) override;
+  // TODO: remove in favor of cat
+  virtual THSTensor& catArray(const std::vector<Tensor*>& inputs,
+                             int dimension) override;
+  virtual int equal(const Tensor& other) const override;
+
+  // Note: the order in *Value and *Tensor is reversed compared to
+  // the declarations in TH/generic/THTensorMath.h, so for instance
+  // the call THRealTensor_ltTensor(r, ta, tb) is equivalent to
+  // ta->ltTensor(r, tb). It is done this way so that the first
+  // argument can be casted onto a byte tensor type
+  virtual THSTensor& ltTensor(const Tensor& r, const Tensor& tb) override;
+  virtual THSTensor& leTensor(const Tensor& r, const Tensor& tb) override;
+  virtual THSTensor& gtTensor(const Tensor& r, const Tensor& tb) override;
+  virtual THSTensor& geTensor(const Tensor& r, const Tensor& tb) override;
+  virtual THSTensor& neTensor(const Tensor& r, const Tensor& tb) override;
+  virtual THSTensor& eqTensor(const Tensor& r, const Tensor& tb) override;
+  virtual THSTensor& ltTensorT(const Tensor& ta, const Tensor& tb) override;
+  virtual THSTensor& leTensorT(const Tensor& ta, const Tensor& tb) override;
+  virtual THSTensor& gtTensorT(const Tensor& ta, const Tensor& tb) override;
+  virtual THSTensor& geTensorT(const Tensor& ta, const Tensor& tb) override;
+  virtual THSTensor& neTensorT(const Tensor& ta, const Tensor& tb) override;
+  virtual THSTensor& eqTensorT(const Tensor& ta, const Tensor& tb) override;
+
+  virtual THSTensor& abs(const Tensor& src) override;
+  virtual THSTensor& sigmoid(const Tensor& src) override;
+  virtual THSTensor& log(const Tensor& src) override;
+  virtual THSTensor& log1p(const Tensor& src) override;
+  virtual THSTensor& exp(const Tensor& src) override;
+  virtual THSTensor& cos(const Tensor& src) override;
+  virtual THSTensor& acos(const Tensor& src) override;
+  virtual THSTensor& cosh(const Tensor& src) override;
+  virtual THSTensor& sin(const Tensor& src) override;
+  virtual THSTensor& asin(const Tensor& src) override;
+  virtual THSTensor& sinh(const Tensor& src) override;
+
+  virtual THSTensor& ltValue(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& leValue(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& gtValue(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& geValue(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& neValue(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& eqValue(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& ltValueT(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& leValueT(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& gtValueT(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& geValueT(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& neValueT(const Tensor& t, scalar_type value) override;
+  virtual THSTensor& eqValueT(const Tensor& t, scalar_type value) override;
+
   virtual THSTensor& fill(scalar_type value) override;
 
+  virtual THSTensor& copy(const Tensor& src) override;
   virtual THSTensor& cat(const std::vector<Tensor*>& src, int dimension) override;
   virtual THSTensor& gather(const Tensor& src, int dimension, const Tensor& index) override;
   virtual THSTensor& scatter(int dimension, const Tensor& index, const Tensor& src) override;

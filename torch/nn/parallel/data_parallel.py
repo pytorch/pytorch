@@ -10,20 +10,32 @@ class DataParallel(Module):
     """Implements data parallelism at the module level.
 
     This container parallelizes the application of the given module by
-    splitting the input across the specified devices. In the forward pass, the
-    module is replicated on each device, and each replica handles a portion of
-    the input. During the backwards pass, gradients from each replica are
-    summed into the original module.
+    splitting the input across the specified devices by chunking in the batch
+    dimension. In the forward pass, the module is replicated on each device,
+    and each replica handles a portion of the input. During the backwards
+    pass, gradients from each replica are summed into the original module.
+
+    The batch size should be larger than the number of GPUs used. It should
+    also be an integer multiple of the number of GPUs so that each chunk is the
+    same size (so that each GPU processes the same number of samples).
+
+    See also: :ref:`cuda-nn-dataparallel-instead`
 
     Args:
         module: module to be parallelized
         device_ids: CUDA devices (default: all devices)
         output_device: device location of output (default: device_ids[0])
-    Example:
-        >>> net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
-        >>> output = net(input)
+
+    Example::
+
+        >>> device_ids=[0, 1, 2]
+        >>> net = torch.nn.DataParallel(model, device_ids=device_ids)
+        >>> input_var.size(0) % len(device_ids)
+        0
+        >>> output = net(input_var)
     """
 
+    # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
     def __init__(self, module, device_ids=None, output_device=None):
         super(DataParallel, self).__init__()
         if device_ids is None:

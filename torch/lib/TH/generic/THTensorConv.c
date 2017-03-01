@@ -44,7 +44,7 @@ void THTensor_(validXCorr2Dptr)(real *r_,
       for (ky = 0; ky < kr; ky++) {
         real *pis_ = pi_;
         for (kx = 0; kx < kc; kx++) {
-          THVector_(add)(r_, pis_, alpha*pw_[kx], oc);
+          THVector_(cadd)(r_, r_, pis_, alpha*pw_[kx], oc);
           pis_++;
         }
         pi_ += ic; /* next input line */
@@ -97,7 +97,7 @@ void THTensor_(validConv2Dptr)(real *r_,
       for (ky = 0; ky < kr; ky++) {
         real *pis_ = pi_;
         for (kx = 0; kx < kc; kx++) {
-          THVector_(add)(r_, pis_, alpha*pw_[-kx], oc);
+          THVector_(cadd)(r_, r_, pis_, alpha*pw_[-kx], oc);
           pis_++;
         }
         pi_ += ic; /* next input line */
@@ -149,7 +149,7 @@ void THTensor_(fullConv2Dptr)(real *r_,
       for (ky = 0; ky < kr; ky++) {
         real *pos_ = po_;
         for (kx = 0; kx < kc; kx++) {
-          THVector_(add)(pos_, t_, alpha*pw_[kx], ic);
+          THVector_(cadd)(pos_, pos_, t_, alpha*pw_[kx], ic);
           pos_++;
         }
         po_ += oc; /* next input line */
@@ -202,7 +202,7 @@ void THTensor_(fullXCorr2Dptr)(real *r_,
       for (ky = 0; ky < kr; ky++) {
         real *pos_ = po_;
         for (kx = 0; kx < kc; kx++) {
-          THVector_(add)(pos_, t_, pw_[-kx]*alpha, ic);
+          THVector_(cadd)(pos_, pos_, t_, pw_[-kx]*alpha, ic);
           pos_++;
         }
         po_ += oc; /* next input line */
@@ -255,7 +255,7 @@ void THTensor_(validXCorr2DRevptr)(real *r_,
         real z = *k_++ * alpha;
 
         for(ky = 0; ky < or; ky++) {
-          THVector_(add)(po_, pi_, z, oc);
+          THVector_(cadd)(po_, po_, pi_, z, oc);
           pi_ += ic;
           po_ += oc;
         }

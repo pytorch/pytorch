@@ -1,6 +1,8 @@
 import math
 import random
 import unittest
+import itertools
+import contextlib
 from copy import deepcopy
 from itertools import repeat, product
 from functools import wraps, reduce
@@ -11,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.nn.init as init
+import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable
 from torch.nn import Parameter
@@ -478,7 +481,8 @@ class TestNN(NNTestCase):
             module_list.extend(nn.ReLU())
 
     def test_ParameterList(self):
-        make_param = lambda: Parameter(torch.randn(10, 10))
+        def make_param():
+            return Parameter(torch.randn(10, 10))
         parameters = [make_param(), make_param()]
         param_list = nn.ParameterList(parameters)
 
@@ -634,30 +638,35 @@ class TestNN(NNTestCase):
     def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
             if dim == 1:
-                return torch.DoubleTensor([1, 3])
-            lower_dim = expected_indices(dim - 1)
-            lower_dim = lower_dim.view(1, *lower_dim.size())
-            return torch.cat((lower_dim + 4, lower_dim + 12), 0)
+                return torch.DoubleTensor([1, 3]).repeat(2, 2, 1)
+            if dim == 2:
+                return torch.DoubleTensor([[5, 7], [13, 15]]).repeat(2, 2, 1, 1)
 
         def expected_grad(dim):
             if dim == 1:
-                return torch.DoubleTensor([0, 1, 0, 1])
-            lower_dim_grad = expected_grad(dim - 1)
-            grad = lower_dim_grad.view(1, *lower_dim_grad.size())
+                return torch.DoubleTensor([0, 1, 0, 1]).repeat(2, 2, 1)
+            grad = expected_grad(dim - 1)
             zero = torch.zeros(grad.size())
-            return torch.cat((zero, grad, zero, grad), 0)
+            return torch.stack((zero, grad, zero, grad), 2)
+
+        def expected_output(dim):
+            if dim == 1:
+                return torch.range(2, 16, 2).view(2, 2, 2)
+            if dim == 2:
+                col = torch.range(6, 62, 8)
+                return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         module_cls = getattr(nn, 'MaxPool{}d'.format(num_dim))
         module = module_cls(2, return_indices=True).type(type)
-        numel = 4 ** num_dim
-        input = torch.range(1, numel).view(1, 1, *repeat(4, num_dim)).type(type)
+        numel = 4 ** (num_dim + 1)
+        input = torch.range(1, numel).view(2, 2, *repeat(4, num_dim)).type(type)
         input_var = Variable(input, requires_grad=True)
 
         # Check forward
         output, indices = module(input_var)
         if num_dim != 3:
             expected_indices = expected_indices(num_dim)
-            expected_output = expected_indices + 1
+            expected_output = expected_output(num_dim)
             self.assertEqual(indices.dim(), input.dim())
             self.assertEqual(indices.data.squeeze(), expected_indices)
             self.assertEqual(output.data.squeeze(), expected_output)
@@ -1090,7 +1099,7 @@ class TestNN(NNTestCase):
         model_cp = deepcopy(model)
         self.assertEqual(model(input).data, model_cp(input).data)
 
-        model_cp.linear.weight[:] = 2
+        model_cp.linear.weight.data[:] = 2
         self.assertNotEqual(model(input).data, model_cp(input).data)
 
     def test_RNN_cell(self):
@@ -1116,6 +1125,100 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: nn.Dropout3d(1.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
+
+    def test_pack_padded_sequence(self):
+        def pad(tensor, length):
+            return torch.cat([tensor, tensor.new(length - tensor.size(0), *tensor.size()[1:]).zero_()])
+        lengths = [10, 8, 4, 2, 2, 2, 1]
+        max_length = lengths[0]
+        batch_sizes = [sum(map(bool, filter(lambda x: x >= i, lengths))) for i in range(1, max_length + 1)]
+        offset = 0
+        padded = torch.cat([pad(i * 100 + torch.range(1, 5 * l).view(l, 1, 5), max_length)
+                            for i, l in enumerate(lengths, 1)], 1)
+        padded = Variable(padded, requires_grad=True)
+        expected_data = [[torch.range(1, 5) + i * 100 for i in range(batch_size)] for batch_size in batch_sizes]
+        expected_data = list(itertools.chain.from_iterable(expected_data))
+        expected_data = torch.cat(expected_data)
+
+        for batch_first in (True, False):
+            src = padded
+            if batch_first:
+                src = src.transpose(0, 1)
+
+            # check output
+            packed = rnn_utils.pack_padded_sequence(src, lengths, batch_first=batch_first)
+            self.assertEqual(packed.data, expected_data)
+            self.assertEqual(packed.batch_sizes, batch_sizes)
+
+            # test inverse
+            unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first)
+            self.assertEqual(unpacked, src)
+            self.assertEqual(unpacked_len, lengths)
+
+            # check grad
+            padded.grad.data.zero_()
+            grad_output = unpacked.data.clone().normal_()
+            unpacked.backward(grad_output)
+            if batch_first:
+                grad_output.transpose_(0, 1)
+            for i, l in enumerate(lengths):
+                self.assertEqual(padded.grad.data[:l, i], grad_output[:l, i])
+                if l < 10:
+                    self.assertEqual(padded.grad.data[l:, i].abs().sum(), 0)
+
+    def _test_variable_sequence(self, cuda):
+        def pad(var, length):
+            if var.size(0) == length:
+                return var
+            return torch.cat([var, Variable(var.data.new(length - var.size(0), *var.size()[1:]).zero_())])
+
+        lengths = [10, 10, 6, 2, 2, 1, 1]
+        max_length = lengths[0]
+        x = Variable(torch.randn(max_length, len(lengths), 3), requires_grad=True)
+        lstm = nn.LSTM(3, 4, bidirectional=True, num_layers=2)
+        lstm2 = deepcopy(lstm)
+        if cuda:
+            x = x.cuda()
+            lstm.cuda()
+            lstm2.cuda()
+
+        # Compute sequences separately
+        seq_outs = []
+        seq_hiddens = []
+        for i, l in enumerate(lengths):
+            out, hid = lstm2(x[:l, i:i + 1])
+            out_pad = pad(out, max_length)
+            seq_outs.append(out_pad)
+            seq_hiddens.append(hid)
+        seq_out = torch.cat(seq_outs, 1)
+        seq_hidden = tuple(torch.cat(hids, 1) for hids in zip(*seq_hiddens))
+
+        # Use packed format
+        packed = rnn_utils.pack_padded_sequence(x, lengths)
+        packed_out, packed_hidden = lstm(packed)
+        unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed_out)
+
+        # Check forward
+        self.assertEqual(packed_hidden, seq_hidden)
+        self.assertEqual(unpacked, seq_out)
+        self.assertEqual(unpacked_len, lengths)
+
+        # Check backward
+        seq_out.sum().backward()
+        grad_x = x.grad.data.clone()
+        x.grad.data.zero_()
+        unpacked.sum().backward()
+
+        self.assertEqual(x.grad.data, grad_x)
+        for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
+            self.assertEqual(p1.grad, p2.grad)
+
+    def test_variable_sequence(self):
+        self._test_variable_sequence(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_variable_sequence_cuda(self):
+        self._test_variable_sequence(True)
 
     def test_LSTM_cell(self):
         # this is just a smoke test; these modules are implemented through
@@ -1176,7 +1279,13 @@ class TestNN(NNTestCase):
                 for x, y in zip(x_layer, y_layer):
                     x.data.copy_(y.data)
 
-            input = Variable(input_val.clone(), requires_grad=True)
+            if isinstance(input_val, rnn_utils.PackedSequence):
+                input = rnn_utils.PackedSequence(
+                    Variable(input_val.data, requires_grad=True), input_val.batch_sizes)
+                input_var = input.data
+            else:
+                input = Variable(input_val.clone(), requires_grad=True)
+                input_var = input
             if is_lstm:
                 hx = (Variable(hx_val.clone(), requires_grad=True),
                       Variable(hx_val.add(1), requires_grad=True))
@@ -1185,16 +1294,19 @@ class TestNN(NNTestCase):
 
             if cuda:
                 rnn.cuda()
-                input.data = input.data.cuda()
+                input_var.data = input_var.data.cuda()
                 if is_lstm:
                     hx[0].data = hx[0].data.cuda()
                     hx[1].data = hx[1].data.cuda()
                 else:
                     hx.data = hx.data.cuda()
-                grad_output = grad_output.cuda()
                 grad_hy = grad_hy.cuda()
+                grad_output = grad_output.cuda()
 
             output, hy = rnn(input, hx)
+
+            if isinstance(output, rnn_utils.PackedSequence):
+                output = output.data
 
             if is_lstm:
                 torch.autograd.backward([output + 0, hy[0] + 0, hy[1] + 0], [grad_output, grad_hy, grad_hy + 1])
@@ -1204,7 +1316,7 @@ class TestNN(NNTestCase):
             return {'output': output.data,
                     'hy': hy[0].data if is_lstm else hy.data,
                     'weights': rnn.all_weights,
-                    'grad_input': input.grad.data,
+                    'grad_input': input_var.grad.data,
                     'grad_hx': hx[0].grad.data if is_lstm else hx.grad.data,
                     'cy': hy[1].data if is_lstm else None,
                     'grad_cx': hx[1].grad.data if is_lstm else None}
@@ -1213,7 +1325,7 @@ class TestNN(NNTestCase):
         hidden_size = 6
         num_layers = 2
         seq_length = 7
-        batch = 5
+        batch = 6
 
         def make_noncontig(tensor):
             ndim = tensor.dim()
@@ -1231,7 +1343,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bias, bidirectional, batch_first, contig in product((True, False), repeat=4):
+            for bias, bidirectional, batch_first, contig, variable_len in product((True, False), repeat=5):
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
                     input_val = torch.randn(batch, seq_length, input_size)
@@ -1239,14 +1351,20 @@ class TestNN(NNTestCase):
                 else:
                     input_val = torch.randn(seq_length, batch, input_size)
                     grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
-                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
-                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
                 if not contig:
                     grad_output = make_noncontig(grad_output)
                     grad_hy = make_noncontig(grad_hy)
                     input_var = make_noncontig(input_val)
                     hx_val = make_noncontig(hx_val)
+
+                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
+                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
+
+                if variable_len:
+                    batch_sizes = [7, 5, 5, 2, 1, 1]
+                    input_val = rnn_utils.pack_padded_sequence(input_val, batch_sizes, batch_first=batch_first)
+                    grad_output = rnn_utils.pack_padded_sequence(grad_output, batch_sizes, batch_first=batch_first).data
 
                 rnn = module(input_size,
                              hidden_size,
@@ -1278,10 +1396,10 @@ class TestNN(NNTestCase):
             grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
             grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
-            rnn = nn.rnn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
+            rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
             outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
 
-            rnn_gpu = nn.rnn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
+            rnn_gpu = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
             outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)

@@ -361,6 +361,62 @@ THCTensor_(cdiv)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *
 }
 
 THC_API void
+THCTensor_(clshift)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF)
+  return THError("clshift not supported for torch.CudaHalfTensor");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2(state, self_, src2, TensorLShiftOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3(state, self_, src1, src2, TensorLShiftOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
+THCTensor_(crshift)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF)
+  return THError("crshift not supported for torch.CudaHalfTensor");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2(state, self_, src2, TensorRShiftOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3(state, self_, src1, src2, TensorRShiftOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
 THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, src1, src2));
@@ -519,4 +575,87 @@ THCTensor_(addcdiv)(THCState *state, THCTensor *self_, THCTensor *t, real value,
   THCudaCheck(cudaGetLastError());
 }
 
+THC_API void
+THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  return THError("cbitand is only supported for integer type tensors");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2(state, self_, src2, TensorBitAndOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3(state, self_, src1, src2, TensorBitAndOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
+THCTensor_(cbitor)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  return THError("cbitor is only supported for integer type tensors");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2(state, self_, src2, TensorBitOrOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3(state, self_, src1, src2, TensorBitOrOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+THC_API void
+THCTensor_(cbitxor)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  return THError("cbitor is only supported for integer type tensors");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2(state, self_, src2, TensorBitXorOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3(state, self_, src1, src2, TensorBitXorOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
 #endif

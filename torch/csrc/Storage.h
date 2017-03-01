@@ -10,6 +10,8 @@
     PyObject_IsInstance(obj, THPDoubleStorageClass)
 #define THPFloatStorage_Check(obj) \
     PyObject_IsInstance(obj, THPFloatStorageClass)
+#define THPHalfStorage_Check(obj) \
+    PyObject_IsInstance(obj, THPFloatStorageClass)
 #define THPLongStorage_Check(obj) \
     PyObject_IsInstance(obj, THPLongStorageClass)
 #define THPIntStorage_Check(obj) \
@@ -23,6 +25,7 @@
 
 #define THPDoubleStorage_CData(obj)  (obj)->cdata
 #define THPFloatStorage_CData(obj)   (obj)->cdata
+#define THPHalfStorage_CData(obj)    (obj)->cdata
 #define THPLongStorage_CData(obj)    (obj)->cdata
 #define THPIntStorage_CData(obj)     (obj)->cdata
 #define THPShortStorage_CData(obj)   (obj)->cdata
@@ -36,5 +39,8 @@
 
 #include "generic/Storage.h"
 #include <TH/THGenerateAllTypes.h>
+
+#include "generic/Storage.h"
+#include <TH/THGenerateHalfType.h>
 
 #endif

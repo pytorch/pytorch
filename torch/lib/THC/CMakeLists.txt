@@ -51,6 +51,7 @@ IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     THCTensorRandom.cpp
     THCCachingAllocator.cpp
     THCCachingHostAllocator.cpp
+    THCStream.cpp
     PROPERTIES COMPILE_FLAGS -std=${CXX_VERSION})
 ELSE()
   SET(CMAKE_CXX_STANDARD 11)
@@ -158,7 +159,7 @@ SET(src
     THCCachingHostAllocator.cpp
     THCGeneral.c
     THCStorageCopy.c
-    THCStream.c
+    THCStream.cpp
     THCTensor.c
     THCTensorCopy.c
     THCTensorRandom.cpp

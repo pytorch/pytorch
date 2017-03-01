@@ -1,4 +1,4 @@
-#include "../base/tensors/THTensor.hpp"
+#include <THPP/tensors/THTensor.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -23,8 +23,8 @@ typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type
 }
 
 template<typename T>
-std::shared_ptr<thd::THTensor<T>> buildTensor(std::vector<long> shape, T value) {
-  auto tensor = std::make_shared<thd::THTensor<T>>();
+std::shared_ptr<thpp::THTensor<T>> buildTensor(std::vector<long> shape, T value) {
+  auto tensor = std::make_shared<thpp::THTensor<T>>();
   tensor->resize(shape);
   tensor->fill(value);
   return tensor;

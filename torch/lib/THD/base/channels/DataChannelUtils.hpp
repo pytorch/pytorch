@@ -13,7 +13,8 @@
 
 namespace thd {
 
-inline void assertTensorEqual(const Tensor& tensor1, const Tensor& tensor2,
+inline void assertTensorEqual(const thpp::Tensor& tensor1,
+                              const thpp::Tensor& tensor2,
                               std::string prefix = std::string()) {
   bool equal = tensor1.elementSize() == tensor2.elementSize() &&
                tensor1.numel() == tensor2.numel() &&

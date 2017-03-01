@@ -203,8 +203,11 @@ class _TensorBase(object):
         return tensor
 
     def expand(self, *sizes):
-        """Returns a new view of the tensor with singleton dimension expanded
+        """Returns a new view of the tensor with singleton dimensions expanded
         to a larger size.
+
+        Tensor can be also expanded to a larger number of dimensions, and the
+        new ones will be appended at the front.
 
         Expanding a tensor does not allocate new memory, but only creates a
         new view on the existing tensor where a dimension of size one is
@@ -232,19 +235,26 @@ class _TensorBase(object):
             sizes = torch.Size(sizes)
         src = self
 
-        src_dim = src.dim()
-        src_stride = list(src.stride())
-        src_size = list(src.size())
+        num_unsqueezed = len(sizes) - src.dim()
+        if src.dim() == 0:
+            raise ValueError('can\'t expand an empty tensor')
+        if num_unsqueezed < 0:
+            raise ValueError('the number of dimensions provided must be greater or equal tensor.dim()')
 
-        if len(sizes) != src_dim:
-            raise ValueError('the number of dimensions provided must equal tensor.dim()')
+        src_stride = [0] * num_unsqueezed + list(src.stride())
+        src_size = [1] * num_unsqueezed + list(src.size())
+        for i in range(num_unsqueezed - 1, -1, -1):
+            # to be consistent with .unsqueeze()
+            src_stride[i] = src_size[i + 1] * src_stride[i + 1]
 
         # create a new geometry for tensor:
-        for i, size in enumerate(src_size):
+        for i, (size, target_size) in enumerate(zip(src_size, sizes)):
             if size == 1:
-                src_size[i] = sizes[i]
+                if target_size == 1:
+                    continue
+                src_size[i] = target_size
                 src_stride[i] = 0
-            elif size != sizes[i]:
+            elif size != target_size:
                 raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
 
         result.set_(src.storage(), src.storage_offset(), torch.Size(src_size),

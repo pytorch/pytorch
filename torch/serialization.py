@@ -103,6 +103,8 @@ def storage_to_tensor_type(storage):
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
 
+    See also: :ref:`recommend-saving-models`
+
     Args:
         obj: saved object
         f: a file-like object (has to implement fileno that returns a file descriptor)

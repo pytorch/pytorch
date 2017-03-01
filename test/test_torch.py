@@ -785,9 +785,11 @@ class TestTorch(TestCase):
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = 4
         if order == 'descending':
-            check_order = lambda a, b: a >= b
+            def check_order(a, b):
+                return a >= b
         elif order == 'ascending':
-            check_order = lambda a, b: a <= b
+            def check_order(a, b):
+                return a <= b
         else:
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
@@ -1640,7 +1642,7 @@ class TestTorch(TestCase):
         self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k), reference)
 
     @unittest.skip("Not implemented yet")
-    def test_xcorr3_xcorr2_eq(self):
+    def test_xcorr3_xcorr2_eq_full(self):
         def reference(x, k, o3, o32):
             for i in range(x.size(1)):
                 for j in range(k.size(1)):
@@ -1648,7 +1650,7 @@ class TestTorch(TestCase):
         self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k, 'F'), reference)
 
     @unittest.skip("Not implemented yet")
-    def test_conv3_conv2_eq(self):
+    def test_conv3_conv2_eq_valid(self):
         def reference(x, k, o3, o32):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
@@ -1867,18 +1869,21 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, ..., 2, 2], 27, 0)
         self.assertEqual(reference[2, 2, ..., 2], 27, 0)
         self.assertEqual(reference[2, 2, 2, ...], 27, 0)
+        self.assertEqual(reference[...], reference, 0)
 
         reference_5d = self._consecutive((3, 3, 3, 3, 3))
         self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
+        self.assertEqual(reference_5d[...], reference_5d, 0)
 
         # LongTensor indexing
         reference = self._consecutive((5, 5, 5))
         idx = torch.LongTensor([2, 4])
         self.assertEqual(reference[idx], torch.stack([reference[2], reference[4]]))
-        self.assertEqual(reference[2, idx], torch.stack([reference[2, 2], reference[2, 4]]))
-        self.assertEqual(reference[3, idx, 1], torch.stack([reference[3, 2], reference[3, 4]])[:, 1])
+        # TODO: enable one indexing is implemented like in numpy
+        # self.assertEqual(reference[2, idx], torch.stack([reference[2, 2], reference[2, 4]]))
+        # self.assertEqual(reference[3, idx, 1], torch.stack([reference[3, 2], reference[3, 4]])[:, 1])
 
         # None indexing
         self.assertEqual(reference[2, None], reference[2].unsqueeze(0))
@@ -1929,6 +1934,7 @@ class TestTorch(TestCase):
         checkPartialAssign((0, 1))
         checkPartialAssign((1, 2))
         checkPartialAssign((0, 2))
+        checkPartialAssign(torch.LongTensor((0, 2)))
 
         with self.assertRaises(IndexError):
             reference[1, 1, 1, 1] = 1
@@ -1949,10 +1955,8 @@ class TestTorch(TestCase):
         with self.assertRaises(TypeError):
             reference[0.0, :, 0.0] = 1
 
-        # LongTensor assignments are not supported yet
-        with self.assertRaises(RuntimeError):
-            reference[torch.LongTensor([2, 4])] = 1
-        with self.assertRaises(RuntimeError):
+        # LongTensor assignments are not fully supported yet
+        with self.assertRaises(TypeError):
             reference[0, torch.LongTensor([2, 4])] = 1
 
     def test_index_copy(self):
@@ -2166,13 +2170,30 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
 
     def test_expand(self):
-        result = torch.Tensor()
-        tensor = torch.rand(8, 1)
-        template = torch.rand(8, 5)
+        tensor = torch.rand(1, 8, 1)
+        tensor2 = torch.rand(5)
+        template = torch.rand(4, 8, 5)
         target = template.size()
         self.assertEqual(tensor.expand_as(template).size(), target)
-        self.assertEqual(tensor.expand(8, 5).size(), target)
-        self.assertEqual(tensor.expand(torch.Size([8, 5])).size(), target)
+        self.assertEqual(tensor.expand(4, 8, 5).size(), target)
+        self.assertEqual(tensor.expand(target).size(), target)
+        self.assertEqual(tensor2.expand_as(template).size(), target)
+        self.assertEqual(tensor2.expand(4, 8, 5).size(), target)
+        self.assertEqual(tensor2.expand(target).size(), target)
+
+        # test double expand
+        self.assertEqual(tensor2.expand(1, 5).expand(2, 2, 5), tensor2.repeat(2, 2, 1))
+
+        # test non-contiguous
+        noncontig = torch.randn(5, 2, 1, 3)[:, 0]
+        assert not noncontig.is_contiguous()
+        self.assertEqual(noncontig.expand(2, 5, 4, 3), noncontig.contiguous().repeat(2, 1, 4, 1))
+
+        # make sure it's compatible with unsqueeze
+        expanded = tensor2.expand(1, 1, 5)
+        unsqueezed = tensor2.unsqueeze(0).unsqueeze(1)
+        self.assertEqual(expanded, unsqueezed)
+        self.assertEqual(expanded.stride(), unsqueezed.stride())
 
     def test_repeat(self):
         result = torch.Tensor()
@@ -2544,6 +2565,35 @@ class TestTorch(TestCase):
 
             rootview = c[8]
             self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
+
+    def test_half_tensor(self):
+        x = torch.randn(5, 5).float()
+        y = torch.randn(5, 5).float()
+        xh, yh = x.half(), y.half()
+
+        self.assertEqual(x.half().float(), x, 1e-3)
+
+        z = torch.Tensor(5, 5)
+        self.assertEqual(z.copy_(xh), x, 1e-3)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(xh, f)
+            f.seek(0)
+            xh2 = torch.load(f)
+            self.assertEqual(xh, xh2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_half_tensor_cuda(self):
+        x = torch.randn(5, 5).half()
+        self.assertEqual(x.cuda().cpu(), x)
+
+        xc = x.cuda()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(xc, f)
+            f.seek(0)
+            xc2 = torch.load(f)
+            self.assertIsInstance(xc2, type(xc))
+            self.assertEqual(xc, xc2)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):

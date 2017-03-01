@@ -4,6 +4,8 @@ function as CPU tensors, but they utilize GPUs for computation.
 
 It is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports CUDA.
+
+:ref:`cuda-semantics` has more details about working with CUDA.
 """
 
 import contextlib
@@ -219,6 +221,15 @@ def current_stream():
 def _host_allocator():
     _lazy_init()
     return torch._C._cuda_cudaHostAllocator()
+
+
+@contextlib.contextmanager
+def _free_mutex():
+    torch._C._cuda_lock_mutex()
+    try:
+        yield
+    finally:
+        torch._C._cuda_unlock_mutex()
 
 
 from .random import *

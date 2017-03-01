@@ -8,12 +8,12 @@ using namespace master;
 
 template<typename T>
 T THDTensor_(receiveValueFromWorker)(int worker_id) {
-  Type type = type_traits<real>::type;
-  if (isInteger(type)) {
+  thpp::Type type = thpp::type_traits<real>::type;
+  if (thpp::isInteger(type)) {
     IntScalar wrapped_value;
     dataChannel->receive(wrapped_value, worker_id);
     return static_cast<T>(wrapped_value.value());
-  } else if (isFloat(type)) {
+  } else if (thpp::isFloat(type)) {
     FloatScalar wrapped_value;
     dataChannel->receive(wrapped_value, worker_id);
     return static_cast<T>(wrapped_value.value());
@@ -101,7 +101,7 @@ static THDTensor* THDTensor_(_alloc)() {
 
 THDTensor* THDTensor_(new)() {
   THDTensor* tensor = THDTensor_(_alloc)();
-  Type constructed_type = type_traits<real>::type;
+  thpp::Type constructed_type = thpp::type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::tensorConstruct,
@@ -115,7 +115,7 @@ THDTensor* THDTensor_(new)() {
 
 THDTensor* THDTensor_(newWithSize)(THLongStorage *sizes, THLongStorage *strides) {
   THDTensor* tensor = THDTensor_(_alloc)();
-  Type constructed_type = type_traits<real>::type;
+  thpp::Type constructed_type = thpp::type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::tensorConstructWithSize,
@@ -651,41 +651,9 @@ void THDTensor_(unfold)(THDTensor *self, THDTensor *src,
   );
 }
 
-THDTensor *THDTensor_(newWithStorage1d)(THDStorage *storage_,
-    ptrdiff_t storageOffset_, long size0_, long stride0_) {
-  THError("newWithStorage1d not supported yet");
-  return nullptr;
-}
-
-THDTensor *THDTensor_(newWithTensor)(THDTensor *tensor) {
-  THError("newWithTensor not supported yet");
-  return nullptr;
-}
-
-
-void THDTensor_(fill)(THDTensor *tensor, real value) {
-  masterCommandChannel->sendMessage(
-    packMessage(
-      Functions::tensorFill,
-      tensor,
-      value
-    ),
-    THDState::s_current_worker
-  );
-}
-
-void THDTensor_(zeros)(THDTensor *tensor, THLongStorage *size) {
-  THDTensor_(resize)(tensor, size, nullptr);
-  THDTensor_(fill)(tensor, 0);
-}
-
-void THDTensor_(ones)(THDTensor *tensor, THLongStorage *size) {
-  THDTensor_(resize)(tensor, size, nullptr);
-  THDTensor_(fill)(tensor, 0);
-}
-
-ptrdiff_t THDTensor_(numel)(THDTensor *self) {
-  return THDTensor_(nElement)(self);
+// TODO implement
+int THDTensor_(isSameSizeAs)(const THDTensor *self, const THDTensor *src) {
+  throw std::runtime_error("isSameSizeAs not implemented yet");
 }
 
 void THDTensor_(gather)(THDTensor *self, THDTensor *src, int dim, THDLongTensor *index) {
@@ -1297,6 +1265,15 @@ void THDTensor_(cminValue)(THDTensor *self, THDTensor *src, real value) {
   );
 }
 
+THDTensor *THDTensor_(newWithStorage1d)(THDStorage *storage_,
+    ptrdiff_t storageOffset_, long size0_, long stride0_) {
+  THError("newWithStorage1d not supported yet");
+  return nullptr;
+}
 
+THDTensor *THDTensor_(newWithTensor)(THDTensor *tensor) {
+  THError("newWithTensor not supported yet");
+  return nullptr;
+}
 
 #endif
