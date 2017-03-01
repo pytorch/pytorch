@@ -3,7 +3,7 @@ Training a classifier
 =====================
 
 This is it. You have seen how to define neural networks, compute loss and make
-updates to the weights of the network,
+updates to the weights of the network.
 
 Now you might be thinking,
 
@@ -104,7 +104,7 @@ print(' '.join('%5s' % classes[labels[j]] for j in range(4)))
 ########################################################################
 # 2. Define a Convolution Neural Network
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# Copy the neural network from the Neural Networks section above and modify it to
+# Copy the neural network from the Neural Networks section before and modify it to
 # take 3-channel images (instead of 1-channel images as it was defined).
 
 from torch.autograd import Variable
@@ -147,7 +147,6 @@ optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 # ^^^^^^^^^^^^^^^^^^^^
 #
 # This is when things start to get interesting.
-#
 # We simply have to loop over our data iterator, and feed the inputs to the
 # network and optimize
 
@@ -206,9 +205,8 @@ outputs = net(Variable(images))
 ########################################################################
 # The outputs are energies for the 10 classes.
 # Higher the energy for a class, the more the network
-# thinks that the image is of the particular class
-#
-# So, let's get the index of the highest energy
+# thinks that the image is of the particular class.
+# So, let's get the index of the highest energy:
 _, predicted = torch.max(outputs.data, 1)
 
 print('Predicted: ', ' '.join('%5s' % classes[predicted[j][0]]
@@ -265,9 +263,8 @@ for i in range(10):
 # ----------------
 # Just like how you transfer a Tensor on to the GPU, you transfer the neural
 # net onto the GPU.
-#
 # This will recursively go over all modules and convert their parameters and
-# buffers to CUDA tensors.
+# buffers to CUDA tensors:
 #
 # .. code:: python
 #

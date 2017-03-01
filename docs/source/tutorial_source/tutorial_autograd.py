@@ -14,8 +14,8 @@ different.
 
 Let us see this in more simple terms with some examples.
 
-``Variable``
-------------
+Variable
+--------
 
 ``autograd.Variable`` is the central class of the package. It wraps a
 Tensor, and supports nearly all of operations defined on it. Once you
@@ -116,5 +116,4 @@ print(x.grad)
 ###############################################################
 # **Read Later:**
 #
-# You can read more documentation on `Variable` and `Function` here:
-# pytorch.org/docs/autograd.html
+#   Documentation of ``Variable`` and ``Function`` is at :doc:`/autograd`

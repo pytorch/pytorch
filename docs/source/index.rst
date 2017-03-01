@@ -24,10 +24,9 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
    tutorial/deep_learning
    tutorial/former_torchies
-   tutorial/c_extension
-   tutorial/tutorial_numpy_extensions
    tutorial/tutorial_reinforcement_q_learning
-
+   tutorial/tutorial_numpy_extensions
+   tutorial/c_extension
 
 
 .. toctree::

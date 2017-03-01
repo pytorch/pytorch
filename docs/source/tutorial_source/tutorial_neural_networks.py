@@ -6,7 +6,6 @@ Neural networks can be constructed using the ``torch.nn`` package.
 
 Now that you had a glimpse of ``autograd``, ``nn`` depends on
 ``autograd`` to define models and differentiate them.
-
 An ``nn.Module`` contains layers, and a method ``forward(input)``\ that
 returns the ``output``.
 
@@ -21,13 +20,16 @@ It is a simple feed-forward network. It takes the input, feeds it
 through several layers one after the other, and then finally gives the
 output.
 
-A typical training procedure for a neural network is as follows: -
-define the neural network that has some learnable parameters (or
-weights) - iterate over a dataset of inputs: - process input through
-network - compute the loss (how far is the output from being correct) -
-propagate gradients back into the network’s parameters - update the
-weights of the network - typically using a simple update rule:
-``weight = weight + learning_rate * gradient``
+A typical training procedure for a neural network is as follows:
+
+- Define the neural network that has some learnable parameters (or
+  weights)
+- Iterate over a dataset of inputs
+- Process input through the network
+- Compute the loss (how far is the output from being correct)
+- Propagate gradients back into the network’s parameters
+- Update the weights of the network, typically using a simple update rule:
+  ``weight = weight + learning_rate * gradient``
 
 Define the network
 ------------------
@@ -74,7 +76,6 @@ print(net)
 # You just have to define the ``forward`` function, and the ``backward``
 # function (where gradients are computed) is automatically defined for you
 # using ``autograd``.
-#
 # You can use any of the Tensor operations in the ``forward`` function.
 #
 # The learnable parameters of a model are returned by ``net.parameters()``
@@ -91,7 +92,7 @@ out = net(input)
 print(out)
 
 ########################################################################
-# zero the gradient buffers of all parameters and backprops with random gradients
+# Zero the gradient buffers of all parameters and backprops with random gradients:
 net.zero_grad()
 out.backward(torch.randn(1, 10))
 
@@ -108,42 +109,43 @@ out.backward(torch.randn(1, 10))
 #     If you have a single sample, just use ``input.unsqueeze(0)`` to add
 #     a fake batch dimension.
 #
-# **Recap of all the classes you’ve seen so far:**
-#
-# -  ``torch.Tensor`` - A *multi-dimensional array*.
-# -  ``autograd.Variable`` - *Wraps a Tensor and records the history of
-#    operations* applied to it. Has the same API as a ``Tensor``, with
-#    some additions like ``backward()``. Also *holds the gradient*
-#    w.r.t. the tensor.
-# -  ``nn.Module`` - Neural network module. *Convenient way of
-#    encapsulating parameters*, with helpers for moving them to GPU,
-#    exporting, loading, etc.
-# -  ``nn.Parameter`` - A kind of Variable, that is *automatically
-#    registered as a parameter when assigned as an attribute to a*
-#    ``Module``.
-# -  ``autograd.Function`` - Implements *forward and backward definitions
-#    of an autograd operation*. Every ``Variable`` operation, creates at
-#    least a single ``Function`` node, that connects to functions that
-#    created a ``Variable`` and *encodes its history**.
+# Before proceeding further, let's recap all the classes you’ve seen so far.
+# 
+# **Recap:**
+#   -  ``torch.Tensor`` - A *multi-dimensional array*.
+#   -  ``autograd.Variable`` - *Wraps a Tensor and records the history of
+#      operations* applied to it. Has the same API as a ``Tensor``, with
+#      some additions like ``backward()``. Also *holds the gradient*
+#      w.r.t. the tensor.
+#   -  ``nn.Module`` - Neural network module. *Convenient way of
+#      encapsulating parameters*, with helpers for moving them to GPU,
+#      exporting, loading, etc.
+#   -  ``nn.Parameter`` - A kind of Variable, that is *automatically
+#      registered as a parameter when assigned as an attribute to a*
+#      ``Module``.
+#   -  ``autograd.Function`` - Implements *forward and backward definitions
+#      of an autograd operation*. Every ``Variable`` operation, creates at
+#      least a single ``Function`` node, that connects to functions that
+#      created a ``Variable`` and *encodes its history**.
 #
 # **At this point, we covered:**
-#
-# -  Defining a neural network
-# -  Processing inputs and calling backward.
+#   -  Defining a neural network
+#   -  Processing inputs and calling backward.
 #
 # **Still Left:**
-#
-# -  Computing the loss
-# -  Updating the weights of the network
+#   -  Computing the loss
+#   -  Updating the weights of the network
 #
 # Loss Function
 # -------------
 # A loss function takes the (output, target) pair of inputs, and computes a
 # value that estimates how far away the output is from the target.
 #
-# There are `several different loss functions under the nn package <http://pytorch.org/docs/nn.html#loss-functions>`_.
-#
-# A simple loss is: `nn.MSELoss` which computes the mean-squared error between the input and the target.
+# There are several different
+# `loss functions <http://pytorch.org/docs/nn.html#loss-functions>`_ under the
+# nn package .
+# A simple loss is: ``nn.MSELoss`` which computes the mean-squared error 
+# between the input and the target.
 #
 # For example:
 
@@ -170,7 +172,7 @@ print(loss)
 # w.r.t. the loss, and all Variables in the graph will have their
 # ``.grad`` Variable accumulated with the gradient.
 #
-# For illustration, let us follow a few steps backward
+# For illustration, let us follow a few steps backward:
 
 print(loss.creator)  # MSELoss
 print(loss.creator.previous_functions[0][0])  # Linear
@@ -184,7 +186,7 @@ print(loss.creator.previous_functions[0][0].previous_functions[0][0])  # ReLU
 # accumulated to existing gradients
 #
 #
-# now we shall call ``loss.backward()``, and have a look at conv1's bias
+# Now we shall call ``loss.backward()``, and have a look at conv1's bias
 # gradients before and after the backward.
 
 
@@ -203,13 +205,13 @@ print(net.conv1.bias.grad)
 #
 # **Read Later:**
 #
-# The neural network package contains various modules and loss functions
-# that form the building blocks of deep neural networks. A full list with
-# documentation is here: http://pytorch.org/docs/nn.html
+#   The neural network package contains various modules and loss functions
+#   that form the building blocks of deep neural networks. A full list with
+#   documentation is :doc:`here </nn>`
 #
-# *The only thing left to learn is:*
+# **The only thing left to learn is:**
 #
-# - updating the weights of the network
+#   - updating the weights of the network
 #
 # Update the weights
 # ------------------
@@ -228,7 +230,6 @@ print(net.conv1.bias.grad)
 #
 # However, as you use neural networks, you want to use various different
 # update rules such as SGD, Nesterov-SGD, Adam, RMSProp, etc.
-#
 # To enable this, we built a small package: ``torch.optim`` that
 # implements all these methods. Using it is very simple:
 

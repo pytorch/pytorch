@@ -3,36 +3,35 @@ nn package
 ==========
 
 We’ve redesigned the nn package, so that it’s fully integrated with
-autograd.
+autograd. Let's review the changes.
 
 **Replace containers with autograd:**
 
+    You no longer have to use Containers like ``ConcatTable``, or modules like
+    ``CAddTable``, or use and debug with nngraph. We will seamlessly use
+    autograd to define our neural networks. For example,
 
-You no longer have to use Containers like `ConcatTable`, or modules like
-`CAddTable`, or use and debug with nngraph. We will seamlessly use
-autograd to define our neural networks. For example,
-
-* ``output = nn.CAddTable():forward({input1, input2})`` simply becomes
-  ``output = input1 + input2``
-* ``output = nn.MulConstant(0.5):forward(input)`` simply becomes
-  ``output = input * 0.5``
+    * ``output = nn.CAddTable():forward({input1, input2})`` simply becomes
+      ``output = input1 + input2``
+    * ``output = nn.MulConstant(0.5):forward(input)`` simply becomes
+      ``output = input * 0.5``
 
 **State is no longer held in the module, but in the network graph:**
 
-Using recurrent networks should be simpler because of this reason. If
-you want to create a recurrent network, simply use the same Linear layer
-multiple times, without having to think about sharing weights.
+    Using recurrent networks should be simpler because of this reason. If
+    you want to create a recurrent network, simply use the same Linear layer
+    multiple times, without having to think about sharing weights.
 
-.. figure:: /_static/img/torch-nn-vs-pytorch-nn.png
-   :alt: torch-nn-vs-pytorch-nn
+    .. figure:: /_static/img/torch-nn-vs-pytorch-nn.png
+       :alt: torch-nn-vs-pytorch-nn
 
-   torch-nn-vs-pytorch-nn
+       torch-nn-vs-pytorch-nn
 
-**Simplified debugging**
+**Simplified debugging:**
 
-Debugging is intuitive using Python’s pdb debugger, and **the debugger
-and stack traces stop at exactly where an error occurred.** What you see
-is what you get.
+    Debugging is intuitive using Python’s pdb debugger, and **the debugger
+    and stack traces stop at exactly where an error occurred.** What you see
+    is what you get.
 
 Example 1: ConvNet
 ------------------
@@ -130,11 +129,10 @@ print(err)
 ########################################################################
 # The output of the ConvNet ``out`` is a ``Variable``. We compute the loss
 # using that, and that results in ``err`` which is also a ``Variable``.
-#
 # Calling ``.backward`` on ``err`` hence will propagate gradients all the
 # way through the ConvNet to it’s weights
 #
-# **Let's access individual layer weights and gradients:**
+# Let's access individual layer weights and gradients:
 
 print(net.conv1.weight.grad.size())
 
@@ -151,7 +149,7 @@ print(net.conv1.weight.grad.data.norm())  # norm of the gradients
 #
 # We introduce **hooks** for this purpose.
 #
-# You can register a function on a *Module* or a *Variable*.
+# You can register a function on a ``Module`` or a ``Variable``.
 # The hook can be a forward hook or a backward hook.
 # The forward hook will be executed when a forward call is executed.
 # The backward hook will be executed in the backward phase.
@@ -238,8 +236,8 @@ rnn = RNN(50, 20, 10)
 ########################################################################
 #
 # A more complete Language Modeling example using LSTMs and Penn Tree-bank
-# is located here:
-# https://github.com/pytorch/examples/tree/master/word\_language\_model
+# is located
+# `here <https://github.com/pytorch/examples/tree/master/word\_language\_model>`_
 #
 # PyTorch by default has seamless CuDNN integration for ConvNets and
 # Recurrent Nets

@@ -1,5 +1,5 @@
-PyTorch for former Torchies
----------------------------
+PyTorch for former Torch users
+------------------------------
 
 In this tutorial, you will learn the following:
 

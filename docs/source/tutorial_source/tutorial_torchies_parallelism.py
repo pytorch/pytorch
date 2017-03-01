@@ -37,9 +37,8 @@ class DataParallelModel(nn.Module):
 ########################################################################
 # The code does not need to be changed in CPU-mode.
 #
-# `The documentation for DataParallel is here`_
-#
-# .. _The documentation for DataParallel is here: http://pytorch.org/docs/nn.html#torch.nn.DataParallel
+# The documentation for DataParallel is 
+# `here <http://pytorch.org/docs/nn.html#torch.nn.DataParallel>`_.
 #
 # **Primitives on which DataParallel is implemented upon:**
 #
@@ -103,8 +102,7 @@ class DistributedModel(nn.Module):
 # There’s a lot more to learn.
 #
 # Look at our more comprehensive introductory tutorial which introduces
-# the ``optim`` package, data loaders etc.: `Deep Learning with PyTorch: a
-# 60-minute blitz`_
+# the ``optim`` package, data loaders etc.: :doc:`/tutorial/deep_learning`.
 #
 # Also look at
 #

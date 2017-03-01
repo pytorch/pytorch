@@ -8,8 +8,8 @@ It uses a tape based system for automatic differentiation.
 In the forward phase, the autograd tape will remember all the operations
 it executed, and in the backward phase, it will replay the operations.
 
-``Variable``
-------------
+Variable
+--------
 
 In autograd, we introduce a ``Variable`` class, which is a very thin
 wrapper around a ``Tensor``. You can access the raw tensor through the

@@ -62,7 +62,7 @@ torch.add(x, y, out=result)
 print(result)
 
 ###############################################################
-# addition: in-place
+# Addition: in-place
 
 # adds x to y
 y.add_(x)
@@ -81,10 +81,9 @@ print(x[:, 1])
 # **Read later:**
 #
 #
-# 100+ Tensor operations, including transposing, indexing, slicing,
-# mathematical operations, linear algebra, random numbers, etc.
-#
-# http://pytorch.org/docs/torch.html
+#   100+ Tensor operations, including transposing, indexing, slicing,
+#   mathematical operations, linear algebra, random numbers, etc are described
+#   :doc:`here </torch>`
 #
 # Numpy Bridge
 # ------------
