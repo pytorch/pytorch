@@ -34,8 +34,8 @@ class SGD(Optimizer):
 
     def __setstate__(self, state):
         super(SGD, self).__setstate__(state)
-        for group in self.parameter_groups:
-            group.set_default('nesterov', False)
+        for group in self.param_groups:
+            group.setdefault('nesterov', False)
 
     def step(self, closure=None):
         """Performs a single optimization step.
