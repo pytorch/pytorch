@@ -1,5 +1,6 @@
 #include "caffe2/utils/string_utils.h"
 
+#include <algorithm>
 #include <sstream>
 #include <vector>
 

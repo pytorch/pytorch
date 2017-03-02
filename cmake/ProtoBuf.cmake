@@ -4,6 +4,9 @@ function(custom_protobuf_find)
   option(protobuf_BUILD_SHARED_LIBS "" OFF)
   option(protobuf_BUILD_TESTS "" OFF)
   option(protobuf_BUILD_EXAMPLES "" OFF)
+  # MSVC protobuf built with static library explicitly uses /MT and /MTd which
+  # makes things a bit tricky, so we set it off.
+  option(protobuf_MSVC_STATIC_RUNTIME "" OFF)
   if (APPLE)
     # Protobuf generated files triggers a deprecated atomic operation warning
     # so we turn it off here.
