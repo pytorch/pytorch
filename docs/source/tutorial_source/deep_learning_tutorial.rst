@@ -26,7 +26,7 @@ installed.
 
     .. figure:: /_static/img/tensor_illustration.png
 
-        :ref:`sphx_glr_tutorial_tutorial_tensor.py`
+        :ref:`sphx_glr_tutorials_tensor_tutorial.py`
 
 .. raw:: html
 
@@ -36,7 +36,7 @@ installed.
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_tensor
+   /tutorials/tensor_tutorial
 
 
 .. ##########################  autograd ########################## 
@@ -49,7 +49,7 @@ installed.
 
     .. figure:: /_static/img/Variable.png
 
-        :ref:`sphx_glr_tutorial_tutorial_autograd.py`
+        :ref:`sphx_glr_tutorials_autograd_tutorial.py`
 
 .. raw:: html
 
@@ -59,7 +59,7 @@ installed.
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_autograd
+   /tutorials/autograd_tutorial
 
 
 .. ##########################  neural_networks ####################
@@ -72,7 +72,7 @@ installed.
 
     .. figure:: /_static/img/mnist.png
 
-        :ref:`sphx_glr_tutorial_tutorial_neural_networks.py`
+        :ref:`sphx_glr_tutorials_neural_networks_tutorial.py`
 
 .. raw:: html
 
@@ -82,7 +82,7 @@ installed.
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_neural_networks
+   /tutorials/neural_networks_tutorial
 
 .. ##########################  cifar10 ####################
 
@@ -94,7 +94,7 @@ installed.
 
     .. figure:: /_static/img/cifar10.png
 
-        :ref:`sphx_glr_tutorial_tutorial_cifar10.py`
+        :ref:`sphx_glr_tutorials_cifar10_tutorial.py`
 
 .. raw:: html
 
@@ -104,7 +104,7 @@ installed.
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_cifar10
+   /tutorials/cifar10_tutorial
 
 .. raw:: html
 

@@ -59,22 +59,22 @@ sphinx_gallery_conf = {
     # path to your examples scripts
     'examples_dirs': 'tutorial_source',
     # path where to save gallery generated examples
-    'gallery_dirs': 'tutorial',
-    'filename_pattern': '/tutorial_'
+    'gallery_dirs': 'tutorials',
+    'filename_pattern': '_tutorial.py'
 }
 
-# Create tutorial folder if it doesn't exist 
+# Create tutorials folder if it doesn't exist
 try:
     import os
-    os.mkdir('tutorial')
+    os.mkdir('tutorials')
 except FileExistsError:
     pass
 
-# Copy rst files from tutorial_source folder to tutorial
+# Copy rst files from tutorial_source folder to tutorials
 for f in glob.glob('tutorial_source/*.rst'):
-    shutil.copy(f, 'tutorial')
+    shutil.copy(f, 'tutorials')
 
-exclude_patterns = ['tutorial/index.rst']
+exclude_patterns = ['tutorials/index.rst']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

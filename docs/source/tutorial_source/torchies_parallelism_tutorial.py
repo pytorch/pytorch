@@ -102,7 +102,7 @@ class DistributedModel(nn.Module):
 # There’s a lot more to learn.
 #
 # Look at our more comprehensive introductory tutorial which introduces
-# the ``optim`` package, data loaders etc.: :doc:`/tutorial/deep_learning`.
+# the ``optim`` package, data loaders etc.: :doc:`/tutorials/deep_learning_tutorial`.
 #
 # Also look at
 #

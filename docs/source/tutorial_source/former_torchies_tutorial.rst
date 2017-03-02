@@ -20,7 +20,7 @@ In this tutorial, you will learn the following:
 
     .. figure:: /_static/img/tensor_illustration.png
 
-        :ref:`sphx_glr_tutorial_tutorial_torchies_tensor.py`
+        :ref:`sphx_glr_tutorials_torchies_tensor_tutorial.py`
 
 .. raw:: html
 
@@ -30,7 +30,7 @@ In this tutorial, you will learn the following:
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_torchies_tensor
+   /tutorials/torchies_tensor_tutorial
 
 
 .. ##########################  autograd ########################## 
@@ -42,7 +42,7 @@ In this tutorial, you will learn the following:
 
     .. figure:: /_static/img/Variable.png
 
-        :ref:`sphx_glr_tutorial_tutorial_torchies_autograd.py`
+        :ref:`sphx_glr_tutorials_torchies_autograd_tutorial.py`
 
 .. raw:: html
 
@@ -52,7 +52,7 @@ In this tutorial, you will learn the following:
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_torchies_autograd
+   /tutorials/torchies_autograd_tutorial
 
 
 .. ##########################  nn ########################## 
@@ -64,7 +64,7 @@ In this tutorial, you will learn the following:
 
     .. figure:: /_static/img/torch-nn-vs-pytorch-nn.png
 
-        :ref:`sphx_glr_tutorial_tutorial_torchies_nn.py`
+        :ref:`sphx_glr_tutorials_torchies_nn_tutorial.py`
 
 .. raw:: html
 
@@ -74,7 +74,7 @@ In this tutorial, you will learn the following:
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_torchies_nn
+   /tutorials/torchies_nn_tutorial
 
 .. ########################## parallelism ########################## 
 
@@ -84,9 +84,9 @@ In this tutorial, you will learn the following:
 
 .. only:: html
 
-    .. figure:: /tutorial/images/thumb/sphx_glr_tutorial_torchies_parallelism_thumb.png
+    .. figure:: /tutorials/images/thumb/sphx_glr_torchies_parallelism_tutorial_thumb.png
 
-        :ref:`sphx_glr_tutorial_tutorial_torchies_parallelism.py`
+        :ref:`sphx_glr_tutorials_torchies_parallelism_tutorial.py`
 
 .. raw:: html
 
@@ -96,7 +96,7 @@ In this tutorial, you will learn the following:
 .. toctree::
    :hidden:
 
-   /tutorial/tutorial_torchies_parallelism
+   /tutorials/torchies_parallelism_tutorial
 
 .. raw:: html
 
