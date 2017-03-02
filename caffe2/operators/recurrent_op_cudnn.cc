@@ -120,15 +120,19 @@ void RecurrentBaseOp<T>::initialize(
   {
     xDesc_.reset(new detail::TensorDescriptors<T>(
         seqLength,
-        {inputDim, batchSize, 1},
-        {1, inputDim, inputDim * batchSize}));
+        // Third dimension is unused
+        {batchSize, inputDim, 1},
+        // Fully-packed
+        {inputDim, 1, 1}));
   }
   // Y setup
   {
     yDesc_.reset(new detail::TensorDescriptors<T>(
         seqLength,
-        {outputDim, batchSize, 1},
-        {1, outputDim, outputDim * batchSize}));
+        // Third dimension is unused
+        {batchSize, hiddenSize * numDirections, 1},
+        // Fully-packed
+        {numDirections * hiddenSize, 1, 1}));
 
     if (output) {
       output->Resize(std::vector<int>{seqLength, batchSize, outputDim});
@@ -138,8 +142,8 @@ void RecurrentBaseOp<T>::initialize(
   // Hidden/Cell setup
   {
     const std::array<int, 3> dim{
-        hiddenSize, batchSize, numLayers * numDirections};
-    const std::array<int, 3> stride{1, hiddenSize, hiddenSize * batchSize};
+        numLayers * numDirections, batchSize, hiddenSize};
+    const std::array<int, 3> stride{batchSize * hiddenSize, hiddenSize, 1};
     CUDNN_CHECK(cudnnSetTensorNdDescriptor(
         hxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
     CUDNN_CHECK(cudnnSetTensorNdDescriptor(
@@ -153,6 +157,7 @@ void RecurrentBaseOp<T>::initialize(
       hiddenOutput->Resize(
           std::vector<int>{numLayers * numDirections, batchSize, hiddenSize});
     }
+
     if (cellOutput) {
       cellOutput->Resize(
           std::vector<int>{numLayers * numDirections, batchSize, hiddenSize});
@@ -431,7 +436,10 @@ input_mode) are passed directly through to CuDNN.
 
 )DOC");
 REGISTER_CUDNN_OPERATOR(RecurrentGradient, RecurrentGradientOp<float>);
-OPERATOR_SCHEMA(RecurrentGradient).NumInputs(9).NumOutputs(6);
+OPERATOR_SCHEMA(RecurrentGradient)
+    .NumInputs(9)
+    .NumOutputs(6)
+    .AllowInplace({{4, 5}});
 REGISTER_CUDNN_OPERATOR(RecurrentInit, RecurrentInitOp<float>);
 OPERATOR_SCHEMA(RecurrentInit).NumInputs(1).NumOutputs(2);
 
