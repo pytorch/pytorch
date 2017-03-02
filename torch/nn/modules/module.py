@@ -357,14 +357,14 @@ class Module(object):
                 for m in module.modules(memo):
                     yield m
 
-    def train(self):
+    def train(self, mode=True):
         """Sets the module in training mode.
 
         This has any effect only on modules such as Dropout or BatchNorm.
         """
-        self.training = True
+        self.training = mode
         for module in self.children():
-            module.train()
+            module.train(mode)
         return self
 
     def eval(self):
@@ -372,10 +372,7 @@ class Module(object):
 
         This has any effect only on modules such as Dropout or BatchNorm.
         """
-        self.training = False
-        for module in self.children():
-            module.eval()
-        return self
+        return self.train(False)
 
     def zero_grad(self):
         """Sets gradients of all model parameters to zero."""
