@@ -1,7 +1,7 @@
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
-
+    
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -9,10 +9,17 @@
 #define TH_OMP_OVERHEAD_THRESHOLD 100000
 
 #ifdef _OPENMP
+
+#ifndef _WIN32
+#define PRAGMA(P) _Pragma("P")
+#else
+#define PRAGMA(P) __pragma(P)
+#endif
+
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR); \
-  _Pragma("omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)") \
+  PRAGMA(omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)) \
   { \
     size_t num_threads = omp_get_num_threads(); \
     size_t tid = omp_get_thread_num(); \
@@ -37,7 +44,7 @@
 #define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
-  _Pragma("omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)") \
+  PRAGMA(omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)) \
   { \
     size_t num_threads = omp_get_num_threads(); \
     size_t tid = omp_get_thread_num(); \
@@ -64,7 +71,7 @@
 #define TH_TENSOR_APPLY3_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
-  _Pragma("omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)") \
+  PRAGMA(omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)) \
   { \
     size_t num_threads = omp_get_num_threads(); \
     size_t tid = omp_get_thread_num(); \
