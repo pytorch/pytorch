@@ -2849,6 +2849,7 @@ class TestTorch(TestCase):
             np.float,
             np.int64,
             np.int32,
+            np.int16,
             np.uint8
         ]
         for dtype in dtypes:

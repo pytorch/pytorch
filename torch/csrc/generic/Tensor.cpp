@@ -16,6 +16,9 @@
 #ifdef TH_REAL_IS_INT
 #define NUMPY_TYPE_ENUM NPY_INT32
 #endif
+#ifdef TH_REAL_IS_SHORT
+#define NUMPY_TYPE_ENUM NPY_INT16
+#endif
 #ifdef TH_REAL_IS_BYTE
 #define NUMPY_TYPE_ENUM NPY_UINT8
 #endif
