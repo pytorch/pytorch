@@ -198,6 +198,23 @@ class TestShapeInference(test_util.TestCase):
         )
         self.InferTensorRunAndCompare(model)
 
+        # Test spatial model
+        model = cnn.CNNModelHelper()
+        workspace.FeedBlob(
+            "img",
+            np.random.rand(32, 19, 33, 28).astype(np.float32)
+        )
+        workspace.FeedBlob(
+            "img_labels",
+            (np.random.rand(32, 33, 28) * 19).astype(np.int32)
+        )
+        model.SoftmaxWithLoss(
+            ["img", "img_labels"],
+            ["softmax_img", "loss"],
+            spatial=1
+        )
+        self.InferTensorRunAndCompare(model)
+
     def testShapeInferenceIm2Col(self):
         # Test with NCHW
         model = cnn.CNNModelHelper()
