@@ -148,7 +148,7 @@ class LocalSession(Session):
     """
     def __init__(self, ws=None):
         Session.__init__(self)
-        self._ws = ws or workspace.C.Workspace()
+        self._ws = ws or workspace.C.Workspace.current
 
     @classmethod
     def _compile_task_group(cls, task_group):
