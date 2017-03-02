@@ -78,8 +78,8 @@ class RMSprop(Optimizer):
 
                 if group['momentum'] > 0:
                     mom = state['momentum']
-                    mom.mul_(group['momentum']).addcdiv_(group['lr'], grad, avg)
-                    p.data.add_(-mom)
+                    mom.mul_(group['momentum']).addcdiv_(grad, avg)
+                    p.data.add_(-group['lr'], mom)
                 else:
                     p.data.addcdiv_(-group['lr'], grad, avg)
 
