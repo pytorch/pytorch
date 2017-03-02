@@ -333,7 +333,7 @@ class Conv3d(_ConvNd):
 class _ConvTransposeMixin(object):
 
     def forward(self, input, output_size=None):
-        output_padding = self._output_padding(input, output_size)
+        padding, output_padding = self._output_padding(input, output_size)
         func = self._backend.ConvNd(
             self.stride, self.padding, self.dilation, self.transposed,
             output_padding, self.groups)
@@ -344,31 +344,25 @@ class _ConvTransposeMixin(object):
 
     def _output_padding(self, input, output_size):
         if output_size is None:
-            return self.output_padding
+            return self.padding, self.output_padding
 
         output_size = list(output_size)
         k = input.dim() - 2
         if len(output_size) == k + 2:
-            output_size = output_size[-2:]
+            output_size = output_size[2:]
         if len(output_size) != k:
             raise ValueError(
                 "output_size must have {} or {} elements (got {})"
                 .format(k, k + 2, len(output_size)))
 
-        def dim_size(d):
-            return ((input.size(d + 2) - 1) * self.stride[d] -
-                    2 * self.padding[d] + self.kernel_size[d])
-
-        min_sizes = [dim_size(d) for d in range(k)]
-        max_sizes = [min_sizes[d] + self.stride[d] - 1 for d in range(k)]
-        for size, min_size, max_size in zip(output_size, min_sizes, max_sizes):
-            if size < min_size or size > max_size:
-                raise ValueError((
-                    "requested an output size of {}, but valid sizes range "
-                    "from {} to {} (for an input of {})").format(
-                        output_size, min_sizes, max_sizes, input.size()[2:]))
-
-        return tuple([output_size[d] - min_sizes[d] for d in range(k)])
+        # 2*padding - output_padding = (input - 1)*stride - output + kernel_size
+        #                            = original_size
+        # padding = math.ceil(original_size / 2)
+        def original_size(d):
+            return ((input.size(d + 2) - 1) * self.stride[d] - output_size[d] + self.kernel_size[d])
+        padding = tuple([math.ceil(original_size(d) / 2.) for d in range(k)])
+        output_padding = tuple([2*padding[d] - original_size(d) for d in range(k)])
+        return padding, output_padding
 
 
 class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
@@ -418,9 +412,9 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
             True, output_padding, groups, bias)
 
     def forward(self, input, output_size=None):
-        output_padding = self._output_padding(input, output_size)
+        padding, output_padding = self._output_padding(input, output_size)
         return F.conv_transpose1d(
-            input, self.weight, self.bias, self.stride, self.padding,
+            input, self.weight, self.bias, self.stride, padding,
             output_padding, self.groups)
 
 
@@ -517,9 +511,9 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
             True, output_padding, groups, bias)
 
     def forward(self, input, output_size=None):
-        output_padding = self._output_padding(input, output_size)
+        padding, output_padding = self._output_padding(input, output_size)
         return F.conv_transpose2d(
-            input, self.weight, self.bias, self.stride, self.padding,
+            input, self.weight, self.bias, self.stride, padding,
             output_padding, self.groups)
 
 
@@ -607,9 +601,9 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
             True, output_padding, groups, bias)
 
     def forward(self, input, output_size=None):
-        output_padding = self._output_padding(input, output_size)
+        padding, output_padding = self._output_padding(input, output_size)
         return F.conv_transpose3d(
-            input, self.weight, self.bias, self.stride, self.padding,
+            input, self.weight, self.bias, self.stride, padding,
             output_padding, self.groups)
 
 
