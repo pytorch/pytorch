@@ -62,7 +62,7 @@ from caffe2.python import cnn, workspace
 
 
 def MLP(order, cudnn_ws):
-    model = cnn.CNNModelHelper(ws_nbytes_limit=cudnn_ws)
+    model = cnn.CNNModelHelper()
     d = 256
     depth = 20
     width = 3
@@ -591,7 +591,6 @@ def GetArgumentParser():
     parser.add_argument(
         "--cudnn_ws",
         type=int,
-        default=-1,
         help="The cudnn workspace size."
     )
     parser.add_argument(
@@ -641,22 +640,21 @@ def GetArgumentParser():
 if __name__ == '__main__':
     args = GetArgumentParser().parse_args()
     if (
-        not args.batch_size or not args.model or not args.order or
-        not args.cudnn_ws
+        not args.batch_size or not args.model or not args.order
     ):
         GetArgumentParser().print_help()
+    else:
+        workspace.GlobalInit(
+            ['caffe2', '--caffe2_log_level=0'] +
+            (['--caffe2_use_nvtx'] if args.use_nvtx else []) +
+            (['--caffe2_htrace_span_log_path=' + args.htrace_span_log_path]
+                if args.htrace_span_log_path else []))
 
-    workspace.GlobalInit(
-        ['caffe2', '--caffe2_log_level=0'] +
-        (['--caffe2_use_nvtx'] if args.use_nvtx else []) +
-        (['--caffe2_htrace_span_log_path=' + args.htrace_span_log_path]
-            if args.htrace_span_log_path else []))
-
-    model_map = {
-        'AlexNet': AlexNet,
-        'OverFeat': OverFeat,
-        'VGGA': VGGA,
-        'Inception': Inception,
-        'MLP': MLP,
-    }
-    Benchmark(model_map[args.model], args)
+        model_map = {
+            'AlexNet': AlexNet,
+            'OverFeat': OverFeat,
+            'VGGA': VGGA,
+            'Inception': Inception,
+            'MLP': MLP,
+        }
+        Benchmark(model_map[args.model], args)
