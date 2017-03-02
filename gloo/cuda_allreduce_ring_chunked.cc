@@ -63,6 +63,7 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     : Allreduce<T>(context, nullptr),
       count_(count),
       bytes_(count * sizeof(T)),
+      synchronizeDeviceOutputs_(streams.size() == 0),
       leftPair_(this->getLeftPair()),
       rightPair_(this->getRightPair()) {
   auto newStream = true;
@@ -275,11 +276,13 @@ void CudaAllreduceRingChunked<T>::run() {
   sendNotificationBuf_->send();
   recvNotificationBuf_->waitRecv();
 
-  // Wait for all chunk broadcasts to complete
-  for (auto i = 0; i < chunks_; i++) {
-    const auto chunkOffset = getChunkOffset(i);
-    if (chunkOffset < chunkContext_.size()) {
-      chunkContext_[chunkOffset].broadcastOp.wait();
+  // If running synchronously, wait for all chunk broadcasts to complete
+  if (synchronizeDeviceOutputs_) {
+    for (auto i = 0; i < chunks_; i++) {
+      const auto chunkOffset = getChunkOffset(i);
+      if (chunkOffset < chunkContext_.size()) {
+        chunkContext_[chunkOffset].broadcastOp.wait();
+      }
     }
   }
 }

@@ -81,6 +81,7 @@ TEST_P(CudaBroadcastTest, SinglePointerAsync) {
         algorithm->run();
 
         // Verify result
+        fixture.synchronizeCudaStreams();
         assertEqual(fixture, root);
       }
     });

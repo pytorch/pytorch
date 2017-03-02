@@ -34,6 +34,7 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
 
   const int count_;
   const int bytes_;
+  const bool synchronizeDeviceOutputs_;
 
   // For the sender (root)
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBuffers_;

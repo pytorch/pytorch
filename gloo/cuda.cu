@@ -66,11 +66,14 @@ CudaDevicePointer<T>::CudaDevicePointer(CudaDevicePointer<T>&& other) noexcept
 template<typename T>
 CudaDevicePointer<T>::~CudaDevicePointer() {
   CudaDeviceScope scope(deviceId_);
+  if (event_ != nullptr) {
+    // Make sure outstanding operations are complete. If the event
+    // hasn't been queued this call will return immediately.
+    CUDA_CHECK(cudaEventSynchronize(event_));
+    CUDA_CHECK(cudaEventDestroy(event_));
+  }
   if (streamOwner_ && stream_ != nullptr) {
     CUDA_CHECK(cudaStreamDestroy(stream_));
-  }
-  if (event_ != nullptr) {
-    CUDA_CHECK(cudaEventDestroy(event_));
   }
 }
 

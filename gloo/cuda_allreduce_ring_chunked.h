@@ -35,6 +35,7 @@ class CudaAllreduceRingChunked : public Allreduce<T> {
   T* hostPtr_;
   const int count_;
   const int bytes_;
+  const bool synchronizeDeviceOutputs_;
 
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;

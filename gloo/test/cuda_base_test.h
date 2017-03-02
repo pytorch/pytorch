@@ -90,6 +90,13 @@ class Fixture {
     return out;
   }
 
+  void synchronizeCudaStreams() {
+    for (const auto& ptr : ptrs) {
+      CudaDeviceScope scope(ptr.getDeviceID());
+      CUDA_CHECK(cudaStreamSynchronize(ptr.getStream()));
+    }
+  }
+
   std::shared_ptr<Context> context;
   const int count;
   std::vector<CudaDevicePointer<float> > ptrs;

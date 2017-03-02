@@ -23,7 +23,8 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
     : Broadcast<T>(context, rootRank),
       devicePtr_(CudaDevicePointer<T>::create(ptr, count, stream)),
       count_(count),
-      bytes_(count * sizeof(T)) {
+      bytes_(count * sizeof(T)),
+      synchronizeDeviceOutputs_(stream == kStreamNotSet) {
   CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
   if (this->contextRank_ == this->rootRank_) {
     for (int i = 0; i < this->contextSize_; i++) {
@@ -65,7 +66,10 @@ void CudaBroadcastOneToAll<T>::run() {
     recvDataBuffer_->waitRecv();
     // Copy host buffer to device
     devicePtr_.copyFromHostAsync(hostPtr_);
-    devicePtr_.waitAsync();
+    // If running synchronously, wait for memcpy to complete
+    if (synchronizeDeviceOutputs_) {
+      devicePtr_.waitAsync();
+    }
   }
 }
 

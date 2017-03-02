@@ -103,6 +103,7 @@ TEST_P(CudaAllreduceTest, MultiPointerAsync) {
       algorithm->run();
 
       // Verify result
+      fixture.synchronizeCudaStreams();
       assertResult(fixture);
     });
 }

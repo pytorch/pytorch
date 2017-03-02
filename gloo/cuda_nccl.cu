@@ -58,6 +58,13 @@ NCCLContext::NCCLContext(NCCLContext&& other) noexcept
 }
 
 NCCLContext::~NCCLContext() {
+  if (masterEvent_ != nullptr) {
+    CudaDeviceScope scope(masterDevice_);
+    // Make sure outstanding operations are complete. If the event
+    // hasn't been queued this call will return immediately.
+    CUDA_CHECK(cudaEventSynchronize(masterEvent_));
+    CUDA_CHECK(cudaEventDestroy(masterEvent_));
+  }
   for (auto i = 0; i < elements_.size(); ++i) {
     CudaDeviceScope scope(elements_[i].device);
     CUDA_CHECK(cudaEventDestroy(events_[i]));
@@ -66,10 +73,6 @@ NCCLContext::~NCCLContext() {
       std::lock_guard<std::mutex> lock(CudaShared::getMutex());
       ncclCommDestroy(comms_[i]);
     }
-  }
-  if (masterEvent_ != nullptr) {
-    CudaDeviceScope scope(masterDevice_);
-    CUDA_CHECK(cudaEventDestroy(masterEvent_));
   }
 }
 

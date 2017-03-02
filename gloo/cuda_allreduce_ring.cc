@@ -24,6 +24,7 @@ CudaAllreduceRing<T>::CudaAllreduceRing(
     : Allreduce<T>(context, nullptr),
       count_(count),
       bytes_(count * sizeof(T)),
+      synchronizeDeviceOutputs_(streams.size() == 0),
       leftPair_(this->getLeftPair()),
       rightPair_(this->getRightPair()) {
   auto newStream = true;
@@ -127,9 +128,11 @@ void CudaAllreduceRing<T>::run() {
     devicePtrs_[i].copyFromHostAsync(hostPtrs_[0]);
   }
 
-  // Wait for memcpy's to complete
-  for (int i = 0; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].waitAsync();
+  // If running synchronously, wait for memcpy's to complete
+  if (synchronizeDeviceOutputs_) {
+    for (int i = 0; i < devicePtrs_.size(); i++) {
+      devicePtrs_[i].waitAsync();
+    }
   }
 }
 
