@@ -111,11 +111,30 @@ auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void 
   }
 }
 
-auto Engine::evaluate_function(FunctionTask& task) -> void
-{
+static variable_list call_pre_hooks(Function& fn, variable_list grad_output) {
+  for (auto& hook : fn.pre_hooks) {
+    grad_output = (*hook)(grad_output);
+  }
+  return grad_output;
+}
+
+static variable_list call_post_hooks(Function& fn, variable_list grad_input, variable_list grad_output) {
+  for (auto& hook : fn.post_hooks) {
+    grad_input = (*hook)(grad_input, grad_output);
+  }
+  return grad_input;
+}
+
+static variable_list call_function(FunctionTask& task) {
+  auto grad_output = call_pre_hooks(*task.fn, GradBuffer::variables(std::move(task.grad)));
+  auto grad_input = task.fn->apply(grad_output);
+  return call_post_hooks(*task.fn, std::move(grad_input), std::move(grad_output));
+}
+
+auto Engine::evaluate_function(FunctionTask& task) -> void {
+  auto grad_inputs = call_function(task);
+
   auto& fn = *task.fn;
-  auto grad_output = fn.call_hooks(GradBuffer::variables(std::move(task.grad)));
-  auto grad_inputs = fn.apply(grad_output);
   if (!task.base->retain_variables) {
     fn.releaseVariables();
   }

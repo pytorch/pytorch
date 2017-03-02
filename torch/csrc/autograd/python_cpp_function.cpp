@@ -60,6 +60,28 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   return tuple.release();
 }
 
+int THPCppFunction_traverse(PyObject* self, visitproc visit, void *arg)
+{
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  for (auto& hook : fn.pre_hooks) {
+    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      Py_VISIT(pyhook->dict);
+    }
+  }
+  for (auto& hook : fn.post_hooks) {
+    if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+      Py_VISIT(pyhook->dict);
+    }
+  }
+  return 0;
+}
+
+int THPCppFunction_clear(PyObject* self)
+{
+  ((THPCppFunction*)self)->cdata.reset();
+  return 0;
+}
+
 void THPCppFunction_dealloc(PyObject* self)
 {
   ((THPCppFunction*)self)->cdata.~shared_ptr();
@@ -73,40 +95,35 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
   }
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
-  if (fn.hooks.empty()) {
-    fn.hooks.resize(fn.num_outputs);
-  }
-  fn.hooks[var->cdata->output_nr] = std::make_shared<PyGradHook>(var->backward_hooks);
+  fn.pre_hooks.push_back(std::make_shared<PyFunctionPreHook>(
+      var->backward_hooks, var->cdata->output_nr));
   Py_RETURN_NONE;
+}
+
+PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
+{
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  return registerFunctionHook(fn, hook);
 }
 
 } // namespace
 
-int TensorConverter(PyObject* obj, std::unique_ptr<thpp::Tensor>* address)
-{
-  try {
-    *address = createTensor(obj);
-  } catch (std::exception& e) {
-    PyErr_Format(PyExc_TypeError,
-        "expected a tensor, got %s", Py_TYPE(obj)->tp_name);
-    return 0;
-  }
-  return 1;
-}
-
 static struct PyMethodDef THPCppFunction_methods[] = {
   {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, NULL},
+  {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, NULL},
   {NULL}
 };
 
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name)
 {
-  type.tp_flags = Py_TPFLAGS_DEFAULT;
+  type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
   type.tp_basicsize = sizeof(THPCppFunction);
   type.tp_call = THPCppFunction_call;
   type.tp_methods = THPCppFunction_methods;
   type.tp_dealloc = THPCppFunction_dealloc;
+  type.tp_traverse = THPCppFunction_traverse;
+  type.tp_clear = THPCppFunction_clear;
   if (PyType_Ready(&type) < 0) {
     auto msg = std::string("Unable to instantiate PyTypeObject for ") + name;
     throw std::runtime_error(msg);
@@ -149,6 +166,31 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype)
 {
   Py_INCREF((PyObject*)pytype);
   cpp_function_types[std::type_index(type)] = THPObjectPtr((PyObject*)pytype);
+}
+
+PyObject* registerFunctionHook(Function& fn, PyObject* hook)
+{
+  PyObject* dict = Py_None;
+  for (auto& hook : fn.post_hooks) {
+    if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+      dict = pyhook->dict;
+      break;
+    }
+  }
+
+  THPObjectPtr register_fn = PyObject_GetAttrString(THPFunctionClass, "_register_hook");
+  if (!register_fn) return NULL;
+  THPObjectPtr res = PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, NULL);
+  if (!res) return NULL;
+
+  if (dict == Py_None) {
+    dict = PyTuple_GET_ITEM(res.get(), 0);
+    fn.post_hooks.push_back(std::make_shared<PyFunctionPostHook>(dict));
+  }
+
+  PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
+  Py_INCREF(handle);
+  return handle;
 }
 
 }} // namespace torch::autograd

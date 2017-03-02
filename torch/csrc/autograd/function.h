@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/grad_hook.h"
+#include "torch/csrc/autograd/function_hook.h"
 
 namespace torch { namespace autograd {
 
@@ -24,8 +24,8 @@ using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
 // State used to create "backward" functions
 struct FunctionFlags {
-  bool requires_grad;
-  bool is_volatile;
+  bool requires_grad = false;
+  bool is_volatile = false;
   function_list previous_functions;
 };
 
@@ -36,7 +36,8 @@ struct Function {
     , requires_grad(false)
     , is_volatile(false)
     , is_stochastic(false)
-    , hooks()
+    , pre_hooks()
+    , post_hooks()
     {}
 
   Function(FunctionFlags&& flags)
@@ -45,7 +46,8 @@ struct Function {
     , requires_grad(flags.requires_grad)
     , is_volatile(flags.is_volatile)
     , is_stochastic(false)
-    , hooks()
+    , pre_hooks()
+    , post_hooks()
     {}
 
   Function(const Function& other) = delete;
@@ -54,9 +56,6 @@ struct Function {
 
   // Implements the operation
   virtual variable_list apply(const variable_list& inputs) = 0;
-
-  // Calls the hooks on each input
-  virtual variable_list call_hooks(variable_list inputs);
 
   // Computes requires_grad, is_volatile, and previous_functions from a list
   // of input variables
@@ -81,7 +80,8 @@ struct Function {
   bool requires_grad;
   bool is_volatile;
   bool is_stochastic;
-  std::vector<std::shared_ptr<GradHook>> hooks;
+  std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
+  std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 };
 
 

@@ -300,6 +300,20 @@ class TestNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    def test_hook_cpp(self):
+        counter = [0]
+        bn = nn.BatchNorm1d(5)
+
+        def hook(module, grad_inputs, grad_outputs):
+            counter[0] += 1
+            self.assertEqual(len(grad_inputs), 3)
+            self.assertEqual(len(grad_outputs), 1)
+            self.assertEqual(module, bn)
+
+        bn.register_backward_hook(hook)
+        output = bn(Variable(torch.randn(5, 5), requires_grad=True))
+        output.sum().backward()
+
     def test_hook_fail(self):
         module = nn.Sigmoid()
         input = Variable(torch.randn(5, 5), requires_grad=True)

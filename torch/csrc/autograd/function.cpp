@@ -32,20 +32,4 @@ auto Function::name() -> std::string {
   return std::string(typeid(*this).name());
 }
 
-auto Function::call_hooks(variable_list inputs) -> variable_list {
-  if (hooks.empty()) {
-    return inputs;
-  }
-
-  variable_list outputs(inputs.size());
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    if (hooks[i]) {
-      outputs[i] = (*hooks[i])(inputs[i]);
-    } else {
-      outputs[i] = inputs[i];
-    }
-  }
-  return outputs;
-}
-
 }} // namespace torch::autograd

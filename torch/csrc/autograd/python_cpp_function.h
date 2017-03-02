@@ -32,15 +32,14 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name);
 
+PyObject* registerFunctionHook(Function& fn, PyObject* hook);
+
 template<typename Ctor>
 PyTypeObject* createForwardFunctionPyTypeObject(PyTypeObject& type, const char* name)
 {
   type.tp_new = &CppFunction_pynew<Ctor>;
   return _initFunctionPyTypeObject(type, name);
 }
-
-// conversion utilities for PyArg_ParseTuple
-int TensorConverter(PyObject* obj, std::unique_ptr<thpp::Tensor>* address);
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype);
 PyObject* functionToPyObject(std::shared_ptr<Function> cdata);

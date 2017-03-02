@@ -39,7 +39,6 @@ struct Variable : public Function {
   std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
   int output_nr;
-  std::unique_ptr<GradHook> backward_hook;
   PyObject *pyobj;  // weak reference
 };
 

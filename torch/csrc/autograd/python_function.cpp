@@ -9,6 +9,7 @@
 
 #include "THP.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
+#include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
@@ -67,6 +68,7 @@ auto PyFunction::apply(const variable_list& gradOutputs) -> variable_list {
       results[i] = std::make_shared<Variable>(createTensor(obj), false, true);
     }
   }
+
   return results;
 }
 
@@ -90,21 +92,24 @@ auto PyFunction::name() -> std::string {
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->needs_input_grad);
-  Py_VISIT(self->backward_hooks);
   if (self->saved_variables) {
     for (unsigned int i = 0; i < self->saved_variables->size(); i++)
       Py_VISIT(std::get<0>(self->saved_variables->at(i)));
   }
-  if (self->output_backward_hooks) {
-    for (int i = 0; i < self->num_inputs; i++)
-      Py_VISIT(self->output_backward_hooks[i].get());
+  for (auto& hook : self->cdata.pre_hooks) {
+    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      Py_VISIT(pyhook->dict);
+    }
   }
-
+  for (auto& hook : self->cdata.post_hooks) {
+    if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+      Py_VISIT(pyhook->dict);
+    }
+  }
   Py_VISIT(self->to_save);
   Py_VISIT(self->shared_pairs);
   Py_VISIT(self->non_differentiable);
   Py_VISIT(self->dirty_tensors);
-
   return 0;
 }
 
@@ -114,7 +119,6 @@ static int THPFunction_clear(THPFunction *self)
   self->cdata.num_outputs = 0;
 
   Py_CLEAR(self->needs_input_grad);
-  Py_CLEAR(self->backward_hooks);
 
   Py_CLEAR(self->to_save);
   Py_CLEAR(self->shared_pairs);
@@ -125,13 +129,13 @@ static int THPFunction_clear(THPFunction *self)
   self->saved_variables = NULL;
   delete saved_variables;
 
-  auto output_backward_hooks = self->output_backward_hooks;
-  self->output_backward_hooks = NULL;
-  delete[] output_backward_hooks;
-
   auto output_info = self->output_info;
   self->output_info = NULL;
   delete output_info;
+
+  // clear pre and post hooks
+  auto pre_hooks = std::move(self->cdata.pre_hooks);
+  auto post_hooks = std::move(self->cdata.post_hooks);
 
   return 0;
 }
@@ -445,10 +449,9 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
       self->cdata.requires_grad = self->cdata.requires_grad || variable->cdata->requires_grad;
     }
 
-
-    // Now we're ready to call a forward (cdataemented in Python)
+    // Now we're ready to call a forward (implemented in Python)
     THPObjectPtr forward_fn = PyObject_GetAttrString((PyObject*)self, "forward");
-    THPUtils_assert(forward_fn.get(), "function %s doesn't cdataement a required "
+    THPUtils_assert(forward_fn.get(), "function %s doesn't implement a required "
         "'forward' method", THPUtils_typename((PyObject*)self));
     THPObjectPtr raw_output = PyObject_CallObject(forward_fn, unpacked_inputs);
     if (!raw_output) return NULL;
@@ -528,254 +531,6 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
 ////////////////////////////////////////////////////////////////////////////////
 // Backward
 ////////////////////////////////////////////////////////////////////////////////
-
-// We need a reference to a smart pointer that will outlive the duration of
-// a function call, so that the char* pointer is valid even after it returns
-static char* _try_get_name(PyObject *hook, THPObjectPtr& tmp) {
-  tmp = PyObject_GetAttrString(hook, "__name__");
-#if PY_MAJOR_VERSION == 2
-  if (tmp && PyString_Check(tmp.get())) {
-    return PyString_AS_STRING(tmp.get());
-  }
-#else
-  if (tmp && PyUnicode_Check(tmp.get())) {
-    tmp = PyUnicode_AsASCIIString(tmp.get());
-    return PyBytes_AS_STRING(tmp.get());
-  }
-#endif
-  return NULL;
-}
-
-#define OPTIONAL_HOOK_NAME                                                     \
-  hook_name ? "'" : "",                                                        \
-  hook_name ? hook_name : "",                                                  \
-  hook_name ? "' " : ""
-
-static void _ensure_correct_hook_result_single(PyObject *original,
-    PyObject *returned, PyObject *hook)
-{
-#if PY_MAJOR_VERSION == 2
-  static PyObject *IS_SAME_SIZE_NAME = PyString_FromString("is_same_size");
-#else
-  static PyObject *IS_SAME_SIZE_NAME = PyUnicode_FromString("is_same_size");
-#endif
-  THPObjectPtr tmp;
-  // Check that the type matches
-  if(Py_TYPE(original) != Py_TYPE(returned)) {
-    char *hook_name = _try_get_name(hook, tmp);
-    THPUtils_setError("backward hook %s%s%shas changed the type of "
-        "grad_input (was %s, but got %s)",
-        OPTIONAL_HOOK_NAME,
-        THPUtils_typename(original),
-        THPUtils_typename(returned)
-    );
-    throw python_error();
-  }
-
-  // Special case - None gradient. The type matches so it's everything we
-  // had to check.
-  if (original == Py_None) return;
-
-  THPVariable *original_var = (THPVariable*)original;
-  THPVariable *returned_var = (THPVariable*)returned;
-
-  // Check that data types match
-  if (Py_TYPE(original_var->data) != Py_TYPE(returned_var->data)) {
-    char *hook_name = _try_get_name(hook, tmp);
-    THPUtils_setError("backward hook %s%s%shas changed the type of "
-        "grad_input data (was %s, but got %s)",
-        OPTIONAL_HOOK_NAME,
-        THPUtils_typename(original_var->data),
-        THPUtils_typename(returned_var->data)
-    );
-    throw python_error();
-  }
-
-  // Check that the size matches
-  THPObjectPtr is_same_size = PyObject_CallMethodObjArgs(original,
-      IS_SAME_SIZE_NAME, returned, NULL);
-  if(is_same_size.get() != Py_True) {
-    char *hook_name = _try_get_name(hook, tmp);
-    THPUtils_setError("backward hook %s%s%shas changed the size of "
-        "grad_input",
-        OPTIONAL_HOOK_NAME
-    );
-    throw python_error();
-  }
-}
-
-static void _ensure_correct_hook_result(THPObjectPtr& grad_input,
-    THPObjectPtr& result, PyObject *hook)
-{
-  THPObjectPtr tmp;
-  // Check that the tuple sizes match
-  if (PyTuple_GET_SIZE(result.get()) != PyTuple_GET_SIZE(grad_input.get())) {
-    char *hook_name = _try_get_name(hook, tmp);
-    THPUtils_setError("backward hook %s%s%sreturned an incorrect number "
-        "of gradients (got %ld, but expected %ld)",
-        OPTIONAL_HOOK_NAME,
-        PyTuple_GET_SIZE(result.get()),
-        PyTuple_GET_SIZE(grad_input.get())
-    );
-    throw python_error();
-  }
-
-  Py_ssize_t size = PyTuple_GET_SIZE(grad_input.get());
-  for (int i = 0; i < size; i++) {
-    PyObject *original = PyTuple_GET_ITEM(grad_input.get(), i);
-    PyObject *returned = PyTuple_GET_ITEM(result.get(), i);
-    _ensure_correct_hook_result_single(original, returned, hook);
-  }
-}
-
-static void _call_output_hooks(THPFunction *self, THPObjectPtr& grad_output)
-{
-  if (!self->output_backward_hooks) return;
-
-  PyObject *key, *value;
-  Py_ssize_t pos = 0;
-  // We can't reuse the tuple we got, so allocate a new one.
-  THPObjectPtr new_grad_output = PyTuple_New(self->cdata.num_outputs);
-  if (!new_grad_output) throw python_error();
-
-  // FIXME: until multiple backward only
-  bool updated_gradient = false;
-  for (int i = 0; i < self->cdata.num_outputs; i++) {
-    // Copy grad to a new tuple
-    PyObject *old_grad = PyTuple_GET_ITEM(grad_output.get(), i);
-    // FIXME: no need to pack them again after changing grads to Variables
-    PyObject *old_grad_var;
-    if (old_grad == Py_None) {
-      old_grad_var = Py_None;
-      Py_INCREF(Py_None);
-    } else {
-      old_grad_var = THPVariable_NewVolatile(old_grad);
-      if (!old_grad_var) throw python_error();
-    }
-    PyTuple_SET_ITEM(new_grad_output.get(), i, old_grad_var);
-
-    // Make sure that we're really going to operate on a dict
-    PyObject *hook_dict = self->output_backward_hooks[i];
-    if (!hook_dict) continue;
-    THPFunction_assert(PyDict_Check(hook_dict), "backward_hooks "
-        "attribute has to be a dictionary");
-
-    while (PyDict_Next(hook_dict, &pos, &key, &value)) {
-      THPObjectPtr result = PyObject_CallFunctionObjArgs(value,
-          old_grad_var, NULL);
-      if (!result) throw python_error();
-
-      // If the hook returns a something else than None, we treat that as a sign
-      // to replace this grad with the return value.
-      if (result.get() != Py_None) {
-        updated_gradient = true;
-
-        // Check all possible inconsistencies of the output that we can detect
-        // (sizes, types, etc.)
-        _ensure_correct_hook_result_single(old_grad_var, result, value);
-
-        // Replace the old gradient
-        PyTuple_SET_ITEM(new_grad_output.get(), i, result.release());
-        Py_XDECREF(old_grad_var);
-        old_grad_var = PyTuple_GET_ITEM(new_grad_output.get(), i);
-      }
-    }
-  }
-
-  // FIXME: no need to do this after multiple backward
-  if (updated_gradient) {
-    THPObjectPtr unpacked_grad_output = PyTuple_New(self->cdata.num_outputs);
-    if (!unpacked_grad_output) throw python_error();
-    for (int i = 0; i < self->cdata.num_outputs; i++) {
-      PyObject *grad = PyTuple_GET_ITEM(new_grad_output.get(), i);
-      if (grad == Py_None) {
-        Py_INCREF(Py_None);
-        PyTuple_SET_ITEM(unpacked_grad_output.get(), i, Py_None);
-      } else {
-        THPVariable *var = (THPVariable*)grad;
-        PyTuple_SET_ITEM(unpacked_grad_output.get(), i, THPVariable_get_data(var));
-      }
-    }
-    grad_output = unpacked_grad_output.release();
-  }
-}
-
-static void _call_function_hooks(THPFunction *self, THPObjectPtr& grad_input, THPObjectPtr& grad_output)
-{
-  if (!self->backward_hooks) return;
-
-  PyObject *key, *value;
-  Py_ssize_t pos = 0;
-
-  THPFunction_assert(PyDict_Check(self->backward_hooks), "backward_hooks "
-      "attribute has to be a dictionary");
-
-  // FIXME: until multiple backward only
-  bool updated_gradient = false;
-  THPObjectPtr packed_grad_input = PyTuple_New(self->num_inputs);
-  if (!packed_grad_input.get()) throw python_error();
-  for (int i = 0; i < self->num_inputs; i++) {
-    PyObject *tensor = PyTuple_GET_ITEM(grad_input.get(), i);
-    PyObject *var;
-    if (tensor == Py_None) {
-      var = Py_None;
-      Py_INCREF(Py_None);
-    } else {
-      var = THPVariable_NewVolatile(tensor);
-    }
-    if (!var) throw python_error();
-    PyTuple_SET_ITEM(packed_grad_input.get(), i, var);
-  }
-  THPObjectPtr packed_grad_output = PyTuple_New(self->cdata.num_outputs);
-  if (!packed_grad_output.get()) throw python_error();
-  for (int i = 0; i < self->cdata.num_outputs; i++) {
-    PyObject *tensor = PyTuple_GET_ITEM(grad_output.get(), i);
-    PyObject *var;
-    if (tensor == Py_None) {
-      var = Py_None;
-      Py_INCREF(Py_None);
-    } else {
-      var = THPVariable_NewVolatile(tensor);
-    }
-    if (!var) throw python_error();
-    PyTuple_SET_ITEM(packed_grad_output.get(), i, var);
-  }
-
-  while (PyDict_Next(self->backward_hooks, &pos, &key, &value)) {
-    THPObjectPtr result = PyObject_CallFunctionObjArgs(value,
-        packed_grad_input.get(), packed_grad_output.get(), NULL);
-    if (!result) throw python_error();
-
-    // If the hook returns a something else than None, we treat that as a sign
-    // to replace grad_input with its return value.
-    if (result.get() != Py_None) {
-      updated_gradient = true;
-      // Make sure we're working with a tuple
-      _ensure_tuple(result);
-      // Check all possible inconsistencies of the output that we can detect
-      // (sizes, types, etc.)
-      _ensure_correct_hook_result(packed_grad_input, result, value);
-      packed_grad_input = result.release();
-    }
-  }
-
-  // FIXME: until multiple backward only
-  if (updated_gradient) {
-    THPObjectPtr unpacked_grad_input = PyTuple_New(self->num_inputs);
-    if (!unpacked_grad_input) throw python_error();
-    for (int i = 0; i < self->num_inputs; i++) {
-      PyObject *grad = PyTuple_GET_ITEM(packed_grad_input.get(), i);
-      if (grad == Py_None) {
-        Py_INCREF(Py_None);
-        PyTuple_SET_ITEM(unpacked_grad_input.get(), i, Py_None);
-      } else {
-        THPVariable *var = (THPVariable*)grad;
-        PyTuple_SET_ITEM(unpacked_grad_input.get(), i, THPVariable_get_data(var));
-      }
-    }
-    grad_input = unpacked_grad_input.release();
-  }
-}
 
 static void _prepare_grad_output(THPFunction *self, THPObjectPtr& raw_grad_output)
 {
@@ -860,9 +615,6 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     THPObjectPtr grad_output = raw_grad_output;
     _prepare_grad_output(self, grad_output);
 
-    // Call output hooks (this can modify grad_output!)
-    _call_output_hooks(self, grad_output);
-
     // self.backward(*grad_output)
     THPObjectPtr backward_fn = PyObject_GetAttrString((PyObject*)self, "backward");
     THPUtils_assert(backward_fn.get(), "function %s doesn't implement a required "
@@ -879,16 +631,6 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     THPUtils_assert(num_grads == num_prev_fns, "%s returned an invalid number of "
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
         num_prev_fns, num_grads);
-
-    // Call function hooks (this can modify grad_input!)
-    _call_function_hooks(self, grad_input, grad_output);
-
-    // Free buffers only if they're not going to be ever used again
-    if (retain_variables == Py_False) {
-      delete self->saved_variables;
-      self->saved_variables = nullptr;
-      self->has_freed_buffers = 1;
-    }
 
     return grad_input.release();
 
@@ -908,15 +650,14 @@ PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
 {
   THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
   THPVariable *var = (THPVariable*)_var;
-
-  if (!self->output_backward_hooks)
-    self->output_backward_hooks = new THPObjectPtr[self->num_inputs];
-  Py_INCREF(var->backward_hooks);
-  self->output_backward_hooks[var->cdata->output_nr] = var->backward_hooks;
-
+  self->cdata.pre_hooks.emplace_back(new PyFunctionPreHook(var->backward_hooks, var->cdata->output_nr));
   Py_RETURN_NONE;
 }
 
+PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
+{
+  return torch::autograd::registerFunctionHook(self->cdata, hook);
+}
 
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
@@ -1021,7 +762,6 @@ int setRequiresGrad(PyObject* obj, PyObject* value, void* _unused) {
 static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, NULL, NULL, NULL},
   {"previous_functions", (getter)THPFunction_previous_functions, NULL, NULL, NULL},
-  {"_backward_hooks", &getObject<&THPFunction::backward_hooks>, &setObject<&THPFunction::backward_hooks>, NULL, NULL},
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, NULL, NULL},
   {"shared_pairs", &getObject<&THPFunction::shared_pairs>, &setObject<&THPFunction::shared_pairs>, NULL, NULL},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, NULL, NULL},
@@ -1037,6 +777,7 @@ static struct PyMethodDef THPFunction_methods[] = {
   {(char*)"_do_forward", (PyCFunction)THPFunction_do_forward, METH_VARARGS, NULL},
   {(char*)"_do_backward", (PyCFunction)THPFunction_do_backward, METH_VARARGS, NULL},
   {(char*)"_register_hook_dict", (PyCFunction)THPFunction__register_hook_dict, METH_O, NULL},
+  {(char*)"register_hook", (PyCFunction)THPFunction_register_hook, METH_O, NULL},
   {NULL}
 };
 

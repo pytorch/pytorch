@@ -29,7 +29,9 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, std::shared_ptr<Vari
 
 PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
 {
-  if (var->pyobj) {
+  if (!var) {
+    Py_RETURN_NONE;
+  } else if (var->pyobj) {
     Py_INCREF(var->pyobj);
   } else {
     var->pyobj = THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var);
@@ -64,6 +66,16 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->data);
   Py_VISIT(self->backward_hooks);
+  if (self->cdata) {
+    if (auto fn = dynamic_cast<PyFunction*>(self->cdata->creator.get())) {
+      Py_VISIT(fn->obj);
+    }
+    for (auto& hook : self->cdata->pre_hooks) {
+      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+  }
   return 0;
 }
 
@@ -71,15 +83,17 @@ static int THPVariable_clear(THPVariable *self)
 {
   Py_CLEAR(self->data);
   Py_CLEAR(self->backward_hooks);
+  if (self->cdata) {
+    self->cdata->pyobj = nullptr;
+  }
+  self->cdata.reset();
   return 0;
 }
 
 static void THPVariable_dealloc(THPVariable* self)
 {
   PyObject_GC_UnTrack(self);
-  Py_XDECREF(self->data);
-  Py_XDECREF(self->backward_hooks);
-  self->cdata->pyobj = nullptr;
+  THPVariable_clear(self);
   self->cdata.~shared_ptr<Variable>();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -287,10 +301,9 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
   Py_XINCREF(obj);
   Py_XDECREF(self->backward_hooks);
   self->backward_hooks = obj;
+  self->cdata->pre_hooks.clear();
   if (obj) {
-    self->cdata->backward_hook.reset(new PyGradHook(obj));
-  } else {
-    self->cdata->backward_hook.reset();
+    self->cdata->pre_hooks.emplace_back(new PyFunctionPreHook(obj, 0));
   }
   return 0;
 }
