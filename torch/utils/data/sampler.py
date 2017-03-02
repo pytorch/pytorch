@@ -64,7 +64,7 @@ class SubsetRandomSampler(Sampler):
         self.indices = indices
 
     def __iter__(self):
-        return iter([self.indices[i] for i in torch.randperm(len(self.indices))])
+        return (self.indices[i] for i in torch.randperm(len(self.indices)))
 
     def __len__(self):
         return len(self.indices)
