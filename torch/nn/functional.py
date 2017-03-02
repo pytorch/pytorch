@@ -618,5 +618,9 @@ def cosine_similarity(input, eps=1e-12):
     w12 = torch.sum(x1*x2, 1)
     w1 = torch.norm(x1, 2, 1)
     w2 = torch.norm(x2, 2, 1)
+<<<<<<< HEAD
     return (w12 / (w1 * w2) + eps).squeeze()
 >>>>>>> Moved computation to functional cosine_similarity
+=======
+    return (w12 / (w1 * w2 + eps)).squeeze()
+>>>>>>> Fixed parenthesis when dividing by w1*w2 ( leads to divide by zero)
