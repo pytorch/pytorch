@@ -20,6 +20,12 @@ file(GLOB_RECURSE tmp *_test.cc)
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
 
+# ---[ If Windows, remove the pthread files.
+if(WIN32)
+  file(GLOB_RECURSE tmp pthread*)
+  exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
+endif()
+
 # ---[ GPU test files
 file(GLOB_RECURSE tmp *_gpu_test.cc)
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})

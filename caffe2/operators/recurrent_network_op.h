@@ -435,11 +435,12 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         CAFFE_ENFORCE(agBlob);
         auto* ag = agBlob->template GetMutable<Tensor<Context>>();
         CAFFE_ENFORCE(ag->dims() == g.dims());
+        T* ag_data = ag->template mutable_data<T>();
         math::Add<T, Context>(
             g.size(),
             g.template data<T>(),
-            ag->template data<T>(),
-            ag->template mutable_data<T>(),
+            ag_data,
+            ag_data,
             &context_);
       }
     };
@@ -465,11 +466,12 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         CAFFE_ENFORCE_EQ(g->size() / g->dim(0), og.size() / og.dim(0));
         const auto timestep_size = g->size() / g->dim(0);
         CAFFE_ENFORCE_EQ(timestep_size, og.size() / og.dim(0));
+        T* g_data = g->template mutable_data<T>();
         math::Add<T, Context>(
             timestep_size,
             og.template data<T>() + t * timestep_size,
-            g->template data<T>() + (t + rg.offset) * timestep_size,
-            g->template mutable_data<T>() + (t + rg.offset) * timestep_size,
+            g_data + (t + rg.offset) * timestep_size,
+            g_data + (t + rg.offset) * timestep_size,
             &context_);
       }
     };
@@ -494,11 +496,13 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         const auto t = g->dim(0) - 1;
         const auto timestep_size = g->size() / g->dim(0);
         CAFFE_ENFORCE_EQ(timestep_size, oglast.size());
+        T* g_data_with_offset =
+            g->template mutable_data<T>() + t * timestep_size;
         math::Add<T, Context>(
             timestep_size,
             oglast.template data<T>(),
-            g->template data<T>() + t * timestep_size,
-            g->template mutable_data<T>() + t * timestep_size,
+            g_data_with_offset,
+            g_data_with_offset,
             &context_);
       }
     };
@@ -543,6 +547,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       VLOG(1) << "Resetting output " << def().output(outputIdx)
               << " like input " << def().input(inputId);
       Output(outputIdx)->ResizeLike(Input(inputId));
+      T* output_data = Output(outputIdx)->template mutable_data<T>();
       auto pBlob = sharedWs_->GetBlob(recurrentGradients_[i].grad);
       CAFFE_ENFORCE(pBlob);
       auto* p = pBlob->template GetMutable<Tensor<Context>>();
@@ -551,19 +556,19 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         context_.template Copy<T, Context, Context>(
             Output(outputIdx)->size(),
             p->template data<T>(),
-            Output(outputIdx)->template mutable_data<T>());
+            output_data);
       } else {
         const auto recurrentStateSize = Input(inputId).dim32(0);
         context_.template Copy<T, Context, Context>(
             recurrentStateSize,
             p->template data<T>(),
-            Output(outputIdx)->template mutable_data<T>());
+            output_data);
         for (int j = 1; j < batchSize; ++j) {
           math::Add<T, Context>(
               recurrentStateSize,
               p->template data<T>() + j * recurrentStateSize,
-              Output(outputIdx)->template data<T>(),
-              Output(outputIdx)->template mutable_data<T>(),
+              output_data,
+              output_data,
               &context_);
         }
       }

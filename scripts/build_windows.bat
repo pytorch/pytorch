@@ -19,6 +19,7 @@ cmake .. ^
   -G"Visual Studio 14 2015 Win64" ^
   -DCMAKE_VERBOSE_MAKEFILE=1 ^
   -DBUILD_TEST=OFF ^
+  -DUSE_CUDA=OFF ^
   -DPROTOBUF_PROTOC_EXECUTABLE=%CAFFE2_ROOT%\build_host_protoc\bin\protoc.exe ^
   || exit /b
 

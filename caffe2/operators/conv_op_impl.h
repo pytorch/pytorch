@@ -109,6 +109,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       if (InputSize() == 3) {
         // Bias term can be carried out outside the group definition
         // to be efficient.
+        auto* bias_data = Input(BIAS).template data<T>();
         math::Gemm<T, Context>(
             CblasNoTrans,
             CblasNoTrans,
@@ -116,7 +117,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
             output_image_size,
             1,
             1,
-            Input(BIAS).template data<T>(),
+            bias_data,
             bias_multiplier_.template data<T>(),
             1,
             Ydata,
