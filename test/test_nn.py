@@ -1013,11 +1013,8 @@ class TestNN(NNTestCase):
         i = Variable(torch.randn(2, 3, 6, 6))
         for h in range(15, 22):
             for w in range(15, 22):
-                if 18 <= h <= 20 and 18 <= w <= 20:
-                    output = m(i, output_size=(h, w))
-                    self.assertEqual(output.size()[2:], (h, w))
-                else:
-                    self.assertRaises(ValueError, lambda: m(i, (h, w)))
+                output = m(i, output_size=(h, w))
+                self.assertEqual(output.size()[2:], (h, w))
 
     def test_Conv2d_naive_groups(self):
         # Check that grouped convolutions matches two half convolutions
