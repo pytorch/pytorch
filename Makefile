@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2015-2017, NVIDIA CORPORATION. All rights reserved.
 #
 # See LICENCE.txt for license information
 #
@@ -52,7 +52,7 @@ endif
 
 NCCL_MAJOR   := 1
 NCCL_MINOR   := 3
-NCCL_PATCH   := 2
+NCCL_PATCH   := 3
 CXXFLAGS  += -DNCCL_MAJOR=$(NCCL_MAJOR) -DNCCL_MINOR=$(NCCL_MINOR) -DNCCL_PATCH=$(NCCL_PATCH)
 
 CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "." -f -2 | rev)
