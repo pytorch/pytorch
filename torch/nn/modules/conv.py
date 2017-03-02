@@ -360,7 +360,7 @@ class _ConvTransposeMixin(object):
         # padding = math.ceil(original_size / 2)
         def original_size(d):
             return ((input.size(d + 2) - 1) * self.stride[d] - output_size[d] + self.kernel_size[d])
-        padding = tuple([math.ceil(original_size(d) / 2.) for d in range(k)])
+        padding = tuple([(original_size(d) + 1) // 2 for d in range(k)])
         output_padding = tuple([2*padding[d] - original_size(d) for d in range(k)])
         return padding, output_padding
 
