@@ -64,13 +64,13 @@ class NCCLContext {
   NCCLContext(const NCCLContext&) = delete;
   NCCLContext& operator=(const NCCLContext&) = delete;
 
-  const int masterDevice_;
-  cudaEvent_t masterEvent_;
-  const cudaStream_t masterStream_;
-  const int root_;
-  std::vector<NCCLElement> elements_;
-  std::vector<ncclComm_t> comms_;
-  std::vector<cudaEvent_t> events_;
+  const int masterDevice;
+  cudaEvent_t masterEvent;
+  const cudaStream_t masterStream;
+  const int root;
+  std::vector<NCCLElement> elements;
+  std::vector<ncclComm_t> comms;
+  std::vector<cudaEvent_t> events;
 };
 
 template <typename T>
