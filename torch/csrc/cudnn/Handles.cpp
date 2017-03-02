@@ -21,7 +21,7 @@ struct Handle {
 };
 
 std::mutex mutex;
-std::unordered_map<int, Handle> handles;
+thread_local std::unordered_map<int, Handle> handles;
 
 }  // namespace
 
