@@ -39,6 +39,7 @@ struct options {
   long iterationTimeNanos = 2 * 1000 * 1000 * 1000;
   int warmupIterationCount = 5;
   bool showNanos = false;
+  int inputs = 1;
 };
 
 struct options parseOptions(int argc, char** argv);

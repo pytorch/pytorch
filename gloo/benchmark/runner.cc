@@ -118,7 +118,7 @@ void Runner::run(BenchmarkFn& fn, int n) {
     // Verify correctness of initial run
     if (options_.verify) {
       benchmark->run();
-      GLOO_ENFORCE(benchmark->verify());
+      benchmark->verify();
     }
 
     // Switch mode based on iteration count or time spent

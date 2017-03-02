@@ -35,21 +35,34 @@ class Benchmark {
     algorithm_->run();
   }
 
-  virtual bool verify() = 0;
+  virtual void verify() {}
 
  protected:
-  virtual float* allocate(int elements) {
-    data_.resize(elements);
-    for (int i = 0; i < data_.size(); i++) {
-      data_[i] = context_->rank_;
+  virtual std::vector<float*> allocate(int inputs, int elements) {
+    std::vector<float*> ptrs;
+
+    // Stride between successive values in any input.
+    const auto stride = context_->size_ * inputs;
+    for (int i = 0; i < inputs; i++) {
+      std::vector<float> memory(elements);
+
+      // Value at memory[0]. Different for every input at every node.
+      // This means all values across all inputs and all nodes are
+      // different and we can accurately detect correctness errors.
+      auto value = (context_->rank_ * inputs) + i;
+      for (int j = 0; j < elements; j++) {
+        memory[j] = (j * stride) + value;
+      }
+      ptrs.push_back(memory.data());
+      inputs_.push_back(std::move(memory));
     }
-    return data_.data();
+    return ptrs;
   }
 
   std::shared_ptr<::gloo::Context> context_;
   struct options options_;
   std::unique_ptr<::gloo::Algorithm> algorithm_;
-  std::vector<float> data_;
+  std::vector<std::vector<float> > inputs_;
 };
 
 } // namespace benchmark

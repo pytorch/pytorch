@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sstream>
+
 namespace gloo {
 namespace benchmark {
 
@@ -43,9 +45,10 @@ static void usage(int status, const char* argv0) {
   X("");
   X("Benchmark parameters:");
   X("      --verify           Verify result first iteration (if applicable)");
-  X("      --elements         Number of floats to use");
-  X("      --iteration-count  Number of iterations");
-  X("      --iteration-time   Number of seconds to run benchmark");
+  X("      --inputs           Number of input buffers");
+  X("      --elements         Number of floats to use per input buffer");
+  X("      --iteration-count  Number of iterations to run benchmark for");
+  X("      --iteration-time   Time to run benchmark for (default: 2s)");
   X("      --nanos            Display timing data in nanos instead of micros");
   X("");
   X("BENCHMARK is one of:");
@@ -56,6 +59,23 @@ static void usage(int status, const char* argv0) {
   X("");
 
   exit(status);
+}
+
+static long argToNanos(char** argv, const char* arg) {
+  std::stringstream ss(arg);
+  long num = 1;
+  std::string unit = "s";
+  ss >> num >> unit;
+  if (unit == "s") {
+    return num * 1000 * 1000 * 1000;
+  } else if (unit == "ms") {
+    return num * 1000 * 1000;
+  } else {
+    fprintf(stderr, "%s: invalid duration: %s\n", argv[0], arg);
+    usage(EXIT_FAILURE, argv[0]);
+  }
+
+  return -1;
 }
 
 struct options parseOptions(int argc, char** argv) {
@@ -75,6 +95,7 @@ struct options parseOptions(int argc, char** argv) {
       {"sync", required_argument, nullptr, 0x1005},
       {"nanos", no_argument, nullptr, 0x1006},
       {"busy-poll", required_argument, nullptr, 0x1007},
+      {"inputs", required_argument, nullptr, 0x1008},
       {"help", no_argument, nullptr, 0xffff},
       {nullptr, 0, nullptr, 0}};
 
@@ -128,8 +149,7 @@ struct options parseOptions(int argc, char** argv) {
       }
       case 0x1004: // --iteration-time
       {
-        long sec = atoi(optarg);
-        result.iterationTimeNanos = sec * 1000 * 1000 * 1000;
+        result.iterationTimeNanos = argToNanos(argv, optarg);
         break;
       }
       case 0x1005: // --sync
@@ -151,6 +171,11 @@ struct options parseOptions(int argc, char** argv) {
           atoi(optarg) == 1 ||
           tolower(optarg[0])== 't' ||
           tolower(optarg[0])== 'y';
+        break;
+      }
+      case 0x1008: // --inputs
+      {
+        result.inputs = atoi(optarg);
         break;
       }
       case 0xffff: // --help

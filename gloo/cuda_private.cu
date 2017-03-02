@@ -26,17 +26,19 @@ __global__ void initializeMemory(
 }
 
 template<typename T>
-CudaMemory<T>::CudaMemory(size_t n): n_(n), bytes_(n * sizeof(T)) {
+CudaMemory<T>::CudaMemory(size_t elements)
+    : elements(elements),
+      bytes(elements * sizeof(T)) {
   CUDA_CHECK(cudaGetDevice(&device_));
   // Sychronize memory allocation with NCCL operations
   std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-  CUDA_CHECK(cudaMalloc(&ptr_, bytes_));
+  CUDA_CHECK(cudaMalloc(&ptr_, bytes));
 }
 
 template<typename T>
 CudaMemory<T>::CudaMemory(CudaMemory<T>&& other) noexcept
-  : n_(other.n_),
-    bytes_(other.bytes_),
+  : elements(other.elements),
+    bytes(other.bytes),
     device_(other.device_),
     ptr_(other.ptr_) {
   // Nullify pointer on move source
@@ -57,16 +59,16 @@ template<typename T>
 void CudaMemory<T>::set(T val, size_t stride, cudaStream_t stream) {
   CudaDeviceScope scope(device_);
   if (stream == kStreamNotSet) {
-    initializeMemory<<<1, 32>>>(ptr_, val, n_, stride);
+    initializeMemory<<<1, 32>>>(ptr_, val, elements, stride);
   } else {
-    initializeMemory<<<1, 32, 0, stream>>>(ptr_, val, n_, stride);
+    initializeMemory<<<1, 32, 0, stream>>>(ptr_, val, elements, stride);
   }
 }
 
 template<typename T>
-std::unique_ptr<T[]> CudaMemory<T>::copyToHost() {
-  auto host = make_unique<T[]>(n_);
-  cudaMemcpy(host.get(), ptr_, bytes_, cudaMemcpyDefault);
+std::unique_ptr<T[]> CudaMemory<T>::copyToHost() const {
+  auto host = make_unique<T[]>(elements);
+  cudaMemcpy(host.get(), ptr_, bytes, cudaMemcpyDefault);
   return host;
 }
 
