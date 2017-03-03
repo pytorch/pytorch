@@ -132,7 +132,8 @@ class Optimizer(object):
         """Clears the gradients of all optimized :class:`Variable` s."""
         for group in self.param_groups:
             for param in group['params']:
-                param.grad.data.zero_()
+                if param.grad is not None:
+                    param.grad.data.zero_()
 
     def step(self, closure):
         """Performs a single optimization step (parameter update).

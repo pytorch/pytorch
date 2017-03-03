@@ -63,6 +63,10 @@ auto Variable::backward(std::shared_ptr<Variable> gradOutput) -> void {
   if (!grad) {
     std::unique_ptr<Tensor> data(gradOutput->data->clone());
     grad = std::make_shared<Variable>(std::move(data), false, true);
+  } else if (grad->data->isSparse() && !gradOutput->data->isSparse()) {
+    auto* sum = gradOutput->data->clone();
+    sum->cadd(*sum, *grad->data);
+    grad->data.reset(sum);
   } else {
     grad->data->cadd(*grad->data, *gradOutput->data);
   }

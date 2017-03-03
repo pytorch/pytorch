@@ -21,6 +21,15 @@ def _type(self, new_type=None, async=False):
         new_type = _import_dotted_name(new_type)
     if new_type == type(self):
         return self
+    if self.is_sparse:
+        if not new_type.is_sparse:
+            raise RuntimeError("Cannot cast sparse tensor to dense tensor")
+        new_type_name = new_type.__module__ + '.' + new_type.__name__
+        new_values_type_name = new_type_name.replace('.sparse', '')
+        new_values = self.values().type(new_values_type_name, async)
+        return new_type(self.indices(), new_values, self.size())
+    if new_type.is_sparse:
+        raise RuntimeError("Cannot cast dense tensor to sparse tensor")
     return new_type(self.size()).copy_(self, async)
 
 
@@ -39,16 +48,20 @@ def _cuda(self, device=None, async=False):
     if self.is_cuda:
         if device is None:
             device = torch.cuda.current_device()
-        if self.get_device() != device:
-            with torch.cuda.device(device):
-                return type(self)(self.size()).copy_(self, async)
-        else:
+        if self.get_device() == device:
             return self
     else:
         if device is None:
             device = -1
-        with torch.cuda.device(device):
-            return self.type(getattr(torch.cuda, self.__class__.__name__), async)
+    with torch.cuda.device(device):
+        if self.is_sparse:
+            new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
+            indices = self.indices().cuda(device, async)
+            values = self.values().cuda(device, async)
+            return new_type(indices, values, self.size())
+        else:
+            new_type = getattr(torch.cuda, self.__class__.__name__)
+            return new_type(self.size()).copy_(self, async)
 
 
 def _range(*args, **kwargs):

@@ -4,6 +4,7 @@ from ._utils import _type, _cuda, _range
 
 class _StorageBase(object):
     is_cuda = False
+    is_sparse = False
 
     def __str__(self):
         content = ' ' + '\n '.join(str(self[i]) for i in _range(len(self)))

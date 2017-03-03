@@ -2,6 +2,15 @@
 #define THS_GENERIC_FILE "tensors/generic/THSTensor.cpp"
 #else
 
+#define const_tensor_cast(tensor) \
+  dynamic_cast<const THSTensor&>(tensor)
+#define const_storage_cast(storage) \
+  dynamic_cast<const THStorage<real>&>(storage)
+#define const_long_cast(tensor) \
+  dynamic_cast<const THSTensor<long>&>(tensor)
+#define const_byte_cast(tensor) \
+  dynamic_cast<const THSTensor<unsigned char>&>(tensor)
+
 template<>
 THSTensor<real>::THSTensor():
   tensor(THSTensor_(new)())
@@ -36,12 +45,12 @@ auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 
 template<>
 int THSTensor<real>::nDim() const {
-  return tensor->nDimension;
+  return tensor->nDimensionI;
 }
 
 template<>
 auto THSTensor<real>::sizes() const -> long_range {
-  return std::vector<long>(tensor->size, tensor->size + tensor->nDimension);
+  return std::vector<long>(tensor->size, tensor->size + tensor->nDimensionI);
 }
 
 template<>
@@ -91,12 +100,12 @@ const void* THSTensor<real>::data() const {
 
 template<>
 void* THSTensor<real>::cdata() {
-  throw std::runtime_error("THSTensor::cdata() not supported");
+  return tensor;
 }
 
 template<>
 const void* THSTensor<real>::cdata() const {
-  throw std::runtime_error("THSTensor::cdata() not supported");
+  return tensor;
 }
 
 template<>
@@ -417,12 +426,16 @@ auto THSTensor<real>::sub(const Tensor &src, scalar_type value) -> THSTensor& {
 
 template<>
 auto THSTensor<real>::mul(const Tensor &src, scalar_type value) -> THSTensor& {
-  throw std::runtime_error("THSTensor::mul() not supported");
+  const THSTensor &src_t = const_tensor_cast(src);
+  THSTensor_(mul)(tensor, src_t.tensor, value);
+  return *this;
 }
 
 template<>
 auto THSTensor<real>::div(const Tensor &src, scalar_type value) -> THSTensor& {
-  throw std::runtime_error("THSTensor::div() not supported");
+  const THSTensor &src_t = const_tensor_cast(src);
+  THSTensor_(div)(tensor, src_t.tensor, value);
+  return *this;
 }
 
 template<>
@@ -442,12 +455,15 @@ auto THSTensor<real>::clamp(const Tensor &src, scalar_type min_value, scalar_typ
 
 template<>
 auto THSTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cadd() not supported");
+  const THSTensor &src1_t = const_tensor_cast(src1);
+  const THSTensor &src2_t = const_tensor_cast(src2);
+  THSTensor_(cadd)(tensor, src1_t.tensor, value, src2_t.tensor);
+  return *this;
 }
 
 template<>
 auto THSTensor<real>::cadd(const Tensor& src1, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cadd() not supported");
+  return cadd(src1, static_cast<scalar_type>(1), src2);
 }
 
 template<>
@@ -457,7 +473,10 @@ auto THSTensor<real>::csub(const Tensor& src1, scalar_type value, const Tensor& 
 
 template<>
 auto THSTensor<real>::cmul(const Tensor& src1, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cmul() not supported");
+  const THSTensor &src1_t = const_tensor_cast(src1);
+  const THSTensor &src2_t = const_tensor_cast(src2);
+  THSTensor_(cmul)(tensor, src1_t.tensor, src2_t.tensor);
+  return *this;
 }
 
 template<>

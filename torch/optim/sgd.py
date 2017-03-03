@@ -56,6 +56,8 @@ class SGD(Optimizer):
             nesterov = group['nesterov']
 
             for p in group['params']:
+                if p.grad is None:
+                    continue
                 d_p = p.grad.data
                 if weight_decay != 0:
                     d_p.add_(weight_decay, p.data)
