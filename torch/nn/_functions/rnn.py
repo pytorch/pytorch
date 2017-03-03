@@ -21,7 +21,7 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
-    x_h = input.unsqueeze(1).expand(input.size(0), 4, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
+    x_h = input.expand(input.size(0), 4, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
     gates = x_h + F.linear(hx, w_hh, b_hh)
     ingate, forgetgate, cellgate, outgate = torch.unbind(gates, 1)
 
@@ -37,7 +37,8 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    gi = input.unsqueeze(1).expand(input.size(0), 3, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
+    input = input.view(input.size(0), 1, -1)
+    gi = input.expand(input.size(0), 3, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = torch.unbind(gi, 1)
     h_r, h_i, h_n = torch.unbind(gh, 1)
@@ -311,12 +312,11 @@ class CudnnRNN(NestedIOFunction):
                 output,
                 weight,
                 grad_weight)
-            if self.skip_input:
-                grad_weight = [tuple(w for w in layer_grad_weight if w is not None)
-                               for layer_grad_weight in grad_weight]
         else:
             grad_weight = [(None,) * len(layer_weight) for layer_weight in weight]
-
+        if self.skip_input:
+            grad_weight = [tuple(w for w in layer_grad_weight if w is not None)
+                           for layer_grad_weight in grad_weight]
         if self.retain_variables:
             self.reserve = self._reserve_clone
             del self._reserve_clone

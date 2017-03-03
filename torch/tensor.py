@@ -255,6 +255,7 @@ class _TensorBase(object):
                 src_size[i] = target_size
                 src_stride[i] = 0
             elif size != target_size:
+                print(sizes)
                 raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
 
         result.set_(src.storage(), src.storage_offset(), torch.Size(src_size),
