@@ -2501,7 +2501,9 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   int maxDim = dimension + 1;
   int allEmpty = 1;
   int allContiguous = 1;
-  int ldimension = dimension;
+
+  // cat_dimension is the actual dimension we cat along
+  int cat_dimension = dimension;
 
   for (i = 0; i < numInputs; i++)
   {
@@ -2510,13 +2512,13 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
 
   // When the user input dimension is -1 (i.e. -2 in C)
   // Then we pick the maximum last dimension across all tensors.
-  if ( dimension == -2 )
+  if ( dimension + TH_INDEX_BASE == -1 )
   {
-    ldimension = maxDim?(maxDim-1):0;
+    cat_dimension = maxDim?(maxDim-1):0;
   }
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
-  THArgCheck(ldimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
+  THArgCheck(cat_dimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
 
   size = THLongStorage_newWithSize(maxDim);
 
@@ -2524,7 +2526,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   {
     // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
     long dimSize = i < inputs[0]->nDimension ? inputs[0]->size[i] : THMin(inputs[0]->nDimension, 1);
-    if (i == ldimension)
+    if (i == cat_dimension)
     {
       for (j = 1; j < numInputs; j++)
       {
@@ -2571,7 +2573,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
 
     // First path is for contiguous inputs along dim 1
     // Second path for non-contiguous
-    if (ldimension == 0 && allContiguous)
+    if (cat_dimension == 0 && allContiguous)
     {
       real* result_data = result->storage->data + result->storageOffset;
       offset = 0;
@@ -2594,9 +2596,9 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
       {
         if (inputs[j]->nDimension)
         {
-          long dimSize = ldimension < inputs[j]->nDimension ? inputs[j]->size[ldimension] : 1;
+          long dimSize = cat_dimension < inputs[j]->nDimension ? inputs[j]->size[cat_dimension] : 1;
           THTensor *nt = THTensor_(newWithTensor)(result);
-          THTensor_(narrow)(nt, NULL, ldimension, offset, dimSize);
+          THTensor_(narrow)(nt, NULL, cat_dimension, offset, dimSize);
           THTensor_(copy)(nt, inputs[j]);
           THTensor_(free)(nt);
           offset += dimSize;
