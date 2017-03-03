@@ -87,8 +87,8 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   // loop below will overwrite the value
   int maxDim = dimension + 1;
 
-  // ldimension is the actual dimension we cat along (minus 1, for 0-based indexing)
-  int ldimension = dimension;
+  // cat_dimension is the actual dimension we cat along
+  int cat_dimension = dimension;
 
   for (i = 0; i < numInputs; i++)
   {
@@ -100,13 +100,13 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   // In the event that the user specified -1 as the concat dimension, then
   // we want to pick the maxDim  as dimension to cat along (and thus maxDim - 1 as the
   // value due to 0-based indexing). If the maxDim is // 0 (i.e. we are catting all
-  // empty tensors), then we set ldimension to be 0
+  // empty tensors), then we set cat_dimension to be 0
   if (dimension + TH_INDEX_BASE == -1) {
-    ldimension = maxDim ? (maxDim - 1) : 0;
+    cat_dimension = maxDim ? (maxDim - 1) : 0;
   }
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
-  THArgCheck(ldimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
+  THArgCheck(cat_dimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
 
   size = THLongStorage_newWithSize(maxDim);
   for(i = 0; i < maxDim; i++)
@@ -115,7 +115,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     long dimSize = i < THCTensor_(nDimension)(state, inputs[0])
                        ? THCTensor_(size)(state, inputs[0], i)
                        : THMin(THCTensor_(nDimension)(state, inputs[0]), 1);
-    if (i == ldimension)
+    if (i == cat_dimension)
     {
       for (j = 1; j < numInputs; j++)
       {
@@ -203,15 +203,15 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-  CatArrayBatchedCopy<real, unsigned int, DIMS><<<applyGrid, applyBlock>>>(data, d_inputs, param, ldimension, param.outputStride[dimension]);
+  CatArrayBatchedCopy<real, unsigned int, DIMS><<<applyGrid, applyBlock>>>(data, d_inputs, param, cat_dimension, param.outputStride[cat_dimension]);
 
     // Now we loop
     offset = 0;
     for (i = 0; i < numInputs; i += CAT_ARRAY_BATCH_SIZE) {
       cohortMax = 0;
       for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
-        long dimSize = ldimension < THCTensor_(nDimension)(state, inputs[i+j])
-          ? THCTensor_(size)(state, inputs[i+j], ldimension)
+        long dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[i+j])
+          ? THCTensor_(size)(state, inputs[i+j], cat_dimension)
           : 1;
 
         stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
@@ -267,12 +267,12 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       // No reason to copy when input is empty
       if (!THCTensor_(nDimension)(state, inputs[j])) continue;
 
-      long dimSize = ldimension < THCTensor_(nDimension)(state, inputs[j])
-               ? THCTensor_(size)(state, inputs[j], ldimension)
+      long dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[j])
+               ? THCTensor_(size)(state, inputs[j], cat_dimension)
                : 1;
 
       THCTensor *nt = THCTensor_(newWithTensor)(state, result);
-      THCTensor_(narrow)(state, nt, NULL, ldimension, offset, dimSize);
+      THCTensor_(narrow)(state, nt, NULL, cat_dimension, offset, dimSize);
       THCTensor_(copy)(state, nt, inputs[j]);
       THCTensor_(free)(state, nt);
       offset += dimSize;
