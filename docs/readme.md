@@ -16,8 +16,8 @@ overview of these domains and how they interact.
 * [CUDA integration](cuda.md) -- integration of CUDA aware Gloo
   algorithms with existing CUDA code
 
-* [Latency optimization](latency.md) -- series of tips and tricks to
-  improve algorithm latency
+* [Latency optimization](latency.md) -- number of tips and tricks to
+  improve performance
 
 ## Overview
 
