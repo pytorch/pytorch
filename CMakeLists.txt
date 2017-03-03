@@ -20,7 +20,9 @@ IF(NOT TH_INSTALL_BIN_SUBDIR
   SET(TH_INSTALL_CMAKE_SUBDIR "share/cmake/TH" CACHE PATH "TH install cmake subdirectory")
 ENDIF()
 
-# flags
+#######################################################################
+##### flags section
+######################################################################
 
 IF(MSVC)
   # respect the standard
@@ -128,6 +130,52 @@ IF(C_AVX2_FOUND)
   SET(CMAKE_C_FLAGS "${C_AVX2_FLAGS} -DUSE_AVX2 ${CMAKE_C_FLAGS}")
 ENDIF(C_AVX2_FOUND)
 
+CHECK_C_SOURCE_RUNS("
+#include <stdatomic.h>
+int main()
+{
+  int a;
+  int oa;
+  atomic_store(&a, 1);
+  atomic_fetch_add(&a, 1);
+  oa = atomic_load(&a);
+  if(!atomic_compare_exchange_strong(&a, &oa, 3))
+    return -1;
+  return 0;
+}
+" HAS_C11_ATOMICS)
+
+IF(NOT HAS_C11_ATOMICS)
+  CHECK_C_SOURCE_RUNS("
+#include <intrin.h>
+int main()
+{
+  long a;
+  _InterlockedExchange(&a, 1);
+  _InterlockedExchangeAdd(&a, 1);
+  if(_InterlockedCompareExchange(&a, 3, 2) != 2)
+    return -1;
+  return 0;
+}
+" HAS_MSC_ATOMICS)
+
+  CHECK_C_SOURCE_RUNS("
+int main()
+{
+  int a;
+  __sync_lock_test_and_set(&a, 1);
+  __sync_fetch_and_add(&a, 1);
+  if(!__sync_bool_compare_and_swap(&a, 2, 3))
+    return -1;
+  return 0;
+}
+" HAS_GCC_ATOMICS)
+ENDIF()
+
+#######################################################################
+##### sources section
+######################################################################
+
 IF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
   SET(simd generic/simd/convolve.c)
   IF(MSVC)
@@ -178,6 +226,11 @@ SET(src
   THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c THVector.c)
 
 SET(src ${src} ${hdr} ${simd})
+
+#######################################################################
+##### build section
+######################################################################
+
 ADD_LIBRARY(TH SHARED ${src})
 if(BUILD_STATIC)
   ADD_LIBRARY(TH_static STATIC ${src})
@@ -190,48 +243,6 @@ MESSAGE(STATUS "TH_SO_VERSION: ${TH_SO_VERSION}")
 SET_TARGET_PROPERTIES(TH PROPERTIES
   VERSION   ${TH_SO_VERSION}
   SOVERSION ${TH_SO_VERSION})
-
-CHECK_C_SOURCE_RUNS("
-#include <stdatomic.h>
-int main()
-{
-  int a;
-  int oa;
-  atomic_store(&a, 1);
-  atomic_fetch_add(&a, 1);
-  oa = atomic_load(&a);
-  if(!atomic_compare_exchange_strong(&a, &oa, 3))
-    return -1;
-  return 0;
-}
-" HAS_C11_ATOMICS)
-
-IF(NOT HAS_C11_ATOMICS)
-  CHECK_C_SOURCE_RUNS("
-#include <intrin.h>
-int main()
-{
-  long a;
-  _InterlockedExchange(&a, 1);
-  _InterlockedExchangeAdd(&a, 1);
-  if(_InterlockedCompareExchange(&a, 3, 2) != 2)
-    return -1;
-  return 0;
-}
-" HAS_MSC_ATOMICS)
-
-  CHECK_C_SOURCE_RUNS("
-int main()
-{
-  int a;
-  __sync_lock_test_and_set(&a, 1);
-  __sync_fetch_and_add(&a, 1);
-  if(!__sync_bool_compare_and_swap(&a, 2, 3))
-    return -1;
-  return 0;
-}
-" HAS_GCC_ATOMICS)
-ENDIF()
 
 IF(HAS_C11_ATOMICS)
   ADD_DEFINITIONS(-DUSE_C11_ATOMICS=1)
@@ -264,10 +275,6 @@ IF(LAPACK_FOUND)
   TARGET_LINK_LIBRARIES(TH ${LAPACK_LIBRARIES})
 ENDIF(LAPACK_FOUND)
 
-IF(BLAS_IS_ACCELERATE)
-  MESSAGE(STATUS "BLAS FOUND IS ACCELERATE: Fix for sdot")
-ENDIF()
-
 IF (UNIX AND NOT APPLE)
    INCLUDE(CheckLibraryExists)
    # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
@@ -284,6 +291,7 @@ IF(UNIX)
   IF(HAVE_MMAP)
     ADD_DEFINITIONS(-DHAVE_MMAP=1)
   ENDIF(HAVE_MMAP)
+  # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
   ADD_DEFINITIONS(-D_FILE_OFFSET_BITS=64)
   CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
   IF(HAVE_SHM_OPEN)
@@ -299,46 +307,9 @@ IF(UNIX)
   ENDIF(HAVE_MALLOC_USABLE_SIZE)
 ENDIF(UNIX)
 
-
-
 IF(NOT MSVC)
   TARGET_LINK_LIBRARIES(TH m)
 ENDIF(NOT MSVC)
-
-SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
-FOREACH(KEYWORD "inline" "__inline__" "__inline")
-  IF(NOT DEFINED C_INLINE)
-
-    SET(CMAKE_REQUIRED_FLAGS "-Dinline=${KEYWORD} ${CMAKE_C_FLAGS}")
-    CHECK_C_SOURCE_RUNS("
-       static inline int static_foo()
-       {
-         return 0;
-       }
-
-       int main(int argc, char *argv[])
-       {
-         static_foo();
-         return 0;
-       }" C_HAS_${KEYWORD})
-
-    IF(C_HAS_${KEYWORD})
-      SET(C_INLINE TRUE)
-# Right now i put it in THGeneral.h -- debatable
-#      ADD_DEFINITIONS("-Dinline=${KEYWORD}")
-      SET(TH_INLINE ${KEYWORD})
-      MESSAGE(STATUS "C inline is supported (${KEYWORD})")
-    ENDIF(C_HAS_${KEYWORD})
-  ENDIF(NOT DEFINED C_INLINE)
-ENDFOREACH(KEYWORD)
-SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
-
-IF(NOT DEFINED C_INLINE)
-  MESSAGE(STATUS "C inline seems not supported")
-# Right now i put it in THGeneral.h -- debatable
-#  ADD_DEFINITIONS("-Dinline=")
-SET(TH_INLINE "")
-ENDIF(NOT DEFINED C_INLINE)
 
 # Is __thread supported?
 IF(NOT MSVC)
@@ -354,6 +325,11 @@ ENDIF(NOT C_HAS_THREAD)
 
 INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
 CONFIGURE_FILE(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
+
+
+#######################################################################
+##### install section
+######################################################################
 
 INSTALL(TARGETS TH
   EXPORT TH-exports

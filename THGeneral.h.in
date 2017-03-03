@@ -13,7 +13,6 @@
 
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK
-#cmakedefine BLAS_IS_ACCELERATE
 #cmakedefine BLAS_F2C
 
 #ifdef __cplusplus
@@ -30,12 +29,6 @@
 # endif
 #else
 # define TH_API TH_EXTERNC
-#endif
-
-#define TH_INLINE @TH_INLINE@
-
-#ifndef __cplusplus
-#define inline @TH_INLINE@
 #endif
 
 #ifndef M_PI
