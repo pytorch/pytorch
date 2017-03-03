@@ -1,13 +1,14 @@
 #include "THCGenerator.hpp"
 
+#include <stdexcept>
+
 #define const_generator_cast(generator) \
   dynamic_cast<const THCGenerator&>(generator)
 
 namespace thpp {
 
-THCGenerator::THCGenerator(THCState* state))
-  : generator(THCRandom_getGenerator())
-  , state(state)
+THCGenerator::THCGenerator(THCState* state)
+  : state(state)
 {
   int num_devices, current_device;
   cudaGetDeviceCount(&num_devices);
