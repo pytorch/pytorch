@@ -10,6 +10,7 @@ if sys.version_info[0] == 2:
     import Queue as queue
 else:
     import queue
+    basestring = str
 
 
 class ExceptionWrapper(object):
@@ -72,7 +73,7 @@ def default_collate(batch):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
         return torch.DoubleTensor(batch)
-    elif isinstance(batch[0], str):
+    elif isinstance(batch[0], basestring):
         return batch
     elif isinstance(batch[0], collections.Iterable):
         # if each batch element is not a tensor, then it should be a tuple
@@ -87,6 +88,8 @@ def default_collate(batch):
 def pin_memory_batch(batch):
     if torch.is_tensor(batch):
         return batch.pin_memory()
+    elif isinstance(batch, basestring):
+        return batch
     elif isinstance(batch, collections.Iterable):
         return [pin_memory_batch(sample) for sample in batch]
     else:
