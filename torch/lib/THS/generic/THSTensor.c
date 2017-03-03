@@ -43,9 +43,6 @@ THLongStorage *THSTensor_(newSizeOf)(THSTensor *self)
 THLongTensor *THSTensor_(indices)(const THSTensor *self) {
   if (self->nnz == 0) {
     // Narrows don't work on 0-length tensors
-    if (self->indices->nDimension) {
-      THLongTensor_resizeNd(self->indices, 0, NULL, NULL);
-    }
     THLongTensor_retain(self->indices);
     return self->indices;
   }
@@ -54,9 +51,6 @@ THLongTensor *THSTensor_(indices)(const THSTensor *self) {
 
 THTensor *THSTensor_(values)(const THSTensor *self) {
   if (self->nnz == 0) {
-    if (self->values->nDimension) {
-      THTensor_(resizeNd)(self->values, 0, NULL, NULL);
-    }
     THTensor_(retain)(self->values);
     return self->values;
   }
@@ -120,7 +114,7 @@ THSTensor* THSTensor_(move)(THSTensor *self, THLongTensor *indices, THTensor *va
   return self;
 }
 
-THSTensor* THSTensor_(set)(THSTensor *self, THLongTensor *indices, THTensor *values) {
+THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values) {
   // Note: Not like torch.set, this is an internal method
   return THSTensor_(move)(
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
@@ -150,7 +144,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
 
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
-  THSTensor_(set)(self, indices, values);
+  THSTensor_(_set)(self, indices, values);
 
   nDimI = THLongTensor_size(indices, 0);
   nDimV = THTensor_(nDimension)(values) - 1;
@@ -219,7 +213,7 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
   THSTensor *other = THSTensor_(new)();
   THSTensor_(rawResize)(other, self->nDimensionI, self->nDimensionV, self->size);
 
-  THSTensor_(set)(other, self->indices, self->values);
+  THSTensor_(_set)(other, self->indices, self->values);
 
   other->nnz = self->nnz;
   return other;
@@ -310,8 +304,13 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
   THTensor_(zero)(other_);
   other = THTensor_(data)(other_);
 
-  // Some necessary dimensions and sizes
   nnz = THSTensor_(nnz)(self);
+  if (nnz == 0) {
+    THLongStorage_free(storage);
+    return other_;
+  }
+
+  // Some necessary dimensions and sizes
   nDimI = THSTensor_(nDimensionI)(self);
   nDimV = THSTensor_(nDimensionV)(self);
   sizes = storage->data;
@@ -343,7 +342,7 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
 void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
   if (self == src) return;
   THSTensor_(rawResize)(self, src->nDimensionI, src->nDimensionV, src->size);
-  THSTensor_(set)(self, src->indices, src->values);
+  THSTensor_(_set)(self, src->indices, src->values);
   self->nnz = src->nnz;
 }
 
@@ -376,7 +375,6 @@ void THSTensor_(addSlice)(
   THTensor *dst, THTensor *src1, real value, THTensor *src2,
   long dim, long dstIdx, long src1Idx, long src2Idx) {
   if (src1->nDimension > 1) {
-    THTensor_(select)(src1Buffer, src1, dim, src1Idx);
     THTensor_(select)(src2Buffer, src2, dim, src2Idx);
     THTensor_(select)(dstBuffer, dst, dim, dstIdx);
     THTensor_(cadd)(dstBuffer, src1Buffer, value, src2Buffer);
@@ -481,7 +479,6 @@ void THSTensor_(reorder)(THSTensor *self) {
   for (j = 1; j < self->nnz; j++) {
     cmp = 1;
     // TODO: pass eps in as a parameter
-    // if (values[j] == 0) continue;
     for (d = 0; d < nDimI; d++)
       if (IND(i, d) != IND(j, d)) {
         cmp = 0;
@@ -560,6 +557,7 @@ void THSTensor_(free)(THSTensor *self)
     return;
   if(THAtomicDecrementRef(&self->refcount))
   {
+    THFree(self->size);
     THLongTensor_free(self->indices);
     THTensor_(free)(self->values);
     THFree(self);

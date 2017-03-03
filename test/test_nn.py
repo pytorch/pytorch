@@ -1174,7 +1174,8 @@ class TestNN(NNTestCase):
             self.assertEqual(unpacked_len, lengths)
 
             # check grad
-            padded.grad.data.zero_()
+            if padded.grad is not None:
+                padded.grad.data.zero_()
             grad_output = unpacked.data.clone().normal_()
             unpacked.backward(grad_output)
             if batch_first:
@@ -1583,7 +1584,7 @@ class TestNN(NNTestCase):
         grad = torch.randn(2, 2, 5, 10, 10).cuda()[:, 1]
         assert not grad.is_contiguous()
         output.backward(grad, retain_variables=True)
-        assert input.grad is not None
+        self.assertIsNotNone(input.grad)
         result = input.grad.data.clone()
         input.grad.data.zero_()
 

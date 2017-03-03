@@ -75,6 +75,6 @@ TH_API void THSTensor_(select)(THSTensor *self, THSTensor *src, int dimension_, 
 
 // internal methods
 THSTensor* THSTensor_(move)(THSTensor *self, THLongTensor *indices, THTensor *values);
-THSTensor* THSTensor_(set)(THSTensor *self, THLongTensor *indices, THTensor *values);
+THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values);
 
 #endif

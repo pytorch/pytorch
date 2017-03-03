@@ -22,10 +22,14 @@ def _type(self, new_type=None, async=False):
     if new_type == type(self):
         return self
     if self.is_sparse:
+        if not new_type.is_sparse:
+            raise RuntimeError("Cannot cast sparse tensor to dense tensor")
         new_type_name = new_type.__module__ + '.' + new_type.__name__
         new_values_type_name = new_type_name.replace('.sparse', '')
         new_values = self.values().type(new_values_type_name, async)
         return new_type(self.indices(), new_values, self.size())
+    if new_type.is_sparse:
+        raise RuntimeError("Cannot cast dense tensor to sparse tensor")
     return new_type(self.size()).copy_(self, async)
 
 

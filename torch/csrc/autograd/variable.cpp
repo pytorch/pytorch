@@ -63,10 +63,11 @@ auto Variable::backward(std::shared_ptr<Variable> gradOutput) -> void {
   if (!grad) {
     std::unique_ptr<Tensor> data(gradOutput->data->clone());
     grad = std::make_shared<Variable>(std::move(data), false, true);
+  } else if (grad->data->isSparse() && !gradOutput->data->isSparse()) {
+    auto* sum = gradOutput->data->clone();
+    sum->cadd(*sum, *grad->data);
+    grad->data.reset(sum);
   } else {
-    if (grad->data->isSparse() && !gradOutput->data->isSparse()) {
-      throw std::runtime_error("mixing sparse and dense gradients is not yet supported");
-    }
     grad->data->cadd(*grad->data, *gradOutput->data);
   }
 }

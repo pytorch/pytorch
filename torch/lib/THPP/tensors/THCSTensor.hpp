@@ -23,13 +23,8 @@ namespace thpp {
 
 template<typename real>
 struct THCSTensor : public interface_traits<real>::tensor_interface_type {
-  friend class THCSTensor<unsigned char>;
-  friend class THCSTensor<char>;
-  friend class THCSTensor<short>;
-  friend class THCSTensor<int>;
-  friend class THCSTensor<long>;
-  friend class THCSTensor<float>;
-  friend class THCSTensor<double>;
+  template<typename U>
+  friend struct THCSTensor;
 
 private:
   using interface_type = typename interface_traits<real>::tensor_interface_type;

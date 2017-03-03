@@ -248,8 +248,6 @@ THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage
 THCSTensor *THCSTensor_(resizeAs)(THCState *state, THCSTensor *self, THCSTensor *src)
 {
   if(!THCSTensor_(isSameSizeAs)(state, self, src)) {
-    // TODO the reshaped tensor may contain out of bounds values
-    // We may want to filter them out
     THCSTensor_(rawResize)(state, self, src->nDimensionI, src->nDimensionV, src->size);
   }
   return self;
@@ -287,6 +285,7 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
     return;
   if(THAtomicDecrementRef(&self->refcount))
   {
+    THFree(self->size);
     THCIndexTensor_(free)(state, self->indices);
     THCTensor_(free)(state, self->values);
     THFree(self);

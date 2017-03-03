@@ -6,6 +6,12 @@
 #define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride[1])
 
 void THSTensor_(zero)(THSTensor *self) {
+    if (self->indices->nDimension) {
+      THLongTensor_resizeNd(self->indices, 0, NULL, NULL);
+    }
+    if (self->values->nDimension) {
+      THTensor_(resizeNd)(self->values, 0, NULL, NULL);
+    }
   self->nnz = 0;
 }
 

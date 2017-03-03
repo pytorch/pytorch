@@ -2,6 +2,16 @@
 #define THCS_GENERIC_FILE "tensors/generic/THCSTensor.cpp"
 #else
 
+#define const_tensor_cast(tensor) \
+  dynamic_cast<const THCSTensor&>(tensor)
+#define const_storage_cast(storage) \
+  dynamic_cast<const THCStorage<real>&>(storage)
+#define const_long_cast(tensor) \
+  dynamic_cast<const THCSTensor<long>&>(tensor)
+#define const_byte_cast(tensor) \
+  dynamic_cast<const THCSTensor<unsigned char>&>(tensor)
+
+
 template<>
 THCSTensor<real>::THCSTensor(THCState* state):
   tensor(THCSTensor_(new)(state)), state(state)
@@ -207,8 +217,6 @@ auto THCSTensor<real>::free() -> THCSTensor& {
   THCSTensor_(free)(state, tensor);
   return *this;
 }
-
-#define non_const_cast(tensor) const_cast<THCSTensor&>(dynamic_cast<const THCSTensor&>(tensor))
 
 template<>
 auto THCSTensor<real>::diag(const Tensor& src, int k) -> THCSTensor& {
@@ -452,8 +460,8 @@ auto THCSTensor<real>::clamp(const Tensor &src, scalar_type min_value, scalar_ty
 
 template<>
 auto THCSTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& src2) -> THCSTensor& {
-  THCSTensor &src1_t = non_const_cast(src1);
-  THCSTensor &src2_t = non_const_cast(src2);
+  const THCSTensor &src1_t = const_tensor_cast(src1);
+  const THCSTensor &src2_t = const_tensor_cast(src2);
   THCSTensor_(cadd)(state, tensor, src1_t.tensor, cast_scalar(value), src2_t.tensor);
   return *this;
 }
@@ -471,8 +479,8 @@ auto THCSTensor<real>::csub(const Tensor& src1, scalar_type value, const Tensor&
 
 template<>
 auto THCSTensor<real>::cmul(const Tensor& src1, const Tensor& src2) -> THCSTensor& {
-  THCSTensor &src1_t = non_const_cast(src1);
-  THCSTensor &src2_t = non_const_cast(src2);
+  const THCSTensor &src1_t = const_tensor_cast(src1);
+  const THCSTensor &src2_t = const_tensor_cast(src2);
   THCSTensor_(cmul)(state, tensor, src1_t.tensor, src2_t.tensor);
   return *this;
 }

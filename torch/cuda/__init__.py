@@ -246,16 +246,25 @@ from .random import *
 from ..tensor import _TensorBase
 from ..storage import _StorageBase
 
+
+def _dummy_type(name):
+    def init_err(self):
+        class_name = self.__class__.__name__
+        raise RuntimeError(
+            "Tried to instantiate dummy base class {}".format(class_name))
+    return type(storage_name, (object,), {"__init__": init_err})
+
+
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
     for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
-        torch._C.__dict__[storage_name] = type(storage_name, (object,), {})
-        torch._C.__dict__[tensor_name] = type(tensor_name, (object,), {})
+        torch._C.__dict__[storage_name] = _dummy_type(storage_name)
+        torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
-    torch._C.__dict__['_CudaStreamBase'] = type('CudaStreamBase', (object,), {})
+    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
 
 
 class _CudaBase(object):

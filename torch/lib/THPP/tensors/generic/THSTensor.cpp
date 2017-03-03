@@ -464,7 +464,6 @@ auto THSTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& 
 template<>
 auto THSTensor<real>::cadd(const Tensor& src1, const Tensor& src2) -> THSTensor& {
   return cadd(src1, static_cast<scalar_type>(1), src2);
-  throw std::runtime_error("THSTensor::cadd() not supported");
 }
 
 template<>

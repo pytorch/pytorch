@@ -26,13 +26,13 @@ static void THSPTensor_(dealloc)(THSPTensor* self)
 static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
 #ifdef THC_GENERIC_FILE
-#define THPIndicesTensor_Check THCPLongTensor_Check
-#define THPIndicesTensor THCPLongTensor
-#define THIndicesTensor THCudaLongTensor
+#define THPIndexTensor_Check THCPLongTensor_Check
+#define THPIndexTensor THCPLongTensor
+#define THIndexTensor THCudaLongTensor
 #else
-#define THPIndicesTensor_Check THPLongTensor_Check
-#define THPIndicesTensor THPLongTensor
-#define THIndicesTensor THLongTensor
+#define THPIndexTensor_Check THPLongTensor_Check
+#define THPIndexTensor THPLongTensor
+#define THIndexTensor THLongTensor
 #endif
   HANDLE_TH_ERRORS
     Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
@@ -76,24 +76,24 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
   }
   // torch.SparseTensor(torch.LongTensor indices, torch.LongTensor values)
-  else if (num_args == 2 && THPIndicesTensor_Check(first_arg)) {
+  else if (num_args == 2 && THPIndexTensor_Check(first_arg)) {
     PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
     if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
 
-    THIndicesTensor *indices = ((THPIndicesTensor*)first_arg)->cdata;
+    THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
     THTensor *values = ((THPTensor*)second_arg)->cdata;
     self->cdata = THSTensor_(newWithTensor)(LIBRARY_STATE indices, values);
   }
   // torch.SparseTensor(torch.LongTensor indices,
   //                    torch.Tensor values,
   //                    torch.Size sizes)
-  else if (num_args > 2 && THPIndicesTensor_Check(first_arg)) {
+  else if (num_args > 2 && THPIndexTensor_Check(first_arg)) {
     PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
     PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
     if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
     if (!THPSize_Check(third_arg)) goto invalid_arguments;
 
-    THIndicesTensor *indices = ((THPIndicesTensor*)first_arg)->cdata;
+    THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
     THTensor *values = ((THPTensor*)second_arg)->cdata;
     THLongStoragePtr sizes = THPUtils_unpackSize(third_arg);
     self->cdata = THSTensor_(newWithTensorAndSize)(
@@ -122,9 +122,9 @@ invalid_arguments:
       "(int ...)");
   return NULL;
   END_HANDLE_TH_ERRORS
-#undef THPIndicesTensor_Check
-#undef THPIndicesTensor
-#undef THIndicesTensor
+#undef THPIndexTensor_Check
+#undef THPIndexTensor
+#undef THIndexTensor
 }
 
 // TODO: implement equality

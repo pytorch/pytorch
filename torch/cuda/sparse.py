@@ -2,14 +2,15 @@ import torch
 from torch import _C
 from ..tensor import _TensorBase
 from torch.sparse import _SparseBase, _sparse_tensor_classes
-from . import _lazy_init, device
+from . import _lazy_init, device, _dummy_type
 
 
 if not hasattr(torch._C, 'CudaSparseDoubleTensorBase'):
     # Define dummy base classes
     for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
         tensor_name = 'CudaSparse{0}TensorBase'.format(t)
-        torch._C.__dict__[tensor_name] = type(tensor_name, (object,), {})
+
+        torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
 
 class _CudaSparseBase(object):
