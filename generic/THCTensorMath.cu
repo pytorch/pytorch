@@ -223,7 +223,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
         // update offset
         offset += dimSize;
       }
-      cudaMemcpy(d_inputs, stackInputs, j * sizeof(CatArrInputTensor<real, unsigned int>), cudaMemcpyHostToDevice);
+      THCudaCheck(cudaMemcpy(d_inputs, stackInputs, j * sizeof(CatArrInputTensor<real, unsigned int>), cudaMemcpyHostToDevice));
 
       // Next, let's consider how we set our kernel launch parameters.
       // We borrow from THCApply, which the kernel's internal indexing
