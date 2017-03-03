@@ -29,11 +29,6 @@ OPERATOR_SCHEMA(SoftmaxWithLoss)
             // Labels must only be 1D or 2D
             CAFFE_ENFORCE(labels.dims().size() <= 2);
 
-            // If 2D, then must be single column
-            if (labels.dims().size() == 2) {
-              CAFFE_ENFORCE(labels.dims().Get(1) == 1);
-            }
-
             // Labels must have the same amount of elements as batch_size
             CAFFE_ENFORCE(batch_size == labels.dims().Get(0));
 
