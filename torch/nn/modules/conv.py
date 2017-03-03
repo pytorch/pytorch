@@ -356,12 +356,12 @@ class _ConvTransposeMixin(object):
                 .format(k, k + 2, len(output_size)))
 
         # 2*padding - output_padding = (input - 1)*stride - output + kernel_size
-        #                            = original_size
-        # padding = math.ceil(original_size / 2)
-        def original_size(d):
+        #                            = no_pad_diff
+        # padding = math.ceil(no_pad_diff / 2)
+        def no_pad_diff(d):
             return ((input.size(d + 2) - 1) * self.stride[d] - output_size[d] + self.kernel_size[d])
-        padding = tuple([(original_size(d) + 1) // 2 for d in range(k)])
-        output_padding = tuple([2 * padding[d] - original_size(d) for d in range(k)])
+        padding = tuple([(no_pad_diff(d) + 1) // 2 for d in range(k)])
+        output_padding = tuple([2 * padding[d] - no_pad_diff(d) for d in range(k)])
         return padding, output_padding
 
 
