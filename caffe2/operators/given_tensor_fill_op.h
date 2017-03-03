@@ -16,8 +16,10 @@ class GivenTensorFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws) {
     auto source_values =
         OperatorBase::template GetRepeatedArgument<T>("values");
-    for (T f : source_values) {
-      values_.push_back(static_cast<T>(f));
+    values_.Resize(source_values.size());
+    T* values_data = values_.template mutable_data<T>();
+    for (int i = 0; i < source_values.size(); i++) {
+      values_data[i] = static_cast<T>(source_values[i]);
     }
   }
 
@@ -26,14 +28,15 @@ class GivenTensorFillOp final : public FillerOp<Context> {
         << "output size: " << output->size()
         << " given size: " << values_.size();
     auto* data = output->template mutable_data<T>();
+    const T* values_data = values_.template data<T>();
     if (output->size()) {
       context_.template Copy<T, CPUContext, Context>(
-          output->size(), values_.data(), data);
+          output->size(), values_data, data);
     }
     return true;
   }
 
  private:
-  vector<T> values_;
+  TensorCPU values_;
 };
 }
