@@ -7,6 +7,9 @@ overview of these domains and how they interact.
 
 * [Overview](readme.md) -- this file
 
+* [Algorithms](algorithms.md) -- index of algorithms and their
+  semantics
+
 * [Transport details](transport.md) -- the transport API and its
   implementations
 
