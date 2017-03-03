@@ -1,4 +1,5 @@
 # Gloo
+
 Gloo is a collective communications library. It comes with a number of
 collective algorithms useful for machine learning applications. These
 include a barrier, broadcast, and allreduce.
@@ -12,13 +13,14 @@ buffers. In the latter case, it is not necessary to copy memory between
 host and device; this is taken care of by the algorithm implementations.
 
 ## Requirements
+
 Gloo is built to run on Linux and has no hard dependencies other than libstdc++.
 
 Optional dependencies are:
-* **[CUDA][cuda] and [NCCL][nccl]** -- for CUDA aware algorithms, tests, and benchmark
-* **[Google Test][gtest]** -- to build and run tests
-* **[Eigen][eigen]** -- for fast floating point routines
-* **[Hiredis][hiredis]** -- for coordinating machine rendezvous through Redis
+* [CUDA][cuda] and [NCCL][nccl] -- for CUDA aware algorithms, tests, and benchmark
+* [Google Test][gtest] -- to build and run tests
+* [Eigen][eigen] -- for fast floating point routines
+* [Hiredis][hiredis] -- for coordinating machine rendezvous through Redis
 
 [cuda]: http://www.nvidia.com/object/cuda_home_new.html
 [nccl]: https://github.com/nvidia/nccl
@@ -27,9 +29,11 @@ Optional dependencies are:
 [hiredis]: https://github.com/redis/hiredis
 
 ## Documentation
+
 Please refer to [docs/](docs/) for detailed documentation.
 
 ## Building
+
 You can build Gloo using CMake.
 
 Since it is a library, it is most convenient to vendor it in your own
@@ -54,19 +58,24 @@ ls -l gloo/gloo_{test,benchmark}
 ```
 
 ## Benchmarking
+
 The benchmark tool depends on 1) Eigen for floating point math and 2)
 Redis/Hiredis for rendezvous. The benchmark tool for CUDA algorithms
 obviously also depends on both CUDA and NCCL.
 
 To run a benchmark:
+
 1. Copy the benchmark tool to all participating machines
+
 2. Start a Redis server on any host (either a client machine or one of
    the machines participating in the test).
+   
 3. Determine some unique ID for the benchmark run (e.g. the `uuid`
    tool or some number).
+   
 4. On each machine, run (or pass `--help` for more options):
 
-    ``` text
+    ```
     ./benchmark \
       --size <number of machines> \
       --rank <index of this machine, starting at 0> \
@@ -78,6 +87,7 @@ To run a benchmark:
       --iteration-time 1s \
       allreduce_ring_chunked
     ```
+
 Example output (running on 4 machines with a 40GbE network):
 
 ``` text
@@ -106,4 +116,5 @@ Example output (running on 4 machines with a 40GbE network):
 ```
 
 ## License
+
 Gloo is BSD-licensed. We also provide an additional patent grant.
