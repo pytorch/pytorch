@@ -111,7 +111,7 @@ class Function(_C._FunctionBase):
         if backward_hooks is None:
             backward_hooks = OrderedDict()
         handle = hooks.RemovableHandle(backward_hooks)
-        backward_hooks[id(handle)] = hook
+        backward_hooks[handle.id] = hook
         return backward_hooks, handle
 
     def forward(self, *input):

@@ -179,7 +179,7 @@ class Module(object):
         that removes the hook from the module.
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[id(handle)] = hook
+        self._backward_hooks[handle.id] = hook
         return handle
 
     def register_forward_hook(self, hook):
@@ -195,7 +195,7 @@ class Module(object):
         that removes the hook from the module.
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        self._forward_hooks[id(handle)] = hook
+        self._forward_hooks[handle.id] = hook
         return handle
 
     def __call__(self, *input, **kwargs):

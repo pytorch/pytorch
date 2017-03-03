@@ -180,7 +180,7 @@ class Variable(_C._VariableBase):
             if self.creator is not None:
                 self.creator._register_hook_dict(self)
         handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[id(handle)] = hook
+        self._backward_hooks[handle.id] = hook
         return handle
 
     def reinforce(self, reward):
