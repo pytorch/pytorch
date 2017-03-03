@@ -180,6 +180,7 @@ def get_parameters(fn, handle, weight_buf):
 def _copyParams(params_from, params_to):
     for layer_params_from, layer_params_to in zip(params_from, params_to):
         for param_from, param_to in zip(layer_params_from, layer_params_to):
+            assert (param_from is None) ^ (param_to is None)
             if param_from is not None and param_to is not None:
                 assert param_from.type() == param_to.type()
                 param_to.copy_(param_from)

@@ -1269,6 +1269,7 @@ class TestNN(NNTestCase):
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
+                    self.assertFalse((x is None) ^ (y is None))
                     if x is not None and y is not None:
                         x.data.copy_(y.data)
 
