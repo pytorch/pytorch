@@ -1736,7 +1736,7 @@ def output_to_list(op_output):
 
 def _add_net_to_dict(net_dict, net):
     name = get_net_name(net)
-    if net in net_dict:
+    if name in net_dict:
         assert net_dict[name] is None or net == net_dict[name], (
             'Different nets with same name: ' + name)
         return False
