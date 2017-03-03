@@ -15,12 +15,12 @@
 #include "vector/SSE.c"
 #endif
 
-#if defined(USE_AVX) || defined(USE_AVX2)
-#include "vector/AVX.c"
+#if defined(__AVX__) || defined(__AVX2__)
+#include "vector/AVX.h"
 #endif
 
-#if defined(USE_AVX2)
-#include "vector/AVX2.c"
+#if defined(__AVX2__)
+#include "vector/AVX2.h"
 #endif
 
 #include "generic/THVectorDefault.c"

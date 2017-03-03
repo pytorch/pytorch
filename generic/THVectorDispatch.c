@@ -26,7 +26,7 @@ static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(fill_AVX), SIMDExtension_AVX),
     #endif
@@ -52,13 +52,13 @@ static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_AVX2)
+  #if defined(__AVX2__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cadd_AVX2), SIMDExtension_AVX2),
     #endif
   #endif
 
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cadd_AVX), SIMDExtension_AVX),
     #endif
@@ -91,7 +91,7 @@ static FunctionDescription THVector_(adds_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(adds_AVX), SIMDExtension_AVX),
     #endif
@@ -119,7 +119,7 @@ static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cmul_AVX), SIMDExtension_AVX),
     #endif
@@ -152,7 +152,7 @@ static FunctionDescription THVector_(muls_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(muls_AVX), SIMDExtension_AVX),
     #endif
@@ -179,7 +179,7 @@ static FunctionDescription THVector_(cdiv_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cdiv_AVX), SIMDExtension_AVX),
     #endif
@@ -206,7 +206,7 @@ static FunctionDescription THVector_(divs_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(divs_AVX), SIMDExtension_AVX),
     #endif
@@ -227,7 +227,7 @@ void THVector_(divs)(real *y, const real *x, const real c, const ptrdiff_t n) {
 
 static void (*THVector_(copy_DISPATCHPTR))(real *, const real *, const ptrdiff_t) = &THVector_(copy_DEFAULT);
 static FunctionDescription THVector_(copy_DISPATCHTABLE)[] = {
-  #if defined(USE_AVX)
+  #if defined(__AVX__)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(copy_AVX), SIMDExtension_AVX),
     #endif
