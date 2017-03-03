@@ -1,6 +1,7 @@
 #include "THCCachingAllocator.h"
 
 #include <cuda_runtime_api.h>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -17,7 +18,7 @@
 //   split. If no block is found, the allocator will delegate to cudaMalloc.
 // - If the cudaMalloc fails, the allocator will free all cached blocks that
 //   are not split and retry the allocation.
-// - Large (>1MB) and small allocation requestss are handled separately. Large
+// - Large (>1MB) and small allocation requests are handled separately. Large
 //   allocation requests can be filled by a cudaMalloc call of the exact size.
 //   Small requests will allocate and split a 1MB buffer, if necessary.
 //
@@ -26,26 +27,36 @@
 // launches. The programmer must insert the proper synchronization if memory
 // segments are used from multiple streams.
 //
+// The library provides a recordStream() function to help insert the correct
+// synchronization when allocations are used on multiple streams. This will
+// ensure that the block is not reused before each recorded stream completes
+// work.
+//
 
 
 namespace {
+
+typedef std::shared_ptr<THCStream> THCStreamPtr;
+typedef std::set<THCStreamPtr> stream_set;
 
 const size_t kRoundSmall = 512;     // round up small allocs to 512 bytes
 const size_t kRoundLarge = 131072;  // round up large allocs to 128 KiB
 const size_t kSmallAlloc = 1048576; // largest "small" allocation is 1 MiB
 
 struct Block {
-  int           device;     // gpu
-  cudaStream_t  stream;     // allocation stream
-  size_t        size;       // block size in bytes
-  char*         ptr;        // memory address
-  bool          allocated;  // in-use flag
-  Block*        prev;       // prev block if split from a larger allocation
-  Block*        next;       // next block if split from a larger allocation
+  int           device;      // gpu
+  cudaStream_t  stream;      // allocation stream
+  stream_set    stream_uses; // streams on which the block was used
+  size_t        size;        // block size in bytes
+  char*         ptr;         // memory address
+  bool          allocated;   // in-use flag
+  Block*        prev;        // prev block if split from a larger allocation
+  Block*        next;        // next block if split from a larger allocation
+  int           event_count; // number of outstanding CUDA events
 
   Block(int device, cudaStream_t stream, size_t size, char* ptr=NULL) :
-      device(device), stream(stream), size(size), ptr(ptr), allocated(0),
-      prev(NULL), next(NULL) { }
+      device(device), stream(stream), stream_uses(), size(size), ptr(ptr),
+      allocated(0), prev(NULL), next(NULL), event_count(0) { }
 };
 
 static bool BlockComparator(const Block* a, const Block* b)
@@ -84,6 +95,9 @@ struct THCCachingAllocator
   // allocated blocks by device pointer
   std::unordered_map<void*, Block*> allocated_blocks;
 
+  // outstanding cuda events
+  std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
+
   THCCachingAllocator() :
       large_blocks(BlockComparator),
       small_blocks(BlockComparator) {}
@@ -95,6 +109,11 @@ struct THCCachingAllocator
 
     int device;
     cudaError_t err = cudaGetDevice(&device);
+    if (err != cudaSuccess) {
+      return err;
+    }
+
+    err = process_events();
     if (err != cudaSuccess) {
       return err;
     }
@@ -159,15 +178,13 @@ struct THCCachingAllocator
 
     Block* block = it->second;
     allocated_blocks.erase(it);
-
-    bool small = block->size <= kSmallAlloc;
-    auto& free_blocks = small ? large_blocks : small_blocks;
-    try_merge_blocks(block, block->prev, free_blocks);
-    try_merge_blocks(block, block->next, free_blocks);
-
     block->allocated = false;
-    free_blocks.insert(block);
 
+    if (!block->stream_uses.empty()) {
+      return insert_events(block);
+    }
+
+    free_block(block);
     return cudaSuccess;
   }
 
@@ -227,6 +244,33 @@ struct THCCachingAllocator
     std::lock_guard<std::mutex> lock(mutex);
     cacheInfoAux(large_blocks, dev_id, total, largest);
     cacheInfoAux(small_blocks, dev_id, total, largest);
+  }
+
+  void recordStream(void* ptr, THCStream* stream)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    Block* block = find_allocated_block(ptr);
+    if (!block) {
+      THError("invalid device pointer: %p", ptr);
+    }
+    if (stream->stream == block->stream) {
+      // ignore uses on the allocation stream, since those don't require any
+      // special synchronization
+      return;
+    }
+    THCStream_retain(stream);
+    block->stream_uses.insert(THCStreamPtr(stream, &THCStream_free));
+  }
+
+  /** moves a block into the free block list */
+  void free_block(Block* block)
+  {
+    THAssert(!block->allocated && block->event_count == 0);
+    bool small = block->size <= kSmallAlloc;
+    auto& free_blocks = small ? large_blocks : small_blocks;
+    try_merge_blocks(block, block->prev, free_blocks);
+    try_merge_blocks(block, block->next, free_blocks);
+    free_blocks.insert(block);
   }
 
   /** combine previously split blocks */
@@ -332,6 +376,68 @@ struct THCCachingAllocator
     }
     return it->second;
   }
+
+  cudaError_t insert_events(Block* block)
+  {
+    cudaError_t err;
+
+    int prev_device;
+    err = cudaGetDevice(&prev_device);
+    if (err != cudaSuccess) return err;
+
+    std::set<THCStreamPtr> streams(std::move(block->stream_uses));
+    for (auto it = streams.begin(); it != streams.end(); ++it) {
+      auto& stream = *it;
+
+      err = cudaSetDevice(stream->device);
+      if (err != cudaSuccess) break;
+
+      cudaEvent_t event;
+      err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+      if (err != cudaSuccess) break;
+
+      err = cudaEventRecord(event, stream->stream);
+      if (err != cudaSuccess) break;
+
+      block->event_count++;
+      cuda_events.emplace_back(event, block);
+    }
+
+    cudaSetDevice(prev_device);
+    return err;
+  }
+
+  cudaError_t process_events()
+  {
+    // Process outstanding cudaEvents. Events that are completed are removed
+    // from the queue, and the 'event_count' for the corresponding allocation
+    // is decremented. Stops at the first event which has not been completed.
+    // Since events on different devices or streams may occur out of order,
+    // the processing of some events may be delayed.
+    while (!cuda_events.empty()) {
+      auto& e = cuda_events.front();
+      cudaEvent_t event = e.first;
+      Block* block = e.second;
+
+      cudaError_t err = cudaEventQuery(event);
+      if (err == cudaErrorNotReady) {
+        break;
+      } else if (err != cudaSuccess) {
+        return err;
+      }
+      err = cudaEventDestroy(event);
+      if (err != cudaSuccess) {
+        return err;
+      }
+
+      block->event_count--;
+      if (block->event_count == 0) {
+        free_block(block);
+      }
+      cuda_events.pop_front();
+    }
+    return cudaSuccess;
+  }
 };
 
 static cudaError_t THCCachingAllocator_malloc(void* ctx, void** ptr, size_t size, cudaStream_t stream)
@@ -377,6 +483,11 @@ THC_API THCDeviceAllocator* THCCachingAllocator_get(void)
 THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
 {
   return caching_allocator.getBaseAllocation(ptr, size);
+}
+
+THC_API void THCCachingAllocator_recordStream(void *ptr, THCStream* stream)
+{
+  caching_allocator.recordStream(ptr, stream);
 }
 
 THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex()
