@@ -25,8 +25,16 @@ ENDIF()
 ######################################################################
 
 IF(MSVC)
-  # respect the standard
-  ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
+  # MSVC now supports C99 since VS2013/VS2015
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /std:c99")
+ELSE(MSVC)
+  # enable gnu99 and not c99 because we use
+  # gnu extensions like posix_memalign
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99")
+ENDIF(MSVC)
+
+IF(MSVC)
+  ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)  # respect the standard
 ENDIF(MSVC)
 
 IF(UNIX)
@@ -118,17 +126,23 @@ ENDIF(NOT NO_GCC_EBX_FPIC_BUG)
 
 FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
 IF(C_SSE2_FOUND)
+  MESSAGE(STATUS "SSE2 Found")
   SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} -DUSE_SSE2 ${CMAKE_C_FLAGS}")
 ENDIF(C_SSE2_FOUND)
 IF(C_SSE3_FOUND)
+  MESSAGE(STATUS "SSE3 Found")
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
 ENDIF(C_SSE3_FOUND)
+# we dont set AVX and AVX2 flags globally, but only for specific files
 IF(C_AVX_FOUND)
-  SET(CMAKE_C_FLAGS "${C_AVX_FLAGS} ${CMAKE_C_FLAGS}")
+  MESSAGE(STATUS "AVX Found")
+  #   SET(CMAKE_C_FLAGS "${C_AVX_FLAGS} ${CMAKE_C_FLAGS}")
 ENDIF(C_AVX_FOUND)
 IF(C_AVX2_FOUND)
-  SET(CMAKE_C_FLAGS "${C_AVX2_FLAGS} ${CMAKE_C_FLAGS}")
+  MESSAGE(STATUS "AVX2 Found")
+  #   SET(CMAKE_C_FLAGS "${C_AVX2_FLAGS} ${CMAKE_C_FLAGS}")
 ENDIF(C_AVX2_FOUND)
+
 
 CHECK_C_SOURCE_RUNS("
 #include <stdatomic.h>
@@ -176,45 +190,40 @@ ENDIF()
 ##### sources section
 ######################################################################
 
+# IF ANY SIMD FOUND
 IF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
   SET(simd generic/simd/convolve.c)
-  IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve.c PROPERTIES COMPILE_FLAGS "/std:c99")
-  ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve.c PROPERTIES COMPILE_FLAGS "-std=c99")
-  ENDIF(MSVC)
 ENDIF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
 
-IF(C_SSE4_1_FOUND)
-  SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} -DUSE_SSE4_1 ${CMAKE_C_FLAGS}")
-ENDIF(C_SSE4_1_FOUND)
-IF(C_SSE4_2_FOUND)
-  SET(CMAKE_C_FLAGS "${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
-ENDIF(C_SSE4_2_FOUND)
-
-IF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
+# IF SSE4 FOUND
+IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
+  SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} -DUSE_SSE4_1 ${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "/Ox /fp:fast /std:c99")
+    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "/Ox /fp:fast")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math -std=c99")
+    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
   ENDIF(MSVC)
   SET(simd ${simd} generic/simd/convolve5x5_sse.c)
-ENDIF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
+ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
 
-IF(MSVC)
-  SET_SOURCE_FILES_PROPERTIES(generic/THTensorMath.c PROPERTIES COMPILE_FLAGS "/std:c99")
-ELSE(MSVC)
-  SET_SOURCE_FILES_PROPERTIES(generic/THTensorMath.c PROPERTIES COMPILE_FLAGS "-std=c99")
-ENDIF(MSVC)
-
-IF(C_AVX_FOUND OR C_AVX2_FOUND)
+# IF AVX FOUND
+IF(C_AVX_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "/Ox /fp:fast /arch:AVX /std:c99")
+    SET_SOURCE_FILES_PROPERTIES(vector/AVX.c generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "/Ox /fp:fast ${C_AVX_FLAGS}")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math -mavx -std=c99")
+    SET_SOURCE_FILES_PROPERTIES(vector/AVX.c generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${C_AVX_FLAGS}")
   ENDIF(MSVC)
-  SET(simd ${simd} generic/simd/convolve5x5_avx.c)
-ENDIF(C_AVX_FOUND OR C_AVX2_FOUND)
+  SET(simd ${simd} vector/AVX.c generic/simd/convolve5x5_avx.c)
+ENDIF(C_AVX_FOUND)
+
+IF(C_AVX2_FOUND)
+  IF(MSVC)
+    SET_SOURCE_FILES_PROPERTIES(vector/AVX2.c PROPERTIES COMPILE_FLAGS "/Ox /fp:fast ${C_AVX2_FLAGS}")
+  ELSE(MSVC)
+    SET_SOURCE_FILES_PROPERTIES(vector/AVX2.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${C_AVX2_FLAGS}")
+  ENDIF(MSVC)
+  SET(simd ${simd} vector/AVX2.c)
+ENDIF(C_AVX2_FOUND)
 
 SET(hdr
   THGeneral.h THHalf.h THAllocator.h THStorage.h THTensor.h THTensorApply.h THBlas.h THMath.h
@@ -223,8 +232,6 @@ SET(hdr
 SET(src
   THGeneral.c THHalf.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
   THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c THVector.c)
-
-SET(src ${src} vector/AVX.c vector/AVX2.c)
 
 SET(src ${src} ${hdr} ${simd})
 
