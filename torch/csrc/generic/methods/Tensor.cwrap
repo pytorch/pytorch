@@ -342,7 +342,11 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - THBoolTensor* mask
 ]]
 
+#if IS_CUDA
+THTensor* THTensor_(transpose_neg)(THCState* state, THTensor *self, THTensor *src, int dim0, int dim1)
+#else
 THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int dim1)
+#endif
 {
   int ndim = self->nDimension;
   if (dim0 < 0)
@@ -350,10 +354,10 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   if (dim1 < 0)
     dim1 += ndim;
   if (src != NULL) {
-    THTensor_(transpose)(self, src, dim0, dim1);
+    THTensor_(transpose)(LIBRARY_STATE self, src, dim0, dim1);
     return NULL;
   } else {
-    return THTensor_(newTranspose)(self, dim0, dim1);
+    return THTensor_(newTranspose)(LIBRARY_STATE self, dim0, dim1);
   }
 }
 
