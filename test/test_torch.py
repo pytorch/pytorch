@@ -1903,6 +1903,25 @@ class TestTorch(TestCase):
         self.assertEqual(reference[:, 2, 1:6:2],
                          torch.stack([reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5]], 1))
 
+        lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
+        tensor = torch.DoubleTensor(lst)
+        for i in range(100):
+            idx1_start = random.randrange(10)
+            idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
+            idx1_step = random.randrange(1, 8)
+            idx1 = slice(idx1_start, idx1_end, idx1_step)
+            if random.randrange(2) == 0:
+                idx2_start = random.randrange(10)
+                idx2_end = idx2_start + random.randrange(1, 10 - idx2_start + 1)
+                idx2_step = random.randrange(1, 8)
+                idx2 = slice(idx2_start, idx2_end, idx2_step)
+                lst_indexed = list(map(lambda l: l[idx2], lst[idx1]))
+                tensor_indexed = tensor[idx1, idx2]
+            else:
+                lst_indexed = lst[idx1]
+                tensor_indexed = tensor[idx1]
+            self.assertEqual(torch.DoubleTensor(lst_indexed), tensor_indexed)
+
         self.assertRaises(ValueError, lambda: reference[1:9:0])
         self.assertRaises(ValueError, lambda: reference[1:9:-1])
 
