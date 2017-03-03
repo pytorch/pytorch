@@ -15,8 +15,8 @@ namespace gloo {
 
 Algorithm::Algorithm(const std::shared_ptr<Context>& context)
     : context_(context),
-      contextRank_(context_->rank_),
-      contextSize_(context_->size_) {}
+      contextRank_(context_->rank),
+      contextSize_(context_->size) {}
 
 // Have to provide implementation for pure virtual destructor.
 Algorithm::~Algorithm() {}
@@ -27,14 +27,14 @@ std::unique_ptr<transport::Pair>& Algorithm::getPair(int i) {
 
 // Helper for ring algorithms
 std::unique_ptr<transport::Pair>& Algorithm::getLeftPair() {
-  auto rank = (context_->size_ + context_->rank_ - 1) % context_->size_;
+  auto rank = (context_->size + context_->rank - 1) % context_->size;
   GLOO_ENFORCE(context_->getPair(rank), "pair missing (index ", rank, ")");
   return context_->getPair(rank);
 }
 
 // Helper for ring algorithms
 std::unique_ptr<transport::Pair>& Algorithm::getRightPair() {
-  auto rank = (context_->rank_ + 1) % context_->size_;
+  auto rank = (context_->rank + 1) % context_->size;
   GLOO_ENFORCE(context_->getPair(rank), "pair missing (index ", rank, ")");
   return context_->getPair(rank);
 }

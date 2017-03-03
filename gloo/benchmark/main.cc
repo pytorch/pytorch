@@ -39,7 +39,7 @@ class AllreduceBenchmark : public Benchmark {
 
   virtual void verify() override {
     // Size is the total number of pointers across the context
-    const auto size = context_->size_ * inputs_.size();
+    const auto size = context_->size * inputs_.size();
     // Expected is set to the expected value at ptr[0]
     const auto expected = (size * (size - 1)) / 2;
     // The stride between values at subsequent indices is equal to
@@ -87,7 +87,7 @@ class BroadcastOneToAllBenchmark : public Benchmark {
   }
 
   virtual void verify() override {
-    const auto stride = context_->size_ * inputs_.size();
+    const auto stride = context_->size * inputs_.size();
     for (const auto& input : inputs_) {
       for (int i = 0; i < input.size(); i++) {
         auto offset = i * stride;

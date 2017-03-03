@@ -42,14 +42,14 @@ class Benchmark {
     std::vector<float*> ptrs;
 
     // Stride between successive values in any input.
-    const auto stride = context_->size_ * inputs;
+    const auto stride = context_->size * inputs;
     for (int i = 0; i < inputs; i++) {
       std::vector<float> memory(elements);
 
       // Value at memory[0]. Different for every input at every node.
       // This means all values across all inputs and all nodes are
       // different and we can accurately detect correctness errors.
-      auto value = (context_->rank_ * inputs) + i;
+      auto value = (context_->rank * inputs) + i;
       for (int j = 0; j < elements; j++) {
         memory[j] = (j * stride) + value;
       }

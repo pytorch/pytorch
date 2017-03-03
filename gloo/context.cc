@@ -14,7 +14,7 @@
 
 namespace gloo {
 
-Context::Context(int rank, int size) : rank_(rank), size_(size) {
+Context::Context(int rank, int size) : rank(rank), size(size) {
   GLOO_ENFORCE_GE(rank, 0);
   GLOO_ENFORCE_LT(rank, size);
   GLOO_ENFORCE_GE(size, 2);
@@ -23,11 +23,11 @@ Context::Context(int rank, int size) : rank_(rank), size_(size) {
 void Context::connectFullMesh(
     rendezvous::Store& store,
     std::shared_ptr<transport::Device>& dev) {
-  std::vector<std::unique_ptr<transport::Pair>> pairs(size_);
+  std::vector<std::unique_ptr<transport::Pair>> pairs(size);
 
   // Create pair to connect to every other node in the collective
-  for (int i = 0; i < size_; i++) {
-    if (i == rank_) {
+  for (int i = 0; i < size; i++) {
+    if (i == rank) {
       continue;
     }
 
@@ -36,19 +36,19 @@ void Context::connectFullMesh(
 
     // Store address for pair for this rank
     std::ostringstream key;
-    key << rank_ << "/" << i;
+    key << rank << "/" << i;
     store.set(key.str(), pairs[i]->address().bytes());
   }
 
   // Connect every pair
-  for (int i = 0; i < size_; i++) {
-    if (i == rank_) {
+  for (int i = 0; i < size; i++) {
+    if (i == rank) {
       continue;
     }
 
     // Wait for address of other side of this pair to become available
     std::ostringstream key;
-    key << i << "/" << rank_;
+    key << i << "/" << rank;
     store.wait({key.str()});
 
     // Connect to other side of this pair

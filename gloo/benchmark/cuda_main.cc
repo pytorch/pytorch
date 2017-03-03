@@ -40,11 +40,11 @@ class CudaBenchmark : public Benchmark {
     GLOO_ENFORCE_LE(inputs, cudaNumDevices());
     std::vector<float*> ptrs;
 
-    const auto stride = context_->size_ * inputs;
+    const auto stride = context_->size * inputs;
     for (auto i = 0; i < inputs; i++) {
       CudaDeviceScope scope(i);
       auto cudaMemory = CudaMemory<float>(elements);
-      cudaMemory.set((context_->rank_ * inputs) + i, stride);
+      cudaMemory.set((context_->rank * inputs) + i, stride);
       ptrs.push_back(*cudaMemory);
       inputs_.push_back(std::move(cudaMemory));
     }
@@ -66,7 +66,7 @@ class CudaAllreduceBenchmark : public CudaBenchmark {
 
   virtual void verify() override {
     // Size is the total number of pointers across the context
-    const auto size = context_->size_ * inputs_.size();
+    const auto size = context_->size * inputs_.size();
     // Expected is set to the expected value at ptr[0]
     const auto expected = (size * (size - 1)) / 2;
     // The stride between values at subsequent indices is equal to

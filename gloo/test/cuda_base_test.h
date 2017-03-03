@@ -46,23 +46,23 @@ class Fixture {
   }
 
   void assignValues() {
-    const auto stride = context->size_ * srcs.size();
+    const auto stride = context->size * srcs.size();
     for (int i = 0; i < srcs.size(); i++) {
       const auto& stream = ptrs[i].getStream();
-      srcs[i].set((context->rank_ * srcs.size()) + i, stride, stream);
+      srcs[i].set((context->rank * srcs.size()) + i, stride, stream);
       CUDA_CHECK(cudaStreamSynchronize(stream));
     }
   }
 
   void assignValuesAsync() {
-    const auto stride = context->size_ * srcs.size();
+    const auto stride = context->size * srcs.size();
     for (int i = 0; i < srcs.size(); i++) {
       const auto& stream = ptrs[i].getStream();
       // Insert sleep on stream to force to artificially delay the
       // kernel that actually populates the memory to surface
       // synchronization errors.
       cudaSleep(stream, 100000);
-      srcs[i].set((context->rank_ * srcs.size()) + i, stride, stream);
+      srcs[i].set((context->rank * srcs.size()) + i, stride, stream);
     }
   }
 

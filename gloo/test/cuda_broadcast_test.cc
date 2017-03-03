@@ -34,12 +34,12 @@ class CudaBroadcastTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
  public:
   void assertEqual(Fixture& fixture, int root) {
-    const auto stride = fixture.context->size_;
+    const auto stride = fixture.context->size;
     for (const auto& ptr : fixture.getHostBuffers()) {
       for (int i = 0; i < fixture.count; i++) {
         ASSERT_EQ((i * stride) + root, ptr[i])
           << "Mismatch at index " << i
-          << " for rank " << fixture.context->rank_;
+          << " for rank " << fixture.context->rank;
       }
     }
   }

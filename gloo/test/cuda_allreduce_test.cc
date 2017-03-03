@@ -35,7 +35,7 @@ class CudaAllreduceTest : public CudaBaseTest,
  public:
   void assertResult(Fixture& fixture) {
     // Size is the total number of pointers across the context
-    const auto size = fixture.ptrs.size() * fixture.context->size_;
+    const auto size = fixture.ptrs.size() * fixture.context->size;
     // Expected is set to the expected value at ptr[0]
     const auto expected = (size * (size - 1)) / 2;
     // The stride between values at subsequent indices is equal to

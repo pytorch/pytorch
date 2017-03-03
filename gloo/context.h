@@ -22,8 +22,8 @@ class Context {
  public:
   Context(int rank, int size);
 
-  const int rank_;
-  const int size_;
+  const int rank;
+  const int size;
 
   void connectFullMesh(
       rendezvous::Store& store,
