@@ -1235,9 +1235,9 @@ class TestNN(NNTestCase):
     def test_variable_sequence(self):
         self._test_variable_sequence(False)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_variable_sequence_cuda(self):
-        self._test_variable_sequence(True)
+    # @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    # def test_variable_sequence_cuda(self):
+    #     self._test_variable_sequence(True)
 
     def test_LSTM_cell(self):
         # this is just a smoke test; these modules are implemented through
