@@ -95,6 +95,7 @@ def _lazy_init():
             "Cannot re-initialize CUDA in forked subprocess. " + msg)
     _check_driver()
     assert torch._C._cuda_init()
+    assert torch._C._cuda_sparse_init()
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
@@ -196,8 +197,11 @@ def stream(stream):
 
 def device_count():
     """Returns the number of GPUs available."""
-    _lazy_init()
-    return torch._C._cuda_getDeviceCount()
+    if is_available():
+        _lazy_init()
+        return torch._C._cuda_getDeviceCount()
+    else:
+        return 0
 
 
 def current_device():
@@ -242,20 +246,30 @@ from .random import *
 from ..tensor import _TensorBase
 from ..storage import _StorageBase
 
+
+def _dummy_type(name):
+    def init_err(self):
+        class_name = self.__class__.__name__
+        raise RuntimeError(
+            "Tried to instantiate dummy base class {}".format(class_name))
+    return type(storage_name, (object,), {"__init__": init_err})
+
+
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
     for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
-        torch._C.__dict__[storage_name] = type(storage_name, (object,), {})
-        torch._C.__dict__[tensor_name] = type(tensor_name, (object,), {})
+        torch._C.__dict__[storage_name] = _dummy_type(storage_name)
+        torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
-    torch._C.__dict__['_CudaStreamBase'] = type('CudaStreamBase', (object,), {})
+    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
 
 
 class _CudaBase(object):
     is_cuda = True
+    is_sparse = False
 
     def type(self, *args, **kwargs):
         with device(self.get_device()):
@@ -399,4 +413,5 @@ torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 torch._tensor_classes.add(HalfTensor)
 
+from . import sparse
 from .streams import Stream, Event

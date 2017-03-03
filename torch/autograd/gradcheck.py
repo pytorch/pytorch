@@ -5,7 +5,7 @@ from torch.autograd import Variable
 def iter_gradients(x):
     if isinstance(x, Variable):
         if x.requires_grad:
-            yield x.grad.data
+            yield x.grad.data if x.grad is not None else None
     else:
         for elem in x:
             for result in iter_gradients(elem):
@@ -14,7 +14,8 @@ def iter_gradients(x):
 
 def zero_gradients(i):
     for t in iter_gradients(i):
-        t.zero_()
+        if t is not None:
+            t.zero_()
 
 
 def make_jacobian(input, num_out):
@@ -91,7 +92,10 @@ def get_analytical_jacobian(input, output):
         zero_gradients(input)
         output.backward(grad_output, retain_variables=True)
         for jacobian_x, d_x in zip(jacobian, iter_gradients(input)):
-            jacobian_x[:, i] = d_x
+            if d_x is None:
+                jacobian_x[:, i].zero_()
+            else:
+                jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
 
     return jacobian
 

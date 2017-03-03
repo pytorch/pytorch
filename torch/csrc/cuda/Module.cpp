@@ -271,6 +271,7 @@ PyObject * THCPModule_getLibPath(PyObject *_unused)
 ////////////////////////////////////////////////////////////////////////////////
 
 bool THCPModule_initCuda(PyObject *torch_module) {
+  HANDLE_TH_ERRORS
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
   state = THCState_alloc();
   THCState_setDeviceAllocator(state, THCCachingAllocator_get());
@@ -298,6 +299,7 @@ bool THCPModule_initCuda(PyObject *torch_module) {
   // TODO: register THCudaShutdown handler at exit
   return true;
 #undef ASSERT_TRUE
+  END_HANDLE_TH_ERRORS
 }
 
 // Callback for python part. Used for additional initialization of python classes

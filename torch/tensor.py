@@ -7,6 +7,7 @@ import sys
 class _TensorBase(object):
     #: bool: True if this is a CUDA tensor
     is_cuda = False
+    is_sparse = False
 
     def new(self, *args, **kwargs):
         """Constructs a new tensor of the same data type."""

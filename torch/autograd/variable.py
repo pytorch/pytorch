@@ -1,6 +1,7 @@
 import sys
 import torch._C as _C
 from collections import OrderedDict
+import torch.sparse as sparse
 import torch.utils.hooks as hooks
 
 from ._functions import *

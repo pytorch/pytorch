@@ -18,6 +18,7 @@ class THPPlugin(CWrapPlugin):
 
         'THCudaTensor*': Template('((THCPFloatTensor*)$arg)->cdata'),
         'THCudaDoubleTensor*': Template('((THCPDoubleTensor*)$arg)->cdata'),
+        'THCudaLongTensor*': Template('((THCPLongTensor*)$arg)->cdata'),
 
         'THSFloatTensor*': Template('((THSPFloatTensor*)$arg)->cdata'),
         'THSDoubleTensor*': Template('((THSPDoubleTensor*)$arg)->cdata'),
@@ -53,6 +54,7 @@ class THPPlugin(CWrapPlugin):
 
         'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPDoubleTensorClass'),
+        'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
 
         'THSDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPDoubleTensorClass'),
         'THSFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPFloatTensorClass'),
@@ -84,6 +86,7 @@ class THPPlugin(CWrapPlugin):
         'THSTensor*': Template('return THSPTensor_(New)($result);'),
         'THLongTensor*': Template('return THPLongTensor_New($result);'),
         'THLongStorage*': Template('return THPLongStorage_New($result);'),
+        'THCudaLongTensor*': Template('return THCPLongTensor_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long': Template('return PyInt_FromLong($result);'),
         'accreal': Template('return THPUtils_(newAccreal)($result);'),
@@ -167,6 +170,7 @@ ${cpu}
         'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
         'THCudaTensor*': 'torch.cuda.FloatTensor',
         'THCudaDoubleTensor*': 'torch.cuda.DoubleTensor',
+        'THCudaLongTensor*': 'torch.cuda.LongTensor',
         'THSize*': 'torch.Size',
         'THStride*': 'tuple',
         'long': 'int',

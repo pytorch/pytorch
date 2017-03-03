@@ -224,12 +224,7 @@ PyObject *THPVariable_get_grad(THPVariable *self)
 {
   auto& var = *self->cdata;
   if (!var.grad) {
-#ifdef WITH_CUDA
-    THCPAutoGPU __guard(var.data->getDevice());
-#endif
-    auto grad = var.data->newTensor();
-    grad->resizeAs(*var.data).zero();
-    var.grad = std::make_shared<Variable>(std::move(grad), 0, 1);
+    Py_RETURN_NONE;
   }
   return THPVariable_Wrap(var.grad);
 }

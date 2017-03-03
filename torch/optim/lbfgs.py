@@ -55,8 +55,16 @@ class LBFGS(Optimizer):
         return self._numel_cache
 
     def _gather_flat_grad(self):
-        return torch.cat(
-            tuple(param.grad.data.view(-1) for param in self._params), 0)
+        views = []
+        for p in self._params:
+            if p.grad is None:
+                view = p.data.new(p.data.numel()).zero_()
+            elif p.grad.data.is_sparse:
+                view = p.grad.data.to_dense().view(-1)
+            else:
+                view = p.grad.data.view(-1)
+            views.append(view)
+        return torch.cat(views, 0)
 
     def _add_grad(self, step_size, update):
         offset = 0

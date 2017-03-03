@@ -141,6 +141,8 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
     return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
   } else if (type == NPY_INT32) {
     return PyObject_CallFunctionObjArgs(THPIntTensorClass, array, NULL);
+  } else if (type == NPY_INT16) {
+    return PyObject_CallFunctionObjArgs(THPShortTensorClass, array, NULL);
   } else if (type == NPY_UINT8) {
     return PyObject_CallFunctionObjArgs(THPByteTensorClass, array, NULL);
   }
@@ -657,6 +659,7 @@ static PyMethodDef TorchMethods[] = {
   // Sparse functions
   {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
+  {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 

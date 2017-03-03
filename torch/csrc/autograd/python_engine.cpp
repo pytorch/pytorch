@@ -52,6 +52,8 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Tensor or None", i);
+      THPUtils_assert(!vars[i]->requires_grad,
+          "element %d of gradients tuple is None, but the corresponding Variable requires grad");
     }
   }
 

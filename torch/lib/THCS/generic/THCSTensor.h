@@ -6,7 +6,8 @@ typedef struct THCSTensor
 {  // Stored in COO format, indices + values
     long *size;
     ptrdiff_t nnz;
-    int nDimension;
+    int nDimensionI; // dimension of indices
+    int nDimensionV; // dimension of values
 
     // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
     // as buffer, so we keep track of both
@@ -14,11 +15,14 @@ typedef struct THCSTensor
     THCTensor *values;
     // Math operations can only be performed on ordered sparse tensors
     int contiguous;
+    int refcount;
 
 } THCSTensor;
 
 /**** access methods ****/
 TH_API int THCSTensor_(nDimension)(THCState *state, const THCSTensor *self);
+TH_API int THCSTensor_(nDimensionI)(THCState *state, const THCSTensor *self);
+TH_API int THCSTensor_(nDimensionV)(THCState *state, const THCSTensor *self);
 TH_API long THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim);
 TH_API ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self);
 TH_API THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self);
@@ -42,6 +46,7 @@ TH_API THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self, 
 
 /**** reshaping methods ***/
 TH_API THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size);
+TH_API THCSTensor *THCSTensor_(resizeAs)(THCState *state, THCSTensor *self, THCSTensor *src);
 TH_API THCSTensor *THCSTensor_(resize1d)(THCState *state, THCSTensor *self, long size0);
 TH_API THCSTensor *THCSTensor_(resize2d)(THCState *state, THCSTensor *self, long size0, long size1);
 TH_API THCSTensor *THCSTensor_(resize3d)(THCState *state, THCSTensor *self, long size0, long size1, long size2);
@@ -53,6 +58,12 @@ TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimens
 TH_API int THCSTensor_(isContiguous)(THCState *state, const THCSTensor *self);
 TH_API void THCSTensor_(contiguous)(THCState *state, THCSTensor *self);
 
+TH_API void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask);
+
 TH_API void THCSTensor_(free)(THCState *state, THCSTensor *self);
+TH_API void THCSTensor_(retain)(THCState *state, THCSTensor *self);
+
+/* CUDA-specific functions */
+TH_API int THCSTensor_(getDevice)(THCState *state, const THCSTensor *self);
 
 #endif
