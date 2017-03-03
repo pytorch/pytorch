@@ -375,6 +375,7 @@ void THSTensor_(addSlice)(
   THTensor *dst, THTensor *src1, real value, THTensor *src2,
   long dim, long dstIdx, long src1Idx, long src2Idx) {
   if (src1->nDimension > 1) {
+    THTensor_(select)(src1Buffer, src1, dim, src1Idx);
     THTensor_(select)(src2Buffer, src2, dim, src2Idx);
     THTensor_(select)(dstBuffer, dst, dim, dstIdx);
     THTensor_(cadd)(dstBuffer, src1Buffer, value, src2Buffer);

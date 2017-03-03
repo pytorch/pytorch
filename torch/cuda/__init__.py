@@ -413,4 +413,5 @@ torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 torch._tensor_classes.add(HalfTensor)
 
+from . import sparse
 from .streams import Stream, Event

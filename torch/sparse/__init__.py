@@ -132,6 +132,10 @@ class _SparseBase(object):
     def __ixor__(self, other):
         raise NotImplementedError
 
+    def __str__(self):
+        return '{} with indices:\n{}and values:\n{}'.format(
+            self.__class__.__name__, self.indices(), self.values())
+
 
 class DoubleTensor(_SparseBase, _C.SparseDoubleTensorBase, _TensorBase):
     def is_signed(self):

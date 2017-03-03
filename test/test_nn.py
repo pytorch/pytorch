@@ -1193,13 +1193,15 @@ class TestNN(NNTestCase):
 
         lengths = [10, 10, 6, 2, 2, 1, 1]
         max_length = lengths[0]
-        x = Variable(torch.randn(max_length, len(lengths), 3), requires_grad=True)
+        x_leaf = Variable(torch.randn(max_length, len(lengths), 3), requires_grad=True)
         lstm = nn.LSTM(3, 4, bidirectional=True, num_layers=2)
         lstm2 = deepcopy(lstm)
         if cuda:
-            x = x.cuda()
+            x = x_leaf.cuda()
             lstm.cuda()
             lstm2.cuda()
+        else:
+            x = x_leaf
 
         # Compute sequences separately
         seq_outs = []
@@ -1224,20 +1226,20 @@ class TestNN(NNTestCase):
 
         # Check backward
         seq_out.sum().backward()
-        grad_x = x.grad.data.clone()
-        x.grad.data.zero_()
+        grad_x = x_leaf.grad.data.clone()
+        x_leaf.grad.data.zero_()
         unpacked.sum().backward()
 
-        self.assertEqual(x.grad.data, grad_x)
+        self.assertEqual(x_leaf.grad.data, grad_x)
         for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
     def test_variable_sequence(self):
         self._test_variable_sequence(False)
 
-    # @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    # def test_variable_sequence_cuda(self):
-    #     self._test_variable_sequence(True)
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_variable_sequence_cuda(self):
+        self._test_variable_sequence(True)
 
     def test_LSTM_cell(self):
         # this is just a smoke test; these modules are implemented through
