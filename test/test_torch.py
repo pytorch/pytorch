@@ -7,7 +7,7 @@ import torch.cuda
 import tempfile
 import unittest
 import warnings
-from itertools import product
+from itertools import product, combinations
 from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack
 
 if TEST_NUMPY:
@@ -2987,6 +2987,23 @@ class TestTorch(TestCase):
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
+    def test_transpose_neg(self):
+        x = torch.randn(10, 20, 30)
+        ndim = 3
+
+        for i, j in combinations(range(ndim), 2):
+            a = x.transpose(i, j)
+            b = x.transpose(i - ndim, j - ndim)
+            self.assertEqual(a, b)
+
+            a = torch.transpose(x, i, j)
+            b = torch.transpose(x, i - ndim, j - ndim)
+            self.assertEqual(a, b)
+
+            a = x.clone()
+            x.transpose_(i, j)
+            x.transpose_(i - ndim, j - ndim)
+            self.assertEqual(a, x)
 
 if __name__ == '__main__':
     run_tests()
