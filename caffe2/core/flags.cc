@@ -23,7 +23,7 @@ const char* UsageMessage() {
 
 bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
   if (*pargc == 0) return true;
-  return google::ParseCommandLineFlags(pargc, pargv, true);
+  return gflags::ParseCommandLineFlags(pargc, pargv, true);
 }
 
 bool CommandLineFlagsHasBeenParsed() {
