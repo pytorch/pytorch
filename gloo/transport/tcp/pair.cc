@@ -496,8 +496,17 @@ void Pair::unregisterBuffer(Buffer* buf) {
 
 // changeState must only be called when holding lock.
 void Pair::changeState(state state) {
+  // Ignore nops
+  if (state == state_) {
+    return;
+  }
+
+  // State can only move forward
+  GLOO_ENFORCE_GT(state, state_);
+
   // Clean up file descriptor when transitioning to CLOSED
-  if (state_ == CONNECTED && state == CLOSED) {
+  if (state == CLOSED) {
+    GLOO_ENFORCE_EQ(state_, CONNECTED);
     if (!sync_) {
       dev_->unregisterDescriptor(fd_);
     }
