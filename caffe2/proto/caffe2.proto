@@ -273,7 +273,7 @@ message BlobProto {
   optional string name = 1;
   optional string type = 2;
   optional TensorProto tensor = 3;
-  optional string content = 4;
+  optional bytes content = 4;
 }
 
 // Protobuf format to serialize DBReader.
