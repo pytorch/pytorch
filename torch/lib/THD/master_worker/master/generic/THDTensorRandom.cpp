@@ -104,20 +104,7 @@ void THDTensor_(multinomial)(THDLongTensor *self, THDGenerator *_generator,
   }
 
   /* will contain multinomial samples (category indices to be returned) */
-  THDLongTensor_resize2d(self, n_dist , n_sample);
-
-  for (int i = 0; i < n_dist; i++) {
-    /* Get normalized cumulative distribution from prob distribution */
-    double sum = 0;
-    for (int j = 0; j < n_categories; j++) {
-      sum += THDStorage_(get)( \
-        prob_dist->storage, \
-        prob_dist->storageOffset+i*prob_dist->stride[0]+j*prob_dist->stride[1] \
-      );
-    }
-
-    THArgCheck((sum > 0), 2, "invalid multinomial distribution (sum of probabilities <= 0)");
-  }
+  THDLongTensor_resize2d(self, n_dist, n_sample);
 
   masterCommandChannel->sendMessage(
     packMessage(

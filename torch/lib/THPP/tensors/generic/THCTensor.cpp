@@ -909,8 +909,7 @@ int THCTensor<real>::logicalall() {
 #if defined(TH_REAL_IS_BYTE)
   return THCTensor_(logicalall)(state, tensor);
 #else
-  throw std::runtime_error("floating point functions are available only for\
-      floating point tensors");
+  throw std::runtime_error("byte functions are available only for byte tensors");
 #endif
 }
 
@@ -919,8 +918,7 @@ int THCTensor<real>::logicalany() {
 #if defined(TH_REAL_IS_BYTE)
   return THCTensor_(logicalany)(state, tensor);
 #else
-  throw std::runtime_error("floating point functions are available only for\
-      floating point tensors");
+  throw std::runtime_error("byte functions are available only for byte tensors");
 #endif
 }
 

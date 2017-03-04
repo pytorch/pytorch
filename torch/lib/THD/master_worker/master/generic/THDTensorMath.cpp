@@ -519,7 +519,6 @@ void THDTensor_(logspace)(THDTensor *r_, real a, real b, long n) {
 void THDTensor_(rand)(THDTensor *r_, THDGenerator *_generator,
                       THLongStorage *size) {
   THDTensor_(resize)(r_, size, NULL);
-  THDTensor_(uniform)(r_, _generator, 0, 1);
 
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorRand, r_, _generator, size),
@@ -530,7 +529,6 @@ void THDTensor_(rand)(THDTensor *r_, THDGenerator *_generator,
 void THDTensor_(randn)(THDTensor *r_, THDGenerator *_generator,
                        THLongStorage *size) {
   THDTensor_(resize)(r_, size, NULL);
-  THDTensor_(normal)(r_, _generator, 0, 1);
 
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorRandn, r_, _generator, size),
@@ -541,7 +539,6 @@ void THDTensor_(randn)(THDTensor *r_, THDGenerator *_generator,
 void THDTensor_(histc)(THDTensor *hist, THDTensor *tensor, long nbins,
                        real minvalue, real maxvalue) {
   THDTensor_(resize1d)(hist, nbins);
-  THDTensor_(zero)(hist);
 
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorHistc, hist, tensor, nbins, minvalue, maxvalue),
@@ -560,7 +557,6 @@ void THDTensor_(bhistc)(THDTensor *hist, THDTensor *tensor, long nbins,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
   THDTensor_(resize2d)(hist, tensor->size[0], nbins);
-  THDTensor_(zero)(hist);
 
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorBhistc, hist, tensor, nbins, minvalue, maxvalue),
