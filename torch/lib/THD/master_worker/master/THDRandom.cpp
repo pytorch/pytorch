@@ -17,7 +17,6 @@ using namespace master;
 
 static THDGenerator* THDGenerator_newUnseeded() {
   THDGenerator *new_generator = new THDGenerator();
-  std::memset(reinterpret_cast<void*>(new_generator), 0, sizeof(new_generator));
   new_generator->generator_id = THDState::s_nextId++;
   return new_generator;
 }
@@ -60,10 +59,6 @@ unsigned long THDRandom_seed(THDGenerator *_generator) {
 }
 
 void THDRandom_manualSeed(THDGenerator *_generator, unsigned long the_seed_) {
-  THDGenerator *blank = THDGenerator_newUnseeded();
-  THDGenerator_copy(_generator, blank);
-  THDGenerator_free(blank);
-
   masterCommandChannel->sendMessage(
     packMessage(Functions::generatorManualSeed, _generator, the_seed_),
     THDState::s_current_worker
