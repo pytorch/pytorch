@@ -165,7 +165,7 @@ class TestLoadSave(TestLoadSaveBase):
                     core.CreateOperator(
                         "Save", original_names, [],
                         absolute_path=1,
-                        strip_regex='.temp',
+                        strip_prefix='.temp',
                         blob_name_overrides=new_names,
                         db=os.path.join(tmp_folder, "db"),
                         db_type=self._db_type

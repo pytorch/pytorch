@@ -32,6 +32,12 @@ DBReader to load from, and we ignore the db and db_type arguments.
         "absolute_path",
         "(int, default 0) if set, use the db path directly and do not prepend "
         "the current root folder of the workspace.")
+     .Arg(
+         "strip_prefix",
+         "(string, default=\"\") characters in the provided blob "
+         " names that match strip_prefix will be removed prior to saving."
+         " Also, characters that precede strip_prefix will be removed. Useful "
+         " for removing device scope from blob names.")
     .Arg("db", "(string) the path to the db to load.")
     .Arg("db_type", "(string) the type of the db.")
     .Arg(
@@ -56,11 +62,12 @@ db specified by the arguments.
         "absolute_path",
         "(int, default 0) if set, use the db path directly and do not prepend "
         "the current root folder of the workspace.")
-    .Arg(
-        "strip_regex",
-        "(string, default=\"\") if set, characters in the provided blob "
-        " names that match the regex will be removed prior to saving. Useful "
-        " for removing device scope from blob names.")
+     .Arg(
+         "strip_prefix",
+         "(string, default=\"\") characters in the provided blob "
+         " names that match strip_prefix will be removed prior to saving."
+         " Also, characters that precede strip_prefix will be removed. Useful "
+         " for removing device scope from blob names.")
     .Arg(
         "blob_name_overrides",
         "(list of strings) if set, used instead of original "

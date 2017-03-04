@@ -3,7 +3,6 @@
 
 #include <cstdio>
 #include <map>
-#include <regex>
 #include <unordered_set>
 
 #include "caffe2/core/blob_serialization.h"
@@ -29,6 +28,8 @@ class LoadOp final : public Operator<Context> {
         ws_(ws),
         absolute_path_(
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
+        strip_prefix_(
+            OperatorBase::GetSingleArgument<string>("strip_prefix", "")),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
         keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
@@ -39,8 +40,19 @@ class LoadOp final : public Operator<Context> {
     }
     if (!load_all_) {
       int idx = 0;
+      std::set<std::string> input_names;
       for (const string& output_name : this->def().output()) {
-        output_indices_[output_name] = idx++;
+        std::string name;
+        if(strip_prefix_.empty()) {
+            name = output_name;
+        }
+        else {
+            auto match_pos = output_name.find(strip_prefix_);
+            name = output_name.substr(match_pos+1, string::npos);
+        }
+        CAFFE_ENFORCE(
+            input_names.insert(name).second, "Duplicated input: ", name);
+        output_indices_[name] = idx++;
       }
     }
   }
@@ -200,6 +212,7 @@ class LoadOp final : public Operator<Context> {
  private:
   Workspace* ws_;
   bool absolute_path_;
+  string strip_prefix_;
   string db_name_;
   string db_type_;
   bool keep_device_;
@@ -216,8 +229,8 @@ class SaveOp final : public Operator<Context> {
         ws_(ws),
         absolute_path_(
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
-        strip_regex_(
-            OperatorBase::GetSingleArgument<string>("strip_regex", "")),
+        strip_prefix_(
+            OperatorBase::GetSingleArgument<string>("strip_prefix", "")),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
         blob_names_(
@@ -229,16 +242,21 @@ class SaveOp final : public Operator<Context> {
             blob_names_.size() == OperatorBase::Inputs().size(),
         "Number of blobs and blob_name_overrides mismatch.");
     CAFFE_ENFORCE(
-        blob_names_.empty() || strip_regex_.empty(),
-        "strip_regex and blob_name_overrides are mutually exclusive.");
+        blob_names_.empty() || strip_prefix_.empty(),
+        "strip_prefix and blob_name_overrides are mutually exclusive.");
 
     if (blob_names_.empty()) {
-      std::regex strip_expr(strip_regex_);
       std::set<std::string> input_names;
       blob_names_.resize(OperatorBase::Inputs().size());
       for (int i = 0; i < blob_names_.size(); ++i) {
-        std::string name =
-            std::regex_replace(def().input(i), strip_expr, string(""));
+        std::string name;
+        if(strip_prefix_.empty()) {
+            name = def().input(i);
+        }
+        else {
+            auto match_pos = def().input(i).find(strip_prefix_);
+            name = def().input(i).substr(match_pos+1, string::npos);
+        }
         CAFFE_ENFORCE(
             input_names.insert(name).second, "Duplicated input: ", name);
         blob_names_[i] = name;
@@ -274,7 +292,7 @@ class SaveOp final : public Operator<Context> {
  private:
   Workspace* ws_;
   bool absolute_path_;
-  string strip_regex_;
+  string strip_prefix_;
   string db_name_;
   string db_type_;
   std::vector<std::string> blob_names_;
