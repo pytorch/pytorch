@@ -2,6 +2,8 @@
 #include "DataChannelUtils.hpp"
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -93,6 +95,12 @@ inline int log2ceil(std::uint32_t value) {
   for (int size = 1; size < value; ++dim, size <<= 1) /* empty */;
 #endif // defined(__GNUC__)
   return dim;
+}
+
+void setSocketNoDelay(int socket) {
+  int flag = 1;
+  socklen_t optlen = sizeof(flag);
+  SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
 }
 
 } // namespace
@@ -295,6 +303,8 @@ int DataChannelTCP::connect(const std::string& address, std::uint16_t port,
     }
   }
 
+  setSocketNoDelay(socket);
+
   return socket;
 }
 
@@ -331,6 +341,8 @@ std::tuple<int, std::string> DataChannelTCP::accept() const {
     SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
     address[INET6_ADDRSTRLEN] = '\0';
   }
+
+  setSocketNoDelay(socket);
 
   return std::make_tuple(socket, std::string(address));
 }
