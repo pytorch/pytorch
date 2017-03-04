@@ -172,7 +172,7 @@ static void THFloatVector_adds_SSE(float *y, const float *x, const float c, cons
   ptrdiff_t i;
   __m128 XMM7 = _mm_set1_ps(c);
   __m128 XMM0, XMM2;
-  for (i=8; i<=((n)-8); i+=8) {
+  for (i=0; i<=((n)-8); i+=8) {
     XMM0 = _mm_loadu_ps((x)+i);
     XMM2 = _mm_loadu_ps((x)+i+4);
     XMM0 = _mm_add_ps(XMM0, XMM7);
