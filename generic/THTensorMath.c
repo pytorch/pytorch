@@ -1,7 +1,7 @@
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
-    
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -11,7 +11,7 @@
 #ifdef _OPENMP
 
 #ifndef _WIN32
-#define PRAGMA(P) _Pragma("P")
+#define PRAGMA(P) _Pragma(#P)
 #else
 #define PRAGMA(P) __pragma(P)
 #endif
