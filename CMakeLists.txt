@@ -133,14 +133,16 @@ IF(C_SSE3_FOUND)
   MESSAGE(STATUS "SSE3 Found")
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
 ENDIF(C_SSE3_FOUND)
-# we dont set AVX and AVX2 flags globally, but only for specific files
+# we dont set -mavx and -mavx2 flags globally, but only for specific files
+# however, we want to enable the AVX codepaths, so we still need to
+# add USE_AVX and USE_AVX2 macro defines
 IF(C_AVX_FOUND)
   MESSAGE(STATUS "AVX Found")
-  #   SET(CMAKE_C_FLAGS "${C_AVX_FLAGS} ${CMAKE_C_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DUSE_AVX ${CMAKE_C_FLAGS}")
 ENDIF(C_AVX_FOUND)
 IF(C_AVX2_FOUND)
   MESSAGE(STATUS "AVX2 Found")
-  #   SET(CMAKE_C_FLAGS "${C_AVX2_FLAGS} ${CMAKE_C_FLAGS}")
+  SET(CMAKE_C_FLAGS "-DUSE_AVX2 ${CMAKE_C_FLAGS}")
 ENDIF(C_AVX2_FOUND)
 
 

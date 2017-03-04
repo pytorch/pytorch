@@ -15,11 +15,11 @@
 #include "vector/SSE.c"
 #endif
 
-#if defined(__AVX__) || defined(__AVX2__)
+#if defined(USE_AVX)
 #include "vector/AVX.h"
 #endif
 
-#if defined(__AVX2__)
+#if defined(USE_AVX2)
 #include "vector/AVX2.h"
 #endif
 
