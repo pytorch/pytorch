@@ -6,8 +6,8 @@
 // Collection of in-kernel scan / prefix sum utilities
 
 // Inclusive prefix sum using shared memory
-template <typename T, bool KillWARDependency>
-__device__ void inclusivePrefixSum(T* smem, T in, T* out) {
+template <typename T, bool KillWARDependency, class BinaryFunction>
+__device__ void inclusivePrefixScan(T* smem, T in, T* out, BinaryFunction binop) {
   // FIXME: this is a slow, simple implementation; need up/down sweep,
   // prevent smem conflicts
   smem[threadIdx.x] = in;
@@ -18,7 +18,7 @@ __device__ void inclusivePrefixSum(T* smem, T in, T* out) {
     T val = 0;
 
     if (threadIdx.x >= offset) {
-      val = smem[threadIdx.x - offset] + smem[threadIdx.x];
+      val = binop(smem[threadIdx.x - offset], smem[threadIdx.x]);
     }
 
     __syncthreads();
@@ -38,11 +38,11 @@ __device__ void inclusivePrefixSum(T* smem, T in, T* out) {
 }
 
 // Exclusive prefix sum using shared memory
-template <typename T, bool KillWARDependency>
-__device__ void exclusivePrefixSum(T* smem, T in, T* out, T* carry) {
+template <typename T, bool KillWARDependency, class BinaryFunction>
+__device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunction binop) {
   // FIXME: crappy implementation
   // We kill write-after-read dependencies separately below, hence the `false`
-  inclusivePrefixSum<T, false>(smem, in, out);
+  inclusivePrefixScan<T, false, BinaryFunction>(smem, in, out, binop);
 
   *out -= in;
   *carry = smem[blockDim.x - 1];
@@ -55,8 +55,8 @@ __device__ void exclusivePrefixSum(T* smem, T in, T* out, T* carry) {
 
 // Inclusive prefix sum for binary vars using intra-warp voting +
 // shared memory
-template <typename T, bool KillWARDependency>
-__device__ void inclusiveBinaryPrefixSum(T* smem, bool in, T* out) {
+template <typename T, bool KillWARDependency, class BinaryFunction>
+__device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
   // Within-warp, we use warp voting.
   T vote = __ballot(in);
   T index = __popc(getLaneMaskLe() & vote);
@@ -77,8 +77,8 @@ __device__ void inclusiveBinaryPrefixSum(T* smem, bool in, T* out) {
     int current = 0;
     for (int i = 0; i < blockDim.x / 32; ++i) {
       T v = smem[i];
-      smem[i] += current;
-      current += v;
+      smem[i] = binop(smem[i], current);
+      current = binop(current, v);
     }
   }
 
@@ -86,7 +86,7 @@ __device__ void inclusiveBinaryPrefixSum(T* smem, bool in, T* out) {
 
   // load the carry from the preceding warp
   if (warp >= 1) {
-    index += smem[warp - 1];
+    index = binop(index, smem[warp - 1]);
   }
 
   *out = index;
@@ -98,9 +98,9 @@ __device__ void inclusiveBinaryPrefixSum(T* smem, bool in, T* out) {
 
 // Exclusive prefix sum for binary vars using intra-warp voting +
 // shared memory
-template <typename T, bool KillWARDependency>
-__device__ void exclusiveBinaryPrefixSum(T* smem, bool in, T* out, T* carry) {
-  inclusiveBinaryPrefixSum<T, false>(smem, in, out);
+template <typename T, bool KillWARDependency, class BinaryFunction>
+__device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, BinaryFunction binop) {
+  inclusiveBinaryPrefixScan<T, false, BinaryFunction>(smem, in, out, binop);
 
   // Inclusive to exclusive
   *out -= (T) in;
