@@ -267,6 +267,9 @@ int DataChannelTCP::connect(const std::string& address, std::uint16_t port,
 
   struct addrinfo *next_addr = addresses.get();
   int socket;
+  // we'll loop over the addresses only if at least of them gave us ECONNREFUSED.
+  // Maybe the host was up, but the server wasn't running.
+  bool any_refused = false;
   while (true) {
     try {
       SYSCHECK(socket = ::socket(next_addr->ai_family, next_addr->ai_socktype, next_addr->ai_protocol))
@@ -276,18 +279,18 @@ int DataChannelTCP::connect(const std::string& address, std::uint16_t port,
       // if `connect` fails, the state of the socket is unspecified.
       // we should close the socket and create a new one before attempting to reconnect.
       ::close(socket);
+      if (errno == ECONNREFUSED) any_refused = true;
 
-      if (!wait || (errno != ECONNREFUSED)) {
-        // we need to move to next address because this was not available
-        // to connect or to create socket
-        next_addr = next_addr->ai_next;
+      // we need to move to next address because this was not available
+      // to connect or to create socket
+      next_addr = next_addr->ai_next;
 
-        // we have tried all addresses but could not connect to any of them
-        if (!next_addr) {
-          throw e;
-        }
-      } else {
+      // we have tried all addresses but could not connect to any of them
+      if (!next_addr) {
+        if (!wait || !any_refused) throw e;
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        any_refused = false;
+        next_addr = addresses.get();
       }
     }
   }
