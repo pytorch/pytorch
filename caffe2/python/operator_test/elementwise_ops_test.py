@@ -36,3 +36,26 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
         self.assertGradientChecks(
             gc, op, [X, Y], 0, [0], stepsize=1e-4, threshold=1e-2)
+
+    @given(n=st.integers(5, 6), m=st.integers(4, 6), **hu.gcs)
+    def test_log(self, n, m, gc, dc):
+        X = np.random.rand(n, m).astype(np.float32) + 1.0
+
+        def log_op(X):
+            return [np.log(X)]
+
+        op = core.CreateOperator(
+            "Log",
+            ["X"],
+            ["Z"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=log_op,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
