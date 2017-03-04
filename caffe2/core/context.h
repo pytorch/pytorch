@@ -1,14 +1,17 @@
 #ifndef CAFFE2_CORE_CONTEXT_H_
 #define CAFFE2_CORE_CONTEXT_H_
 
-#include <ctime>
 #include <cstdlib>
+#include <ctime>
 #include <random>
+#include <unordered_map>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/math.h"
+
+CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
 
@@ -21,6 +24,20 @@ struct CPUAllocator {
   virtual ~CPUAllocator() {}
   virtual void* New(size_t nbytes) = 0;
   virtual void Delete(void* data) = 0;
+};
+
+// A virtual struct that is used to report Caffe2's memory allocation and
+// deallocation status
+class MemoryAllocationReporter {
+ public:
+  MemoryAllocationReporter() : allocated_(0) {}
+  void New(void* ptr, size_t nbytes);
+  void Delete(void* ptr);
+
+ private:
+  std::mutex mutex_;
+  std::unordered_map<void*, size_t> size_table_;
+  size_t allocated_;
 };
 
 struct DefaultCPUAllocator final : CPUAllocator {
@@ -106,10 +123,20 @@ class CPUContext final {
     return *random_generator_.get();
   }
 
-  inline static void* New(size_t nbytes) {
-    return GetCPUAllocator()->New(nbytes);
+  static void* New(size_t nbytes) {
+    void* data = GetCPUAllocator()->New(nbytes);
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
+      reporter_.New(data, nbytes);
+    }
+    return data;
   }
-  inline static void Delete(void* data) { GetCPUAllocator()->Delete(data); }
+
+  static void Delete(void* data) {
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
+      reporter_.Delete(data);
+    }
+    GetCPUAllocator()->Delete(data);
+  }
 
   // Two copy functions that deals with cross-device copies.
   template <class SrcContext, class DstContext>
@@ -142,6 +169,7 @@ class CPUContext final {
   // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
   int random_seed_{1701};
   std::unique_ptr<std::mt19937> random_generator_;
+  static MemoryAllocationReporter reporter_;
 };
 
 template<>
