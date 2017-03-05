@@ -16,7 +16,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None):
         kwargs_tup = ({},) * len(modules)
     # Fast track
     if len(modules) == 1:
-        return ( modules[0](*inputs[0], **kwargs_tup[0]), )
+        return (modules[0](*inputs[0], **kwargs_tup[0]), )
 
     lock = threading.Lock()
     results = {}

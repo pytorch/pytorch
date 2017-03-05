@@ -7,7 +7,7 @@ from torch.cuda.comm import broadcast
 def scatter(input, target_gpus, dim=0):
     """
     Slices variables into approximately equal chunks and
-    distributes them accross given GPUs. Duplicates 
+    distributes them accross given GPUs. Duplicates
     references to objects that are not variables. Does not
     support Tensors.
     """
