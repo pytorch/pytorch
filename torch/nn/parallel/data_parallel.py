@@ -80,7 +80,7 @@ class DataParallel(Module):
         scattered = self.scatter(inputs, self.device_ids)
         used_gpus = len(scattered)  # The last GPU might not be used. For example, input of size 4, on 5 GPUs
         gpu_dicts = None
-        if kwargs:
+        if kwargs is not None:
             gpu_dicts = [{} for i in range(used_gpus)]
             for key in kwargs.keys():
                 scattered_kwargs = self.scatter(_to_cuda(kwargs[key]), self.device_ids)
