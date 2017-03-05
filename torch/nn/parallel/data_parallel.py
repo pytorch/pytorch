@@ -78,17 +78,21 @@ class DataParallel(Module):
 
         replicas = self.replicate(self.module, self.device_ids)
         scattered = self.scatter(inputs, self.device_ids)
-
+        used_gpus = len(scattered)  # The last GPU might not be used. For example, input of size 5, on 4 GPUs
         gpu_dicts = None
         if kwargs:
             scatter_kwargs = {}
             for key in kwargs.keys():
                 scatter_kwargs[key] = self.scatter(
                     _to_cuda(kwargs[key]), self.device_ids)
-            gpu_dicts = tuple(
-                {key: values[i] for key, values in scatter_kwargs.items()}
-                for i in self.device_ids
-            )
+
+            gpu_dicts = tuple()
+            for i in range(used_gpus):
+                gpu_dict = {}
+                for key, values in scatter_kwargs.items():
+                    assert len(values) == used_gpus
+                    gpu_dict[key] = values[i]
+                gpu_dicts += (gpu_dict,)
         replicas = replicas[:len(scattered)]
         outputs = self.parallel_apply(replicas, scattered, gpu_dicts)
         return self.gather(outputs, self.output_device)
