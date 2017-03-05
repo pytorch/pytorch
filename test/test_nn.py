@@ -869,6 +869,9 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(m, (var1, var2, float1), (0, 1))
         local_test(out)
 
+        out = dp.data_parallel(m, (var1, var2, float1), (1, 0))
+        local_test(out)
+
         out = dp.data_parallel(m, (var1, var2, float1), (0,))
         local_test(out)
 
