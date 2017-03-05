@@ -132,7 +132,7 @@ This is how a ``Linear`` module can be implemented::
             # nn.Parameters can never be volatile and, different than Variables,
             # they require gradients by default.
             self.weight = nn.Parameter(torch.Tensor(input_features, output_features))
-            if bias is not None:
+            if bias:
                 self.bias = nn.Parameter(torch.Tensor(output_features))
             else:
                 # You should always register all possible parameters, but the
