@@ -389,27 +389,32 @@ bool DataChannelTCP::initWorker() {
     processes_number--;
   }
 
-  // make network connection with other processes
-  for (auto& process : _processes) {
-    if ((process.rank == _rank) || (process.rank == MASTER_RANK)) continue;
+  /**
+    Firstly we are connecting to workers with rank lower than our rank,
+    then we accepting connections from other wokers with higher rank.
 
-    // it is to prevent accept-connect deadlock
-    if (process.rank < _rank) {
-      process.socket = connect(process.address, process.port);
+    This prevents from deadlocks where everyone is accepting or everyone is
+    tryin to connect.
+  **/
 
-      // send rank to tell to the accepting process who we are
-      std::uint32_t p_rank = (std::uint32_t)_rank;
-      send_bytes<std::uint32_t>(process.socket, &p_rank, 1);
-    } else {
-      auto accept_state = accept();
-      int socket = std::get<0>(accept_state);
+  for (std::uint32_t r = 1; r < _rank; ++r) {
+    auto& process = _processes[r];
+    process.socket = connect(process.address, process.port);
 
-      // get rank of process we have just accepted
-      std::uint32_t p_rank;
-      recv_bytes<std::uint32_t>(socket, &p_rank, 1);
+    // send rank to tell to the accepting process who we are
+    std::uint32_t p_rank = static_cast<std::uint32_t>(_rank);
+    send_bytes<std::uint32_t>(process.socket, &p_rank, 1);
+  }
 
-      _processes[p_rank].socket = socket;
-    }
+  for (std::uint32_t i = _rank + 1; i < _processes.size(); ++i) {
+    auto accept_state = accept();
+    int socket = std::get<0>(accept_state);
+
+    // get rank of process we have just accepted
+    std::uint32_t p_rank;
+    recv_bytes<std::uint32_t>(socket, &p_rank, 1);
+
+    _processes[p_rank].socket = socket;
   }
 
   // close socket for listening, we will not use it anymore
