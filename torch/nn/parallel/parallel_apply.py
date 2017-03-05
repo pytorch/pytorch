@@ -13,15 +13,15 @@ def parallel_apply(modules, inputs, kwargs_tup=None):
     if kwargs_tup:
         assert len(modules) == len(kwargs_tup)
     else:
-        kwargs_tup = tuple({} for gpu in modules)
+        kwargs_tup = ({},) * len(modules)
     # Fast track
     if len(modules) == 1:
-        return (wrap(modules[0], *inputs[0], **kwargs_tup[0]), )
+        return ( modules[0](*inputs[0], **kwargs_tup[0]), )
 
     lock = threading.Lock()
     results = {}
 
-    def _worker(module, input, results, lock, **kwargs):
+    def _worker(module, input, kwargs, results, lock):
         var_input = input
         while not isinstance(var_input, Variable):
             var_input = var_input[0]
@@ -35,8 +35,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None):
                 results[input] = e
 
     threads = [threading.Thread(target=_worker,
-                                args=(module, input, results, lock),
-                                kwargs=kwargs
+                                args=(module, input, kwargs, results, lock),
                                 )
                for module, input, kwargs in zip(modules, inputs, kwargs_tup)]
 

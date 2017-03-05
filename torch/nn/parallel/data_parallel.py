@@ -85,11 +85,10 @@ class DataParallel(Module):
             for key in kwargs.keys():
                 scatter_kwargs[key] = self.scatter(
                     _to_cuda(kwargs[key]), self.device_ids)
-            gpu_dicts = tuple([
-                dict([(key, values[i])
-                     for key, values in scatter_kwargs.items()])
+            gpu_dicts = tuple(
+                {key: values[i] for key, values in scatter_kwargs.items()}
                 for i in self.device_ids
-            ])
+            )
         replicas = replicas[:len(scattered)]
         outputs = self.parallel_apply(replicas, scattered, gpu_dicts)
         return self.gather(outputs, self.output_device)
@@ -107,7 +106,7 @@ class DataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
 
-def data_parallel(module, inputs, device_ids, module_kwargs=None, output_device=None, dim=0):
+def data_parallel(module, inputs, device_ids, output_device=None, dim=0, module_kwargs=None):
     """Evaluates module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
@@ -142,10 +141,10 @@ def data_parallel(module, inputs, device_ids, module_kwargs=None, output_device=
         scatter_kwargs = {}
         for key in module_kwargs.keys():
             scatter_kwargs[key] = scatter(module_kwargs[key], device_ids, dim)
-        gpu_dicts = tuple([
-            dict([(key, values[i]) for key, values in scatter_kwargs.items()])
+        gpu_dicts = tuple(
+            {key: values[i] for key, values in scatter_kwargs.items()}
             for i in device_ids
-        ])
+        )
 
     replicas = replicas[:len(scattered)]
     outputs = parallel_apply(replicas, scattered, gpu_dicts)

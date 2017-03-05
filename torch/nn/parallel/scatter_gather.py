@@ -6,15 +6,15 @@ from torch.cuda.comm import broadcast
 
 def scatter(input, target_gpus, dim=0):
     """
-    Slices all variables and tensors into approximately
-      equal chunks and distributes them accross given GPUs.
-    Duplicates references to objects that are not variables
-      or tensors.
+    Slices variables into approximately equal chunks and
+    distributes them accross given GPUs. Duplicates 
+    references to objects that are not variables. Does not
+    support Tensors.
     """
     def scatter_map(obj):
         if isinstance(obj, Variable):
             return Scatter(target_gpus, dim=dim)(obj)
-        assert not torch.is_tensor(obj), "Tensors not supported in DataParallel"
+        assert not torch.is_tensor(obj), "Tensors not supported in scatter."
         if isinstance(obj, tuple) or isinstance(obj, list):
             return type(obj)(zip(*map(scatter_map, obj)))
         return tuple(obj for targets in target_gpus)
