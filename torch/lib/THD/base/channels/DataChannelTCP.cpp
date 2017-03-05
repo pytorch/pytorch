@@ -396,9 +396,19 @@ bool DataChannelTCP::initWorker() {
     // it is to prevent accept-connect deadlock
     if (process.rank < _rank) {
       process.socket = connect(process.address, process.port);
+
+      // send rank to tell to the accepting process who we are
+      std::uint32_t p_rank = (std::uint32_t)_rank;
+      send_bytes<std::uint32_t>(process.socket, &p_rank, 1);
     } else {
       auto accept_state = accept();
-      process.socket = std::get<0>(accept_state);
+      int socket = std::get<0>(accept_state);
+
+      // get rank of process we have just accepted
+      std::uint32_t p_rank;
+      recv_bytes<std::uint32_t>(socket, &p_rank, 1);
+
+      _processes[p_rank].socket = socket;
     }
   }
 
