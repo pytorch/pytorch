@@ -24,7 +24,7 @@ static THDGenerator* THDGenerator_newUnseeded() {
 THDGenerator* THDGenerator_new() {
   THDGenerator *generator = THDGenerator_newUnseeded();
   masterCommandChannel->sendMessage(
-    packMessage(Functions::generatorConstruct, generator),
+    packMessage(Functions::generatorNew, generator),
     THDState::s_current_worker
   );
   THDRandom_seed(generator);

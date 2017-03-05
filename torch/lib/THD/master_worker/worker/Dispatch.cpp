@@ -57,7 +57,7 @@ using Functions = thd::Functions;
 
 
 static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
-    {Functions::generatorConstruct, generatorConstruct},
+    {Functions::generatorNew, generatorNew},
     {Functions::generatorFree, generatorFree},
     {Functions::generatorCopy, generatorCopy},
     {Functions::generatorSeed, generatorSeed},

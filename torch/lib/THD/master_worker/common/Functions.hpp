@@ -6,7 +6,7 @@ namespace thd {
 
 enum Functions: std::uint16_t {
   // generator functions
-  generatorConstruct,
+  generatorNew,
   generatorCopy,
   generatorFree,
   generatorSeed,
