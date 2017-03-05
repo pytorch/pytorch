@@ -52,9 +52,29 @@ auto THCTensor<real>::clone_shallow() -> THCTensor* {
 
 template<>
 auto THCTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
-  return std::unique_ptr<Tensor>(
+  return std::unique_pkr<Tensor>(
       new THCTensor(state, THCTensor_(newContiguous)(state, tensor)));
 }
+
+template<>
+auto THCTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCTensor* {
+  throw std::runtime_error("newSelect is not yet available for CUDA tensors");
+} 
+
+template<>
+auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCTensor* {
+  throw std::runtime_error("newNarrow is not yet available for CUDA tensors");
+} 
+
+template<>
+auto THCTensor<real>::newTranspose(int dimension1, int dimension2) const -> THCTensor* {
+  throw std::runtime_error("newTranspose is not yet available for CUDA tensors");
+} 
+
+template<>
+auto THCTensor<real>::newUnfold(int dimension, long size, long step) const -> THCTensor* {
+  throw std::runtime_error("newUnfold is not yet available for CUDA tensors");
+} 
 
 template<>
 int THCTensor<real>::nDim() const {
@@ -245,7 +265,14 @@ auto THCTensor<real>::unfold(const Tensor& src, int dimension,
 }
 
 template<>
-auto THCTensor<real>::squeeze(const Tensor& src, int dimension) -> THCTensor& {
+auto THCTensor<real>::squeeze(const Tensor& src) -> THCTensor& {
+  auto src_raw = (dynamic_cast<const THCTensor<real>&>(src)).tensor;
+  THCTensor_(squeeze)(state, tensor, src_raw);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::squeeze1d(const Tensor& src, int dimension) -> THCTensor& {
   auto src_raw = (dynamic_cast<const THCTensor<real>&>(src)).tensor;
   THCTensor_(squeeze1d)(state, tensor, src_raw, dimension);
   return *this;
@@ -258,9 +285,156 @@ auto THCTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THCTensor& 
   return *this;
 }
 
+#define LAPACK_ERROR "Lapack operations not yet available for CUDA tensors"
+
+template<>
+auto THCTensor<real>::gesv(const Tensor& ra, const Tensor& b, const Tensor& a) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                            const char *uplo, const char *trans, const char *diag) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::gels(const Tensor& ra, const Tensor& b, const Tensor& a) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::syev(const Tensor& rv, const Tensor& a,
+                           const char *jobz, const char *uplo) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::geev(const Tensor& rv, const Tensor& a, const char *jobvr) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::gesvd(const Tensor& rs, const Tensor& rv,
+                            const Tensor& a, const char *jobu) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                             const Tensor& a, const char *jobu) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::getri(const Tensor& a) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::potrf(const Tensor& a, const char *uplo) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::potrs(const Tensor& b, const Tensor& a, const char *uplo) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::potri(const Tensor& a, const char *uplo) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::qr(const Tensor& rr, const Tensor& a) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::geqrf(const Tensor& rtau, const Tensor& a) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::orgqr(const Tensor& a, const Tensor& tau) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                            const char *side, const char *trans) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCTensor<real>::pstrf(const Tensor& rpiv, const Tensor& a,
+                            const char *uplo, scalar_type tol) -> THCTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
 template<>
 auto THCTensor<real>::fill(scalar_type value) -> THCTensor& {
   THCTensor_(fill)(state, tensor, cast_scalar(value));
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::maskedFill(const Tensor& mask, scalar_type value) -> THCTensor& {
+  THCTensor_(maskedFill)(state, tensor, const_byte_cast(mask).tensor, value);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::maskedCopy(const Tensor& mask, const Tensor& src) -> THCTensor& {
+  THCTensor_(maskedCopy)(state, tensor, const_byte_cast(mask).tensor,
+                         const_tensor_cast(src).tensor);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THCTensor& {
+  THCTensor_(maskedSelect)(state, tensor, const_tensor_cast(src).tensor,
+                           const_byte_cast(mask).tensor);
+  return *this;
+}
+
+template<>
+ptrdiff_t THCTensor<real>::nonzeroElems() const {
+  throw std::runtime_error("THCTensor::nonzeroElems() is not supported yer");
+}
+
+template<>
+auto THCTensor<real>::nonzero(const Tensor& subscript) -> THCTensor& {
+  THCTensor_(nonzero)(state, const_long_cast(subscript).tensor, tensor);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::indexSelect(const Tensor& src, int dim, const Tensor& index) -> THCTensor& {
+  THCTensor_(indexSelect)(state, tensor, const_tensor_cast(src).tensor, dim,
+                          const_long_cast(index).tensor);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::indexCopy(int dim, const Tensor& index, const Tensor& src) -> THCTensor& {
+  THCTensor_(indexCopy)(tensor, dim, const_long_cast(index).tensor,
+                        const_tensor_cast(src).tensor);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::indexAdd(int dim, const Tensor& index, const Tensor& src) -> THCTensor& {
+  THCTensor_(indexAdd)(state, tensor, dim, const_long_cast(index).tensor,
+                       const_tensor_cast(src).tensor);
+  return *this;
+}
+
+template<>
+auto THCTensor<real>::indexFill(int dim, const Tensor& index, scalar_type value) -> THCTensor& {
+  THCTensor_(indexFill)(state, tensor, dim, const_long_cast(index).tensor, value);
   return *this;
 }
 

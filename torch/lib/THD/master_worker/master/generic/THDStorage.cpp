@@ -25,7 +25,7 @@ THDStorage* THDStorage_(new)() {
   thpp::Type type = thpp::type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstruct,
+      Functions::storageNew,
       type,
       storage
     ),
@@ -65,7 +65,7 @@ THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
   storage->size = size;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize,
+      Functions::storageNewWithSize,
       type,
       storage,
       size
@@ -81,7 +81,7 @@ THDStorage* THDStorage_(newWithSize1)(real value) {
   storage->size = 1;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value
@@ -97,7 +97,7 @@ THDStorage* THDStorage_(newWithSize2)(real value1, real value2) {
   storage->size = 2;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value1,
@@ -114,7 +114,7 @@ THDStorage* THDStorage_(newWithSize3)(real value1, real value2, real value3) {
   storage->size = 3;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value1,
@@ -132,7 +132,7 @@ THDStorage* THDStorage_(newWithSize4)(real value1, real value2, real value3, rea
   storage->size = 4;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value1,

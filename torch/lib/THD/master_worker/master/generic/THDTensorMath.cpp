@@ -21,6 +21,132 @@ void THDTensor_(zero)(THDTensor *r) {
   THDTensor_(fill)(r, 0);
 }
 
+void THDTensor_(maskedFill)(THDTensor *tensor, THDByteTensor *mask, real value) {
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorMaskedFill,
+      tensor,
+      mask,
+      value
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(maskedCopy)(THDTensor *tensor, THDByteTensor *mask, THDTensor* src) {
+  if (THDTensor_(nElement)(tensor) != THDByteTensor_nElement(mask))
+    THError("Number of elements of destination tensor != Number of elements in mask");
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorMaskedCopy,
+      tensor,
+      mask,
+      src
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(maskedSelect)(THDTensor *tensor, THDTensor* src, THDByteTensor *mask) {
+  ptrdiff_t numel = THDByteTensor_sumall(mask);
+  THDTensor_(resize1d)(tensor, numel);
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorMaskedSelect,
+      tensor,
+      src,
+      mask
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(nonzero)(THDLongTensor *subscript, THDTensor *tensor) {
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorNonzero,
+      subscript,
+      tensor
+    ),
+    THDState::s_current_worker
+  );
+  ptrdiff_t numel = THDTensor_(receiveValueFromWorker)<ptrdiff_t>(tensor->storage->node_id);
+  THDLongTensor_resize2d(subscript, numel, tensor->nDimension);
+}
+
+void THDTensor_(indexSelect)(THDTensor *tensor, THDTensor *src, int dim, THDLongTensor *index) {
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < src->nDimension, 4, "Indexing dim %d is out of bounds of tensor",
+             dim + TH_INDEX_BASE);
+  THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
+  THLongStorage *newSize = THLongStorage_newWithSize(src->nDimension);
+  THLongStorage_rawCopy(newSize, src->size);
+  THDTensor_(resize)(tensor, newSize, NULL);
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorIndexSelect,
+      tensor,
+      src,
+      dim,
+      index
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(indexCopy)(THDTensor *tensor, int dim, THDLongTensor *index, THDTensor *src) {
+  ptrdiff_t numel = THDLongTensor_nElement(index);
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < src->nDimension, 4, "Indexing dim %d is out of bounds of tensor",
+             dim + TH_INDEX_BASE);
+  THArgCheck(numel == src->size[dim], 4, "Number of indices should be equal to source:size(dim)");
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorIndexCopy,
+      tensor,
+      dim,
+      index,
+      src
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(indexAdd)(THDTensor *tensor, int dim, THDLongTensor *index, THDTensor *src) {
+  ptrdiff_t numel = THDLongTensor_nElement(index);
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < src->nDimension, 4, "Indexing dim %d is out of bounds of tensor",
+             dim + TH_INDEX_BASE);
+  THArgCheck(numel == src->size[dim], 4, "Number of indices should be equal to source:size(dim)");
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorIndexAdd,
+      tensor,
+      dim,
+      index,
+      src
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(indexFill)(THDTensor *tensor, int dim, THDLongTensor *index, real val) {
+  ptrdiff_t numel = THDLongTensor_nElement(index);
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < tensor->nDimension, 4, "Indexing dim %d is out of bounds of tensor",
+             dim + TH_INDEX_BASE);
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorIndexFill,
+      tensor,
+      dim,
+      index,
+      val
+    ),
+    THDState::s_current_worker
+  );
+}
+
 void THDTensor_(zeros)(THDTensor *tensor, THLongStorage *size) {
   THDTensor_(resize)(tensor, size, nullptr);
   THDTensor_(zero)(tensor);

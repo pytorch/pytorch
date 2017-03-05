@@ -43,6 +43,10 @@ public:
   virtual THSTensor* clone() const override;
   virtual THSTensor* clone_shallow() override;
   virtual std::unique_ptr<Tensor> contiguous() const override;
+  virtual THSTensor* newSelect(int dimension, long sliceIndex) const override; 
+  virtual THSTensor* newNarrow(int dimension, long firstIndex, long size) const override; 
+  virtual THSTensor* newTranspose(int dimension1, int dimension2) const override; 
+  virtual THSTensor* newUnfold(int dimension, long size, long step) const override; 
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -83,8 +87,32 @@ public:
                                int dimension2) override;
   virtual THSTensor& unfold(const Tensor& src, int dimension,
                             long size, long step) override;
-  virtual THSTensor& squeeze(const Tensor& src, int dimension) override;
+  virtual THSTensor& squeeze(const Tensor& src) override;
+  virtual THSTensor& squeeze1d(const Tensor& src, int dimension) override;
   virtual THSTensor& unsqueeze(const Tensor& src, int dimension) override;
+
+  virtual THSTensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a);
+  virtual THSTensor& trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                           const char *uplo, const char *trans, const char *diag);
+  virtual THSTensor& gels(const Tensor& ra, const Tensor& b, const Tensor& a);
+  virtual THSTensor& syev(const Tensor& rv, const Tensor& a,
+                          const char *jobz, const char *uplo);
+  virtual THSTensor& geev(const Tensor& rv, const Tensor& a, const char *jobvr);
+  virtual THSTensor& gesvd(const Tensor& rs, const Tensor& rv,
+                           const Tensor& a, const char *jobu);
+  virtual THSTensor& gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                            const Tensor& a, const char *jobu);
+  virtual THSTensor& getri(const Tensor& a);
+  virtual THSTensor& potrf(const Tensor& a, const char *uplo);
+  virtual THSTensor& potrs(const Tensor& b, const Tensor& a, const char *uplo);
+  virtual THSTensor& potri(const Tensor& a, const char *uplo);
+  virtual THSTensor& qr(const Tensor& rr, const Tensor& a);
+  virtual THSTensor& geqrf(const Tensor& rtau, const Tensor& a);
+  virtual THSTensor& orgqr(const Tensor& a, const Tensor& tau);
+  virtual THSTensor& ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                           const char *side, const char *trans);
+  virtual THSTensor& pstrf(const Tensor& rpiv, const Tensor& a,
+                           const char *uplo, scalar_type tol);
 
   virtual THSTensor& diag(const Tensor& src, int k) override;
   virtual THSTensor& eye(long n, long m) override;
@@ -92,14 +120,14 @@ public:
                           scalar_type step) override;
   virtual THSTensor& randperm(const Generator& _generator, long n) override;
   virtual THSTensor& sort(const Tensor& ri, const Tensor& src,
-                       int dimension, int desc) override;
+                          int dimension, int desc) override;
   virtual THSTensor& topk(const Tensor& ri, const Tensor& src,
-                       long k, int dim, int dir, int sorted) override;
+                          long k, int dim, int dir, int sorted) override;
   virtual THSTensor& tril(const Tensor& src, long k) override;
   virtual THSTensor& triu(const Tensor& src, long k) override;
   // TODO: remove in favor of cat
   virtual THSTensor& catArray(const std::vector<Tensor*>& inputs,
-                             int dimension) override;
+                              int dimension) override;
   virtual int equal(const Tensor& other) const override;
 
   // Note: the order in *Value and *Tensor is reversed compared to
@@ -198,6 +226,18 @@ public:
   virtual THSTensor& eqValueT(const Tensor& t, scalar_type value) override;
 
   virtual THSTensor& fill(scalar_type value) override;
+  virtual THSTensor& maskedFill(const Tensor& mask, scalar_type value) override;
+  virtual THSTensor& maskedCopy(const Tensor& mask, const Tensor& src) override;
+  virtual THSTensor& maskedSelect(const Tensor& mask, const Tensor& src) override;
+  virtual ptrdiff_t nonzeroElems() const override;
+  // NOTE like in byte comparison operations, the order in nonzero
+  // is reversed compared to THS, i.e. tensor->nonzero(subscript) is equivalent
+  // to THSTensor_(nonzero)(subscript, tensor)
+  virtual THSTensor& nonzero(const Tensor& subscript) override;
+  virtual THSTensor& indexSelect(const Tensor& src, int dim, const Tensor& index) override;
+  virtual THSTensor& indexCopy(int dim, const Tensor& index, const Tensor& src) override;
+  virtual THSTensor& indexAdd(int dim, const Tensor& index, const Tensor& src) override;
+  virtual THSTensor& indexFill(int dim, const Tensor& index, scalar_type value) override;
 
   virtual THSTensor& copy(const Tensor& src) override;
   virtual THSTensor& cat(const std::vector<Tensor*>& src, int dimension) override;

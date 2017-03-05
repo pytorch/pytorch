@@ -17,7 +17,75 @@ static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type) {
   throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
 
-static void tensorConstruct(rpc::RPCMessage& raw_message) {
+static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type,
+                                                  THLongStorage *size,
+                                                  THLongStorage *stride) {
+  if (type == thpp::Type::UCHAR)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<unsigned char>(size, stride));
+  else if (type == thpp::Type::CHAR)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<char>(size, stride));
+  else if (type == thpp::Type::SHORT)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<short>(size, stride));
+  else if (type == thpp::Type::INT)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<int>(size, stride));
+  else if (type == thpp::Type::LONG)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<long>(size, stride));
+  else if (type == thpp::Type::FLOAT)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<float>(size, stride));
+  else if (type == thpp::Type::DOUBLE)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<double>(size, stride));
+  throw std::invalid_argument("passed character doesn't represent a tensor type");
+}
+
+static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type,
+                                                  thpp::Storage *storage, 
+                                                  ptrdiff_t storageOffset,
+                                                  THLongStorage *size,
+                                                  THLongStorage *stride) {
+  if (type == thpp::Type::UCHAR)
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<unsigned char>(*storage, storageOffset, size, stride));
+  else if (type == thpp::Type::CHAR)
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<char>(*storage, storageOffset, size, stride));
+  else if (type == thpp::Type::SHORT)
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<short>(*storage, storageOffset, size, stride));
+  else if (type == thpp::Type::INT)
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<int>(*storage, storageOffset, size, stride));
+  else if (type == thpp::Type::LONG)
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<long>(*storage, storageOffset, size, stride));
+  else if (type == thpp::Type::FLOAT)
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<float>(*storage, storageOffset, size, stride));
+  else if (type == thpp::Type::DOUBLE)
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<double>(*storage, storageOffset, size, stride));
+  throw std::invalid_argument("passed character doesn't represent a tensor type");
+}
+
+static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type,
+                                                  thpp::Tensor *tensor) {
+  if (type == thpp::Type::UCHAR)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<unsigned char>(*tensor));
+  else if (type == thpp::Type::CHAR)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<char>(*tensor));
+  else if (type == thpp::Type::SHORT)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<short>(*tensor));
+  else if (type == thpp::Type::INT)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<int>(*tensor));
+  else if (type == thpp::Type::LONG)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<long>(*tensor));
+  else if (type == thpp::Type::FLOAT)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<float>(*tensor));
+  else if (type == thpp::Type::DOUBLE)
+    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<double>(*tensor));
+  throw std::invalid_argument("passed character doesn't represent a *tensor type");
+}
+
+static void tensorNew(rpc::RPCMessage& raw_message) {
   thpp::Type type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
   finalize(raw_message);
@@ -27,16 +95,55 @@ static void tensorConstruct(rpc::RPCMessage& raw_message) {
   );
 }
 
-static void tensorConstructWithSize(rpc::RPCMessage& raw_message) {
+static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
   thpp::Type type = unpackType(raw_message);
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  thd::object_id_type id = unpackTensor(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  // TODO
+  workerTensors.emplace(
+    id,
+    createTensor(type, size, stride)
+  );
   THLongStorage_free(size);
   THLongStorage_free(stride);
-  throw std::runtime_error("construct with size thpp::is not yet implemented");
+}
+
+static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
+  thpp::Type type = unpackType(raw_message);
+  thd::object_id_type id = unpackTensor(raw_message);
+  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  ptrdiff_t storageOffset = unpackInteger(raw_message);
+  THLongStorage *size = unpackTHLongStorage(raw_message);
+  THLongStorage *stride = unpackTHLongStorage(raw_message);
+  finalize(raw_message);
+  workerTensors.emplace(
+    id,
+    createTensor(type, storage, storageOffset, size, stride)
+  );
+  THLongStorage_free(size);
+  THLongStorage_free(stride);
+}
+
+static void tensorNewWithTensor(rpc::RPCMessage& raw_message) {
+  thpp::Type type = unpackType(raw_message);
+  thd::object_id_type id = unpackTensor(raw_message);
+  thpp::Tensor *self = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  workerTensors.emplace(
+    id,
+    createTensor(type, self)
+  );
+}
+
+static void tensorNewClone(rpc::RPCMessage& raw_message) {
+  thd::object_id_type id = unpackTensor(raw_message);
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  workerTensors.emplace(
+    id,
+    std::unique_ptr<thpp::Tensor>(tensor->clone())
+  );
 }
 
 static void tensorResize(rpc::RPCMessage& raw_message) {
@@ -235,6 +342,21 @@ static void tensorUnfold(rpc::RPCMessage& raw_message) {
   long step = unpackInteger(raw_message);
   finalize(raw_message);
   tensor->unfold(*src, dimension, size, step);
+}
+
+static void tensorSqueeze(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->squeeze(*src);
+}
+
+static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->squeeze1d(*src, dimension);
 }
 
 static void tensorFree(rpc::RPCMessage& raw_message) {

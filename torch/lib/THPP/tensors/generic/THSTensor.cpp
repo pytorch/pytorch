@@ -44,6 +44,26 @@ auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 }
 
 template<>
+auto THSTensor<real>::newSelect(int dimension, long sliceIndex) const -> THSTensor* {
+  throw std::runtime_error("newSelect is not yet available for sparse tensors");
+} 
+
+template<>
+auto THSTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THSTensor* {
+  throw std::runtime_error("newNarrow is not yet available for sparse tensors");
+} 
+
+template<>
+auto THSTensor<real>::newTranspose(int dimension1, int dimension2) const -> THSTensor* {
+  throw std::runtime_error("newTranspose is not yet available for sparse tensors");
+} 
+
+template<>
+auto THSTensor<real>::newUnfold(int dimension, long size, long step) const -> THSTensor* {
+  throw std::runtime_error("newUnfold is not yet available for sparse tensors");
+} 
+
+template<>
 int THSTensor<real>::nDim() const {
   return tensor->nDimensionI;
 }
@@ -183,8 +203,13 @@ auto THSTensor<real>::unfold(const Tensor& src, int dimension,
 }
 
 template<>
-auto THSTensor<real>::squeeze(const Tensor& src, int dimension) -> THSTensor& {
+auto THSTensor<real>::squeeze(const Tensor& src) -> THSTensor& {
   throw std::runtime_error("THSTensor::squeeze not supported");
+}
+
+template<>
+auto THSTensor<real>::squeeze1d(const Tensor& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::squeeze1d not supported");
 }
 
 template<>
@@ -192,9 +217,143 @@ auto THSTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THSTensor& 
   throw std::runtime_error("THSTensor::unsqueeze not supported");
 }
 
+#define LAPACK_ERROR "Lapack operations not yet available for sparse tensors"
+
+template<>
+auto THSTensor<real>::gesv(const Tensor& ra, const Tensor& b, const Tensor& a) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+  return *this;
+}
+
+template<>
+auto THSTensor<real>::trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                            const char *uplo, const char *trans, const char *diag) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::gels(const Tensor& ra, const Tensor& b, const Tensor& a) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::syev(const Tensor& rv, const Tensor& a,
+                           const char *jobz, const char *uplo) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::geev(const Tensor& rv, const Tensor& a, const char *jobvr) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::gesvd(const Tensor& rs, const Tensor& rv,
+                            const Tensor& a, const char *jobu) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                             const Tensor& a, const char *jobu) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::getri(const Tensor& a) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::potrf(const Tensor& a, const char *uplo) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::potrs(const Tensor& b, const Tensor& a, const char *uplo) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::potri(const Tensor& a, const char *uplo) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::qr(const Tensor& rr, const Tensor& a) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::geqrf(const Tensor& rtau, const Tensor& a) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::orgqr(const Tensor& a, const Tensor& tau) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                            const char *side, const char *trans) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THSTensor<real>::pstrf(const Tensor& rpiv, const Tensor& a,
+                            const char *uplo, scalar_type tol) -> THSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
 template<>
 auto THSTensor<real>::fill(scalar_type value) -> THSTensor& {
   throw std::runtime_error("THSTensor::fill() not supported");
+}
+
+template<>
+auto THSTensor<real>::maskedFill(const Tensor& mask, scalar_type value) -> THSTensor& {
+  throw std::runtime_error("THSTensor::maskedFill() not supported");
+}
+
+template<>
+auto THSTensor<real>::maskedCopy(const Tensor& mask, const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::maskedCopy() not supported");
+}
+
+template<>
+auto THSTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THSTensor& {
+  throw std::runtime_error("THSTensor::maskedSelect() not supported");
+}
+
+template<>
+ptrdiff_t THSTensor<real>::nonzeroElems() const {
+  throw std::runtime_error("THSTensor::nonzeroElems() not supported");
+}
+
+template<>
+auto THSTensor<real>::nonzero(const Tensor& subscript) -> THSTensor& {
+  throw std::runtime_error("THSTensor::nonzero() not supported");
+}
+
+template<>
+auto THSTensor<real>::indexSelect(const Tensor& src, int dim, const Tensor& index) -> THSTensor& {
+  throw std::runtime_error("THSTensor::indexSelect() not supported");
+}
+
+template<>
+auto THSTensor<real>::indexCopy(int dim, const Tensor& index, const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::indexCopy() not supported");
+}
+
+template<>
+auto THSTensor<real>::indexAdd(int dim, const Tensor& index, const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::indexAdd() not supported");
+}
+
+template<>
+auto THSTensor<real>::indexFill(int dim, const Tensor& index, scalar_type value) -> THSTensor& {
+  throw std::runtime_error("THSTensor::indexFill() not supported");
 }
 
 template<>
