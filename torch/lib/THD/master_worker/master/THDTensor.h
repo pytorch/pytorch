@@ -22,3 +22,6 @@ typedef struct {
 
 #include "generic/THDTensorMath.h"
 #include <TH/THGenerateAllTypes.h>
+
+#include "generic/THDTensorLapack.h"
+#include <TH/THGenerateFloatTypes.h>

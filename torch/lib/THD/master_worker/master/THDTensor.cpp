@@ -22,3 +22,6 @@
 
 #include "master_worker/master/generic/THDTensorMath.cpp"
 #include "TH/THGenerateAllTypes.h"
+
+#include "master_worker/master/generic/THDTensorLapack.cpp"
+#include "TH/THGenerateFloatTypes.h"

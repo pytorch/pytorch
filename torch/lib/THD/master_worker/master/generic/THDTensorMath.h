@@ -3,6 +3,18 @@
 #else
 
 THD_API void THDTensor_(fill)(THDTensor *r_, real value);
+THD_API void THDTensor_(zero)(THDTensor *r);
+THD_API void THDTensor_(maskedFill)(THDTensor *tensor, THDByteTensor *mask, real value);
+THD_API void THDTensor_(maskedCopy)(THDTensor *tensor, THDByteTensor *mask, THDTensor* src);
+THD_API void THDTensor_(maskedSelect)(THDTensor *tensor, THDTensor* src, THDByteTensor *mask);
+THD_API void THDTensor_(nonzero)(THDLongTensor *subscript, THDTensor *tensor);
+THD_API void THDTensor_(indexSelect)(THDTensor *tensor, THDTensor *src, int dim,
+                                     THDLongTensor *index);
+THD_API void THDTensor_(indexCopy)(THDTensor *tensor, int dim, THDLongTensor *index, THDTensor *src);
+THD_API void THDTensor_(indexAdd)(THDTensor *tensor, int dim, THDLongTensor *index, THDTensor *src);
+THD_API void THDTensor_(indexFill)(THDTensor *tensor, int dim, THDLongTensor *index, real val);
+
+
 THD_API void THDTensor_(zeros)(THDTensor *r_, THLongStorage *size);
 THD_API void THDTensor_(ones)(THDTensor *r_, THLongStorage *size);
 THD_API ptrdiff_t THDTensor_(numel)(THDTensor *t);

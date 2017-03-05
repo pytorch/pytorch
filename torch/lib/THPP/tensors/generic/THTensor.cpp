@@ -12,6 +12,8 @@
   dynamic_cast<const THTensor<float>&>(tensor)
 #define const_double_cast(tensor) \
   dynamic_cast<const THTensor<double>&>(tensor)
+#define const_int_cast(tensor) \
+  dynamic_cast<const THTensor<int>&>(tensor)
 #define const_byte_cast(tensor) \
   dynamic_cast<const THTensor<unsigned char>&>(tensor)
 #define const_generator_cast(generator) \
@@ -20,6 +22,23 @@
 template<>
 THTensor<real>::THTensor():
   tensor(THTensor_(new)())
+  {};
+
+template<>
+THTensor<real>::THTensor(const Tensor& other):
+  tensor(THTensor_(newWithTensor)(const_tensor_cast(other).tensor))
+  {};
+
+template<>
+THTensor<real>::THTensor(const Storage& storage, ptrdiff_t storageOffset,
+                         THLongStorage *size, THLongStorage *stride):
+  tensor(THTensor_(newWithStorage)(const_storage_cast(storage).storage,
+                                   storageOffset, size, stride))
+  {};
+
+template<>
+THTensor<real>::THTensor(THLongStorage *size, THLongStorage *stride):
+  tensor(THTensor_(newWithSize(size, stride)))
   {};
 
 template<>
@@ -48,6 +67,26 @@ template<>
 auto THTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
   return std::unique_ptr<Tensor>(new THTensor(THTensor_(newContiguous)(tensor)));
 }
+
+template<>
+auto THTensor<real>::newSelect(int dimension, long sliceIndex) const -> THTensor* {
+  return new THTensor(THTensor_(newSelect(tensor, dimension, sliceIndex)));
+} 
+
+template<>
+auto THTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THTensor* {
+  return new THTensor(THTensor_(newNarrow(tensor, dimension, firstIndex, size)));
+} 
+
+template<>
+auto THTensor<real>::newTranspose(int dimension1, int dimension2) const -> THTensor* {
+  return new THTensor(THTensor_(newTranspose(tensor, dimension1, dimension2)));
+} 
+
+template<>
+auto THTensor<real>::newUnfold(int dimension, long size, long step) const -> THTensor* {
+  return new THTensor(THTensor_(newUnfold(tensor, dimension, size, step)));
+} 
 
 template<>
 int THTensor<real>::nDim() const {
@@ -235,7 +274,14 @@ auto THTensor<real>::unfold(const Tensor& src, int dimension,
 }
 
 template<>
-auto THTensor<real>::squeeze(const Tensor& src, int dimension) -> THTensor& {
+auto THTensor<real>::squeeze(const Tensor& src) -> THTensor& {
+  auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
+  THTensor_(squeeze)(tensor, src_raw);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::squeeze1d(const Tensor& src, int dimension) -> THTensor& {
   auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
   THTensor_(squeeze1d)(tensor, src_raw, dimension);
   return *this;
@@ -249,8 +295,232 @@ auto THTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THTensor& {
 }
 
 template<>
+auto THTensor<real>::gesv(const Tensor& ra, const Tensor& b, const Tensor& a) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(gesv)(tensor, const_tensor_cast(ra).tensor, const_tensor_cast(b).tensor,
+                  const_tensor_cast(a).tensor);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+  return *this;
+}
+
+template<>
+auto THTensor<real>::trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                           const char *uplo, const char *trans, const char *diag) -> THTensor& {
+
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(trtrs)(tensor, const_tensor_cast(ra).tensor, const_tensor_cast(b).tensor,
+                   const_tensor_cast(a).tensor, uplo, trans, diag);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::gels(const Tensor& ra, const Tensor& b, const Tensor& a) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(gels)(tensor, const_tensor_cast(ra).tensor, const_tensor_cast(b).tensor,
+                  const_tensor_cast(a).tensor);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::syev(const Tensor& rv, const Tensor& a,
+                          const char *jobz, const char *uplo) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(syev)(tensor, const_tensor_cast(rv).tensor, const_tensor_cast(a).tensor, jobz, uplo);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::geev(const Tensor& rv, const Tensor& a, const char *jobvr) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(geev)(tensor, const_tensor_cast(rv).tensor, const_tensor_cast(a).tensor, jobvr);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::gesvd(const Tensor& rs, const Tensor& rv,
+                           const Tensor& a, const char *jobu) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(gesvd)(tensor, const_tensor_cast(rs).tensor, const_tensor_cast(rv).tensor,
+                   const_tensor_cast(a).tensor, jobu);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                            const Tensor& a, const char *jobu) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(gesvd2)(tensor, const_tensor_cast(rs).tensor, const_tensor_cast(rv).tensor,
+                    const_tensor_cast(ra).tensor, const_tensor_cast(a).tensor, jobu);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::getri(const Tensor& a) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(getri)(tensor, const_tensor_cast(a).tensor);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::potrf(const Tensor& a, const char *uplo) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(potrf)(tensor, const_tensor_cast(a).tensor, uplo);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::potrs(const Tensor& b, const Tensor& a, const char *uplo) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(potrs)(tensor, const_tensor_cast(b).tensor, const_tensor_cast(a).tensor, uplo);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::potri(const Tensor& a, const char *uplo) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(potri)(tensor, const_tensor_cast(a).tensor, uplo);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::qr(const Tensor& rr, const Tensor& a) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(qr)(tensor, const_tensor_cast(rr).tensor, const_tensor_cast(a).tensor);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::geqrf(const Tensor& rtau, const Tensor& a) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(geqrf)(tensor, const_tensor_cast(rtau).tensor, const_tensor_cast(a).tensor);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::orgqr(const Tensor& a, const Tensor& tau) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(orgqr)(tensor, const_tensor_cast(a).tensor, const_tensor_cast(tau).tensor);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                           const char *side, const char *trans) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(ormqr)(tensor, const_tensor_cast(a).tensor, const_tensor_cast(tau).tensor,
+                   const_tensor_cast(c).tensor, side, trans);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
+auto THTensor<real>::pstrf(const Tensor& rpiv, const Tensor& a,
+                           const char *uplo, scalar_type tol) -> THTensor& {
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  THTensor_(pstrf)(tensor, const_int_cast(rpiv).tensor, const_tensor_cast(a).tensor, uplo, tol);
+#else
+  throw std::runtime_error("Lapack operations are available only for floating point tensors");
+#endif
+}
+
+template<>
 auto THTensor<real>::fill(scalar_type value) -> THTensor& {
   THTensor_(fill)(tensor, value);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::maskedFill(const Tensor& mask, scalar_type value) -> THTensor& {
+  THTensor_(maskedFill)(tensor, const_byte_cast(mask).tensor, value);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::maskedCopy(const Tensor& mask, const Tensor& src) -> THTensor& {
+  THTensor_(maskedCopy)(tensor, const_byte_cast(mask).tensor, const_tensor_cast(src).tensor);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THTensor& {
+  THTensor_(maskedSelect)(tensor, const_tensor_cast(src).tensor, const_byte_cast(mask).tensor);
+  return *this;
+}
+
+template<>
+ptrdiff_t THTensor<real>::nonzeroElems() const {
+  ptrdiff_t result = 0;
+#ifdef TH_REAL_IS_HALF
+#define IS_NONZERO(val) ((val.x & 0x7fff) != 0)
+#else
+#define IS_NONZERO(val) ((val)!=0)
+#endif
+  TH_TENSOR_APPLY(real, tensor,
+                  if IS_NONZERO(*tensor_data) {
+                    ++result;
+                  });
+  return result;
+}
+
+template<>
+auto THTensor<real>::nonzero(const Tensor& subscript) -> THTensor& {
+  THTensor_(nonzero)(const_long_cast(subscript).tensor, tensor);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::indexSelect(const Tensor& src, int dim, const Tensor& index) -> THTensor& {
+  THTensor_(indexSelect)(tensor, const_tensor_cast(src).tensor, dim,
+                         const_long_cast(index).tensor);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::indexCopy(int dim, const Tensor& index, const Tensor& src) -> THTensor& {
+  THTensor_(indexCopy)(tensor, dim, const_long_cast(index).tensor,
+                       const_tensor_cast(src).tensor);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::indexAdd(int dim, const Tensor& index, const Tensor& src) -> THTensor& {
+  THTensor_(indexAdd)(tensor, dim, const_long_cast(index).tensor,
+                      const_tensor_cast(src).tensor);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::indexFill(int dim, const Tensor& index, scalar_type value) -> THTensor& {
+  THTensor_(indexFill)(tensor, dim, const_long_cast(index).tensor, value);
   return *this;
 }
 

@@ -1,4 +1,106 @@
 
+static void tensorFill(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *t = unpackRetrieveTensor(raw_message);
+  thpp::Type type = peekType(raw_message);
+  if (thpp::isInteger(type)) {
+    auto value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<thpp::IntTensor*>(t)->fill(value);
+  } else if (thpp::isFloat(type)) {
+    auto value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<thpp::FloatTensor*>(t)->fill(value);
+  } else {
+    throw std::runtime_error("expected a scalar type");
+  }
+}
+
+static void tensorMaskedFill(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *t = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *mask = unpackRetrieveTensor(raw_message);
+  thpp::Type type = peekType(raw_message);
+  if (thpp::isInteger(type)) {
+    auto value = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<thpp::IntTensor*>(t)->maskedFill(*mask, value);
+  } else if (thpp::isFloat(type)) {
+    auto value = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<thpp::FloatTensor*>(t)->maskedFill(*mask, value);
+  } else {
+    throw std::runtime_error("expected a scalar type");
+  }
+}
+
+static void tensorMaskedCopy(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *t = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *mask = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  t->maskedCopy(*mask, *src);
+}
+
+static void tensorMaskedSelect(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *t = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *mask = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  t->maskedCopy(*src, *mask);
+}
+
+static void tensorNonzero(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *subscript = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  sendValueToMaster((double)tensor->nonzeroElems());
+  tensor->nonzero(*subscript);
+}
+
+static void tensorIndexSelect(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  int dim = unpackInteger(raw_message);
+  thpp::Tensor *index = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->indexSelect(*src, dim, *index);
+}
+
+static void tensorIndexCopy(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  int dim = unpackInteger(raw_message);
+  thpp::Tensor *index = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->indexCopy(dim, *index, *src);
+}
+
+static void tensorIndexAdd(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  int dim = unpackInteger(raw_message);
+  thpp::Tensor *index = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->indexAdd(dim, *index, *src);
+}
+
+static void tensorIndexFill(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  int dim = unpackInteger(raw_message);
+  thpp::Tensor *index = unpackRetrieveTensor(raw_message);
+  thpp::Type type = peekType(raw_message);
+  if (thpp::isInteger(type)) {
+    auto val = unpackInteger(raw_message);
+    finalize(raw_message);
+    dynamic_cast<thpp::IntTensor*>(tensor)->indexFill(dim, *index, val);
+  } else if (thpp::isFloat(type)) {
+    auto val = unpackFloat(raw_message);
+    finalize(raw_message);
+    dynamic_cast<thpp::FloatTensor*>(tensor)->indexFill(dim, *index, val);
+  } else {
+    throw std::runtime_error("expected a scalar type");
+  }
+}
+
 static void tensorDiag(rpc::RPCMessage& raw_message) {
   thpp::Tensor *r = unpackRetrieveTensor(raw_message);
   thpp::Tensor *t = unpackRetrieveTensor(raw_message);

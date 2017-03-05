@@ -42,6 +42,10 @@ public:
   virtual THCTensor* clone() const override;
   virtual THCTensor* clone_shallow() override;
   virtual std::unique_ptr<Tensor> contiguous() const override;
+  virtual THCTensor* newSelect(int dimension, long sliceIndex) const override; 
+  virtual THCTensor* newNarrow(int dimension, long firstIndex, long size) const override; 
+  virtual THCTensor* newTranspose(int dimension1, int dimension2) const override; 
+  virtual THCTensor* newUnfold(int dimension, long size, long step) const override; 
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -79,11 +83,35 @@ public:
   virtual THCTensor& select(const Tensor& src, int dimension,
                            long sliceIndex) override;
   virtual THCTensor& transpose(const Tensor& src, int dimension1,
-                              int dimension2) override;
+                               int dimension2) override;
   virtual THCTensor& unfold(const Tensor& src, int dimension,
                            long size, long step) override;
-  virtual THCTensor& squeeze(const Tensor& src, int dimension) override;
+  virtual THCTensor& squeeze(const Tensor& src) override;
+  virtual THCTensor& squeeze1d(const Tensor& src, int dimension) override;
   virtual THCTensor& unsqueeze(const Tensor& src, int dimension) override;
+
+  virtual THCTensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a);
+  virtual THCTensor& trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                           const char *uplo, const char *trans, const char *diag);
+  virtual THCTensor& gels(const Tensor& ra, const Tensor& b, const Tensor& a);
+  virtual THCTensor& syev(const Tensor& rv, const Tensor& a,
+                          const char *jobz, const char *uplo);
+  virtual THCTensor& geev(const Tensor& rv, const Tensor& a, const char *jobvr);
+  virtual THCTensor& gesvd(const Tensor& rs, const Tensor& rv,
+                           const Tensor& a, const char *jobu);
+  virtual THCTensor& gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                            const Tensor& a, const char *jobu);
+  virtual THCTensor& getri(const Tensor& a);
+  virtual THCTensor& potrf(const Tensor& a, const char *uplo);
+  virtual THCTensor& potrs(const Tensor& b, const Tensor& a, const char *uplo);
+  virtual THCTensor& potri(const Tensor& a, const char *uplo);
+  virtual THCTensor& qr(const Tensor& rr, const Tensor& a);
+  virtual THCTensor& geqrf(const Tensor& rtau, const Tensor& a);
+  virtual THCTensor& orgqr(const Tensor& a, const Tensor& tau);
+  virtual THCTensor& ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                           const char *side, const char *trans);
+  virtual THCTensor& pstrf(const Tensor& rpiv, const Tensor& a,
+                           const char *uplo, scalar_type tol);
 
   virtual THCTensor& diag(const Tensor& src, int k) override;
   virtual THCTensor& eye(long n, long m) override;
@@ -195,7 +223,20 @@ public:
   virtual THCTensor& geValueT(const Tensor& t, scalar_type value) override;
   virtual THCTensor& neValueT(const Tensor& t, scalar_type value) override;
   virtual THCTensor& eqValueT(const Tensor& t, scalar_type value) override;
+
   virtual THCTensor& fill(scalar_type value) override;
+  virtual THCTensor& maskedFill(const Tensor& mask, scalar_type value) override;
+  virtual THCTensor& maskedCopy(const Tensor& mask, const Tensor& src) override;
+  virtual THCTensor& maskedSelect(const Tensor& mask, const Tensor& src) override;
+  virtual ptrdiff_t nonzeroElems() const override;
+  // NOTE like in byte comparison operations, the order in nonzero
+  // is reversed compared to THC, i.e. tensor->nonzero(subscript) is equivalent
+  // to THCTensor_(nonzero)(subscript, tensor)
+  virtual THCTensor& nonzero(const Tensor& subscript) override;
+  virtual THCTensor& indexSelect(const Tensor& src, int dim, const Tensor& index) override;
+  virtual THCTensor& indexCopy(int dim, const Tensor& index, const Tensor& src) override;
+  virtual THCTensor& indexAdd(int dim, const Tensor& index, const Tensor& src) override;
+  virtual THCTensor& indexFill(int dim, const Tensor& index, scalar_type value) override;
 
   virtual THCTensor& copy(const Tensor& src) override;
   virtual THCTensor& cat(const std::vector<Tensor*>& src, int dimension) override;

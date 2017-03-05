@@ -24,6 +24,9 @@ struct th_tensor_traits {};
 
 namespace thpp {
 
+template <typename real>
+  struct THStorage;
+
 template<typename real>
 struct THTensor : public interface_traits<real>::tensor_interface_type {
   template<typename U>
@@ -38,11 +41,19 @@ public:
 
   THTensor();
   THTensor(tensor_type *wrapped);
+  THTensor(const Tensor& other);
+  THTensor(const Storage& storage, ptrdiff_t storageOffset,
+           THLongStorage *size, THLongStorage *stride);
+  THTensor(THLongStorage *size, THLongStorage *stride);
   virtual ~THTensor();
 
   virtual THTensor* clone() const override;
   virtual THTensor* clone_shallow() override;
   virtual std::unique_ptr<Tensor> contiguous() const override;
+  virtual THTensor* newSelect(int dimension, long sliceIndex) const override; 
+  virtual THTensor* newNarrow(int dimension, long firstIndex, long size) const override; 
+  virtual THTensor* newTranspose(int dimension1, int dimension2) const override; 
+  virtual THTensor* newUnfold(int dimension, long size, long step) const override; 
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -83,8 +94,32 @@ public:
                               int dimension2) override;
   virtual THTensor& unfold(const Tensor& src, int dimension,
                            long size, long step) override;
-  virtual THTensor& squeeze(const Tensor& src, int dimension) override;
+  virtual THTensor& squeeze(const Tensor& src) override;
+  virtual THTensor& squeeze1d(const Tensor& src, int dimension) override;
   virtual THTensor& unsqueeze(const Tensor& src, int dimension) override;
+
+  virtual THTensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a);
+  virtual THTensor& trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                          const char *uplo, const char *trans, const char *diag);
+  virtual THTensor& gels(const Tensor& ra, const Tensor& b, const Tensor& a);
+  virtual THTensor& syev(const Tensor& rv, const Tensor& a,
+                         const char *jobz, const char *uplo);
+  virtual THTensor& geev(const Tensor& rv, const Tensor& a, const char *jobvr);
+  virtual THTensor& gesvd(const Tensor& rs, const Tensor& rv,
+                          const Tensor& a, const char *jobu);
+  virtual THTensor& gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                           const Tensor& a, const char *jobu);
+  virtual THTensor& getri(const Tensor& a);
+  virtual THTensor& potrf(const Tensor& a, const char *uplo);
+  virtual THTensor& potrs(const Tensor& b, const Tensor& a, const char *uplo);
+  virtual THTensor& potri(const Tensor& a, const char *uplo);
+  virtual THTensor& qr(const Tensor& rr, const Tensor& a);
+  virtual THTensor& geqrf(const Tensor& rtau, const Tensor& a);
+  virtual THTensor& orgqr(const Tensor& a, const Tensor& tau);
+  virtual THTensor& ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                          const char *side, const char *trans);
+  virtual THTensor& pstrf(const Tensor& rpiv, const Tensor& a,
+                          const char *uplo, scalar_type tol);
 
   virtual THTensor& diag(const Tensor& src, int k) override;
   virtual THTensor& eye(long n, long m) override;
@@ -196,7 +231,20 @@ public:
   virtual THTensor& geValueT(const Tensor& t, scalar_type value) override;
   virtual THTensor& neValueT(const Tensor& t, scalar_type value) override;
   virtual THTensor& eqValueT(const Tensor& t, scalar_type value) override;
+
   virtual THTensor& fill(scalar_type value) override;
+  virtual THTensor& maskedFill(const Tensor& mask, scalar_type value) override;
+  virtual THTensor& maskedCopy(const Tensor& mask, const Tensor& src) override;
+  virtual THTensor& maskedSelect(const Tensor& mask, const Tensor& src) override;
+  virtual ptrdiff_t nonzeroElems() const override;
+  // NOTE like in byte comparison operations, the order in nonzero
+  // is reversed compared to TH, i.e. tensor->nonzero(subscript) is equivalent
+  // to THTensor_(nonzero)(subscript, tensor)
+  virtual THTensor& nonzero(const Tensor& subscript) override;
+  virtual THTensor& indexSelect(const Tensor& src, int dim, const Tensor& index) override;
+  virtual THTensor& indexCopy(int dim, const Tensor& index, const Tensor& src) override;
+  virtual THTensor& indexAdd(int dim, const Tensor& index, const Tensor& src) override;
+  virtual THTensor& indexFill(int dim, const Tensor& index, scalar_type value) override;
 
   virtual THTensor& copy(const Tensor& src) override;
   virtual THTensor& cat(const std::vector<Tensor*>& src, int dimension) override;
