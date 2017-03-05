@@ -2034,6 +2034,26 @@ class TestNNInit(TestCase):
                         self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
                                          torch.eye(rows) * gain ** 2, prec=1e-6)
 
+    def test_PReLU(self):
+        p = nn.PReLU(3, 0.3)
+
+        def forward_backward(input, grad_output):
+            output = p(input)
+            self.assertEqual(output[input > 0], input[input > 0])
+            self.assertEqual(output[input < 0], input[input < 0] * 0.3)
+
+            output.backward(grad_output)
+            grad_output = Variable(grad_output)
+            self.assertEqual(input.grad[input > 0], grad_output[input > 0])
+            self.assertEqual(input.grad[input < 0], grad_output[input < 0] * 0.3)
+
+        input = Variable(torch.randn(2, 3, 4), requires_grad=True)
+        grad_output = torch.randn(2, 3, 4)
+        forward_backward(input, grad_output)
+        input = Variable(torch.randn(2, 3, 4, 5, 6), requires_grad=True)
+        grad_output = torch.randn(2, 3, 4, 5, 6)
+        forward_backward(input, grad_output)
+
 
 def add_test(test):
     test_name = test.get_name()
