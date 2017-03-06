@@ -58,6 +58,12 @@ bool CommandLineFlagsHasBeenParsed();
 
 #include <gflags/gflags.h>
 
+// gflags before 2.0 uses namespace google and after 2.1 uses namespace gflags.
+// Using GFLAGS_GFLAGS_H_ to capture this change.
+#ifndef GFLAGS_GFLAGS_H_
+namespace gflags = google;
+#endif  // GFLAGS_GFLAGS_H_
+
 #define CAFFE2_GFLAGS_DEF_WRAPPER(type, name, default_value, help_str)         \
   DEFINE_##type(name, default_value, help_str);                                \
   namespace caffe2 {                                                           \
