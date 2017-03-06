@@ -27,7 +27,7 @@ The second saves and loads the entire model::
 
 Then later::
 
-    the_model = torch.load(PATH))
+    the_model = torch.load(PATH)
 
 However in this case, the serialized data is bound to the specific classes
 and the exact directory structure used, so it can break in various ways when
