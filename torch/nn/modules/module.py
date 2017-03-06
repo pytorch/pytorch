@@ -360,15 +360,26 @@ class Module(object):
                 else:
                     yield module
 
-    def modules(self, memo=None):
+    def modules(self, named=False, memo=None, prefix=None):
         if memo is None:
             memo = set()
+            prefix = []
         if self not in memo:
             memo.add(self)
-            yield self
-            for module in self.children():
-                for m in module.modules(memo):
+            if named is True:
+                yield '.'.join(prefix), self
+            else:
+                yield self
+            for child in self.children(named):
+                if named is True:
+                    name, module = child
+                    prefix.append(name)
+                else:
+                    module = child
+                for m in module.modules(named, memo, prefix):
                     yield m
+                if prefix:
+                    prefix.pop()
 
     def train(self, mode=True):
         """Sets the module in training mode.
