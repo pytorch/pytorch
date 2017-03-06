@@ -46,13 +46,47 @@ class Prod(_DimReduceFunction):
     def backward(self, grad_output):
         if self.dim is None:
             input, = self.saved_tensors
-            grad_input = grad_output.new(self.input_size).fill_(self.result)
-            return grad_input.div(input)
+            zero_loc = (input==0).nonzero()
+            if zero_loc.dim() == 0:
+                grad_input = grad_output.new(self.input_size).fill_(self.result)
+                return grad_input.div(input)
+            elif zero_loc.size()[0] > 1:
+                return grad_output.new(self.input_size).fill_(0)
+            else:
+                grad_input = grad_output.new(self.input_size).fill_(0)
+                indexing_tuple = tuple(zero_loc[0].numpy())
+                input_copy = input.new(self.input_size).fill_(0)
+                input_copy.copy_(input)
+                input_copy[indexing_tuple] = 1.0
+                grad_input[indexing_tuple] = input_copy.prod()
+                return grad_input
         else:
             input, output = self.saved_tensors
+            input_copy = input.new(self.input_size).fill_(0)
+            input_copy.copy_(input)
+            input_copy[input == 0] = 1.0
+
             repeats = [1 for _ in self.input_size]
             repeats[self.dim] = self.input_size[self.dim]
-            return output.mul(grad_output).repeat(*repeats).div_(input)
+            output_zero_cnt = (input == 0).sum(self.dim)
+            output_one_zero_ind = (output_zero_cnt == 1).nonzero()
+            grad_input = output.mul(grad_output)
+            grad_input[output_zero_cnt > 0] = 0.0
+            grad_input = grad_input.repeat(*repeats).div_(input_copy)
+            if output_one_zero_ind.dim() == 0:
+                return grad_input
+
+            for i in range(output_one_zero_ind.size()[0]):
+                if output_one_zero_ind.is_cuda:
+                    output_one_zero_vec_ind = tuple(output_one_zero_ind[i].cpu().numpy())
+                else:
+                    output_one_zero_vec_ind = tuple(output_one_zero_ind[i].numpy())
+                output_one_zero_vec_indexing = output_one_zero_vec_ind[:self.dim] + (slice(0, None),) + output_one_zero_vec_ind[self.dim+1:]
+                output_one_zero_vec = input.new(self.input_size[self.dim]).fill_(0)
+                output_one_zero_vec.copy_(input[output_one_zero_vec_indexing])
+                output_one_zero_vec[(output_one_zero_vec==0).nonzero()[0, 0]] = 1.0
+                grad_input[output_one_zero_vec_ind] = output_one_zero_vec.prod() if output_one_zero_vec.numel()>1 else 1.0
+            return grad_input
 
 
 class Mean(_DimReduceFunction):
