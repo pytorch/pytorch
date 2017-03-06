@@ -46,19 +46,19 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
             OperatorBase::GetSingleArgument<int>("deterministic", 0)),
         cudnn_state_(OperatorBase::GetSingleArgument<int>("cudnn_state", 0)) {
     CAFFE_ENFORCE(!deterministic_ || !exhaustive_search_);
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
-    CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bias_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&top_desc_));
-    CUDNN_CHECK(cudnnCreateConvolutionDescriptor(&conv_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bottom_desc_));
+    CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&filter_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bias_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_));
+    CUDNN_ENFORCE(cudnnCreateConvolutionDescriptor(&conv_desc_));
   }
 
   ~CudnnConvTransposeOpBase() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bottom_desc_));
-    CUDNN_CHECK(cudnnDestroyFilterDescriptor(filter_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bias_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(top_desc_));
-    CUDNN_CHECK(cudnnDestroyConvolutionDescriptor(conv_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bottom_desc_));
+    CUDNN_ENFORCE(cudnnDestroyFilterDescriptor(filter_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bias_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(top_desc_));
+    CUDNN_ENFORCE(cudnnDestroyConvolutionDescriptor(conv_desc_));
   }
 
  protected:
@@ -180,7 +180,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.dims();
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bottom_desc_,
           GetCudnnTensorFormat(order_),
           cudnnTypeWrapper<T>::type,
@@ -191,7 +191,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
-      CUDNN_CHECK(cudnnSetFilter4dDescriptor(
+      CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,
           GetCudnnTensorFormat(order_),
@@ -199,7 +199,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
           C,
           kernel_h_,
           kernel_w_));
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bias_desc_,
           GetCudnnTensorFormat(order_),
           cudnnTypeWrapper<T>::type,
@@ -209,7 +209,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
           1));
     }
     // Set the output
-    CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         top_desc_,
         GetCudnnTensorFormat(order_),
         cudnnTypeWrapper<T>::type,
@@ -229,7 +229,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
 #if CUDNN_VERSION_MIN(6,0,0)
-    CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
+    CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t_,
         pad_l_,
@@ -240,7 +240,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         CUDNN_CROSS_CORRELATION,
         cudnnTypeWrapper<T>::type));
 #else
-    CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
+    CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t_,
         pad_l_,
@@ -263,7 +263,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
             cudnn_wrapper_.with_cudnn_state(
                 cudnn_state_, [&](CuDNNState* state) {
                   state->workspace().reset();
-                  CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithm(
+                  CUDNN_ENFORCE(cudnnFindConvolutionBackwardDataAlgorithm(
                       state->cudnn_handle(),
                       filter_desc_,
                       bottom_desc_,
@@ -278,7 +278,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
             return data_perf_stat[0].algo;
           });
     } else {
-      CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
+      CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataAlgorithm(
           cudnn_wrapper_.inline_cudnn_handle(),
           filter_desc_,
           bottom_desc_,
@@ -290,7 +290,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
     }
 
     size_t bwd_data_ws_size;
-    CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
+    CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataWorkspaceSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         filter_desc_,
         bottom_desc_,
@@ -306,7 +306,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
   // Now, actually run the computation.
   // Filter
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-    CUDNN_CHECK(cudnnConvolutionBackwardData(
+    CUDNN_ENFORCE(cudnnConvolutionBackwardData(
         state->cudnn_handle(),
         cudnnTypeWrapper<T>::kOne(),
         filter_desc_,
@@ -322,7 +322,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         Y->template mutable_data<T>()));
   });
   // Bias
-  CUDNN_CHECK(cudnnAddTensor(
+  CUDNN_ENFORCE(cudnnAddTensor(
       cudnn_wrapper_.inline_cudnn_handle(),
       cudnnTypeWrapper<T>::kOne(),
       bias_desc_,
@@ -399,7 +399,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.dims();
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bottom_desc_,
           GetCudnnTensorFormat(order_),
           cudnnTypeWrapper<T>::type,
@@ -410,7 +410,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
-      CUDNN_CHECK(cudnnSetFilter4dDescriptor(
+      CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,
           GetCudnnTensorFormat(order_),
@@ -418,7 +418,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           C,
           kernel_h_,
           kernel_w_));
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bias_desc_,
           GetCudnnTensorFormat(order_),
           cudnnTypeWrapper<T>::type,
@@ -428,7 +428,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           1));
     }
     // Set the output
-    CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         top_desc_,
         GetCudnnTensorFormat(order_),
         cudnnTypeWrapper<T>::type,
@@ -448,7 +448,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
 #if CUDNN_VERSION_MIN(6,0,0)
-    CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
+    CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t_,
         pad_l_,
@@ -459,7 +459,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         CUDNN_CROSS_CORRELATION,
         cudnnTypeWrapper<T>::type));
 #else
-    CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
+    CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t_,
         pad_l_,
@@ -499,7 +499,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
             cudnn_wrapper_.with_cudnn_state(
                 cudnn_state_, [&](CuDNNState* state) {
                   state->workspace().reset();
-                  CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(
+                  CUDNN_ENFORCE(cudnnFindConvolutionBackwardFilterAlgorithm(
                       state->cudnn_handle(),
                       top_desc_,
                       bottom_desc_,
@@ -519,7 +519,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
             fwd_perf_stat;
         cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
           state->workspace().reset();
-          CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithm(
+          CUDNN_ENFORCE(cudnnFindConvolutionForwardAlgorithm(
               state->cudnn_handle(),
               top_desc_,
               filter_desc_,
@@ -535,7 +535,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
       });
     } else {
       // choose backward algorithm for filter
-      CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
+      CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm(
           cudnn_wrapper_.inline_cudnn_handle(),
           top_desc_,
           bottom_desc_,
@@ -545,7 +545,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           cudnn_ws_nbytes_limit_,
           &bwd_filter_algo_));
       // choose backward algo for data
-      CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
+      CUDNN_ENFORCE(cudnnGetConvolutionForwardAlgorithm(
           cudnn_wrapper_.inline_cudnn_handle(),
           top_desc_,
           filter_desc_,
@@ -556,7 +556,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           &algo_));
     }
     // get workspace for backwards filter algorithm
-    CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+    CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         top_desc_,
         bottom_desc_,
@@ -565,7 +565,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         bwd_filter_algo_,
         &bwd_filter_ws_size));
     // get workspace for backwards data algorithm
-    CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
+    CUDNN_ENFORCE(cudnnGetConvolutionForwardWorkspaceSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         top_desc_,
         filter_desc_,
@@ -580,7 +580,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   }
 
   // Now, actually run the computation.
-  CUDNN_CHECK(cudnnConvolutionBackwardBias(
+  CUDNN_ENFORCE(cudnnConvolutionBackwardBias(
       cudnn_wrapper_.inline_cudnn_handle(),
       cudnnTypeWrapper<T>::kOne(),
       top_desc_,
@@ -590,7 +590,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
       dbias->template mutable_data<T>()));
 
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-    CUDNN_CHECK(cudnnConvolutionBackwardFilter(
+    CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
         state->cudnn_handle(),
         cudnnTypeWrapper<T>::kOne(),
         top_desc_,
@@ -608,7 +608,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
       // Compute the gradient w.r.t. the input.
       auto* dX = Output(INPUT_GRAD);
       dX->ResizeLike(X);
-      CUDNN_CHECK(cudnnConvolutionForward(
+      CUDNN_ENFORCE(cudnnConvolutionForward(
           state->cudnn_handle(),
           cudnnTypeWrapper<T>::kOne(),
           top_desc_,

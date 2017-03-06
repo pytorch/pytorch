@@ -109,7 +109,7 @@ const char* cublasGetErrorString(cublasStatus_t error);
 const char* curandGetErrorString(curandStatus_t error);
 
 // CUDA: various checks for different function calls.
-#define CUDA_CHECK(condition)       \
+#define CUDA_ENFORCE(condition)     \
   do {                              \
     cudaError_t error = condition;  \
     CAFFE_ENFORCE_EQ(               \
@@ -122,7 +122,21 @@ const char* curandGetErrorString(curandStatus_t error);
         ": ",                       \
         cudaGetErrorString(error)); \
   } while (0)
+#define CUDA_CHECK(condition)                                 \
+  do {                                                        \
+    cudaError_t error = condition;                            \
+    CHECK(error == cudaSuccess) << cudaGetErrorString(error); \
+  } while (0)
 
+#define CUDA_DRIVERAPI_ENFORCE(condition)                            \
+  do {                                                               \
+    CUresult result = condition;                                     \
+    if (result != CUDA_SUCCESS) {                                    \
+      const char* msg;                                               \
+      cuGetErrorName(result, &msg);                                  \
+      CAFFE_THROW("Error at: ", __FILE__, ":", __LINE__, ": ", msg); \
+    }                                                                \
+  } while (0)
 #define CUDA_DRIVERAPI_CHECK(condition)                                 \
   do {                                                                  \
     CUresult result = condition;                                        \
@@ -134,7 +148,7 @@ const char* curandGetErrorString(curandStatus_t error);
     }                                                                   \
   } while (0)
 
-#define CUBLAS_CHECK(condition)                  \
+#define CUBLAS_ENFORCE(condition)                \
   do {                                           \
     cublasStatus_t status = condition;           \
     CAFFE_ENFORCE_EQ(                            \
@@ -147,8 +161,14 @@ const char* curandGetErrorString(curandStatus_t error);
         ": ",                                    \
         ::caffe2::cublasGetErrorString(status)); \
   } while (0)
+#define CUBLAS_CHECK(condition)                    \
+  do {                                             \
+    cublasStatus_t status = condition;             \
+    CHECK(status == CUBLAS_STATUS_SUCCESS)         \
+        << ::caffe2::cublasGetErrorString(status); \
+  } while (0)
 
-#define CURAND_CHECK(condition)                  \
+#define CURAND_ENFORCE(condition)                \
   do {                                           \
     curandStatus_t status = condition;           \
     CAFFE_ENFORCE_EQ(                            \
@@ -160,6 +180,12 @@ const char* curandGetErrorString(curandStatus_t error);
         __LINE__,                                \
         ": ",                                    \
         ::caffe2::curandGetErrorString(status)); \
+  } while (0)
+#define CURAND_CHECK(condition)                    \
+  do {                                             \
+    curandStatus_t status = condition;             \
+    CHECK(status == CURAND_STATUS_SUCCESS)         \
+        << ::caffe2::curandGetErrorString(status); \
   } while (0)
 
 #define CUDA_1D_KERNEL_LOOP(i, n)                                              \
@@ -212,11 +238,11 @@ class DeviceGuard {
   explicit DeviceGuard(int newDevice)
       : previous_(GetCurrentGPUID()) {
     if (previous_ != newDevice) {
-      CUDA_CHECK(cudaSetDevice(newDevice));
+      CUDA_ENFORCE(cudaSetDevice(newDevice));
     }
   }
 
-  ~DeviceGuard() {
+  ~DeviceGuard() noexcept {
     CUDA_CHECK(cudaSetDevice(previous_));
   }
 

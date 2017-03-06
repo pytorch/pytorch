@@ -81,8 +81,21 @@ void Gemm<float, CUDAContext>(
       (TransA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   cublasOperation_t cuTransB =
       (TransB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
-  CUBLAS_CHECK(cublasSgemm(context->cublas_handle(), cuTransB, cuTransA,
-      N, M, K, &alpha, B, ldb, A, lda, &beta, C, N));
+  CUBLAS_ENFORCE(cublasSgemm(
+      context->cublas_handle(),
+      cuTransB,
+      cuTransA,
+      N,
+      M,
+      K,
+      &alpha,
+      B,
+      ldb,
+      A,
+      lda,
+      &beta,
+      C,
+      N));
 }
 
 template <>
@@ -97,8 +110,21 @@ void GemmEx<float, CUDAContext>(
       (TransA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   cublasOperation_t cuTransB =
       (TransB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
-  CUBLAS_CHECK(cublasSgemm(context->cublas_handle(), cuTransB, cuTransA,
-      N, M, K, &alpha, B, ldb, A, lda, &beta, C, ldc));
+  CUBLAS_ENFORCE(cublasSgemm(
+      context->cublas_handle(),
+      cuTransB,
+      cuTransA,
+      N,
+      M,
+      K,
+      &alpha,
+      B,
+      ldb,
+      A,
+      lda,
+      &beta,
+      C,
+      ldc));
 }
 
 template <>
@@ -108,8 +134,19 @@ void Gemv<float, CUDAContext>(
     CUDAContext* context) {
   cublasOperation_t cuTransA =
       (TransA == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
-  CUBLAS_CHECK(cublasSgemv(context->cublas_handle(), cuTransA, N, M, &alpha,
-      A, N, x, 1, &beta, y, 1));
+  CUBLAS_ENFORCE(cublasSgemv(
+      context->cublas_handle(),
+      cuTransA,
+      N,
+      M,
+      &alpha,
+      A,
+      N,
+      x,
+      1,
+      &beta,
+      y,
+      1));
 }
 
 
@@ -166,7 +203,7 @@ template <>
 void RandUniform<float, CUDAContext>(
     const int n, const float min, const float max, float* r,
     CUDAContext* context) {
-  CURAND_CHECK(curandGenerateUniform(context->curand_generator(), r, n));
+  CURAND_ENFORCE(curandGenerateUniform(context->curand_generator(), r, n));
   UniformShift<float><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                         0, context->cuda_stream()>>>(n, min, max, r);
 }
@@ -175,7 +212,8 @@ template <>
 void RandUniform<double, CUDAContext>(
     const int n, const double min, const double max, double* r,
     CUDAContext* context) {
-  CURAND_CHECK(curandGenerateUniformDouble(context->curand_generator(), r, n));
+  CURAND_ENFORCE(
+      curandGenerateUniformDouble(context->curand_generator(), r, n));
   UniformShift<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                          0, context->cuda_stream()>>>(n, min, max, r);
 }
@@ -184,8 +222,8 @@ template <>
 void RandUniform<int, CUDAContext>(
     const int n, const int min, const int max, int* r,
     CUDAContext* context) {
-  CURAND_CHECK(curandGenerate(context->curand_generator(),
-                              reinterpret_cast<unsigned int*>(r), n));
+  CURAND_ENFORCE(curandGenerate(
+      context->curand_generator(), reinterpret_cast<unsigned int*>(r), n));
   UniformIntFit<<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                   0, context->cuda_stream()>>>(
       n, min, max, reinterpret_cast<unsigned int*>(r));
@@ -218,7 +256,7 @@ void RandGaussian<float, CUDAContext>(
   // curandGenerateNormal requires n to be even.
   const int even_n =
       HandleOddLengthRandGaussian<float>(n, mean, std, r, context);
-  CURAND_CHECK(
+  CURAND_ENFORCE(
       curandGenerateNormal(context->curand_generator(), r, even_n, mean, std));
 }
 
@@ -228,7 +266,7 @@ void RandGaussian<double, CUDAContext>(
     CUDAContext* context) {
   const int even_n =
       HandleOddLengthRandGaussian<double>(n, mean, std, r, context);
-  CURAND_CHECK(curandGenerateNormalDouble(
+  CURAND_ENFORCE(curandGenerateNormalDouble(
       context->curand_generator(), r, even_n, mean, std));
 }
 
@@ -238,7 +276,7 @@ void Dot<float, CUDAContext>(
     const int n, const float* a, const float* b, float* y,
     CUDAContext* context) {
   float result;
-  CUBLAS_CHECK(cublasSdot(context->cublas_handle(), n, a, 1, b, 1, &result));
+  CUBLAS_ENFORCE(cublasSdot(context->cublas_handle(), n, a, 1, b, 1, &result));
   context->Copy<float, CPUContext, CUDAContext>(1, &result, y);
 }
 
@@ -247,7 +285,7 @@ void Dot<double, CUDAContext>(
     const int n, const double* a, const double* b, double* y,
     CUDAContext* context) {
   double result;
-  CUBLAS_CHECK(cublasDdot(context->cublas_handle(), n, a, 1, b, 1, y));
+  CUBLAS_ENFORCE(cublasDdot(context->cublas_handle(), n, a, 1, b, 1, y));
   context->Copy<double, CPUContext, CUDAContext>(1, &result, y);
 }
 
@@ -374,7 +412,7 @@ void Axpy<float, CUDAContext>(
     const float* X,
     float* Y,
     CUDAContext* context) {
-  CUBLAS_CHECK(cublasSaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
+  CUBLAS_ENFORCE(cublasSaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
 }
 
 template <>
@@ -384,7 +422,7 @@ void Axpy<double, CUDAContext>(
     const double* X,
     double* Y,
     CUDAContext* context) {
-  CUBLAS_CHECK(cublasDaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
+  CUBLAS_ENFORCE(cublasDaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
 }
 
 namespace detail {

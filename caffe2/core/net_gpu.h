@@ -15,7 +15,7 @@ struct Event {
   explicit Event(const DeviceOption& device_option);
   ~Event() {
     if (event_) {
-      CUDA_CHECK(cudaEventDestroy(event_));
+      CUDA_ENFORCE(cudaEventDestroy(event_));
     }
   }
 

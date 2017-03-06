@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
       "provided by cuda.");
 
   int gpu_count;
-  CUDA_CHECK(cudaGetDeviceCount(&gpu_count));
+  CUDA_ENFORCE(cudaGetDeviceCount(&gpu_count));
   for (int i = 0; i < gpu_count; ++i) {
     LOG(INFO) << "Querying device ID = " << i;
     caffe2::DeviceQuery(i);

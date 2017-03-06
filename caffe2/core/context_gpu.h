@@ -27,7 +27,6 @@ enum class CudaMemoryPoolType {
 CudaMemoryPoolType GetCudaMemoryPoolType();
 
 
-
 /**
  * A struct to host thread-local cuda objects.
  *
@@ -54,9 +53,8 @@ class ThreadLocalCUDAObjects {
     }
     if (!gpu_streams[stream_id]) {
       DeviceGuard guard(gpu);
-      CUDA_CHECK(cudaStreamCreateWithFlags(
-        &gpu_streams[stream_id], cudaStreamNonBlocking
-      ));
+      CUDA_ENFORCE(cudaStreamCreateWithFlags(
+          &gpu_streams[stream_id], cudaStreamNonBlocking));
     }
     return gpu_streams[stream_id];
   }
@@ -68,19 +66,19 @@ class ThreadLocalCUDAObjects {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
-      CUBLAS_CHECK(cublasCreate(&gpu_handles[stream_id]));
+      CUBLAS_ENFORCE(cublasCreate(&gpu_handles[stream_id]));
       // The default is CUBLAS_POINTER_MODE_HOST. You can override
       // it after obtaining the cublas handle, but do that with
       // caution.
-      CUBLAS_CHECK(cublasSetPointerMode(
+      CUBLAS_ENFORCE(cublasSetPointerMode(
           gpu_handles[stream_id], CUBLAS_POINTER_MODE_HOST));
-      CUBLAS_CHECK(cublasSetStream(gpu_handles[stream_id],
-          GetStream(gpu, stream_id)));
+      CUBLAS_ENFORCE(
+          cublasSetStream(gpu_handles[stream_id], GetStream(gpu, stream_id)));
     }
     return gpu_handles[stream_id];
   }
 
-  ~ThreadLocalCUDAObjects() {
+  ~ThreadLocalCUDAObjects() noexcept {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
       for (auto& handle : cublas_handles_[i]) {
         if (handle) {
@@ -106,14 +104,14 @@ class CUDAContext final {
 
   ~CUDAContext() {
     if (curand_generator_) {
-      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
+      CURAND_ENFORCE(curandDestroyGenerator(curand_generator_));
     }
     CAFFE_ENFORCE(FinishDeviceComputation());
   }
 
   inline void SwitchToDevice(int stream_id) {
     set_stream_id(stream_id);
-    CUDA_CHECK(cudaSetDevice(gpu_id_));
+    CUDA_ENFORCE(cudaSetDevice(gpu_id_));
   }
   inline void SwitchToDevice() {
     SwitchToDevice(0);
@@ -152,13 +150,13 @@ class CUDAContext final {
   curandGenerator_t& curand_generator() {
     if (!curand_generator_) {
       DeviceGuard guard(gpu_id_);
-      CURAND_CHECK(
+      CURAND_ENFORCE(
           curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
-      CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(
-          curand_generator_, random_seed_));
+      CURAND_ENFORCE(
+          curandSetPseudoRandomGeneratorSeed(curand_generator_, random_seed_));
       CHECK_NOTNULL(curand_generator_);
     }
-    CURAND_CHECK(curandSetStream(curand_generator_, cuda_stream()));
+    CURAND_ENFORCE(curandSetStream(curand_generator_, cuda_stream()));
     return curand_generator_;
   }
 
@@ -174,8 +172,11 @@ class CUDAContext final {
 
   template <class SrcContext, class DstContext>
   inline void CopyBytes(size_t nbytes, const void* src, void* dst) {
-    CUDA_CHECK(cudaMemcpyAsync(
-        dst, src, nbytes, cudaMemcpyDefault,
+    CUDA_ENFORCE(cudaMemcpyAsync(
+        dst,
+        src,
+        nbytes,
+        cudaMemcpyDefault,
         cuda_objects_.GetStream(gpu_id_, stream_id_)));
   }
 
@@ -238,7 +239,7 @@ struct PinnedCPUAllocator final : CPUAllocator {
   void* New(size_t nbytes) override {
     void* data;
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-    CUDA_CHECK(cudaMallocHost(&data, nbytes));
+    CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
     memset(data, 0, nbytes);
     return data;
   }
@@ -256,7 +257,7 @@ struct PinnedCPUAllocator final : CPUAllocator {
       cudaGetLastError();
     } else {
       // For all other errors, still do a cuda check.
-      CUDA_CHECK(err);
+      CUDA_ENFORCE(err);
     }
   }
 };

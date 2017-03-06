@@ -9,9 +9,9 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   CuDNNPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&top_desc_));
-    CUDNN_CHECK(cudnnCreatePoolingDescriptor(&pooling_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bottom_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_));
+    CUDNN_ENFORCE(cudnnCreatePoolingDescriptor(&pooling_desc_));
     // Figure out the pooling descriptor.
     if (def().type().substr(0, 7) == "MaxPool") {
       mode_ = CUDNN_POOLING_MAX;
@@ -37,9 +37,9 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   }
 
   ~CuDNNPoolOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bottom_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(top_desc_));
-    CUDNN_CHECK(cudnnDestroyPoolingDescriptor(pooling_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bottom_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(top_desc_));
+    CUDNN_ENFORCE(cudnnDestroyPoolingDescriptor(pooling_desc_));
   }
 
   template <typename M>
@@ -72,12 +72,20 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
       // Dimensions changed; we will need to re-initialize things.
       VLOG(1) << "Changing the cudnn descriptor configurations.";
       cudnn_input_dims_ = X.dims();
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          bottom_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, N, C, H, W));
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          top_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, N, C,
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          bottom_desc_,
+          GetCudnnTensorFormat(order_),
+          cudnnTypeWrapper<T>::type,
+          N,
+          C,
+          H,
+          W));
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          top_desc_,
+          GetCudnnTensorFormat(order_),
+          cudnnTypeWrapper<T>::type,
+          N,
+          C,
           order_ == StorageOrder::NCHW ? Y->dim32(2) : Y->dim32(1),
           order_ == StorageOrder::NCHW ? Y->dim32(3) : Y->dim32(2)));
       if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
@@ -87,7 +95,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
             "the only exception of the caffe legacy pooling case where we "
             "try to preserve backward compatibility with Caffe.");
       }
-      CUDNN_CHECK(cudnnSetPooling2dDescriptor(
+      CUDNN_ENFORCE(cudnnSetPooling2dDescriptor(
           pooling_desc_,
           mode_,
           CUDNN_PROPAGATE_NAN,
@@ -99,10 +107,14 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
           stride_w_));
     }
     // Carry out the pooling computation.
-    CUDNN_CHECK(cudnnPoolingForward(
-        cudnn_wrapper_.inline_cudnn_handle(), pooling_desc_,
-        cudnnTypeWrapper<T>::kOne(), bottom_desc_, X.template data<T>(),
-        cudnnTypeWrapper<T>::kZero(), top_desc_,
+    CUDNN_ENFORCE(cudnnPoolingForward(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        pooling_desc_,
+        cudnnTypeWrapper<T>::kOne(),
+        bottom_desc_,
+        X.template data<T>(),
+        cudnnTypeWrapper<T>::kZero(),
+        top_desc_,
         Y->template mutable_data<T>()));
     return true;
   }
@@ -131,9 +143,9 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
   CuDNNPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&top_desc_));
-    CUDNN_CHECK(cudnnCreatePoolingDescriptor(&pooling_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bottom_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_));
+    CUDNN_ENFORCE(cudnnCreatePoolingDescriptor(&pooling_desc_));
     // Figure out the pooling descriptor.
     if (def().type() == "MaxPoolGradient") {
       mode_ = CUDNN_POOLING_MAX;
@@ -159,9 +171,9 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
   }
 
   ~CuDNNPoolGradientOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bottom_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(top_desc_));
-    CUDNN_CHECK(cudnnDestroyPoolingDescriptor(pooling_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bottom_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(top_desc_));
+    CUDNN_ENFORCE(cudnnDestroyPoolingDescriptor(pooling_desc_));
   }
 
   template <typename M>
@@ -197,12 +209,20 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
       // Dimensions changed; we will need to re-initialize things.
       VLOG(1) << "Changing the cudnn descriptor configurations.";
       cudnn_input_dims_ = X.dims();
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          bottom_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, N, C, H, W));
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          top_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, N, C,
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          bottom_desc_,
+          GetCudnnTensorFormat(order_),
+          cudnnTypeWrapper<T>::type,
+          N,
+          C,
+          H,
+          W));
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          top_desc_,
+          GetCudnnTensorFormat(order_),
+          cudnnTypeWrapper<T>::type,
+          N,
+          C,
           order_ == StorageOrder::NCHW ? Y.dim32(2) : Y.dim32(1),
           order_ == StorageOrder::NCHW ? Y.dim32(3) : Y.dim32(2)));
       if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
@@ -212,7 +232,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
             "the only exception of the caffe legacy pooling case where we "
             "try to preserve backward compatibility with Caffe.");
       }
-      CUDNN_CHECK(cudnnSetPooling2dDescriptor(
+      CUDNN_ENFORCE(cudnnSetPooling2dDescriptor(
           pooling_desc_,
           mode_,
           CUDNN_PROPAGATE_NAN,
@@ -224,12 +244,19 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
           stride_w_));
     }
     // Carry out the pooling computation.
-    CUDNN_CHECK(cudnnPoolingBackward(
-        cudnn_wrapper_.inline_cudnn_handle(), pooling_desc_,
-        cudnnTypeWrapper<T>::kOne(), top_desc_,
-        Y.template data<T>(), top_desc_, dY.template data<T>(),
-        bottom_desc_, X.template data<T>(), cudnnTypeWrapper<T>::kZero(),
-        bottom_desc_, dX->template mutable_data<T>()));
+    CUDNN_ENFORCE(cudnnPoolingBackward(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        pooling_desc_,
+        cudnnTypeWrapper<T>::kOne(),
+        top_desc_,
+        Y.template data<T>(),
+        top_desc_,
+        dY.template data<T>(),
+        bottom_desc_,
+        X.template data<T>(),
+        cudnnTypeWrapper<T>::kZero(),
+        bottom_desc_,
+        dX->template mutable_data<T>()));
     return true;
   }
 

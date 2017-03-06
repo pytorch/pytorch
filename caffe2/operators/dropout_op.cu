@@ -34,8 +34,8 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
     // boolean numbers, we will generate into dY and write the result to
     // mask.
     float* Ydata = Y->mutable_data<float>();
-    CURAND_CHECK(curandGenerateUniform(
-        context_.curand_generator(), Ydata, X.size()));
+    CURAND_ENFORCE(
+        curandGenerateUniform(context_.curand_generator(), Ydata, X.size()));
     DropoutKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
                     0, context_.cuda_stream()>>>(
         X.size(), ratio_, X.data<float>(), Ydata, mask->mutable_data<bool>());

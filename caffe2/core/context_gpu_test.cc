@@ -32,7 +32,7 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
     void* allocated = CUDAContext::New(nbytes);
     EXPECT_NE(allocated, nullptr);
     cudaPointerAttributes attr;
-    CUDA_CHECK(cudaPointerGetAttributes(&attr, allocated));
+    CUDA_ENFORCE(cudaPointerGetAttributes(&attr, allocated));
     EXPECT_EQ(attr.memoryType, cudaMemoryTypeDevice);
     EXPECT_EQ(attr.device, i);
     CUDAContext::Delete(allocated);
@@ -50,7 +50,7 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
 
 cudaStream_t getStreamForHandle(cublasHandle_t handle) {
   cudaStream_t stream = nullptr;
-  CUBLAS_CHECK(cublasGetStream(handle, &stream));
+  CUBLAS_ENFORCE(cublasGetStream(handle, &stream));
   CHECK_NOTNULL(stream);
   return stream;
 }

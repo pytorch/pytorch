@@ -13,8 +13,8 @@ TensorDescriptors<T>::TensorDescriptors(
   descs_.resize(n);
   CAFFE_ENFORCE_EQ(dim.size(), stride.size());
   for (auto i = 0; i < n; ++i) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&descs_[i]));
-    CUDNN_CHECK(cudnnSetTensorNdDescriptor(
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&descs_[i]));
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         descs_[i],
         cudnnTypeWrapper<T>::type,
         dim.size(),
@@ -36,24 +36,24 @@ RecurrentBaseOp<T>::RecurrentBaseOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : Operator<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
-  CUDNN_CHECK(cudnnCreateDropoutDescriptor(&dropoutDesc_));
-  CUDNN_CHECK(cudnnCreateRNNDescriptor(&rnnDesc_));
-  CUDNN_CHECK(cudnnCreateFilterDescriptor(&wDesc_));
-  CUDNN_CHECK(cudnnCreateTensorDescriptor(&hxDesc_));
-  CUDNN_CHECK(cudnnCreateTensorDescriptor(&cxDesc_));
-  CUDNN_CHECK(cudnnCreateTensorDescriptor(&hyDesc_));
-  CUDNN_CHECK(cudnnCreateTensorDescriptor(&cyDesc_));
+  CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropoutDesc_));
+  CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
+  CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
+  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hxDesc_));
+  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cxDesc_));
+  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hyDesc_));
+  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cyDesc_));
 }
 
 template <typename T>
 RecurrentBaseOp<T>::~RecurrentBaseOp() {
-  CUDNN_CHECK(cudnnDestroyDropoutDescriptor(dropoutDesc_));
-  CUDNN_CHECK(cudnnDestroyRNNDescriptor(rnnDesc_));
-  CUDNN_CHECK(cudnnDestroyFilterDescriptor(wDesc_));
-  CUDNN_CHECK(cudnnDestroyTensorDescriptor(hxDesc_));
-  CUDNN_CHECK(cudnnDestroyTensorDescriptor(cxDesc_));
-  CUDNN_CHECK(cudnnDestroyTensorDescriptor(hyDesc_));
-  CUDNN_CHECK(cudnnDestroyTensorDescriptor(cyDesc_));
+  CUDNN_ENFORCE(cudnnDestroyDropoutDescriptor(dropoutDesc_));
+  CUDNN_ENFORCE(cudnnDestroyRNNDescriptor(rnnDesc_));
+  CUDNN_ENFORCE(cudnnDestroyFilterDescriptor(wDesc_));
+  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hxDesc_));
+  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cxDesc_));
+  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hyDesc_));
+  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cyDesc_));
 }
 
 template <typename T>
@@ -91,11 +91,11 @@ void RecurrentBaseOp<T>::initialize(
   // Dropout setup
   {
     size_t stateSize;
-    CUDNN_CHECK(cudnnDropoutGetStatesSize(
+    CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
         cudnn_wrapper_.inline_cudnn_handle(), &stateSize));
     dropoutStates->Resize(std::vector<int>{static_cast<int>(
         stateSize / 4 /* sizeof(T) - workaround clang bug */)});
-    CUDNN_CHECK(cudnnSetDropoutDescriptor(
+    CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
         dropoutDesc_,
         cudnn_wrapper_.inline_cudnn_handle(),
         OperatorBase::GetSingleArgument<float>("dropout", 0.0),
@@ -106,7 +106,7 @@ void RecurrentBaseOp<T>::initialize(
 
   // RNN setup
   {
-    CUDNN_CHECK(cudnnSetRNNDescriptor(
+    CUDNN_ENFORCE(cudnnSetRNNDescriptor(
         rnnDesc_,
         hiddenSize,
         numLayers,
@@ -144,13 +144,13 @@ void RecurrentBaseOp<T>::initialize(
     const std::array<int, 3> dim{
         numLayers * numDirections, batchSize, hiddenSize};
     const std::array<int, 3> stride{batchSize * hiddenSize, hiddenSize, 1};
-    CUDNN_CHECK(cudnnSetTensorNdDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         hxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_CHECK(cudnnSetTensorNdDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         cxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_CHECK(cudnnSetTensorNdDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         hyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_CHECK(cudnnSetTensorNdDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         cyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
 
     if (hiddenOutput) {
@@ -167,7 +167,7 @@ void RecurrentBaseOp<T>::initialize(
   // Weights setup
   {
     size_t weightsSize;
-    CUDNN_CHECK(cudnnGetRNNParamsSize(
+    CUDNN_ENFORCE(cudnnGetRNNParamsSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         rnnDesc_,
         xDesc_->descs()[0],
@@ -178,13 +178,13 @@ void RecurrentBaseOp<T>::initialize(
             weightsSize / 4 /* sizeof(T) - workaround clang bug */),
         1,
         1};
-    CUDNN_CHECK(cudnnSetFilterNdDescriptor(
+    CUDNN_ENFORCE(cudnnSetFilterNdDescriptor(
         wDesc_, cudnnTypeWrapper<T>::type, CUDNN_TENSOR_NCHW, 3, dims.data()));
   }
 
   // RNN workspace size
   {
-    CUDNN_CHECK(cudnnGetRNNWorkspaceSize(
+    CUDNN_ENFORCE(cudnnGetRNNWorkspaceSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         rnnDesc_,
         seqLength,
@@ -208,7 +208,7 @@ bool RecurrentOp<T>::RunOnDevice() {
 
   // Validation checks
   size_t weightsSize;
-  CUDNN_CHECK(cudnnGetRNNParamsSize(
+  CUDNN_ENFORCE(cudnnGetRNNParamsSize(
       cudnn_wrapper_.inline_cudnn_handle(),
       rnnDesc_,
       xDesc_->descs()[0],
@@ -217,7 +217,7 @@ bool RecurrentOp<T>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(Input(WEIGHT).nbytes(), weightsSize);
 
   // Training reserve size
-  CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
+  CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
       cudnn_wrapper_.inline_cudnn_handle(),
       rnnDesc_,
       seqLength,
@@ -230,7 +230,7 @@ bool RecurrentOp<T>::RunOnDevice() {
 
   if (OperatorBase::GetSingleArgument<int>("is_test", 0)) {
     cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
-      CUDNN_CHECK(cudnnRNNForwardInference(
+      CUDNN_ENFORCE(cudnnRNNForwardInference(
           state->cudnn_handle(),
           rnnDesc_,
           seqLength,
@@ -253,7 +253,7 @@ bool RecurrentOp<T>::RunOnDevice() {
     });
   } else {
     cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
-      CUDNN_CHECK(cudnnRNNForwardTraining(
+      CUDNN_ENFORCE(cudnnRNNForwardTraining(
           state->cudnn_handle(),
           rnnDesc_,
           seqLength,
@@ -288,7 +288,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
     initialize(Input(INPUT), Output(DROPOUT_STATES));
     cachedInputDims_ = Input(INPUT).dims();
   }
-  CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
+  CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
       cudnn_wrapper_.inline_cudnn_handle(),
       rnnDesc_,
       seqLength,
@@ -312,7 +312,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
   const auto * reserve = Output(RNN_SCRATCH_OUT)->template data<T>();
 #endif
   cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
-    CUDNN_CHECK(cudnnRNNBackwardData(
+    CUDNN_ENFORCE(cudnnRNNBackwardData(
         state->cudnn_handle(),
         rnnDesc_,
         seqLength,
@@ -340,7 +340,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
         cudnnWsNbytes_,
         reserve,
         reserveNbytes_));
-    CUDNN_CHECK(cudnnRNNBackwardWeights(
+    CUDNN_ENFORCE(cudnnRNNBackwardWeights(
         state->cudnn_handle(),
         rnnDesc_,
         seqLength,
@@ -364,7 +364,7 @@ template <typename T>
 bool RecurrentInitOp<T>::RunOnDevice() {
   initialize(Input(INPUT), Output(DROPOUT_STATES));
   size_t weightsSize;
-  CUDNN_CHECK(cudnnGetRNNParamsSize(
+  CUDNN_ENFORCE(cudnnGetRNNParamsSize(
       cudnn_wrapper_.inline_cudnn_handle(),
       rnnDesc_,
       xDesc_->descs()[0],
@@ -387,9 +387,9 @@ bool RecurrentInitOp<T>::RunOnDevice() {
   for (auto i = 0; i < OperatorBase::GetSingleArgument<int>("num_layers", 0);
        ++i) {
     cudnnFilterDescriptor_t biasDesc;
-    CUDNN_CHECK(cudnnCreateFilterDescriptor(&biasDesc));
+    CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&biasDesc));
     void* bias;
-    CUDNN_CHECK(cudnnGetRNNLinLayerBiasParams(
+    CUDNN_ENFORCE(cudnnGetRNNLinLayerBiasParams(
         cudnn_wrapper_.inline_cudnn_handle(),
         rnnDesc_,
         i,
@@ -404,7 +404,7 @@ bool RecurrentInitOp<T>::RunOnDevice() {
     cudnnDataType_t dt;
     cudnnTensorFormat_t tf;
     // For some reason, the CuDNN Bias tensor is 3 dimensional
-    CUDNN_CHECK(cudnnGetFilterNdDescriptor(
+    CUDNN_ENFORCE(cudnnGetFilterNdDescriptor(
         biasDesc, 3, &dt, &tf, &numBiasDims, biasDims.data()));
     CAFFE_ENFORCE_EQ(numBiasDims, 3);
     math::Set<T, CUDAContext>(

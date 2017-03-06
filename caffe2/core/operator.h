@@ -23,7 +23,7 @@ namespace caffe2 {
 class OperatorBase {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
-  virtual ~OperatorBase() {}
+  virtual ~OperatorBase() noexcept {}
 
   /** @brief Checks if the operator has an argument of the given name.
    */

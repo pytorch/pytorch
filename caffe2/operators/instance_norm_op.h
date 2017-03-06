@@ -29,8 +29,6 @@ class InstanceNormOp : public Operator<Context> {
       default:
         CAFFE_THROW("Unknown storage order: ", order_);
     }
-    // To suppress old compiler warnings
-    return true;
   }
 
   bool RunOnDeviceWithOrderNHWC();
@@ -71,8 +69,6 @@ class InstanceNormGradientOp : public Operator<Context> {
       default:
         CAFFE_THROW("Unknown storage order: ", order_);
     }
-    // To suppress old compiler warnings
-    return true;
   }
 
   bool RunOnDeviceWithOrderNHWC();

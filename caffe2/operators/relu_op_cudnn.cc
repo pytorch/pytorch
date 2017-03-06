@@ -12,9 +12,9 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
         cudnn_wrapper_(&context_),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
-    CUDNN_CHECK(cudnnCreateActivationDescriptor(&activ_desc_));
-    CUDNN_CHECK(cudnnSetActivationDescriptor(
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
+    CUDNN_ENFORCE(cudnnCreateActivationDescriptor(&activ_desc_));
+    CUDNN_ENFORCE(cudnnSetActivationDescriptor(
         activ_desc_, CUDNN_ACTIVATION_RELU, CUDNN_PROPAGATE_NAN, 0.0));
 
     // Choose function body for given math type
@@ -33,8 +33,8 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
   }
 
   ~CuDNNReluOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(data_desc_));
-    CUDNN_CHECK(cudnnDestroyActivationDescriptor(activ_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
+    CUDNN_ENFORCE(cudnnDestroyActivationDescriptor(activ_desc_));
   }
 
   template <typename M>
@@ -65,14 +65,24 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
         // and wrap everything into C.
         C = X.size() / X.dim32(0);
       }
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          data_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, X.dim32(0), C, H, W));
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          data_desc_,
+          GetCudnnTensorFormat(order_),
+          cudnnTypeWrapper<T>::type,
+          X.dim32(0),
+          C,
+          H,
+          W));
     }
-    CUDNN_CHECK(cudnnActivationForward(cudnn_wrapper_.inline_cudnn_handle(),
-        activ_desc_, cudnnTypeWrapper<T>::kOne(), data_desc_,
-        X.template data<T>(), cudnnTypeWrapper<T>::kZero(),
-        data_desc_, Y->template mutable_data<T>()));
+    CUDNN_ENFORCE(cudnnActivationForward(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        activ_desc_,
+        cudnnTypeWrapper<T>::kOne(),
+        data_desc_,
+        X.template data<T>(),
+        cudnnTypeWrapper<T>::kZero(),
+        data_desc_,
+        Y->template mutable_data<T>()));
     return true;
   }
 
@@ -108,9 +118,9 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
         cudnn_wrapper_(&context_),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
-    CUDNN_CHECK(cudnnCreateActivationDescriptor(&activ_desc_));
-    CUDNN_CHECK(cudnnSetActivationDescriptor(
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
+    CUDNN_ENFORCE(cudnnCreateActivationDescriptor(&activ_desc_));
+    CUDNN_ENFORCE(cudnnSetActivationDescriptor(
         activ_desc_, CUDNN_ACTIVATION_RELU, CUDNN_PROPAGATE_NAN, 0.0));
 
     // Choose function body for given math type
@@ -129,8 +139,8 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
   }
 
   ~CuDNNReluGradientOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(data_desc_));
-    CUDNN_CHECK(cudnnDestroyActivationDescriptor(activ_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
+    CUDNN_ENFORCE(cudnnDestroyActivationDescriptor(activ_desc_));
   }
 
   template <typename M>
@@ -162,16 +172,30 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
         // and wrap everything into C.
         C = Y.size() / Y.dim32(0);
       }
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          data_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, Y.dim32(0), C, H, W));
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          data_desc_,
+          GetCudnnTensorFormat(order_),
+          cudnnTypeWrapper<T>::type,
+          Y.dim32(0),
+          C,
+          H,
+          W));
     }
     const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
     const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
-    CUDNN_CHECK(cudnnActivationBackward(cudnn_wrapper_.inline_cudnn_handle(),
-        activ_desc_, &kOne, data_desc_, Y.template data<T>(),
-        data_desc_, dY.template data<T>(), data_desc_, Y.template data<T>(),
-        &kZero, data_desc_, dX->template mutable_data<T>()));
+    CUDNN_ENFORCE(cudnnActivationBackward(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        activ_desc_,
+        &kOne,
+        data_desc_,
+        Y.template data<T>(),
+        data_desc_,
+        dY.template data<T>(),
+        data_desc_,
+        Y.template data<T>(),
+        &kZero,
+        data_desc_,
+        dX->template mutable_data<T>()));
     return true;
   }
 

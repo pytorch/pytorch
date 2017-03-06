@@ -21,7 +21,7 @@ constexpr size_t gCaffe2Alignment = 32;
 // A virtual allocator class to do memory allocation and deallocation.
 struct CPUAllocator {
   CPUAllocator() {}
-  virtual ~CPUAllocator() {}
+  virtual ~CPUAllocator() noexcept {}
   virtual void* New(size_t nbytes) = 0;
   virtual void Delete(void* data) = 0;
 };
@@ -111,7 +111,7 @@ class CPUContext final {
     CAFFE_ENFORCE_EQ(option.device_type(), CPU);
   }
 
-  ~CPUContext() {}
+  ~CPUContext() noexcept {}
 
   inline void SwitchToDevice(int stream_id) {}
   inline void SwitchToDevice() {
