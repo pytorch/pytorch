@@ -119,7 +119,7 @@ class SegmentsTester(TesterBase):
                 dtype=data.dtype
             ) for seg_id in range(0, K)
         ]
-        counts = np.zeros(K)
+        counts = np.zeros(K, dtype=int)
         for i, seg_id in enumerate(segment_ids):
             data_idx = i if indices is None else indices[i]
             outputs[seg_id][counts[seg_id]] = data[data_idx]
@@ -132,7 +132,7 @@ class SegmentsTester(TesterBase):
         if len(segment_ids) == 0:
             return output
         K = max(segment_ids) + 1
-        counts = np.zeros(K)
+        counts = np.zeros(K, dtype=int)
         for i, seg_id in enumerate(segment_ids):
             output[i] = inputs[seg_id][counts[seg_id]]
             counts[seg_id] += 1
