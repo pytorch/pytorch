@@ -28,4 +28,8 @@ auto Function::flags(const variable_list& inputs) -> FunctionFlags {
   return f;
 }
 
+auto Function::name() -> std::string {
+  return std::string(typeid(*this).name());
+}
+
 }} // namespace torch::autograd

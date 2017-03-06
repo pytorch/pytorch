@@ -179,7 +179,7 @@ class Module(object):
         that removes the hook from the module.
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[id(handle)] = hook
+        self._backward_hooks[handle.id] = hook
         return handle
 
     def register_forward_hook(self, hook):
@@ -195,7 +195,7 @@ class Module(object):
         that removes the hook from the module.
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        self._forward_hooks[id(handle)] = hook
+        self._forward_hooks[handle.id] = hook
         return handle
 
     def __call__(self, *input, **kwargs):
@@ -211,12 +211,10 @@ class Module(object):
             var = var[0]
         creator = var.creator
         if creator is not None and len(self._backward_hooks) > 0:
-            if creator._backward_hooks is None:
-                creator._backward_hooks = OrderedDict()
             for hook in self._backward_hooks.values():
                 wrapper = functools.partial(hook, self)
                 functools.update_wrapper(wrapper, hook)
-                creator._backward_hooks[id(wrapper)] = wrapper
+                creator.register_hook(wrapper)
         return result
 
     def __getattr__(self, name):

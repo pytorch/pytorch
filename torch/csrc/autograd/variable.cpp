@@ -1,8 +1,6 @@
 #include "torch/csrc/autograd/variable.h"
 
-#ifdef WITH_CUDA
-#include "torch/csrc/cuda/AutoGPU.h"
-#endif
+#include "torch/csrc/utils/auto_gpu.h"
 
 using namespace torch;
 using namespace thpp;
@@ -18,7 +16,6 @@ Variable::Variable(
     , grad(nullptr)
     , version_counter(new VariableVersion())
     , output_nr(0)
-    , backward_hook()
     , pyobj(nullptr)
 {
   if (!this->data) {
@@ -36,7 +33,6 @@ Variable::Variable(
     , grad(nullptr)
     , version_counter(new VariableVersion())
     , output_nr(creator->num_outputs++)
-    , backward_hook()
     , pyobj(nullptr)
 {
   if (!this->data) {
@@ -48,18 +44,13 @@ Variable::Variable(
   previous_functions[0] = std::make_pair<>(creator, output_nr);
 }
 
-bool Variable::is_cuda()
-{
-  return data->isCuda();
-}
-
 auto Variable::backward(std::shared_ptr<Variable> gradOutput) -> void {
-  if (backward_hook) {
-    gradOutput = (*backward_hook)(gradOutput);
+  if (!pre_hooks.empty()) {
+    for (auto& hook : pre_hooks) {
+      gradOutput = (*hook)(variable_list({gradOutput}))[0];
+    }
   }
-#ifdef WITH_CUDA
-  THCPAutoGPU auto_gpu(gradOutput->data->getDevice());
-#endif
+  AutoGPU auto_gpu(gradOutput->data->getDevice());
   if (!grad) {
     std::unique_ptr<Tensor> data(gradOutput->data->clone());
     grad = std::make_shared<Variable>(std::move(data), false, true);

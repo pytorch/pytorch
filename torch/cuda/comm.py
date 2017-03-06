@@ -28,6 +28,35 @@ def broadcast(tensor, devices):
     return tuple(tensor.cuda(gpu, async=True) for gpu in devices)
 
 
+def broadcast_coalesced(tensors, devices, buffer_size=10485760):
+    """Broadcasts a sequence tensors to the specified GPUs.
+
+    Small tensors are first coalesced into a buffer to reduce the number
+    of synchronizations.
+
+    Arguments:
+        tensors (sequence): tensors to broadcast.
+        devices (Iterable): an iterable of devices to which to broadcast.
+        buffer_size (int): maximum size of the buffer used for coalescing
+
+    Returns:
+        A tuple containing copies of the ``tensor``, placed on devices
+        corresponding to indices from ``devices``.
+    """
+    for tensor in tensors:
+        if tensor.get_device() != devices[0]:
+            raise RuntimeError('all tensors must be on devices[0]')
+    outputs = [[] for _ in devices]
+    # use the original tensors for the first device
+    outputs[0].extend(tensors)
+    for chunk in _take_tensors(tensors, buffer_size):
+        results = broadcast(_flatten_tensors(chunk), devices)
+        # use the broadcasted tensors for the remaining devices
+        for dst, res in zip(outputs[1:], results[1:]):
+            dst.extend(_unflatten_tensors(res, chunk))
+    return tuple(outputs)
+
+
 def reduce_add(inputs, destination=None):
     """Sums tensors from multiple GPUs.
 
@@ -66,6 +95,31 @@ def reduce_add(inputs, destination=None):
         input_correct_gpu = inp.cuda(result.get_device())
         result.add_(input_correct_gpu)
     return result
+
+
+def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
+    """Sums tensors from multiple GPUs.
+
+    Small tensors are first coalesced into a buffer to reduce the number
+    of synchronizations.
+
+    Arguments:
+        inputs (Iterable[Tensor]): an iterable of tensors to add.
+        destination (int, optional): a device on which the output will be
+            placed (default: current device).
+        buffer_size (int): maximum size of the buffer used for coalescing
+
+    Returns:
+        A tuple of tensors containing an elementwise sum of each group of
+        inputs, placed on the ``destination`` device.
+    """
+    output = []
+    itrs = [_take_tensors(tensors, buffer_size) for tensors in inputs]
+    for chunks in zip(*itrs):
+        flattened = [_flatten_tensors(chunk) for chunk in chunks]
+        result = reduce_add(flattened, destination)
+        output.extend(_unflatten_tensors(result, chunks[0]))
+    return tuple(output)
 
 
 def scatter(tensor, devices, chunk_sizes=None, dim=0):
@@ -143,3 +197,42 @@ def gather(tensors, dim=0, destination=None):
         result.narrow(dim, chunk_start, tensor.size(dim)).copy_(tensor, True)
         chunk_start += tensor.size(dim)
     return result
+
+
+def _flatten_tensors(tensors):
+    """Flatten tensors into a single contiguous 1D buffer"""
+    if len(tensors) == 1:
+        return tensors[0].contiguous().view(-1)
+    size = sum(tensor.numel() for tensor in tensors)
+    offset = 0
+    flat = tensors[0].new(size)
+    for tensor in tensors:
+        flat.narrow(0, offset, tensor.numel()).copy_(tensor)
+        offset += tensor.numel()
+    return flat
+
+
+def _unflatten_tensors(flat, tensors):
+    """View a flat buffer using the sizes of tensors"""
+    outputs = []
+    offset = 0
+    for tensor in tensors:
+        outputs.append(flat.narrow(0, offset, tensor.numel()).view_as(tensor))
+        offset += tensor.numel()
+    return tuple(outputs)
+
+
+def _take_tensors(tensors, size_limit):
+    """Groups tensors into lists of up to size_limit bytes"""
+    buf = []
+    size = 0
+    for tensor in tensors:
+        param_size = tensor.numel() * tensor.element_size()
+        if size + param_size > size_limit and size > 0:
+            yield buf
+            size = 0
+            buf = []
+        buf.append(tensor)
+        size += param_size
+    if len(buf) > 0:
+        yield buf
