@@ -54,7 +54,7 @@ class RMSprop(Optimizer):
                     state['step'] = 0
                     state['square_avg'] = grad.new().resize_as_(grad).zero_()
                     if group['momentum'] > 0:
-                        state['momentum'] = grad.new().resize_as_(grad).zero_()
+                        state['momentum_buffer'] = grad.new().resize_as_(grad).zero_()
                     if group['centered']:
                         state['grad_avg'] = grad.new().resize_as_(grad).zero_()
 
@@ -68,7 +68,6 @@ class RMSprop(Optimizer):
 
                 square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
 
-                avg = None
                 if group['centered']:
                     grad_avg = state['grad_avg']
                     grad_avg.mul_(alpha).add_(1 - alpha, grad)
@@ -77,9 +76,9 @@ class RMSprop(Optimizer):
                     avg = square_avg.sqrt().add_(group['eps'])
 
                 if group['momentum'] > 0:
-                    mom = state['momentum']
-                    mom.mul_(group['momentum']).addcdiv_(grad, avg)
-                    p.data.add_(-group['lr'], mom)
+                    buf = state['momentum_buffer']
+                    buf.mul_(group['momentum']).addcdiv_(grad, avg)
+                    p.data.add_(-group['lr'], buf)
                 else:
                     p.data.addcdiv_(-group['lr'], grad, avg)
 
