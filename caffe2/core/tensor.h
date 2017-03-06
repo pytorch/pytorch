@@ -174,7 +174,7 @@ class Tensor {
     CopyFrom(src, &tmp_context);
   }
 
-  virtual ~Tensor() {}
+  virtual ~Tensor() noexcept {}
 
   /**
    * @brief Extends the outer-most dimension of this tensor by num elements,

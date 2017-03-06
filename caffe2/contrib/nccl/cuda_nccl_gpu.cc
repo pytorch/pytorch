@@ -29,25 +29,25 @@ class NCCLContext {
       DeviceGuard g(devices_[i]);
       // get stream priorities
       int lo_pri, hi_pri;
-      CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
-      CUDA_CHECK(cudaStreamCreateWithPriority(
+      CUDA_ENFORCE(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
+      CUDA_ENFORCE(cudaStreamCreateWithPriority(
           &streams_[i], cudaStreamNonBlocking, hi_pri));
-      CUDA_CHECK(cudaEventCreateWithFlags(
+      CUDA_ENFORCE(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));
     }
     DeviceGuard g(master_gpu_id_);
-    CUDA_CHECK(cudaEventCreateWithFlags(
+    CUDA_ENFORCE(cudaEventCreateWithFlags(
         &master_event_, cudaEventDefault | cudaEventDisableTiming));
   }
 
   ~NCCLContext() {
     for (auto i = 0; i < devices_.size(); ++i) {
       DeviceGuard g(devices_[i]);
-      CUDA_CHECK(cudaStreamDestroy(streams_[i]));
-      CUDA_CHECK(cudaEventDestroy(events_[i]));
+      CUDA_ENFORCE(cudaStreamDestroy(streams_[i]));
+      CUDA_ENFORCE(cudaEventDestroy(events_[i]));
     }
     DeviceGuard g(master_gpu_id_);
-    CUDA_CHECK(cudaEventDestroy(master_event_));
+    CUDA_ENFORCE(cudaEventDestroy(master_event_));
     for (auto& comm : comms_) {
       ncclCommDestroy(comm);
     }
@@ -123,7 +123,7 @@ void runNCCL(const NCCLExecution& ex, F&& f) {
   // the original stream.
   {
     DeviceGuard g(ex.stream_gpu_id);
-    CUDA_CHECK(cudaEventRecord(context->master_event_, ex.stream));
+    CUDA_ENFORCE(cudaEventRecord(context->master_event_, ex.stream));
   }
 
   {
@@ -137,18 +137,18 @@ void runNCCL(const NCCLExecution& ex, F&& f) {
       auto& event = events[i];
 
       DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
-      CUDA_CHECK(cudaStreamWaitEvent(stream, context->master_event_, 0));
+      CUDA_ENFORCE(cudaStreamWaitEvent(stream, context->master_event_, 0));
       f(ctx, comm, stream);
       // Record an event on each children stream that we have finished
       // our computation
-      CUDA_CHECK(cudaEventRecord(event, stream));
+      CUDA_ENFORCE(cudaEventRecord(event, stream));
     }
   }
 
   // Now, wait on all the events in the original stream.
   DeviceGuard dg(ex.stream_gpu_id);
   for (auto& event : events) {
-    CUDA_CHECK(cudaStreamWaitEvent(CHECK_NOTNULL(ex.stream), event, 0));
+    CUDA_ENFORCE(cudaStreamWaitEvent(CHECK_NOTNULL(ex.stream), event, 0));
   }
 }
 

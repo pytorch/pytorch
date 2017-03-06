@@ -20,8 +20,8 @@ class CudnnSpatialBNOp final : public SpatialBNOp<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   CudnnSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNOp<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ <= CUDNN_BN_MIN_EPSILON - FLT_EPSILON) {
       LOG(ERROR) << "Provided epsilon is smaller than "
                  << "CUDNN_BN_MIN_EPSILON. Setting it to "
@@ -31,8 +31,8 @@ class CudnnSpatialBNOp final : public SpatialBNOp<CUDAContext> {
   }
 
   ~CudnnSpatialBNOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(data_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bn_param_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bn_param_desc_));
   }
 
   bool RunOnDevice() override;
@@ -51,8 +51,8 @@ class CudnnSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
   CudnnSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNGradientOp<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ <= CUDNN_BN_MIN_EPSILON - FLT_EPSILON) {
       LOG(ERROR) << "Provided epsilon is smaller than "
                  << "CUDNN_BN_MIN_EPSILON. Setting it to "
@@ -62,8 +62,8 @@ class CudnnSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
   }
 
   ~CudnnSpatialBNGradientOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(data_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bn_param_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bn_param_desc_));
   }
 
   bool RunOnDevice() override;
@@ -99,10 +99,15 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
   if (X.dims() != cudnn_input_dims_) {
     VLOG(1) << "Setting descriptors.";
     cudnn_input_dims_ = X.dims();
-    CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-        data_desc_, GetCudnnTensorFormat(order_),
-        cudnnTypeWrapper<T>::type, N, C, H, W));
-    CUDNN_CHECK(cudnnDeriveBNTensorDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+        data_desc_,
+        GetCudnnTensorFormat(order_),
+        cudnnTypeWrapper<T>::type,
+        N,
+        C,
+        H,
+        W));
+    CUDNN_ENFORCE(cudnnDeriveBNTensorDescriptor(
         bn_param_desc_, data_desc_, kSpatialBNMode));
   }
 
@@ -118,7 +123,7 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
 
     auto* Y = Output(OUTPUT);
     Y->ResizeLike(X);
-    CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
+    CUDNN_ENFORCE(cudnnBatchNormalizationForwardInference(
         cudnn_wrapper_.inline_cudnn_handle(),
         kSpatialBNMode,
         cudnnTypeWrapper<T>::kOne(),
@@ -176,7 +181,7 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
     void* save_mean_data = save_mean->template mutable_data<T>();
     void* save_var_data = save_var->template mutable_data<T>();
 
-    CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
+    CUDNN_ENFORCE(cudnnBatchNormalizationForwardTraining(
         cudnn_wrapper_.inline_cudnn_handle(),
         kSpatialBNMode,
         cudnnTypeWrapper<T>::kOne(),
@@ -215,10 +220,15 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
     cudnn_input_dims_ = X.dims();
-    CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-        data_desc_, GetCudnnTensorFormat(order_),
-        cudnnTypeWrapper<T>::type, N, C, H, W));
-    CUDNN_CHECK(cudnnDeriveBNTensorDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+        data_desc_,
+        GetCudnnTensorFormat(order_),
+        cudnnTypeWrapper<T>::type,
+        N,
+        C,
+        H,
+        W));
+    CUDNN_ENFORCE(cudnnDeriveBNTensorDescriptor(
         bn_param_desc_, data_desc_, kSpatialBNMode));
   }
 
@@ -234,7 +244,7 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   const void* saved_mean_data = saved_mean.template data<T>();
   const void* saved_var_data = saved_var.template data<T>();
 
-  CUDNN_CHECK(cudnnBatchNormalizationBackward(
+  CUDNN_ENFORCE(cudnnBatchNormalizationBackward(
       cudnn_wrapper_.inline_cudnn_handle(),
       kSpatialBNMode,
       cudnnTypeWrapper<T>::kOne(),

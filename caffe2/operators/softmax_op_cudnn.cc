@@ -19,11 +19,11 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   explicit CuDNNSoftmaxOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&context_) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
   ~CuDNNSoftmaxOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 
   bool RunOnDevice() override {
@@ -32,15 +32,26 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
     DCHECK_EQ(X.ndim(), 2);
     Y->ResizeLike(X);
     if (dims_ != X.dims()) {
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          desc_, GetCudnnTensorFormat(StorageOrder::NCHW),
-          cudnnTypeWrapper<T>::type, X.dim32(0), X.dim32(1), 1, 1));
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          desc_,
+          GetCudnnTensorFormat(StorageOrder::NCHW),
+          cudnnTypeWrapper<T>::type,
+          X.dim32(0),
+          X.dim32(1),
+          1,
+          1));
       dims_ = X.dims();
     }
-    CUDNN_CHECK(cudnnSoftmaxForward(cudnn_wrapper_.inline_cudnn_handle(),
-        CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE,
-        cudnnTypeWrapper<T>::kOne(), desc_, X.template data<T>(),
-        cudnnTypeWrapper<T>::kZero(), desc_, Y->template mutable_data<T>()));
+    CUDNN_ENFORCE(cudnnSoftmaxForward(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        CUDNN_SOFTMAX_ACCURATE,
+        CUDNN_SOFTMAX_MODE_INSTANCE,
+        cudnnTypeWrapper<T>::kOne(),
+        desc_,
+        X.template data<T>(),
+        cudnnTypeWrapper<T>::kZero(),
+        desc_,
+        Y->template mutable_data<T>()));
     return true;
   }
 
@@ -57,11 +68,11 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
   explicit CuDNNSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&context_) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
   ~CuDNNSoftmaxGradientOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(desc_));
+    CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 
   bool RunOnDevice() override {
@@ -76,15 +87,27 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     DCHECK_EQ(dY.dim32(1), D);
     dX->ResizeLike(Y);
     if (dims_ != Y.dims()) {
-      CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-          desc_, GetCudnnTensorFormat(StorageOrder::NCHW),
-          cudnnTypeWrapper<T>::type, Y.dim32(0), Y.dim32(1), 1, 1));
+      CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
+          desc_,
+          GetCudnnTensorFormat(StorageOrder::NCHW),
+          cudnnTypeWrapper<T>::type,
+          Y.dim32(0),
+          Y.dim32(1),
+          1,
+          1));
       dims_ = Y.dims();
     }
-    CUDNN_CHECK(cudnnSoftmaxBackward(cudnn_wrapper_.inline_cudnn_handle(),
-        CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE,
-        cudnnTypeWrapper<T>::kOne(), desc_, Y.template data<T>(),
-        desc_, dY.template data<T>(), cudnnTypeWrapper<T>::kZero(), desc_,
+    CUDNN_ENFORCE(cudnnSoftmaxBackward(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        CUDNN_SOFTMAX_ACCURATE,
+        CUDNN_SOFTMAX_MODE_INSTANCE,
+        cudnnTypeWrapper<T>::kOne(),
+        desc_,
+        Y.template data<T>(),
+        desc_,
+        dY.template data<T>(),
+        cudnnTypeWrapper<T>::kZero(),
+        desc_,
         dX->template mutable_data<T>()));
     return true;
   }

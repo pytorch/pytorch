@@ -33,7 +33,7 @@ static void BM_cudaGetDevice(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
   int id;
   while (state.KeepRunning()) {
-    CUDA_CHECK(cudaGetDevice(&id));
+    CUDA_ENFORCE(cudaGetDevice(&id));
   }
 }
 BENCHMARK(BM_cudaGetDevice);
@@ -43,7 +43,7 @@ static void BM_cudaSetDevice(benchmark::State& state) {
   int total = NumCudaDevices();
   int i = 0;
   while (state.KeepRunning()) {
-    CUDA_CHECK(cudaSetDevice((i++) % total));
+    CUDA_ENFORCE(cudaSetDevice((i++) % total));
   }
 }
 BENCHMARK(BM_cudaSetDevice);
@@ -52,9 +52,9 @@ static void BM_cudaStreamCreateSyncDelete(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
   cudaStream_t stream;
   while (state.KeepRunning()) {
-    CUDA_CHECK(cudaStreamCreate(&stream));
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-    CUDA_CHECK(cudaStreamDestroy(stream));
+    CUDA_ENFORCE(cudaStreamCreate(&stream));
+    CUDA_ENFORCE(cudaStreamSynchronize(stream));
+    CUDA_ENFORCE(cudaStreamDestroy(stream));
   }
 }
 BENCHMARK(BM_cudaStreamCreateSyncDelete);
@@ -62,9 +62,9 @@ BENCHMARK(BM_cudaStreamCreateSyncDelete);
 static void BM_cudaStreamSynchronize(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
   cudaStream_t stream;
-  CUDA_CHECK(cudaStreamCreate(&stream));
+  CUDA_ENFORCE(cudaStreamCreate(&stream));
   while (state.KeepRunning()) {
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    CUDA_ENFORCE(cudaStreamSynchronize(stream));
   }
 }
 BENCHMARK(BM_cudaStreamSynchronize);
@@ -73,11 +73,11 @@ static void BM_cudaEventRecord(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
   cudaStream_t stream;
   cudaEvent_t event;
-  CUDA_CHECK(cudaStreamCreate(&stream));
-  CUDA_CHECK(cudaEventCreateWithFlags(
+  CUDA_ENFORCE(cudaStreamCreate(&stream));
+  CUDA_ENFORCE(cudaEventCreateWithFlags(
       &event, cudaEventDefault | cudaEventDisableTiming));
   while (state.KeepRunning()) {
-    CUDA_CHECK(cudaEventRecord(event, stream));
+    CUDA_ENFORCE(cudaEventRecord(event, stream));
   }
 }
 BENCHMARK(BM_cudaEventRecord);
@@ -87,15 +87,15 @@ static void BM_cudaStreamWaitEventThenStreamSynchronize(
   CAFFE2_SKIP_IF_NO_GPU;
   cudaStream_t stream;
   cudaEvent_t event;
-  CUDA_CHECK(cudaStreamCreate(&stream));
-  CUDA_CHECK(cudaEventCreateWithFlags(
+  CUDA_ENFORCE(cudaStreamCreate(&stream));
+  CUDA_ENFORCE(cudaEventCreateWithFlags(
       &event, cudaEventDefault | cudaEventDisableTiming));
-  CUDA_CHECK(cudaEventRecord(event, stream));
-  CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
-  CUDA_CHECK(cudaStreamSynchronize(stream));
+  CUDA_ENFORCE(cudaEventRecord(event, stream));
+  CUDA_ENFORCE(cudaStreamWaitEvent(stream, event, 0));
+  CUDA_ENFORCE(cudaStreamSynchronize(stream));
   while (state.KeepRunning()) {
-    CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    CUDA_ENFORCE(cudaStreamWaitEvent(stream, event, 0));
+    CUDA_ENFORCE(cudaStreamSynchronize(stream));
   }
 }
 BENCHMARK(BM_cudaStreamWaitEventThenStreamSynchronize);

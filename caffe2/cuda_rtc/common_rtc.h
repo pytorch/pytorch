@@ -21,7 +21,7 @@ class CudaRTCFunction {
   CudaRTCFunction() : module_loaded_(false) {}
   ~CudaRTCFunction() {
     if (module_loaded_) {
-      CUDA_DRIVERAPI_CHECK(cuModuleUnload(module_));
+      CUDA_DRIVERAPI_ENFORCE(cuModuleUnload(module_));
     }
   }
 
@@ -61,11 +61,12 @@ class CudaRTCFunction {
     NVRTC_CHECK(nvrtcDestroyProgram(&prog));
     // After compilation, load the module.
     if (module_loaded_) {
-      CUDA_DRIVERAPI_CHECK(cuModuleUnload(module_));
+      CUDA_DRIVERAPI_ENFORCE(cuModuleUnload(module_));
     }
-    CUDA_DRIVERAPI_CHECK(cuModuleLoadDataEx(&module_, nvrtc_ptx, 0, 0, 0));
+    CUDA_DRIVERAPI_ENFORCE(cuModuleLoadDataEx(&module_, nvrtc_ptx, 0, 0, 0));
     module_loaded_ = true;
-    CUDA_DRIVERAPI_CHECK(cuModuleGetFunction(&kernel_, module_, name.c_str()));
+    CUDA_DRIVERAPI_ENFORCE(
+        cuModuleGetFunction(&kernel_, module_, name.c_str()));
   }
 
   template <typename... Args>
@@ -76,9 +77,8 @@ class CudaRTCFunction {
     CAFFE_ENFORCE(
         module_loaded_, "Cannot call Launch before a module is loaded.");
     void * args_voidp[] = {&args...};
-    CUDA_DRIVERAPI_CHECK(cuLaunchKernel(
-        kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream,
-        args_voidp, 0));
+    CUDA_DRIVERAPI_ENFORCE(cuLaunchKernel(
+        kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream, args_voidp, 0));
   }
 
   void LaunchEx(unsigned int gx, unsigned int gy, unsigned int gz,
@@ -87,9 +87,8 @@ class CudaRTCFunction {
                 void** extra) {
     CAFFE_ENFORCE(
         module_loaded_, "Cannot call Launch before a module is loaded.");
-    CUDA_DRIVERAPI_CHECK(cuLaunchKernel(
-        kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream,
-        nullptr, extra));
+    CUDA_DRIVERAPI_ENFORCE(cuLaunchKernel(
+        kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream, nullptr, extra));
   }
 
  private:

@@ -92,13 +92,13 @@ int GetDefaultGPUID() { return gDefaultGPUID; }
 
 int GetCurrentGPUID() {
   int gpu_id = 0;
-  CUDA_CHECK(cudaGetDevice(&gpu_id));
+  CUDA_ENFORCE(cudaGetDevice(&gpu_id));
   return gpu_id;
 }
 
 int GetGPUIDForPointer(const void* ptr) {
   cudaPointerAttributes attr;
-  CUDA_CHECK(cudaPointerGetAttributes(&attr, ptr));
+  CUDA_ENFORCE(cudaPointerGetAttributes(&attr, ptr));
   return attr.device;
 }
 
@@ -115,7 +115,7 @@ const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
   if (props.size() == 0) {
     props.resize(NumCudaDevices());
     for (int i = 0; i < NumCudaDevices(); ++i) {
-      CUDA_CHECK(cudaGetDeviceProperties(&props[i], i));
+      CUDA_ENFORCE(cudaGetDeviceProperties(&props[i], i));
     }
   }
   return props[deviceid];

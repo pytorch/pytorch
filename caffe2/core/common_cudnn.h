@@ -59,7 +59,7 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
 
 // A macro that wraps around a cudnn statement so we can check if the cudnn
 // execution finishes or not.
-#define CUDNN_CHECK(condition)                            \
+#define CUDNN_ENFORCE(condition)                          \
   do {                                                    \
     cudnnStatus_t status = condition;                     \
     CAFFE_ENFORCE_EQ(                                     \
@@ -71,6 +71,12 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
         __LINE__,                                         \
         ": ",                                             \
         ::caffe2::internal::cudnnGetErrorString(status)); \
+  } while (0)
+#define CUDNN_CHECK(condition)                              \
+  do {                                                      \
+    cudnnStatus_t status = condition;                       \
+    CHECK(status == CUDNN_STATUS_SUCCESS)                   \
+        << ::caffe2::internal::cudnnGetErrorString(status); \
   } while (0)
 
 // report the version of cuDNN Caffe2 was compiled with
@@ -170,9 +176,9 @@ inline cudnnTensorFormat_t GetCudnnTensorFormat(const StorageOrder& order) {
 class cudnnTensorDescWrapper {
  public:
   cudnnTensorDescWrapper() {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&desc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
-  ~cudnnTensorDescWrapper() {
+  ~cudnnTensorDescWrapper() noexcept {
     CUDNN_CHECK(cudnnDestroyTensorDescriptor(desc_));
   }
 
@@ -192,7 +198,7 @@ class cudnnTensorDescWrapper {
     format_ = format;
     type_ = type;
     dims_ = dims;
-    CUDNN_CHECK(cudnnSetTensor4dDescriptor(
+    CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         desc_,
         format,
         type,
@@ -224,9 +230,9 @@ class cudnnTensorDescWrapper {
 class cudnnFilterDescWrapper {
  public:
   cudnnFilterDescWrapper() {
-    CUDNN_CHECK(cudnnCreateFilterDescriptor(&desc_));
+    CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&desc_));
   }
-  ~cudnnFilterDescWrapper() {
+  ~cudnnFilterDescWrapper() noexcept {
     CUDNN_CHECK(cudnnDestroyFilterDescriptor(desc_));
   }
 
@@ -246,7 +252,7 @@ class cudnnFilterDescWrapper {
     order_ = order;
     type_ = type;
     dims_ = dims;
-    CUDNN_CHECK(cudnnSetFilter4dDescriptor(
+    CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
         desc_,
         type,
         GetCudnnTensorFormat(order),
@@ -290,7 +296,7 @@ class CuDNNHandles {
     }
   }
 
-  ~CuDNNHandles() {
+  ~CuDNNHandles() noexcept {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
       if (cudnn_handle_[i]) {
         CUDNN_CHECK(cudnnDestroy(cudnn_handle_[i]));
@@ -310,7 +316,7 @@ class CuDNNHandles {
  * not need more than one cudnn workspace per device.
  */
 struct CuDNNWorkspace {
-  ~CuDNNWorkspace() {
+  ~CuDNNWorkspace() noexcept {
     if (data_) {
       CUDAContext::Delete(data_);
     }
@@ -346,14 +352,14 @@ class CuDNNState {
  public:
   explicit CuDNNState(size_t gpu_id) : gpu_id_(gpu_id) {
     DeviceGuard g(gpu_id_);
-    CUDNN_CHECK(cudnnCreate(&cudnn_handle_));
-    CUDA_CHECK(cudaEventCreate(&before_));
-    CUDA_CHECK(cudaEventCreate(&after_));
-    CUDA_CHECK(cudaStreamCreate(&stream_));
-    CUDNN_CHECK(cudnnSetStream(cudnn_handle_, stream_));
+    CUDNN_ENFORCE(cudnnCreate(&cudnn_handle_));
+    CUDA_ENFORCE(cudaEventCreate(&before_));
+    CUDA_ENFORCE(cudaEventCreate(&after_));
+    CUDA_ENFORCE(cudaStreamCreate(&stream_));
+    CUDNN_ENFORCE(cudnnSetStream(cudnn_handle_, stream_));
   }
 
-  ~CuDNNState() {
+  ~CuDNNState() noexcept {
     DeviceGuard g(gpu_id_);
     CUDNN_CHECK(cudnnDestroy(cudnn_handle_));
     CUDA_CHECK(cudaStreamDestroy(stream_));
@@ -371,11 +377,11 @@ class CuDNNState {
 
   template <typename F>
   void execute(cudaStream_t stream, F&& f) {
-    CUDA_CHECK(cudaEventRecord(before_, stream));
-    CUDA_CHECK(cudaStreamWaitEvent(stream_, before_, 0));
+    CUDA_ENFORCE(cudaEventRecord(before_, stream));
+    CUDA_ENFORCE(cudaStreamWaitEvent(stream_, before_, 0));
     f(this);
-    CUDA_CHECK(cudaEventRecord(after_, stream_));
-    CUDA_CHECK(cudaStreamWaitEvent(stream, after_, 0));
+    CUDA_ENFORCE(cudaEventRecord(after_, stream_));
+    CUDA_ENFORCE(cudaStreamWaitEvent(stream, after_, 0));
   }
 
  private:
@@ -416,8 +422,8 @@ class CuDNNWrapper {
       return cudnn_handle_;
     } else {
       context_->SwitchToDevice();
-      CUDNN_CHECK(cudnnCreate(&cudnn_handle_));
-      CUDNN_CHECK(cudnnSetStream(cudnn_handle_, context_->cuda_stream()));
+      CUDNN_ENFORCE(cudnnCreate(&cudnn_handle_));
+      CUDNN_ENFORCE(cudnnSetStream(cudnn_handle_, context_->cuda_stream()));
     }
     return cudnn_handle_;
   }

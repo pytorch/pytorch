@@ -62,7 +62,6 @@ class RoIPoolGradientOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     CAFFE_NOT_IMPLEMENTED;
-    return true;
   }
 
  protected:

@@ -91,7 +91,7 @@ struct Stream {
 
     if (!stream_) {
       CAFFE_ENFORCE(gpu_id_ == -1, "Gpu ID should be -1.");
-      CUDA_CHECK(cudaEventSynchronize(event->event_));
+      CUDA_ENFORCE(cudaEventSynchronize(event->event_));
       return;
     }
 
@@ -99,7 +99,7 @@ struct Stream {
     VLOG_IF(2, gpu_id_ != event->gpu_id_) << "Cross-device waiting: " << gpu_id_
                                           << " waiting on " << event->gpu_id_;
     DeviceGuard g(gpu_id_);
-    CUDA_CHECK(cudaStreamWaitEvent(stream_, event->event_, 0));
+    CUDA_ENFORCE(cudaStreamWaitEvent(stream_, event->event_, 0));
   }
 
   int gpu_id_{-1};
@@ -114,7 +114,7 @@ Event::Event(const DeviceOption& device_option) {
     gpu_id_ = device_option.has_cuda_gpu_id() ? device_option.cuda_gpu_id()
                                               : GetDefaultGPUID();
     DeviceGuard g(gpu_id_);
-    CUDA_CHECK(cudaEventCreateWithFlags(
+    CUDA_ENFORCE(cudaEventCreateWithFlags(
         &event_, cudaEventDefault | cudaEventDisableTiming));
   }
 }
@@ -141,7 +141,7 @@ void Event::record(const Stream& stream) {
 
   CAFFE_ENFORCE(event_, "Event should not be NULL.");
   DeviceGuard g(gpu_id_);
-  CUDA_CHECK(cudaEventRecord(event_, stream.stream_));
+  CUDA_ENFORCE(cudaEventRecord(event_, stream.stream_));
   outstanding_ = true;
 }
 
@@ -318,7 +318,7 @@ void GPUExecutor::WorkerFunction() {
     for (auto& pendtask : task_batch) {
       cudaStream_t stream =
           CUDAContext::cuda_stream(gpu_id_, pendtask->stream_id_);
-      CUDA_CHECK(cudaStreamSynchronize(stream));
+      CUDA_ENFORCE(cudaStreamSynchronize(stream));
       streams.push(pendtask->stream_id_);
       std::unique_lock<std::mutex> lk(*pendtask->mtx_);
       pendtask->done_ = true;
