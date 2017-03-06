@@ -309,6 +309,7 @@ def _RegisterPythonImpl(f, grad_f=None, pass_workspace=False):
         C.register_python_gradient_op(token, grad_f)
     return token
 
+
 def CreatePythonOperator(
     f, inputs,
     outputs,
@@ -1329,17 +1330,18 @@ class Net(object):
         new_proto = caffe2_pb2.NetDef()
         new_proto.CopyFrom(proto)
         new_proto.name = name
-        if blob_remap is None and op_id_mask is None:
-            # TODO(azzolini): should we also clone input_record here
-            return Net(new_proto)
 
         if blob_remap is None:
             blob_remap = {}
         if op_id_mask is None:
             op_id_mask = range(0, len(proto.op))
 
+        def get_remapped_str(blob):
+            blob_str = str(blob)
+            return str(blob_remap.get(blob_str, blob_str))
+
         def remap_list(proto_list):
-            new_list = [blob_remap.get(b, b) for b in proto_list]
+            new_list = [get_remapped_str(b) for b in proto_list]
             del proto_list[:]
             proto_list.extend(new_list)
 
@@ -1364,7 +1366,7 @@ class Net(object):
                 new_net._input_record = schema.from_blob_list(
                     self._input_record,
                     [
-                        BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                        BlobReference(get_remapped_str(blob), net=new_net)
                         for blob in self._input_record.field_blobs()
                     ],
                 )
@@ -1372,10 +1374,11 @@ class Net(object):
                 new_net._output_record = schema.from_blob_list(
                     self._output_record,
                     [
-                        BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                        BlobReference(get_remapped_str(blob), net=new_net)
                         for blob in self._output_record.field_blobs()
                     ],
                 )
+
         new_net._attr_dict.update(self._attr_dict)
         return new_net
 
@@ -1614,6 +1617,19 @@ class Net(object):
         for blob in record.field_blobs():
             self.AddExternalOutput(blob)
         self._output_record = record
+
+    def AppendOutputRecordField(self, field_name, record):
+        from caffe2.python import schema
+        assert self._output_record is not None, (
+            'Tried to append to missing output record'
+        )
+        for blob in record.field_blobs():
+            assert self.BlobIsDefined(blob)
+        for blob in record.field_blobs():
+            self.AddExternalOutput(blob)
+        self._output_record = self._output_record + schema.Struct(
+            (field_name, record)
+        )
 
     def input_record(self):
         return self._input_record
@@ -1909,6 +1925,7 @@ def add_nets_in_order(step, net_list):
 
 
 class Plan(object):
+
     def __init__(self, name_or_step):
         self._plan = caffe2_pb2.PlanDef()
         self._net_dict = OrderedDict()
