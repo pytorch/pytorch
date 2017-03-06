@@ -339,13 +339,26 @@ class Module(object):
             for p in module.parameters(memo):
                 yield p
 
-    def children(self):
-        """Returns an iterator over children modules."""
+    def children(self, named=False):
+        """Returns an iterator over children modules.
+
+        Arguments:
+            named (boolean): A boolean indicating if the names of the
+                children modules should also be returned.
+
+        Example:
+            >>> for name, module in model.children(named=True):
+            >>>     if name in PRINT_LIST:
+            >>>         print(module)
+        """
         memo = set()
-        for module in self._modules.values():
+        for name, module in self._modules.items():
             if module is not None and module not in memo:
                 memo.add(module)
-                yield module
+                if named is True:
+                    yield name, module
+                else:
+                    yield module
 
     def modules(self, memo=None):
         if memo is None:
