@@ -9,10 +9,9 @@ from collections import OrderedDict
 from caffe2.proto import caffe2_pb2
 from collections import defaultdict
 from caffe2.python import scope, utils, workspace
+import caffe2.python._import_c_extension as C
 import numpy as np
 import sys
-
-import caffe2.python._import_c_extension as C
 
 
 # Mac os specific message
@@ -1221,6 +1220,24 @@ class Net(object):
         Attributes are user-defined objects added with `add_attribute'.
         """
         return self._attr_dict.get(name, [])
+
+    def set_rand_seed(self, seed=100, sequence_seed=True, seed_on_op_def=False):
+        """
+        Adds a random seed to each op in the net.
+        If sequence_seed is set, the i-th op has rand_seed=`seed + i`
+        If seed_on_op_def is set, the op rand_seed=hash(str(op))
+        sequence_seed and seed_on_op_def cannot be both set to True.
+        """
+        assert not (sequence_seed and seed_on_op_def), (
+            'sequence_seed and seed_on_op_def cannot be both set to True.')
+        for i, op in enumerate(self.Proto().op):
+            if sequence_seed:
+                curr_seed = seed + i
+            elif seed_on_op_def:
+                curr_seed = hash(str(op) + str(seed)) % np.iinfo(np.uint32).max
+            else:
+                curr_seed = seed
+            op.device_option.random_seed = curr_seed
 
     def Name(self):
         return self._net.name
