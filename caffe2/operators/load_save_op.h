@@ -15,6 +15,22 @@
 
 namespace caffe2 {
 
+namespace {
+struct BlobState {
+  int64_t total_size;
+  int64_t current_size;
+  bool is_tensor;
+
+  explicit BlobState(
+      int64_t total_size = 0,
+      int64_t current_size = 0,
+      bool is_tensor = false)
+      : total_size(total_size),
+        current_size(current_size),
+        is_tensor(is_tensor) {}
+};
+} // namespace
+
 using db::Cursor;
 using db::DB;
 using db::Transaction;
@@ -87,7 +103,8 @@ class LoadOp final : public Operator<Context> {
 
   void extractAll(Cursor* cursor) {
     CAFFE_ENFORCE(cursor, "cursor is not valid");
-    std::unordered_set<string> seen_blobs;
+    std::unordered_map<string, BlobState> blob_states;
+    int loaded_blobs = 0;
     for (; cursor->Valid(); cursor->Next()) {
       const string& dbKey = cursor->key();
       auto key = dbKey.substr(0, dbKey.find(kChunkIdSeparator));
@@ -100,41 +117,24 @@ class LoadOp final : public Operator<Context> {
         SetCurrentDevice(&proto);
       }
 
-      if (seen_blobs.count(key) == 0 && ws_->GetBlob(key)) {
-        // This blob already exists, reset it, read below about why!
-        ws_->GetBlob(key)->Reset();
-      }
-
       Blob* blob = ws_->CreateBlob(key);
-      blob->Deserialize(proto);
-      if (!blob->IsType<Tensor<Context>>()) {
-        // Only tensors can be seen multiple times as chunks.
-        CAFFE_ENFORCE(seen_blobs.count(key) == 0, "Blob duplicated");
-      }
-      seen_blobs.insert(key);
+      ProcessBlob(blob, proto, &blob_states, key, &loaded_blobs);
     }
+
+    VLOG(1) << "Loaded " << loaded_blobs << " from db";
+    validateBlobStates(blob_states);
   }
 
   void extractFrom(Cursor* cursor, const vector<Blob*>& outputs) {
     CAFFE_ENFORCE(cursor);
-
-    // We are tracking sizes of already read tensor parts while reading data
-    // chunks. This way we can make sure that all chunks were loaded in the end.
-    // This is a map from output index to current size of the blob
-    std::map<int, size_t> blobSizes;
-    std::unordered_set<string> loaded;
+    std::unordered_map<string, BlobState> blob_states;
+    int loaded_blobs = 0;
     for (; cursor->Valid(); cursor->Next()) {
       const string& dbKey = cursor->key();
       auto key = dbKey.substr(0, dbKey.find(kChunkIdSeparator));
       if (!output_indices_.count(key)) {
         VLOG(1) << "Key " << key << " not used. Skipping.";
       } else {
-        CAFFE_ENFORCE(
-            loaded.count(key) == 0,
-            "Multiple copies of blob ",
-            key,
-            " found in the db.");
-
         VLOG(2) << "Deserializing blob " << key;
         BlobProto proto;
         CAFFE_ENFORCE(proto.ParseFromString(cursor->value()));
@@ -145,71 +145,110 @@ class LoadOp final : public Operator<Context> {
         }
         auto blobIndex = output_indices_[key];
         Blob* blob = outputs.at(blobIndex);
-        auto blobSize = blobSizes.insert({blobIndex, 0});
-        if (blobSize.second) {
-          // We reset the blob so that any existing content is destroyed. This
-          // is to guaranee correct device placement: if we are deserializing
-          // into a TensorCUDA, without explicit Reset we might be loading data
-          // into an existing TensorCUDA that has pre-allocated memory on a
-          // different GPU.
-          blob->Reset();
-        }
-        blob->Deserialize(proto);
+        ProcessBlob(blob, proto, &blob_states, key, &loaded_blobs);
 
-        if (!blob->IsType<Tensor<Context>>()) {
-          // Deal with non-tensors: we don't support chunking so we're done.
-          loaded.insert(key);
-        } else {
-          // Deal with tensors: done whtn read total tensor size
-          CAFFE_ENFORCE(proto.has_tensor());
-          auto tensorSize = blob->Get<Tensor<Context>>().size();
-          if (proto.tensor().has_segment()) {
-            blobSize.first->second += proto.tensor().segment().end() -
-                proto.tensor().segment().begin();
-          } else {
-            CAFFE_ENFORCE(blobSize.first->second == 0);
-            blobSize.first->second = tensorSize;
-          }
-          if (blobSize.first->second >= tensorSize) {
-            loaded.insert(key);
-          }
-        }
-
-        if (loaded.size() >= OutputSize()) {
+        if (loaded_blobs == OutputSize()) {
           VLOG(1) << "Read all required blobs";
           break;
         }
       }
     }
-    VLOG(1) << "Fully loaded " << loaded.size() << " blobs";
 
-    for (const auto& blobSize : blobSizes) {
-      Blob* blob = outputs.at(blobSize.first);
-      if (blob->IsType<Tensor<Context>>()) {
-        size_t tensorSize = blob->Get<Tensor<Context>>().size();
-        CAFFE_ENFORCE(
-            tensorSize == blobSize.second,
-            "Data size mistmatch for blob ",
-            def().output(blobSize.first),
-            ". Expected: ",
-            tensorSize,
-            " Read: ",
-            blobSize.second);
-      }
-    }
+    validateBlobStates(blob_states);
+    VLOG(1) << "Fully loaded " << blob_states.size() << " blobs";
 
-    if (loaded.size() != OutputSize()) {
+    if (loaded_blobs != OutputSize()) {
       for (const string& output_name : this->def().output()) {
-        if (loaded.count(output_name) <= 0) {
+        if (blob_states.count(output_name) == 0) {
           LOG(ERROR) << "Failed to load blob: " << output_name;
         }
       }
       CAFFE_THROW(
-          "Expected to load ", OutputSize(), " blobs, ", "got ", loaded.size());
+          "Expected to load ",
+          OutputSize(),
+          " blobs, got ",
+          loaded_blobs,
+          " only.\n");
     }
   }
 
  private:
+  // We are tracking sizes of already read tensor parts while reading data
+  // chunks. This way we can make sure that all chunks were loaded in the end.
+  void ProcessBlob(
+      Blob* blob,
+      const BlobProto& proto,
+      std::unordered_map<string, BlobState>* blob_states_ptr,
+      const string& key,
+      int* loaded_blobs) {
+    auto& blob_states = *blob_states_ptr;
+    if (blob_states.count(key) == 0) {
+      // We reset the blob so that any existing content is destroyed. This
+      // is to guaranee correct device placement: if we are deserializing
+      // into a TensorCUDA, without explicit Reset we might be loading data
+      // into an existing TensorCUDA that has pre-allocated memory on a
+      // different GPU.
+      blob->Reset();
+    }
+    blob->Deserialize(proto);
+    if (!blob->IsType<Tensor<Context>>()) {
+      // Only tensors can be seen multiple times as chunks.
+      CAFFE_ENFORCE(blob_states.count(key) == 0, "Blob duplicated:", key);
+      blob_states[key] = BlobState();
+      (*loaded_blobs)++;
+      return;
+    }
+
+    CAFFE_ENFORCE(proto.has_tensor());
+    if (blob_states.count(key)) {
+      CAFFE_ENFORCE(blob_states[key].is_tensor, "Must be tensor ", key);
+      CAFFE_ENFORCE(
+          blob_states[key].current_size < blob_states[key].total_size,
+          "Found an extra part for an already filled tensor: ",
+          key);
+      CAFFE_ENFORCE(
+          proto.tensor().has_segment(),
+          "Partial tensor must have a segment: ",
+          key);
+      blob_states[key].current_size +=
+          proto.tensor().segment().end() - proto.tensor().segment().begin();
+      CAFFE_ENFORCE(
+          blob_states[key].current_size <= blob_states[key].total_size,
+          "Tensor parts are bigger than target size for tensor: ",
+          key);
+    } else {
+      auto total_size = blob->Get<Tensor<Context>>().size();
+      auto current_size = total_size;
+      if (proto.tensor().has_segment()) {
+        current_size =
+            proto.tensor().segment().end() - proto.tensor().segment().begin();
+      }
+      blob_states[key] =
+          BlobState(total_size, current_size, true /* is_tensor */);
+    }
+
+    if (blob_states[key].current_size == blob_states[key].total_size) {
+      (*loaded_blobs)++;
+    }
+  }
+
+  void validateBlobStates(
+      const std::unordered_map<string, BlobState>& blob_states) {
+    for (const auto& iter : blob_states) {
+      const BlobState& blob_state = iter.second;
+      if (blob_state.is_tensor) {
+        CAFFE_ENFORCE(
+            blob_state.current_size == blob_state.total_size,
+            "Data size mistmatch for blob ",
+            iter.first,
+            ". Expected: ",
+            blob_state.total_size,
+            " Read: ",
+            blob_state.current_size);
+      }
+    }
+  }
+
   Workspace* ws_;
   bool absolute_path_;
   string strip_prefix_;

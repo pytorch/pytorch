@@ -122,6 +122,26 @@ class TestLoadSaveBase(test_util.TestCase):
                 if e.errno != errno.ENOENT:
                     raise
 
+    def saveFile(self, tmp_folder, db_type):
+        dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
+                  np.int16, np.int32, np.int64, np.uint8, np.uint16]
+        arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
+                  for T in dtypes]
+
+        for i, arr in enumerate(arrays):
+            self.assertTrue(workspace.FeedBlob(str(i), arr))
+            self.assertTrue(workspace.HasBlob(str(i)))
+
+        # Saves the blobs to a local db.
+        tmp_file = os.path.join(tmp_folder, "db")
+        op = core.CreateOperator(
+            "Save",
+            [str(i) for i in range(len(arrays))], [],
+            absolute_path=1,
+            db=tmp_file, db_type=db_type)
+        workspace.RunOperatorOnce(op)
+        return tmp_file, arrays
+
 
 class TestLoadSave(TestLoadSaveBase):
 
@@ -147,6 +167,61 @@ class TestLoadSave(TestLoadSaveBase):
             db=os.path.join(tmp_folder, "db"), db_type=self._db_type)
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+
+    def testLoadExcessblobs(self):
+        tmp_folder = tempfile.mkdtemp()
+        tmp_file, arrays = self.saveFile(tmp_folder, self._db_type)
+
+        op = core.CreateOperator(
+            "Load",
+            [], [str(i) for i in range(len(arrays))] * 2,
+            absolute_path=1,
+            db=tmp_file, db_type=self._db_type,
+            load_all=False)
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+
+    def testTruncatedFile(self):
+        tmp_folder = tempfile.mkdtemp()
+        tmp_file, arrays = self.saveFile(tmp_folder, self._db_type)
+
+        with open(tmp_file, 'wb+') as fdest:
+            fdest.seek(20, os.SEEK_END)
+            fdest.truncate()
+
+        op = core.CreateOperator(
+            "Load",
+            [], [str(i) for i in range(len(arrays))],
+            absolute_path=1,
+            db=tmp_file, db_type=self._db_type,
+            load_all=False)
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+
+        op = core.CreateOperator(
+            "Load",
+            [], [],
+            absolute_path=1,
+            db=tmp_file, db_type=self._db_type,
+            load_all=True)
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
 
     def testBlobNameOverrides(self):
         original_names = ['blob_a', 'blob_b', 'blob_c']
