@@ -13,9 +13,21 @@ struct LogCUDAFunctor {
   }
 };
 
+struct SqrCUDAFunctor {
+  template <typename T>
+  inline void
+  operator()(const int n, const T* x, T* y, CUDAContext* device_context) {
+    math::Sqr<T, CUDAContext>(n, x, y, device_context);
+  }
+};
+
 namespace {
+
 REGISTER_CUDA_OPERATOR(
     Log,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, LogCUDAFunctor>);
+REGISTER_CUDA_OPERATOR(
+    Sqr,
+    UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SqrCUDAFunctor>);
 }
 }
