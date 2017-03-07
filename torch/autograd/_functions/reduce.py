@@ -68,24 +68,21 @@ class Prod(_DimReduceFunction):
 
             repeats = [1 for _ in self.input_size]
             repeats[self.dim] = self.input_size[self.dim]
-            output_zero_cnt = (input == 0).sum(self.dim)
-            output_one_zero_ind = (output_zero_cnt == 1).nonzero()
+            input_zero_cnt = (input == 0).sum(self.dim)
+            input_one_zero_ind = (input_zero_cnt == 1).nonzero()
             grad_input = output.mul(grad_output)
-            grad_input[output_zero_cnt > 0] = 0.0
+            grad_input[input_zero_cnt > 0] = 0.0
             grad_input = grad_input.repeat(*repeats).div_(input_copy)
-            if output_one_zero_ind.dim() == 0:
+            if input_one_zero_ind.dim() == 0:
                 return grad_input
 
-            for i in range(output_one_zero_ind.size()[0]):
-                if output_one_zero_ind.is_cuda:
-                    output_one_zero_vec_ind = tuple(output_one_zero_ind[i].cpu().numpy())
-                else:
-                    output_one_zero_vec_ind = tuple(output_one_zero_ind[i].numpy())
-                output_one_zero_vec_indexing = output_one_zero_vec_ind[:self.dim] + (slice(0, None),) + output_one_zero_vec_ind[self.dim+1:]
-                output_one_zero_vec = input.new(self.input_size[self.dim]).fill_(0)
-                output_one_zero_vec.copy_(input[output_one_zero_vec_indexing])
-                output_one_zero_vec[(output_one_zero_vec==0).nonzero()[0, 0]] = 1.0
-                grad_input[output_one_zero_vec_ind] = output_one_zero_vec.prod() if output_one_zero_vec.numel()>1 else 1.0
+            for i in range(input_one_zero_ind.size()[0]):
+                input_one_zero_vec_ind = tuple(input_one_zero_ind[i].cpu().numpy()) if input_one_zero_ind.is_cuda else tuple(input_one_zero_ind[i].numpy())
+                input_one_zero_vec = input.new(self.input_size[self.dim]).fill_(0)
+                input_one_zero_vec.copy_(input[input_one_zero_vec_ind[:self.dim] + (slice(0, None),) + input_one_zero_vec_ind[self.dim+1:]])
+                ind_in_one_zero_vec = (input_one_zero_vec==0).nonzero()[0, 0]
+                input_one_zero_vec[ind_in_one_zero_vec] = 1.0
+                grad_input[input_one_zero_vec_ind[:self.dim] + (ind_in_one_zero_vec,) + input_one_zero_vec_ind[self.dim+1:]] = grad_output[input_one_zero_vec_ind]*(input_one_zero_vec.prod() if input_one_zero_vec.numel()>1 else 1.0)
             return grad_input
 
 
