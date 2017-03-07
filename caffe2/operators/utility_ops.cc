@@ -112,6 +112,22 @@ REGISTER_GRADIENT(Reshape, GetReshapeGradient);
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction(
+        [](const OperatorDef&, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          int total = 1;
+          std::size_t index = 0;
+          for (auto d : in[0].dims()) {
+            // skip the first element
+            if (index++ == 0) {
+              continue;
+            }
+            total *= d;
+          }
+          out[0].add_dims(in[0].dims(0));
+          out[0].add_dims(total);
+          return out;
+        })
     .SetDoc(R"DOC(
 Flattens the input tensor into a 2D matrix, keeping the first dimension
 unchanged.
