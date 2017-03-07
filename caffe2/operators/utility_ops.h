@@ -433,6 +433,34 @@ class ScatterWeightedSumOp : public Operator<Context> {
 };
 
 template <typename T, class Context>
+class SumElementsOp : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(SumElementsOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  bool RunOnDevice() override {
+    bool average = OperatorBase::GetSingleArgument<bool>("average", false);
+    auto& X = Input(0);
+    auto* sum = Output(0);
+    sum->Resize(vector<TIndex>());
+    math::Sum<T, Context>(
+        X.size(),
+        X.template data<T>(),
+        sum->template mutable_data<T>(),
+        &context_);
+    if (average) {
+      math::Scale<T, Context>(
+          1,
+          static_cast<T>(1.) / X.size(),
+          sum->template data<T>(),
+          sum->template mutable_data<T>(),
+          &context_);
+    }
+    return true;
+  }
+};
+
+template <typename T, class Context>
 class MaxOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;

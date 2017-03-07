@@ -12,6 +12,8 @@ REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Sum, SumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SumInt, SumOp<int, CPUContext>);
+REGISTER_CPU_OPERATOR(SumElements, SumElementsOp<float, CPUContext>);
+
 REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
@@ -108,6 +110,15 @@ class GetReshapeGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(Reshape, GetReshapeGradient);
+
+OPERATOR_SCHEMA(SumElements)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .ScalarType(TensorProto::FLOAT)
+    .SetDoc("Sums the elements of the input tensor.")
+    .Arg("average", "whether to average or not")
+    .Input(0, "X", "Tensor to sum up")
+    .Output(0, "sum", "Scalar sum");
 
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
