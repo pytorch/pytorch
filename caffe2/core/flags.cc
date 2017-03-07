@@ -18,7 +18,7 @@ void SetUsageMessage(const string& str) {
 }
 
 const char* UsageMessage() {
-  return google::ProgramUsage();
+  return gflags::ProgramUsage();
 }
 
 bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
