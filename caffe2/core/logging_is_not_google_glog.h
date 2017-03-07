@@ -15,7 +15,13 @@
 
 // Log severity level constants.
 const int FATAL   = 3;
+#if !defined(_MSC_VER) || !defined(ERROR)
+// Windows defines the ERROR macro already, and as a result we will
+// simply use that one. The downside is that one will now mix LOG(INFO)
+// and LOG(ERROR) because ERROR is defined to be zero. Anyway, the
+// recommended way is to use glog so fixing this is a low-pri item.
 const int ERROR   = 2;
+#endif
 const int WARNING = 1;
 const int INFO    = 0;
 const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";

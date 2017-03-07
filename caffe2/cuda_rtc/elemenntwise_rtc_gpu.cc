@@ -84,7 +84,8 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
     static_assert(sizeof(void*) == sizeof(size_t),
                   "The argbuffer relies on the assumption that void* and "
                   "size_t have the same size.");
-    size_t argBuffer[InputSize() + OutputSize() + 1];
+    vector<size_t> argBuffer_vec(InputSize() + OutputSize() + 1);
+    size_t* argBuffer = argBuffer_vec.data();
     CAFFE_ENFORCE(
         Input(0).size() < std::numeric_limits<int>::max(),
         "The kernel function currently only supports int index.");

@@ -4,7 +4,10 @@
 #include <mutex>
 #include <stack>
 
+#if !defined(_MSC_VER)
 #include <sched.h>
+#endif
+
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/operator.h"
@@ -258,6 +261,10 @@ void GPUExecutor::Release(int gpu) {
 }
 
 void GPUExecutor::set_affinity() {
+  // TODO: find a Windows-compatible affinity setting approach.
+  // Currently, set_affinity has no effect in Windows. The code is still
+  // correct with possible slowdowns.
+#if !defined(_MSC_VER)
   /* Set CPU affinity */
   int num_cores = std::thread::hardware_concurrency();
   if (num_cores > 0) {
@@ -269,6 +276,7 @@ void GPUExecutor::set_affinity() {
       LOG(WARNING) << "Could not set CPU affinity";
     }
   }
+#endif
 }
 
 // Worker that takes list of operators from the queue
@@ -363,7 +371,9 @@ class SingleThreadAsyncNet : public SimpleNet {
   }
 
   bool RunAsync() {
-    LOG(FATAL) << "RunAsync() not implemented for singlethread_async net";
+    CAFFE_THROW("RunAsync() not implemented for singlethread_async net");
+    // Just to suppress compiler warning.
+    return false;
   }
 
  private:
