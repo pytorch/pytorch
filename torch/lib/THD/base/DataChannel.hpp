@@ -59,7 +59,7 @@ struct DataChannel {
 
 protected:
   struct Group {
-    using rank_type = unsigned int;
+    using rank_type = int;
 
     Group();
     /*
@@ -70,24 +70,24 @@ protected:
      * eg. ranks = {[0] = 6, [1] = 2} which means that 0 and 1 are new ranks in group
      * and 6, 2 are global ranks corresponding to 0 and 1 respectively.
      */
-    Group(std::vector<int> ranks, int max_rank);
+    Group(std::vector<rank_type> ranks, rank_type max_rank);
     virtual ~Group();
 
-    std::size_t size() const;
+    rank_type size() const;
 
     /*
      * In contrast to `getGroupRank` this function throws `std::logic_error`
      * when rank is member of this group.
      */
-    rank_type mustGetGroupRank(int global_rank) const;
-    std::pair<rank_type, bool> getGroupRank(int global_rank) const;
+    rank_type mustGetGroupRank(rank_type global_rank) const;
+    std::pair<rank_type, bool> getGroupRank(rank_type global_rank) const;
 
     /*
      * In contrast to `getGlobalRank` this function throws `std::logic_error`
      * when provided `group_rank` is not in range of group.
      */
-    rank_type mustGetGlobalRank(int group_rank) const;
-    std::pair<rank_type, bool> getGlobalRank(int group_rank) const;
+    rank_type mustGetGlobalRank(rank_type group_rank) const;
+    std::pair<rank_type, bool> getGlobalRank(rank_type group_rank) const;
 
   private:
     // maps new group ranks to old ranks (global ranks)
