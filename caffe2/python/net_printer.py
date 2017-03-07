@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 from caffe2.proto.caffe2_pb2 import OperatorDef
 from caffe2.python.checkpoint import Job
 from caffe2.python.core import Net, ExecutionStep, Plan
-from caffe2.python.task import Task, TaskGroup, WorkspaceType
+from caffe2.python.task import Task, TaskGroup, WorkspaceType, TaskOutput
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import copy
@@ -153,9 +153,9 @@ class Text(object):
             self._lines_in_context.append(0)
         yield
         if text is not None:
-            self._indent -= 4
             if self._lines_in_context[-1] == 0:
                 self.add('pass')
+            self._indent -= 4
             del self._lines_in_context[-1]
 
     def add(self, text):
@@ -283,9 +283,16 @@ def print_step(text, step):
                     text.add(call('yield stop_if', [proto.should_stop_blob]))
 
 
+def _print_task_output(x):
+    assert isinstance(x, TaskOutput)
+    return 'Output[' + ', '.join(map(str, x.names)) + ']'
+
+
 @Printer.register(Task)
 def print_task(text, task):
-    with text.context(call('Task', [('node', task.node), ('name', task.name)])):
+    outs = ', '.join(map(_print_task_output, task.outputs()))
+    context = [('node', task.node), ('name', task.name), ('outputs', outs)]
+    with text.context(call('Task', context)):
         text(task.get_step())
 
 
@@ -300,6 +307,10 @@ def print_task_group(text, tg, header=None):
 def print_job(text, job):
     text(job.init_group, 'Job.current().init_group')
     text(job.epoch_group, 'Job.current().epoch_group')
+    with text.context('Job.current().stop_signals'):
+        for out in job.stop_signals:
+            text.add(_print_task_output(out))
+    text(job.exit_group, 'Job.current().exit_group')
 
 
 def to_string(obj):
