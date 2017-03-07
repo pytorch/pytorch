@@ -12,6 +12,18 @@ Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/
 
 [![Windows Build status](https://ci.appveyor.com/api/projects/status/kec4ta779stuyb83?svg=true)](https://ci.appveyor.com/project/Yangqing/caffe2)
 
+
+Detailed build matrix (hit refresh if you see icons not showing up due to heroku):
+
+| Target      | Status |
+|-------------|----|
+| Linux       | [![Build Linux](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/1)](https://travis-ci.org/caffe2/caffe2) |
+| Mac (CPU)   | [![Build Mac](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/2)](https://travis-ci.org/caffe2/caffe2) |
+| Android     | [![Build Android](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/3)](https://travis-ci.org/caffe2/caffe2) |
+| iOS         | [![Build iOS](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/5)](https://travis-ci.org/caffe2/caffe2) |
+| Linux + MKL | [![Build LinuxMKL](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/6)](https://travis-ci.org/caffe2/caffe2) |
+| Windows     | [![Build status](https://ci.appveyor.com/api/projects/status/kec4ta779stuyb83?svg=true)](https://ci.appveyor.com/project/Yangqing/caffe2) |
+
     git clone --recursive https://github.com/caffe2/caffe2.git
     cd caffe2
     
