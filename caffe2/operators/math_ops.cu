@@ -1,7 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/core/operator.h"
-#include "caffe2/operators/elementwise_op.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/math_ops.h"
 
 namespace caffe2 {
 
@@ -30,4 +28,7 @@ REGISTER_CUDA_OPERATOR(
     Sqr,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SqrCUDAFunctor>);
 }
+REGISTER_CUDA_OPERATOR(
+    Pow,
+    UnaryElementwiseWithArgsOp<TensorTypes<float>, CUDAContext, PowFunctor>);
 }

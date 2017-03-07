@@ -526,9 +526,10 @@ class HypothesisTestCase(test_util.TestCase):
                         output_blob_name, shapes, types, output)
                 outs.append(output)
             if grad_reference and output_to_grad:
-                self._assertGradReferenceChecks(
-                    op, inputs, reference_outputs,
-                    output_to_grad, grad_reference)
+                with core.DeviceScope(device_option):
+                    self._assertGradReferenceChecks(
+                        op, inputs, reference_outputs,
+                        output_to_grad, grad_reference)
             return outs
 
     def assertValidationChecks(

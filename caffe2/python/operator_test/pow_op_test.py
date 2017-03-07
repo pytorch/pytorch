@@ -11,19 +11,24 @@ import caffe2.python.hypothesis_test_util as hu
 import unittest
 
 
-class TestElementwisePowerOp(hu.HypothesisTestCase):
+class TestPowOp(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(),
-           exponent=st.floats(min_value=-1.0, max_value=1.0),
-           **hu.gcs_cpu_only)
+           exponent=st.floats(min_value=2.0, max_value=3.0),
+           **hu.gcs)
     def test_elementwise_power(self, X, exponent, gc, dc):
-        def elementwise_power(X):
+        def powf(X):
             return (X ** exponent,)
 
+        def powf_grad(g_out, outputs, fwd_inputs):
+            return (exponent * (fwd_inputs[0] ** (exponent - 1)) * g_out,)
+
         op = core.CreateOperator(
-            "ElementwisePower", ["X"], ["Y"], exponent=exponent)
-        self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertReferenceChecks(gc, op, [X], elementwise_power)
+            "Pow", ["X"], ["Y"], exponent=exponent)
+
+        self.assertReferenceChecks(gc, op, [X], powf,
+                                   output_to_grad="Y",
+                                   grad_reference=powf_grad),
 
 
 if __name__ == "__main__":

@@ -369,11 +369,35 @@ __global__ void ScaleKernelDeviceAlpha(
     y[i] = x[i] * (*alpha);
   }
 }
+
+template <typename T>
+__global__ void PowKernel(const int n, const T* x, const T exponent, T* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = powf(x[i], exponent);
+  }
+}
 }  // namespace
 
 template <>
+void Powx<float, CUDAContext>(
+    const int N,
+    const float* a,
+    const float b,
+    float* y,
+    CUDAContext* context) {
+  PowKernel<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context->cuda_stream()>>>(N, a, b, y);
+}
+
+template <>
 void Scale<float, CUDAContext>(
-    const int n, const float alpha, const float *x, float* y,
+    const int n,
+    const float alpha,
+    const float* x,
+    float* y,
     CUDAContext* context) {
   ScaleKernel<float><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                        0, context->cuda_stream()>>>(n, alpha, x, y);
