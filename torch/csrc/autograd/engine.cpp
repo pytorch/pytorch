@@ -22,6 +22,17 @@ using thpp::Tensor;
 
 namespace torch { namespace autograd {
 
+struct FunctionTask {
+  BackwardTask* base;
+  std::shared_ptr<Function> fn;
+  GradBuffer grad;
+
+  FunctionTask(BackwardTask* base, std::shared_ptr<Function> fn, GradBuffer grad)
+    : base(base)
+    , fn(fn)
+    , grad(std::move(grad)) {}
+};
+
 struct ReadyQueue {
   std::deque<FunctionTask> queue;
   std::condition_variable not_empty;
@@ -53,17 +64,6 @@ struct BackwardTask {
     , not_done()
     , not_ready()
     , dependencies() {}
-};
-
-struct FunctionTask {
-  BackwardTask* base;
-  std::shared_ptr<Function> fn;
-  GradBuffer grad;
-
-  FunctionTask(BackwardTask* base, std::shared_ptr<Function> fn, GradBuffer grad)
-    : base(base)
-    , fn(fn)
-    , grad(std::move(grad)) {}
 };
 
 auto ReadyQueue::push_front(FunctionTask item) -> void {

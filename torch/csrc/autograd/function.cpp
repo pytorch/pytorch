@@ -1,5 +1,6 @@
 #include "function.h"
 
+#include <string>
 #include <THPP/THPP.h>
 
 #include "variable.h"
