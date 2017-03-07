@@ -458,16 +458,10 @@ class MaxOp : public Operator<Context> {
           output->dims());
     }
 
-    T* output_data = output->template mutable_data<T>();
-    for (int i = 1; i < InputSize(); i++) {
-      auto input_data = Input(i).template data<T>();
-      for (int j = 0; j < input0.size(); j++) {
-        output_data[j] = std::max(output_data[j], input_data[j]);
-      }
-    }
-
-    return true;
+    return Compute();
   }
+
+  virtual bool Compute();
 };
 
 template <typename T, class Context>
