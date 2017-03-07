@@ -74,12 +74,10 @@ std::shared_ptr<Context> Runner::newContext() {
 
   auto context =
     std::make_shared<Context>(options_.contextRank, options_.contextSize);
-  auto redisStore = std::unique_ptr<rendezvous::Store>(
-    new rendezvous::RedisStore(options_.redisHost, options_.redisPort));
-  auto prefixStore = std::unique_ptr<rendezvous::Store>(
-    new rendezvous::PrefixStore(prefix.str(), redisStore));
 
-  context->connectFullMesh(*prefixStore, device_);
+  rendezvous::RedisStore redisStore(options_.redisHost, options_.redisPort);
+  rendezvous::PrefixStore prefixStore(prefix.str(), redisStore);
+  context->connectFullMesh(prefixStore, device_);
   return context;
 }
 

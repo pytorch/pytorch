@@ -18,7 +18,7 @@ namespace rendezvous {
 
 class PrefixStore : public Store {
  public:
-  PrefixStore(const std::string& prefix, std::unique_ptr<Store>& store);
+  PrefixStore(const std::string& prefix, Store& store);
 
   virtual ~PrefixStore() {}
 
@@ -31,7 +31,7 @@ class PrefixStore : public Store {
 
  protected:
   const std::string prefix_;
-  std::unique_ptr<Store> store_;
+  Store& store_;
 
   std::string joinKey(const std::string& key);
 };
