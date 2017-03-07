@@ -4,26 +4,36 @@ language: cpp
 
 matrix:
   fast_finish: true
+  # Note: the indices of the build below is used to generate detailed build 
+  # status in the README.md file. If you find yourself changing the indices,
+  # make sure you change the build status lines in README.md accordingly too.
   include:
-    - os: linux
-      compiler: gcc
-      env: BUILD_TARGET=android
-    - os: osx
-      compiler: clang
-      env: BUILD_TARGET=android
-    - os: osx
-      compiler: clang
-      env: BUILD_TARGET=ios
+    # 1
     - os: linux
       compiler: gcc
       env: COMPILER=g++
+    # 2
     - os: osx
       compiler: clang
       env: COMPILER=clang++
+    # 3
+    - os: linux
+      compiler: gcc
+      env: BUILD_TARGET=android
+    # 4
+    - os: osx
+      compiler: clang
+      env: BUILD_TARGET=android
+    # 5
+    - os: osx
+      compiler: clang
+      env: BUILD_TARGET=ios
+    # 6
     - os: linux
       compiler: gcc
       env: COMPILER=g++
       env: BLAS=MKL
+    # 7
     - os: linux
       compiler: gcc
       addons:
@@ -33,6 +43,7 @@ matrix:
           packages:
           - g++-4.8
       env: COMPILER=g++-4.8
+    # 8
     - os: linux
       compiler: gcc
       addons:
@@ -42,6 +53,7 @@ matrix:
           packages:
           - g++-4.9
       env: COMPILER=g++-4.9
+    # 9
     - os: linux
       compiler: gcc
       addons:
