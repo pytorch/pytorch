@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util, cnn
+from caffe2.python import workspace, test_util, cnn
 
 
 class TestShapeInference(test_util.TestCase):
@@ -266,6 +266,19 @@ class TestShapeInference(test_util.TestCase):
                 "tensor", "tiled_tensor_{}".format(i), tiles=5, axis=i)
         self.InferTensorRunAndCompare(m)
 
+    def testShapeInferenceFlatten(self):
+        model = cnn.CNNModelHelper()
+        model.FlattenToVec("X", "FlatVec")
+        workspace.FeedBlob("X", np.random.rand(17, 5, 13).astype(np.float32))
+
+        self.InferTensorRunAndCompare(model)
+
+        model = cnn.CNNModelHelper()
+        model.Flatten("X", "Flat")
+        workspace.FeedBlob("X", np.random.rand(17, 5, 13).astype(np.float32))
+
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model):
         '''
         Runs shape inference, and then the model to check
@@ -329,5 +342,4 @@ class TestShapeInference(test_util.TestCase):
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()
