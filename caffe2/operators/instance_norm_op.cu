@@ -121,7 +121,7 @@ __global__ void InstanceNormGradientKernel(
       output_grad_offset += dim_stride;
     }
 
-    temp *= -std::pow(inv_stdev_data[i], 3.0) / dim;
+    temp *= -powf(inv_stdev_data[i], 3.0) / dim;
 
     input_grad_offset = input_grad_data + n * N_stride + c * C_stride;
     output_grad_offset = output_grad_data + n * N_stride + c * C_stride;

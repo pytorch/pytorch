@@ -400,7 +400,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
         Index idx = idxs[i];
         DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
                                     << ", range 0 to " << N;
-        math::Scale<T, Context, FixedSize>(
+        math::ScaleFixedSize<T, Context, FixedSize>(
             block_size,
             w0,
             data + block_size * idx,
@@ -420,7 +420,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
         // double-checking the indices, but it's fine as it's DCHECK only
         DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
                                     << ", range 0 to " << N;
-        math::Axpy<T, Context, FixedSize>(
+        math::AxpyFixedSize<T, Context, FixedSize>(
             block_size,
             w,
             x_data + block_size * i,
@@ -502,32 +502,7 @@ class MaxGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(MaxGradientOp);
 
-  bool RunOnDevice() override {
-    auto& output = Input(0);
-    auto& grad_output = Input(1);
-    const int kInputStartOffset = 2;
-
-    const T* data = output.template data<T>();
-    ConstEigenArrayMap<T> output_array(
-        output.template data<T>(), 1, output.size());
-    ConstEigenArrayMap<T> grad_out_array(
-        grad_output.template data<T>(), 1, grad_output.size());
-
-    for (int i = 0; i < OutputSize(); i++) {
-      auto& input = Input(i + kInputStartOffset);
-      ConstEigenArrayMap<T> input_array(
-          input.template data<T>(), 1, input.size());
-
-      auto* grad_input = Output(i);
-      grad_input->ResizeLike(input);
-      EigenArrayMap<T> grad_in_array(
-          grad_input->template mutable_data<T>(), 1, grad_input->size());
-      grad_in_array = grad_out_array *
-          input_array.cwiseEqual(output_array).template cast<T>();
-    }
-
-    return true;
-  }
+  bool RunOnDevice() override;
 };
 
 /**

@@ -74,7 +74,7 @@ list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_CPU)
 if (BUILD_SHARED_LIBS)
   list(APPEND Caffe2_MAIN_LIBS Caffe2_CPU)
 else()
-    caffe_add_whole_archive_flag(Caffe2_CPU tmp)
+  caffe_add_whole_archive_flag(Caffe2_CPU tmp)
   list(APPEND Caffe2_MAIN_LIBS ${tmp})
 endif()
 
