@@ -36,7 +36,6 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         self._default_optimizer = None
         self._loss = None
         self._output_schema = None
-        self._preproc_output_schema = None
 
         # Connect Schema to self.net. That particular instance of schmea will be
         # use for generation of the Layers accross the network and would be used
@@ -49,9 +48,17 @@ class LayerModelHelper(model_helper.ModelHelperBase):
             self.net,
             trainer_extra_schema
         )
+        self._metrics_schema = schema.Struct()
 
         self._init_global_constants()
         self.param_init_net = self.create_init_net('param_init_net')
+
+    def add_metric_field(self, name, value):
+        assert name not in self._metrics_schema.fields, (
+            "Try to add metric field twice: {}".format(name))
+        self._metrics_schema = self._metrics_schema + schema.Struct(
+            (name, value)
+        )
 
     def add_global_constant(self, name, array=None, dtype=None,
                             initializer=None):
@@ -157,14 +164,15 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         return self._trainer_extra_schema
 
     @property
-    def preproc_output_schema(self):
-        assert self._preproc_output_schema is not None
-        return self._preproc_output_schema
+    def metrics_schema(self):
+        """
+        Returns the schema that represents model output that should be used for
+        metric reporting.
 
-    @preproc_output_schema.setter
-    def preproc_output_schema(self, schema):
-        assert self._preproc_output_schema is None
-        self._preproc_output_schema = schema
+        During the training/evaluation this schema will be appended to the
+        schema that represents model output.
+        """
+        return self._metrics_schema
 
     @property
     def output_schema(self):
