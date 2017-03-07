@@ -685,14 +685,14 @@ caution.
 OPERATOR_SCHEMA(EnsureDense)
     .NumInputs(1)
     .NumOutputs(1)
-    .EnforceInplace({{0, 0}})
+    .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 This operator converts dense or sparse gradients to dense ones.
 Therefore, sparse gradient can be back propagated to Operators that consume
 dense gradients only (e.g., FCGradient).
 
 The operator's behaviors:
-- In forward, simply pass input to the output in place.
+- In forward, simply pass in place or copy input to the output.
 - In backward, if the gradient passed-in is sparse gradient, change it to
   dense gradient in linear time; otherwise, simply pass the dense gradient.
 )DOC")
