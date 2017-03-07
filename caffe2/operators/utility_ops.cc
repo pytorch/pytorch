@@ -273,7 +273,7 @@ Currently only works on CPU because of access to INDICES.
 OPERATOR_SCHEMA(Max)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
-    .IdenticalTypeAndShape()
+    .IdenticalTypeAndShapeOfInput(0)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 Element-wise max of each of the input tensors. The first input tensor can be
@@ -850,5 +850,20 @@ SHOULD_NOT_DO_GRADIENT(Slice);
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
 
 } // namespace
+
+template <typename T, class Context>
+bool MaxOp<T, Context>::Compute() {
+  auto& input0 = Input(0);
+  const int N = input0.size();
+  T* output_data = Output(0)->template mutable_data<T>();
+
+  for (int i = 1; i < InputSize(); i++) {
+    auto input_data = Input(i).template data<T>();
+    EigenVectorMap<T> output_vec(output_data, N);
+    output_vec = output_vec.cwiseMax(ConstEigenVectorMap<T>(input_data, N));
+  }
+
+  return true;
+}
 
 } // namespace caffe2
