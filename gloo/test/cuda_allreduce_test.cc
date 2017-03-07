@@ -33,7 +33,7 @@ using Param = std::tuple<int, int, std::function<Func>>;
 class CudaAllreduceTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
  public:
-  void assertResult(Fixture& fixture) {
+  void assertResult(CudaFixture& fixture) {
     // Size is the total number of pointers across the context
     const auto size = fixture.ptrs.size() * fixture.context->size;
     // Expected is set to the expected value at ptr[0]
@@ -59,7 +59,7 @@ TEST_P(CudaAllreduceTest, SinglePointer) {
 
   spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = Fixture(context, 1, count);
+      auto fixture = CudaFixture(context, 1, count);
       auto ptrs = fixture.getFloatPointers();
       auto algorithm = fn(context, ptrs, count, {});
       fixture.assignValues();
@@ -77,7 +77,7 @@ TEST_P(CudaAllreduceTest, MultiPointer) {
 
   spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = Fixture(context, getDeviceCount(), count);
+      auto fixture = CudaFixture(context, cudaNumDevices(), count);
       auto ptrs = fixture.getFloatPointers();
       auto algorithm = fn(context, ptrs, count, {});
       fixture.assignValues();
@@ -95,7 +95,7 @@ TEST_P(CudaAllreduceTest, MultiPointerAsync) {
 
   spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = Fixture(context, getDeviceCount(), count);
+      auto fixture = CudaFixture(context, cudaNumDevices(), count);
       auto ptrs = fixture.getFloatPointers();
       auto streams = fixture.getCudaStreams();
       auto algorithm = fn(context, ptrs, count, streams);

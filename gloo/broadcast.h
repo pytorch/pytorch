@@ -17,8 +17,13 @@ namespace gloo {
 template <typename T>
 class Broadcast : public Algorithm {
  public:
-  Broadcast(const std::shared_ptr<Context>& context, int rootRank)
-      : Algorithm(context), rootRank_(rootRank) {
+  Broadcast(
+      const std::shared_ptr<Context>& context,
+      int rootRank,
+      int rootPointerRank)
+      : Algorithm(context),
+        rootRank_(rootRank),
+        rootPointerRank_(rootPointerRank) {
     GLOO_ENFORCE_GE(rootRank_, 0);
     GLOO_ENFORCE_LT(rootRank_, contextSize_);
   }
@@ -27,10 +32,15 @@ class Broadcast : public Algorithm {
     return rootRank_;
   }
 
+  int getRootPointerRank() const {
+    return rootPointerRank_;
+  }
+
   virtual ~Broadcast(){};
 
  protected:
   const int rootRank_;
+  const int rootPointerRank_;
 };
 
 } // namespace gloo

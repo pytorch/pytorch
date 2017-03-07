@@ -19,17 +19,18 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
  public:
   CudaBroadcastOneToAll(
       const std::shared_ptr<Context>& context,
-      T* ptr,
+      const std::vector<T*>& ptrs,
       int count,
       int rootRank = 0,
-      cudaStream_t stream = kStreamNotSet);
+      int rootPointerRank = 0,
+      const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
 
   virtual ~CudaBroadcastOneToAll();
 
   virtual void run() override;
 
  protected:
-  CudaDevicePointer<T> devicePtr_;
+  std::vector<CudaDevicePointer<T> > devicePtrs_;
   T* hostPtr_;
 
   const int count_;
@@ -41,6 +42,10 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
 
   // For all receivers
   std::unique_ptr<transport::Buffer> recvDataBuffer_;
+
+  // For local broadcast
+  struct LocalBroadcast;
+  std::unique_ptr<LocalBroadcast> localBroadcast_;
 };
 
 } // namespace gloo

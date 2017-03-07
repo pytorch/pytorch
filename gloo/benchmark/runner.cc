@@ -51,7 +51,7 @@ Runner::Runner(const options& options) : options_(options) {
 
   // Create broadcast algorithm to synchronize between participants
   broadcast_.reset(
-    new BroadcastOneToAll<long>(newContext(), &broadcastValue_, 1));
+    new BroadcastOneToAll<long>(newContext(), {&broadcastValue_}, 1));
 
   // Create barrier for run-to-run synchronization
   barrier_.reset(new BarrierAllToOne(newContext()));

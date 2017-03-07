@@ -21,68 +21,102 @@ namespace {
 // Function to instantiate and run algorithm.
 using Func = std::unique_ptr<::gloo::Algorithm>(
     std::shared_ptr<::gloo::Context>&,
-    float* ptr,
+    std::vector<float*> ptr,
     int count,
     int rootRank,
-    cudaStream_t stream);
+    int rootPointerRank,
+    std::vector<cudaStream_t> streams);
 
 // Test parameterization.
-using Param = std::tuple<int, int, std::function<Func>>;
+using Param = std::tuple<int, int, int, std::function<Func>>;
 
 // Test fixture.
 class CudaBroadcastTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
  public:
-  void assertEqual(Fixture& fixture, int root) {
-    const auto stride = fixture.context->size;
+  void assertResult(CudaFixture& fixture, int root, int rootPointer) {
+    // Expected is set to the expected value at ptr[0]
+    const auto expected = root * fixture.srcs.size() + rootPointer;
+    // Stride is difference between values at subsequent indices
+    const auto stride = fixture.srcs.size() * fixture.context->size;
+    // Verify all buffers passed by this instance
     for (const auto& ptr : fixture.getHostBuffers()) {
-      for (int i = 0; i < fixture.count; i++) {
-        ASSERT_EQ((i * stride) + root, ptr[i])
-          << "Mismatch at index " << i
-          << " for rank " << fixture.context->rank;
+      for (auto i = 0; i < fixture.count; i++) {
+        ASSERT_EQ((i * stride) + expected, ptr[i])
+          << "Mismatch at index " << i;
       }
     }
   }
 };
 
-TEST_P(CudaBroadcastTest, SinglePointer) {
-  auto size = std::get<0>(GetParam());
-  auto count = std::get<1>(GetParam());
-  auto fn = std::get<2>(GetParam());
+TEST_P(CudaBroadcastTest, Default) {
+  auto processCount = std::get<0>(GetParam());
+  auto pointerCount = std::get<1>(GetParam());
+  auto elementCount = std::get<2>(GetParam());
+  auto fn = std::get<3>(GetParam());
 
-  spawn(size, [&](std::shared_ptr<Context> context) {
+  spawn(processCount, [&](std::shared_ptr<Context> context) {
+      auto fixture = CudaFixture(context, pointerCount, elementCount);
+      auto ptrs = fixture.getFloatPointers();
+
       // Run with varying root
-      for (int root = 0; root < 1; root++) {
-        auto fixture = Fixture(context, 1, count);
-        auto ptrs = fixture.getFloatPointers();
-        auto algorithm = fn(context, ptrs[0], count, root, kStreamNotSet);
-        fixture.assignValues();
-        algorithm->run();
+      // TODO(PN): go up to processCount
+      for (auto rootProcessRank = 0;
+           rootProcessRank < 1;
+           rootProcessRank++) {
+        // TODO(PN): go up to pointerCount
+        for (auto rootPointerRank = 0;
+             rootPointerRank < 1;
+             rootPointerRank++) {
+          fixture.assignValues();
+          auto algorithm = fn(context,
+                              ptrs,
+                              elementCount,
+                              rootProcessRank,
+                              rootPointerRank,
+                              {});
+          algorithm->run();
 
-        // Verify result
-        assertEqual(fixture, root);
+          // Verify result
+          assertResult(fixture, rootProcessRank, rootPointerRank);
+        }
       }
     });
 }
 
-TEST_P(CudaBroadcastTest, SinglePointerAsync) {
-  auto size = std::get<0>(GetParam());
-  auto count = std::get<1>(GetParam());
-  auto fn = std::get<2>(GetParam());
+TEST_P(CudaBroadcastTest, DefaultAsync) {
+  auto processCount = std::get<0>(GetParam());
+  auto pointerCount = std::get<1>(GetParam());
+  auto elementCount = std::get<2>(GetParam());
+  auto fn = std::get<3>(GetParam());
 
-  spawn(size, [&](std::shared_ptr<Context> context) {
+  spawn(processCount, [&](std::shared_ptr<Context> context) {
+      auto fixture = CudaFixture(context, pointerCount, elementCount);
+      auto ptrs = fixture.getFloatPointers();
+      auto streams = fixture.getCudaStreams();
+
       // Run with varying root
-      for (int root = 0; root < 1; root++) {
-        auto fixture = Fixture(context, 1, count);
-        auto ptrs = fixture.getFloatPointers();
-        auto streams = fixture.getCudaStreams();
-        auto algorithm = fn(context, ptrs[0], count, root, streams[0]);
-        fixture.assignValuesAsync();
-        algorithm->run();
+      // TODO(PN): go up to processCount
+      for (auto rootProcessRank = 0;
+           rootProcessRank < 1;
+           rootProcessRank++) {
+        // TODO(PN): go up to pointerCount
+        for (auto rootPointerRank = 0;
+             rootPointerRank < 1;
+             rootPointerRank++) {
+          fixture.assignValuesAsync();
+          auto algorithm = fn(context,
+                              ptrs,
+                              elementCount,
+                              rootProcessRank,
+                              rootPointerRank,
+                              streams);
+          algorithm->run();
 
-        // Verify result
-        fixture.synchronizeCudaStreams();
-        assertEqual(fixture, root);
+          // Verify result
+          fixture.synchronizeCudaStreams();
+          assertResult(fixture, rootProcessRank, rootPointerRank);
+        }
       }
     });
 }
@@ -98,20 +132,22 @@ std::vector<int> genMemorySizes() {
 
 static std::function<Func> broadcastOneToAll = [](
     std::shared_ptr<::gloo::Context>& context,
-    float* ptr,
+    std::vector<float*> ptrs,
     int count,
-    int rootRank,
-    cudaStream_t stream) {
+    int rootProcessRank,
+    int rootPointerRank,
+    std::vector<cudaStream_t> streams) {
   return std::unique_ptr<::gloo::Algorithm>(
     new ::gloo::CudaBroadcastOneToAll<float>(
-      context, ptr, count, rootRank, stream));
+      context, ptrs, count, rootProcessRank, rootPointerRank, streams));
 };
 
 INSTANTIATE_TEST_CASE_P(
     OneToAllBroadcast,
     CudaBroadcastTest,
     ::testing::Combine(
-        ::testing::Range(2, 16),
+        ::testing::Values(2, 3, 4, 5),
+        ::testing::Values(1, cudaNumDevices()),
         ::testing::ValuesIn(genMemorySizes()),
         ::testing::Values(broadcastOneToAll)));
 

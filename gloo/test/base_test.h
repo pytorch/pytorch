@@ -68,5 +68,45 @@ class BaseTest : public ::testing::Test {
   std::unique_ptr<::gloo::rendezvous::Store> store_;
 };
 
+class Fixture {
+ public:
+  Fixture(const std::shared_ptr<Context> context, int ptrs, int count)
+      : context(context),
+        count(count) {
+    for (int i = 0; i < ptrs; i++) {
+      std::unique_ptr<float[]> ptr(new float[count]);
+      srcs.push_back(std::move(ptr));
+    }
+  }
+
+  Fixture(Fixture&& other) noexcept
+    : context(other.context),
+      count(other.count) {
+    srcs = std::move(other.srcs);
+  }
+
+  void assignValues() {
+    const auto stride = context->size * srcs.size();
+    for (auto i = 0; i < srcs.size(); i++) {
+      auto val = (context->rank * srcs.size()) + i;
+      for (auto j = 0; j < count; j++) {
+        srcs[i][j] = (j * stride) + val;
+      }
+    }
+  }
+
+  std::vector<float*> getFloatPointers() const {
+    std::vector<float*> out;
+    for (const auto& src : srcs) {
+      out.push_back(src.get());
+    }
+    return out;
+  }
+
+  std::shared_ptr<Context> context;
+  const int count;
+  std::vector<std::unique_ptr<float[]> > srcs;
+};
+
 } // namespace test
 } // namespace gloo

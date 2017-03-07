@@ -81,9 +81,9 @@ class BroadcastOneToAllBenchmark : public Benchmark {
 
  public:
   virtual void initialize(int elements) override {
-    auto ptrs = allocate(1, elements);
+    auto ptrs = allocate(options_.inputs, elements);
     algorithm_.reset(
-        new BroadcastOneToAll<float>(context_, ptrs[0], elements, rootRank_));
+        new BroadcastOneToAll<float>(context_, ptrs, elements, rootRank_));
   }
 
   virtual void verify() override {

@@ -19,42 +19,67 @@ namespace test {
 namespace {
 
 // Function to instantiate and run algorithm.
-using Func = void(
+using Func = std::unique_ptr<::gloo::Algorithm>(
     std::shared_ptr<::gloo::Context>&,
-    float* dataPtr,
-    int dataSize,
-    int rootRank);
+    std::vector<float*> ptrs,
+    int count,
+    int rootRank,
+    int rootPointerRank);
 
 // Test parameterization.
-using Param = std::tuple<int, int, std::function<Func>>;
+using Param = std::tuple<int, int, int, std::function<Func>>;
 
 // Test fixture.
 class BroadcastTest : public BaseTest,
-                      public ::testing::WithParamInterface<Param> {};
-
-TEST_P(BroadcastTest, SinglePointer) {
-  auto contextSize = std::get<0>(GetParam());
-  auto dataSize = std::get<1>(GetParam());
-  auto fn = std::get<2>(GetParam());
-
-  spawnThreads(contextSize, [&](int contextRank) {
-    auto context =
-        std::make_shared<::gloo::Context>(contextRank, contextSize);
-    context->connectFullMesh(*store_, device_);
-
-    std::unique_ptr<float[]> ptr(new float[dataSize]);
-
-    // Run with varying root
-    for (int rootRank = 0; rootRank < contextSize; rootRank++) {
-      for (int i = 0; i < dataSize; i++) {
-        ptr[i] = contextRank;
-      }
-      fn(context, ptr.get(), dataSize, rootRank);
-      for (int i = 0; i < dataSize; i++) {
-        ASSERT_EQ(rootRank, ptr[i]) << "Mismatch at index " << i;
+                      public ::testing::WithParamInterface<Param> {
+ public:
+  void assertResult(Fixture& fixture, int root, int rootPointer) {
+    // Expected is set to the expected value at ptr[0]
+    const auto expected = root * fixture.srcs.size() + rootPointer;
+    // Stride is difference between values at subsequent indices
+    const auto stride = fixture.srcs.size() * fixture.context->size;
+    // Verify all buffers passed by this instance
+    for (const auto& ptr : fixture.getFloatPointers()) {
+      for (auto i = 0; i < fixture.count; i++) {
+        ASSERT_EQ((i * stride) + expected, ptr[i])
+          << "Mismatch at index " << i;
       }
     }
-  });
+  }
+};
+
+TEST_P(BroadcastTest, Default) {
+  auto processCount = std::get<0>(GetParam());
+  auto pointerCount = std::get<1>(GetParam());
+  auto elementCount = std::get<2>(GetParam());
+  auto fn = std::get<3>(GetParam());
+
+  spawn(processCount, [&](std::shared_ptr<Context> context) {
+      auto fixture = Fixture(context, pointerCount, elementCount);
+      auto ptrs = fixture.getFloatPointers();
+
+      // Run with varying root
+      // TODO(PN): go up to processCount
+      for (auto rootProcessRank = 0;
+           rootProcessRank < 1;
+           rootProcessRank++) {
+        // TODO(PN): go up to pointerCount
+        for (auto rootPointerRank = 0;
+             rootPointerRank < 1;
+             rootPointerRank++) {
+          fixture.assignValues();
+          auto algorithm = fn(context,
+                              ptrs,
+                              elementCount,
+                              rootProcessRank,
+                              rootPointerRank);
+          algorithm->run();
+
+          // Verify result
+          assertResult(fixture, rootProcessRank, rootPointerRank);
+        }
+      }
+    });
 }
 
 std::vector<int> genMemorySizes() {
@@ -68,19 +93,21 @@ std::vector<int> genMemorySizes() {
 
 static std::function<Func> broadcastOneToAll = [](
     std::shared_ptr<::gloo::Context>& context,
-    float* dataPtr,
-    int dataSize,
-    int rootRank) {
-  ::gloo::BroadcastOneToAll<float> algorithm(
-      context, dataPtr, dataSize, rootRank);
-  algorithm.run();
+    std::vector<float*> ptrs,
+    int count,
+    int rootProcessRank,
+    int rootPointerRank) {
+  return std::unique_ptr<::gloo::Algorithm>(
+    new ::gloo::BroadcastOneToAll<float>(
+      context, ptrs, count, rootProcessRank, rootPointerRank));
 };
 
 INSTANTIATE_TEST_CASE_P(
     OneToAllBroadcast,
     BroadcastTest,
     ::testing::Combine(
-        ::testing::Range(2, 16),
+        ::testing::Values(2, 3, 4, 5),
+        ::testing::Values(1, 2),
         ::testing::ValuesIn(genMemorySizes()),
         ::testing::Values(broadcastOneToAll)));
 

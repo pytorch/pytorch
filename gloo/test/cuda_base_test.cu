@@ -27,5 +27,11 @@ void cudaSleep(cudaStream_t stream, size_t clocks) {
   waitClocks<<<1, 1, 0, stream>>>(clocks);
 }
 
+int cudaNumDevices() {
+  int n = 0;
+  CUDA_CHECK(cudaGetDeviceCount(&n));
+  return n;
+}
+
 } // namespace test
 } // namespace gloo

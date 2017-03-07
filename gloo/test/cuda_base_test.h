@@ -18,18 +18,13 @@ namespace test {
 
 void cudaSleep(cudaStream_t stream, size_t clocks);
 
-class CudaBaseTest : public BaseTest {
- public:
-  int getDeviceCount() {
-    int n = 0;
-    CUDA_CHECK(cudaGetDeviceCount(&n));
-    return n;
-  }
-};
+int cudaNumDevices();
 
-class Fixture {
+class CudaBaseTest : public BaseTest {};
+
+class CudaFixture {
  public:
-  Fixture(const std::shared_ptr<Context> context, int devices, int count)
+  CudaFixture(const std::shared_ptr<Context> context, int devices, int count)
       : context(context),
         count(count) {
     for (int i = 0; i < devices; i++) {
@@ -40,7 +35,9 @@ class Fixture {
     }
   }
 
-  Fixture(Fixture&& other) noexcept : count(other.count) {
+  CudaFixture(CudaFixture&& other) noexcept
+    : context(other.context),
+      count(other.count) {
     srcs = std::move(other.srcs);
     ptrs = std::move(other.ptrs);
   }
