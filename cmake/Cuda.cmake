@@ -160,7 +160,7 @@ endmacro()
 # Special care for windows platform: we know that 32-bit windows does not support cuda.
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
   if(NOT (CMAKE_SIZEOF_VOID_P EQUAL 8))
-    message(FATAL_ERROR
+    message(WARNING
             "CUDA support not available with 32-bit windows. Did you "
             "forget to set Win64 in the generator target?")
     return()
@@ -180,12 +180,7 @@ if (${CUDA_VERSION} LESS 8.0)
   set(Caffe2_known_gpu_archs ${Caffe2_known_gpu_archs7})
   list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
   list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
-else()
-  # CUDA 8 may complain that sm_20 is no longer supported. Suppress the
-  # warning for now.
-  list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
 endif()
-
 include_directories(SYSTEM ${CUDA_INCLUDE_DIRS})
 list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY}
                               ${CUDA_curand_LIBRARY} ${CUDA_CUBLAS_LIBRARIES})
@@ -228,35 +223,8 @@ endforeach()
 
 # Set C++11 support
 set(CUDA_PROPAGATE_HOST_FLAGS OFF)
-if (NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
-endif()
-
-# Debug and Release symbol support
-if (MSVC)
-  if (${CMAKE_BUILD_TYPE} MATCHES "Release")
-	if (${BUILD_SHARED_LIBS})
-	  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -MD")
-	else()
-	  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -MT")
-	endif()
-  elseif(${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    message(FATAL_ERROR
-	        "Caffe2 currently does not support the combination of MSVC, Cuda "
-			"and Debug mode. Either set USE_CUDA=OFF or set the build type "
-			"to Release")
-	if (${BUILD_SHARED_LIBS})
-	  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -MDd")
-	else()
-	  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -MTd")
-	endif()
-  else()
-    message(FATAL_ERROR "Unknown cmake build type: " ${CMAKE_BUILD_TYPE})
-  endif()
-endif()
-
-
+list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
+list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
 if(OpenMP_FOUND)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler ${OpenMP_CXX_FLAGS}")
 endif()

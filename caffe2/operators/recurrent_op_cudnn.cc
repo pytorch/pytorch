@@ -225,12 +225,9 @@ bool RecurrentOp<T>::RunOnDevice() {
       &reserveNbytes_));
   Output(RNN_SCRATCH)
       ->Resize(std::vector<int>{static_cast<int>(
-          reserveNbytes_ / 4)}); // sizeof(T) - workaround clang bug
+          reserveNbytes_ / 4 /* sizeof(T) - workaround clang bug */)});
   Output(RNN_SCRATCH)->template mutable_data<T>();
 
-  auto InputData = [this](int i) { return this->Input(i).template data<T>(); };
-  auto OutputData = [this](int i) { return this->Output(i)->template mutable_data<T>(); };
-  
   if (OperatorBase::GetSingleArgument<int>("is_test", 0)) {
     cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
       CUDNN_ENFORCE(cudnnRNNForwardInference(
@@ -238,19 +235,19 @@ bool RecurrentOp<T>::RunOnDevice() {
           rnnDesc_,
           seqLength,
           xDesc_->descs(),
-          InputData(INPUT),//.template data<T>(),
+          Input(INPUT).template data<T>(),
           hxDesc_,
-          InputData(HIDDEN_INPUT),//.template data<T>(),
+          Input(HIDDEN_INPUT).template data<T>(),
           cxDesc_,
-          InputData(CELL_INPUT),//.template data<T>(),
+          Input(CELL_INPUT).template data<T>(),
           wDesc_,
-          InputData(WEIGHT),//.template data<T>(),
+          Input(WEIGHT).template data<T>(),
           yDesc_->descs(),
-          OutputData(OUTPUT),//->template mutable_data<T>(),
+          Output(OUTPUT)->template mutable_data<T>(),
           hyDesc_,
-          OutputData(HIDDEN_OUTPUT),//->template mutable_data<T>(),
+          Output(HIDDEN_OUTPUT)->template mutable_data<T>(),
           cyDesc_,
-          OutputData(CELL_OUTPUT),//->template mutable_data<T>(),
+          Output(CELL_OUTPUT)->template mutable_data<T>(),
           state->workspace().get(cudnnWsNbytes_),
           cudnnWsNbytes_));
     });
@@ -261,22 +258,22 @@ bool RecurrentOp<T>::RunOnDevice() {
           rnnDesc_,
           seqLength,
           xDesc_->descs(),
-          InputData(INPUT),//.template data<T>(),
+          Input(INPUT).template data<T>(),
           hxDesc_,
-          InputData(HIDDEN_INPUT),//.template data<T>(),
+          Input(HIDDEN_INPUT).template data<T>(),
           cxDesc_,
-          InputData(CELL_INPUT),//.template data<T>(),
+          Input(CELL_INPUT).template data<T>(),
           wDesc_,
-          InputData(WEIGHT),//.template data<T>(),
+          Input(WEIGHT).template data<T>(),
           yDesc_->descs(),
-          OutputData(OUTPUT),//->template mutable_data<T>(),
+          Output(OUTPUT)->template mutable_data<T>(),
           hyDesc_,
-          OutputData(HIDDEN_OUTPUT),//->template mutable_data<T>(),
+          Output(HIDDEN_OUTPUT)->template mutable_data<T>(),
           cyDesc_,
-          OutputData(CELL_OUTPUT),//->template mutable_data<T>(),
+          Output(CELL_OUTPUT)->template mutable_data<T>(),
           state->workspace().get(cudnnWsNbytes_),
           cudnnWsNbytes_,
-          OutputData(RNN_SCRATCH),//->template mutable_data<T>(),
+          Output(RNN_SCRATCH)->template mutable_data<T>(),
           reserveNbytes_));
     });
   }
@@ -314,34 +311,31 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
 #else
   const auto * reserve = Output(RNN_SCRATCH_OUT)->template data<T>();
 #endif
-  auto InputData = [this](int i) { return this->Input(i).template data<T>(); };
-  auto OutputData = [this](int i) { return this->Output(i)->template mutable_data<T>(); };
-  
   cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
     CUDNN_ENFORCE(cudnnRNNBackwardData(
         state->cudnn_handle(),
         rnnDesc_,
         seqLength,
         yDesc_->descs(),
-        InputData(OUTPUT), //Input(OUTPUT).template data<T>(),
+        Input(OUTPUT).template data<T>(),
         yDesc_->descs(),
-        InputData(GRAD_OUTPUT), //Input(GRAD_OUTPUT).template data<T>(),
+        Input(GRAD_OUTPUT).template data<T>(),
         hyDesc_,
-        InputData(GRAD_HIDDEN_OUTPUT), //Input(GRAD_HIDDEN_OUTPUT).template data<T>(),
+        Input(GRAD_HIDDEN_OUTPUT).template data<T>(),
         cyDesc_,
-        InputData(GRAD_CELL_OUTPUT), //Input(GRAD_CELL_OUTPUT).template data<T>(),
+        Input(GRAD_CELL_OUTPUT).template data<T>(),
         wDesc_,
-        InputData(WEIGHT), //Input(WEIGHT).template data<T>(),
+        Input(WEIGHT).template data<T>(),
         hxDesc_,
-        InputData(HIDDEN_INPUT), //Input(HIDDEN_INPUT).template data<T>(),
+        Input(HIDDEN_INPUT).template data<T>(),
         cxDesc_,
-        InputData(CELL_INPUT), //Input(CELL_INPUT).template data<T>(),
+        Input(CELL_INPUT).template data<T>(),
         xDesc_->descs(),
-        OutputData(GRAD_INPUT), //Output(GRAD_INPUT)->template mutable_data<T>(),
+        Output(GRAD_INPUT)->template mutable_data<T>(),
         hxDesc_,
-        OutputData(GRAD_HIDDEN_INPUT), //Output(GRAD_HIDDEN_INPUT)->template mutable_data<T>(),
+        Output(GRAD_HIDDEN_INPUT)->template mutable_data<T>(),
         cxDesc_,
-        OutputData(GRAD_CELL_INPUT), //Output(GRAD_CELL_INPUT)->template mutable_data<T>(),
+        Output(GRAD_CELL_INPUT)->template mutable_data<T>(),
         state->workspace().get(cudnnWsNbytes_),
         cudnnWsNbytes_,
         reserve,
@@ -351,19 +345,18 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
         rnnDesc_,
         seqLength,
         xDesc_->descs(),
-        InputData(INPUT), //Input(INPUT).template data<T>(),
+        Input(INPUT).template data<T>(),
         hxDesc_,
-        InputData(HIDDEN_INPUT), //Input(HIDDEN_INPUT).template data<T>(),
+        Input(HIDDEN_INPUT).template data<T>(),
         yDesc_->descs(),
-        InputData(OUTPUT), //Input(OUTPUT).template data<T>(),
+        Input(OUTPUT).template data<T>(),
         state->workspace().get(cudnnWsNbytes_),
         cudnnWsNbytes_,
         wDesc_,
-        OutputData(GRAD_WEIGHT), //Output(GRAD_WEIGHT)->template mutable_data<T>(),
+        Output(GRAD_WEIGHT)->template mutable_data<T>(),
         reserve,
         reserveNbytes_));
   });
-
   return true;
 }
 
@@ -378,7 +371,7 @@ bool RecurrentInitOp<T>::RunOnDevice() {
       &weightsSize,
       cudnnTypeWrapper<T>::type));
   Output(WEIGHT)->Resize(std::vector<int>{(static_cast<int>(
-      weightsSize / 4 ))}); // sizeof(T) - workaround clang bug
+      weightsSize / 4 /* sizeof(T) - workaround clang bug */))});
   math::RandUniform<T, CUDAContext>(
       Output(WEIGHT)->size(),
       -OperatorBase::GetSingleArgument<float>("scale", 0.01),
@@ -420,7 +413,6 @@ bool RecurrentInitOp<T>::RunOnDevice() {
         static_cast<T*>(bias),
         &context_);
   }
-
   return true;
 }
 

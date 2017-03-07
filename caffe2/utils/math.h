@@ -15,11 +15,8 @@ extern "C" {
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
-
-#ifndef __CUDACC__
 #include "Eigen/Core"
 #include "Eigen/Dense"
-#endif
 
 namespace caffe2 {
 
@@ -27,7 +24,6 @@ namespace caffe2 {
 // engine specified.
 class DefaultEngine {};
 
-#ifndef __CUDACC__
 // Common Eigen types that we will often use
 template <typename T>
 using EigenMatrixMap =
@@ -51,7 +47,6 @@ using ConstEigenVectorMap =
 template <typename T>
 using ConstEigenVectorArrayMap =
     Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1> >;
-#endif
 
 namespace math {
 
@@ -202,7 +197,9 @@ template <typename T, class Context>
 void Select(const int N, const int D, const T* x, const int* idx, T* y,
             Context* context);
 
-template <typename T, class Context>
+// For small FixedValues (like FixedSize=1) the function might provide more
+// efficent implementation hard-coded statically for this size.
+template <typename T, class Context, int FixedSize = -1>
 void Scale(const int N, const T alpha, const T* x, T* y,
            Context* context);
 
@@ -213,9 +210,10 @@ template <typename T, class Context>
 void Scale(const int N, const T* alpha, const T* x, T* y,
            Context* context);
 
-template <typename T, class Context>
-void Axpy(const int N, const T alpha, const T* x, T* y,
-          Context* context);
+// For small FixedValues (like FixedSize=1) the function might provide more
+// efficent implementation hard-coded statically for this size.
+template <typename T, class Context, int FixedSize = -1>
+void Axpy(const int N, const T alpha, const T* x, T* y, Context* context);
 
 // Different from the Axpy function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,

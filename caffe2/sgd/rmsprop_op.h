@@ -18,7 +18,19 @@ void rmsprop_update(
     float momentum,
     float epsilon,
     const float* lr,
-    Context* context);
+    Context* context) {
+  ConstEigenVectorArrayMap<float> gVec(g, N);
+  ConstEigenVectorArrayMap<float> msVec(ms, N);
+  ConstEigenVectorArrayMap<float> momVec(mom, N);
+  // Update new mean square estimate
+  EigenVectorArrayMap<float> nmsVec(nms, N);
+  nmsVec = msVec + (1.0f - decay) * (gVec * gVec - msVec);
+  // Update momentum estimate
+  EigenVectorArrayMap<float> nmomVec(nmom, N);
+  nmomVec = momVec * momentum + lr[0] * gVec / (epsilon + nmsVec).sqrt();
+  // New gradient is the momentum
+  EigenVectorArrayMap<float>(ng, N) = nmomVec;
+}
 
 template <typename T, class Context>
 class RmsPropOp final : public Operator<Context> {

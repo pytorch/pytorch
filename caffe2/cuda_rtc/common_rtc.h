@@ -48,23 +48,22 @@ class CudaRTCFunction {
     if (compile_result != NVRTC_SUCCESS) {
       size_t log_size;
       NVRTC_CHECK(nvrtcGetProgramLogSize(prog, &log_size));
-      vector<char> nvrtc_log(log_size);
-      NVRTC_CHECK(nvrtcGetProgramLog(prog, nvrtc_log.data()));
+      char nvrtc_log[log_size];
+      NVRTC_CHECK(nvrtcGetProgramLog(prog, nvrtc_log));
       LOG(FATAL) << "Compilation failure for nvrtc("
                       << nvrtcGetErrorString(compile_result)
-                      << "): \n" << nvrtc_log.data();
+                      << "): \n" << nvrtc_log;
     }
     size_t ptx_size;
     NVRTC_CHECK(nvrtcGetPTXSize(prog, &ptx_size));
-    vector<char> nvrtc_ptx(ptx_size);
-    NVRTC_CHECK(nvrtcGetPTX(prog, nvrtc_ptx.data()));
+    char nvrtc_ptx[ptx_size];
+    NVRTC_CHECK(nvrtcGetPTX(prog, nvrtc_ptx));
     NVRTC_CHECK(nvrtcDestroyProgram(&prog));
     // After compilation, load the module.
     if (module_loaded_) {
       CUDA_DRIVERAPI_ENFORCE(cuModuleUnload(module_));
     }
-    CUDA_DRIVERAPI_ENFORCE(cuModuleLoadDataEx(
-        &module_, nvrtc_ptx.data(), 0, 0, 0));
+    CUDA_DRIVERAPI_ENFORCE(cuModuleLoadDataEx(&module_, nvrtc_ptx, 0, 0, 0));
     module_loaded_ = true;
     CUDA_DRIVERAPI_ENFORCE(
         cuModuleGetFunction(&kernel_, module_, name.c_str()));

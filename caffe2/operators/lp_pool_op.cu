@@ -11,30 +11,6 @@ class LpPool {};
 
 namespace {
 template <typename T>
-inline __device__ T cuda_pow(T x, T y);
-
-template <typename T>
-inline __device__ T cuda_abs(T x);
-
-template<>
-inline __device__ float cuda_pow<float>(float x, float y) {
-  return powf(x, y);
-}
-template<>
-inline __device__ double cuda_pow<double>(double x, double y) {
-  return pow(x, y);
-}
-
-template <>
-inline __device__ float cuda_abs(float x) { return fabsf(x); }
-template <>
-inline __device__ double cuda_abs(double x) { return fabs(x); }
-
-
-}
-
-namespace {
-template <typename T>
 __global__ void LpPoolForwardNCHW(
     const int nthreads,
     const T* bottom_data,
@@ -71,10 +47,10 @@ __global__ void LpPoolForwardNCHW(
     for (int h = hstart; h < hend; ++h) {
       for (int w = wstart; w < wend; ++w) {
         top_data[index] +=
-            cuda_pow<T>(cuda_abs(bottom_data[bottom_offset + h * width + w]), p);
+            std::pow(std::abs(bottom_data[bottom_offset + h * width + w]), p);
       }
     }
-    top_data[index] = cuda_pow<T>(top_data[index], 1.0 / p);
+    top_data[index] = std::pow(top_data[index], 1.0 / p);
   }
 }
 
@@ -111,12 +87,12 @@ __global__ void LpPoolForwardNHWC(
     int bottom_offset = n * height * width * channels + c;
     for (int h = hstart; h < hend; ++h) {
       for (int w = wstart; w < wend; ++w) {
-        output += cuda_pow<T>(
-            cuda_abs(bottom_data[bottom_offset + (h * width + w) * channels]),
+        output += std::pow(
+            std::abs(bottom_data[bottom_offset + (h * width + w) * channels]),
             p);
       }
     }
-    top_data[index] = cuda_pow<T>(output, 1.0 / p);
+    top_data[index] = std::pow(output, 1.0 / p);
   }
 }
 
@@ -167,8 +143,8 @@ __global__ void LpPoolBackwardNCHW(
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         gradient += top_diff_slice[ph * pooled_width + pw] *
-            bottom_data[index] * cuda_pow<T>(cuda_abs(bottom_data[index]), p - 2) /
-            cuda_pow<T>(top_data_slice[ph * pooled_width + pw], p - 1);
+            bottom_data[index] * std::pow(std::abs(bottom_data[index]), p - 2) /
+            std::pow(top_data_slice[ph * pooled_width + pw], p - 1);
       }
     }
     bottom_diff[index] = gradient;
@@ -221,8 +197,8 @@ __global__ void LpPoolBackwardNHWC(
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         gradient += top_diff_slice[(ph * pooled_width + pw) * channels] *
-            bottom_data[index] * cuda_pow<T>(cuda_abs(bottom_data[index]), p - 2) /
-            cuda_pow<T>(top_data_slice[(ph * pooled_width + pw) * channels],
+            bottom_data[index] * std::pow(std::abs(bottom_data[index]), p - 2) /
+            std::pow(top_data_slice[(ph * pooled_width + pw) * channels],
                      p - 1);
       }
     }

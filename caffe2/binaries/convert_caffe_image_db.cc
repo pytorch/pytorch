@@ -43,8 +43,7 @@ int main(int argc, char** argv) {
     } else {
       // float data not supported right now.
       CAFFE_ENFORCE_EQ(datum.float_data_size(), 0);
-      std::vector<char> buffer_vec(datum.data().size());
-      char* buffer = buffer_vec.data();
+      char buffer[datum.data().size()];
       // swap order from CHW to HWC
       int channels = datum.channels();
       int size = datum.height() * datum.width();
