@@ -14,6 +14,8 @@
 namespace thd {
 
 struct DataChannelTCP : DataChannel {
+  using rank_type = DataChannel::Group::rank_type;
+
   struct RequestTCP : DataChannel::Request {
     RequestTCP(QueueWorker::Request&& request);
     virtual ~RequestTCP();
@@ -74,9 +76,6 @@ private:
   void _send(thpp::Tensor& data, int dst_id);
   void _receive(Scalar& data, int src_id);
   void _receive(thpp::Tensor& data, int src_id);
-  void _reduce(thpp::Tensor& result, thpp::Tensor& data,
-               THDReduceOp operation) const;
-  template<typename T>
   void _reduce(thpp::Tensor& result, thpp::Tensor& data,
                THDReduceOp operation) const;
 

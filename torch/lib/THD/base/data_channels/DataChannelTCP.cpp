@@ -14,10 +14,81 @@
 #include <system_error>
 
 
+<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
+=======
+
+#ifndef MSG_MORE // OS X does not have this optimalization option
+#define MSG_MORE 0
+#endif
+
+#define SYSCHECK(expr) { \
+  errno = 0; (expr);     \
+  if (errno != 0) throw std::system_error(errno, std::system_category()); \
+}
+
+>>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
 namespace thd {
 namespace {
 
 constexpr int MASTER_RANK = 0;
+<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
+=======
+constexpr int LISTEN_QUEUE_SIZE = 64;
+
+template<typename T>
+void send_bytes(int socket, const T* buffer, std::size_t length,
+                bool more_data = false)
+{
+  std::size_t bytes_to_send = sizeof(T) * length;
+  if (bytes_to_send == 0)
+    return;
+
+  int flags = 0;
+  if (more_data) { // there is more data to send
+    flags |= MSG_MORE;
+  }
+
+  auto bytes = reinterpret_cast<const std::uint8_t*>(buffer);
+  std::uint8_t *current_bytes = const_cast<std::uint8_t*>(bytes);
+
+  while (bytes_to_send > 0) {
+    ssize_t bytes_sent;
+    SYSCHECK(bytes_sent = ::send(socket, current_bytes, bytes_to_send, flags))
+    if (bytes_sent == 0)
+      throw std::system_error(EBADMSG, std::system_category());
+
+    bytes_to_send -= bytes_sent;
+    current_bytes += bytes_sent;
+  }
+}
+
+
+template<typename T>
+void recv_bytes(int socket, T* buffer, std::size_t length)
+{
+  std::size_t bytes_to_receive = sizeof(T) * length;
+  if (bytes_to_receive == 0)
+    return;
+
+  auto bytes = reinterpret_cast<std::uint8_t*>(buffer);
+  std::uint8_t *current_bytes = bytes;
+
+  while (bytes_to_receive > 0) {
+    ssize_t bytes_received;
+    SYSCHECK(bytes_received = ::recv(socket, current_bytes, bytes_to_receive, 0))
+    if (bytes_received == 0)
+      throw std::system_error(EBADMSG, std::system_category());
+
+    bytes_to_receive -= bytes_received;
+    current_bytes += bytes_received;
+  }
+}
+
+
+inline bool validatePort(int port) {
+  return (port > 0 && port < 65536);
+}
+>>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
 
 
 inline int log2ceil(std::uint32_t value) {
@@ -32,6 +103,24 @@ inline int log2ceil(std::uint32_t value) {
   return dim;
 }
 
+<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
+=======
+// Finds nearest power-of-two less than or equal to `value`.
+template<typename T>
+inline int pow2(T value) {
+  T pof2 = 1;
+  while (pof2 <= value) { pof2 <<= 1; }
+  pof2 >>= 1;
+  return pof2;
+}
+
+void setSocketNoDelay(int socket) {
+  int flag = 1;
+  socklen_t optlen = sizeof(flag);
+  SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
+}
+
+>>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
 } // namespace
 
 
@@ -113,8 +202,15 @@ bool DataChannelTCP::initWorker() {
 
   std::tie(_socket, _port) = listen();
 
+<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
   send_bytes<std::uint32_t>(master_socket, &_rank, 1);
   send_bytes<std::uint16_t>(master_socket, &_port, 1); // send listening port to master
+=======
+  std::uint32_t p_rank = (std::uint32_t)_rank;
+  std::uint16_t p_port = (std::uint16_t)_port;
+  send_bytes<std::uint32_t>(master_socket, &p_rank, 1, true);
+  send_bytes<std::uint16_t>(master_socket, &p_port, 1); // send listening port to master
+>>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
 
   std::uint32_t processes_number;
   recv_bytes<std::uint32_t>(master_socket, &processes_number, 1);
@@ -225,15 +321,15 @@ bool DataChannelTCP::initMaster() {
     if (worker.rank == _rank) continue;
 
     std::uint32_t processes_number = _processes.size();
-    send_bytes<std::uint32_t>(worker.socket, &processes_number, 1);
+    send_bytes<std::uint32_t>(worker.socket, &processes_number, 1, true);
 
     for (auto& process : _processes) {
       if (process.rank == _rank) continue;
 
       std::uint32_t proc_address_length = process.address.size();
-      send_bytes<std::uint32_t>(worker.socket, &process.rank, 1);
-      send_bytes<std::uint32_t>(worker.socket, &proc_address_length, 1);
-      send_bytes<char>(worker.socket, process.address.data(), proc_address_length);
+      send_bytes<std::uint32_t>(worker.socket, &process.rank, 1, true);
+      send_bytes<std::uint32_t>(worker.socket, &proc_address_length, 1, true);
+      send_bytes<char>(worker.socket, process.address.data(), proc_address_length, true);
       send_bytes<std::uint16_t>(worker.socket, &(process.port), 1);
     }
   }
@@ -277,16 +373,19 @@ int DataChannelTCP::getNumProcesses() {
 void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
                                thpp::Tensor& input, THDGroup group_id) {
   /*
-   * Since all-gather is semantically equivalent to gather followed by
-   * broadcast we use those functions to implement all-gather function.
+   * Allgather algorithm is simple ring algorithm. This algorithm perfroms
+   * well on large data (> 512 KB) and generalize well on large group of nodes.
+   * More about efficiency can be found here:
+   *   > http://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf (section 4.1)
    *
-   * Even though we use first rank from group as point of gather and broadcast
-   * we should not see any bottlenecks here.
+   * TODO: implement Bruck / recursive doubling algorithms to make allGather
+   * efficient also for small data (< 512 KB).
    */
 
   const auto& group = _groups.at(group_id);
+  rank_type group_rank;
   bool exists;
-  std::tie(std::ignore, exists) = group.getGroupRank(_rank);
+  std::tie(group_rank, exists) = group.getGroupRank(_rank);
   if (!exists)
     return;
 
@@ -296,11 +395,20 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
   for (auto out_tensor : output)
     assertTensorEqual(*out_tensor, input, "allGather");
 
-  auto main_rank = group.mustGetGlobalRank(0);
-  gather(output, input, main_rank, group_id);
+  rank_type left = (group.size() + group_rank - 1) % group.size();
+  rank_type right = (group_rank + 1) % group.size();
 
-  for (std::size_t i = 0; i < group.size(); ++i)
-    broadcast(*(output.at(i)), main_rank, group_id);
+  memcpy(output[group_rank]->data(), input.data(), input.elementSize() * input.numel());
+
+  auto j = group_rank, jnext = left;
+  for (rank_type i = 0; i < group.size(); ++i) {
+    auto send_request = isend(*(output[j]), group.mustGetGlobalRank(right));
+    receive(*(output[jnext]), group.mustGetGlobalRank(left));
+    send_request->wait();
+
+    j = jnext;
+    jnext = (group.size() + jnext - 1) % group.size();
+  }
 }
 
 
@@ -324,8 +432,7 @@ void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
     for (auto out_tensor : output)
       assertTensorEqual(*out_tensor, input, "gather");
 
-    for (std::size_t i = 0; i < group.size(); ++i) {
-      // TODO: change it to some kind of helper
+    for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
       if (_rank != global_rank) {
         receive(*(output.at(i)), global_rank);
@@ -358,8 +465,7 @@ void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
     for (auto in_tensor : input)
       assertTensorEqual(*in_tensor, output, "scatter");
 
-    for (std::size_t i = 0; i < group.size(); ++i) {
-      // TODO: change it to some kind of helper
+    for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
       if (_rank != global_rank) {
         send(*(input.at(i)), global_rank);
@@ -374,25 +480,78 @@ void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
 void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
                                THDGroup group_id) {
   /*
-   * Since an all-reduce operation is semantically equivalent to an
-   * all-to-one reduction followed by a one-to-all broadcast, the asymptotically
-   * optimal algorithms for these two operations can be used to construct
-   * a similar algorithm for the all-reduce operation.
+   * Allreduce implementation is recursive doubling algorithm. It is good
+   * algorithm for small sizes of message but other (theoratically better)
+   * implementations could not be addapted because of non-commutative
+   * operations on tensors (operation cannot be commutative because this could
+   * introduce different numerical errors on different workers).
    *
-   * Even though we use first rank from group as point of broadcast and aggregation
-   * we should not see any bottlenecks here.
+   * More about efficiency can be found here:
+   *   > http://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf (section 4.5)
+   *
+   * Implementation is based on:
+   *   > https://github.com/pmodels/mpich/blob/master/src/mpi/coll/allreduce.c
    */
 
   const auto& group = _groups.at(group_id);
+  rank_type group_rank;
   bool exists;
 
-  std::tie(std::ignore, exists) = group.getGroupRank(_rank);
+  std::tie(group_rank, exists) = group.getGroupRank(_rank);
   if (!exists)
     return;
 
-  auto main_rank = group.mustGetGlobalRank(0);
-  reduce(data, operation, main_rank, group_id);
-  broadcast(data, main_rank, group_id);
+  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  auto tmp_tensor = data.clone();
+
+  auto pof2 = pow2(group.size());
+  int rem = group.size() - pof2;
+  int newrank = 0;
+
+  if (group_rank < 2 * rem) {
+    if (group_rank % 2 == 0) {
+      send(data, group.mustGetGlobalRank(group_rank + 1));
+      newrank = -1;
+    } else {
+      receive(*tmp_tensor, group.mustGetGlobalRank(group_rank - 1));
+      _reduce(data, *tmp_tensor, operation);
+      newrank = group_rank / 2;
+    }
+  } else {
+    newrank = group_rank - rem;
+  }
+
+  if (newrank != -1) {
+    int mask = 0x1;
+    while (mask < pof2) {
+      int newdst = newrank ^ mask;
+      int dst = (newdst < rem) ? (newdst * 2 + 1) : (newdst + rem);
+
+      auto dst_global_rank = group.mustGetGlobalRank(dst);
+      auto send_request = isend(data, dst_global_rank);
+      receive(*tmp_tensor, dst_global_rank);
+      send_request->wait();
+
+      if (dst < group_rank) {
+        _reduce(data, *tmp_tensor, operation);
+      } else {
+        _reduce(*tmp_tensor, data, operation);
+        std::memcpy(data.data(), tmp_tensor->data(), tensor_bytes);
+      }
+
+      mask <<= 1;
+    }
+  }
+
+  delete tmp_tensor;
+
+  if (group_rank < 2 * rem) {
+    if (group_rank % 2) {
+      send(data, group.mustGetGlobalRank(group_rank - 1));
+    } else {
+      receive(data, group.mustGetGlobalRank(group_rank + 1));
+    }
+  }
 }
 
 
@@ -404,22 +563,22 @@ void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
    */
 
   const auto& group = _groups.at(group_id);
-  unsigned int group_rank;
+  rank_type group_rank;
   bool exists;
 
   std::tie(group_rank, exists) = group.getGroupRank(_rank);
   if (!exists)
     return;
 
-  unsigned int group_dst_rank = group.mustGetGroupRank(dst_rank);
+  auto group_dst_rank = group.mustGetGroupRank(dst_rank);
   int dim = log2ceil(group.size());
-  int virtual_rank = ((group.size() - group_dst_rank) + group_rank) % group.size();
+  rank_type virtual_rank = ((group.size() - group_dst_rank) + group_rank) % group.size();
   long long mask = 0;
   auto result_tensor = data.clone();
 
   for (int k = 0; k <= dim - 1; mask ^= (1 << k), ++k) {
     if ((virtual_rank & mask) == 0) {
-      int partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
+      rank_type partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
       if (partner >= group.size())
         continue;
 
@@ -453,22 +612,22 @@ void DataChannelTCP::broadcast(thpp::Tensor& data, int src_rank,
    */
 
   const auto& group = _groups.at(group_id);
-  unsigned int group_rank;
+  rank_type group_rank;
   bool exists;
 
   std::tie(group_rank, exists) = group.getGroupRank(_rank);
   if (!exists)
     return;
 
-  unsigned int group_src_rank = group.mustGetGroupRank(src_rank);
+  auto group_src_rank = group.mustGetGroupRank(src_rank);
   int dim = log2ceil(group.size());
-  int virtual_rank = ((group.size() - group_src_rank) + group_rank) % group.size();
+  rank_type virtual_rank = ((group.size() - group_src_rank) + group_rank) % group.size();
   long long mask = (1 << dim) - 1;
 
   for (int k = dim - 1; k >= 0; --k) {
     mask ^= (1 << k); // clear bit `k`
     if ((virtual_rank & mask) == 0) {
-      int partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
+      rank_type partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
       if (partner >= group.size())
         continue;
 
@@ -579,7 +738,7 @@ void DataChannelTCP::barrier(THDGroup group_id) {
    */
 
   const auto& group = _groups.at(group_id);
-  unsigned int group_rank;
+  rank_type group_rank;
   bool exists;
 
   std::tie(group_rank, exists) = group.getGroupRank(_rank);
@@ -587,14 +746,14 @@ void DataChannelTCP::barrier(THDGroup group_id) {
     return;
 
   std::uint8_t byte = 1;
-  for (int distance = 1; distance < group.size(); distance <<= 1) {
-    int recv_partner = (group_rank + group.size() - distance) % group.size();
+  for (rank_type distance = 1; distance < group.size(); distance <<= 1) {
+    rank_type recv_partner = (group_rank + group.size() - distance) % group.size();
     const auto& recv_process = _processes.at(group.mustGetGlobalRank(recv_partner));
     auto recv_request = _receive_worker.push([&recv_process, &byte]{
       recv_bytes<std::uint8_t>(recv_process.socket, &byte, 1);
     });
 
-    int send_partner = (group_rank + distance) % group.size();
+    rank_type send_partner = (group_rank + distance) % group.size();
     const auto& send_process = _processes.at(group.mustGetGlobalRank(send_partner));
     auto send_request = _send_worker.push([&send_process, &byte]{
       send_bytes<std::uint8_t>(send_process.socket, &byte, 1);
@@ -630,7 +789,7 @@ void DataChannelTCP::_send(const Scalar& data, int dst_rank) {
 
   // send size of scalar in bytes
   std::uint64_t scalar_bytes = data.elementSize();
-  send_bytes<std::uint64_t>(process_dst.socket, &scalar_bytes, 1);
+  send_bytes<std::uint64_t>(process_dst.socket, &scalar_bytes, 1, true);
 
   // send data (bytes)
   send_bytes<std::uint8_t>(
@@ -659,7 +818,7 @@ void DataChannelTCP::_send(thpp::Tensor& data, int dst_rank) {
 
   // send size of tensor data in bytes
   std::uint64_t tensor_bytes = data.elementSize() * data.numel();
-  send_bytes<std::uint64_t>(process_dst.socket, &tensor_bytes, 1);
+  send_bytes<std::uint64_t>(process_dst.socket, &tensor_bytes, 1, true);
 
   // send data (bytes)
   send_bytes<std::uint8_t>(
@@ -687,15 +846,19 @@ void DataChannelTCP::_receive(Scalar& data, int src_rank) {
   std::uint64_t scalar_bytes;
   recv_bytes<std::uint64_t>(process_src.socket, &scalar_bytes, 1);
 
-  // recv data (bytes)
-  std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[scalar_bytes]);
-  recv_bytes<std::uint8_t>(process_src.socket, bytes.get(), scalar_bytes);
-
   std::uint64_t actual_scalar_bytes = data.elementSize();
-  if (actual_scalar_bytes != scalar_bytes)
+  if (actual_scalar_bytes == scalar_bytes) {
+    recv_bytes<std::uint8_t>(
+      process_src.socket,
+      reinterpret_cast<std::uint8_t*>(data.data()),
+      scalar_bytes
+    );
+  } else {
+    // remove invalid data from recv buffer
+    std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[scalar_bytes]);
+    recv_bytes<std::uint8_t>(process_src.socket, bytes.get(), scalar_bytes);
     throw std::logic_error("scalar sizes do not match");
-
-  std::memcpy(data.data(), bytes.get(), scalar_bytes);
+  }
 }
 
 
@@ -719,61 +882,35 @@ void DataChannelTCP::_receive(thpp::Tensor& data, int src_rank) {
   std::uint64_t tensor_bytes;
   recv_bytes<std::uint64_t>(process_src.socket, &tensor_bytes, 1);
 
-  // recv data (bytes)
-  std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[tensor_bytes]);
-  recv_bytes<std::uint8_t>(process_src.socket, bytes.get(), tensor_bytes);
-
   std::uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
-  if (actual_tensor_bytes != tensor_bytes)
+  if (actual_tensor_bytes == tensor_bytes) {
+    recv_bytes<std::uint8_t>(
+      process_src.socket,
+      reinterpret_cast<std::uint8_t*>(data.data()),
+      tensor_bytes
+    );
+  } else {
+    // remove invalid data from recv buffer
+    std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[tensor_bytes]);
+    recv_bytes<std::uint8_t>(process_src.socket, bytes.get(), tensor_bytes);
     throw std::logic_error("tensor sizes do not match");
-
-  std::memcpy(data.data(), bytes.get(), tensor_bytes);
-}
-
-
-void DataChannelTCP::_reduce(thpp::Tensor& result, thpp::Tensor& data,
-                             THDReduceOp operation) const {
-  assertTensorEqual(result, data, "reduce");
-
-  thpp::Type tensor_type = data.type();
-  switch(tensor_type) {
-    case thpp::Type::CHAR:   _reduce<char>(result, data, operation); break;
-    case thpp::Type::FLOAT:  _reduce<float>(result, data, operation); break;
-    case thpp::Type::DOUBLE: _reduce<double>(result, data, operation); break;
-    case thpp::Type::SHORT:  _reduce<short>(result, data, operation); break;
-    case thpp::Type::USHORT: _reduce<unsigned short>(result, data, operation); break;
-    case thpp::Type::INT:    _reduce<int>(result, data, operation); break;
-    case thpp::Type::UINT:   _reduce<unsigned int>(result, data, operation); break;
-    case thpp::Type::LONG:   _reduce<long>(result, data, operation); break;
-    case thpp::Type::ULONG:  _reduce<unsigned long>(result, data, operation); break;
-    case thpp::Type::LONG_LONG:  _reduce<long long>(result, data, operation); break;
-    case thpp::Type::ULONG_LONG: _reduce<unsigned long long>(result, data, operation); break;
-    default:
-      throw std::logic_error("unsupported tensor type in reduce");
   }
 }
 
-
-template<typename T>
 void DataChannelTCP::_reduce(thpp::Tensor& result, thpp::Tensor& data,
                              THDReduceOp operation) const {
   assertTensorEqual(result, data, "reduce");
 
-  auto result_data = reinterpret_cast<T*>(result.data());
-  auto new_data = reinterpret_cast<T*>(data.data());
-
-  for (std::size_t i = 0; i < data.numel(); ++i) {
-    if (operation == THDReduceOp::THDReduceMIN) {
-      result_data[i] = std::min(result_data[i], new_data[i]);
-    } else if (operation == THDReduceOp::THDReduceMAX) {
-      result_data[i] = std::max(result_data[i], new_data[i]);
-    } else if (operation == THDReduceOp::THDReduceSUM) {
-      result_data[i] += new_data[i];
-    } else if (operation == THDReduceOp::THDReducePRODUCT) {
-      result_data[i] *= new_data[i];
-    } else {
-      throw std::logic_error("unsupported reduce operation");
-    }
+  if (operation == THDReduceOp::THDReduceMIN) {
+    result.cmin(result, data);
+  } else if (operation == THDReduceOp::THDReduceMAX) {
+    result.cmax(result, data);
+  } else if (operation == THDReduceOp::THDReduceSUM) {
+    result.cadd(result, data);
+  } else if (operation == THDReduceOp::THDReducePRODUCT) {
+    result.cmul(result, data);
+  } else {
+    throw std::logic_error("unsupported reduce operation");
   }
 }
 

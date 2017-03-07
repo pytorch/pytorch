@@ -15,8 +15,9 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <array>
 
-constexpr int WORKERS_NUM = 2;
+constexpr std::array<int, 4> WORKERS_NUM = {2, 4, 7, 13};
 constexpr int MASTER_PORT = 45678;
 constexpr int BARRIER_WAIT_TIME = 200; // milliseconds
 
@@ -35,16 +36,17 @@ void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
   }
 }
 
-void test_send_recv_tensor_any_source(std::shared_ptr<thd::DataChannel> data_channel) {
+void test_send_recv_tensor_any_source(std::shared_ptr<thd::DataChannel> data_channel,
+                                      int workers) {
   if (data_channel->getRank() == 0) {
     std::set<int> ranks;
-    for (int i = 0; i < WORKERS_NUM; i++) {
+    for (int i = 0; i < workers; i++) {
       auto int_tensor = buildTensor<int>({1, 2, 3}, -1);
       data_channel->receive(*int_tensor);
       ranks.insert(static_cast<int*>(int_tensor->data())[0]);
     }
 
-    assert(ranks.size() == WORKERS_NUM);
+    assert(ranks.size() == workers);
   } else {
     auto int_tensor = buildTensor<int>({1, 2, 3}, data_channel->getRank());
     data_channel->send(*int_tensor, 0);
@@ -75,54 +77,46 @@ void test_broadcast(std::shared_ptr<thd::DataChannel> data_channel) {
   }
 }
 
-void _test_reduce_helper(
-  std::shared_ptr<thd::DataChannel> data_channel,
-  THDReduceOp op_type,
-  long init_value,
-  long expected_value
-) {
+void _test_reduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
+                         THDReduceOp op_type, long init_value, long expected_value) {
   if (data_channel->getRank() == 0) {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, init_value);
-    data_channel->reduce(*int_tensor, op_type, 0);
-    ASSERT_TENSOR_VALUE(int, *int_tensor, expected_value)
+    auto long_tensor = buildTensor<long>({1, 2, 3, 4, 5}, init_value);
+    data_channel->reduce(*long_tensor, op_type, 0);
+    ASSERT_TENSOR_VALUE(long, *long_tensor, expected_value)
   } else {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
-    data_channel->reduce(*int_tensor, op_type, 0);
+    auto long_tensor = buildTensor<long>({1, 2, 3, 4, 5}, data_channel->getRank());
+    data_channel->reduce(*long_tensor, op_type, 0);
   }
 }
 
-void test_reduce(std::shared_ptr<thd::DataChannel> data_channel) {
+void test_reduce(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
   _test_reduce_helper(data_channel, THDReduceOp::THDReduceSUM,
-                      2, 2 + (WORKERS_NUM * (WORKERS_NUM + 1) / 2));
+                      2, 2 + (workers * (workers + 1) / 2));
   _test_reduce_helper(data_channel, THDReduceOp::THDReducePRODUCT,
-                      2, 2 * std::tgamma(WORKERS_NUM + 1));
+                      2, 2 * factorial(workers));
   _test_reduce_helper(data_channel, THDReduceOp::THDReduceMIN, 10010, 1);
   _test_reduce_helper(data_channel, THDReduceOp::THDReduceMAX,
                       -1, data_channel->getNumProcesses() - 1);
 }
 
-void _test_allReduce_helper(
-  std::shared_ptr<thd::DataChannel> data_channel,
-  THDReduceOp op_type,
-  long init_value,
-  long expected_value
-) {
+void _test_allReduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
+                            THDReduceOp op_type, long init_value, long expected_value) {
   if (data_channel->getRank() == 0) {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, init_value);
+    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5, 6, 7, 100}, init_value);
     data_channel->allReduce(*int_tensor, op_type, 0);
     ASSERT_TENSOR_VALUE(int, *int_tensor, expected_value)
   } else {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
+    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5, 6, 7, 100}, data_channel->getRank());
     data_channel->allReduce(*int_tensor, op_type, 0);
     ASSERT_TENSOR_VALUE(int, *int_tensor, expected_value)
   }
 }
 
-void test_allReduce(std::shared_ptr<thd::DataChannel> data_channel) {
+void test_allReduce(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
   _test_allReduce_helper(data_channel, THDReduceOp::THDReduceSUM,
-                         2, 2 + (WORKERS_NUM * (WORKERS_NUM + 1) / 2));
+                         2, 2 + (workers * (workers + 1) / 2));
   _test_allReduce_helper(data_channel, THDReduceOp::THDReducePRODUCT,
-                         2, 2 * std::tgamma(WORKERS_NUM + 1));
+                         2, 2 * factorial(workers));
   _test_allReduce_helper(data_channel, THDReduceOp::THDReduceMIN, 10010, 1);
   _test_allReduce_helper(data_channel, THDReduceOp::THDReduceMAX,
                          -1, data_channel->getNumProcesses() - 1);
@@ -316,11 +310,11 @@ void test_reduce_group(std::shared_ptr<thd::DataChannel> data_channel,
 void test_allReduce_group(std::shared_ptr<thd::DataChannel> data_channel,
                           THDGroup group, std::vector<int> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
-    auto int_tensor = buildTensor({1, 2, 3, 4, 5}, 10);
+    auto int_tensor = buildTensor({1, 2, 3, 4, 5, 6, 7, 100}, 10);
     data_channel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM, group);
     ASSERT_TENSOR_VALUE(int, *int_tensor, 10 * group_ranks.size())
   } else {
-    auto int_tensor = buildTensor({1, 2, 3, 4, 5}, 1000);
+    auto int_tensor = buildTensor({1, 2, 3, 4, 5, 6, 7, 100}, 1000);
     data_channel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM, group);
     ASSERT_TENSOR_VALUE(int, *int_tensor, 1000)
   }
@@ -546,13 +540,13 @@ void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channe
   }
 }
 
-void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel) {
+void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
   test_send_recv_tensor(data_channel);
-  test_send_recv_tensor_any_source(data_channel);
+  test_send_recv_tensor_any_source(data_channel, workers);
   test_send_recv_scalar(data_channel);
   test_broadcast(data_channel);
-  test_reduce(data_channel);
-  test_allReduce(data_channel);
+  test_reduce(data_channel, workers);
+  test_allReduce(data_channel, workers);
   test_scatter(data_channel);
   test_gather(data_channel);
   test_allGather(data_channel);
@@ -579,16 +573,16 @@ void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 
-void init_tcp_master() {
+void init_tcp_master(int workers) {
   g_mutex.lock();
-  setenv("WORLD_SIZE", std::to_string((WORKERS_NUM + 1)).data(), 1);
+  setenv("WORLD_SIZE", std::to_string((workers + 1)).data(), 1);
   setenv("RANK", "0", 1);
   setenv("MASTER_PORT", std::to_string(MASTER_PORT).data(), 1);
   auto masterChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
   g_mutex.unlock();
 
   assert(masterChannel->init());
-  run_all_tests(masterChannel);
+  run_all_tests(masterChannel, workers);
 
   // wait for all workers to finish
   for (auto& worker : g_all_workers) {
@@ -597,7 +591,7 @@ void init_tcp_master() {
 }
 
 
-void init_tcp_worker(unsigned int id) {
+void init_tcp_worker(unsigned int id, int workers) {
   g_mutex.lock();
   setenv("RANK", std::to_string(id).data(), 1);
   setenv("MASTER_ADDR", std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
@@ -605,7 +599,7 @@ void init_tcp_worker(unsigned int id) {
   g_mutex.unlock();
 
   assert(worker_channel->init());
-  run_all_tests(worker_channel);
+  run_all_tests(worker_channel, workers);
 }
 
 
@@ -613,7 +607,7 @@ void init_tcp_worker(unsigned int id) {
 void init_mpi_process() {
   auto data_channel = std::make_shared<thd::DataChannelMPI>();
   assert(data_channel->init());
-  run_all_tests(data_channel);
+  run_all_tests(data_channel, WORKERS_NUM[0]);
 
   std::cout << "MPI OK (id: " << data_channel->getRank() << ")" << std::endl;
 }
@@ -625,24 +619,27 @@ int main(int argc, char const *argv[]) {
   if (argc == 1) {
 #endif // WITH_MPI
     g_data_channel_type = "tcp";
-    std::cout << "TCP:" << std::endl;
-    // start tcp master
-    std::thread master_thread(init_tcp_master);
+    for (auto workers : WORKERS_NUM) {
+      std::cout << "TCP (workers: " << workers << "):" << std::endl;
+      // start tcp master
+      std::thread master_thread(init_tcp_master, workers);
 
-    // start tcp worker
-    for (int id = 1; id <= WORKERS_NUM; ++id) {
-      g_all_workers.push_back(std::thread(init_tcp_worker, id));
+      // start tcp worker
+      for (int id = 1; id <= workers; ++id) {
+        g_all_workers.push_back(std::thread(init_tcp_worker, id, workers));
+      }
+
+      master_thread.join();
+      g_all_workers.clear();
+
+      std::cout << "TCP - OK" << std::endl;
     }
-
-    master_thread.join();
-
-    std::cout << "TCP OK" << std::endl;
 #ifdef WITH_MPI
     std::cout << "--------------------------" << std::endl;
 
     // start MPI processes
     std::cout << "MPI:" << std::endl;
-    execlp("mpirun", "mpirun", "-n", std::to_string(WORKERS_NUM + 1).data(), argv[0], "1", NULL);
+    execlp("mpirun", "mpirun", "-n", std::to_string(WORKERS_NUM[0] + 1).data(), argv[0], "1", NULL);
   } else {
     g_data_channel_type = "mpi";
     init_mpi_process();

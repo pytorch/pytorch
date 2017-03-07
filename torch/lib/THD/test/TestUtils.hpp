@@ -40,6 +40,12 @@ inline long nowInMilliseconds() {
       (std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+inline long long factorial(int n) {
+  long long a = 1;
+  for (long long i = 1; i <= n; ++i) { a *= i; }
+  return a;
+}
+
 #define ASSERT_TENSOR_VALUE(T, tensor, value) {            \
   for (std::size_t idx = 0; idx < (tensor).numel(); idx++) \
     assert(check_equal(                                    \
