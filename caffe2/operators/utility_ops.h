@@ -147,8 +147,13 @@ class EnsureDenseOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& input = Input(0);
     auto* output = Output(0);
-    CAFFE_ENFORCE_EQ(&input, output, "In place operation is required.");
     CAFFE_ENFORCE_GT(input.ndim(), 0, "Input has to be at least a vector.");
+    // it is allowed to have the output inplace overwrite the input but also
+    // allow the output to be copied from the input
+    if (&input != output) {
+      output->ResizeLike(input);
+      output->CopyFrom(input, &context_);
+    }
     return true;
   }
 };

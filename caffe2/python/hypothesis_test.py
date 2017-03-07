@@ -858,8 +858,10 @@ class TestOperators(hu.HypothesisTestCase):
             N = prediction.shape[0]
             correct = 0
             for i in range(0, len(prediction)):
-                pred_sorted = sorted([[item,j] for j,item in enumerate(prediction[i])],
-                    cmp=lambda x,y: cmp(y[0], x[0]))
+                # we no longer have cmp function in python 3
+                pred_sorted = sorted([
+                    [item, j] for j, item in enumerate(prediction[i])],
+                    cmp=lambda x, y: int(y[0] > x[0]) - int(y[0] < x[0]))
                 max_ids = [x[1] for x in pred_sorted[0:top_k]]
                 for m in max_ids:
                     if m == labels[i]:
@@ -932,7 +934,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         def op_ref(lengths):
             sids = []
-            for i, l in enumerate(lengths):
+            for _, l in enumerate(lengths):
                 sids.extend(range(l))
             return (np.array(sids, dtype=np.int32), )
 
@@ -1581,7 +1583,7 @@ class TestOperators(hu.HypothesisTestCase):
         plan.AddStep(core.execution_step('all_steps', steps, num_iter=3))
         self.ws.run(plan)
 
-        for i, net in enumerate(nets):
+        for i, _ in enumerate(nets):
             self.assertEqual(
                 self.ws.blobs['output_{}'.format(i + 1)].fetch()[0],
                 expected[i])
@@ -2031,7 +2033,7 @@ class TestOperators(hu.HypothesisTestCase):
         feeds = [("X", X), ("scale", scale), ("bias", bias)]
         for blob, arr in feeds:
             ws.create_blob(blob).feed(arr)
-        for i in range(100):
+        for _ in range(100):
             ws.run(op)
         for blob, arr in feeds:
             np.testing.assert_array_equal(ws.blobs[blob].fetch(), arr)
@@ -2169,6 +2171,20 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 0, [0])
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+    @given(N=st.integers(min_value=2, max_value=10),
+           M=st.integers(min_value=2, max_value=10), **hu.gcs)
+    def test_ensure_dense(self, N, M, gc, dc):
+        # in place
+        X = np.random.rand(N, M).astype(np.float32) - 0.5
+        op = core.CreateOperator("EnsureDense", ["X"], "X")
+        self.assertReferenceChecks(gc, op, [X], lambda x: [x])
+        self.assertDeviceChecks(dc, op, [X], [0])
+        # or not
+        X = np.random.rand(N, M).astype(np.float32) - 0.5
+        op = core.CreateOperator("EnsureDense", ["X"], "out")
+        self.assertReferenceChecks(gc, op, [X], lambda x: [x])
+        self.assertDeviceChecks(dc, op, [X], [0])
 
 
 if __name__ == "__main__":
