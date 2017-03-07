@@ -10,7 +10,7 @@ import hypothesis.strategies as st
 import numpy as np
 
 
-class TextUtilityOps(hu.HypothesisTestCase):
+class TestUtilityOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
@@ -33,4 +33,45 @@ class TextUtilityOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X, Y, Z],
             reference=max_op,
+        )
+
+    @given(n=st.integers(5, 8), **hu.gcs)
+    def test_elementwise_sum(self, n, gc, dc):
+        X = np.random.rand(n).astype(np.float32)
+
+        def sum_op(X):
+            return [np.sum(X)]
+
+        op = core.CreateOperator(
+            "SumElements",
+            ["X"],
+            ["y"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=sum_op,
+        )
+
+    @given(n=st.integers(5, 8), **hu.gcs)
+    def test_elementwise_avg(self, n, gc, dc):
+        X = np.random.rand(n).astype(np.float32)
+
+        def sum_op(X):
+            return [np.mean(X)]
+
+        op = core.CreateOperator(
+            "SumElements",
+            ["X"],
+            ["y"],
+            average=1
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=sum_op,
         )
