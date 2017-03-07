@@ -8,7 +8,9 @@ Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/
 
 ## Building Caffe2
 
-[![Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=master)](https://travis-ci.org/caffe2/caffe2)
+[![Travis Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=master)](https://travis-ci.org/caffe2/caffe2)
+
+[![Windows Build status](https://ci.appveyor.com/api/projects/status/kec4ta779stuyb83?svg=true)](https://ci.appveyor.com/project/Yangqing/caffe2)
 
     git clone --recursive https://github.com/caffe2/caffe2.git
     cd caffe2

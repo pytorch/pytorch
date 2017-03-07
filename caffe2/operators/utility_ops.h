@@ -396,7 +396,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
         Index idx = idxs[i];
         DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
                                     << ", range 0 to " << N;
-        math::Scale<T, Context, FixedSize>(
+        math::ScaleFixedSize<T, Context, FixedSize>(
             block_size,
             w0,
             data + block_size * idx,
@@ -416,7 +416,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
         // double-checking the indices, but it's fine as it's DCHECK only
         DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
                                     << ", range 0 to " << N;
-        math::Axpy<T, Context, FixedSize>(
+        math::AxpyFixedSize<T, Context, FixedSize>(
             block_size,
             w,
             x_data + block_size * i,

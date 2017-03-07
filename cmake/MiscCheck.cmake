@@ -53,6 +53,15 @@ if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
 endif()
 
 # ---[ If we are using msvc, set no warning flags
-if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
-  message(STATUS "Adding no warning argument to the compiler")
+if (MSVC)
+  add_compile_options(/MP)
+  add_compile_options(
+      # Rough format: (warning level): Description
+      /wd4018 # (3): Signed/unsigned mismatch
+      /wd4244 # (2/3/4): Possible loss of precision
+      /wd4267 # (3): Conversion of size_t to smaller type. Possible loss of data.
+      /wd4800 # (3): Forcing non-boolean value to true or false.
+      /wd4996 # (3): Use of a deprecated member
+      /wd5030 # (?): Unrecognized C++ attribute
+  )
 endif()

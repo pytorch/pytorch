@@ -572,15 +572,18 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
                     auto* dX =
                         Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
                     dX->ResizeLike(X);
+                    const T* filter_data = filter.template data<T>();
+                    const T* dYdata = dY.template data<T>();
+                    T* dXdata = dX->template mutable_data<T>();
                     CUDNN_ENFORCE(cudnnFindConvolutionBackwardDataAlgorithmEx(
                         state->cudnn_handle(),
                         filter_desc_,
-                        filter.template data<T>(),
+                        filter_data,
                         top_desc_,
-                        dY.template data<T>(),
+                        dYdata,
                         conv_desc_,
                         bottom_desc_,
-                        dX->template mutable_data<T>(),
+                        dXdata,
                         kNUM_CUDNN_BWD_DATA_ALGS,
                         &returned_algo_count,
                         data_perf_stat.data(),

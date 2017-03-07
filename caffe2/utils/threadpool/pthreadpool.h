@@ -64,33 +64,33 @@ size_t pthreadpool_get_threads_count(pthreadpool_t threadpool);
  *    will be called once for each item.
  */
 void pthreadpool_compute_1d(
-	pthreadpool_t threadpool,
-	pthreadpool_function_1d_t function,
-	void* argument,
-	size_t range);
+    pthreadpool_t threadpool,
+    pthreadpool_function_1d_t function,
+    void* argument,
+    size_t range);
 
 void pthreadpool_compute_1d_tiled(
-	pthreadpool_t threadpool,
-	pthreadpool_function_1d_tiled_t function,
-	void* argument,
-	size_t range,
-	size_t tile);
+    pthreadpool_t threadpool,
+    pthreadpool_function_1d_tiled_t function,
+    void* argument,
+    size_t range,
+    size_t tile);
 
 void pthreadpool_compute_2d(
-	pthreadpool_t threadpool,
-	pthreadpool_function_2d_t function,
-	void* argument,
-	size_t range_i,
-	size_t range_j);
+    pthreadpool_t threadpool,
+    pthreadpool_function_2d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j);
 
 void pthreadpool_compute_2d_tiled(
-	pthreadpool_t threadpool,
-	pthreadpool_function_2d_tiled_t function,
-	void* argument,
-	size_t range_i,
-	size_t range_j,
-	size_t tile_i,
-	size_t tile_j);
+    pthreadpool_t threadpool,
+    pthreadpool_function_2d_tiled_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    size_t tile_i,
+    size_t tile_j);
 
 /**
  * Terminates threads in the thread pool and releases associated resources.
