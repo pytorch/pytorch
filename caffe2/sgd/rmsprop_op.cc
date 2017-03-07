@@ -2,6 +2,33 @@
 
 namespace caffe2 {
 
+template <>
+void rmsprop_update<CPUContext>(
+    int N,
+    const float* g,
+    const float* ms,
+    const float* mom,
+    float* ng,
+    float* nms,
+    float* nmom,
+    float decay,
+    float momentum,
+    float epsilon,
+    const float* lr,
+    CPUContext* context) {
+  ConstEigenVectorArrayMap<float> gVec(g, N);
+  ConstEigenVectorArrayMap<float> msVec(ms, N);
+  ConstEigenVectorArrayMap<float> momVec(mom, N);
+  // Update new mean square estimate
+  EigenVectorArrayMap<float> nmsVec(nms, N);
+  nmsVec = msVec + (1.0f - decay) * (gVec * gVec - msVec);
+  // Update momentum estimate
+  EigenVectorArrayMap<float> nmomVec(nmom, N);
+  nmomVec = momVec * momentum + lr[0] * gVec / (epsilon + nmsVec).sqrt();
+  // New gradient is the momentum
+  EigenVectorArrayMap<float>(ng, N) = nmomVec;
+}
+
 namespace {
 REGISTER_CPU_OPERATOR(RmsProp, RmsPropOp<float, CPUContext>);
 OPERATOR_SCHEMA(RmsProp)

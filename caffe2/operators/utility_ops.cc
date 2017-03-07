@@ -893,4 +893,31 @@ bool MaxOp<T, Context>::Compute() {
   return true;
 }
 
+template <typename T, class Context>
+bool MaxGradientOp<T, Context>::RunOnDevice() {
+  auto& output = Input(0);
+  auto& grad_output = Input(1);
+  const int kInputStartOffset = 2;
+
+  const T* data = output.template data<T>();
+  ConstEigenArrayMap<T> output_array(
+      output.template data<T>(), 1, output.size());
+  ConstEigenArrayMap<T> grad_out_array(
+      grad_output.template data<T>(), 1, grad_output.size());
+
+  for (int i = 0; i < OutputSize(); i++) {
+    auto& input = Input(i + kInputStartOffset);
+    ConstEigenArrayMap<T> input_array(
+        input.template data<T>(), 1, input.size());
+
+    auto* grad_input = Output(i);
+    grad_input->ResizeLike(input);
+    EigenArrayMap<T> grad_in_array(
+        grad_input->template mutable_data<T>(), 1, grad_input->size());
+    grad_in_array = grad_out_array *
+        input_array.cwiseEqual(output_array).template cast<T>();
+  }
+  return true;
+}
+
 } // namespace caffe2

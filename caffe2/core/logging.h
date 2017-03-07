@@ -159,7 +159,6 @@ struct EnforceOK {};
 class EnforceFailMessage {
  public:
   constexpr /* implicit */ EnforceFailMessage(EnforceOK) : msg_(nullptr) {}
-
   EnforceFailMessage(EnforceFailMessage&&) = default;
   EnforceFailMessage(const EnforceFailMessage&) = delete;
   EnforceFailMessage& operator=(EnforceFailMessage&&) = delete;
@@ -180,7 +179,7 @@ class EnforceFailMessage {
     msg_ = new std::string(std::move(msg));
   }
   inline bool bad() const {
-    return msg_;
+    return msg_ != nullptr;
   }
   std::string get_message_and_free(std::string&& extra) const {
     std::string r;

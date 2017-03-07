@@ -169,7 +169,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  [[gnu::visibility("default")]] static CaffeTypeId Id();
+  CAFFE2_EXPORT static CaffeTypeId Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).

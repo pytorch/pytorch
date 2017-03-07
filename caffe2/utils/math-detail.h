@@ -7,29 +7,13 @@ class CPUContext;
 namespace math {
 namespace detail {
 
-template <typename T, class Context>
-void ScaleDynamic(
-    const int N,
-    const T alpha,
-    const T* x,
-    T* y,
-    Context* context);
-
-template <typename T, class Context>
-void AxpyDynamic(
-    const int N,
-    const T alpha,
-    const T* x,
-    T* y,
-    Context* context);
-
 // proxy to a class because of partial specialization limitations for functions
 
 template<typename T, class Context, int FixedSize>
 struct ScaleImpl {
   inline void
   operator()(const int N, const T alpha, const T* x, T* y, Context* context) {
-    ScaleDynamic(N, alpha, x, y, context);
+    Scale(N, alpha, x, y, context);
   }
 };
 
@@ -51,7 +35,7 @@ template<typename T, class Context, int FixedSize>
 struct AxpyImpl {
   inline void
   operator()(const int N, const T alpha, const T* x, T* y, Context* context) {
-    AxpyDynamic(N, alpha, x, y, context);
+    Axpy(N, alpha, x, y, context);
   }
 };
 
@@ -73,14 +57,14 @@ struct AxpyImpl<T, CPUContext, 1> {
 }  // namespace detail
 
 template <typename T, class Context, int FixedSize>
-void Scale(const int N, const T alpha, const T* x, T* y,
-           Context* context) {
+inline void
+ScaleFixedSize(const int N, const T alpha, const T* x, T* y, Context* context) {
   detail::ScaleImpl<T, Context, FixedSize>()(N, alpha, x, y, context);
 }
 
 template <typename T, class Context, int FixedSize>
-void Axpy(const int N, const T alpha, const T* x, T* y,
-           Context* context) {
+inline void
+AxpyFixedSize(const int N, const T alpha, const T* x, T* y, Context* context) {
   detail::AxpyImpl<T, Context, FixedSize>()(N, alpha, x, y, context);
 }
 
