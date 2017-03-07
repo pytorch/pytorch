@@ -407,7 +407,7 @@ class SumReducer<T, CPUContext> : public BaseReducer {
   template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::AxpyFixedSize<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
+    math::Axpy<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
   }
 
  private:
@@ -489,7 +489,7 @@ class WeightedSumReducer<T, CPUContext> : public BaseReducer {
   template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::AxpyFixedSize<T, CPUContext, FixedSize>(
+    math::Axpy<T, CPUContext, FixedSize>(
         meta.block_size, meta.scalars[offset], in, out_, context);
   }
 
@@ -548,7 +548,7 @@ class WeightedSumReducerGradient : public BaseReducerGradient {
       TIndex offset,
       Context* context,
       const int length) {
-    math::ScaleFixedSize<T, CPUContext, FixedSize>(
+    math::Scale<T, CPUContext, FixedSize>(
         meta.block_size, meta.scalars[offset], s_grad_, data_grad, context);
   }
 
@@ -562,7 +562,7 @@ class WeightedSumReducerGradient : public BaseReducerGradient {
       TIndex offset,
       Context* context,
       const int length) {
-    math::ScaleFixedSize<T, CPUContext, FixedSize>(
+    math::Scale<T, CPUContext, FixedSize>(
         meta.block_size, meta.scalars[offset], s_grad_, data_grad, context);
     math::Dot(
         meta.block_size, s_grad_, data, meta.scalars_grad + offset, context);
@@ -613,15 +613,14 @@ class MeanReducer<T, CPUContext> : public BaseReducer {
   template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::AxpyFixedSize<T, CPUContext, FixedSize>(
-        meta.block_size, 1, in, out_, context);
+    math::Axpy<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
     current_size_++;
   }
 
   template <int FixedSize>
   void finish(const Meta& meta, CPUContext* context) {
     if (current_size_ > 0) {
-      math::ScaleFixedSize<T, CPUContext, FixedSize>(
+      math::Scale<T, CPUContext, FixedSize>(
           meta.block_size, 1.0 / current_size_, out_, out_, context);
     }
   }
@@ -651,7 +650,7 @@ class MeanReducerGradient : public BaseReducerGradient {
       Context* context,
       const int length) {
     CAFFE_ENFORCE_GT(length, 0, "Segment length must be > 0");
-    math::ScaleFixedSize<T, CPUContext, FixedSize>(
+    math::Scale<T, CPUContext, FixedSize>(
         meta.block_size, 1.0 / length, s_grad_, data_grad, context);
   }
 
