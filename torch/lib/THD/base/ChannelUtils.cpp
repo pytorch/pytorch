@@ -86,7 +86,7 @@ std::tuple<int, std::uint16_t> listen(std::uint16_t port) {
 }
 
 
-int connect(const std::string& address, std::uint16_t port, int wait) {
+int connect(const std::string& address, std::uint16_t port, bool wait) {
   struct addrinfo hints, *res = NULL;
 
   memset(&hints, 0x00, sizeof(hints));

@@ -1,4 +1,4 @@
-#include "../base/channels/data_channel/DataChannelMPI.hpp"
+#include "../base/data_channels/DataChannelMPI.hpp"
 
 #include <unistd.h>
 #include <cassert>

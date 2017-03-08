@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <string>
-#include <vector>
 
 namespace thd { namespace rpc {
 
@@ -23,7 +22,7 @@ struct ByteArray {
   std::string to_string() const;
 
 private:
-  std::vector<char> _data;
+  std::string _data;
 };
 
 }} // namespace rpc, thd

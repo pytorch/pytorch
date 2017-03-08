@@ -60,20 +60,20 @@ void recv_bytes(int socket, T* buffer, std::size_t length)
 
 inline std::uint16_t convertToPort(long port) {
   if ((port < 0) || (port >= UINT16_MAX))
-    throw std::domain_error("invalid port");
+    throw std::domain_error("invalid port (value out of range)");
 
   return static_cast<std::uint16_t>(port);
 }
 
 inline std::uint32_t convertToRank(long rank, long min = 0) {
   if ((rank < min) || (rank >= UINT32_MAX))
-    throw std::domain_error("invalid rank");
+    throw std::domain_error("invalid rank (value out of range)");
 
   return static_cast<std::uint32_t>(rank);
 }
 
 std::tuple<int, std::uint16_t> listen(std::uint16_t port = 0);
-int connect(const std::string& address, std::uint16_t port, int wait = true);
+int connect(const std::string& address, std::uint16_t port, bool wait = true);
 std::tuple<int, std::string> accept(int listen_socket, int timeout = -1);
 
 std::tuple<std::uint16_t, std::uint32_t> load_master_env();

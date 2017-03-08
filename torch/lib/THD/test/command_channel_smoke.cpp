@@ -1,8 +1,6 @@
-#include "../base/channels/command_channel/CommandChannel.hpp"
-#include "../base/channels/ChannelEnvVars.hpp"
+#include "../master_worker/common/CommandChannel.hpp"
+#include "../base/ChannelEnvVars.hpp"
 
-#include <stdlib.h>
-#include <unistd.h>
 #include <cassert>
 #include <cerrno>
 #include <cstdlib>
@@ -70,6 +68,7 @@ void init_master(int world_size, const std::string& master_port) {
 
   for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
     std::unique_ptr<rpc::RPCMessage> msg;
+    fprintf(stderr, "master: about to recv a message from worker %d\n", worker_rank);
     msg = channel->recvMessage(worker_rank);
     std::string expected = std::string("hello to master from worker ") +
       std::to_string(worker_rank);
