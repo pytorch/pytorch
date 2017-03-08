@@ -18,6 +18,7 @@ class PairwiseDistance(Module):
             - Input: :math:`(N, D)` where `D = vector dimension`
             - Output: :math:`(N, 1)
 
+<<<<<<< HEAD
         >>> pdist = nn.PairwiseDistance(2)
         >>> input1 = autograd.Variable(torch.randn(100, 128))
         >>> input2 = autograd.Variable(torch.randn(100, 128))
@@ -27,6 +28,10 @@ class PairwiseDistance(Module):
         super(PairwiseDistance, self).__init__()
         self.norm = p
         self.eps = eps
+=======
+    def forward(self, x1, x2):
+        return F.cosine_similarity(x1, x2, self.eps)
+>>>>>>> Changed function signature of CosineSimilarity .forward module
 
     def forward(self, x1, x2):
         return F.pairwise_distance(x1, x2, self.norm, self.eps)
