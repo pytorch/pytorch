@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-PYCMD=${PYCMD:="python3"}
+PYCMD=${PYCMD:="python"}
 COVERAGE=0
 while [[ "$#" -gt 0 ]]; do
     case "$1" in

@@ -1,6 +1,6 @@
 #include "CommandChannel.hpp"
-#include "../ChannelEnvVars.hpp"
-#include "../ChannelUtils.hpp"
+#include "../../base/ChannelEnvVars.hpp"
+#include "../../base/ChannelUtils.hpp"
 
 #include <unistd.h>
 #include <climits>
@@ -59,7 +59,6 @@ MasterCommandChannel::~MasterCommandChannel() {
 }
 
 bool MasterCommandChannel::init() {
-  // listen on workers
   std::tie(_sockets[0], std::ignore) = listen(_port);
 
   int socket;
@@ -70,12 +69,8 @@ bool MasterCommandChannel::init() {
     _sockets.at(rank) = socket;
   }
 
-  /* Sending confirm byte is necessary to block workers until all remaing workers
-   * connect. This necessesity comes from case when worker finishes connecting
-   * to command channel and start connecting to data channel. Since master
-   * in both channels listen on same port workers potentially could try to connect
-   * data channel when master is still listening in command channel - this
-   * could cause a deadlock.
+  /* Sending confirm byte is to test connection and make barrier for workers.
+   * It allows to block connected workers until all remaining workers connect.
    */
   for (std::size_t i = 1; i < _sockets.size(); ++i) {
     std::uint8_t confirm_byte = 1;
@@ -89,19 +84,19 @@ bool MasterCommandChannel::init() {
 }
 
 void MasterCommandChannel::sendMessage(std::unique_ptr<rpc::RPCMessage> msg, int rank) {
-  if (rank <= 0) {
+  if ((rank <= 0) || (rank >= _sockets.size())) {
     throw std::domain_error("sendMessage received invalid rank as parameter");
   }
 
-  ::thd::sendMessage(_sockets.at(rank), std::move(msg));
+  ::thd::sendMessage(_sockets[rank], std::move(msg));
 }
 
 std::unique_ptr<rpc::RPCMessage> MasterCommandChannel::recvMessage(int rank) {
-  if (rank <= 0) {
+  if ((rank <= 0) || (rank >= _sockets.size())) {
     throw std::domain_error("recvMessage received invalid rank as parameter");
   }
 
-  return receiveMessage(_sockets.at(rank));
+  return receiveMessage(_sockets[rank]);
 }
 
 

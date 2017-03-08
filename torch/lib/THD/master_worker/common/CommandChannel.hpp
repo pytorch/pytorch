@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../../master_worker/common/RPC.hpp"
+#include "RPC.hpp"
 
 #include <memory>
 #include <string>

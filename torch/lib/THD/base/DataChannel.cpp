@@ -1,8 +1,8 @@
 #include "DataChannel.hpp"
 #ifdef WITH_MPI
-#include "DataChannelMPI.hpp"
+#include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
-#include "DataChannelTCP.hpp"
+#include "data_channels/DataChannelTCP.hpp"
 
 #include <algorithm>
 #include <stdexcept>

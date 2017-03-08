@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../base/channels/command_channel/CommandChannel.hpp"
-#include "../../base/channels/data_channel/DataChannel.hpp"
+#include "../common/CommandChannel.hpp"
+#include "../../base/DataChannel.hpp"
 
 #include <THPP/THPP.h>
 

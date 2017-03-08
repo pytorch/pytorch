@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../THD.h"
-#include "../base/channels/data_channel/DataChannel.h"
+#include "../base/DataChannel.h"
 
 THD_API int THDGetRank();
 THD_API int THDGetNumProcesses();

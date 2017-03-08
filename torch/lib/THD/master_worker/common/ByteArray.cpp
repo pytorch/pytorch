@@ -36,14 +36,7 @@ ByteArray::ByteArray(const ByteArray& arr)
 ByteArray::~ByteArray() {}
 
 ByteArray& ByteArray::append(const char* arr, std::size_t size) {
-  if (_data.capacity() < _data.size() + size) {
-    _data.reserve(_data.capacity() + size);
-  }
-
-  for (std::size_t i = 0; i < size; ++i) {
-    _data.push_back(arr[i]);
-  }
-
+  _data.append(arr, arr + size);
   return *this;
 }
 
@@ -56,7 +49,7 @@ std::size_t ByteArray::length() const {
 }
 
 std::string ByteArray::to_string() const {
-  return std::string(_data.begin(), _data.end());
+  return _data;
 }
 
 }} // namespace rpc, thd

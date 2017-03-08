@@ -8,12 +8,12 @@
 
 #ifndef _THD_CORE
 #include "base/TensorDescriptor.h"
-#include "base/channels/data_channel/DataChannelRequest.h"
+#include "base/DataChannelRequest.h"
 #else
 #include "base/TensorDescriptor.hpp"
-#include "base/channels/data_channel/DataChannelRequest.hpp"
+#include "base/DataChannelRequest.hpp"
 #endif
-#include "base/channels/ChannelType.h"
+#include "base/ChannelType.h"
 
 #include "process_group/General.h"
 #include "process_group/Collectives.h"
