@@ -31,7 +31,7 @@ DataChannel::Group::Group(std::vector<rank_type> ranks, rank_type max_rank)
     throw std::logic_error("cannot create empty group");
 
   sort(ranks.begin(), ranks.end());
-  if (ranks.front() < 0 || ranks.back() > max_rank) {
+  if (ranks.back() > max_rank) {
     throw std::out_of_range(
       "array of ranks contains invalid rank, "
       "all ranks should be in range: [0, " + std::to_string(max_rank) + "]"
@@ -96,7 +96,7 @@ auto DataChannel::Group::mustGetGlobalRank(rank_type group_rank) const -> rank_t
 
 
 auto DataChannel::Group::getGlobalRank(rank_type group_rank) const -> std::pair<rank_type, bool> {
-  if (group_rank < 0 || group_rank >= _new2old.size())
+  if (group_rank >= _new2old.size())
     return std::make_pair(0, false);
 
   return std::make_pair(_new2old[group_rank], true);

@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <exception>
+#include <mutex>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -16,8 +17,8 @@ std::mutex g_mutex;
 
 void init_worker(const int& rank, const std::string& master_addr) {
   g_mutex.lock();
-  setenv("RANK", std::to_string(rank).data(), 1);
-  setenv("MASTER_ADDR", master_addr.data(), 1);
+  setenv(RANK_ENV, std::to_string(rank).data(), 1);
+  setenv(MASTER_ADDR_ENV, master_addr.data(), 1);
   auto channel = std::make_shared<thd::WorkerCommandChannel>(); // reads all env variable
   g_mutex.unlock();
 
@@ -47,9 +48,9 @@ void init_worker(const int& rank, const std::string& master_addr) {
 
 void init_master(int world_size, const std::string& master_port) {
   g_mutex.lock();
-  setenv("WORLD_SIZE", std::to_string(world_size).data(), 1);
-  setenv("RANK", "0", 1);
-  setenv("MASTER_PORT", master_port.data(), 1);
+  setenv(WORLD_SIZE_ENV, std::to_string(world_size).data(), 1);
+  setenv(RANK_ENV, "0", 1);
+  setenv(MASTER_PORT_ENV, master_port.data(), 1);
   auto channel = std::make_shared<thd::MasterCommandChannel>(); // reads all env variable
   g_mutex.unlock();
 

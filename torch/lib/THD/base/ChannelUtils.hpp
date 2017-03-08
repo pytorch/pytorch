@@ -4,11 +4,15 @@
 #include <sys/types.h>
 #include <cstdlib>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <tuple>
 
 namespace thd {
+
+using rank_type = std::uint32_t;
+using port_type = std::uint16_t;
 
 #define SYSCHECK(expr) { \
   errno = 0; (expr);     \
@@ -16,7 +20,7 @@ namespace thd {
 }
 
 template<typename T>
-void send_bytes(int socket, const T* buffer, std::size_t length)
+void send_bytes(int socket, const T* buffer, std::size_t length, bool more_data = false)
 {
   std::size_t bytes_to_send = sizeof(T) * length;
   if (bytes_to_send == 0)
@@ -25,9 +29,16 @@ void send_bytes(int socket, const T* buffer, std::size_t length)
   auto bytes = reinterpret_cast<const std::uint8_t*>(buffer);
   std::uint8_t *current_bytes = const_cast<std::uint8_t*>(bytes);
 
+  int flags = 0;
+#ifdef MSG_MORE
+  if (more_data) { // there is more data to send
+    flags |= MSG_MORE;
+  }
+#endif
+
   while (bytes_to_send > 0) {
     ssize_t bytes_sent;
-    SYSCHECK(bytes_sent = ::send(socket, current_bytes, bytes_to_send, 0))
+    SYSCHECK(bytes_sent = ::send(socket, current_bytes, bytes_to_send, flags))
     if (bytes_sent == 0)
       throw std::system_error(EBADMSG, std::system_category());
 
@@ -58,26 +69,26 @@ void recv_bytes(int socket, T* buffer, std::size_t length)
   }
 }
 
-inline std::uint16_t convertToPort(long port) {
-  if ((port < 0) || (port >= UINT16_MAX))
+inline port_type convertToPort(long port) {
+  if ((port < 0) || (port >= std::numeric_limits<port_type>::max()))
     throw std::domain_error("invalid port (value out of range)");
 
-  return static_cast<std::uint16_t>(port);
+  return static_cast<port_type>(port);
 }
 
-inline std::uint32_t convertToRank(long rank, long min = 0) {
-  if ((rank < min) || (rank >= UINT32_MAX))
+inline rank_type convertToRank(long rank, long min = 0) {
+  if ((rank < min) || (rank >= std::numeric_limits<rank_type>::max()))
     throw std::domain_error("invalid rank (value out of range)");
 
-  return static_cast<std::uint32_t>(rank);
+  return static_cast<rank_type>(rank);
 }
 
-std::tuple<int, std::uint16_t> listen(std::uint16_t port = 0);
-int connect(const std::string& address, std::uint16_t port, bool wait = true);
+std::tuple<int, port_type> listen(port_type port = 0);
+int connect(const std::string& address, port_type port, bool wait = true);
 std::tuple<int, std::string> accept(int listen_socket, int timeout = -1);
 
-std::tuple<std::uint16_t, std::uint32_t> load_master_env();
-std::tuple<std::string, std::uint16_t> load_worker_env();
-std::uint32_t load_rank_env();
+std::tuple<port_type, rank_type> load_master_env();
+std::tuple<std::string, port_type> load_worker_env();
+rank_type load_rank_env();
 
 } // namespace thd

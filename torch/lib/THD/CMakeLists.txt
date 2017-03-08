@@ -72,7 +72,7 @@ FILE(GLOB_RECURSE base_cpp "base/*.cpp")
 FILE(GLOB_RECURSE test_cpp "test/*.cpp")
 
 IF(NOT MPI_FOUND)
-  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/channels/data_channel/DataChannelMPI.cpp")
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelMPI.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
 ENDIF()
 
