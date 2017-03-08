@@ -19,8 +19,8 @@ class CosineSimilarity(Module):
         super(CosineSimilarity, self).__init__()
         self.eps = 1e-12
 
-    def forward(self, x):
-        return F.cosine_similarity(x, self.eps)
+    def forward(self, x1, x2):
+        return F.cosine_similarity(x1, x2, self.eps)
 
 
 # TODO: Euclidean
