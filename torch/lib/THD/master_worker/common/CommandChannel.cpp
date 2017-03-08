@@ -19,7 +19,7 @@ void sendMessage(int socket, std::unique_ptr<rpc::RPCMessage> msg) {
   auto& bytes = msg.get()->bytes();
   std::uint64_t msg_length = static_cast<std::uint64_t>(bytes.length());
 
-  send_bytes<std::uint64_t>(socket, &msg_length, 1);
+  send_bytes<std::uint64_t>(socket, &msg_length, 1, true);
   send_bytes<std::uint8_t>(
     socket,
     reinterpret_cast<const std::uint8_t*>(bytes.data()),
@@ -44,7 +44,7 @@ std::unique_ptr<rpc::RPCMessage> receiveMessage(int socket) {
 MasterCommandChannel::MasterCommandChannel()
   : _rank(0)
 {
-  std::uint32_t world_size;
+  rank_type world_size;
   std::tie(_port, world_size) = load_master_env();
 
   _sockets.resize(world_size);
@@ -62,10 +62,10 @@ bool MasterCommandChannel::init() {
   std::tie(_sockets[0], std::ignore) = listen(_port);
 
   int socket;
-  std::uint32_t rank;
+  rank_type rank;
   for (std::size_t i = 1; i < _sockets.size(); ++i) {
     std::tie(socket, std::ignore) = accept(_sockets[0]);
-    recv_bytes<std::uint32_t>(socket, &rank, 1);
+    recv_bytes<rank_type>(socket, &rank, 1);
     _sockets.at(rank) = socket;
   }
 
@@ -114,7 +114,7 @@ WorkerCommandChannel::~WorkerCommandChannel() {
 
 bool WorkerCommandChannel::init() {
   _socket = connect(_master_addr, _master_port);
-  send_bytes<std::uint32_t>(_socket, &_rank, 1); // send rank
+  send_bytes<rank_type>(_socket, &_rank, 1); // send rank
 
   std::uint8_t confirm_byte;
   recv_bytes<std::uint8_t>(_socket, &confirm_byte, 1);

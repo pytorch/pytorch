@@ -2,6 +2,7 @@
 #ifdef WITH_MPI
 #include "../base/data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
+#include "../base/ChannelEnvVars.hpp"
 #include "TestUtils.hpp"
 
 #include <THPP/tensors/THTensor.hpp>
@@ -80,12 +81,12 @@ void test_broadcast(std::shared_ptr<thd::DataChannel> data_channel) {
 void _test_reduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
                          THDReduceOp op_type, long init_value, long expected_value) {
   if (data_channel->getRank() == 0) {
-    auto long_tensor = buildTensor<long>({1, 2, 3, 4, 5}, init_value);
-    data_channel->reduce(*long_tensor, op_type, 0);
-    ASSERT_TENSOR_VALUE(long, *long_tensor, expected_value)
+    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, init_value);
+    data_channel->reduce(*int_tensor, op_type, 0);
+    ASSERT_TENSOR_VALUE(int, *int_tensor, expected_value)
   } else {
-    auto long_tensor = buildTensor<long>({1, 2, 3, 4, 5}, data_channel->getRank());
-    data_channel->reduce(*long_tensor, op_type, 0);
+    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
+    data_channel->reduce(*int_tensor, op_type, 0);
   }
 }
 
@@ -275,7 +276,7 @@ void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
 ////////////
 
 void test_broadcast_group(std::shared_ptr<thd::DataChannel> data_channel,
-                          THDGroup group, std::vector<int> group_ranks) {
+                          THDGroup group, std::vector<thd::rank_type> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
     if (data_channel->getRank() == group_ranks[0])
@@ -291,7 +292,7 @@ void test_broadcast_group(std::shared_ptr<thd::DataChannel> data_channel,
 }
 
 void test_reduce_group(std::shared_ptr<thd::DataChannel> data_channel,
-                       THDGroup group, std::vector<int> group_ranks) {
+                       THDGroup group, std::vector<thd::rank_type> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5}, 10);
     data_channel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, group_ranks[0], group);
@@ -308,7 +309,7 @@ void test_reduce_group(std::shared_ptr<thd::DataChannel> data_channel,
 }
 
 void test_allReduce_group(std::shared_ptr<thd::DataChannel> data_channel,
-                          THDGroup group, std::vector<int> group_ranks) {
+                          THDGroup group, std::vector<thd::rank_type> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5, 6, 7, 100}, 10);
     data_channel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM, group);
@@ -321,7 +322,7 @@ void test_allReduce_group(std::shared_ptr<thd::DataChannel> data_channel,
 }
 
 void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
-                        THDGroup group, std::vector<int> group_ranks) {
+                        THDGroup group, std::vector<thd::rank_type> group_ranks) {
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
@@ -344,7 +345,7 @@ void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
 
 
 void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
-                       THDGroup group, std::vector<int> group_ranks) {
+                       THDGroup group, std::vector<thd::rank_type> group_ranks) {
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
@@ -369,7 +370,7 @@ void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
 }
 
 void test_allGather_group(std::shared_ptr<thd::DataChannel> data_channel,
-                          THDGroup group, std::vector<int> group_ranks) {
+                          THDGroup group, std::vector<thd::rank_type> group_ranks) {
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
@@ -390,7 +391,7 @@ void test_allGather_group(std::shared_ptr<thd::DataChannel> data_channel,
 }
 
 void test_barrier_group(std::shared_ptr<thd::DataChannel> data_channel,
-                        THDGroup group, std::vector<int> group_ranks) {
+                        THDGroup group, std::vector<thd::rank_type> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
     for (int i = 0; i < group_ranks.size(); ++i) {
       if (data_channel->getRank() == group_ranks[i]) {
@@ -555,7 +556,7 @@ void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) 
   test_irecv(data_channel);
   test_interlaces(data_channel);
 
-  std::vector<int> group_ranks = {1, 2};
+  std::vector<thd::rank_type> group_ranks = {1, 2};
   THDGroup group = data_channel->newGroup(group_ranks);
   test_broadcast_group(data_channel, group, group_ranks);
   test_reduce_group(data_channel, group, group_ranks);
@@ -575,9 +576,9 @@ void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) 
 
 void init_tcp_master(int workers) {
   g_mutex.lock();
-  setenv("WORLD_SIZE", std::to_string((workers + 1)).data(), 1);
-  setenv("RANK", "0", 1);
-  setenv("MASTER_PORT", std::to_string(MASTER_PORT).data(), 1);
+  setenv(thd::WORLD_SIZE_ENV, std::to_string((workers + 1)).data(), 1);
+  setenv(thd::RANK_ENV, "0", 1);
+  setenv(thd::MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
   auto masterChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
   g_mutex.unlock();
 
@@ -593,8 +594,8 @@ void init_tcp_master(int workers) {
 
 void init_tcp_worker(unsigned int id, int workers) {
   g_mutex.lock();
-  setenv("RANK", std::to_string(id).data(), 1);
-  setenv("MASTER_ADDR", std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
+  setenv(thd::RANK_ENV, std::to_string(id).data(), 1);
+  setenv(thd::MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
   auto worker_channel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
   g_mutex.unlock();
 

@@ -8,6 +8,7 @@
 
 #include <THPP/Traits.hpp>
 
+#include <cstring>
 #include <memory>
 
 #include "master_worker/master/generic/THDTensor.cpp"

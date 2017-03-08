@@ -1,5 +1,4 @@
 #include "DataChannelTCP.hpp"
-#include "../ChannelUtils.hpp"
 
 #include <sys/poll.h>
 #include <unistd.h>
@@ -14,113 +13,32 @@
 #include <system_error>
 
 
-<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
-=======
-
-#ifndef MSG_MORE // OS X does not have this optimalization option
-#define MSG_MORE 0
-#endif
-
-#define SYSCHECK(expr) { \
-  errno = 0; (expr);     \
-  if (errno != 0) throw std::system_error(errno, std::system_category()); \
-}
-
->>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
 namespace thd {
 namespace {
 
-constexpr int MASTER_RANK = 0;
-<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
-=======
-constexpr int LISTEN_QUEUE_SIZE = 64;
+constexpr rank_type MASTER_RANK = 0;
 
-template<typename T>
-void send_bytes(int socket, const T* buffer, std::size_t length,
-                bool more_data = false)
-{
-  std::size_t bytes_to_send = sizeof(T) * length;
-  if (bytes_to_send == 0)
-    return;
-
-  int flags = 0;
-  if (more_data) { // there is more data to send
-    flags |= MSG_MORE;
-  }
-
-  auto bytes = reinterpret_cast<const std::uint8_t*>(buffer);
-  std::uint8_t *current_bytes = const_cast<std::uint8_t*>(bytes);
-
-  while (bytes_to_send > 0) {
-    ssize_t bytes_sent;
-    SYSCHECK(bytes_sent = ::send(socket, current_bytes, bytes_to_send, flags))
-    if (bytes_sent == 0)
-      throw std::system_error(EBADMSG, std::system_category());
-
-    bytes_to_send -= bytes_sent;
-    current_bytes += bytes_sent;
-  }
-}
-
-
-template<typename T>
-void recv_bytes(int socket, T* buffer, std::size_t length)
-{
-  std::size_t bytes_to_receive = sizeof(T) * length;
-  if (bytes_to_receive == 0)
-    return;
-
-  auto bytes = reinterpret_cast<std::uint8_t*>(buffer);
-  std::uint8_t *current_bytes = bytes;
-
-  while (bytes_to_receive > 0) {
-    ssize_t bytes_received;
-    SYSCHECK(bytes_received = ::recv(socket, current_bytes, bytes_to_receive, 0))
-    if (bytes_received == 0)
-      throw std::system_error(EBADMSG, std::system_category());
-
-    bytes_to_receive -= bytes_received;
-    current_bytes += bytes_received;
-  }
-}
-
-
-inline bool validatePort(int port) {
-  return (port > 0 && port < 65536);
-}
->>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
-
-
-inline int log2ceil(std::uint32_t value) {
-  int dim = 0;
+inline std::uint32_t log2ceil(std::uint32_t value) {
+  std::uint32_t dim = 0;
 #if defined(__GNUC__)
   if (value <= 1)
     return 0;
   dim = 32 - __builtin_clz(value - 1);
 #else
-  for (int size = 1; size < value; ++dim, size <<= 1) /* empty */;
+  for (std::uint32_t size = 1; size < value; ++dim, size <<= 1) /* empty */;
 #endif // defined(__GNUC__)
   return dim;
 }
 
-<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
-=======
 // Finds nearest power-of-two less than or equal to `value`.
 template<typename T>
-inline int pow2(T value) {
-  T pof2 = 1;
+inline std::uint64_t pow2(T value) {
+  std::uint64_t pof2 = 1;
   while (pof2 <= value) { pof2 <<= 1; }
   pof2 >>= 1;
   return pof2;
 }
 
-void setSocketNoDelay(int socket) {
-  int flag = 1;
-  socklen_t optlen = sizeof(flag);
-  SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
-}
-
->>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
 } // namespace
 
 
@@ -156,7 +74,7 @@ DataChannelTCP::DataChannelTCP(int timeout)
   _rank = load_rank_env();
 
   if (_rank == MASTER_RANK) { // MASTER
-    std::uint32_t processes_number;
+    rank_type processes_number;
     std::tie(_port, processes_number) = load_master_env();
 
     _processes.resize(processes_number);
@@ -168,7 +86,7 @@ DataChannelTCP::DataChannelTCP(int timeout)
     };
   } else { // WORKER
     std::string address;
-    std::uint16_t port;
+    port_type port;
     std::tie(address, port) = load_worker_env();
 
     // add master
@@ -202,34 +120,28 @@ bool DataChannelTCP::initWorker() {
 
   std::tie(_socket, _port) = listen();
 
-<<<<<<< HEAD:torch/lib/THD/base/data_channels/DataChannelTCP.cpp
-  send_bytes<std::uint32_t>(master_socket, &_rank, 1);
-  send_bytes<std::uint16_t>(master_socket, &_port, 1); // send listening port to master
-=======
-  std::uint32_t p_rank = (std::uint32_t)_rank;
-  std::uint16_t p_port = (std::uint16_t)_port;
-  send_bytes<std::uint32_t>(master_socket, &p_rank, 1, true);
-  send_bytes<std::uint16_t>(master_socket, &p_port, 1); // send listening port to master
->>>>>>> Tweaks, fixes, cleanup in DataChannelTCP:torch/lib/THD/base/channels/DataChannelTCP.cpp
+  send_bytes<rank_type>(master_socket, &_rank, 1, true);
+  send_bytes<port_type>(master_socket, &_port, 1); // send listening port to master
 
-  std::uint32_t processes_number;
-  recv_bytes<std::uint32_t>(master_socket, &processes_number, 1);
+  rank_type processes_number;
+  recv_bytes<rank_type>(master_socket, &processes_number, 1);
   _processes.resize(processes_number);
 
   // get all metadata of other processes in network
   processes_number--; // exclude master
   while (processes_number > 0) {
-    std::uint32_t p_rank, p_address_len;
-    std::uint16_t p_port;
+    std::uint32_t p_address_len;
+    rank_type p_rank;
+    port_type p_port;
 
-    recv_bytes<std::uint32_t>(master_socket, &p_rank, 1); // get process rank
+    recv_bytes<rank_type>(master_socket, &p_rank, 1); // get process rank
     recv_bytes<std::uint32_t>(master_socket, &p_address_len, 1); // get process address length
 
     // get process address
     std::unique_ptr<char[]> tmp_address(new char[p_address_len + 1]);
     recv_bytes<char>(master_socket, tmp_address.get(), p_address_len);
 
-    recv_bytes<std::uint16_t>(master_socket, &p_port, 1); // get process port
+    recv_bytes<port_type>(master_socket, &p_port, 1); // get process port
 
     _processes[p_rank] = {
       .rank = p_rank,
@@ -249,22 +161,21 @@ bool DataChannelTCP::initWorker() {
    * trying to connect.
    */
 
-  for (std::uint32_t r = 1; r < _rank; ++r) {
+  for (rank_type r = 1; r < _rank; ++r) {
     auto& process = _processes[r];
     process.socket = connect(process.address, process.port);
 
     // send rank to tell to the accepting process who we are
-    std::uint32_t p_rank = static_cast<std::uint32_t>(_rank);
-    send_bytes<std::uint32_t>(process.socket, &p_rank, 1);
+    send_bytes<rank_type>(process.socket, &_rank, 1);
   }
 
-  for (std::uint32_t i = _rank + 1; i < _processes.size(); ++i) {
+  for (rank_type i = _rank + 1; i < _processes.size(); ++i) {
     int socket;
     std::tie(socket, std::ignore) = accept(_socket, _timeout);
 
     // get rank of process we have just accepted
-    std::uint32_t p_rank;
-    recv_bytes<std::uint32_t>(socket, &p_rank, 1);
+    rank_type p_rank;
+    recv_bytes<rank_type>(socket, &p_rank, 1);
 
     _processes[p_rank].socket = socket;
   }
@@ -281,16 +192,16 @@ bool DataChannelTCP::initMaster() {
   std::tie(_socket, std::ignore) = listen(_port);
 
   // wait for all workers to connect
-  int workers = _processes.size() - 1;
+  std::size_t workers = _processes.size() - 1;
   while (workers > 0) {
     std::string p_address;
     int p_socket;
     std::tie(p_socket, p_address) = accept(_socket, _timeout);
 
-    std::uint32_t p_rank;
-    std::uint16_t p_port;
-    recv_bytes<std::uint32_t>(p_socket, &p_rank, 1);
-    recv_bytes<std::uint16_t>(p_socket, &p_port, 1);
+    rank_type p_rank;
+    port_type p_port;
+    recv_bytes<rank_type>(p_socket, &p_rank, 1);
+    recv_bytes<port_type>(p_socket, &p_port, 1);
 
     if (p_rank >= _processes.size()) {
       throw std::out_of_range(
@@ -320,17 +231,17 @@ bool DataChannelTCP::initMaster() {
   for (const auto& worker : _processes) {
     if (worker.rank == _rank) continue;
 
-    std::uint32_t processes_number = _processes.size();
-    send_bytes<std::uint32_t>(worker.socket, &processes_number, 1, true);
+    rank_type processes_number = _processes.size();
+    send_bytes<rank_type>(worker.socket, &processes_number, 1, true);
 
     for (auto& process : _processes) {
       if (process.rank == _rank) continue;
 
       std::uint32_t proc_address_length = process.address.size();
-      send_bytes<std::uint32_t>(worker.socket, &process.rank, 1, true);
+      send_bytes<rank_type>(worker.socket, &process.rank, 1, true);
       send_bytes<std::uint32_t>(worker.socket, &proc_address_length, 1, true);
       send_bytes<char>(worker.socket, process.address.data(), proc_address_length, true);
-      send_bytes<std::uint16_t>(worker.socket, &(process.port), 1);
+      send_bytes<port_type>(worker.socket, &process.port, 1);
     }
   }
 
@@ -345,9 +256,9 @@ bool DataChannelTCP::initMaster() {
 bool DataChannelTCP::init() {
   bool ok = (_rank == MASTER_RANK ? initMaster() : initWorker());
   if (ok) {
-    std::vector<int> ranks;
+    std::vector<rank_type> ranks;
     ranks.reserve(_processes.size());
-    for (size_t rank = 0; rank < _processes.size(); ++rank)
+    for (rank_type rank = 0; rank < _processes.size(); ++rank)
       ranks.push_back(rank);
 
     _groups.insert({
@@ -360,12 +271,12 @@ bool DataChannelTCP::init() {
 }
 
 
-int DataChannelTCP::getRank() {
+rank_type DataChannelTCP::getRank() {
   return _rank;
 }
 
 
-int DataChannelTCP::getNumProcesses() {
+rank_type DataChannelTCP::getNumProcesses() {
   return _processes.size();
 }
 
@@ -413,7 +324,7 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
 
 
 void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
-                            thpp::Tensor& input, int dst_rank, THDGroup group_id) {
+                            thpp::Tensor& input, rank_type dst_rank, THDGroup group_id) {
   const auto& group = _groups.at(group_id);
   bool exists;
 
@@ -445,7 +356,7 @@ void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
 
 
 void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
-                             thpp::Tensor& output, int src_rank,
+                             thpp::Tensor& output, rank_type src_rank,
                              THDGroup group_id) {
   const auto& group = _groups.at(group_id);
   bool exists;
@@ -502,7 +413,7 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
     return;
 
   std::uint64_t tensor_bytes = data.elementSize() * data.numel();
-  auto tmp_tensor = data.clone();
+  auto tmp_tensor = std::unique_ptr<thpp::Tensor>(data.clone());
 
   auto pof2 = pow2(group.size());
   int rem = group.size() - pof2;
@@ -543,8 +454,6 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
     }
   }
 
-  delete tmp_tensor;
-
   if (group_rank < 2 * rem) {
     if (group_rank % 2) {
       send(data, group.mustGetGlobalRank(group_rank - 1));
@@ -556,7 +465,7 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
 
 
 void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
-                            int dst_rank, THDGroup group_id) {
+                            rank_type dst_rank, THDGroup group_id) {
   /*
    * Idea of this algorithm is similar to broadcast but with reversed
    * order and direction of communication.
@@ -572,9 +481,9 @@ void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
 
   auto group_dst_rank = group.mustGetGroupRank(dst_rank);
   int dim = log2ceil(group.size());
-  rank_type virtual_rank = ((group.size() - group_dst_rank) + group_rank) % group.size();
+  rank_type virtual_rank = (group_rank + group.size() - group_dst_rank) % group.size();
   long long mask = 0;
-  auto result_tensor = data.clone();
+  auto result_tensor = std::unique_ptr<thpp::Tensor>(data.clone());
 
   for (int k = 0; k <= dim - 1; mask ^= (1 << k), ++k) {
     if ((virtual_rank & mask) == 0) {
@@ -594,12 +503,10 @@ void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
 
   if (_rank == dst_rank)
     std::memcpy(data.data(), result_tensor->data(), data.elementSize() * data.numel());
-
-  delete result_tensor;
 }
 
 
-void DataChannelTCP::broadcast(thpp::Tensor& data, int src_rank,
+void DataChannelTCP::broadcast(thpp::Tensor& data, rank_type src_rank,
                                THDGroup group_id) {
   /*
    * General idea of this algorithm is to send data in `d` dimensional
@@ -621,7 +528,7 @@ void DataChannelTCP::broadcast(thpp::Tensor& data, int src_rank,
 
   auto group_src_rank = group.mustGetGroupRank(src_rank);
   int dim = log2ceil(group.size());
-  rank_type virtual_rank = ((group.size() - group_src_rank) + group_rank) % group.size();
+  rank_type virtual_rank = (group_rank + group.size() - group_src_rank) % group.size();
   long long mask = (1 << dim) - 1;
 
   for (int k = dim - 1; k >= 0; --k) {
@@ -642,7 +549,7 @@ void DataChannelTCP::broadcast(thpp::Tensor& data, int src_rank,
 }
 
 
-void DataChannelTCP::send(const Scalar& data, int dst_rank) {
+void DataChannelTCP::send(const Scalar& data, rank_type dst_rank) {
   auto request = _send_worker.push([this, &data, dst_rank]{
     this->_send(data, dst_rank);
   });
@@ -650,7 +557,7 @@ void DataChannelTCP::send(const Scalar& data, int dst_rank) {
 }
 
 
-void DataChannelTCP::send(thpp::Tensor& data, int dst_rank) {
+void DataChannelTCP::send(thpp::Tensor& data, rank_type dst_rank) {
   auto request = _send_worker.push([this, &data, dst_rank]{
     this->_send(data, dst_rank);
   });
@@ -658,7 +565,7 @@ void DataChannelTCP::send(thpp::Tensor& data, int dst_rank) {
 }
 
 
-void DataChannelTCP::receive(Scalar& data, int src_rank) {
+void DataChannelTCP::receive(Scalar& data, rank_type src_rank) {
   auto request = _receive_worker.push([this, &data, src_rank]{
     this->_receive(data, src_rank);
   });
@@ -701,7 +608,7 @@ void DataChannelTCP::receive(thpp::Tensor& data) {
 }
 
 
-void DataChannelTCP::receive(thpp::Tensor& data, int src_rank) {
+void DataChannelTCP::receive(thpp::Tensor& data, rank_type src_rank) {
   auto request = _receive_worker.push([this, &data, src_rank]{
     this->_receive(data, src_rank);
   });
@@ -710,7 +617,7 @@ void DataChannelTCP::receive(thpp::Tensor& data, int src_rank) {
 
 
 DataChannelTCP::RequestTCP* DataChannelTCP::isend(thpp::Tensor& data,
-                                                  int dst_rank) {
+                                                  rank_type dst_rank) {
   std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
   auto request = _send_worker.push([this, copy_tensor, dst_rank]{
     this->_send(*copy_tensor, dst_rank);
@@ -720,7 +627,7 @@ DataChannelTCP::RequestTCP* DataChannelTCP::isend(thpp::Tensor& data,
 
 
 DataChannelTCP::RequestTCP* DataChannelTCP::ireceive(thpp::Tensor& data,
-                                                     int src_rank) {
+                                                     rank_type src_rank) {
   std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
   auto request = _receive_worker.push([this, copy_tensor, src_rank]{
     this->_receive(*copy_tensor, src_rank);
@@ -765,7 +672,7 @@ void DataChannelTCP::barrier(THDGroup group_id) {
 }
 
 
-THDGroup DataChannelTCP::newGroup(const std::vector<int>& ranks) {
+THDGroup DataChannelTCP::newGroup(const std::vector<rank_type>& ranks) {
   auto new_group = DataChannel::Group(ranks, _processes.size() - 1);
   THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
 
@@ -774,14 +681,11 @@ THDGroup DataChannelTCP::newGroup(const std::vector<int>& ranks) {
 }
 
 
-void DataChannelTCP::_send(const Scalar& data, int dst_rank) {
+void DataChannelTCP::_send(const Scalar& data, rank_type dst_rank) {
   /*
    * We have to check if dst_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
    */
-
-  if (dst_rank < 0)
-    throw std::out_of_range("destination rank is invalid (< 0)");
 
   const auto& process_dst = _processes.at(dst_rank);
   if (process_dst.rank == _rank)
@@ -800,14 +704,11 @@ void DataChannelTCP::_send(const Scalar& data, int dst_rank) {
 }
 
 
-void DataChannelTCP::_send(thpp::Tensor& data, int dst_rank) {
+void DataChannelTCP::_send(thpp::Tensor& data, rank_type dst_rank) {
   /*
    * We have to check if dst_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
    */
-
-  if (dst_rank < 0)
-    throw std::out_of_range("destination rank is invalid (< 0)");
 
   const auto& process_dst = _processes.at(dst_rank);
   if (process_dst.rank == _rank)
@@ -829,14 +730,11 @@ void DataChannelTCP::_send(thpp::Tensor& data, int dst_rank) {
 }
 
 
-void DataChannelTCP::_receive(Scalar& data, int src_rank) {
+void DataChannelTCP::_receive(Scalar& data, rank_type src_rank) {
   /*
    * We have to check if src_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
    */
-
-  if (src_rank < 0)
-    throw std::out_of_range("source rank is invalid (< 0)");
 
   const auto& process_src = _processes.at(src_rank);
   if (process_src.rank == _rank)
@@ -862,14 +760,11 @@ void DataChannelTCP::_receive(Scalar& data, int src_rank) {
 }
 
 
-void DataChannelTCP::_receive(thpp::Tensor& data, int src_rank) {
+void DataChannelTCP::_receive(thpp::Tensor& data, rank_type src_rank) {
   /*
    * We have to check if src_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
    */
-
-  if (src_rank < 0)
-    throw std::out_of_range("source rank is invalid (< 0)");
 
   const auto& process_src = _processes.at(src_rank);
   if (process_src.rank == _rank)

@@ -7,6 +7,7 @@
 #include <netinet/tcp.h>
 #include <sys/poll.h>
 #include <unistd.h>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
@@ -34,10 +35,10 @@ const char* get_env(const char* env) {
 
 } // anonymous namespace
 
-std::tuple<int, std::uint16_t> listen(std::uint16_t port) {
+std::tuple<int, port_type> listen(port_type port) {
   struct addrinfo hints, *res = NULL;
 
-  memset(&hints, 0x00, sizeof(hints));
+  std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE;
   hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
@@ -80,16 +81,16 @@ std::tuple<int, std::uint16_t> listen(std::uint16_t port) {
   struct sockaddr_in addr;
   socklen_t addr_len = sizeof(addr);
   SYSCHECK(::getsockname(socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
-  std::uint16_t listen_port = ntohs(addr.sin_port);
+  port_type listen_port = ntohs(addr.sin_port);
 
   return std::make_tuple(socket, listen_port);
 }
 
 
-int connect(const std::string& address, std::uint16_t port, bool wait) {
+int connect(const std::string& address, port_type port, bool wait) {
   struct addrinfo hints, *res = NULL;
 
-  memset(&hints, 0x00, sizeof(hints));
+  std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
   hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
@@ -179,10 +180,10 @@ std::tuple<int, std::string> accept(int listen_socket, int timeout) {
   return std::make_tuple(socket, std::string(address));
 }
 
-std::tuple<std::uint16_t, std::uint32_t> load_master_env() {
-  std::uint16_t port = convertToPort(std::stoul(getenv(MASTER_PORT_ENV)));
+std::tuple<port_type, rank_type> load_master_env() {
+  auto port = convertToPort(std::stoul(getenv(MASTER_PORT_ENV)));
 
-  std::uint32_t world_size = std::stoul(getenv(WORLD_SIZE_ENV));
+  rank_type world_size = std::stoul(getenv(WORLD_SIZE_ENV));
   if (world_size == 0)
     throw std::domain_error(std::string(WORLD_SIZE_ENV) + " env variable cannot be 0");
 
@@ -190,18 +191,18 @@ std::tuple<std::uint16_t, std::uint32_t> load_master_env() {
 }
 
 
-std::tuple<std::string, std::uint16_t> load_worker_env() {
+std::tuple<std::string, port_type> load_worker_env() {
   std::string full_address = std::string(getenv(MASTER_ADDR_ENV));
   auto found_pos = full_address.rfind(":");
   if (found_pos == std::string::npos)
     throw std::domain_error("invalid master address, usage: IP:PORT | HOSTNAME:PORT");
 
   std::string str_port = full_address.substr(found_pos + 1);
-  std::uint16_t port = convertToPort(std::stoul(str_port));
+  auto port = convertToPort(std::stoul(str_port));
   return std::make_tuple(full_address.substr(0, found_pos), port);
 }
 
-std::uint32_t load_rank_env() {
+rank_type load_rank_env() {
   return convertToRank(std::stol(getenv(RANK_ENV)));
 }
 
