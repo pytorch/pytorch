@@ -11,12 +11,8 @@ class CosineSimilarity(Module):
         .. math ::
             cossim(v_1,v_2) = \frac{v_1 * v_2}{\left| v_1 \right| * \left| v_2 \right|}
         
-        Inputs: x
-            - **x** of size (2, batch, size): Tensor containing the two input batches x1,x2 = x.
-
-        Outputs: output
-            - **output** of size (batch,): Tensor containing the batch-wise similarities between the batched inputs x1,x2.
-
+        Args: 
+            - **x** of size (2, batch, size): Tensor containing the two input batches x1,x2 = x
     """
 
     def __init__(self):
