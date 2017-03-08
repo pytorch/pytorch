@@ -23,7 +23,7 @@ class RMSprop(Optimizer):
 
     """
 
-    def __init__(self, params, lr=1e-2, momentum=0, alpha=0.99, eps=1e-8, centered=False, weight_decay=0):
+    def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False):
         defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, weight_decay=weight_decay)
         super(RMSprop, self).__init__(params, defaults)
 
