@@ -1,88 +1,23 @@
 #include "DataChannelTCP.hpp"
-#include "DataChannelUtils.hpp"
+#include "../ChannelUtils.hpp"
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <sys/poll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <fcntl.h>
-#include <netdb.h>
 #include <unistd.h>
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <future>
-#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <system_error>
-#include <thread>
-#include <tuple>
 
-
-#define SYSCHECK(expr) { \
-  errno = 0; (expr);     \
-  if (errno != 0) throw std::system_error(errno, std::system_category()); \
-}
 
 namespace thd {
 namespace {
 
 constexpr int MASTER_RANK = 0;
-constexpr int LISTEN_QUEUE_SIZE = 64;
-
-template<typename T>
-void send_bytes(int socket, const T* buffer, std::size_t length)
-{
-  std::size_t bytes_to_send = sizeof(T) * length;
-  if (bytes_to_send == 0)
-    return;
-
-  auto bytes = reinterpret_cast<const std::uint8_t*>(buffer);
-  std::uint8_t *current_bytes = const_cast<std::uint8_t*>(bytes);
-
-  while (bytes_to_send > 0) {
-    ssize_t bytes_sent;
-    SYSCHECK(bytes_sent = ::send(socket, current_bytes, bytes_to_send, 0))
-    if (bytes_sent == 0)
-      throw std::system_error(EBADMSG, std::system_category());
-
-    bytes_to_send -= bytes_sent;
-    current_bytes += bytes_sent;
-  }
-}
-
-
-template<typename T>
-void recv_bytes(int socket, T* buffer, std::size_t length)
-{
-  std::size_t bytes_to_receive = sizeof(T) * length;
-  if (bytes_to_receive == 0)
-    return;
-
-  auto bytes = reinterpret_cast<std::uint8_t*>(buffer);
-  std::uint8_t *current_bytes = bytes;
-
-  while (bytes_to_receive > 0) {
-    ssize_t bytes_received;
-    SYSCHECK(bytes_received = ::recv(socket, current_bytes, bytes_to_receive, 0))
-    if (bytes_received == 0)
-      throw std::system_error(EBADMSG, std::system_category());
-
-    bytes_to_receive -= bytes_received;
-    current_bytes += bytes_received;
-  }
-}
-
-
-inline bool validatePort(int port) {
-  return (port > 0 && port < 65536);
-}
 
 
 inline int log2ceil(std::uint32_t value) {
@@ -95,12 +30,6 @@ inline int log2ceil(std::uint32_t value) {
   for (int size = 1; size < value; ++dim, size <<= 1) /* empty */;
 #endif // defined(__GNUC__)
   return dim;
-}
-
-void setSocketNoDelay(int socket) {
-  int flag = 1;
-  socklen_t optlen = sizeof(flag);
-  SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
 }
 
 } // namespace
@@ -135,56 +64,30 @@ DataChannelTCP::DataChannelTCP(int timeout)
   , _timeout(timeout)
   , _poll_events(nullptr)
 {
-  auto rank_env = std::getenv(RANK_ENV);
-  if (!rank_env)
-    throw std::domain_error("env variable not found: " + std::string(RANK_ENV));
+  _rank = load_rank_env();
 
-  _rank = std::stoi(rank_env);
   if (_rank == MASTER_RANK) { // MASTER
-    auto master_port_env = std::getenv(MASTER_PORT_ENV);
-    if (!master_port_env)
-      throw std::domain_error("env variable not found: " + std::string(MASTER_PORT_ENV));
-
-    _port = std::stoul(master_port_env);
-    if (!validatePort(_port))
-      throw std::domain_error("invalid listen port number");
-
-    auto num_proceses_env = std::getenv(WORLD_SIZE_ENV);
-    if (!num_proceses_env)
-      throw std::domain_error("env variable not found: " + std::string(WORLD_SIZE_ENV));
-
-    int processes_number = std::stoul(num_proceses_env);
-    if (processes_number == 0)
-      throw std::domain_error("invalid " + std::string(WORLD_SIZE_ENV) + " env variable");
+    std::uint32_t processes_number;
+    std::tie(_port, processes_number) = load_master_env();
 
     _processes.resize(processes_number);
     _processes[_rank] = {
-      .rank = static_cast<std::uint32_t>(_rank),
+      .rank = _rank,
       .address = "",
       .port = 0,
       .socket = -1,
     };
   } else { // WORKER
-    auto master_addr_env = std::getenv(MASTER_ADDR_ENV);
-    if (!master_addr_env)
-      throw std::domain_error("env variable not found: " + std::string(MASTER_ADDR_ENV));
-
-    std::string full_address = std::string(master_addr_env);
-    auto found_pos = full_address.rfind(":");
-    if (found_pos == std::string::npos)
-      throw std::domain_error("invalid master address, usage: IP:PORT | HOSTNAME:PORT");
-
-    std::string str_port = full_address.substr(found_pos + 1);
-    int port = std::stoul(str_port);
-    if (!validatePort(port))
-      throw std::domain_error("invalid master port number");
+    std::string address;
+    std::uint16_t port;
+    std::tie(address, port) = load_worker_env();
 
     // add master
-    _processes.resize(MASTER_RANK + 1);
+    _processes.resize(1);
     _processes[MASTER_RANK] = {
       .rank = MASTER_RANK,
-      .address = full_address.substr(0, found_pos),
-      .port = static_cast<std::uint16_t>(port),
+      .address = address,
+      .port = port,
       .socket = -1,
     };
   }
@@ -203,162 +106,15 @@ DataChannelTCP::~DataChannelTCP()
 }
 
 
-void DataChannelTCP::listen(std::uint16_t port = 0) {
-  struct addrinfo hints, *res = NULL;
-
-  memset(&hints, 0x00, sizeof(hints));
-  hints.ai_flags = AI_PASSIVE;
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
-  hints.ai_socktype = SOCK_STREAM; // TCP
-
-  // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
-  // by editing `/etc/gai.conf`. so there is no need to manual sorting
-  // or protcol preference.
-  int err = getaddrinfo(NULL, std::to_string(port).data(), &hints, &res);
-  if (err != 0 || !res) {
-    throw std::invalid_argument("cannot find host to listen on: " + std::string(gai_strerror(err)));
-  }
-
-  std::shared_ptr<struct addrinfo> addresses(res, [](struct addrinfo* p) {
-    ::freeaddrinfo(p);
-  });
-
-  struct addrinfo *next_addr = addresses.get();
-  while (true) {
-    try {
-      SYSCHECK(_socket = ::socket(next_addr->ai_family, next_addr->ai_socktype, next_addr->ai_protocol))
-
-      int optval = 1;
-      SYSCHECK(::setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
-      SYSCHECK(::bind(_socket, next_addr->ai_addr, next_addr->ai_addrlen))
-      SYSCHECK(::listen(_socket, LISTEN_QUEUE_SIZE))
-      break;
-    } catch (const std::system_error& e) {
-      ::close(_socket);
-      next_addr = next_addr->ai_next;
-
-      // we have tried all addresses but could not establish listening on any of them
-      if (!next_addr) {
-        throw e;
-      }
-    }
-  }
-
-  // get listen port
-  struct sockaddr_in addr;
-  socklen_t addr_len = sizeof(addr);
-  SYSCHECK(::getsockname(_socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
-  _port = ntohs(addr.sin_port);
-}
-
-
-int DataChannelTCP::connect(const std::string& address, std::uint16_t port,
-                            int wait = true) const {
-  struct addrinfo hints, *res = NULL;
-
-  memset(&hints, 0x00, sizeof(hints));
-  hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
-  hints.ai_socktype = SOCK_STREAM; // TCP
-
-  // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
-  // by editing `/etc/gai.conf`. so there is no need to manual sorting
-  // or protcol preference.
-  int err = ::getaddrinfo(address.data(), std::to_string(port).data(), &hints, &res);
-  if (err != 0 || !res) {
-    throw std::invalid_argument("host not found: " + std::string(gai_strerror(err)));
-  }
-
-  std::shared_ptr<struct addrinfo> addresses(res, [](struct addrinfo* p) {
-    ::freeaddrinfo(p);
-  });
-
-  struct addrinfo *next_addr = addresses.get();
-  int socket;
-  // we'll loop over the addresses only if at least of them gave us ECONNREFUSED.
-  // Maybe the host was up, but the server wasn't running.
-  bool any_refused = false;
-  while (true) {
-    try {
-      SYSCHECK(socket = ::socket(next_addr->ai_family, next_addr->ai_socktype, next_addr->ai_protocol))
-      SYSCHECK(::connect(socket, next_addr->ai_addr, next_addr->ai_addrlen))
-      break;
-    } catch (const std::system_error& e) {
-      // if `connect` fails, the state of the socket is unspecified.
-      // we should close the socket and create a new one before attempting to reconnect.
-      ::close(socket);
-      if (errno == ECONNREFUSED) any_refused = true;
-
-      // we need to move to next address because this was not available
-      // to connect or to create socket
-      next_addr = next_addr->ai_next;
-
-      // we have tried all addresses but could not connect to any of them
-      if (!next_addr) {
-        if (!wait || !any_refused) throw e;
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        any_refused = false;
-        next_addr = addresses.get();
-      }
-    }
-  }
-
-  setSocketNoDelay(socket);
-
-  return socket;
-}
-
-
-std::tuple<int, std::string> DataChannelTCP::accept() const {
-  // poll on listen socket, it allows to make timeout
-  std::unique_ptr<struct pollfd[]> events(new struct pollfd[1]);
-  events[0] = {.fd = _socket, .events = POLLIN};
-
-  int res;
-  SYSCHECK(res = ::poll(events.get(), 1, _timeout))
-  if (res == 0) {
-    throw std::runtime_error("waiting for processes to connect has timed out");
-  } else {
-    if (!(events[0].revents & POLLIN))
-      throw std::system_error(ECONNABORTED, std::system_category());
-  }
-
-  int socket;
-  SYSCHECK(socket = ::accept(_socket, NULL, NULL))
-
-  struct sockaddr_storage addr;
-  socklen_t addr_len = sizeof(addr);
-  char address[INET6_ADDRSTRLEN + 1];
-
-  SYSCHECK(::getpeername(socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
-
-  if (addr.ss_family == AF_INET) {
-    struct sockaddr_in *s = reinterpret_cast<struct sockaddr_in*>(&addr);
-    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
-    address[INET_ADDRSTRLEN] = '\0';
-  } else {
-    struct sockaddr_in6 *s = reinterpret_cast<struct sockaddr_in6*>(&addr);
-    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
-    address[INET6_ADDRSTRLEN] = '\0';
-  }
-
-  setSocketNoDelay(socket);
-
-  return std::make_tuple(socket, std::string(address));
-}
-
-
 bool DataChannelTCP::initWorker() {
   auto& master = _processes[MASTER_RANK];
   master.socket = connect(master.address, master.port);
   int master_socket = master.socket;
 
-  listen();
+  std::tie(_socket, _port) = listen();
 
-  std::uint32_t p_rank = (std::uint32_t)_rank;
-  std::uint16_t p_port = (std::uint16_t)_port;
-  send_bytes<std::uint32_t>(master_socket, &p_rank, 1);
-  send_bytes<std::uint16_t>(master_socket, &p_port, 1); // send listening port to master
+  send_bytes<std::uint32_t>(master_socket, &_rank, 1);
+  send_bytes<std::uint16_t>(master_socket, &_port, 1); // send listening port to master
 
   std::uint32_t processes_number;
   recv_bytes<std::uint32_t>(master_socket, &processes_number, 1);
@@ -389,13 +145,13 @@ bool DataChannelTCP::initWorker() {
     processes_number--;
   }
 
-  /**
-    Firstly we are connecting to workers with rank lower than our rank,
-    then we accepting connections from other wokers with higher rank.
-
-    This prevents from deadlocks where everyone is accepting or everyone is
-    tryin to connect.
-  **/
+  /*
+   * Firstly we are connecting to workers with rank lower than our rank,
+   * then we accepting connections from other wokers with higher rank.
+   *
+   * This prevents from deadlocks where everyone is accepting or everyone is
+   * trying to connect.
+   */
 
   for (std::uint32_t r = 1; r < _rank; ++r) {
     auto& process = _processes[r];
@@ -407,8 +163,8 @@ bool DataChannelTCP::initWorker() {
   }
 
   for (std::uint32_t i = _rank + 1; i < _processes.size(); ++i) {
-    auto accept_state = accept();
-    int socket = std::get<0>(accept_state);
+    int socket;
+    std::tie(socket, std::ignore) = accept(_socket, _timeout);
 
     // get rank of process we have just accepted
     std::uint32_t p_rank;
@@ -426,19 +182,19 @@ bool DataChannelTCP::initWorker() {
 
 
 bool DataChannelTCP::initMaster() {
-  listen(_port);
+  std::tie(_socket, std::ignore) = listen(_port);
 
   // wait for all workers to connect
   int workers = _processes.size() - 1;
   while (workers > 0) {
-    auto accept_state = accept();
-    int socket = std::get<0>(accept_state);
-    std::string p_address = std::get<1>(accept_state);
+    std::string p_address;
+    int p_socket;
+    std::tie(p_socket, p_address) = accept(_socket, _timeout);
 
     std::uint32_t p_rank;
     std::uint16_t p_port;
-    recv_bytes<std::uint32_t>(socket, &p_rank, 1);
-    recv_bytes<std::uint16_t>(socket, &p_port, 1);
+    recv_bytes<std::uint32_t>(p_socket, &p_rank, 1);
+    recv_bytes<std::uint16_t>(p_socket, &p_port, 1);
 
     if (p_rank >= _processes.size()) {
       throw std::out_of_range(
@@ -458,7 +214,7 @@ bool DataChannelTCP::initMaster() {
       .rank = p_rank,
       .address = p_address,
       .port = p_port,
-      .socket = socket,
+      .socket = p_socket,
     };
 
     workers--;
@@ -1022,6 +778,3 @@ void DataChannelTCP::_reduce(thpp::Tensor& result, thpp::Tensor& data,
 }
 
 } // namespace thd
-
-
-#undef SYSCHECK

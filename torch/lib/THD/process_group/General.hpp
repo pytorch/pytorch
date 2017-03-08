@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base/DataChannel.hpp"
+#include "base/channels/data_channel/DataChannel.hpp"
 #include "General.h"
 #include <memory>
 

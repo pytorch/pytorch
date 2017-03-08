@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ChannelType.h"
 #include "DataChannel.h"
-#include "Scalar.hpp"
+#include "../ChannelType.h"
+#include "../../Scalar.hpp"
 
 #include <THPP/Tensor.hpp>
 

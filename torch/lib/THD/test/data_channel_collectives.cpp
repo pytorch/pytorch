@@ -1,6 +1,6 @@
-#include "../base/channels/DataChannelTCP.hpp"
+#include "../base/channels/data_channel/DataChannelTCP.hpp"
 #ifdef WITH_MPI
-#include "../base/channels/DataChannelMPI.hpp"
+#include "../base/channels/data_channel/DataChannelMPI.hpp"
 #endif // WITH_MPI
 #include "TestUtils.hpp"
 

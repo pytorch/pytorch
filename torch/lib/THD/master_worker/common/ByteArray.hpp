@@ -2,34 +2,28 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace thd { namespace rpc {
 
 struct ByteArray {
   using size_type = std::size_t;
+
   ByteArray();
   ByteArray(std::size_t size);
-  ByteArray(char* arr, std::size_t size);
+  ByteArray(const char* arr, std::size_t size);
   ByteArray(ByteArray&& arr);
   ByteArray(const ByteArray& arr);
   ~ByteArray();
 
   ByteArray& append(const char* arr, std::size_t size);
-  char* data() const;
+  const char* data() const;
   size_type length() const;
 
-  std::string to_string();
-
-  static ByteArray fromData(const char* arr, std::size_t size);
+  std::string to_string() const;
 
 private:
-  char* _data;
-  size_type _length; // The length of the data.
-  size_type _size; // The size of the allocated memory.
-
-  void _realloc(std::size_t new_size);
-  void _resize(std::size_t desired_size);
-  void _resizeExact(std::size_t desired_size);
+  std::vector<char> _data;
 };
 
 }} // namespace rpc, thd

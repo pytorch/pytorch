@@ -1,32 +1,29 @@
-#include "../master_worker/common/CommandChannel.hpp"
-#include "../base/ChannelEnvVars.hpp"
+#include "../base/channels/command_channel/CommandChannel.hpp"
+#include "../base/channels/ChannelEnvVars.hpp"
 
+#include <stdlib.h>
+#include <unistd.h>
 #include <cassert>
 #include <cerrno>
 #include <cstdlib>
 #include <exception>
 #include <string>
 #include <system_error>
-#include <stdlib.h>
-#include <unistd.h>
+#include <thread>
 
 using namespace thd;
 
-void overwrite_env(const std::string& name, const std::string& value) {
-  int err = setenv(name.c_str(), value.c_str(), 1);
-  if (err == -1) {
-    throw std::system_error(errno, std::system_category(),
-        "unable to set an environmental variable " + name + " to " + value);
-  }
-}
+std::vector<std::thread> g_all_workers;
+std::mutex g_mutex;
 
 void init_worker(const int& rank, const std::string& master_addr) {
-  overwrite_env(RANK_ENV, std::to_string(rank));
-  overwrite_env(MASTER_ADDR_ENV, master_addr);
+  g_mutex.lock();
+  setenv("RANK", std::to_string(rank).data(), 1);
+  setenv("MASTER_ADDR", master_addr.data(), 1);
+  auto channel = std::make_shared<thd::WorkerCommandChannel>(); // reads all env variable
+  g_mutex.unlock();
 
-  fprintf(stderr, "worker %d: about to construct a worker\n", rank);
-  WorkerCommandChannel channel(rank);
-  fprintf(stderr, "worker %d: constructed\n", rank);
+  assert(channel->init());
 
   // Send.
   rpc::ByteArray arr;
@@ -36,13 +33,13 @@ void init_worker(const int& rank, const std::string& master_addr) {
 
   fprintf(stderr, "worker %d: about to send a message\n", rank);
 
-  channel.sendMessage(std::unique_ptr<rpc::RPCMessage>(
-        new rpc::RPCMessage(std::move(arr))));
+  auto rpc_msg = std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(std::move(arr)));
+  channel->sendMessage(std::move(rpc_msg));
 
   fprintf(stderr, "worker %d: sent message\n", rank);
 
   // Recieve.
-  auto msg = channel.recvMessage();
+  auto msg = channel->recvMessage();
   std::string expected = std::string("hello to worker ") +
       std::to_string(rank) + " from master";
   fprintf(stderr, "Worker %d: received '%.*s'\n", rank,
@@ -50,59 +47,56 @@ void init_worker(const int& rank, const std::string& master_addr) {
   assert(expected.compare(msg.get()->bytes().to_string()) == 0);
 }
 
-void init_master(const int& world_size, const std::string& master_port) {
-  overwrite_env(RANK_ENV, std::to_string(0));
-  overwrite_env(WORLD_SIZE_ENV, std::to_string(world_size));
-  overwrite_env(MASTER_PORT_ENV, master_port);
+void init_master(int world_size, const std::string& master_port) {
+  g_mutex.lock();
+  setenv("WORLD_SIZE", std::to_string(world_size).data(), 1);
+  setenv("RANK", "0", 1);
+  setenv("MASTER_PORT", master_port.data(), 1);
+  auto channel = std::make_shared<thd::MasterCommandChannel>(); // reads all env variable
+  g_mutex.unlock();
 
-  MasterCommandChannel channel;
+  assert(channel->init());
 
-  for (int wi = 1; wi < world_size; ++wi) {
+  for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
     rpc::ByteArray arr;
     arr.append("hello to worker ", sizeof("hello to worker ") - 1);
-    arr.append(std::to_string(wi).c_str(), std::to_string(wi).size());
+    arr.append(std::to_string(worker_rank).c_str(), std::to_string(worker_rank).size());
     arr.append(" from master", sizeof(" from master") - 1);
 
-    fprintf(stderr, "master: about to send a message to worker %d\n", wi);
-    channel.sendMessage(
-        std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(arr)),
-        wi
-    );
+    fprintf(stderr, "master: about to send a message to worker %d\n", worker_rank);
+    auto rpc_msg = std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(arr));
+    channel->sendMessage(std::move(rpc_msg), worker_rank);
   }
 
-  for (int wi = 1; wi < world_size; ++wi) {
+  for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
     std::unique_ptr<rpc::RPCMessage> msg;
-    msg = channel.recvMessage(wi);
+    msg = channel->recvMessage(worker_rank);
     std::string expected = std::string("hello to master from worker ") +
-      std::to_string(wi);
+      std::to_string(worker_rank);
     fprintf(stderr, "Master: received '%.*s' from worker %d\n",
         (int)msg.get()->bytes().length(), msg.get()->bytes().data(),
-        wi);
+        worker_rank);
     assert(expected.compare(msg.get()->bytes().to_string()) == 0);
+  }
+
+  // wait for all workers to finish
+  for (auto& worker : g_all_workers) {
+    worker.join();
   }
 }
 
-void run_test_case(
-    const std::string& name,
-    const int& world_size,
-    const std::string& master_addr,
-    const std::string& master_port,
-    int& rank
-
-) {
-  rank = 0;
-  for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
-    pid_t pid = fork();
-    if (pid == 0) {
-      rank = worker_rank;
-      init_worker(worker_rank, master_addr + ":" + master_port);
-      std::exit(0);
-    } else if (pid < 0) {
-      throw std::system_error(errno, std::system_category(), "failed to fork");
-    }
+void run_test_case(const std::string& name, int world_size,
+                   const std::string& master_addr, const std::string& master_port) {
+  for (int rank = 1; rank < world_size; ++rank) {
+    g_all_workers.push_back(
+      std::thread(init_worker, rank, master_addr + ":" + master_port)
+    );
   }
 
-  init_master(world_size, master_port);
+  std::thread master_thread(init_master, world_size, master_port);
+  master_thread.join();
+  g_all_workers.clear();
+
   fprintf(stderr, "\nPassed %s:\n"
       "world size =\t\t%d\n"
       "master address =\t%s\n"
@@ -116,46 +110,44 @@ int main() {
   std::string master_addr;
   std::string master_port;
   std::string test_name;
-  int rank;
 
   try {
     test_name = "Master test";
     world_size = 1;
     master_addr = "127.0.0.1";
     master_port = "55555";
-    run_test_case(test_name, world_size, master_addr, master_port, rank);
+    run_test_case(test_name, world_size, master_addr, master_port);
 
     test_name = "Basic test";
     world_size = 4;
     master_addr = "127.0.0.1";
     master_port = "55555";
-    run_test_case(test_name, world_size, master_addr, master_port, rank);
+    run_test_case(test_name, world_size, master_addr, master_port);
 
     test_name = "Many workers test";
     world_size = 12;
     master_addr = "127.0.0.1";
     master_port = "55555";
-    run_test_case(test_name, world_size, master_addr, master_port, rank);
+    run_test_case(test_name, world_size, master_addr, master_port);
 
     test_name = "IPv6 test";
     world_size = 12;
     master_addr = "127.0.0.1";
     master_port = "55555";
-    run_test_case(test_name, world_size, master_addr, master_port, rank);
+    run_test_case(test_name, world_size, master_addr, master_port);
 
     test_name = "Hostname resolution test";
     world_size = 12;
     master_addr = "localhost";
     master_port = "55555";
-    run_test_case(test_name, world_size, master_addr, master_port, rank);
+    run_test_case(test_name, world_size, master_addr, master_port);
   } catch (const std::exception& e) {
-    throw std::runtime_error(std::string() + "rank = " + std::to_string(rank) +
-        "; test for world size = " + std::to_string(world_size) +
+    throw std::runtime_error(
+        "test for world size = " + std::to_string(world_size) +
         ", master address = " + master_addr + ", master port = " +
-        master_port + " failed because of: " + e.what());
+        master_port + " failed because of: `" + e.what() + "`");
   }
 
   fprintf(stdout, "OK\n");
-
   return 0;
 }
