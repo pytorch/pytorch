@@ -19,6 +19,7 @@ class BarrierAllToOne : public Barrier {
       const std::shared_ptr<Context>& context,
       int rootRank = 0)
       : Barrier(context), rootRank_(rootRank) {
+    auto slot = this->context_->nextSlot();
     if (this->contextRank_ == rootRank_) {
       // Create send/recv buffers for every peer
       for (int i = 0; i < this->contextSize_; i++) {
@@ -29,11 +30,11 @@ class BarrierAllToOne : public Barrier {
 
         auto& pair = this->getPair(i);
         auto sdata = std::unique_ptr<int>(new int);
-        auto sbuf = pair->createSendBuffer(1, sdata.get(), sizeof(int));
+        auto sbuf = pair->createSendBuffer(slot, sdata.get(), sizeof(int));
         sendBuffersData_.push_back(std::move(sdata));
         sendBuffers_.push_back(std::move(sbuf));
         auto rdata = std::unique_ptr<int>(new int);
-        auto rbuf = pair->createRecvBuffer(0, rdata.get(), sizeof(int));
+        auto rbuf = pair->createRecvBuffer(slot, rdata.get(), sizeof(int));
         recvBuffersData_.push_back(std::move(rdata));
         recvBuffers_.push_back(std::move(rbuf));
       }
@@ -41,11 +42,11 @@ class BarrierAllToOne : public Barrier {
       // Create send/recv buffers to/from the root
       auto& pair = this->getPair(rootRank_);
       auto sdata = std::unique_ptr<int>(new int);
-      auto sbuf = pair->createSendBuffer(0, sdata.get(), sizeof(int));
+      auto sbuf = pair->createSendBuffer(slot, sdata.get(), sizeof(int));
       sendBuffersData_.push_back(std::move(sdata));
       sendBuffers_.push_back(std::move(sbuf));
       auto rdata = std::unique_ptr<int>(new int);
-      auto rbuf = pair->createRecvBuffer(1, rdata.get(), sizeof(int));
+      auto rbuf = pair->createRecvBuffer(slot, rdata.get(), sizeof(int));
       recvBuffersData_.push_back(std::move(rdata));
       recvBuffers_.push_back(std::move(rbuf));
     }

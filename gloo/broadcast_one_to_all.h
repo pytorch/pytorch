@@ -35,6 +35,7 @@ class BroadcastOneToAll : public Broadcast<T> {
     // Setup pairs/buffers for sender/receivers
     if (this->contextSize_ > 1) {
       auto ptr = ptrs_[this->getRootPointerRank()];
+      auto slot = this->context_->nextSlot();
       if (this->contextRank_ == this->rootRank_) {
         for (auto i = 0; i < this->contextSize_; i++) {
           if (i == this->contextRank_) {
@@ -43,11 +44,11 @@ class BroadcastOneToAll : public Broadcast<T> {
 
           auto& pair = this->context_->getPair(i);
           sendDataBuffers_.push_back(
-            pair->createSendBuffer(0, ptr, bytes_));
+            pair->createSendBuffer(slot, ptr, bytes_));
         }
       } else {
         auto& rootPair = this->context_->getPair(this->rootRank_);
-        recvDataBuffer_ = rootPair->createRecvBuffer(0, ptr, bytes_);
+        recvDataBuffer_ = rootPair->createRecvBuffer(slot, ptr, bytes_);
       }
     }
   }

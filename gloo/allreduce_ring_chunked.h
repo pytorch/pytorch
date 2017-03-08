@@ -23,41 +23,45 @@ class AllreduceRingChunked : public Allreduce<T> {
   AllreduceRingChunked(
       const std::shared_ptr<Context>& context,
       std::vector<T*> ptrs,
-      int dataSize,
+      int count,
       typename Allreduce<T>::ReduceFunction fn = nullptr)
       : Allreduce<T>(context, fn),
         ptrs_(ptrs),
-        dataSize_(dataSize),
-        dataSizeBytes_(dataSize * sizeof(T)),
+        count_(count),
+        bytes_(count_ * sizeof(T)),
         leftPair_(this->getLeftPair()),
         rightPair_(this->getRightPair()) {
     // Use chunks of no less than 1024 bytes (256 * sizeof(float))
     constexpr unsigned long minSize = 256;
     chunks_ = this->contextSize_ * 2;
-    chunkSize_ = std::max(minSize, (dataSize_ + chunks_ - 1) / chunks_);
+    chunkSize_ = std::max(minSize, (count_ + chunks_ - 1) / chunks_);
     chunkBytes_ = chunkSize_ * sizeof(T);
 
     // Allocate inboxes
     for (int i = 0; i < 2; i++) {
-      inbox_[i] = static_cast<T*>(malloc(dataSizeBytes_));
+      inbox_[i] = static_cast<T*>(malloc(bytes_));
     }
 
     for (int i = 0; i < 2; i++) {
+      auto slot = this->context_->nextSlot();
+
       // Buffer to send to (rank+1).
       sendDataBuf_[i] =
-          rightPair_->createSendBuffer(i, ptrs_[0], dataSizeBytes_);
+        rightPair_->createSendBuffer(slot, ptrs_[0], bytes_);
       // Buffer that (rank-1) writes to.
-      recvDataBuf_[i] = leftPair_->createRecvBuffer(i, inbox_[i], chunkBytes_);
+      recvDataBuf_[i] =
+        leftPair_->createRecvBuffer(slot, inbox_[i], chunkBytes_);
     }
 
     // Dummy buffers for localized barrier.
     // Before sending to the right, we only need to know that the node
     // on the right is done using the inbox that's about to be written
     // into. No need for a global barrier.
+    auto notificationSlot = this->context_->nextSlot();
     sendNotificationBuf_ =
-        leftPair_->createSendBuffer(2, &dummy_, sizeof(dummy_));
+      leftPair_->createSendBuffer(notificationSlot, &dummy_, sizeof(dummy_));
     recvNotificationBuf_ =
-        rightPair_->createRecvBuffer(2, &dummy_, sizeof(dummy_));
+      rightPair_->createRecvBuffer(notificationSlot, &dummy_, sizeof(dummy_));
   }
 
   virtual ~AllreduceRingChunked() {
@@ -71,7 +75,7 @@ class AllreduceRingChunked : public Allreduce<T> {
   void run() {
     // Reduce specified pointers into ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
-      this->fn_(ptrs_[0], ptrs_[i], dataSize_);
+      this->fn_(ptrs_[0], ptrs_[i], count_);
     }
 
     // Kick off copying initial chunks
@@ -103,11 +107,11 @@ class AllreduceRingChunked : public Allreduce<T> {
           chunks_;
       auto offset = chunkOffset * chunkSize_;
       auto length = chunkSize_;
-      if (offset + length <= dataSize_) {
+      if (offset + length <= count_) {
         // Chunk completely in range, copy full chunk.
-      } else if (offset < dataSize_) {
+      } else if (offset < count_) {
         // Chunk partially in range, copy partial chunk.
-        length = dataSize_ - offset;
+        length = count_ - offset;
       } else {
         // Chunk out of range, copy nothing.
         length = 0;
@@ -142,11 +146,11 @@ class AllreduceRingChunked : public Allreduce<T> {
           chunks_;
       auto offset = chunkOffset * chunkSize_;
       auto length = chunkSize_;
-      if (offset + length <= dataSize_) {
+      if (offset + length <= count_) {
         // Chunk completely in range, copy full chunk.
-      } else if (offset < dataSize_) {
+      } else if (offset < count_) {
         // Chunk partially in range, copy partial chunk.
-        length = dataSize_ - offset;
+        length = count_ - offset;
       } else {
         // Chunk out of range, copy nothing.
         length = 0;
@@ -183,7 +187,7 @@ class AllreduceRingChunked : public Allreduce<T> {
 
     // Broadcast ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
-      memcpy(ptrs_[i], ptrs_[0], dataSizeBytes_);
+      memcpy(ptrs_[i], ptrs_[0], bytes_);
     }
   }
 
@@ -192,11 +196,11 @@ class AllreduceRingChunked : public Allreduce<T> {
     // Populate inbox of next participant in the ring.
     auto offset = (chunkOffset % chunks_) * chunkSize_;
     auto length = chunkSize_;
-    if (offset + length <= dataSize_) {
+    if (offset + length <= count_) {
       // Chunk completely in range, copy full chunk.
-    } else if (offset < dataSize_) {
+    } else if (offset < count_) {
       // Chunk partially in range, copy partial chunk.
-      length = dataSize_ - offset;
+      length = count_ - offset;
     } else {
       // Chunk out of range, copy _something_.
       // When nothing is put on the wire for empty chunks. @pietern
@@ -212,8 +216,8 @@ class AllreduceRingChunked : public Allreduce<T> {
   }
 
   std::vector<T*> ptrs_;
-  int dataSize_;
-  int dataSizeBytes_;
+  const int count_;
+  const int bytes_;
 
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;

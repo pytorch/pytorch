@@ -23,31 +23,34 @@ class AllreduceRing : public Allreduce<T> {
   AllreduceRing(
       const std::shared_ptr<Context>& context,
       std::vector<T*> ptrs,
-      int dataSize,
+      int count,
       typename Allreduce<T>::ReduceFunction fn = nullptr)
       : Allreduce<T>(context, fn),
         ptrs_(ptrs),
-        dataSize_(dataSize),
-        dataSizeBytes_(dataSize * sizeof(T)),
+        count_(count),
+        bytes_(count_ * sizeof(T)),
         leftPair_(this->getLeftPair()),
         rightPair_(this->getRightPair()) {
-    inbox_ = static_cast<T*>(malloc(dataSizeBytes_));
-    outbox_ = static_cast<T*>(malloc(dataSizeBytes_));
+    inbox_ = static_cast<T*>(malloc(bytes_));
+    outbox_ = static_cast<T*>(malloc(bytes_));
+
+    auto slot = this->context_->nextSlot();
 
     // Buffer to send to (rank+1).
-    sendDataBuf_ = rightPair_->createSendBuffer(0, outbox_, dataSizeBytes_);
+    sendDataBuf_ = rightPair_->createSendBuffer(slot, outbox_, bytes_);
 
     // Buffer that (rank-1) writes to.
-    recvDataBuf_ = leftPair_->createRecvBuffer(0, inbox_, dataSizeBytes_);
+    recvDataBuf_ = leftPair_->createRecvBuffer(slot, inbox_, bytes_);
 
     // Dummy buffers for localized barrier.
     // Before sending to the right, we only need to know that the node
     // on the right is done using the inbox that's about to be written
     // into. No need for a global barrier.
+    auto notificationSlot = this->context_->nextSlot();
     sendNotificationBuf_ =
-        leftPair_->createSendBuffer(1, &dummy_, sizeof(dummy_));
+      leftPair_->createSendBuffer(notificationSlot, &dummy_, sizeof(dummy_));
     recvNotificationBuf_ =
-        rightPair_->createRecvBuffer(1, &dummy_, sizeof(dummy_));
+      rightPair_->createRecvBuffer(notificationSlot, &dummy_, sizeof(dummy_));
   }
 
   virtual ~AllreduceRing() {
@@ -62,11 +65,11 @@ class AllreduceRing : public Allreduce<T> {
   void run() {
     // Reduce specified pointers into ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
-      this->fn_(ptrs_[0], ptrs_[i], dataSize_);
+      this->fn_(ptrs_[0], ptrs_[i], count_);
     }
 
     // Intialize outbox with locally reduced values
-    memcpy(outbox_, ptrs_[0], dataSizeBytes_);
+    memcpy(outbox_, ptrs_[0], bytes_);
 
     int numRounds = this->contextSize_ - 1;
     for (int round = 0; round < numRounds; round++) {
@@ -77,14 +80,14 @@ class AllreduceRing : public Allreduce<T> {
       recvDataBuf_->waitRecv();
 
       // Reduce
-      this->fn_(ptrs_[0], inbox_, dataSize_);
+      this->fn_(ptrs_[0], inbox_, count_);
 
       // Wait for outbox write to complete
       sendDataBuf_->waitSend();
 
       // Prepare for next round if necessary
       if (round < (numRounds - 1)) {
-        memcpy(outbox_, inbox_, dataSizeBytes_);
+        memcpy(outbox_, inbox_, bytes_);
       }
 
       // Send notification to node on the left that
@@ -97,14 +100,14 @@ class AllreduceRing : public Allreduce<T> {
 
     // Broadcast ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
-      memcpy(ptrs_[i], ptrs_[0], dataSizeBytes_);
+      memcpy(ptrs_[i], ptrs_[0], bytes_);
     }
   }
 
  protected:
   std::vector<T*> ptrs_;
-  int dataSize_;
-  int dataSizeBytes_;
+  const int count_;
+  const int bytes_;
 
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;

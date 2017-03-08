@@ -14,7 +14,10 @@
 
 namespace gloo {
 
-Context::Context(int rank, int size) : rank(rank), size(size) {
+Context::Context(int rank, int size)
+    : rank(rank),
+      size(size),
+      slot_(0) {
   GLOO_ENFORCE_GE(rank, 0);
   GLOO_ENFORCE_LT(rank, size);
   GLOO_ENFORCE_GE(size, 2);
@@ -57,6 +60,14 @@ void Context::connectFullMesh(
   }
 
   pairs_ = std::move(pairs);
+}
+
+std::unique_ptr<transport::Pair>& Context::getPair(int i) {
+  return pairs_.at(i);
+}
+
+int Context::nextSlot() {
+  return slot_++;
 }
 
 } // namespace gloo

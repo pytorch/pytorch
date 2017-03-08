@@ -93,6 +93,7 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
 
   // Setup pairs/buffers for sender/receivers
   if (this->contextSize_ > 1) {
+    auto slot = this->context_->nextSlot();
     if (this->contextRank_ == this->rootRank_) {
       for (int i = 0; i < this->contextSize_; i++) {
         if (i == this->contextRank_) {
@@ -101,11 +102,11 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
 
         auto& pair = this->context_->getPair(i);
         sendDataBuffers_.push_back(
-          pair->createSendBuffer(0, hostPtr_, bytes_));
+          pair->createSendBuffer(slot, hostPtr_, bytes_));
       }
     } else {
       auto& rootPair = this->context_->getPair(this->rootRank_);
-      recvDataBuffer_ = rootPair->createRecvBuffer(0, hostPtr_, bytes_);
+      recvDataBuffer_ = rootPair->createRecvBuffer(slot, hostPtr_, bytes_);
     }
   }
 

@@ -138,20 +138,23 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
   }
 
   for (auto i = 0; i < 2; i++) {
+    auto slot = this->context_->nextSlot();
+
     // Buffer to send to (rank+1).
-    sendDataBuf_[i] = rightPair_->createSendBuffer(i, hostPtr_, bytes_);
+    sendDataBuf_[i] = rightPair_->createSendBuffer(slot, hostPtr_, bytes_);
     // Buffer that (rank-1) writes to.
-    recvDataBuf_[i] = leftPair_->createRecvBuffer(i, inbox_[i], chunkBytes_);
+    recvDataBuf_[i] = leftPair_->createRecvBuffer(slot, inbox_[i], chunkBytes_);
   }
 
   // Dummy buffers for localized barrier.
   // Before sending to the right, we only need to know that the node
   // on the right is done using the inbox that's about to be written
   // into. No need for a global barrier.
+  auto notificationSlot = this->context_->nextSlot();
   sendNotificationBuf_ =
-      leftPair_->createSendBuffer(2, &dummy_, sizeof(dummy_));
+    leftPair_->createSendBuffer(notificationSlot, &dummy_, sizeof(dummy_));
   recvNotificationBuf_ =
-      rightPair_->createRecvBuffer(2, &dummy_, sizeof(dummy_));
+    rightPair_->createRecvBuffer(notificationSlot, &dummy_, sizeof(dummy_));
 }
 
 template <typename T>

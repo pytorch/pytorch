@@ -18,23 +18,22 @@ class BarrierAllToAll : public Barrier {
   explicit BarrierAllToAll(const std::shared_ptr<Context>& context)
       : Barrier(context) {
     // Create send/recv buffers for every peer
-    for (int i = 0; i < this->contextSize_; i++) {
+    auto slot = this->context_->nextSlot();
+    for (auto i = 0; i < this->contextSize_; i++) {
       // Skip self
       if (i == this->contextRank_) {
         continue;
       }
 
       auto& pair = this->getPair(i);
-
-      auto sendBufData = std::unique_ptr<int>(new int);
-      auto sendBuf = pair->createSendBuffer(0, sendBufData.get(), sizeof(int));
-      sendBuffersData_.push_back(std::move(sendBufData));
-      sendBuffers_.push_back(std::move(sendBuf));
-
-      auto recvBufData = std::unique_ptr<int>(new int);
-      auto recvBuf = pair->createRecvBuffer(0, recvBufData.get(), sizeof(int));
-      recvBuffersData_.push_back(std::move(recvBufData));
-      recvBuffers_.push_back(std::move(recvBuf));
+      auto sdata = std::unique_ptr<int>(new int);
+      auto sbuf = pair->createSendBuffer(slot, sdata.get(), sizeof(int));
+      sendBuffersData_.push_back(std::move(sdata));
+      sendBuffers_.push_back(std::move(sbuf));
+      auto rdata = std::unique_ptr<int>(new int);
+      auto rbuf = pair->createRecvBuffer(slot, rdata.get(), sizeof(int));
+      recvBuffersData_.push_back(std::move(rdata));
+      recvBuffers_.push_back(std::move(rbuf));
     }
   }
 
@@ -50,10 +49,10 @@ class BarrierAllToAll : public Barrier {
   }
 
  protected:
-  std::vector<std::unique_ptr<transport::Buffer>> sendBuffers_;
   std::vector<std::unique_ptr<int>> sendBuffersData_;
-  std::vector<std::unique_ptr<transport::Buffer>> recvBuffers_;
+  std::vector<std::unique_ptr<transport::Buffer>> sendBuffers_;
   std::vector<std::unique_ptr<int>> recvBuffersData_;
+  std::vector<std::unique_ptr<transport::Buffer>> recvBuffers_;
 };
 
 } // namespace gloo

@@ -23,7 +23,7 @@ CudaAllreduceRing<T>::CudaAllreduceRing(
   const std::vector<cudaStream_t>& streams)
     : Allreduce<T>(context, nullptr),
       count_(count),
-      bytes_(count * sizeof(T)),
+      bytes_(count_ * sizeof(T)),
       synchronizeDeviceOutputs_(streams.size() == 0),
       leftPair_(this->getLeftPair()),
       rightPair_(this->getRightPair()) {
@@ -48,20 +48,23 @@ CudaAllreduceRing<T>::CudaAllreduceRing(
   inbox_ = static_cast<T*>(malloc(bytes_));
   outbox_ = static_cast<T*>(malloc(bytes_));
 
+  auto slot = this->context_->nextSlot();
+
   // Buffer to send to (rank+1).
-  sendDataBuf_ = rightPair_->createSendBuffer(0, outbox_, bytes_);
+  sendDataBuf_ = rightPair_->createSendBuffer(slot, outbox_, bytes_);
 
   // Buffer that (rank-1) writes to.
-  recvDataBuf_ = leftPair_->createRecvBuffer(0, inbox_, bytes_);
+  recvDataBuf_ = leftPair_->createRecvBuffer(slot, inbox_, bytes_);
 
   // Dummy buffers for localized barrier.
   // Before sending to the right, we only need to know that the node
   // on the right is done using the inbox that's about to be written
   // into. No need for a global barrier.
+  auto notificationSlot = this->context_->nextSlot();
   sendNotificationBuf_ =
-    leftPair_->createSendBuffer(1, &dummy_, sizeof(dummy_));
+    leftPair_->createSendBuffer(notificationSlot, &dummy_, sizeof(dummy_));
   recvNotificationBuf_ =
-    rightPair_->createRecvBuffer(1, &dummy_, sizeof(dummy_));
+    rightPair_->createRecvBuffer(notificationSlot, &dummy_, sizeof(dummy_));
 }
 
 template <typename T>

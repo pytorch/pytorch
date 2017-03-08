@@ -29,12 +29,13 @@ class Context {
       rendezvous::Store& store,
       std::shared_ptr<transport::Device>& dev);
 
-  std::unique_ptr<transport::Pair>& getPair(int i) {
-    return pairs_.at(i);
-  }
+  std::unique_ptr<transport::Pair>& getPair(int i);
+
+  int nextSlot();
 
  protected:
   std::vector<std::unique_ptr<transport::Pair>> pairs_;
+  int slot_;
 };
 
 } // namespace gloo
