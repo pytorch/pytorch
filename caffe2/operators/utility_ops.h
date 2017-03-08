@@ -466,6 +466,28 @@ class SumElementsOp : public Operator<Context> {
 };
 
 template <typename T, class Context>
+class SumElementsGradientOp final : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(SumElementsGradientOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  bool RunOnDevice() override {
+    bool average = OperatorBase::GetSingleArgument<bool>("average", false);
+    auto& X = Input(0);
+    TensorCPU sum_grad = TensorCPU(Input(1));
+    auto* dX = Output(0);
+    dX->ResizeLike(X);
+    DCHECK_EQ(sum_grad.size(), 1);
+    math::Set<T, Context>(
+        dX->size(),
+        static_cast<T>(sum_grad.data<T>()[0] * (average ? 1.0 / X.size() : 1)),
+        dX->template mutable_data<T>(),
+        &context_);
+    return true;
+  }
+};
+
+template <typename T, class Context>
 class MaxOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;

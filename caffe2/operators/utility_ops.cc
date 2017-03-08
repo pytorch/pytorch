@@ -13,6 +13,9 @@ REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Sum, SumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SumInt, SumOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(SumElements, SumElementsOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SumElementsGradient,
+    SumElementsGradientOp<float, CPUContext>);
 
 REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
@@ -98,7 +101,8 @@ class GetReshapeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "Reshape", "",
+        "Reshape",
+        "",
         vector<string>{GO(0), O(1)},
         vector<string>{GI(0), "_" + GI(0) + "_dims"});
   }
@@ -119,6 +123,18 @@ OPERATOR_SCHEMA(SumElements)
     .Arg("average", "whether to average or not")
     .Input(0, "X", "Tensor to sum up")
     .Output(0, "sum", "Scalar sum");
+
+class GetSumElementsGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "SumElementsGradient",
+        "",
+        vector<string>{I(0), GO(0)},
+        vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(SumElements, GetSumElementsGradient);
 
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
@@ -155,16 +171,15 @@ OPERATOR_SCHEMA(FlattenToVec)
     .NumInputs(1)
     .NumOutputs(1)
     .TensorInferenceFunction(
-          [](const OperatorDef& def, const vector<TensorShape>& in) {
-            vector<TensorShape> out(1);
-            int total = 1;
-            for(auto d : in[0].dims()) {
-              total *= d;
-            }
-            out[0].add_dims(total);
-            return out;
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          int total = 1;
+          for (auto d : in[0].dims()) {
+            total *= d;
           }
-    )
+          out[0].add_dims(total);
+          return out;
+        })
     .SetDoc(R"DOC(
 Flattens the input tensor into a 1D vector.
 )DOC")
@@ -198,12 +213,12 @@ OPERATOR_SCHEMA(ResizeLike)
     .NumInputs(2)
     .NumOutputs(1)
     .TensorInferenceFunction(
-          [](const OperatorDef& def, const vector<TensorShape>& in) {
-            vector<TensorShape> out(1);
-            out.push_back(in[1]);
-            out[0].set_data_type(in[0].data_type());
-            return out;
-          })
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          out.push_back(in[1]);
+          out[0].set_data_type(in[0].data_type());
+          return out;
+        })
     .SetDoc(R"DOC(
 Produces tensor condaining data of first input and shape of second input.
 )DOC")
@@ -211,16 +226,16 @@ Produces tensor condaining data of first input and shape of second input.
     .Input(1, "shape_tensor", "Tensor whose shape will be applied to output.")
     .Output(0, "output", "Tensor with data of input 0 and shape of input 1.");
 
-
 OPERATOR_SCHEMA(SumInt)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
-    .TensorInferenceFunction([](const OperatorDef& def, const vector<TensorShape>& in) {
-      vector<TensorShape> out(1);
-      out.push_back(in[0]);
-      out[0].set_data_type(TensorProto::INT32);
-      return out;
-    })
+    .TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          out.push_back(in[0]);
+          out[0].set_data_type(TensorProto::INT32);
+          return out;
+        })
     .AllowInplace({{0, 0}});
 
 OPERATOR_SCHEMA(Sum)
@@ -404,12 +419,13 @@ OPERATOR_SCHEMA(CopyOnDeviceLike)
 OPERATOR_SCHEMA(Shape)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction([](const OperatorDef& def, const vector<TensorShape>& in) {
-      vector<TensorShape> out(1);
-      out[0].add_dims(in[0].dims().size());
-      out[0].set_data_type(TensorProto::INT32);
-      return out;
-    })
+    .TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          out[0].add_dims(in[0].dims().size());
+          out[0].set_data_type(TensorProto::INT32);
+          return out;
+        })
     .SetDoc("Produce a 1D int64 tensor with the shape of the input tensor.");
 
 OPERATOR_SCHEMA(HasElements)
