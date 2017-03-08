@@ -532,7 +532,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
 
-def cosine_similarity(x1,x2, eps=1e-12):
+
+def cosine_similarity(x1, x2, eps=1e-12):
     r"""Returns cosine similarity between two vectors ( here batches of vectors )
     Examples: F.cosine_similarity(Variable(torch.randn(2,5,7)))
     Args: 
@@ -546,7 +547,7 @@ def cosine_similarity(x1,x2, eps=1e-12):
         >>> output = cs(input)
         >>> print(output)
     """
-    w12 = torch.sum(x1*x2, 1)
+    w12 = torch.sum(x1 * x2, 1)
     w1 = torch.norm(x1, 2, 1)
     w2 = torch.norm(x2, 2, 1)
     return (w12 / (w1 * w2 + eps)).squeeze()

@@ -1801,7 +1801,7 @@ new_module_tests = [
     ),
     dict(
         constructor=lambda: nn.CosineSimilarity(),
-        input_size=(2,5,7),
+        input_size=(2, 5, 7),
     ),
     dict(
         module_name='PixelShuffle',
