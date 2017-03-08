@@ -20,6 +20,20 @@ def generate_predict_net(model):
     return predict_net
 
 
+def generate_eval_net(model):
+    eval_net = core.Net('eval_net')
+
+    for layer in model.layers:
+        layer.add_operators(
+            eval_net, context=InstantiationContext.PREDICTION)
+
+    input_schema = model.input_feature_schema + model.trainer_extra_schema
+    output_schema = model.output_schema + model.metrics_schema
+    eval_net.set_input_record(input_schema)
+    eval_net.set_output_record(output_schema)
+    return eval_net
+
+
 def _generate_training_net_only(model):
     train_net = core.Net('train_net')
     train_init_net = model.create_init_net('train_init_net')
