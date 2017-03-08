@@ -44,8 +44,8 @@ class LoadOp final : public Operator<Context> {
         ws_(ws),
         absolute_path_(
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
-        strip_prefix_(
-            OperatorBase::GetSingleArgument<string>("strip_prefix", "")),
+        add_prefix_(
+            OperatorBase::GetSingleArgument<string>("add_prefix", "")),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
         keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
@@ -58,14 +58,7 @@ class LoadOp final : public Operator<Context> {
       int idx = 0;
       std::set<std::string> input_names;
       for (const string& output_name : this->def().output()) {
-        std::string name;
-        if(strip_prefix_.empty()) {
-            name = output_name;
-        }
-        else {
-            auto match_pos = output_name.find(strip_prefix_);
-            name = output_name.substr(match_pos+1, string::npos);
-        }
+        std::string name = output_name;
         CAFFE_ENFORCE(
             input_names.insert(name).second, "Duplicated input: ", name);
         output_indices_[name] = idx++;
@@ -107,7 +100,7 @@ class LoadOp final : public Operator<Context> {
     int loaded_blobs = 0;
     for (; cursor->Valid(); cursor->Next()) {
       const string& dbKey = cursor->key();
-      auto key = dbKey.substr(0, dbKey.find(kChunkIdSeparator));
+      auto key = add_prefix_ + dbKey.substr(0, dbKey.find(kChunkIdSeparator));
       BlobProto proto;
       CAFFE_ENFORCE(
           proto.ParseFromString(cursor->value()), "Couldn't parse Proto");
@@ -131,7 +124,7 @@ class LoadOp final : public Operator<Context> {
     int loaded_blobs = 0;
     for (; cursor->Valid(); cursor->Next()) {
       const string& dbKey = cursor->key();
-      auto key = dbKey.substr(0, dbKey.find(kChunkIdSeparator));
+      auto key = add_prefix_ + dbKey.substr(0, dbKey.find(kChunkIdSeparator));
       if (!output_indices_.count(key)) {
         VLOG(1) << "Key " << key << " not used. Skipping.";
       } else {
@@ -251,7 +244,7 @@ class LoadOp final : public Operator<Context> {
 
   Workspace* ws_;
   bool absolute_path_;
-  string strip_prefix_;
+  string add_prefix_;
   string db_name_;
   string db_type_;
   bool keep_device_;
@@ -294,7 +287,8 @@ class SaveOp final : public Operator<Context> {
         }
         else {
             auto match_pos = def().input(i).find(strip_prefix_);
-            name = def().input(i).substr(match_pos+1, string::npos);
+            name = def().input(i).substr(
+                match_pos + strip_prefix_.size(), string::npos);
         }
         CAFFE_ENFORCE(
             input_names.insert(name).second, "Duplicated input: ", name);
