@@ -533,13 +533,11 @@ OPERATOR_SCHEMA(LengthsToRanges)
     .SetDoc(R"DOC(
 Given a vector of segment lengths, calculates offsets of each segment and packs
 them next to the lengths. For the input vector of length N the output is a Nx2
-matrix with (offset, lengths) packaged for each segment. Output is going to have
-the same type as input. For long tensors explicit casting from int32 to int64
-might be necessary prior to this op.
+matrix with (offset, lengths) packaged for each segment.
 
 For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
 )DOC")
-    .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
+    .Input(0, "lengths", "1D tensor of int32 segment lengths.")
     .Output(
         0,
         "ranges",
