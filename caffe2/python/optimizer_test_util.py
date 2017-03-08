@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import numpy as np
 from caffe2.python import core, workspace, cnn
-from caffe2.python.sgd import build_sgd
 
 
 class TestBase(object):
@@ -25,7 +24,6 @@ class TestBase(object):
         loss = model.AveragedLoss(sq, "avg_loss")
         grad_map = model.AddGradientOperators([loss])
         self.assertIsInstance(grad_map['fc_w'], core.BlobReference)
-        build_sgd(model, base_learning_rate=0.1)
         self.build_optimizer(model)
 
         workspace.FeedBlob('data', data[0])
