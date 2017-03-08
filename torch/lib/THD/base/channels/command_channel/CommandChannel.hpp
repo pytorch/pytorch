@@ -1,12 +1,10 @@
 #pragma once
 
-#include "RPC.hpp"
+#include "../../../master_worker/common/RPC.hpp"
 
 #include <memory>
 #include <string>
 #include <vector>
-
-#include <asio.hpp>
 
 namespace thd {
 
@@ -14,31 +12,33 @@ struct MasterCommandChannel {
   MasterCommandChannel();
   ~MasterCommandChannel();
 
+  bool init();
+
   std::unique_ptr<rpc::RPCMessage> recvMessage(int rank);
   void sendMessage(std::unique_ptr<rpc::RPCMessage> msg, int rank);
 
 private:
-  int _rank;
-  asio::io_service _io;
-  int _world_size;
-  std::vector<asio::ip::tcp::socket> _sockets;
+  std::uint32_t _rank;
+  std::vector<int> _sockets;
 
-  void _load_env(unsigned short& port, int& world_size);
+  std::uint16_t _port;
 };
 
 struct WorkerCommandChannel {
-  WorkerCommandChannel(int rank);
+  WorkerCommandChannel();
   ~WorkerCommandChannel();
+
+  bool init();
 
   std::unique_ptr<rpc::RPCMessage> recvMessage();
   void sendMessage(std::unique_ptr<rpc::RPCMessage> msg);
 
 private:
-  int _rank;
-  asio::io_service _io;
-  asio::ip::tcp::socket _socket;
+  std::uint32_t _rank;
+  int _socket;
 
-  void _load_env(std::string& ip_addr, unsigned short& port);
+  std::string _master_addr;
+  std::uint16_t _master_port;
 };
 
 } // namespace thd

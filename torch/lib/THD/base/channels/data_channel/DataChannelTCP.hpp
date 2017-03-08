@@ -1,7 +1,6 @@
 #pragma once
 
-#include "../DataChannel.hpp"
-#include "../ChannelEnvVars.hpp"
+#include "DataChannel.hpp"
 #include "DataChannelUtils.hpp"
 
 #include <sys/poll.h>
@@ -68,11 +67,6 @@ private:
     int socket;
   };
 
-
-  void listen(std::uint16_t port);
-  int connect(const std::string& address, std::uint16_t port, int wait) const;
-  std::tuple<int, std::string> accept() const;
-
   bool initMaster();
   bool initWorker();
 
@@ -87,9 +81,9 @@ private:
                THDReduceOp operation) const;
 
 
-  int _rank; // Rank of current process, range: [0.._processes.size()-1]
+  std::uint32_t _rank; // Rank of current process, range: [0.._processes.size()-1]
   int _socket; // Socket on which process is listening
-  int _port; // Port on which process is listening
+  std::uint16_t _port; // Port on which process is listening
   int _timeout; // Accept waiting timeout in milliseconds (it is optional, default = infinity)
 
   std::vector<Process> _processes; // Other processes in network
