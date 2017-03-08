@@ -532,11 +532,12 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
 
-def cosine_similarity(input, eps=1e-12):
+def cosine_similarity(x1,x2, eps=1e-12):
     r"""Returns cosine similarity between two vectors ( here batches of vectors )
     Examples: F.cosine_similarity(Variable(torch.randn(2,5,7)))
     Args: 
-        input (Variable): Tensor with size (2, batch, dim)
+        x1 (Variable): Tensor with size (batch, dim)
+        x2 (Variable): Tensor with size (batch,dim), identical to x1
         eps  (int, default=1e-12): Epsilon to avoid division by zero
 
     Examples:
@@ -545,8 +546,6 @@ def cosine_similarity(input, eps=1e-12):
         >>> output = cs(input)
         >>> print(output)
     """
-    assert len(input) == 2,"Input needs to be of size (2, batch, dim)"
-    x1, x2 = input
     w12 = torch.sum(x1*x2, 1)
     w1 = torch.norm(x1, 2, 1)
     w2 = torch.norm(x2, 2, 1)
