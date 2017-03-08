@@ -7,14 +7,20 @@ import argparse
 import logging
 import numpy as np
 
-from caffe2.python import workspace, experiment_util, data_parallel_model
+from caffe2.python import core, workspace, experiment_util, data_parallel_model, dyndep
 from caffe2.python import timeout_guard, cnn
 
 import caffe2.python.models.resnet as resnet
 
 '''
-Parallelized multi-GPU trainer for Resnet 50. Can be used to train on imagenet
-data, for example.
+Parallelized multi-GPU distributed trainer for Resnet 50. Can be used to train
+on imagenet data, for example.
+
+The trainer run with single machine multi-gpu mode by setting num_shards = 1.
+To run the trainer distribted multi-gpu mode with M machines, in every machine
+run the trainer with num_shards = M, shard_id = a unique integer in the set
+[0, M-1] and set file_store_path to a directory path thats globally visible to
+all machines (ex. NFS directory).
 '''
 
 
@@ -22,6 +28,7 @@ logging.basicConfig()
 log = logging.getLogger("resnet50_trainer")
 log.setLevel(logging.DEBUG)
 
+dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:file_store_handler_ops')
 
 def AddImageInput(model, reader, batch_size, img_size):
     '''
@@ -106,7 +113,7 @@ def RunEpoch(
 
             if (test_model is not None):
                 # Run 5 iters of testing
-                for t in range(0, 5):
+                for _ in range(0, 5):
                     workspace.RunNet(test_model.net.Proto().name)
                     for g in test_model._devices:
                         test_accuracy += np.asscalar(workspace.FetchBlob(
@@ -153,6 +160,25 @@ def Train(args):
         use_cudnn=True,
         cudnn_exhaustive_search=True
     )
+
+    if args.num_shards > 1:
+        # Create rendezvous for distributed computation
+        store_handler = "store_handler"
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "FileStoreHandlerCreate", [], [store_handler],
+                path=args.file_store_path
+            )
+        )
+        rendezvous = dict(
+            kv_handler=store_handler,
+            shard_id=args.shard_id,
+            num_shards=args.num_shards,
+            engine="FBCOLLECTIVE",
+            exit_nets=None)
+    else:
+        rendezvous = None
+
 
     # Model building functions
     def create_resnet50_model_ops(model, loss_scale):
@@ -204,6 +230,7 @@ def Train(args):
         forward_pass_builder_fun=create_resnet50_model_ops,
         param_update_builder_fun=add_parameter_update_ops,
         devices=gpus,
+        rendezvous=rendezvous,
         optimize_gradient_memory=True,
     )
 
@@ -299,6 +326,13 @@ def main():
                         help="Initial learning rate.")
     parser.add_argument("--weight_decay", type=float, default=1e-4,
                         help="Weight decay (L2 regularization)")
+    parser.add_argument("--num_shards", type=int, default=1,
+                        help="Number of machines in distributed run.")
+    parser.add_argument("--shard_id", type=int, default=0,
+                        help="Shard id.")
+    parser.add_argument("--file_store_path", type=str, default="/tmp",
+                        help="A path to a directory for machines rendezvous"
+                        "file store kv_handler.")
     args = parser.parse_args()
 
     Train(args)
