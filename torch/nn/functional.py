@@ -604,14 +604,17 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
     return torch.pow(out, 1. / p)
 =======
 def cosine_similarity(input, eps=1e-12):
-    """
-    Function: cosine_similarity
-    Summary: Returns cosine similarity between two vectors ( here batches of vectors )
+    r"""Returns cosine similarity between two vectors ( here batches of vectors )
     Examples: F.cosine_similarity(Variable(torch.randn(2,5,7)))
-    Attributes: 
-        @param (input): Tensor with size (2, batch, dim)
-        @param (eps) default=1e-12: Epsilon to avoid division by zero
-    Returns: Tensor of size (batch,), each index representing the cosine similarity between the two inputs
+    Args: 
+        input (Variable): Tensor with size (2, batch, dim)
+        eps  (int, default=1e-12): Epsilon to avoid division by zero
+
+    Examples:
+        >>> cs = nn.CosineSimilarity()
+        >>> input = autograd.Variable(torch.Tensor(9, 4, 4))
+        >>> output = cs(input)
+        >>> print(output)
     """
     assert len(input) == 2,"Input needs to be of size (2, batch, dim)"
     x1, x2 = input
