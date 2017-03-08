@@ -5,7 +5,11 @@ from __future__ import unicode_literals
 
 from caffe2.python import core
 from caffe2.python.cnn import CNNModelHelper
-from caffe2.python.attention import apply_regular_attention
+from caffe2.python.attention import (
+    apply_regular_attention,
+    apply_recurrent_attention,
+    AttentionType,
+)
 
 
 def recurrent_net(
@@ -265,6 +269,7 @@ def LSTMWithAttention(
     decoder_state_dim,
     batch_size,
     scope,
+    attention_type=AttentionType.Regular,
     outputs_with_grads=(0, 4),
     weighted_encoder_outputs=None,
 ):
@@ -304,6 +309,9 @@ def LSTMWithAttention(
     decoder_state_dim: size of hidden states of LSTM
 
     batch_size: batch size
+
+    attention_type: One of: AttentionType.Regular, AttentionType.Recurrent.
+    Determines which type of attention mechanism to use.
 
     outputs_with_grads : position indices of output blobs which will receive
     external error gradient during backpropagation
@@ -385,16 +393,31 @@ def LSTMWithAttention(
         [hidden_t_prev, cell_t_prev, gates_t, decoder_input_lengths, timestep],
         ['hidden_t_intermediate', s('cell_t')],
     )
-    attention_weighted_encoder_context_t = apply_regular_attention(
-        model=step_model,
-        encoder_output_dim=encoder_output_dim,
-        encoder_outputs_transposed=encoder_outputs_transposed,
-        weighted_encoder_outputs=weighted_encoder_outputs,
-        decoder_hidden_state_t=hidden_t_intermediate,
-        decoder_hidden_state_dim=decoder_state_dim,
-        batch_size=batch_size,
-        scope=scope,
-    )
+    if attention_type == AttentionType.Recurrent:
+        attention_weighted_encoder_context_t = apply_recurrent_attention(
+            model=step_model,
+            encoder_output_dim=encoder_output_dim,
+            encoder_outputs_transposed=encoder_outputs_transposed,
+            weighted_encoder_outputs=weighted_encoder_outputs,
+            decoder_hidden_state_t=hidden_t_intermediate,
+            decoder_hidden_state_dim=decoder_state_dim,
+            batch_size=batch_size,
+            scope=scope,
+            attention_weighted_encoder_context_t_prev=(
+                attention_weighted_encoder_context_t_prev
+            ),
+        )
+    else:
+        attention_weighted_encoder_context_t = apply_regular_attention(
+            model=step_model,
+            encoder_output_dim=encoder_output_dim,
+            encoder_outputs_transposed=encoder_outputs_transposed,
+            weighted_encoder_outputs=weighted_encoder_outputs,
+            decoder_hidden_state_t=hidden_t_intermediate,
+            decoder_hidden_state_dim=decoder_state_dim,
+            batch_size=batch_size,
+            scope=scope,
+        )
     hidden_t = step_model.Copy(hidden_t_intermediate, s('hidden_t'))
     step_model.net.AddExternalOutputs(
         cell_t,
