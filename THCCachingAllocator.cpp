@@ -276,7 +276,7 @@ struct THCCachingAllocator
   /** combine previously split blocks */
   void try_merge_blocks(Block* dst, Block* src, FreeBlocks& free_blocks)
   {
-    if (!src || src->allocated) {
+    if (!src || src->allocated || src->event_count > 0) {
       return;
     }
     if (dst->prev == src) {
@@ -386,6 +386,7 @@ struct THCCachingAllocator
     if (err != cudaSuccess) return err;
 
     std::set<THCStreamPtr> streams(std::move(block->stream_uses));
+    THAssert(block->stream_uses.empty());
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       auto& stream = *it;
 
