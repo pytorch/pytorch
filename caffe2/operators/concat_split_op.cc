@@ -15,7 +15,9 @@ OPERATOR_SCHEMA(Concat)
     .NumOutputs(2)
     .Arg("axis", "Which axis to concat on")
     .Arg("order", "Either NHWC or HCWH, will concat on C axis")
-    .SetDoc("Concatenate a list of tensors into a single tensor.");
+    .SetDoc("Concatenate a list of tensors into a single tensor")
+    .Output(0, "concat_result", "Concatenated tensor")
+    .Output(1, "split_info", "The dimensions of the inputs.");
 
 // Backward compatibility names.
 REGISTER_CPU_OPERATOR(DepthSplit, SplitOp<CPUContext>);
