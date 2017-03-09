@@ -25,6 +25,7 @@
 namespace caffe2 {
 
 class NetBase;
+struct CompiledExecutionStep;
 
 struct StopOnSignal {
   StopOnSignal()
@@ -189,9 +190,7 @@ class Workspace {
   bool RunNetOnce(const NetDef& net_def);
 
  protected:
-  bool ExecuteStepRecursive(
-      const ExecutionStep& execution,
-      ShouldContinue externalShouldContinue);
+  bool ExecuteStepRecursive(CompiledExecutionStep& execution);
 
  private:
   BlobMap blob_map_;
