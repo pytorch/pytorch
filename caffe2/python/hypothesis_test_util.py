@@ -244,9 +244,11 @@ def runOpBenchmark(
     device_option,
     op,
     inputs,
-    input_device_options={},
+    input_device_options=None,
     iterations=10,
 ):
+    if input_device_options is None:
+        input_device_options = {}
     op = copy.deepcopy(op)
     op.device_option.CopyFrom(device_option)
     net = caffe2_pb2.NetDef()
@@ -445,7 +447,7 @@ class HypothesisTestCase(test_util.TestCase):
         op,
         inputs,
         reference,
-        input_device_options={},
+        input_device_options=None,
         threshold=1e-4,
         output_to_grad=None,
         grad_reference=None,
@@ -473,6 +475,9 @@ class HypothesisTestCase(test_util.TestCase):
 
                 self.assertReferenceChecks(gc, op, [X], softsign)
         """
+        if input_device_options is None:
+            input_device_options = {}
+
         op = copy.deepcopy(op)
         op.device_option.CopyFrom(device_option)
 
@@ -483,6 +488,7 @@ class HypothesisTestCase(test_util.TestCase):
                     b,
                     device_option=input_device_options.get(n, device_option)
                 )
+                print("Input", n, input_device_options.get(n, device_option))
             net = core.Net("opnet")
             net.Proto().op.extend([op])
             test_shape_inference = False
@@ -538,9 +544,11 @@ class HypothesisTestCase(test_util.TestCase):
         op,
         inputs,
         validator,
-        input_device_options={},
+        input_device_options=None,
         as_kwargs=True
     ):
+        if input_device_options is None:
+            input_device_options = {}
         if as_kwargs:
             assert len(set(list(op.input) + list(op.output))) == \
                 len(op.input) + len(op.output), \

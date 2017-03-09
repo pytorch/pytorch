@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
 import hypothesis.strategies as st
 import numpy as np
 from functools import partial
@@ -84,11 +85,11 @@ def _gather_padding_ref(start_pad_width, end_pad_width, data, lengths):
     pad_width = start_pad_width + end_pad_width
     ptr = 0
     for length in lengths:
-        for i in range(start_pad_width):
+        for _ in range(start_pad_width):
             start_padding += data[ptr]
             ptr += 1
         ptr += length - pad_width
-        for i in range(end_pad_width):
+        for _ in range(end_pad_width):
             end_padding += data[ptr]
             ptr += 1
     return (start_padding, end_padding)
@@ -190,7 +191,7 @@ class TestSequenceOps(hu.HypothesisTestCase):
                           elements=st.floats(min_value=-np.inf,
                                              max_value=np.inf),
                           min_value=1, max_value=10),
-                          **hu.gcs_cpu_only)
+                          **hu.gcs)
     def test_reverse_packed_segs(self, data, gc, dc):
         max_length = data.shape[0]
         batch_size = data.shape[1]
@@ -217,6 +218,7 @@ class TestSequenceOps(hu.HypothesisTestCase):
             op=op,
             inputs=[data, lengths],
             reference=op_ref,
+            input_device_options={"lengths": core.DeviceOption(caffe2_pb2.CPU)},
             output_to_grad='reversed_data',
             grad_reference=op_grad_ref)
 
