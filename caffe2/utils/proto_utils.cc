@@ -116,7 +116,11 @@ void WriteProtoToTextFile(const Message& proto, const char* filename) {
 }
 
 bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
+#if defined (_MSC_VER)  // for MSC compiler binary flag needs to be specified
+  int fd = open(filename, O_RDONLY | O_BINARY);
+#else
   int fd = open(filename, O_RDONLY);
+#endif
   CAFFE_ENFORCE_NE(fd, -1, "File not found: ", filename);
   std::unique_ptr<ZeroCopyInputStream> raw_input(new FileInputStream(fd));
   std::unique_ptr<CodedInputStream> coded_input(
