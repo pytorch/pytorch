@@ -36,49 +36,61 @@ DAGNetBase::ExecutionChains singleChains(
   return chains;
 }
 
-static void prune(
-    int node_idx,
-    int prev_node_idx,
-    std::vector<internal::OpGraphNode>& nodes,
-    std::vector<bool>& ancestors) {
+static void prune(int node_idx, std::vector<internal::OpGraphNode>& nodes) {
+  // Ancestor table for tracking the visited nodes
+  std::vector<bool> ancestors(nodes.size(), false);
+  // stack element is pair of <curr_node, previous_node>
+  std::stack<std::pair<int, int>> nodes_stack;
+  // initialize the prev_node to be -1
+  nodes_stack.push(std::make_pair(node_idx, -1));
 
-  // Check if this has a parent that can be pruned:
-  //  if parent is not the previous node visited and is
-  //  an ancestor of the current traversar, it can be
-  //  pruned.
-  if (prev_node_idx >= 0) {
-    std::vector<int> new_parents;
-    for (auto parent : nodes[node_idx].parents_) {
-      if (parent != prev_node_idx && ancestors[parent]) {
-        // We can prune this one
-        nodes[parent].children_.erase(
-            std::remove(
-                nodes[parent].children_.begin(),
-                nodes[parent].children_.end(),
-                node_idx),
-            nodes[parent].children_.end());
-      } else {
-        new_parents.push_back(parent);
+  while (!nodes_stack.empty()) {
+    const auto& node_pair = nodes_stack.top();
+    int curr = node_pair.first;
+    int prev = node_pair.second;
+
+    // If the node has already been visited, pop curr out of
+    // stack and clean up the ancestor table
+    CAFFE_ENFORCE(curr < ancestors.size(), "Out of bound access");
+    if (ancestors[curr]) {
+      ancestors[curr] = false;
+      nodes_stack.pop();
+      continue;
+    }
+
+    // Check if this has a parent that can be pruned:
+    //  if parent is not the previous node visited and is
+    //  an ancestor of the current traversar, it can be
+    //  pruned.
+    if (prev >= 0) {
+      std::vector<int> new_parents;
+      for (auto parent : nodes[curr].parents_) {
+        if (parent != prev && ancestors[parent]) {
+          // We can prune this one
+          nodes[parent].children_.erase(
+              std::remove(
+                  nodes[parent].children_.begin(),
+                  nodes[parent].children_.end(),
+                  curr),
+              nodes[parent].children_.end());
+        } else {
+          new_parents.push_back(parent);
+        }
+      }
+      nodes[curr].parents_ = new_parents;
+    }
+
+    ancestors[curr] = true;
+
+    // Descend -- but only once from each node
+    if (nodes[curr].visited_inputs == nodes[curr].num_orig_parents) {
+      const auto& children = nodes[curr].children_;
+      for (auto child : children) {
+        nodes[child].visited_inputs++;
+        nodes_stack.push(std::make_pair(child, curr));
       }
     }
-    nodes[node_idx].parents_ = new_parents;
   }
-  ancestors[node_idx] = true;
-
-  // Increase satisfied input count for children
-  std::vector<int> children = nodes[node_idx].children_;
-
-  // Descend -- but only once from each node
-  if (nodes[node_idx].visited_inputs == nodes[node_idx].num_orig_parents) {
-    for (auto child : children) {
-      nodes[child].visited_inputs++;
-    }
-    for (auto child : children) {
-      prune(child, node_idx, nodes, ancestors);
-    }
-  }
-
-  ancestors[node_idx] = false;
 }
 
 /**
@@ -103,9 +115,8 @@ std::vector<internal::OpGraphNode> pruneOpNodeGraph(
   }
 
   for (int i = 0; i < pruned.size(); ++i) {
-    std::vector<bool> ancestors(pruned.size(), false);
     if (pruned[i].parents_.size() == 0) {
-      prune(i, -1, pruned, ancestors);
+      prune(i, pruned);
     }
   }
 
