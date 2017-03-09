@@ -42,6 +42,7 @@ std::unordered_map<THDReduceOp, MPI_Op> mpi_op = {
 
 std::unordered_map<thpp::Type, MPI_Datatype> mpi_datatype = {
   {thpp::Type::CHAR, MPI_CHAR},
+  {thpp::Type::UCHAR, MPI_UNSIGNED_CHAR},
   {thpp::Type::FLOAT, MPI_FLOAT},
   {thpp::Type::DOUBLE, MPI_DOUBLE},
   {thpp::Type::SHORT, MPI_SHORT},
