@@ -9,12 +9,6 @@ class CosineEmbeddingLoss(Function):
         self.margin = margin
         self.size_average = size_average
 
-    def _new_idx(self, input):
-        if input.is_cuda:
-            return torch.cuda.ByteTensor()
-        else:
-            return torch.ByteTensor()
-
     def forward(self, input1, input2, y):
         self.w1 = input1.new()
         self.w22 = input1.new()
@@ -22,7 +16,7 @@ class CosineEmbeddingLoss(Function):
         self.w32 = input1.new()
         self._outputs = input1.new()
 
-        _idx = self._new_idx(input1)
+        _idx = input1.new().byte()
 
         buffer = torch.mul(input1, input2)
         torch.sum(buffer, 1, out=self.w1)
