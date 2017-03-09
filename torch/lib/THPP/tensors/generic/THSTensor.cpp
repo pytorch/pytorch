@@ -217,7 +217,7 @@ auto THSTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THSTensor& 
   throw std::runtime_error("THSTensor::unsqueeze not supported");
 }
 
-#define LAPACK_ERROR "Lapack operations not yet available for sparse tensors"
+#define LAPACK_ERROR "Lapack operations are not available for sparse tensors"
 
 template<>
 auto THSTensor<real>::gesv(const Tensor& ra, const Tensor& b, const Tensor& a) -> THSTensor& {

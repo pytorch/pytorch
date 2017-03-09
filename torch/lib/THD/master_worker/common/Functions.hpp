@@ -51,6 +51,7 @@ enum Functions: std::uint16_t {
   tensorSqueeze,
   tensorSqueeze1d,
   tensorNElement,
+
   tensorGesv,
   tensorTrtrs,
   tensorGels,
@@ -67,6 +68,7 @@ enum Functions: std::uint16_t {
   tensorOrgqr,
   tensorOrmqr,
   tensorPstrf,
+
   tensorFill,
   tensorMaskedFill,
   tensorMaskedCopy,

@@ -11,6 +11,9 @@
 #include <cstring>
 #include <memory>
 
+#include "master_worker/master/generic/THDTensorMeta.cpp"
+#include "TH/THGenerateAllTypes.h"
+
 #include "master_worker/master/generic/THDTensor.cpp"
 #include "TH/THGenerateAllTypes.h"
 

@@ -70,8 +70,8 @@ void THDTensor_(nonzero)(THDLongTensor *subscript, THDTensor *tensor) {
     ),
     THDState::s_current_worker
   );
-  ptrdiff_t numel = THDTensor_(receiveValueFromWorker)<ptrdiff_t>(tensor->storage->node_id);
-  THDLongTensor_resize2d(subscript, numel, tensor->nDimension);
+  ptrdiff_t numel = receiveValueFromWorker<ptrdiff_t>(tensor->storage->node_id);
+  THDLongTensor__resize2d(subscript, numel, tensor->nDimension);
 }
 
 void THDTensor_(indexSelect)(THDTensor *tensor, THDTensor *src, int dim, THDLongTensor *index) {

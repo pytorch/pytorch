@@ -52,7 +52,7 @@ auto THCTensor<real>::clone_shallow() -> THCTensor* {
 
 template<>
 auto THCTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
-  return std::unique_pkr<Tensor>(
+  return std::unique_ptr<Tensor>(
       new THCTensor(state, THCTensor_(newContiguous)(state, tensor)));
 }
 
@@ -382,7 +382,7 @@ auto THCTensor<real>::fill(scalar_type value) -> THCTensor& {
 
 template<>
 auto THCTensor<real>::maskedFill(const Tensor& mask, scalar_type value) -> THCTensor& {
-  THCTensor_(maskedFill)(state, tensor, const_byte_cast(mask).tensor, value);
+  THCTensor_(maskedFill)(state, tensor, const_byte_cast(mask).tensor, cast_scalar(value));
   return *this;
 }
 
@@ -402,7 +402,7 @@ auto THCTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THC
 
 template<>
 ptrdiff_t THCTensor<real>::nonzeroElems() const {
-  throw std::runtime_error("THCTensor::nonzeroElems() is not supported yer");
+  throw std::runtime_error("THCTensor::nonzeroElems() is not supported yet");
 }
 
 template<>
@@ -420,7 +420,7 @@ auto THCTensor<real>::indexSelect(const Tensor& src, int dim, const Tensor& inde
 
 template<>
 auto THCTensor<real>::indexCopy(int dim, const Tensor& index, const Tensor& src) -> THCTensor& {
-  THCTensor_(indexCopy)(tensor, dim, const_long_cast(index).tensor,
+  THCTensor_(indexCopy)(state, tensor, dim, const_long_cast(index).tensor,
                         const_tensor_cast(src).tensor);
   return *this;
 }
@@ -434,7 +434,7 @@ auto THCTensor<real>::indexAdd(int dim, const Tensor& index, const Tensor& src) 
 
 template<>
 auto THCTensor<real>::indexFill(int dim, const Tensor& index, scalar_type value) -> THCTensor& {
-  THCTensor_(indexFill)(state, tensor, dim, const_long_cast(index).tensor, value);
+  THCTensor_(indexFill)(state, tensor, dim, const_long_cast(index).tensor, cast_scalar(value));
   return *this;
 }
 

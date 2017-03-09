@@ -91,28 +91,28 @@ public:
   virtual THSTensor& squeeze1d(const Tensor& src, int dimension) override;
   virtual THSTensor& unsqueeze(const Tensor& src, int dimension) override;
 
-  virtual THSTensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a);
+  virtual THSTensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a) override;
   virtual THSTensor& trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
-                           const char *uplo, const char *trans, const char *diag);
-  virtual THSTensor& gels(const Tensor& ra, const Tensor& b, const Tensor& a);
+                           const char *uplo, const char *trans, const char *diag) override;
+  virtual THSTensor& gels(const Tensor& ra, const Tensor& b, const Tensor& a) override;
   virtual THSTensor& syev(const Tensor& rv, const Tensor& a,
-                          const char *jobz, const char *uplo);
-  virtual THSTensor& geev(const Tensor& rv, const Tensor& a, const char *jobvr);
+                          const char *jobz, const char *uplo) override;
+  virtual THSTensor& geev(const Tensor& rv, const Tensor& a, const char *jobvr) override;
   virtual THSTensor& gesvd(const Tensor& rs, const Tensor& rv,
-                           const Tensor& a, const char *jobu);
+                           const Tensor& a, const char *jobu) override;
   virtual THSTensor& gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
-                            const Tensor& a, const char *jobu);
-  virtual THSTensor& getri(const Tensor& a);
-  virtual THSTensor& potrf(const Tensor& a, const char *uplo);
-  virtual THSTensor& potrs(const Tensor& b, const Tensor& a, const char *uplo);
-  virtual THSTensor& potri(const Tensor& a, const char *uplo);
-  virtual THSTensor& qr(const Tensor& rr, const Tensor& a);
-  virtual THSTensor& geqrf(const Tensor& rtau, const Tensor& a);
-  virtual THSTensor& orgqr(const Tensor& a, const Tensor& tau);
+                            const Tensor& a, const char *jobu) override;
+  virtual THSTensor& getri(const Tensor& a) override;
+  virtual THSTensor& potrf(const Tensor& a, const char *uplo) override;
+  virtual THSTensor& potrs(const Tensor& b, const Tensor& a, const char *uplo) override;
+  virtual THSTensor& potri(const Tensor& a, const char *uplo) override;
+  virtual THSTensor& qr(const Tensor& rr, const Tensor& a) override;
+  virtual THSTensor& geqrf(const Tensor& rtau, const Tensor& a) override;
+  virtual THSTensor& orgqr(const Tensor& a, const Tensor& tau) override;
   virtual THSTensor& ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
-                           const char *side, const char *trans);
+                           const char *side, const char *trans) override;
   virtual THSTensor& pstrf(const Tensor& rpiv, const Tensor& a,
-                           const char *uplo, scalar_type tol);
+                           const char *uplo, scalar_type tol) override;
 
   virtual THSTensor& diag(const Tensor& src, int k) override;
   virtual THSTensor& eye(long n, long m) override;

@@ -1,88 +1,28 @@
 
-static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type) {
+template<typename... Ts>
+static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type, Ts &... args) {
   if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<unsigned char>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<unsigned char>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<char>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<char>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<short>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<short>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<int>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<int>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::LONG)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<long>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<long>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<float>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<float>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<double>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<double>(std::forward<Ts>(args)...));
   throw std::invalid_argument("passed character doesn't represent a tensor type");
-}
-
-static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type,
-                                                  THLongStorage *size,
-                                                  THLongStorage *stride) {
-  if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<unsigned char>(size, stride));
-  else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<char>(size, stride));
-  else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<short>(size, stride));
-  else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<int>(size, stride));
-  else if (type == thpp::Type::LONG)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<long>(size, stride));
-  else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<float>(size, stride));
-  else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<double>(size, stride));
-  throw std::invalid_argument("passed character doesn't represent a tensor type");
-}
-
-static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type,
-                                                  thpp::Storage *storage, 
-                                                  ptrdiff_t storageOffset,
-                                                  THLongStorage *size,
-                                                  THLongStorage *stride) {
-  if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<unsigned char>(*storage, storageOffset, size, stride));
-  else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<char>(*storage, storageOffset, size, stride));
-  else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<short>(*storage, storageOffset, size, stride));
-  else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<int>(*storage, storageOffset, size, stride));
-  else if (type == thpp::Type::LONG)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<long>(*storage, storageOffset, size, stride));
-  else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<float>(*storage, storageOffset, size, stride));
-  else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<double>(*storage, storageOffset, size, stride));
-  throw std::invalid_argument("passed character doesn't represent a tensor type");
-}
-
-static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type,
-                                                  thpp::Tensor *tensor) {
-  if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<unsigned char>(*tensor));
-  else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<char>(*tensor));
-  else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<short>(*tensor));
-  else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<int>(*tensor));
-  else if (type == thpp::Type::LONG)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<long>(*tensor));
-  else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<float>(*tensor));
-  else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<double>(*tensor));
-  throw std::invalid_argument("passed character doesn't represent a *tensor type");
 }
 
 static void tensorNew(rpc::RPCMessage& raw_message) {
@@ -119,7 +59,7 @@ static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
   workerTensors.emplace(
     id,
-    createTensor(type, storage, storageOffset, size, stride)
+    createTensor(type, *storage, storageOffset, size, stride)
   );
   THLongStorage_free(size);
   THLongStorage_free(stride);
@@ -132,7 +72,7 @@ static void tensorNewWithTensor(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
   workerTensors.emplace(
     id,
-    createTensor(type, self)
+    createTensor(type, *self)
   );
 }
 
