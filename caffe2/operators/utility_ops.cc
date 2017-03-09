@@ -53,6 +53,9 @@ REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToWeights, LengthsToWeightsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(EnsureDense, EnsureDenseOp<CPUContext>);
+REGISTER_CPU_OPERATOR(
+    AccumulateHistogram,
+    AccumulateHistogramOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(WallClockTime)
     .NumInputs(0)
@@ -713,6 +716,26 @@ The operator's behaviors:
     .Input(0, "input", "Input tensors.")
     .Output(0, "output", "Output tensor. Same dimension as inputs.");
 
+OPERATOR_SCHEMA(AccumulateHistogram)
+    .NumInputs(1)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
+This operator calculate thes histogram of values in input tensor.
+There're 2 outputs, one for histogram of current input tensor, and another
+for histogram of the all input tensors accumulated through history.
+The output would contain num_buckets + 2 values. index[1 ... num_buckets]
+for values in [lower_bound, upper_bound) interval. And the rest 2 for values
+smaller than lower_bound or greater than upper_bound respectively.
+)DOC")
+    .Input(0, "X", "Input tensor.")
+    .Output(0, "CurHist", "Output histogram of the current tensor.")
+    .Output(1, "AccHist", "Accumulated histogram of the history tensor.")
+    .Arg("lower_bound", "the lower bound value")
+    .Arg("upper_bound", "the upper bound value")
+    .Arg(
+        "num_buckets",
+        "number of buckets to use in [lower_bound, upper_bound)");
+
 class GetEnsureDenseGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -889,6 +912,7 @@ SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
 // TODO(azzolini): Add support for slice gradient
 SHOULD_NOT_DO_GRADIENT(Slice);
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
+SHOULD_NOT_DO_GRADIENT(AccumulateHistogram);
 
 } // namespace
 
