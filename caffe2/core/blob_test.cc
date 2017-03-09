@@ -8,6 +8,7 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/qtensor.h"
+#include "caffe2/core/qtensor_serialization.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
@@ -491,6 +492,49 @@ TEST_SERIALIZATION_WITH_TYPE(int16_t, int32_data)
 TEST_SERIALIZATION_WITH_TYPE(uint8_t, int32_data)
 TEST_SERIALIZATION_WITH_TYPE(uint16_t, int32_data)
 TEST_SERIALIZATION_WITH_TYPE(int64_t, int64_data)
+
+TEST(QTensorTest, QTensorSerialization) {
+  Blob blob;
+  QTensor<CPUContext>* qtensor = blob.GetMutable<QTensor<CPUContext>>();
+  qtensor->SetPrecision(5);
+  qtensor->SetSigned(false);
+  qtensor->SetScale(1.337);
+  qtensor->SetBias(-1.337);
+  qtensor->Resize(std::vector<int>{2, 3});
+  // "Randomly" set bits.
+  srand(0);
+  for (int i = 0; i < 6; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      qtensor->SetBitAtIndex(j, i, rand() % 2);
+    }
+  }
+
+  string serialized = blob.Serialize("test");
+  BlobProto proto;
+  CHECK(proto.ParseFromString(serialized));
+  EXPECT_EQ(proto.name(), "test");
+  EXPECT_EQ(proto.type(), "QTensor");
+  EXPECT_TRUE(proto.has_qtensor());
+  const QTensorProto& qtensor_proto = proto.qtensor();
+
+  EXPECT_EQ(qtensor_proto.precision(), qtensor->precision());
+  EXPECT_EQ(qtensor_proto.scale(), qtensor->scale());
+  EXPECT_EQ(qtensor_proto.bias(), qtensor->bias());
+  EXPECT_EQ(qtensor_proto.is_signed(), qtensor->is_signed());
+
+  Blob new_blob;
+  new_blob.Deserialize(serialized);
+  EXPECT_TRUE(new_blob.IsType<QTensor<CPUContext>>());
+  const QTensor<CPUContext>& new_qtensor = blob.Get<QTensor<CPUContext>>();
+  EXPECT_EQ(new_qtensor.ndim(), 2);
+  EXPECT_EQ(new_qtensor.dim32(0), 2);
+  EXPECT_EQ(new_qtensor.dim32(1), 3);
+  for (int i = 0; i < 6; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      EXPECT_EQ(qtensor->GetBitAtIndex(j, i), new_qtensor.GetBitAtIndex(j, i));
+    }
+  }
+}
 
 typedef double my_type;
 
