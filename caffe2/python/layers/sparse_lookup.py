@@ -18,7 +18,7 @@ import operator
 
 class SparseLookup(ModelLayer):
     _supported_reducers = ['PositionWeighted', 'LogMeanExp', 'LogSumExp', 'Max',
-                           'Mean', 'Sum']
+                           'Mean', 'Sum', 'Sqrt']
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
@@ -124,6 +124,22 @@ class SparseLookup(ModelLayer):
                     ],
                     self.output_schema.field_blobs(),
                     grad_on_weights=1,
+                    engine='fp16'
+                )
+            elif self.reducer == 'Sqrt':
+                sqrt_weight = net.LengthsToWeights(
+                    [self.input_record.lengths()],
+                    [self.input_record.lengths() + '_sqrt'],
+                    power=0.5
+                )
+                net.SparseLengthsWeightedSum(
+                    [
+                        self.w,
+                        sqrt_weight,
+                        self.input_record.items(),
+                        self.input_record.lengths()
+                    ],
+                    self.output_schema.field_blobs(),
                     engine='fp16'
                 )
             else:
