@@ -51,6 +51,8 @@ static void finalize(rpc::RPCMessage& raw_message) {
 #include "dispatch/Tensor.cpp"
 #include "dispatch/TensorMath.cpp"
 #include "dispatch/TensorRandom.cpp"
+#include "dispatch/TensorLapack.cpp"
+#include "dispatch/Communication.cpp"
 
 using dispatch_fn = void (*)(rpc::RPCMessage&);
 using Functions = thd::Functions;
@@ -82,6 +84,8 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorSelect, tensorSelect},
     {Functions::tensorTranspose, tensorTranspose},
     {Functions::tensorUnfold, tensorUnfold},
+    {Functions::tensorSqueeze, tensorSqueeze},
+    {Functions::tensorSqueeze, tensorSqueeze1d},
 
     {Functions::tensorFree, tensorFree},
     {Functions::tensorAdd, tensorAdd},
@@ -230,6 +234,8 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorCauchy, tensorCauchy},
     {Functions::tensorLogNormal, tensorLogNormal},
     {Functions::tensorMultinomial, tensorMultinomial},
+
+    {Functions::tensorGesv, tensorGesv},
 
     {Functions::storageNew, storageNew},
     {Functions::storageNewWithSize, storageNewWithSize},
