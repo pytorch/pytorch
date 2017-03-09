@@ -2186,6 +2186,39 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X], lambda x: [x])
         self.assertDeviceChecks(dc, op, [X], [0])
 
+    @given(N=st.integers(min_value=10, max_value=100),
+           M=st.integers(min_value=2, max_value=10),
+           num_buckets=st.integers(min_value=1, max_value=5),
+           **hu.gcs)
+    def test_accumulate_histogram_op(self, N, M, num_buckets, gc, dc):
+        X = np.random.rand(N, M).astype(np.float32)
+        lower_bound, upper_bound = 0.1, 0.9
+        op = core.CreateOperator("AccumulateHistogram", ["X"],
+                                 ['cur_hist', 'acc_hist'],
+                                 lower_bound=lower_bound,
+                                 upper_bound=upper_bound,
+                                 num_buckets=num_buckets)
+
+        def histogram(X):
+            hist = np.zeros((num_buckets + 2, ), dtype=np.int32)
+            segment = (upper_bound - lower_bound) / num_buckets
+            Y = np.zeros((N, M), dtype=np.int32)
+            Y[X < lower_bound] = 0
+            Y[X >= upper_bound] = num_buckets + 1
+            Y[(X >= lower_bound) & (X < upper_bound)] = \
+                ((X[(X >= lower_bound) & (X < upper_bound)] - lower_bound) /
+                        segment + 1).astype(np.int32)
+
+            for i in range(Y.shape[0]):
+                for j in range(Y.shape[1]):
+                    hist[Y[i][j]] += 1
+            cur_hist, acc_hist = hist, hist
+
+            return [cur_hist, acc_hist]
+
+        self.assertDeviceChecks(dc, op, [X], [0, 1])
+        self.assertReferenceChecks(gc, op, [X], histogram)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1538,6 +1538,68 @@ class UnsafeCoalesceOp final : public Operator<Context> {
   }
 };
 
+template <typename T, class Context>
+class AccumulateHistogramOp : public Operator<Context> {
+ public:
+  AccumulateHistogramOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws),
+        lower_bound_(
+            OperatorBase::GetSingleArgument<float>("lower_bound", 0.0)),
+        upper_bound_(
+            OperatorBase::GetSingleArgument<float>("upper_bound", 1.0)),
+        num_buckets_(OperatorBase::GetSingleArgument<int>("num_buckets", 1)) {
+    CAFFE_ENFORCE_GT(num_buckets_, 0);
+    // 2 more for histograms < lower_bound, >= upper_bound respectively
+    num_output_buckets_ = num_buckets_ + 2;
+    accumulate_hist_ = std::vector<int64_t>(num_output_buckets_, 0);
+  }
+
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  bool RunOnDevice() override {
+    auto& X = Input(X_IN);
+    auto* X_data = X.template data<T>();
+    int N = X.size();
+    auto* cur_hist = Output(CUR_HIST);
+    auto* acc_hist = Output(ACC_HIST);
+    cur_hist->Resize(num_output_buckets_);
+    acc_hist->Resize(num_output_buckets_);
+    auto* cur_hist_data = cur_hist->template mutable_data<int64_t>();
+    auto* acc_hist_data = acc_hist->template mutable_data<int64_t>();
+    auto segment = (upper_bound_ - lower_bound_) / num_buckets_;
+    math::Set<int64_t, Context>(
+        num_output_buckets_, 0, cur_hist_data, &context_);
+
+    for (int i = 0; i < N; i++) {
+      int bucket_index = -1;
+      if (X_data[i] < lower_bound_) {
+        bucket_index = 0;
+      } else if (X_data[i] >= upper_bound_) {
+        bucket_index = num_buckets_ + 1;
+      } else {
+        bucket_index = (int)((X_data[i] - lower_bound_) / segment) + 1;
+      }
+      cur_hist_data[bucket_index] += 1;
+      accumulate_hist_[bucket_index] += 1;
+    }
+
+    for (int i = 0; i < num_output_buckets_; i++) {
+      acc_hist_data[i] = accumulate_hist_[i];
+    }
+
+    return true;
+  }
+
+ private:
+  float lower_bound_;
+  float upper_bound_;
+  int num_buckets_;
+  int num_output_buckets_;
+  std::vector<int64_t> accumulate_hist_;
+
+  INPUT_TAGS(X_IN);
+  OUTPUT_TAGS(CUR_HIST, ACC_HIST);
+};
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_UTILITY_OPS_H_
