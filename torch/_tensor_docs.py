@@ -648,7 +648,7 @@ Example:
 
 add_docstr(torch._C.FloatTensorBase.index_fill_,
            """
-index_fill_(dim, index, tensor) -> Tensor
+index_fill_(dim, index, val) -> Tensor
 
 Fills the elements of the original tensor with value :attr:`val` by selecting
 the indices in the order given in index.
