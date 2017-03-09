@@ -14,7 +14,7 @@ void SetUsageMessage(const string& str) {
     // Usage message has already been set, so we will simply return.
     return;
   }
-  google::SetUsageMessage(str);
+  gflags::SetUsageMessage(str);
 }
 
 const char* UsageMessage() {
