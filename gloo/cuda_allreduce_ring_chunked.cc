@@ -22,17 +22,17 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
       CudaDevicePointer<T>&& rootDevicePtr,
       T* hostPtr,
       size_t length,
-      std::vector<nccl::NCCLElement>&& reduceElements,
-      std::vector<nccl::NCCLElement>&& broadcastElements)
+      std::vector<nccl::NCCLElement<T>>&& reduceElements,
+      std::vector<nccl::NCCLElement<T>>&& broadcastElements)
       : rootDevicePtr(std::move(rootDevicePtr)),
         hostPtr(hostPtr),
         length(length),
-        reduceOp(nccl::NCCLContext(
+        reduceOp(nccl::NCCLContext<T>(
             this->rootDevicePtr.getDeviceID(),
             this->rootDevicePtr.getStream(),
             std::move(reduceElements),
             this->rootDevicePtr.getDeviceID())),
-        broadcastOp(nccl::NCCLContext(
+        broadcastOp(nccl::NCCLContext<T>(
             this->rootDevicePtr.getDeviceID(),
             this->rootDevicePtr.getStream(),
             std::move(broadcastElements),
@@ -104,18 +104,17 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     }
 
     // Create NCCL elements for the chunk on each device
-    std::vector<nccl::NCCLElement> reduceElements;
-    std::vector<nccl::NCCLElement> broadcastElements;
+    std::vector<nccl::NCCLElement<T>> reduceElements;
+    std::vector<nccl::NCCLElement<T>> broadcastElements;
     for (auto i = 0; i < ptrs.size(); i++) {
-      auto chunkPtr = *devicePtrs_[i] + offset;
-      nccl::NCCLElement el(
-          chunkPtr,
-          chunkPtr,
-          length,
-          devicePtrs_[i].getDeviceID(),
-          devicePtrs_[i].getStream());
-      reduceElements.push_back(el);
-      broadcastElements.push_back(el);
+      const auto chunkPtr = *devicePtrs_[i] + offset;
+      const auto stream = devicePtrs_[i].getStream();
+      reduceElements.push_back(nccl::NCCLElement<T>(
+          CudaDevicePointer<T>::create(chunkPtr, length, stream),
+          CudaDevicePointer<T>::create(chunkPtr, length, stream)));
+      broadcastElements.push_back(nccl::NCCLElement<T>(
+          CudaDevicePointer<T>::create(chunkPtr, length, stream),
+          CudaDevicePointer<T>::create(chunkPtr, length, stream)));
     }
 
     // Create a device pointer for the chunk on device ptrs[0]. We will use the

@@ -32,28 +32,36 @@ namespace nccl {
         ncclGetErrorString(status));   \
   } while (0)
 
+template <typename T>
 struct NCCLElement {
-  NCCLElement(
-      void* src,
-      void* dst,
-      const size_t length,
-      const int device,
-      const cudaStream_t stream)
-      : src(src), dst(dst), length(length), device(device), stream(stream) {}
+  NCCLElement(CudaDevicePointer<T> src, CudaDevicePointer<T> dst)
+      : src(std::move(src)),
+        dst(std::move(dst)),
+        count(src.getCount()),
+        device(src.getDeviceID()) {
+    GLOO_ENFORCE_EQ(
+        src.getCount(),
+        dst.getCount(),
+        "NCCL source and destination must be the same size");
+    GLOO_ENFORCE_EQ(
+        src.getDeviceID(),
+        dst.getDeviceID(),
+        "NCCL source and destination must be on same device");
+  }
 
-  void* src;
-  void* dst;
-  const size_t length;
+  CudaDevicePointer<T> src;
+  CudaDevicePointer<T> dst;
+  const size_t count;
   const int device;
-  const cudaStream_t stream;
 };
 
+template <typename T>
 class NCCLContext {
  public:
   explicit NCCLContext(
       int device,
       cudaStream_t stream,
-      std::vector<NCCLElement>&& elements,
+      std::vector<NCCLElement<T>>&& elements,
       int root);
 
   NCCLContext(NCCLContext&& other) noexcept;
@@ -68,7 +76,7 @@ class NCCLContext {
   cudaEvent_t masterEvent;
   const cudaStream_t masterStream;
   const int root;
-  std::vector<NCCLElement> elements;
+  std::vector<NCCLElement<T>> elements;
   std::vector<ncclComm_t> comms;
   std::vector<cudaEvent_t> events;
 };
@@ -76,7 +84,7 @@ class NCCLContext {
 template <typename T>
 class NCCLOp {
  public:
-  explicit NCCLOp(NCCLContext&& context) : context_(std::move(context)) {}
+  explicit NCCLOp(NCCLContext<T>&& context) : context_(std::move(context)) {}
   NCCLOp(NCCLOp&& other) = default;
   virtual ~NCCLOp() = default;
 
@@ -91,20 +99,21 @@ class NCCLOp {
   template <typename F>
   void runNCCL(F&& f);
 
-  NCCLContext context_;
+  NCCLContext<T> context_;
 };
 
 template <typename T>
 class ReduceOp : public NCCLOp<T> {
  public:
-  explicit ReduceOp(NCCLContext&& context) : NCCLOp<T>(std::move(context)) {}
+  explicit ReduceOp(NCCLContext<T>&& context) : NCCLOp<T>(std::move(context)) {}
   void runAsync() override;
 };
 
 template <typename T>
 class BroadcastOp : public NCCLOp<T> {
  public:
-  explicit BroadcastOp(NCCLContext&& context) : NCCLOp<T>(std::move(context)) {}
+  explicit BroadcastOp(NCCLContext<T>&& context)
+      : NCCLOp<T>(std::move(context)) {}
   void runAsync() override;
 };
 

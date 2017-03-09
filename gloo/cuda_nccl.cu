@@ -9,35 +9,42 @@
 
 #include "gloo/cuda_nccl.h"
 
+#include <algorithm>
+
 #include "gloo/cuda_private.h"
 
 namespace gloo {
 namespace nccl {
 
-NCCLContext::NCCLContext(
+template <typename T>
+NCCLContext<T>::NCCLContext(
     int device,
     cudaStream_t stream,
-    std::vector<NCCLElement>&& elements,
+    std::vector<NCCLElement<T>>&& elements,
     int root)
     : masterDevice(device),
       masterStream(stream),
       root(root),
-      elements(elements) {
+      elements(std::move(elements)) {
   std::vector<int> devices;
-  devices.reserve(elements.size());
-  for (auto el : elements) {
+  devices.reserve(this->elements.size());
+  for (auto& el : this->elements) {
+    GLOO_ENFORCE(
+      // Performing a linear search given small set of devices
+      std::find(devices.begin(), devices.end(), el.device) == devices.end(),
+      "NCCL elements must map to unique devices");
     devices.push_back(el.device);
   }
   {
     // Initialze comms. Synchronize with conflicting CUDA and NCCL operations.
     std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-    comms.resize(elements.size());
+    comms.resize(this->elements.size());
     NCCL_CHECK(ncclCommInitAll(comms.data(), devices.size(), devices.data()));
   }
   // Allocate the events and streams
-  events.resize(elements.size());
-  for (auto i = 0; i < elements.size(); i++) {
-    CudaDeviceScope scope(elements[i].device);
+  events.resize(this->elements.size());
+  for (auto i = 0; i < this->elements.size(); i++) {
+    CudaDeviceScope scope(this->elements[i].device);
     CUDA_CHECK(cudaEventCreateWithFlags(
         &events[i], cudaEventDefault | cudaEventDisableTiming));
   }
@@ -45,7 +52,8 @@ NCCLContext::NCCLContext(
       &masterEvent, cudaEventDefault | cudaEventDisableTiming));
 }
 
-NCCLContext::NCCLContext(NCCLContext&& other) noexcept
+template <typename T>
+NCCLContext<T>::NCCLContext(NCCLContext&& other) noexcept
   : masterDevice(other.masterDevice),
     masterEvent(other.masterEvent),
     masterStream(other.masterStream),
@@ -57,7 +65,8 @@ NCCLContext::NCCLContext(NCCLContext&& other) noexcept
   other.masterEvent = nullptr;
 }
 
-NCCLContext::~NCCLContext() {
+template <typename T>
+NCCLContext<T>::~NCCLContext() {
   if (masterEvent != nullptr) {
     CudaDeviceScope scope(masterDevice);
     // Make sure outstanding operations are complete. If the event
@@ -112,13 +121,17 @@ void NCCLOp<T>::runNCCL(F&& f) {
       const auto& element = elements[i];
       const auto& comm = context_.comms[i];
       const auto& event = context_.events[i];
-      const auto& stream = element.stream;
-      // Synchronize with the master stream
+      const auto& srcStream = element.src.getStream();
+      const auto& dstStream = element.dst.getStream();
+      // Synchronize the source and destination with the master stream.
       CudaDeviceScope scope(element.device);
-      CUDA_CHECK(cudaStreamWaitEvent(stream, context_.masterEvent, 0));
+      CUDA_CHECK(cudaStreamWaitEvent(srcStream, context_.masterEvent, 0));
+      if (srcStream != dstStream) {
+        CUDA_CHECK(cudaStreamWaitEvent(dstStream, context_.masterEvent, 0));
+      }
       // Run the operation
-      f(element, comm, stream);
-      CUDA_CHECK(cudaEventRecord(event, stream));
+      f(element, comm, dstStream);
+      CUDA_CHECK(cudaEventRecord(event, dstStream));
     }
   }
 
@@ -136,11 +149,11 @@ template <typename T>
 void ReduceOp<T>::runAsync() {
   const auto root = this->context_.root;
   this->runNCCL([root](
-      const NCCLElement& element, ncclComm_t comm, cudaStream_t stream) {
+      const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclReduce(
-        element.src,
-        element.dst,
-        element.length,
+        *element.src,
+        *element.dst,
+        element.count,
         ncclTypeWrapper<T>::type,
         ncclSum,
         root,
@@ -153,10 +166,10 @@ template <typename T>
 void BroadcastOp<T>::runAsync() {
   const auto root = this->context_.root;
   this->runNCCL([root](
-      const NCCLElement& element, ncclComm_t comm, cudaStream_t stream) {
+      const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclBcast(
-        element.dst,
-        element.length,
+        *element.dst,
+        element.count,
         ncclTypeWrapper<T>::type,
         root,
         comm,
@@ -164,6 +177,7 @@ void BroadcastOp<T>::runAsync() {
   });
 }
 
+template class NCCLContext<float>;
 template class NCCLOp<float>;
 template class ReduceOp<float>;
 template class BroadcastOp<float>;
