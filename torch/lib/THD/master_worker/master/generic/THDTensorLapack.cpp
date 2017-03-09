@@ -92,8 +92,10 @@ static THDTensor *THDTensor_(cloneColumnMajor)(THDTensor *self, THDTensor *src) 
   return THDTensor_(cloneColumnMajorNrows)(self, src, src->size[0]);
 }
 
-
-/* TODO implement all those */
+/*
+ * A verbose set of comments on what the Lapack functions do
+ * is contained in their implementation in the TH library
+ */
 
 /* TODO this might leak on incorrect data */
 void THDTensor_(gesv)(THDTensor *rb, THDTensor *ra, THDTensor *b, THDTensor *a) {
@@ -306,16 +308,151 @@ void THDTensor_(gesvd2)(THDTensor *ru, THDTensor *rs, THDTensor *rv, THDTensor *
   THDTensor_(free)(ra_);
 }
 
-void THDTensor_(getri)(THDTensor *ra, THDTensor *a) {}
-void THDTensor_(potrf)(THDTensor *ra, THDTensor *a, const char *uplo) {}
-void THDTensor_(potrs)(THDTensor *rb, THDTensor *b, THDTensor *a,  const char *uplo) {}
-void THDTensor_(potri)(THDTensor *ra, THDTensor *a, const char *uplo) {}
-void THDTensor_(qr)(THDTensor *rq, THDTensor *rr, THDTensor *a) {}
-void THDTensor_(geqrf)(THDTensor *ra, THDTensor *rtau, THDTensor *a) {}
-void THDTensor_(orgqr)(THDTensor *ra, THDTensor *a, THDTensor *tau) {}
+void THDTensor_(getri)(THDTensor *ra, THDTensor *a) {
+  if (a == NULL) a = ra;
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorGetri, ra, a),
+    THDState::s_current_worker
+  );
+
+  THDTensor_(free)(THDTensor_(cloneColumnMajor)(ra, a));
+}
+
+void THDTensor_(potrf)(THDTensor *ra, THDTensor *a, const char *uplo) {
+  if (a == NULL) a = ra;
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorPotrf, ra, a, uplo[0]),
+    THDState::s_current_worker
+  );
+
+  THDTensor_(free)(THDTensor_(cloneColumnMajor)(ra, a));
+}
+
+void THDTensor_(potrs)(THDTensor *rb, THDTensor *b, THDTensor *a,  const char *uplo) {
+  bool free_b = false;
+  if (b == NULL) b = rb;
+
+  THArgCheck(a->nDimension == 2, 2, "A should have 2 dimensions, but has %d",
+      a->nDimension);
+  THArgCheck(b->nDimension == 1 || b->nDimension == 2, 1, "B should have 1 or 2 "
+      "dimensions, but has %d", b->nDimension);
+  THArgCheck(a->size[0] == a->size[1], 2, "A should be square, but is %ldx%ld",
+      a->size[0], a->size[1]);
+  THArgCheck(a->size[0] == b->size[0], 2, "A,B size incompatible - A has %ld "
+      "rows, B has %ld", a->size[0], b->size[0]);
+
+  if (b->nDimension == 1) {
+    b = THDTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size[0],
+            b->stride[0], 1, 0);
+    free_b = true;
+  }
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorPotrs, rb, b, a, uplo[0]),
+    THDState::s_current_worker
+  );
+
+  THDTensor_(free)(THDTensor_(cloneColumnMajor)(NULL, a));
+  THDTensor_(free)(THDTensor_(cloneColumnMajor)(rb, b));
+
+  if (free_b) THDTensor_(free)(b);
+}
+
+void THDTensor_(potri)(THDTensor *ra, THDTensor *a, const char *uplo) {
+  if (a == NULL) a = ra;
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorPotri, ra, a, uplo[0]),
+    THDState::s_current_worker
+  );
+
+  THDTensor_(free)(THDTensor_(cloneColumnMajor)(ra, a));
+}
+
+void THDTensor_(qr)(THDTensor *rq, THDTensor *rr, THDTensor *a) {
+  int m = a->size[0];
+  int n = a->size[1];
+  int k = (m < n ? m : n);
+  THDTensor *ra = THDTensor_(new)();
+  THDTensor *rtau = THDTensor_(new)();
+  THDTensor *rr_ = THDTensor_(new)();
+  THDTensor_(geqrf)(ra, rtau, a);
+  THDTensor_(resize2d)(rr_, k, ra->size[1]);
+  THDTensor_(narrow)(rr_, ra, 0, 0, k);
+  THDTensor_(triu)(rr_, rr_, 0);
+  THDTensor_(resize2d)(rq, ra->size[0], k);
+  THDTensor_(orgqr)(rq, ra, rtau);
+  THDTensor_(narrow)(rq, rq, 1, 0, k);
+  THDTensor_(free)(ra);
+  THDTensor_(free)(rtau);
+  THDTensor_(free)(rr_);
+}
+
+void THDTensor_(geqrf)(THDTensor *ra, THDTensor *rtau, THDTensor *a) {
+  if (a == NULL) ra = a;
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorGeqrf, ra, rtau, a),
+    THDState::s_current_worker
+  );
+
+  THDTensor *ra_ = THDTensor_(cloneColumnMajor)(ra, a);
+
+  int m = ra_->size[0];
+  int n = ra_->size[1];
+  int k = (m < n ? m : n);
+  THDTensor_(resize1d)(rtau, k);
+  THDTensor_(free)(ra);
+}
+
+void THDTensor_(orgqr)(THDTensor *ra, THDTensor *a, THDTensor *tau) {
+  if (a == NULL) a = ra;
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorOrgqr, ra, a),
+    THDState::s_current_worker
+  );
+
+  THDTensor_(free)(THDTensor_(cloneColumnMajor)(ra, a));
+}
+
 void THDTensor_(ormqr)(THDTensor *ra, THDTensor *a, THDTensor *tau, THDTensor *c,
-                       const char *side, const char *trans) {}
+                       const char *side, const char *trans) {
+  if (a == NULL) a = ra;
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorOrmqr, ra, a, tau, c, side[0], trans[0]),
+    THDState::s_current_worker
+  );
+  THDTensor_(free)(THDTensor_(cloneColumnMajor)(ra, c));
+}
+
 void THDTensor_(pstrf)(THDTensor *ra, THDIntTensor *rpiv, THDTensor*a,
-                       const char* uplo, real tol) {}
+                       const char* uplo, real tol) {
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorPstrf, ra, rpiv, a, uplo[0], tol),
+    THDState::s_current_worker
+  );
+
+  int n = a->size[0];
+
+  THDTensor *ra_ = THDTensor_(cloneColumnMajor)(ra, a);
+  THDIntTensor_resize1d(rpiv, n);
+
+  THDTensor_(free)(ra_);
+}
 
 #endif

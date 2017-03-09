@@ -123,8 +123,8 @@ struct Tensor {
   virtual Tensor& maskedCopy(const Tensor& mask, const Tensor& src) = 0;
   virtual Tensor& maskedSelect(const Tensor& mask, const Tensor& src) = 0;
   virtual ptrdiff_t nonzeroElems() const = 0;
-  // NOTE like in byte comparison operations, the order in nonzero
-  // is reversed compared to TH
+  // NOTE like in byte comparison operations, the order of arguments
+  // in nonzero is reversed compared to TH
   virtual Tensor& nonzero(const Tensor& subscript) = 0;
   virtual Tensor& indexSelect(const Tensor& src, int dim, const Tensor& index) = 0;
   virtual Tensor& indexCopy(int dim, const Tensor& index, const Tensor& src) = 0;
