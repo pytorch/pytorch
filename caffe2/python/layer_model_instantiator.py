@@ -3,11 +3,9 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
+from caffe2.python import core
 from caffe2.python.layers.layers import InstantiationContext
 from caffe2.python.layers.tags import Tags
-
-import itertools
 
 
 def generate_predict_net(model):
@@ -40,12 +38,16 @@ def _generate_training_net_only(model):
 
     for layer in model.layers:
         layer.add_operators(train_net, train_init_net)
+
+    input_schema = model.input_feature_schema + model.trainer_extra_schema
+    output_schema = model.output_schema + model.metrics_schema
+    train_net.set_input_record(input_schema)
+    train_net.set_output_record(output_schema)
     return train_init_net, train_net
 
 
 def generate_training_nets_forward_only(model):
     train_init_net, train_net = _generate_training_net_only(model)
-    train_net.set_input_record(model.input_feature_schema)
     return train_init_net, train_net
 
 
@@ -58,13 +60,4 @@ def generate_training_nets(model):
         if not optimizer:
             optimizer = model.default_optimizer
         optimizer(train_net, train_init_net, param, grad_map[str(param)])
-
-    trainer_schema = schema.Struct(
-        *itertools.chain(
-            model.trainer_extra_schema.get_children(),
-            model.input_feature_schema.get_children(),
-        )
-    )
-
-    train_net.set_input_record(trainer_schema)
     return train_init_net, train_net
