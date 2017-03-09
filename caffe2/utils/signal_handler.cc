@@ -125,7 +125,7 @@ bool SignalHandler::GotSIGINT() {
 // function was called.
 bool SignalHandler::GotSIGHUP() {
   uint64_t count = sighup_count;
-  bool result = (count != my_sigint_count_);
+  bool result = (count != my_sighup_count_);
   my_sighup_count_ = count;
   return result;
 }
