@@ -7,6 +7,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/qtensor.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
@@ -656,6 +657,17 @@ TEST(CustomChunkSize, BigTensorSerialization) {
   counter = 0;
   blob.Serialize("test", acceptor, kNoChunking);
   EXPECT_EQ(counter, 1);
+}
+
+TEST(QTensor, QTensorSizingTest) {
+  vector<int> dims(3);
+  dims[0] = 2;
+  dims[1] = 3;
+  dims[2] = 5;
+  QTensor<CPUContext> qtensor(dims, 3);
+  EXPECT_TRUE(qtensor.mutable_data() != nullptr);
+  EXPECT_EQ(qtensor.nbytes(), 12);
+  EXPECT_EQ(qtensor.size(), 30);
 }
 } // namespace
 } // namespace caffe2
