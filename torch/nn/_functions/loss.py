@@ -55,7 +55,7 @@ class CosineEmbeddingLoss(Function):
         v1, v2, y = self.saved_tensors
 
         buffer = v1.new()
-        _idx = self._new_idx(v1)
+        _idx = v1.new().byte()
 
         gw1 = grad_output.new()
         gw2 = grad_output.new()
