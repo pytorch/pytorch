@@ -10,7 +10,7 @@ class CosineEmbeddingLoss(Function):
         self.size_average = size_average
 
     def _new_idx(self, input):
-        if torch.typename(input) == 'torch.cuda.FloatTensor':
+        if input.is_cuda:
             return torch.cuda.ByteTensor()
         else:
             return torch.ByteTensor()
