@@ -62,6 +62,16 @@ message TensorProto {
   optional Segment segment = 11;
 }
 
+message QTensorProto {
+  repeated int64 dims = 1;
+  required int32 precision = 2;
+  required double scale = 3;
+  required double bias = 4;
+  required bool is_signed = 5;
+  repeated int32 data = 6 [packed = true];
+  optional string name = 7;
+}
+
 // TensorProtos stores multiple TensorProto objects in one single proto. This
 // is useful for small tensors; For anything big, consider using a DB for
 // storage.
@@ -274,6 +284,7 @@ message BlobProto {
   optional string type = 2;
   optional TensorProto tensor = 3;
   optional bytes content = 4;
+  optional QTensorProto qtensor = 5;
 }
 
 // Protobuf format to serialize DBReader.
