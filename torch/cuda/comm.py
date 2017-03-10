@@ -10,7 +10,9 @@ def broadcast(tensor, devices):
 
     Arguments:
         tensor (Tensor): tensor to broadcast.
-        devices (Iterable): an iterable of devices to which to broadcast.
+        devices (Iterable): an iterable of devices among which to broadcast.
+          Note that it should be like (src, dst1, dst2, ...), the first element
+          of which is the source device to broadcast from.
 
     Returns:
         A tuple containing copies of the ``tensor``, placed on devices
@@ -36,7 +38,9 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
 
     Arguments:
         tensors (sequence): tensors to broadcast.
-        devices (Iterable): an iterable of devices to which to broadcast.
+        devices (Iterable): an iterable of devices among which to broadcast.
+          Note that it should be like (src, dst1, dst2, ...), the first element
+          of which is the source device to broadcast from.
         buffer_size (int): maximum size of the buffer used for coalescing
 
     Returns:
