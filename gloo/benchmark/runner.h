@@ -17,6 +17,7 @@
 #include "gloo/benchmark/options.h"
 #include "gloo/benchmark/timer.h"
 #include "gloo/broadcast.h"
+#include "gloo/transport/device.h"
 
 namespace gloo {
 namespace benchmark {

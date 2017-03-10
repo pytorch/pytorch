@@ -15,6 +15,7 @@
 #include "gloo/barrier_all_to_one.h"
 #include "gloo/broadcast_one_to_all.h"
 #include "gloo/common/logging.h"
+#include "gloo/rendezvous/context.h"
 #include "gloo/rendezvous/prefix_store.h"
 #include "gloo/rendezvous/redis_store.h"
 #include "gloo/transport/device.h"
@@ -73,7 +74,8 @@ std::shared_ptr<Context> Runner::newContext() {
   prefix << options_.prefix << "-" << prefixCounter_++;
 
   auto context =
-    std::make_shared<Context>(options_.contextRank, options_.contextSize);
+    std::make_shared<rendezvous::Context>(
+      options_.contextRank, options_.contextSize);
 
   rendezvous::RedisStore redisStore(options_.redisHost, options_.redisPort);
   rendezvous::PrefixStore prefixStore(prefix.str(), redisStore);

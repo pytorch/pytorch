@@ -21,7 +21,7 @@ namespace {
 
 // Function to instantiate and run algorithm.
 using Func = void(
-    std::shared_ptr<::gloo::Context>&,
+    std::shared_ptr<::gloo::Context>,
     std::vector<float*> dataPtrs,
     int dataSize);
 
@@ -39,7 +39,7 @@ TEST_P(AllreduceTest, SinglePointer) {
 
   spawnThreads(contextSize, [&](int contextRank) {
     auto context =
-        std::make_shared<::gloo::Context>(contextRank, contextSize);
+      std::make_shared<::gloo::rendezvous::Context>(contextRank, contextSize);
     context->connectFullMesh(*store_, device_);
 
     std::unique_ptr<float[]> ptr(new float[dataSize]);
@@ -66,7 +66,7 @@ std::vector<int> genMemorySizes() {
 }
 
 static std::function<Func> allreduceRing = [](
-    std::shared_ptr<::gloo::Context>& context,
+    std::shared_ptr<::gloo::Context> context,
     std::vector<float*> dataPtrs,
     int dataSize) {
   ::gloo::AllreduceRing<float> algorithm(context, dataPtrs, dataSize);
@@ -82,7 +82,7 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::Values(allreduceRing)));
 
 static std::function<Func> allreduceRingChunked = [](
-    std::shared_ptr<::gloo::Context>& context,
+    std::shared_ptr<::gloo::Context> context,
     std::vector<float*> dataPtrs,
     int dataSize) {
   ::gloo::AllreduceRingChunked<float> algorithm(

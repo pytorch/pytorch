@@ -20,7 +20,7 @@ namespace test {
 namespace {
 
 // Function to instantiate and run algorithm.
-using Func = void(std::shared_ptr<::gloo::Context>&);
+using Func = void(std::shared_ptr<::gloo::Context>);
 
 // Test parameterization.
 using Param = std::tuple<int, std::function<Func>>;
@@ -35,14 +35,14 @@ TEST_P(BarrierTest, SinglePointer) {
 
   spawnThreads(contextSize, [&](int contextRank) {
     auto context =
-        std::make_shared<::gloo::Context>(contextRank, contextSize);
+      std::make_shared<::gloo::rendezvous::Context>(contextRank, contextSize);
     context->connectFullMesh(*store_, device_);
     fn(context);
   });
 }
 
 static std::function<Func> barrierAllToAll =
-    [](std::shared_ptr<::gloo::Context>& context) {
+    [](std::shared_ptr<::gloo::Context> context) {
       ::gloo::BarrierAllToAll algorithm(context);
       algorithm.run();
     };
@@ -55,7 +55,7 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::Values(barrierAllToAll)));
 
 static std::function<Func> barrierAllToOne =
-    [](std::shared_ptr<::gloo::Context>& context) {
+    [](std::shared_ptr<::gloo::Context> context) {
       ::gloo::BarrierAllToOne algorithm(context);
       algorithm.run();
     };

@@ -9,28 +9,23 @@
 
 #pragma once
 
-#include <memory>
-#include <vector>
-
-#include "gloo/transport/pair.h"
+#include "gloo/context.h"
+#include "gloo/rendezvous/store.h"
+#include "gloo/transport/device.h"
 
 namespace gloo {
+namespace rendezvous {
 
-class Context {
+class Context : public ::gloo::Context {
  public:
   Context(int rank, int size);
   virtual ~Context();
 
-  const int rank;
-  const int size;
-
-  std::unique_ptr<transport::Pair>& getPair(int i);
-
-  int nextSlot();
-
- protected:
-  std::vector<std::unique_ptr<transport::Pair>> pairs_;
-  int slot_;
+  void connectFullMesh(
+      Store& store,
+      std::shared_ptr<transport::Device>& dev);
 };
+
+} // namespace rendezvous
 
 } // namespace gloo
