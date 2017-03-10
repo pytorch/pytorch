@@ -52,60 +52,36 @@ namespace caffe2 {
 
 namespace {
 
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    CreateCommonWorld,
-    MPI,
+REGISTER_CUDA_OPERATOR(
+    MPICreateCommonWorld,
     MPICreateCommonWorldOp<CUDAContext>);
 #if CAFFE2_HAS_CUDA_MPI_BASICS
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(Broadcast, MPI, MPIBroadcastOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Reduce,
-    MPI,
-    MPIReduceOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Allgather,
-    MPI,
-    MPIAllgatherOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    SendTensor,
-    MPI,
-    MPISendTensorOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    ReceiveTensor,
-    MPI,
-    MPIReceiveTensorOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIBroadcast, MPIBroadcastOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIReduce, MPIReduceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIAllgather, MPIAllgatherOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPISendTensor, MPISendTensorOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIReceiveTensor, MPIReceiveTensorOp<CUDAContext>);
 #else
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Broadcast,
-    MPI,
-    GPUFallbackOp<MPIBroadcastOp<CPUContext>>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Reduce,
-    MPI,
+REGISTER_CUDA_OPERATOR(MPIBroadcast, GPUFallbackOp<MPIBroadcastOp<CPUContext>>);
+REGISTER_CUDA_OPERATOR(
+    MPIReduce,
     GPUFallbackOp<MPIReduceOp<float, CPUContext>>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Allgather,
-    MPI,
+REGISTER_CUDA_OPERATOR(
+    MPIAllgather,
     GPUFallbackOp<MPIAllgatherOp<float, CPUContext>>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    SendTensor,
-    MPI,
+REGISTER_CUDA_OPERATOR(
+    MPISendTensor,
     GPUFallbackOp<MPISendTensorOp<CPUContext>>);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    ReceiveTensor,
-    MPI,
+REGISTER_CUDA_OPERATOR(
+    MPIReceiveTensor,
     GPUFallbackOp<MPIReceiveTensorOp<CPUContext>, SkipIndices<1, 2>>);
 #endif
 
 #if CAFFE2_HAS_CUDA_MPI_ALLREDUCE
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Allreduce,
-    MPI,
-    MPIAllreduceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIAllreduce, MPIAllreduceOp<float, CUDAContext>);
 #else
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Allreduce,
-    MPI,
+REGISTER_CUDA_OPERATOR(
+    MPIAllreduce,
     GPUFallbackOp<MPIAllreduceOp<float, CPUContext>>);
 #endif
 }  // namespace
