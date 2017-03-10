@@ -7,6 +7,7 @@ import sys
 class _TensorBase(object):
     #: bool: True if this is a CUDA tensor
     is_cuda = False
+    is_sparse = False
 
     def new(self, *args, **kwargs):
         """Constructs a new tensor of the same data type."""
@@ -142,14 +143,14 @@ class _TensorBase(object):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
     def split(self, split_size, dim=0):
-        """Splits this tensor into a list of tensors.
+        """Splits this tensor into a tuple of tensors.
 
         See :func:`torch.split`.
         """
         return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
-        """Splits this tensor into a list of tensors.
+        """Splits this tensor into a tuple of tensors.
 
         See :func:`torch.chunk`.
         """

@@ -191,8 +191,7 @@ class BCELoss(_WeightedLoss):
     ..math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
     This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1,
-    for instance, the output of an `nn.Sigmoid` layer.
+    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.
 
     By default, the losses are averaged for each minibatch over observations
     *as well as* over dimensions. However, if the field `sizeAverage` is set

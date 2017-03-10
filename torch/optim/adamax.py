@@ -38,6 +38,8 @@ class Adamax(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
+                if p.grad is None:
+                    continue
                 grad = p.grad.data
                 state = self.state[p]
 

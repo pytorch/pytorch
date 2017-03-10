@@ -483,7 +483,7 @@ tests = [
                   input_size=(1, 2, 4, 4, 4)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2),
-                  input_size=(2, 3, 5, 5, 5)),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2, 2, 2, 2),
                   input_size=(2, 3, 5, 5, 5),

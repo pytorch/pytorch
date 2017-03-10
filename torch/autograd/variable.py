@@ -1,6 +1,7 @@
 import sys
 import torch._C as _C
 from collections import OrderedDict
+import torch.sparse as sparse
 import torch.utils.hooks as hooks
 
 from ._functions import *
@@ -150,7 +151,7 @@ class Variable(_C._VariableBase):
         The hook will be called every time a gradient with respect to the
         variable is computed. The hook should have the following signature::
 
-            hook(grad) -> Tensor or None
+            hook(grad) -> Variable or None
 
         The hook should not modify its argument, but it can optionally return
         a new gradient which will be used in place of :attr:`grad`.
@@ -179,21 +180,8 @@ class Variable(_C._VariableBase):
             if self.creator is not None:
                 self.creator._register_hook_dict(self)
         handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[id(handle)] = hook
+        self._backward_hooks[handle.id] = hook
         return handle
-
-    def _do_backward(self, grad_output, retain_variables):
-        assert len(grad_output) == 1
-        assert self._version == 0 and self.creator is None, \
-            "leaf variable was used in an inplace operation"
-        unpacked_grad = grad_output[0]
-        if self._backward_hooks:
-            for hook in self._backward_hooks.values():
-                result = hook(unpacked_grad)
-                if result is not None:
-                    unpacked_grad = result
-        self.grad.data.add_(unpacked_grad)
-        return tuple()
 
     def reinforce(self, reward):
         """Registers a reward obtained as a result of a stochastic process.

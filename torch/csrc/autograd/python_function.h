@@ -22,6 +22,7 @@ struct PyFunction : public Function {
 
   virtual variable_list apply(const variable_list& inputs) override;
   virtual void releaseVariables() override;
+  virtual std::string name() override;
 
   PyObject* obj;
 };
@@ -32,8 +33,6 @@ struct THPFunction {
     PyObject_HEAD
 
     PyObject *needs_input_grad;
-    PyObject *backward_hooks;
-    THPObjectPtr *output_backward_hooks;
 
     PyObject *to_save;
     PyObject *shared_pairs;

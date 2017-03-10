@@ -63,11 +63,16 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
       "}\n")
 
     execute_process(COMMAND "${CUDA_NVCC_EXECUTABLE}" "--run" "${cufile}"
+                    "-ccbin" ${CMAKE_CXX_COMPILER}
                     WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/"
                     RESULT_VARIABLE nvcc_res OUTPUT_VARIABLE nvcc_out
                     ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
 
     if(nvcc_res EQUAL 0)
+      # only keep the last line of nvcc_out
+      STRING(REGEX REPLACE ";" "\\\\;" nvcc_out "${nvcc_out}")
+      STRING(REGEX REPLACE "\n" ";" nvcc_out "${nvcc_out}")
+      list(GET nvcc_out -1 nvcc_out)
       string(REPLACE "2.1" "2.1(2.0)" nvcc_out "${nvcc_out}")
       set(CUDA_GPU_DETECT_OUTPUT ${nvcc_out} CACHE INTERNAL "Returned GPU architetures from detect_gpus tool" FORCE)
     endif()
@@ -116,13 +121,13 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
       set(add_ptx TRUE)
       set(arch_name ${CMAKE_MATCH_1})
     endif()
-    if(arch_name MATCHES "([0-9]\\.[0-9])$")
+    if(arch_name MATCHES "(^[0-9]\\.[0-9](\\([0-9]\\.[0-9]\\))?)$")
       set(arch_bin ${CMAKE_MATCH_1})
       set(arch_ptx ${arch_bin})
     else()
       # Look for it in our list of known architectures
       if(${arch_name} STREQUAL "Fermi")
-        set(arch_bin 2.0 "2.1(2.0)")
+        set(arch_bin "2.0 2.1(2.0)")
       elseif(${arch_name} STREQUAL "Kepler+Tegra")
         set(arch_bin 3.2)
       elseif(${arch_name} STREQUAL "Kepler+Tesla")
@@ -173,11 +178,11 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
   # Tell NVCC to add binaries for the specified GPUs
   foreach(arch ${cuda_arch_bin})
     if(arch MATCHES "([0-9]+)\\(([0-9]+)\\)")
-      # User explicitly specified PTX for the concrete BIN
+      # User explicitly specified ARCH for the concrete CODE
       list(APPEND nvcc_flags -gencode arch=compute_${CMAKE_MATCH_2},code=sm_${CMAKE_MATCH_1})
       list(APPEND nvcc_archs_readable sm_${CMAKE_MATCH_1})
     else()
-      # User didn't explicitly specify PTX for the concrete BIN, we assume PTX=BIN
+      # User didn't explicitly specify ARCH for the concrete CODE, we assume ARCH=CODE
       list(APPEND nvcc_flags -gencode arch=compute_${arch},code=sm_${arch})
       list(APPEND nvcc_archs_readable sm_${arch})
     endif()

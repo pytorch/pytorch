@@ -1,5 +1,6 @@
 #include "function.h"
 
+#include <string>
 #include <THPP/THPP.h>
 
 #include "variable.h"
@@ -26,6 +27,10 @@ auto Function::flags(const variable_list& inputs) -> FunctionFlags {
   }
   f.requires_grad &= !f.is_volatile;
   return f;
+}
+
+auto Function::name() -> std::string {
+  return std::string(typeid(*this).name());
 }
 
 }} // namespace torch::autograd

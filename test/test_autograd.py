@@ -70,6 +70,51 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5))
         self.assertEqual(y.grad.data, (x.data + 1) * 4)
 
+    def test_hooks_cpp(self):
+        # Tests hooks for autograd function implemented in C++
+        bn = torch.nn.BatchNorm1d(5, affine=False)
+        bn.eval()
+
+        counter = [0]
+
+        def bw_hook(grad):
+            counter[0] += 1
+            return grad * 2
+
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+        z = bn(x)
+        z.register_hook(bw_hook)
+        z.sum().backward()
+
+        self.assertEqual(counter[0], 1, 'bw_hook not called')
+        self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
+
+    @unittest.skipIf(sys.version_info[0] == 2, "Python 2 doesn't collect cycles involving __del__")
+    def test_hooks_cycle(self):
+        import gc
+        counter = [0]
+
+        class GradHook(object):
+            def __init__(self, var):
+                self.var = var
+
+            def __del__(self):
+                counter[0] += 1
+
+            def __call__(self, *args):
+                pass
+
+        def run_test():
+            x = Variable(torch.ones(5, 5), requires_grad=True)
+            y = x * 2
+            x.register_hook(GradHook(x))
+            y.register_hook(GradHook(y))
+            y._backward_hooks[1] = GradHook(y)
+
+        run_test()
+        gc.collect()
+        self.assertEqual(counter[0], 3)
+
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
         # You should never have to use such things in your code.
@@ -84,7 +129,6 @@ class TestAutograd(TestCase):
                 return grad_x, None
 
         fn = NoneGradientFunction()
-        fn._backward_hooks = OrderedDict()
         was_called = [False]
 
         def hook(grad_input, grad_output):
@@ -95,7 +139,7 @@ class TestAutograd(TestCase):
             self.assertIsNotNone(grad_output[0])
             self.assertIsNotNone(grad_output[1])
             was_called[0] = True
-        fn._backward_hooks[id(hook)] = hook
+        fn.register_hook(hook)
 
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5))
@@ -127,6 +171,49 @@ class TestAutograd(TestCase):
 
     def test_backward(self):
         self._test_backward()
+
+    def test_sparse_backward(self):
+        class FixedGradientFunction(Function):
+
+            def __init__(self, grad):
+                self.grad = grad
+
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_x):
+                return self.grad
+
+        size = torch.Size([6, 3, 2])
+        i1 = torch.LongTensor([
+            [0, 3, 4],
+            [0, 2, 2],
+        ])
+        v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
+        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
+        i2 = torch.LongTensor([
+            [0, 1, 3, 4],
+            [0, 1, 2, 2],
+        ])
+        v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
+        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
+        dense_grad = torch.rand(size).double()
+        sparse_fn1 = FixedGradientFunction(sparse_grad1)
+        sparse_fn2 = FixedGradientFunction(sparse_grad2)
+        dense_fn = FixedGradientFunction(dense_grad)
+
+        # sparse first
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        (sparse_fn1(x) + dense_fn(x) + sparse_fn2(x)).sum().backward()
+        self.assertEqual(x.grad.data, dense_grad + sparse_grad1 + sparse_grad2)
+        # dense first
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        (dense_fn(x) + sparse_fn1(x) + sparse_fn2(x)).sum().backward()
+        self.assertEqual(x.grad.data, dense_grad + sparse_grad1 + sparse_grad2)
+        # sparse only
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
+        self.assertEqual(x.grad.data, sparse_grad1 + sparse_grad2)
 
     @unittest.skip("BasicEngine is out of date")
     def test_backward_basic_engine(self):
@@ -197,7 +284,8 @@ class TestAutograd(TestCase):
         y = Variable(x, requires_grad=True)
 
         def check_index(idx):
-            y.grad.data.zero_()
+            if y.grad is not None:
+                y.grad.data.zero_()
             indexed_tensor = x[idx]
             indexed_var = y[idx]
 

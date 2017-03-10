@@ -196,7 +196,8 @@ class TestNN(NNTestCase):
     def _backward_criterion(self, criterion, input, target):
         input_tuple = input if isinstance(input, tuple) else (input,)
         for i in input_tuple:
-            i.grad.data.zero_()
+            if i.grad is not None:
+                i.grad.data.zero_()
         args = input_tuple + (target,)
         criterion(*args).backward()
         if isinstance(input, tuple):
@@ -206,18 +207,24 @@ class TestNN(NNTestCase):
 
     def _zero_grad_parameters(self, module):
         if hasattr(module, 'weight') and module.weight is not None:
-            module.weight.grad.data.zero_()
+            if module.weight.grad is not None:
+                module.weight.grad.data.zero_()
         if hasattr(module, 'bias') and module.bias is not None:
-            module.bias.grad.data.zero_()
+            if module.bias.grad is not None:
+                module.bias.grad.data.zero_()
 
     def _get_parameters(self, module):
         params = []
         d_params = []
         if hasattr(module, 'weight') and module.weight is not None:
             params += [module.weight.data]
+            if module.weight.grad is None:
+                module.weight._grad = Variable(module.weight.data.clone().zero_())
             d_params += [module.weight.grad.data]
         if hasattr(module, 'bias') and module.bias is not None:
             params += [module.bias.data]
+            if module.bias.grad is None:
+                module.bias._grad = Variable(module.bias.data.clone().zero_())
             d_params += [module.bias.grad.data]
         return params, d_params
 
@@ -252,7 +259,8 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
-        test_bwd = module.register_backward_hook(lambda *args: bw_hook(1, *args))
+        test_bwd = module.register_backward_hook(
+            lambda *args: bw_hook(1, *args))
 
         output = module(input)
         self.assertEqual(counter['forwards'], 3)
@@ -292,6 +300,20 @@ class TestNN(NNTestCase):
 
         test_fwd.remove()
         test_bwd.remove()
+
+    def test_hook_cpp(self):
+        counter = [0]
+        bn = nn.BatchNorm1d(5)
+
+        def hook(module, grad_inputs, grad_outputs):
+            counter[0] += 1
+            self.assertEqual(len(grad_inputs), 3)
+            self.assertEqual(len(grad_outputs), 1)
+            self.assertEqual(module, bn)
+
+        bn.register_backward_hook(hook)
+        output = bn(Variable(torch.randn(5, 5), requires_grad=True))
+        output.sum().backward()
 
     def test_hook_fail(self):
         module = nn.Sigmoid()
@@ -350,19 +372,31 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad.data, expected_grad)
 
     def test_zero_grad(self):
+        i = Variable(torch.randn(2, 5), requires_grad=True)
         module = nn.Linear(5, 5)
         for p in module.parameters():
             p.requires_grad = False
         module.zero_grad()
 
         module.weight.requires_grad = True
-        module.weight.grad.data.fill_(1)
+        module.zero_grad()
+        self.assertIsNone(module.weight.grad)  # uninitialized grad
+
+        module(i).sum().backward()
+        self.assertIsNotNone(module.weight.grad)
+        self.assertGreater(module.weight.grad.data.abs().sum(), 0)
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
 
         module.bias.requires_grad = True
-        module.weight.grad.data.fill_(1)
-        module.bias.grad.data.fill_(1)
+        module.zero_grad()
+        self.assertIsNotNone(module.weight.grad)
+        self.assertIsNone(module.bias.grad)
+        module(i).sum().backward()
+        self.assertIsNotNone(module.weight.grad)
+        self.assertIsNotNone(module.bias.grad)
+        self.assertGreater(module.weight.grad.data.abs().sum(), 0)
+        self.assertGreater(module.bias.grad.data.abs().sum(), 0)
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
@@ -586,7 +620,7 @@ class TestNN(NNTestCase):
         grads = torch.range(1, 100), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
-                p.grad.data.copy_(g)
+                p._grad = Variable(g.clone())
             norm_before = compute_norm(norm_type)
             clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
@@ -797,7 +831,8 @@ class TestNN(NNTestCase):
         inputs = ((i1,), (i2,))
         modules = (l1, l2)
         expected_outputs = (expected1, expected2)
-        outputs = dp.parallel_apply(modules, inputs)
+
+        outputs = dp.parallel_apply(modules, inputs, None)
         for out, expected in zip(outputs, expected_outputs):
             self.assertEqual(out.data, expected)
 
@@ -814,27 +849,70 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
-            def forward(self, x, y):
-                return x + y
+
+            def forward(self, var1, var2, float1, var3=None):
+                if var3 is None:
+                    return float1 * (var1 * var2)
+                else:
+                    return float1 * (var1 * var2 + var3)
 
         m = TestModule()
-        x = Variable(torch.randn(5, 5).float())
-        y = Variable(torch.randn(5, 5).float())
-        expected = m(x, y)
+        var1 = Variable(torch.randn(5, 5).float(), requires_grad=True)
+        var2 = Variable(torch.randn(5, 5).float(), requires_grad=True)
+        var3 = Variable(torch.randn(5, 5).float(), requires_grad=False)
 
-        out = dp.data_parallel(m, (x, y), (0, 1))
-        self.assertEqual(out, expected)
+        float1 = torch.randn(1)[0]
+        target = Variable(torch.randn(5, 5).float()).cuda()
+        crit = nn.MSELoss()
 
-        out = dp.data_parallel(m, (x, y), (0,))
-        self.assertEqual(out, expected)
+        expected = m(var1, var2, float1)
+        loss = expected.sum()
+        loss.backward()
+        gvar1_exp = var1.grad.clone()
+        gvar2_exp = var2.grad.clone()
+
+        def local_test(out):
+            var1.grad.data.fill_(0.0)
+            var2.grad.data.fill_(0.0)
+            loss = out.sum()
+            loss.backward()
+            self.assertEqual(out, expected)
+            self.assertEqual(gvar1_exp, var1.grad)
+            self.assertEqual(gvar2_exp, var2.grad)
+
+        out = dp.data_parallel(m, (var1, var2, float1), (0, 1))
+        local_test(out)
+
+        out = dp.data_parallel(m, (var1, var2, float1), (1, 0))
+        local_test(out)
+
+        out = dp.data_parallel(m, (var1, var2, float1), (0,))
+        local_test(out)
+
+        var1.grad.data.fill_(0.0)
+        var2.grad.data.fill_(0.0)
+        expected = m(var1, var2, float1, var3=var3)
+        loss = expected.sum()
+        loss.backward()
+        gvar1_exp = var1.grad.clone()
+        gvar2_exp = var2.grad.clone()
 
         dpm = nn.DataParallel(TestModule())
-        out = dpm(x, y)
-        self.assertEqual(out, expected)
+        out = dpm(var1, var2, float1, var3=var3)
+        local_test(out)
 
         dpm = nn.DataParallel(TestModule(), device_ids=[0])
-        out = dpm(x, y)
-        self.assertEqual(out, expected)
+        out = dpm(var1, var2, float1, var3=var3)
+        local_test(out)
+
+        kwarg_wrap = {'var3': var3}
+        out = dp.data_parallel(
+            m, (var1, var2, float1), (0, 1), module_kwargs=kwarg_wrap)
+        local_test(out)
+
+        out = dp.data_parallel(
+            m, (var1, var2, float1), (0,), module_kwargs=kwarg_wrap)
+        local_test(out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_small_back(self):
@@ -1167,7 +1245,8 @@ class TestNN(NNTestCase):
             self.assertEqual(unpacked_len, lengths)
 
             # check grad
-            padded.grad.data.zero_()
+            if padded.grad is not None:
+                padded.grad.data.zero_()
             grad_output = unpacked.data.clone().normal_()
             unpacked.backward(grad_output)
             if batch_first:
@@ -1185,13 +1264,15 @@ class TestNN(NNTestCase):
 
         lengths = [10, 10, 6, 2, 2, 1, 1]
         max_length = lengths[0]
-        x = Variable(torch.randn(max_length, len(lengths), 3), requires_grad=True)
+        x_leaf = Variable(torch.randn(max_length, len(lengths), 3), requires_grad=True)
         lstm = nn.LSTM(3, 4, bidirectional=True, num_layers=2)
         lstm2 = deepcopy(lstm)
         if cuda:
-            x = x.cuda()
+            x = x_leaf.cuda()
             lstm.cuda()
             lstm2.cuda()
+        else:
+            x = x_leaf
 
         # Compute sequences separately
         seq_outs = []
@@ -1216,11 +1297,11 @@ class TestNN(NNTestCase):
 
         # Check backward
         seq_out.sum().backward()
-        grad_x = x.grad.data.clone()
-        x.grad.data.zero_()
+        grad_x = x_leaf.grad.data.clone()
+        x_leaf.grad.data.zero_()
         unpacked.sum().backward()
 
-        self.assertEqual(x.grad.data, grad_x)
+        self.assertEqual(x_leaf.grad.data, grad_x)
         for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
@@ -1404,8 +1485,10 @@ class TestNN(NNTestCase):
         for nonlinearity in ('tanh', 'relu'):
             hx_val = torch.randn(num_layers, batch, hidden_size)
             input_val = torch.randn(seq_length, batch, input_size)
-            grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
-            grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
+            grad_output = torch.randn(
+                seq_length, batch, hidden_size * num_directions)
+            grad_hy = torch.randn(
+                num_layers * num_directions, batch, hidden_size)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
             outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
@@ -1576,11 +1659,12 @@ class TestNN(NNTestCase):
         grad = torch.randn(2, 2, 5, 10, 10).cuda()[:, 1]
         assert not grad.is_contiguous()
         output.backward(grad, retain_variables=True)
-        result = output.grad.data.clone()
-        output.grad.data.zero_()
+        self.assertIsNotNone(input.grad)
+        result = input.grad.data.clone()
+        input.grad.data.zero_()
 
         output.backward(grad.contiguous())
-        self.assertEqual(result, output.grad.data)
+        self.assertEqual(result, input.grad.data)
 
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)
@@ -1613,7 +1697,8 @@ class TestNN(NNTestCase):
             grad1 = data.grad.data.clone()
 
             # 2nd pass
-            data.grad.data.zero_()
+            if data.grad is not None:
+                data.grad.data.zero_()
 
             res2 = module(data)
             res2.backward(grad)
