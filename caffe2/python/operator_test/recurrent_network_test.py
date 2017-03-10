@@ -98,6 +98,55 @@ def old_lstm_reference(
     return (output, last_output, last_state)
 
 
+def milstm_reference(
+        input,
+        hidden_input,
+        cell_input,
+        gates_w,
+        gates_b,
+        alpha,
+        beta1,
+        beta2,
+        b,
+        seq_lengths):
+    T = input.shape[0]
+    N = input.shape[1]
+    G = input.shape[2]
+    D = hidden_input.shape[hidden_input.ndim - 1]
+    hidden = np.zeros(shape=(T + 1, N, D))
+    cell = np.zeros(shape=(T + 1, N, D))
+    assert hidden.shape[0] == T + 1
+    assert cell.shape[0] == T + 1
+    assert hidden.shape[1] == N
+    assert cell.shape[1] == N
+    cell[0, :, :] = cell_input
+    hidden[0, :, :] = hidden_input
+    for t in range(T):
+        input_t = input[t].reshape(1, N, G)
+        hidden_t_prev = hidden[t].reshape(1, N, D)
+        cell_t_prev = cell[t].reshape(1, N, D)
+        gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
+        gates = (alpha * gates * input_t) + \
+                    (beta1 * gates) + \
+                    (beta2 * input_t) + \
+                    b
+        hidden_t, cell_t = lstm_unit(
+            hidden_t_prev,
+            cell_t_prev,
+            gates,
+            seq_lengths,
+            t,
+        )
+        hidden[t + 1] = hidden_t
+        cell[t + 1] = cell_t
+    return (
+        hidden[1:],
+        hidden[-1].reshape(1, N, D),
+        cell[1:],
+        cell[-1].reshape(1, N, D)
+    )
+
+
 def lstm_with_attention_reference(
     input,
     initial_hidden_state,
@@ -316,6 +365,26 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         self.lstm(model, create_lstm, t, n, d, old_lstm_reference,
                   gradients_to_check=[0, 2, 3, 4, 5],
                   outputs_to_check=[0, 3, 4])
+
+    @given(t=st.integers(1, 4),
+           n=st.integers(1, 5),
+           d=st.integers(1, 5))
+    def test_milstm(self, t, n, d):
+        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+            model = CNNModelHelper(name='external')
+
+            def create_milstm(
+                    model, input_blob, seq_lengths,
+                    init, dim_in, dim_out, scope):
+                recurrent.MILSTM(
+                    model, input_blob, seq_lengths, init,
+                    dim_in, dim_out, scope="external/recurrent",
+                    outputs_with_grads=outputs_with_grads)
+
+            self.lstm(model, create_milstm, t, n, d, milstm_reference,
+                      gradients_to_check=[0, 1, 2, 3, 4],
+                      outputs_to_check=[0, 1, 2, 3],
+                      outputs_with_grads=outputs_with_grads)
 
     @debug
     def lstm(self, model, create_lstm, t, n, d, ref, gradients_to_check,
