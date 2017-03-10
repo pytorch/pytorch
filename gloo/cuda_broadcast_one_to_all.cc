@@ -139,7 +139,7 @@ void CudaBroadcastOneToAll<T>::run() {
   if (this->contextRank_ == this->rootRank_) {
     // Copy device buffer to host
     devicePtrs_[this->getRootPointerRank()].copyToHostAsync(hostPtr_);
-    devicePtrs_[this->getRootPointerRank()].waitAsync();
+    devicePtrs_[this->getRootPointerRank()].wait();
 
     // Fire off all send operations concurrently
     for (auto& buf : sendDataBuffers_) {
@@ -175,7 +175,7 @@ void CudaBroadcastOneToAll<T>::run() {
     } else {
       // Wait for memcpy to complete
       if (synchronizeDeviceOutputs_) {
-        devicePtrs_[this->getRootPointerRank()].waitAsync();
+        devicePtrs_[this->getRootPointerRank()].wait();
       }
     }
   }

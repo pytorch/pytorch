@@ -102,7 +102,7 @@ void CudaDevicePointer<T>::copyFromHostAsync(T* src) {
 }
 
 template<typename T>
-void CudaDevicePointer<T>::waitAsync() {
+void CudaDevicePointer<T>::wait() {
   CudaDeviceScope scope(deviceId_);
   CUDA_CHECK(cudaEventSynchronize(event_));
 }

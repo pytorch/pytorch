@@ -69,7 +69,7 @@ class CudaDevicePointer {
   void copyFromHostAsync(T* src);
 
   // Wait for copy to complete.
-  void waitAsync();
+  void wait();
 
  protected:
   // Instances must be created through static functions

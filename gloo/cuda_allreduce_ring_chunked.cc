@@ -193,7 +193,7 @@ void CudaAllreduceRingChunked<T>::run() {
       auto& context = chunkContext_[chunkOffset];
 
       // Wait for the local reduction and copy to host memory to complete
-      context.rootDevicePtr.waitAsync();
+      context.rootDevicePtr.wait();
 
       // Reduce chunk from previous round. Nothing to do for initial rounds.
       if (round >= 2) {

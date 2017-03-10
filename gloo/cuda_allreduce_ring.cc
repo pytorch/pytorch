@@ -90,9 +90,9 @@ void CudaAllreduceRing<T>::run() {
   }
 
   // Reduce specified pointers into hostPtrs_[0]
-  devicePtrs_[0].waitAsync();
+  devicePtrs_[0].wait();
   for (int i = 1; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].waitAsync();
+    devicePtrs_[i].wait();
     this->fn_(hostPtrs_[0], hostPtrs_[i], count_);
   }
 
@@ -134,7 +134,7 @@ void CudaAllreduceRing<T>::run() {
   // If running synchronously, wait for memcpy's to complete
   if (synchronizeDeviceOutputs_) {
     for (int i = 0; i < devicePtrs_.size(); i++) {
-      devicePtrs_[i].waitAsync();
+      devicePtrs_[i].wait();
     }
   }
 }
