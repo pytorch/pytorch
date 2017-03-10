@@ -20,7 +20,7 @@ class Embedding(Function):
 
     def _renorm(self, indices, weight):
         if indices.dim() == 2:
-            indices = indices.view(-1)
+            indices = indices.clone().view(-1)
 
         self._backend.LookupTable_renorm(
             self._backend.library_state,
