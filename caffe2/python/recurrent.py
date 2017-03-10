@@ -450,3 +450,160 @@ def LSTMWithAttention(
         scope=scope,
         outputs_with_grads=outputs_with_grads,
     )
+
+
+def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
+           scope, outputs_with_grads=(0,)):
+    '''
+    Adds MI flavor of standard LSTM recurrent network operator to a model.
+    See https://arxiv.org/pdf/1606.06630.pdf
+
+    model: CNNModelHelper object new operators would be added to
+
+    input_blob: the input sequence in a format T x N x D
+    where T is sequence size, N - batch size and D - input dimention
+
+    seq_lengths: blob containing sequence lengths which would be passed to
+    LSTMUnit operator
+
+    initial_states: a tupple of (hidden_input_blob, cell_input_blob)
+    which are going to be inputs to the cell net on the first iteration
+
+    dim_in: input dimention
+
+    dim_out: output dimention
+
+    outputs_with_grads : position indices of output blobs which will receive
+    external error gradient during backpropagation
+    '''
+    def s(name):
+        # We have to manually scope due to our internal/external blob
+        # relationships.
+        return "{}/{}".format(str(scope), str(name))
+
+    """ initial bulk fully-connected """
+    input_blob = model.FC(
+        input_blob, s('i2h'), dim_in=dim_in, dim_out=4 * dim_out, axis=2)
+
+    """ the step net """
+    step_model = CNNModelHelper(name='milstm_cell', param_model=model)
+    input_t, timestep, cell_t_prev, hidden_t_prev = (
+        step_model.net.AddExternalInputs(
+            'input_t', 'timestep', 'cell_t_prev', 'hidden_t_prev'))
+    # hU^T
+    # Shape: [1, batch_size, 4 * hidden_size]
+    prev_t = step_model.FC(
+        hidden_t_prev, s('prev_t'), dim_in=dim_out,
+        dim_out=4 * dim_out, axis=2)
+    # defining MI parameters
+    alpha = step_model.param_init_net.ConstantFill(
+        [],
+        [s('alpha')],
+        shape=[4 * dim_out],
+        value=1.0
+    )
+    beta1 = step_model.param_init_net.ConstantFill(
+        [],
+        [s('beta1')],
+        shape=[4 * dim_out],
+        value=1.0
+    )
+    beta2 = step_model.param_init_net.ConstantFill(
+        [],
+        [s('beta2')],
+        shape=[4 * dim_out],
+        value=1.0
+    )
+    b = step_model.param_init_net.ConstantFill(
+        [],
+        [s('b')],
+        shape=[4 * dim_out],
+        value=0.0
+    )
+    # alpha * (xW^T * hU^T)
+    # Shape: [1, batch_size, 4 * hidden_size]
+    alpha_tdash = step_model.net.Mul(
+        [prev_t, input_t],
+        s('alpha_tdash')
+    )
+    # Shape: [batch_size, 4 * hidden_size]
+    alpha_tdash_rs, _ = step_model.net.Reshape(
+        alpha_tdash,
+        [s('alpha_tdash_rs'), s('alpha_tdash_old_shape')],
+        shape=[-1, 4 * dim_out],
+    )
+    alpha_t = step_model.net.Mul(
+        [alpha_tdash_rs, alpha],
+        s('alpha_t'),
+        broadcast=1,
+        use_grad_hack=1
+    )
+    # beta1 * hU^T
+    # Shape: [batch_size, 4 * hidden_size]
+    prev_t_rs, _ = step_model.net.Reshape(
+        prev_t,
+        [s('prev_t_rs'), s('prev_t_old_shape')],
+        shape=[-1, 4 * dim_out],
+    )
+    beta1_t = step_model.net.Mul(
+        [prev_t_rs, beta1],
+        s('beta1_t'),
+        broadcast=1,
+        use_grad_hack=1
+    )
+    # beta2 * xW^T
+    # Shape: [batch_szie, 4 * hidden_size]
+    input_t_rs, _ = step_model.net.Reshape(
+        input_t,
+        [s('input_t_rs'), s('input_t_old_shape')],
+        shape=[-1, 4 * dim_out],
+    )
+    beta2_t = step_model.net.Mul(
+        [input_t_rs, beta2],
+        s('beta2_t'),
+        broadcast=1,
+        use_grad_hack=1
+    )
+    # Add 'em all up
+    gates_tdash = step_model.net.Sum(
+        [alpha_t, beta1_t, beta2_t],
+        s('gates_tdash')
+    )
+    gates_t = step_model.net.Add(
+        [gates_tdash, b],
+        s('gates_t'),
+        broadcast=1,
+        use_grad_hack=1
+    )
+    # # Shape: [1, batch_size, 4 * hidden_size]
+    gates_t_rs, _ = step_model.net.Reshape(
+        gates_t,
+        [s('gates_t_rs'), s('gates_t_old_shape')],
+        shape=[1, -1, 4 * dim_out],
+    )
+
+    hidden_t, cell_t = step_model.net.LSTMUnit(
+        [hidden_t_prev, cell_t_prev, gates_t_rs, seq_lengths, timestep],
+        [s('hidden_t'), s('cell_t')],
+    )
+    step_model.net.AddExternalOutputs(cell_t, hidden_t)
+
+    """ recurrent network """
+    (hidden_input_blob, cell_input_blob) = initial_states
+    output, last_output, all_states, last_state = recurrent_net(
+        net=model.net,
+        cell_net=step_model.net,
+        inputs=[(input_t, input_blob)],
+        initial_cell_inputs=[
+            (hidden_t_prev, hidden_input_blob),
+            (cell_t_prev, cell_input_blob),
+        ],
+        links={
+            hidden_t_prev: hidden_t,
+            cell_t_prev: cell_t,
+        },
+        timestep=timestep,
+        scope=scope,
+        outputs_with_grads=outputs_with_grads,
+    )
+    return output, last_output, all_states, last_state
