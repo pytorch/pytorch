@@ -26,8 +26,8 @@ const int SHUTDOWN_TIMEOUT = 2000; // 2s
 struct ClientSession {
   ClientSession(ManagerSocket s): socket(std::move(s)), pid(0) {}
 
-  pid_t pid;
   ManagerSocket socket;
+  pid_t pid;
 };
 
 
