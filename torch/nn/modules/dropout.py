@@ -21,16 +21,17 @@ class Dropout(Module):
         >>> output = m(input)
     """
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p=0.5, inplace=False, v2=False):
         super(Dropout, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.v2 = v2
 
     def forward(self, input):
-        return F.dropout(input, self.p, self.training, self.inplace)
+        return F.dropout(input, self.p, self.training, self.inplace, self.v2)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -73,16 +74,17 @@ class Dropout2d(Module):
        http://arxiv.org/abs/1411.4280
     """
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p=0.5, inplace=False, v2=False):
         super(Dropout2d, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.v2 = v2
 
     def forward(self, input):
-        return self._backend.Dropout2d(self.p, self.training, self.inplace)(input)
+        return self._backend.Dropout2d(self.p, self.training, self.inplace, self.v2)(input)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -125,16 +127,17 @@ class Dropout3d(Module):
        http://arxiv.org/abs/1411.4280
     """
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p=0.5, inplace=False, v2=False):
         super(Dropout3d, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.v2 = v2
 
     def forward(self, input):
-        return self._backend.Dropout3d(self.p, self.training, self.inplace)(input)
+        return self._backend.Dropout3d(self.p, self.training, self.inplace, self.v2)(input)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''

@@ -420,21 +420,25 @@ class TestNN(NNTestCase):
 
     def _test_dropout(self, cls, input):
         p = 0.2
-        input.fill_(1 - p)
+        for v2 in [False, True]:
+            if v2:
+                input.fill_(1)
+            else:
+                input.fill_(1 - p)
 
-        module = cls(p)
-        input_var = Variable(input, requires_grad=True)
-        output = module(input_var)
-        self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
-        output.backward(input)
-        self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
+            module = cls(p, v2=v2)
+            input_var = Variable(input, requires_grad=True)
+            output = module(input_var)
+            self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
+            output.backward(input)
+            self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
-        module = cls(p, True)
-        input_var = Variable(input.clone(), requires_grad=True)
-        output = module(input_var + 0)
-        self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
-        output.backward(input)
-        self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
+            module = cls(p, True, v2=v2)
+            input_var = Variable(input.clone(), requires_grad=True)
+            output = module(input_var + 0)
+            self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
+            output.backward(input)
+            self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
         # Check that these don't raise errors
         module.__repr__()
