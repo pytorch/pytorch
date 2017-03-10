@@ -13,6 +13,34 @@ import numpy as np
 class TestFillerOperator(hu.HypothesisTestCase):
 
     @given(**hu.gcs)
+    def test_shape_error(self, gc, dc):
+        op = core.CreateOperator(
+            'GaussianFill',
+            [],
+            'out',
+            shape=32,  # illegal parameter
+            mean=0.0,
+            std=1.0,
+        )
+        exception = False
+        try:
+            workspace.RunOperatorOnce(op)
+        except Exception:
+            exception = True
+        self.assertTrue(exception, "Did not throw exception on illegal shape")
+
+        op = core.CreateOperator(
+            'ConstantFill',
+            [],
+            'out',
+            shape=[],  # scalar
+            value=2.0,
+        )
+        exception = False
+        self.assertTrue(workspace.RunOperatorOnce(op))
+        self.assertEqual(workspace.FetchBlob('out'), [2.0])
+
+    @given(**hu.gcs)
     def test_gaussian_fill_op(self, gc, dc):
         op = core.CreateOperator(
             'GaussianFill',

@@ -40,6 +40,10 @@ class FillerOp : public Operator<Context> {
       if (input_as_shape_) {
         CAFFE_THROW("An input must be given if input_as_shape is true");
       }
+      if (shape_.size() == 0 &&
+          OperatorBase::HasSingleArgumentOfType<int>("shape")) {
+        CAFFE_THROW("Fill 'shape' argument was a scalar, list expected");
+      }
     }
   }
 
