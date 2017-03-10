@@ -22,20 +22,19 @@ struct CudaBroadcastOneToAll<T>::LocalBroadcast {
       const std::vector<CudaDevicePointer<T> >& devicePtrs,
       int count,
       int rootPointerRank) {
-    std::vector<nccl::NCCLElement> elements;
+    std::vector<nccl::NCCLElement<T>> elements;
     for (auto& devicePtr : devicePtrs) {
       GLOO_ENFORCE_EQ(count, devicePtr.getCount());
-      nccl::NCCLElement element(
-        *devicePtr,
-        *devicePtr,
-        count,
-        devicePtr.getDeviceID(),
-        devicePtr.getStream());
-      elements.push_back(element);
+      const auto ptr = *devicePtr;
+      const auto stream = devicePtr.getStream();
+      nccl::NCCLElement<T> element(
+        CudaDevicePointer<T>::create(ptr, count, stream),
+        CudaDevicePointer<T>::create(ptr, count, stream));
+      elements.push_back(std::move(element));
     }
 
     auto& rootDevicePtr = devicePtrs[rootPointerRank];
-    nccl::NCCLContext context(
+    nccl::NCCLContext<T> context(
       rootDevicePtr.getDeviceID(),
       rootDevicePtr.getStream(),
       std::move(elements),
