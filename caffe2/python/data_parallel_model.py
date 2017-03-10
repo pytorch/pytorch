@@ -516,13 +516,11 @@ def _GetReverseOrderedGrads(model):
 # A helper function to extract a parameter's name
 def stripParamName(param):
     # Format is "a/b/c/d" -> d
-    if isinstance(param, core.BlobReference):
-        name = str(param)
-    elif isinstance(param, core.GradientSlice):
+    if isinstance(param, core.GradientSlice):
         # We index GradientSlices by the indices name
         name = str(param.indices)
     else:
-        assert False, "Param {} BlobReference/GradientSlice".format(param)
+        name = str(param)
     return name[name.index(scope._NAMESCOPE_SEPARATOR) + 1:]
 
 
