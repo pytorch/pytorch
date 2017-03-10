@@ -545,7 +545,7 @@ def RawTuple(num_fields):
     Creates a tuple of `num_field` untyped scalars.
     """
     assert isinstance(num_fields, int)
-    assert num_fields > 0
+    assert num_fields >= 0
     return Tuple(*([np.void] * num_fields))
 
 
