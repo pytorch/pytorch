@@ -14,12 +14,11 @@ const char kBcastNet[] = R"NET(
   name: "bcast"
   op {
     output: "comm"
-    type: "CreateCommonWorld"
-    engine: "MPI"
+    type: "MPICreateCommonWorld"
   }
   op {
     output: "X"
-    type: "ConstantFill"
+    type: "MPIConstantFill"
     arg {
       name: "shape"
       ints: 10
@@ -33,8 +32,7 @@ const char kBcastNet[] = R"NET(
     input: "comm"
     input: "X"
     output: "X"
-    type: "Broadcast"
-    engine: "MPI"
+    type: "MPIBroadcast"
     arg {
       name: "root"
       i: 0
@@ -74,12 +72,11 @@ const char kReduceNet[] = R"NET(
   name: "reduce"
   op {
     output: "comm"
-    type: "CreateCommonWorld"
-    engine: "MPI"
+    type: "MPICreateCommonWorld"
   }
   op {
     output: "X"
-    type: "ConstantFill"
+    type: "MPIConstantFill"
     arg {
       name: "shape"
       ints: 10
@@ -93,8 +90,7 @@ const char kReduceNet[] = R"NET(
     input: "comm"
     input: "X"
     output: "X_reduced"
-    type: "Reduce"
-    engine: "MPI"
+    type: "MPIReduce"
     arg {
       name: "root"
       i: 0
@@ -141,12 +137,11 @@ const char kMPIAllgatherNet[] = R"NET(
   name: "allgather"
   op {
     output: "comm"
-    type: "CreateCommonWorld"
-    engine: "MPI"
+    type: "MPICreateCommonWorld"
   }
   op {
     output: "X"
-    type: "ConstantFill"
+    type: "MPIConstantFill"
     arg {
       name: "shape"
       ints: 2
@@ -161,8 +156,7 @@ const char kMPIAllgatherNet[] = R"NET(
     input: "comm"
     input: "X"
     output: "X_gathered"
-    engine: "MPI"
-    type: "Allgather"
+    type: "MPIAllgather"
   }
 )NET";
 
@@ -202,12 +196,11 @@ const char kMPIAllreduceNet[] = R"NET(
   name: "allreduce"
   op {
     output: "comm"
-    type: "CreateCommonWorld"
-    engine: "MPI"
+    type: "MPICreateCommonWorld"
   }
   op {
     output: "X"
-    type: "ConstantFill"
+    type: "MPIConstantFill"
     arg {
       name: "shape"
       ints: 10
@@ -221,8 +214,7 @@ const char kMPIAllreduceNet[] = R"NET(
     input: "comm"
     input: "X"
     output: "X_reduced"
-    type: "Allreduce"
-    engine: "MPI"
+    type: "MPIAllreduce"
   }
 )NET";
 
@@ -261,12 +253,11 @@ const char kInPlaceMPIAllreduceNet[] = R"NET(
   name: "allreduce"
   op {
     output: "comm"
-    type: "CreateCommonWorld"
-    engine: "MPI"
+    type: "MPICreateCommonWorld"
   }
   op {
     output: "X"
-    type: "ConstantFill"
+    type: "MPIConstantFill"
     arg {
       name: "shape"
       ints: 10
@@ -280,8 +271,7 @@ const char kInPlaceMPIAllreduceNet[] = R"NET(
     input: "comm"
     input: "X"
     output: "X"
-    type: "Allreduce"
-    engine: "MPI"
+    type: "MPIAllreduce"
   }
 )NET";
 
