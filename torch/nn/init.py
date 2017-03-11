@@ -81,7 +81,7 @@ def xavier_uniform(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform
     distribution. The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in +
-    fan_out)) * sqrt(3) 
+    fan_out)) * sqrt(3)
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -105,7 +105,7 @@ def xavier_normal(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal
     distribution. The resulting tensor will have values sampled from normal distribution with mean=0 and std = gain *
-    sqrt(2/(fan_in + fan_out)) 
+    sqrt(2/(fan_in + fan_out))
 
     Args:
         tensor: a n-dimension torch.Tensor
