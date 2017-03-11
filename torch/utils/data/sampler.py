@@ -68,3 +68,22 @@ class SubsetRandomSampler(Sampler):
 
     def __len__(self):
         return len(self.indices)
+
+    
+class WeightedRandomSampler(Sampler):
+    """Samples elements from [0,..,len(weights)-1] with given probabilities (weights).
+    Arguments:
+        weights (list)   : a list of weights, not necessary summing up to one
+        num_samples (int): number of samples to draw
+    """
+
+    def __init__(self, weights, num_samples, replacement=True):
+        self.weights = torch.DoubleTensor(weights)
+        self.num_samples = num_samples
+        self.replacement = replacement
+
+    def __iter__(self):
+        return iter(torch.multinomial(self.weights, self.num_samples, self.replacement))
+
+    def __len__(self):
+        return self.num_samples
