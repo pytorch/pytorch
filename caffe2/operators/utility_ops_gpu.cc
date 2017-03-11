@@ -1,4 +1,5 @@
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/reshape_op.h"
 #include "caffe2/operators/utility_ops.h"
 
 namespace caffe2 {
@@ -34,7 +35,6 @@ REGISTER_CUDA_OPERATOR(Squeeze, SqueezeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ExpandDims, ExpandDimsOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(Reshape, ReshapeOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SumElements, SumElementsOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
