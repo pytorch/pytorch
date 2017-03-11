@@ -282,6 +282,29 @@ class TestLoadSave(TestLoadSaveBase):
                 if e.errno != errno.ENOENT:
                     raise
 
+    def testMissingFile(self):
+        tmp_folder = tempfile.mkdtemp()
+        tmp_file = os.path.join(tmp_folder, "missing_db")
+
+        op = core.CreateOperator(
+            "Load",
+            [], [],
+            absolute_path=1,
+            db=tmp_file, db_type=self._db_type,
+            load_all=True)
+        with self.assertRaises(RuntimeError):
+            try:
+                workspace.RunOperatorOnce(op)
+            except RuntimeError as e:
+                print(e)
+                raise
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+
+
 
 if __name__ == '__main__':
     unittest.main()
