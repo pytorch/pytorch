@@ -405,6 +405,7 @@ else:
 
 
 setup(name="torch", version=version,
+      description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",
       ext_modules=extensions,
       cmdclass={
           'build': build,
