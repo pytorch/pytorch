@@ -35,7 +35,7 @@ Containers
     :members:
 
 :hidden:`ParameterList`
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ParameterList
     :members:
@@ -764,3 +764,17 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pixel_shuffle
+
+torch.nn.init
+=============
+
+.. currentmodule:: torch.nn.init
+.. autofunction:: uniform
+.. autofunction:: normal
+.. autofunction:: constant
+.. autofunction:: xavier_uniform
+.. autofunction:: xavier_normal
+.. autofunction:: kaiming_uniform
+.. autofunction:: kaiming_normal
+.. autofunction:: orthogonal
+.. autofunction:: sparse
