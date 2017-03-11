@@ -78,9 +78,9 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method described in "Understanding the 
-    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform 
-    distribution. The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in + 
+    """Fills the input Tensor or Variable with values according to the method described in "Understanding the
+    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform
+    distribution. The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in +
     fan_out)) * sqrt(3) 
 
     Args:
@@ -102,9 +102,9 @@ def xavier_uniform(tensor, gain=1):
 
 
 def xavier_normal(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method described in "Understanding the 
-    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal 
-    distribution. The resulting tensor will have values sampled from normal distribution with mean=0 and std = gain * 
+    """Fills the input Tensor or Variable with values according to the method described in "Understanding the
+    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal
+    distribution. The resulting tensor will have values sampled from normal distribution with mean=0 and std = gain *
     sqrt(2/(fan_in + fan_out)) 
 
     Args:
@@ -138,10 +138,10 @@ def _calculate_correct_fan(tensor, mode):
 
 
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
-    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into 
-    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform 
-    distribution. The resulting tensor will have values sampled from U(-bound, bound) where bound = sqrt(2/((1 + a^2) 
-    * fan_in)) * sqrt(3) 
+    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform
+    distribution. The resulting tensor will have values sampled from U(-bound, bound) where bound = sqrt(2/((1 + a^2)
+    * fan_in)) * sqrt(3)
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -164,8 +164,8 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
 
 def kaiming_normal(tensor, a=0, mode='fan_in'):
-    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into 
-    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal 
+    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal
     distribution. The resulting tensor will have values sampled from normal distribution with mean=0 and std = sqrt(
     2/((1 + a^2) * fan_in))
 
@@ -189,11 +189,11 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
 
 
 def orthogonal(tensor, gain=1):
-    """Fills the input Tensor or Variable with a (semi) orthogonal matrix. The input tensor must have at least 2 
-    dimensions, and for tensors with more than 2 dimensions the trailing dimensions are flattened. viewed as 2D 
-    representation with rows equal to the first dimension and columns equal to the product of  as a sparse matrix, 
-    where the non-zero elements will be drawn from a normal distribution with mean=0 and std=`std`. Reference: "Exact 
-    solutions to the nonlinear dynamics of learning in deep linear neural networks"-Saxe, A. et al. 
+    """Fills the input Tensor or Variable with a (semi) orthogonal matrix. The input tensor must have at least 2
+    dimensions, and for tensors with more than 2 dimensions the trailing dimensions are flattened. viewed as 2D
+    representation with rows equal to the first dimension and columns equal to the product of  as a sparse matrix,
+    where the non-zero elements will be drawn from a normal distribution with mean=0 and std=`std`. Reference: "Exact
+    solutions to the nonlinear dynamics of learning in deep linear neural networks"-Saxe, A. et al.
 
     Args:
         tensor: a n-dimension torch.Tensor, where n >= 2
@@ -224,7 +224,7 @@ def orthogonal(tensor, gain=1):
 
 
 def sparse(tensor, sparsity, std=0.01):
-    """Fills the 2D input Tensor or Variable as a sparse matrix, where the non-zero elements will be drawn from a 
+    """Fills the 2D input Tensor or Variable as a sparse matrix, where the non-zero elements will be drawn from a
     normal distribution with mean=0 and std=`std`.
 
     Args:
