@@ -54,18 +54,19 @@ bool OpSchema::Verify(const OperatorDef& def) const {
       if (def.input(in_idx) == def.output(out_idx) &&
           (!inplace_allowed_(in_idx, out_idx)
           && !inplace_enforced_(in_idx, out_idx))) {
-        LOG(ERROR)
-            << "Input index " << in_idx << " and output idx "
-            << out_idx << " are set to be in-place but this is actually not "
-            << "supported by op " << def.type();
+        LOG(ERROR) << "Input index " << in_idx << " and output idx " << out_idx
+                   << " (" << def.input(in_idx) << ")"
+                   << " are set to be in-place but this is actually not "
+                   << "supported by op " << def.type();
         return false;
       }
       if (def.input(in_idx) != def.output(out_idx) &&
           inplace_enforced_(in_idx, out_idx)) {
-        LOG(ERROR)
-            << "Input index " << in_idx << " and output idx " << out_idx
-            << " are not in-place but should be as required by op "
-            << def.type();
+        LOG(ERROR) << "Input index " << in_idx << " (" << def.input(in_idx) << ")"
+                   << " and output idx " << out_idx
+                   << " (" << def.output(in_idx) << ")"
+                   << " are not in-place but should be as required by op "
+                   << def.type();
         return false;
       }
     }
