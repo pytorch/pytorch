@@ -53,3 +53,13 @@ class TestReaderWithLimit(TestCase):
         self.assertEquals(
             sorted(ws.blobs[str(dst_ds.content().label())].fetch()), range(100))
         self.assertTrue(ws.blobs[str(reader.data_finished())].fetch())
+
+        """ 3. Read without counter """
+        ws.run(dst_init)
+        with TaskGroup() as tg:
+            reader = ReaderWithLimit(src_ds.reader(), num_iter=None)
+            pipe(reader, dst_ds.writer(), num_threads=8)
+        session.run(tg)
+        self.assertEquals(
+            sorted(ws.blobs[str(dst_ds.content().label())].fetch()), range(100))
+        self.assertTrue(ws.blobs[str(reader.data_finished())].fetch())

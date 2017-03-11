@@ -263,9 +263,12 @@ Both input operands should be of type `bool`.
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol)     \
-  OPERATOR_SCHEMA(name).NumInputs(2).NumOutputs(1).FillUsing( \
-      LogicalDocGenerator(symbol));                           \
+#define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol) \
+  OPERATOR_SCHEMA(name)                                   \
+      .NumInputs(2)                                       \
+      .NumOutputs(1)                                      \
+      .AllowInplace({{0, 0}})                             \
+      .FillUsing(LogicalDocGenerator(symbol));            \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or");
