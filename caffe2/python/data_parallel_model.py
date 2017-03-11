@@ -109,6 +109,7 @@ def Parallelize_GPU(
 
     if (param_update_builder_fun is None):
         log.info("Parameter update function not defined --> only forward")
+        _InferBlobDevice(model_helper_obj)
         return
 
     log.info("Adding gradient operators")
@@ -149,6 +150,7 @@ def Parallelize_GPU(
             with core.NameScope("gpu_{}".format(device)):
                 param_update_builder_fun(model_helper_obj)
 
+    _InferBlobDevice(model_helper_obj)
     _AnalyzeOperators(model_helper_obj)
 
     # Configure dagnet to run with only one worker on the first iteration,
