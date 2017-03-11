@@ -2436,7 +2436,7 @@ new_module_tests = [
         test_cuda=False
     ),
     dict(
-        constructor=lambda: nn.CosineSimilarity(),
+        module_name='CosineSimilarity',
         input_size=(2, 5, 7),
     ),
     dict(
