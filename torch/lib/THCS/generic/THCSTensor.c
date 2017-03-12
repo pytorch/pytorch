@@ -42,12 +42,19 @@ THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self)
 
 /*** TODO: watch out for memory leaks ***/
 THCIndexTensor *THCSTensor_(indices)(THCState *state, const THCSTensor *self) {
-  if (!self->indices) return self->indices;
+  if (self->nnz == 0) {
+    // Narrows don't work on 0-length tensors
+    THCIndexTensor_(retain)(state, self->indices);
+    return self->indices;
+  }
   return THCIndexTensor_(newNarrow)(state, self->indices, 1, 0, self->nnz);
 }
 
 THCTensor *THCSTensor_(values)(THCState *state, const THCSTensor *self) {
-  if (!self->indices) return self->values;
+  if (self->nnz == 0) {
+    THCTensor_(retain)(state, self->values);
+    return self->values;
+  }
   return THCTensor_(newNarrow)(state, self->values, 0, 0, self->nnz);
 }
 
@@ -60,8 +67,8 @@ THCTensor *THCSTensor_(values)(THCState *state, const THCSTensor *self) {
 static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
 {
   self->size = NULL;
-  self->indices = NULL;
-  self->values = NULL;
+  self->indices = THCIndexTensor_(new)(state);
+  self->values = THCTensor_(new)(state);
   self->nDimensionI = 0;
   self->nDimensionV = 0;
   self->contiguous = 0;
@@ -90,18 +97,27 @@ static void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI,
   self->contiguous = 0;
 }
 
-THCSTensor *THCSTensor_(set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
-  THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 2,
-      "indices must be nDim x nnz");
-  THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 2,
-      "indices and values must have same nnz");
+// directly assign without cloning or retaining (internal method)
+THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
+  int empty = THCTensor_(nDimension)(state, values) == 0;
+  if (!empty) {
+    THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 2,
+        "indices must be nDim x nnz");
+    THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 2,
+        "indices and values must have same nnz");
+  }
   THCIndexTensor_(free)(state, self->indices);
   THCTensor_(free)(state, self->values);
-  self->indices = THCIndexTensor_(newClone)(state, indices);
-  self->values = THCTensor_(newClone)(state, values);
-  self->nnz = THCTensor_(size)(state, values, 0);
+  self->indices = indices;
+  self->values = values;
+  self->nnz = empty ? 0 : THCTensor_(size)(state, values, 0);
 
   return self;
+}
+
+THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
+  // Note: Not like torch.set, this is an internal method
+  return THCSTensor_(move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
 }
 
 /*** end helper methods ***/
@@ -126,7 +142,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
 
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
-  THCSTensor_(set)(state, self, indices, values);
+  THCSTensor_(_set)(state, self, indices, values);
 
   nDimI = THCIndexTensor_(size)(state, indices, 0);
   nDimV = THCTensor_(nDimension)(state, values) - 1;
@@ -198,7 +214,7 @@ THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self) {
   THCSTensor *other = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, other, self->nDimensionI, self->nDimensionV, self->size);
 
-  THCSTensor_(set)(
+  THCSTensor_(_set)(
       state,
       other,
       THCIndexTensor_(newClone)(state, self->indices),
