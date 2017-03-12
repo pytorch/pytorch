@@ -572,3 +572,31 @@ def pad(input, pad, mode='constant', value=0):
             return _functions.thnn.ReplicationPad3d(*pad)(input)
     else:
         raise NotImplementedError("Only 4D and 5D padding is supported for now")
+
+
+# distance
+
+def pairwise_distance(input, p=2):
+    r"""
+    Computes the batchwise pairwise distance between vectors v1,v2:
+
+        .. math ::
+            \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
+
+        Args:
+            x (Tensor): input tensor containing the two input batches
+            p (real): the norm degree. Default: 2
+
+        Shape:
+            - Input: :math:`(2, N, D)` where `D = vector dimension`
+            - Output: :math:`(N, 1)
+
+        >>> pdist = nn.PairwiseDistance(2)
+        >>> input = autograd.Variable(torch.randn(2, 100, 128))
+        >>> output = pdist(input)
+    """
+    assert input.size(0) == 2, "Input needs to be of size (2, batch, dim)"
+    x1, x2 = input[0], input[1]
+    diff = torch.abs(x1 - x2)
+    out = torch.pow(diff + 1e-6, p).sum(dim=1)
+    return torch.pow(out, 1. / p)

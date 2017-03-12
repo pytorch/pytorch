@@ -3,9 +3,26 @@ from .module import Module
 
 
 class PairwiseDistance(Module):
-    r"""Computes the distance between two vectors using the p-norm.
-    """
+    r"""
+    Computes the batchwise pairwise distance between vectors v1,v2:
 
+        .. math ::
+            \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
+
+        Args:
+            x (Tensor): input tensor containing the two input batches
+
+        Attributes:
+            p (real): the norm degree. Default: 2
+
+        Shape:
+            - Input: :math:`(2, N, D)` where `D = vector dimension`
+            - Output: :math:`(N, 1)
+
+        >>> pdist = nn.PairwiseDistance(2)
+        >>> input = autograd.Variable(torch.randn(2, 100, 128))
+        >>> output = pdist(input)
+    """
     def __init__(self, p=2):
         super(PairwiseDistance, self).__init__()
         assert p % 1 == 0

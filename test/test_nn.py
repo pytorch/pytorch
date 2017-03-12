@@ -2423,6 +2423,10 @@ new_module_tests = [
         input_size=(1, 2, 4, 4),
         desc='scale'
     ),
+    dict(
+        module_name='PairwiseDistance',
+        input_size=(2, 5, 7),
+    ),
 ]
 
 for test_params in module_tests + new_module_tests:
