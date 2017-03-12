@@ -24,7 +24,9 @@ void setSocketNoDelay(int socket) {
   SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
 }
 
-const char* get_env(const char* env) {
+} // anonymous namespace
+
+const char* must_getenv(const char* env) {
   const char* value = std::getenv(env);
   if (value == nullptr) {
     throw std::logic_error(std::string("") + "failed to read the " + env +
@@ -32,8 +34,6 @@ const char* get_env(const char* env) {
   }
   return value;
 }
-
-} // anonymous namespace
 
 std::tuple<int, port_type> listen(port_type port) {
   struct addrinfo hints, *res = NULL;
@@ -45,7 +45,7 @@ std::tuple<int, port_type> listen(port_type port) {
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
   // by editing `/etc/gai.conf`. so there is no need to manual sorting
-  // or protcol preference.
+  // or protocol preference.
   int err = getaddrinfo(NULL, std::to_string(port).data(), &hints, &res);
   if (err != 0 || !res) {
     throw std::invalid_argument("cannot find host to listen on: " + std::string(gai_strerror(err)));
@@ -204,6 +204,10 @@ std::tuple<std::string, port_type> load_worker_env() {
 
 rank_type load_rank_env() {
   return convertToRank(std::stol(getenv(RANK_ENV)));
+}
+
+rank_type load_world_size_env() {
+  return convertToRank(std::stol(getenv(WORLD_SIZE_ENV)));
 }
 
 } // namespace thd

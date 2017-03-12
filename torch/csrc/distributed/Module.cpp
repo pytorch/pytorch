@@ -9,6 +9,7 @@
 static std::unordered_map<std::string, THDChannelType> name2channel_type = {
     {"mpi", THDChannelMPI},
     {"tcp", THDChannelTCP},
+    {"gloo", THDChannelGloo},
 };
 
 static bool THDPModule_loadClasses(PyObject *module_dict)
