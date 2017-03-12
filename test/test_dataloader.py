@@ -173,6 +173,7 @@ class TestDataLoader(TestCase):
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
+
 class StringDataset(Dataset):
     def __init__(self):
         self.s = '12345'
