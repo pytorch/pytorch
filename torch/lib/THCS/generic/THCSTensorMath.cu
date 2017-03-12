@@ -39,11 +39,55 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 }
 
 void THCSTensor_(mul)(THCState *state, THCSTensor *r_, THCSTensor *t, real value) {
-  THError("WARNING: Sparse Cuda Tensor op mul is not implemented");
+  if (r_ == t) {
+    THCTensor *r_values_ = THCSTensor_(values)(state, r_);
+    THCTensor_(mul)(state, r_values_, r_values_, value);
+    THCTensor_(free)(state, r_values_);
+  } else {
+    THCSTensor_(resizeAs)(state, r_, t);
+
+    THCIndexTensor *r_indices_ = THCSTensor_(indices)(state, r_);
+    THCTensor *r_values_ = THCSTensor_(values)(state, r_);
+    THCIndexTensor *t_indices_ = THCSTensor_(indices)(state, t);
+    THCTensor *t_values_ = THCSTensor_(values)(state, t);
+
+    THCIndexTensor_(resizeAs)(state, r_indices_, t_indices_);
+    THCIndexTensor_(copy)(state, r_indices_, t_indices_);
+    THCTensor_(mul)(state, r_values_, t_values_, value);
+    r_->nnz = t->nnz;
+    r_->contiguous = t->contiguous;
+
+    THCIndexTensor_(free)(state, r_indices_);
+    THCTensor_(free)(state, r_values_);
+    THCIndexTensor_(free)(state, t_indices_);
+    THCTensor_(free)(state, t_values_);
+  }
 }
 
 void THCSTensor_(div)(THCState *state, THCSTensor *r_, THCSTensor *t, real value) {
-  THError("WARNING: Sparse Cuda Tensor op div is not implemented");
+  if (r_ == t) {
+    THCTensor *r_values_ = THCSTensor_(values)(state, r_);
+    THCTensor_(mul)(state, r_values_, r_values_, value);
+    THCTensor_(free)(state, r_values_);
+  } else {
+    THCSTensor_(resizeAs)(state, r_, t);
+
+    THCIndexTensor *r_indices_ = THCSTensor_(indices)(state, r_);
+    THCTensor *r_values_ = THCSTensor_(values)(state, r_);
+    THCIndexTensor *t_indices_ = THCSTensor_(indices)(state, t);
+    THCTensor *t_values_ = THCSTensor_(values)(state, t);
+
+    THCIndexTensor_(resizeAs)(state, r_indices_, t_indices_);
+    THCIndexTensor_(copy)(state, r_indices_, t_indices_);
+    THCTensor_(div)(state, r_values_, t_values_, value);
+    r_->nnz = t->nnz;
+    r_->contiguous = t->contiguous;
+
+    THCIndexTensor_(free)(state, r_indices_);
+    THCTensor_(free)(state, r_values_);
+    THCIndexTensor_(free)(state, t_indices_);
+    THCTensor_(free)(state, t_values_);
+  }
 }
 
 void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real value, THCSTensor *src) {

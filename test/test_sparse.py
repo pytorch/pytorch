@@ -7,212 +7,232 @@ import unittest
 from common import TestCase, run_tests
 from numbers import Number
 
-SparseTensor = sparse.DoubleTensor
+# triplet := (index type, value type, sparse type)
+cpu_triplet = (
+    torch.LongTensor,
+    torch.DoubleTensor,
+    torch.sparse.DoubleTensor)
+type_triplets = [cpu_triplet]
+if torch.cuda.is_available():
+    cuda_triplet = (
+        torch.cuda.LongTensor,
+        torch.cuda.DoubleTensor,
+        torch.cuda.sparse.DoubleTensor)
+    type_triplets.append(cuda_triplet)
 
 
 class TestSparse(TestCase):
 
     @staticmethod
-    def _gen_sparse(d, nnz, with_size):
+    def _gen_sparse(d, nnz, with_size, is_cuda=False):  # FIXME remove default is_cuda value to ensure coverage
         if isinstance(with_size, Number):
             v = torch.randn(nnz)
             i = (torch.rand(d, nnz) * with_size).type(torch.LongTensor)
-            x = SparseTensor(i, v)
+            x = torch.sparse.DoubleTensor(i, v)
         else:
             v_size = [nnz] + list(with_size[d:])
             v = torch.randn(*v_size)
             i = torch.rand(d, nnz) * \
                 torch.Tensor(with_size[:d]).repeat(nnz, 1).transpose(0, 1)
             i = i.type(torch.LongTensor)
-            x = SparseTensor(i, v, torch.Size(with_size))
+            x = torch.sparse.DoubleTensor(i, v, torch.Size(with_size))
 
-        return x, i, v
+        if is_cuda:
+            return x.cuda(), i.cuda(), v.cuda()
+        else:
+            return x, i, v
 
     def test_basic(self):
-        x, i, v = self._gen_sparse(3, 10, 100)
+        for is_cuda in [False, True] if torch.cuda.is_available() else [False]:
+            x, i, v = self._gen_sparse(3, 10, 100, is_cuda)
 
-        self.assertEqual(i, x.indices())
-        self.assertEqual(v, x.values())
+            self.assertEqual(i, x.indices())
+            self.assertEqual(v, x.values())
 
-        x, i, v = self._gen_sparse(3, 10, [100, 100, 100])
-        self.assertEqual(i, x.indices())
-        self.assertEqual(v, x.values())
-        self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(x.nnz(), 10)
-        for i in range(3):
-            self.assertEqual(x.size(i), 100)
+            x, i, v = self._gen_sparse(3, 10, [100, 100, 100], is_cuda)
+            self.assertEqual(i, x.indices())
+            self.assertEqual(v, x.values())
+            self.assertEqual(x.ndimension(), 3)
+            self.assertEqual(x.nnz(), 10)
+            for i in range(3):
+                self.assertEqual(x.size(i), 100)
 
-        # Make sure we can access empty indices / values
-        x = SparseTensor()
-        self.assertEqual(x.indices().numel(), 0)
-        self.assertEqual(x.values().numel(), 0)
+        for _, _, SparseTensor in type_triplets:
+            # Make sure we can access empty indices / values
+            x = SparseTensor()
+            self.assertEqual(x.indices().numel(), 0)
+            self.assertEqual(x.values().numel(), 0)
 
     def test_to_dense(self):
-        i = torch.LongTensor([
-            [0, 1, 2, 2],
-            [0, 0, 0, 3],
-            [0, 0, 1, 4],
-        ])
-        v = torch.Tensor([2, 1, 3, 4])
-        x = SparseTensor(i, v, torch.Size([3, 4, 5]))
-        res = torch.Tensor([
-            [[2, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0]],
-            [[1, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0]],
-            [[0, 3, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 4]],
-        ])
+        for IndexTensor, ValueTensor, SparseTensor in type_triplets:
+            i = IndexTensor([
+                [0, 1, 2, 2],
+                [0, 0, 0, 3],
+                [0, 0, 1, 4],
+            ])
+            v = ValueTensor([2, 1, 3, 4])
+            x = SparseTensor(i, v, torch.Size([3, 4, 5]))
+            res = ValueTensor([
+                [[2, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0]],
+                [[1, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0]],
+                [[0, 3, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 4]],
+            ])
 
-        x.to_dense()  # Tests double to_dense for memory corruption
-        x.to_dense()
-        x.to_dense()
-        self.assertEqual(res, x.to_dense())
+            x.to_dense()  # Tests double to_dense for memory corruption
+            x.to_dense()
+            x.to_dense()
+            self.assertEqual(res, x.to_dense())
 
     def test_to_dense_hybrid(self):
-        i = torch.LongTensor([
-            [0, 1, 2, 2],
-            [0, 0, 0, 3],
-        ])
-        v = torch.Tensor([[2, 3], [1, 2], [3, 4], [4, 5]])
-        x = SparseTensor(i, v, torch.Size([3, 4, 2]))
-        res = torch.Tensor([
-            [[2, 3],
-             [0, 0],
-             [0, 0],
-             [0, 0]],
-            [[1, 2],
-             [0, 0],
-             [0, 0],
-             [0, 0]],
-            [[3, 4],
-             [0, 0],
-             [0, 0],
-             [4, 5]],
-        ])
+        for IndexTensor, ValueTensor, SparseTensor in type_triplets:
+            i = IndexTensor([
+                [0, 1, 2, 2],
+                [0, 0, 0, 3],
+            ])
+            v = ValueTensor([[2, 3], [1, 2], [3, 4], [4, 5]])
+            x = SparseTensor(i, v, torch.Size([3, 4, 2]))
+            res = ValueTensor([
+                [[2, 3],
+                 [0, 0],
+                 [0, 0],
+                 [0, 0]],
+                [[1, 2],
+                 [0, 0],
+                 [0, 0],
+                 [0, 0]],
+                [[3, 4],
+                 [0, 0],
+                 [0, 0],
+                 [4, 5]],
+            ])
 
-        x.to_dense()  # Tests double to_dense for memory corruption
-        x.to_dense()
-        x.to_dense()
-        self.assertEqual(res, x.to_dense())
+            x.to_dense()  # Tests double to_dense for memory corruption
+            x.to_dense()
+            x.to_dense()
+            self.assertEqual(res, x.to_dense())
 
     def test_contig(self):
-        i = torch.LongTensor([
-            [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
-            [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
-        ])
-        v = torch.Tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-        x = SparseTensor(i, v, torch.Size([100, 100]))
-        exp_i = torch.LongTensor([
-            [0, 1, 6, 14, 27, 35, 39, 40, 66, 71],
-            [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
-        ])
-        exp_v = torch.Tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
-        x.contiguous()
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        for IndexTensor, ValueTensor, SparseTensor in type_triplets:
+            i = IndexTensor([
+                [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
+                [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
+            ])
+            v = ValueTensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+            x = SparseTensor(i, v, torch.Size([100, 100]))
+            exp_i = IndexTensor([
+                [0, 1, 6, 14, 27, 35, 39, 40, 66, 71],
+                [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
+            ])
+            exp_v = ValueTensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
+            x.contiguous()
+            self.assertEqual(exp_i, x.indices())
+            self.assertEqual(exp_v, x.values())
 
-        i = torch.LongTensor([
-            [2, 0, 2, 1],
-            [0, 0, 3, 0],
-            [1, 0, 4, 0],
-        ])
-        v = torch.Tensor([3, 2, 4, 1])
-        x = SparseTensor(i, v, torch.Size([3, 4, 5]))
-        exp_i = torch.LongTensor([
-            [0, 1, 2, 2],
-            [0, 0, 0, 3],
-            [0, 0, 1, 4],
-        ])
-        exp_v = torch.Tensor([2, 1, 3, 4])
+            i = IndexTensor([
+                [2, 0, 2, 1],
+                [0, 0, 3, 0],
+                [1, 0, 4, 0],
+            ])
+            v = ValueTensor([3, 2, 4, 1])
+            x = SparseTensor(i, v, torch.Size([3, 4, 5]))
+            exp_i = IndexTensor([
+                [0, 1, 2, 2],
+                [0, 0, 0, 3],
+                [0, 0, 1, 4],
+            ])
+            exp_v = ValueTensor([2, 1, 3, 4])
 
-        x.contiguous()
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+            x.contiguous()
+            self.assertEqual(exp_i, x.indices())
+            self.assertEqual(exp_v, x.values())
 
-        # Duplicate indices
-        i = torch.LongTensor([
-            [0, 0, 2, 0],
-            [0, 0, 3, 0],
-            [0, 0, 4, 0],
-        ])
-        v = torch.Tensor([3, 2, 4, 1])
-        x = SparseTensor(i, v, torch.Size([3, 4, 5]))
-        exp_i = torch.LongTensor([
-            [0, 2],
-            [0, 3],
-            [0, 4],
-        ])
-        exp_v = torch.Tensor([6, 4])
+            # Duplicate indices
+            i = IndexTensor([
+                [0, 0, 2, 0],
+                [0, 0, 3, 0],
+                [0, 0, 4, 0],
+            ])
+            v = ValueTensor([3, 2, 4, 1])
+            x = SparseTensor(i, v, torch.Size([3, 4, 5]))
+            exp_i = IndexTensor([
+                [0, 2],
+                [0, 3],
+                [0, 4],
+            ])
+            exp_v = ValueTensor([6, 4])
 
-        x.contiguous()
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+            x.contiguous()
+            self.assertEqual(exp_i, x.indices())
+            self.assertEqual(exp_v, x.values())
 
     def test_contig_hybrid(self):
-        i = torch.LongTensor([
-            [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
-            [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
-        ])
-        v = torch.Tensor([
-            [1, 2], [2, 3], [3, 4], [4, 5], [5, 6],
-            [6, 7], [7, 8], [8, 9], [9, 10], [10, 11],
-        ])
-        x = SparseTensor(i, v, torch.Size([100, 100, 2]))
-        exp_i = torch.LongTensor([
-            [0, 1, 6, 14, 27, 35, 39, 40, 66, 71],
-            [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
-        ])
-        exp_v = torch.Tensor([
-            [2, 3], [1, 2], [6, 7], [4, 5], [10, 11],
-            [3, 4], [5, 6], [9, 10], [8, 9], [7, 8],
-        ])
-        x.contiguous()
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        for IndexTensor, ValueTensor, SparseTensor in type_triplets:
+            i = IndexTensor([
+                [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
+                [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
+            ])
+            v = ValueTensor([
+                [1, 2], [2, 3], [3, 4], [4, 5], [5, 6],
+                [6, 7], [7, 8], [8, 9], [9, 10], [10, 11],
+            ])
+            x = SparseTensor(i, v, torch.Size([100, 100, 2]))
+            exp_i = IndexTensor([
+                [0, 1, 6, 14, 27, 35, 39, 40, 66, 71],
+                [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
+            ])
+            exp_v = ValueTensor([
+                [2, 3], [1, 2], [6, 7], [4, 5], [10, 11],
+                [3, 4], [5, 6], [9, 10], [8, 9], [7, 8],
+            ])
+            x.contiguous()
+            self.assertEqual(exp_i, x.indices())
+            self.assertEqual(exp_v, x.values())
 
-        i = torch.LongTensor([
-            [2, 0, 2, 1],
-            [0, 0, 3, 0],
-            [1, 0, 4, 0],
-        ])
-        v = torch.Tensor([[3, 3, 3], [2, 2, 2], [4, 4, 4], [1, 1, 1]])
-        x = SparseTensor(i, v, torch.Size([3, 4, 5, 3]))
-        exp_i = torch.LongTensor([
-            [0, 1, 2, 2],
-            [0, 0, 0, 3],
-            [0, 0, 1, 4],
-        ])
-        exp_v = torch.Tensor([[2, 2, 2], [1, 1, 1], [3, 3, 3], [4, 4, 4]])
+            i = IndexTensor([
+                [2, 0, 2, 1],
+                [0, 0, 3, 0],
+                [1, 0, 4, 0],
+            ])
+            v = ValueTensor([[3, 3, 3], [2, 2, 2], [4, 4, 4], [1, 1, 1]])
+            x = SparseTensor(i, v, torch.Size([3, 4, 5, 3]))
+            exp_i = IndexTensor([
+                [0, 1, 2, 2],
+                [0, 0, 0, 3],
+                [0, 0, 1, 4],
+            ])
+            exp_v = ValueTensor([[2, 2, 2], [1, 1, 1], [3, 3, 3], [4, 4, 4]])
 
-        x.contiguous()
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+            x.contiguous()
+            self.assertEqual(exp_i, x.indices())
+            self.assertEqual(exp_v, x.values())
 
-        # Duplicate indices
-        i = torch.LongTensor([
-            [0, 0, 2, 0],
-            [0, 0, 3, 0],
-            [0, 0, 4, 0],
-        ])
-        v = torch.Tensor([[3, 2, 3], [2, 1, 1], [4, 3, 4], [1, 1, 1]])
-        x = SparseTensor(i, v, torch.Size([3, 4, 5, 3]))
-        exp_i = torch.LongTensor([
-            [0, 2],
-            [0, 3],
-            [0, 4],
-        ])
-        exp_v = torch.Tensor([[6, 4, 5], [4, 3, 4]])
+            # Duplicate indices
+            i = IndexTensor([
+                [0, 0, 2, 0],
+                [0, 0, 3, 0],
+                [0, 0, 4, 0],
+            ])
+            v = ValueTensor([[3, 2, 3], [2, 1, 1], [4, 3, 4], [1, 1, 1]])
+            x = SparseTensor(i, v, torch.Size([3, 4, 5, 3]))
+            exp_i = IndexTensor([
+                [0, 2],
+                [0, 3],
+                [0, 4],
+            ])
+            exp_v = ValueTensor([[6, 4, 5], [4, 3, 4]])
 
-        x.contiguous()
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+            x.contiguous()
+            self.assertEqual(exp_i, x.indices())
+            self.assertEqual(exp_v, x.values())
 
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]

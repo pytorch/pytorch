@@ -9,6 +9,7 @@
 
 #define THCIndexTensor          THCudaLongTensor
 #define THCIndexTensor_(NAME)   THCudaLongTensor_ ## NAME
+#define integer                 long
 
 #include "generic/THCSTensor.h"
 #include "THCSGenerateAllTypes.h"
@@ -17,4 +18,3 @@
 #include "THCSGenerateAllTypes.h"
 
 #endif
-
