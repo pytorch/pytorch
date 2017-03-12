@@ -21,6 +21,8 @@ struct GradBuffer {
   // Accumulates the gradient "var" at the specified index
   void addGrad(size_t idx, std::shared_ptr<Variable>&& var);
 
+  int device() const;
+
   // Returns the gradients as a list of variables. Destroys this GradBuffer.
   static std::vector<std::shared_ptr<Variable>> variables(GradBuffer&& buffer);
 

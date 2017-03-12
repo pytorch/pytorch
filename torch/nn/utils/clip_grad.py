@@ -11,7 +11,7 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
         max_norm (float or int): max norm of the gradients
         norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for infinity norm.
     """
-    parameters = list(parameters)
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == float('inf'):

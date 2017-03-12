@@ -98,6 +98,7 @@ dispatch:                                                                      \
   return PyObject_Call(method, args, kwargs);                                  \
 }
 
+IMPLEMENT_SPARSE_STATELESS(spmm);
 IMPLEMENT_SPARSE_STATELESS(sspmm);
 IMPLEMENT_SPARSE_STATELESS(sspaddmm);
 

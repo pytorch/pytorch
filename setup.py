@@ -249,6 +249,7 @@ main_sources = [
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/object_ptr.cpp",
+    "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/autograd/init.cpp",
@@ -260,7 +261,9 @@ main_sources = [
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_engine.cpp",
+    "torch/csrc/autograd/python_hook.cpp",
     "torch/csrc/autograd/functions/batch_normalization.cpp",
+    "torch/csrc/autograd/functions/convolution.cpp",
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN_generic.cpp",
 ]
@@ -388,7 +391,7 @@ if WITH_CUDA:
                        )
     extensions.append(THCUNN)
 
-version = '0.1.9'
+version = '0.1.10'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     version = os.getenv('PYTORCH_BUILD_VERSION') \

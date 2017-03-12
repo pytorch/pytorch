@@ -7,7 +7,7 @@ import torch.cuda
 import tempfile
 import unittest
 import warnings
-from itertools import product
+from itertools import product, combinations
 from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack
 
 if TEST_NUMPY:
@@ -1903,6 +1903,25 @@ class TestTorch(TestCase):
         self.assertEqual(reference[:, 2, 1:6:2],
                          torch.stack([reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5]], 1))
 
+        lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
+        tensor = torch.DoubleTensor(lst)
+        for i in range(100):
+            idx1_start = random.randrange(10)
+            idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
+            idx1_step = random.randrange(1, 8)
+            idx1 = slice(idx1_start, idx1_end, idx1_step)
+            if random.randrange(2) == 0:
+                idx2_start = random.randrange(10)
+                idx2_end = idx2_start + random.randrange(1, 10 - idx2_start + 1)
+                idx2_step = random.randrange(1, 8)
+                idx2 = slice(idx2_start, idx2_end, idx2_step)
+                lst_indexed = list(map(lambda l: l[idx2], lst[idx1]))
+                tensor_indexed = tensor[idx1, idx2]
+            else:
+                lst_indexed = lst[idx1]
+                tensor_indexed = tensor[idx1]
+            self.assertEqual(torch.DoubleTensor(lst_indexed), tensor_indexed)
+
         self.assertRaises(ValueError, lambda: reference[1:9:0])
         self.assertRaises(ValueError, lambda: reference[1:9:-1])
 
@@ -2968,6 +2987,23 @@ class TestTorch(TestCase):
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
+    def test_transpose_neg(self):
+        x = torch.randn(10, 20, 30)
+        ndim = 3
+
+        for i, j in combinations(range(ndim), 2):
+            a = x.transpose(i, j)
+            b = x.transpose(i - ndim, j - ndim)
+            self.assertEqual(a, b)
+
+            a = torch.transpose(x, i, j)
+            b = torch.transpose(x, i - ndim, j - ndim)
+            self.assertEqual(a, b)
+
+            a = x.clone()
+            x.transpose_(i, j)
+            x.transpose_(i - ndim, j - ndim)
+            self.assertEqual(a, x)
 
 if __name__ == '__main__':
     run_tests()

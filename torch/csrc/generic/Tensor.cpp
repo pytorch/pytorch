@@ -477,9 +477,13 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
       PyErr_SetString(PyExc_ValueError, "slice step has to be greater than 0");
       throw python_error();
     }
-    THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, indexed_dim, start, length * step);
+    if (length == 0) {
+      PyErr_SetString(PyExc_ValueError, "result of slicing is an empty tensor");
+      throw python_error();
+    }
+    tresult->storageOffset += tresult->stride[indexed_dim] * start;
     tresult->stride[indexed_dim] *= step;
-    tresult->size[indexed_dim] /= step;
+    tresult->size[indexed_dim] = length;
     indexed_dim++;
   } else {
     return false;

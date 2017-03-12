@@ -80,8 +80,8 @@ def autograd_sharing(queue, ready, master_modified):
     is_ok = var.data.equal(expected_var)
     var.data[:] = torch.ones(5, 5)
 
-    is_ok &= var.grad.data.equal(torch.zeros(5, 5))
-    var.grad.data[:] = torch.ones(5, 5)
+    is_ok &= var.grad is None
+    var._grad = Variable(torch.ones(5, 5), requires_grad=False)
 
     queue.put(is_ok)
 
@@ -358,7 +358,7 @@ class TestMultiprocessing(TestCase):
         queue = mp.Queue()
         p = mp.Process(target=autograd_sharing, args=(queue, ready, master_modified))
         p.start()
-        var.grad.data.zero_()
+        var._grad = Variable(torch.zeros(5, 5), requires_grad=False)
         queue.put(var)
 
         ready.wait()

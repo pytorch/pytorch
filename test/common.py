@@ -118,11 +118,18 @@ class TestCase(unittest.TestCase):
             y = y.data
 
         if torch.is_tensor(x) and torch.is_tensor(y):
-            max_err = 0
-            super(TestCase, self).assertEqual(x.size(), y.size())
-            for index in iter_indices(x):
-                max_err = max(max_err, abs(x[index] - y[index]))
-            self.assertLessEqual(max_err, prec, message)
+            def assertTensorsEqual(a, b):
+                max_err = 0
+                super(TestCase, self).assertEqual(a.size(), b.size())
+                for index in iter_indices(a):
+                    max_err = max(max_err, abs(a[index] - b[index]))
+                self.assertLessEqual(max_err, prec, message)
+            self.assertEqual(x.is_sparse, y.is_sparse, message)
+            if x.is_sparse:
+                assertTensorsEqual(x.indices(), y.indices())
+                assertTensorsEqual(x.values(), y.values())
+            else:
+                assertTensorsEqual(x, y)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
