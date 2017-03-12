@@ -69,7 +69,7 @@ class SubsetRandomSampler(Sampler):
     def __len__(self):
         return len(self.indices)
 
-    
+
 class WeightedRandomSampler(Sampler):
     """Samples elements from [0,..,len(weights)-1] with given probabilities (weights).
     Arguments:
