@@ -173,6 +173,28 @@ class TestDataLoader(TestCase):
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
+class StringDataset(Dataset):
+    def __init__(self):
+        self.s = '12345'
+
+    def __len__(self):
+        return len(self.s)
+
+    def __getitem__(self, ndx):
+        return (self.s[ndx], ndx)
+
+
+class TestStringDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = StringDataset()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_shuffle_pin_memory(self):
+        loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
+        for batch_ndx, (s, n) in enumerate(loader):
+            self.assertIsInstance(s[0], str)
+            self.assertTrue(n.is_pinned())
+
 
 if __name__ == '__main__':
     run_tests()
