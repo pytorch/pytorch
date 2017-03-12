@@ -3,6 +3,7 @@
 #include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
 #include "data_channels/DataChannelTCP.hpp"
+#include "data_channels/DataChannelGloo.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -13,6 +14,8 @@ namespace thd {
 DataChannel* DataChannel::newChannel(THDChannelType type) {
   if (type == THDChannelTCP)
     return new DataChannelTCP();
+  else if (type == THDChannelGloo)
+    return new DataChannelGloo();
 #ifdef WITH_MPI
   else if (type == THDChannelMPI)
     return new DataChannelMPI();

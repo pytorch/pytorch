@@ -8,16 +8,21 @@
 #include <string>
 #include <system_error>
 #include <tuple>
+#include <vector>
 
 namespace thd {
 
 using rank_type = std::uint32_t;
 using port_type = std::uint16_t;
 
+using size_type = std::uint64_t;
+
 #define SYSCHECK(expr) { \
   errno = 0; (expr);     \
   if (errno != 0) throw std::system_error(errno, std::system_category()); \
 }
+
+const char* must_getenv(const char* env);
 
 template<typename T>
 void send_bytes(int socket, const T* buffer, std::size_t length, bool more_data = false)
@@ -90,5 +95,48 @@ std::tuple<int, std::string> accept(int listen_socket, int timeout = -1);
 std::tuple<port_type, rank_type> load_master_env();
 std::tuple<std::string, port_type> load_worker_env();
 rank_type load_rank_env();
+rank_type load_world_size_env();
+
+/* send a string's length and data */
+inline void send_string(int socket, const std::string& str,
+                        bool more_data = false) {
+  size_type size = str.size();
+  send_bytes<size_type>(socket, &size, 1, true);
+  send_bytes<char>(socket, str.data(), size, more_data);
+}
+
+/* receive a string as sent in send_string */
+inline std::string recv_string(int socket) {
+  size_type value_size;
+  recv_bytes<size_type>(socket, &value_size, 1);
+  std::vector<char> value(value_size);
+  recv_bytes<char>(socket, value.data(), value.size());
+  return std::string(value.data(), value.size());
+}
+
+/* send a vector's length and data */
+template<typename T>
+void send_vector(int socket, const std::vector<T>& vec,
+                 bool more_data = false) {
+  size_type size = vec.size();
+  send_bytes<size_type>(socket, &size, 1, true);
+  send_bytes<T>(socket, vec.data(), size, more_data);
+}
+
+/* receive a vector as sent in send_vector */
+template<typename T>
+std::vector<T> recv_vector(int socket) {
+  size_type value_size;
+  recv_bytes<size_type>(socket, &value_size, 1);
+  std::vector<char> value(value_size);
+  recv_bytes<char>(socket, value.data(), value.size());
+  return value;
+}
+
+/* this is only for convenience when sending rvalues */
+template<typename T>
+void send_value(int socket, T&& value, bool more_data = false) {
+  send_bytes<T>(socket, &value, 1, more_data);
+}
 
 } // namespace thd

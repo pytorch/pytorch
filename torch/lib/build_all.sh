@@ -37,6 +37,12 @@ else
 fi
 C_FLAGS="$BASIC_C_FLAGS $LDFLAGS"
 function build() {
+  local extra_args
+  if [[ $# -lt 2 ]]; then
+    extra_args=""
+  else
+    extra_args="$2"
+  fi
   mkdir -p build/$1
   cd build/$1
   cmake ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
@@ -58,11 +64,15 @@ function build() {
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
               -DNO_CUDA=$((1-$WITH_CUDA)) \
-              -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release)
+              -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
+              $2
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
-  rm -rf $INSTALL_DIR/lib/lib$1$LD_POSTFIX_UNVERSIONED
+  local lib_prefix=$INSTALL_DIR/lib/lib$1
+  if [ -f "$lib_prefix$LD_POSTFIX" ]; then
+    rm -rf -- "$lib_prefix$LD_POSTFIX_UNVERSIONED"
+  fi
 
   if [[ $(uname) == 'Darwin' ]]; then
     cd tmp_install/lib
@@ -104,6 +114,7 @@ CPP_FLAGS=" -std=c++11 "
 build libshm
 
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
+    build gloo "-DBUILD_SHARED=1"
     build THD
 fi
 
