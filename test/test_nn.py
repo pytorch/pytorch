@@ -2425,7 +2425,7 @@ new_module_tests = [
     ),
     dict(
         module_name='PairwiseDistance',
-        input_size=(2, 5, 7),
+        input_size=((5, 7), (5, 7)),
     ),
 ]
 

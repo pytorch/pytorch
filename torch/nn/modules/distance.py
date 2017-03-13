@@ -24,7 +24,6 @@ class PairwiseDistance(Module):
     """
     def __init__(self, p=2, eps=1e-6):
         super(PairwiseDistance, self).__init__()
-        assert p % 1 == 0
         self.norm = p
         self.eps = eps
 
