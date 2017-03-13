@@ -113,6 +113,7 @@ OPERATOR_SCHEMA(Flatten)
             }
             total *= d;
           }
+          out[0].set_data_type(in[0].data_type());
           out[0].add_dims(in[0].dims(0));
           out[0].add_dims(total);
           return out;
@@ -139,6 +140,7 @@ OPERATOR_SCHEMA(FlattenToVec)
           for (auto d : in[0].dims()) {
             total *= d;
           }
+          out[0].set_data_type(in[0].data_type());
           out[0].add_dims(total);
           return out;
         })
@@ -182,7 +184,7 @@ OPERATOR_SCHEMA(ResizeLike)
           return out;
         })
     .SetDoc(R"DOC(
-Produces tensor condaining data of first input and shape of second input.
+Produces tensor containing data of first input and shape of second input.
 )DOC")
     .Input(0, "data", "Tensor whose data will be copied into the output.")
     .Input(1, "shape_tensor", "Tensor whose shape will be applied to output.")
