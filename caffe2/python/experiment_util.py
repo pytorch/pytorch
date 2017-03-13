@@ -57,6 +57,7 @@ class ModelTrainerLog():
         self.start_time = time.time()
         self.last_time = self.start_time
         self.last_input_count = 0
+        self.external_loggers = None
 
         if external_loggers is not None:
             self.external_loggers = external_loggers
