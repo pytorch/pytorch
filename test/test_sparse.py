@@ -295,6 +295,22 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 100)
         test_shape(3000, 64, 300)
 
+    def test_dsmm(self):
+        def test_shape(di, dj, dk):
+            for is_cuda in [False, True]:
+                x = self._gen_sparse(2, 20, [di, dj], is_cuda)[0]
+                y = torch.randn(dj, dk)
+                if is_cuda:
+                    y = y.cuda()
+
+                expected = torch.mm(x.to_dense(), y)
+                res = torch.dsmm(x, y)
+                self.assertEqual(res, expected)
+
+        test_shape(7, 5, 3)
+        test_shape(1000, 100, 100)
+        test_shape(3000, 64, 300)
+
     def _test_spadd_shape(self, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
         x, _, _ = self._gen_sparse(len(shape_i), 10, shape)
