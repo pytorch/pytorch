@@ -663,10 +663,8 @@ def run_seq2seq_model(args, model_params=None):
     logger.info('Source vocab size', len(source_vocab))
     logger.info('Target vocab size', len(target_vocab))
 
-    source_vocab_eval = gen_vocab(args.source_corpus_eval, args.unk_threshold)
-    target_vocab_eval = gen_vocab(args.target_corpus_eval, args.unk_threshold)
-    batches_eval = gen_batches(args.source_corpus, args.target_corpus,
-                               source_vocab_eval, target_vocab_eval,
+    batches_eval = gen_batches(args.source_corpus_eval, args.target_corpus_eval,
+                               source_vocab, target_vocab,
                                model_params['batch_size'])
 
     with Seq2SeqModelCaffe2(
