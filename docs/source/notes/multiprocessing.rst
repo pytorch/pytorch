@@ -102,11 +102,6 @@ example below as well::
     from model import MyModel
 
     def train(model):
-        # This for loop will break sharing of gradient buffers. It's not
-        # necessary but it reduces the contention, and has a small memory cost
-        # (equal to the total size of parameters).
-        for param in model.parameters():
-            param.grad.data = param.grad.data.clone()
         # Construct data_loader, optimizer, etc.
         for data, labels in data_loader:
             optimizer.zero_grad()
