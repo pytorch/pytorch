@@ -279,6 +279,13 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+    def testShapeInferenceReshape(self):
+        model = cnn.CNNModelHelper()
+        model.Reshape("X", ["Reshaped", "Old_Shape"], shape=[8, 0, -1, 2])
+        workspace.FeedBlob("X", np.random.rand(4, 26, 32).astype(np.float32))
+
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model):
         '''
         Runs shape inference, and then the model to check
