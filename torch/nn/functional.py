@@ -576,7 +576,7 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-def pairwise_distance(input, p=2):
+def pairwise_distance(x1, x2, p=2, eps=1e-6):
     r"""
     Computes the batchwise pairwise distance between vectors v1,v2:
 
@@ -588,15 +588,16 @@ def pairwise_distance(input, p=2):
             p (real): the norm degree. Default: 2
 
         Shape:
-            - Input: :math:`(2, N, D)` where `D = vector dimension`
+            - Input: :math:`(N, D)` where `D = vector dimension`
             - Output: :math:`(N, 1)
 
-        >>> pdist = nn.PairwiseDistance(2)
-        >>> input = autograd.Variable(torch.randn(2, 100, 128))
-        >>> output = pdist(input)
+        >>> input1 = autograd.Variable(torch.randn(100, 128))
+        >>> input2 = autograd.Variable(torch.randn(100, 128))
+        >>> output = F.pairwise_distance(input1, input2, p=2)
+        >>> output.backward()
     """
-    assert input.size(0) == 2, "Input needs to be of size (2, batch, dim)"
-    x1, x2 = input[0], input[1]
+    assert x1.size() == x2.size(), "Input sizes must be equal."
+    assert x1.dim() == 2, "Input rank must be equal to two."
     diff = torch.abs(x1 - x2)
-    out = torch.pow(diff + 1e-6, p).sum(dim=1)
+    out = torch.pow(diff + eps, p).sum(dim=1)
     return torch.pow(out, 1. / p)
