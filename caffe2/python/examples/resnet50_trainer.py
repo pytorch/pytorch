@@ -143,15 +143,21 @@ def RunEpoch(
 
 def Train(args):
     total_batch_size = args.batch_size
-    num_gpus = args.num_gpus
-    batch_per_device = total_batch_size // num_gpus
 
+    # Either use specified device list or generate one
+    if args.gpus is not None:
+        gpus = [int(x) for x in args.gpus.split(',')]
+        num_gpus = len(gpus)
+    else:
+        gpus = range(args.num_gpus)
+        num_gpus = args.num_gpus
+
+    batch_per_device = total_batch_size // num_gpus
     assert \
         total_batch_size % num_gpus == 0, \
         "Number of GPUs must divide batch size"
 
-    gpus = range(num_gpus)
-    log.info("Running on gpus: {}".format(gpus))
+    log.info("Running on GPUs: {}".format(gpus))
 
     # Create CNNModeLhelper object
     train_model = cnn.CNNModelHelper(
@@ -308,8 +314,10 @@ def main():
                         help="Path to test data")
     parser.add_argument("--db_type", type=str, default="lmdb",
                         help="Database type (such as lmdb or leveldb)")
+    parser.add_argument("--gpus", type=str,
+                        help="Comma separated list of GPU devices to use")
     parser.add_argument("--num_gpus", type=int, default=1,
-                        help="Number of GPUs.")
+                        help="Number of GPU devices (instead of --gpus)")
     parser.add_argument("--num_channels", type=int, default=3,
                         help="Number of color channels")
     parser.add_argument("--image_size", type=int, default=227,
@@ -317,7 +325,7 @@ def main():
     parser.add_argument("--num_labels", type=int, default=1000,
                         help="Number of labels")
     parser.add_argument("--batch_size", type=int, default=32,
-                        help="Batch size, total over all GPUs.")
+                        help="Batch size, total over all GPUs")
     parser.add_argument("--epoch_size", type=int, default=1500000,
                         help="Number of images/epoch")
     parser.add_argument("--num_epochs", type=int, default=1000,
@@ -327,7 +335,7 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=1e-4,
                         help="Weight decay (L2 regularization)")
     parser.add_argument("--num_shards", type=int, default=1,
-                        help="Number of machines in distributed run.")
+                        help="Number of machines in distributed run")
     parser.add_argument("--shard_id", type=int, default=0,
                         help="Shard id.")
     parser.add_argument("--file_store_path", type=str, default="/tmp",
