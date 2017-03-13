@@ -21,23 +21,17 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
   ChunkContext(
       CudaDevicePointer<T>&& rootDevicePtr,
       T* hostPtr,
-      size_t length,
       std::vector<nccl::NCCLElement<T>>&& reduceElements,
       std::vector<nccl::NCCLElement<T>>&& broadcastElements)
       : rootDevicePtr(std::move(rootDevicePtr)),
         hostPtr(hostPtr),
-        length(length),
+        length(rootDevicePtr.getCount()),
         reduceOp(nccl::NCCLContext<T>(
-            this->rootDevicePtr.getDeviceID(),
-            this->rootDevicePtr.getStream(),
             std::move(reduceElements),
             this->rootDevicePtr.getDeviceID())),
         broadcastOp(nccl::NCCLContext<T>(
-            this->rootDevicePtr.getDeviceID(),
-            this->rootDevicePtr.getStream(),
             std::move(broadcastElements),
-            this->rootDevicePtr.getDeviceID())) {
-  }
+            this->rootDevicePtr.getDeviceID())) {}
   ChunkContext(ChunkContext&& other) = default;
 
   // Instances cannot be copied or copy-assigned
@@ -106,7 +100,7 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     // Create NCCL elements for the chunk on each device
     std::vector<nccl::NCCLElement<T>> reduceElements;
     std::vector<nccl::NCCLElement<T>> broadcastElements;
-    for (auto i = 0; i < ptrs.size(); i++) {
+    for (auto i = 0; i < devicePtrs_.size(); i++) {
       const auto chunkPtr = *devicePtrs_[i] + offset;
       const auto stream = devicePtrs_[i].getStream();
       reduceElements.push_back(nccl::NCCLElement<T>(
@@ -121,12 +115,11 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     // associated stream to serialize NCCL operations and device-host memcpys.
     // The NCCL operation will synchronize the independent device streams with
     // this master stream.
-    CudaDevicePointer<T> rootDevicePtr =
-        CudaDevicePointer<T>::create(ptrs[0] + offset, length);
+    CudaDevicePointer<T> rootDevicePtr = CudaDevicePointer<T>::create(
+        *devicePtrs_[0] + offset, length, devicePtrs_[0].getStream());
     chunkContext_.push_back(ChunkContext(
         std::move(rootDevicePtr),
         hostPtr_ + offset,
-        length,
         std::move(reduceElements),
         std::move(broadcastElements)));
   }

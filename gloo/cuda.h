@@ -62,6 +62,10 @@ class CudaDevicePointer {
     return stream_;
   }
 
+  cudaEvent_t getEvent() const {
+    return event_;
+  }
+
   // Copy contents of device pointer to host.
   void copyToHostAsync(T* dst);
 

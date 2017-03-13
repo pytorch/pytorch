@@ -58,34 +58,25 @@ struct NCCLElement {
 template <typename T>
 class NCCLContext {
  public:
-  explicit NCCLContext(
-      int device,
-      cudaStream_t stream,
-      std::vector<NCCLElement<T>>&& elements,
-      int root);
-
-  NCCLContext(NCCLContext&& other) noexcept;
-
+  NCCLContext(std::vector<NCCLElement<T>>&& elements, int root);
+  NCCLContext(NCCLContext&&) = default;
   ~NCCLContext();
 
   // Instances cannot be copied or copy-assigned
   NCCLContext(const NCCLContext&) = delete;
   NCCLContext& operator=(const NCCLContext&) = delete;
 
-  const int masterDevice;
-  cudaEvent_t masterEvent;
-  const cudaStream_t masterStream;
   const int root;
   std::vector<NCCLElement<T>> elements;
   std::vector<ncclComm_t> comms;
-  std::vector<cudaEvent_t> events;
+  std::vector<cudaEvent_t> ncclEvents;
 };
 
 template <typename T>
 class NCCLOp {
  public:
   explicit NCCLOp(NCCLContext<T>&& context) : context_(std::move(context)) {}
-  NCCLOp(NCCLOp&& other) = default;
+  NCCLOp(NCCLOp&&) = default;
   virtual ~NCCLOp() = default;
 
   // Kick off the operation

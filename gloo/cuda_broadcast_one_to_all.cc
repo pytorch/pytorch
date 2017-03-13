@@ -35,8 +35,6 @@ struct CudaBroadcastOneToAll<T>::LocalBroadcast {
 
     auto& rootDevicePtr = devicePtrs[rootPointerRank];
     nccl::NCCLContext<T> context(
-      rootDevicePtr.getDeviceID(),
-      rootDevicePtr.getStream(),
       std::move(elements),
       rootDevicePtr.getDeviceID());
 
