@@ -4,16 +4,20 @@
 
 namespace caffe2 {
 
-template <typename T, class Context = CUDAContext, bool NORMALIZE = false>
-class ReduceFrontOp : public Operator<CUDAContext> {
+template <
+    typename T,
+    class Context = CUDAContext,
+    bool FIRSTDIMS = true,
+    bool NORMALIZE = false>
+class ReduceDimsOp : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ReduceFrontOp(const OperatorDef& operator_def, Workspace* ws)
+  ReduceDimsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         num_reduce_dims_(
             OperatorBase::GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
-  ~ReduceFrontOp() {}
+  ~ReduceDimsOp() {}
 
   bool RunOnDevice() override {
     const auto& input = Input(0);
@@ -21,29 +25,41 @@ class ReduceFrontOp : public Operator<CUDAContext> {
     auto* Y = Output(0);
 
     CHECK_LT(num_reduce_dims_, input.dims().size());
-    const int M = input.size_to_dim(num_reduce_dims_);
-    const int N = input.size_from_dim(num_reduce_dims_);
+    const int M = FIRSTDIMS
+        ? input.size_to_dim(num_reduce_dims_)
+        : input.size_to_dim(input.ndim() - num_reduce_dims_);
+    const int N = FIRSTDIMS
+        ? input.size_from_dim(num_reduce_dims_)
+        : input.size_from_dim(input.ndim() - num_reduce_dims_);
 
     vector<TIndex> output_shape;
-    for (int i = num_reduce_dims_; i < input.dims().size(); ++i) {
+    int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
+    int end_index = FIRSTDIMS ? input.dims().size()
+                              : input.dims().size() - num_reduce_dims_;
+    for (int i = start_index; i < end_index; ++i) {
       output_shape.push_back(input.dims()[i]);
     }
 
     Y->Resize(output_shape);
 
-    if (ones_.size() != M) {
-      ones_.Resize(M);
+    int in_dim = FIRSTDIMS ? M : N;
+
+    if (ones_.size() != in_dim) {
+      ones_.Resize(in_dim);
       math::Set<T, Context>(
-          M, static_cast<T>(1), ones_.template mutable_data<T>(), &context_);
+          in_dim,
+          static_cast<T>(1),
+          ones_.template mutable_data<T>(),
+          &context_);
     }
 
     T alpha = 1.0;
     if (NORMALIZE) { // Static if
-      alpha = 1.0 / M;
+      alpha = 1.0 / in_dim;
     }
 
     math::Gemv<T, Context>(
-        CblasTrans,
+        FIRSTDIMS ? CblasTrans : CblasNoTrans,
         M,
         N,
         alpha,
@@ -61,16 +77,20 @@ class ReduceFrontOp : public Operator<CUDAContext> {
   int num_reduce_dims_;
 };
 
-template <typename T, class Context = CUDAContext, bool NORMALIZE = false>
-class ReduceFrontGradientOp : public Operator<CUDAContext> {
+template <
+    typename T,
+    class Context = CUDAContext,
+    bool FIRSTDIMS = true,
+    bool NORMALIZE = false>
+class ReduceDimsGradientOp : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ReduceFrontGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  ReduceDimsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         num_reduce_dims_(
             OperatorBase::GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
-  ~ReduceFrontGradientOp() {}
+  ~ReduceDimsGradientOp() {}
 
   bool RunOnDevice() override {
     const auto& grad_in = Input(0);
@@ -81,36 +101,48 @@ class ReduceFrontGradientOp : public Operator<CUDAContext> {
     // Copy first dims
     vector<TIndex> output_shape(
         shape.template data<TIndex>(),
-        shape.template data<TIndex>() + num_reduce_dims_);
-    for (const auto& dim : grad_in.dims()) {
-      output_shape.push_back(dim);
-    }
+        shape.template data<TIndex>() + shape.size());
 
     auto* out_grad = Output(0);
     out_grad->Resize(output_shape);
 
-    const int M = out_grad->size_to_dim(num_reduce_dims_);
-    const int N = out_grad->size_from_dim(num_reduce_dims_);
+    const int M = FIRSTDIMS
+        ? out_grad->size_to_dim(num_reduce_dims_)
+        : out_grad->size_to_dim(out_grad->ndim() - num_reduce_dims_);
+    const int N = FIRSTDIMS
+        ? out_grad->size_from_dim(num_reduce_dims_)
+        : out_grad->size_from_dim(out_grad->ndim() - num_reduce_dims_);
+
+    int in_dim = FIRSTDIMS ? M : N;
 
     T alpha = 1.0;
     if (NORMALIZE) { // Static if
-      alpha = 1.0 / M;
+      alpha = 1.0 / in_dim;
     }
 
     math::Set<T, CUDAContext>(
         out_grad->size(),
-        static_cast<T>(0),
+        FIRSTDIMS ? static_cast<T>(0) : static_cast<T>(alpha),
         out_grad->template mutable_data<T>(),
         &context_);
 
     for (int i = 0; i < M; ++i) {
-      math::Axpby<T, CUDAContext>(
-          N,
-          alpha,
-          grad_in.template data<T>(),
-          static_cast<T>(0),
-          out_grad->template mutable_data<T>() + i * N,
-          &context_);
+      if (FIRSTDIMS) {
+        math::Axpby<T, CUDAContext>(
+            N,
+            alpha,
+            grad_in.template data<T>(),
+            static_cast<T>(0),
+            out_grad->template mutable_data<T>() + i * N,
+            &context_);
+      } else {
+        math::Scale<T, CUDAContext>(
+            N,
+            grad_in.template data<T>() + i,
+            out_grad->template data<T>() + i * N,
+            out_grad->template mutable_data<T>() + i * N,
+            &context_);
+      }
     }
 
     return true;
@@ -120,14 +152,27 @@ class ReduceFrontGradientOp : public Operator<CUDAContext> {
   int num_reduce_dims_;
 };
 
+REGISTER_CUDA_OPERATOR(ReduceFrontSum, ReduceDimsOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ReduceFrontSumGradient,
-    ReduceFrontGradientOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(ReduceFrontSum, ReduceFrontOp<float, CUDAContext>);
+    ReduceDimsGradientOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ReduceFrontMean,
-    ReduceFrontOp<float, CUDAContext, true>);
+    ReduceDimsOp<float, CUDAContext, true, true>);
 REGISTER_CUDA_OPERATOR(
     ReduceFrontMeanGradient,
-    ReduceFrontGradientOp<float, CUDAContext, true>);
+    ReduceDimsGradientOp<float, CUDAContext, true, true>);
+
+REGISTER_CUDA_OPERATOR(ReduceBackSum, ReduceDimsOp<float, CUDAContext, false>);
+REGISTER_CUDA_OPERATOR(
+    ReduceBackSumGradient,
+    ReduceDimsGradientOp<float, CUDAContext, false, false>);
+
+REGISTER_CUDA_OPERATOR(
+    ReduceBackMean,
+    ReduceDimsOp<float, CUDAContext, false, true>);
+REGISTER_CUDA_OPERATOR(
+    ReduceBackMeanGradient,
+    ReduceDimsGradientOp<float, CUDAContext, false, true>);
+
 } // namespace caffe2

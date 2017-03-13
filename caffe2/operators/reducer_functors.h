@@ -328,13 +328,18 @@ class BaseReducer {
   struct Meta {
     TIndex block_size;
     vector<TIndex> block_shape;
+    bool first_dim;
+
+    explicit Meta(bool first = true) : first_dim(first) {}
 
     void
     observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
       DCHECK_EQ(0, input);
       auto& dims = value.dims();
-      block_shape.assign(dims.begin() + skip_dims, dims.end());
-      block_size = value.size_from_dim(skip_dims);
+      first_dim ? block_shape.assign(dims.begin() + skip_dims, dims.end())
+                : block_shape.assign(dims.begin(), dims.end() - skip_dims);
+      block_size = first_dim ? value.size_from_dim(skip_dims)
+                             : value.size_from_dim(value.ndim() - skip_dims);
     }
 
     void appendOutputShape(vector<TIndex>* output_shape) {
@@ -369,11 +374,19 @@ class BaseReducerGradient {
   struct Meta {
     TIndex block_size;
     vector<TIndex> block_shape;
+    bool first_dim;
 
-    Meta(const Tensor<CPUContext>& out_grad, int skip_dims) {
+    Meta(
+        const Tensor<CPUContext>& out_grad,
+        int skip_dims,
+        bool first_dim = true)
+        : first_dim(first_dim) {
       auto& dims = out_grad.dims();
-      block_shape.assign(dims.begin() + skip_dims, dims.end());
-      block_size = out_grad.size_from_dim(skip_dims);
+      first_dim ? block_shape.assign(dims.begin() + skip_dims, dims.end())
+                : block_shape.assign(dims.begin(), dims.end() - skip_dims);
+      block_size = first_dim
+          ? out_grad.size_from_dim(skip_dims)
+          : out_grad.size_from_dim(out_grad.ndim() - skip_dims);
     }
 
     void observeOriginalInput(
@@ -400,18 +413,27 @@ class SumReducer<T, CPUContext> : public BaseReducer {
  public:
   using FixedDispatch = FixedValues<1>;
 
-  SumReducer(const Meta& meta, T* out, CPUContext* context) : out_(out) {
+  SumReducer(const Meta& meta, T* out, CPUContext* context)
+      : current_size_(0), out_(out) {
     // add a wrapper in Context for it
-    memset(out, 0, sizeof(T) * meta.block_size);
+    if (meta.first_dim) {
+      memset(out, 0, sizeof(T) * meta.block_size);
+    }
   }
   template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::AxpyFixedSize<T, CPUContext, FixedSize>(
-        meta.block_size, 1, in, out_, context);
+    if (meta.first_dim) {
+      math::AxpyFixedSize<T, CPUContext, FixedSize>(
+          meta.block_size, 1, in, out_, context);
+    } else {
+      math::Sum<T, CPUContext>(
+          meta.block_size, in, out_ + current_size_++, context);
+    }
   }
 
  private:
+  int current_size_;
   T* out_;
 };
 
@@ -432,9 +454,11 @@ class SumReducerGradient : public BaseReducerGradient {
       const int length) {
     if (FixedSize == 1) { // static if
       *data_grad = *s_grad_;
-    } else {
+    } else if (meta.first_dim) {
       context->template Copy<T, Context, Context>(
           meta.block_size, s_grad_, data_grad);
+    } else {
+      math::Set<T, Context>(length, s_grad_[offset], data_grad, context);
     }
   }
 
@@ -470,6 +494,10 @@ class WeightedSumReducer<T, CPUContext> : public BaseReducer {
   struct Meta : BaseReducer::Meta {
     const T* scalars;
 
+    bool first_dim;
+
+    explicit Meta(bool first = true) : first_dim(first) {}
+
     void
     observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
       if (input == 1) {
@@ -490,6 +518,10 @@ class WeightedSumReducer<T, CPUContext> : public BaseReducer {
   template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
+    CAFFE_ENFORCE(
+        meta.first_dim,
+        "WeightedSumReducer implemented only for "
+        "front dimensions reduction");
     math::AxpyFixedSize<T, CPUContext, FixedSize>(
         meta.block_size, meta.scalars[offset], in, out_, context);
   }
@@ -608,22 +640,34 @@ class MeanReducer<T, CPUContext> : public BaseReducer {
 
   MeanReducer(const Meta& meta, T* out, CPUContext* context)
       : out_(out), current_size_(0) {
-    memset(out, 0, sizeof(T) * meta.block_size);
+    if (meta.first_dim) {
+      memset(out, 0, sizeof(T) * meta.block_size);
+    }
   }
 
   template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::AxpyFixedSize<T, CPUContext, FixedSize>(
-        meta.block_size, 1, in, out_, context);
+    if (meta.first_dim) {
+      math::AxpyFixedSize<T, CPUContext, FixedSize>(
+          meta.block_size, 1, in, out_, context);
+    } else {
+      math::Sum<T, CPUContext>(
+          meta.block_size, in, out_ + current_size_, context);
+    }
     current_size_++;
   }
 
   template <int FixedSize>
   void finish(const Meta& meta, CPUContext* context) {
-    if (current_size_ > 0) {
+    if (meta.first_dim) {
+      if (current_size_ > 0) {
+        math::ScaleFixedSize<T, CPUContext, FixedSize>(
+            meta.block_size, 1.0 / current_size_, out_, out_, context);
+      }
+    } else {
       math::ScaleFixedSize<T, CPUContext, FixedSize>(
-          meta.block_size, 1.0 / current_size_, out_, out_, context);
+          current_size_, 1.0 / meta.block_size, out_, out_, context);
     }
   }
 
@@ -652,8 +696,13 @@ class MeanReducerGradient : public BaseReducerGradient {
       Context* context,
       const int length) {
     CAFFE_ENFORCE_GT(length, 0, "Segment length must be > 0");
-    math::ScaleFixedSize<T, CPUContext, FixedSize>(
-        meta.block_size, 1.0 / length, s_grad_, data_grad, context);
+    if (meta.first_dim) {
+      math::ScaleFixedSize<T, CPUContext, FixedSize>(
+          meta.block_size, 1.0 / length, s_grad_, data_grad, context);
+    } else {
+      math::Set<T, CPUContext>(
+          length, s_grad_[offset] * 1.0f / length, data_grad, context);
+    }
   }
 
  private:

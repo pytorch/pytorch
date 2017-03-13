@@ -278,12 +278,13 @@ template <
     typename T,
     class Context,
     class Reducer,
+    bool FirstDim,
     class InputAccessor = BaseInputAccessor<T>>
-class AbstractReduceFrontOp : public Operator<Context> {
+class AbstractReduceFrontOrBackOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  AbstractReduceFrontOp(const OperatorDef& operator_def, Workspace* ws)
+  AbstractReduceFrontOrBackOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(int, "num_reduce_dim", num_reduce_dims_, 1) {}
 
@@ -291,7 +292,9 @@ class AbstractReduceFrontOp : public Operator<Context> {
     auto& data = Input(0);
     // If more complicated fixed size logic becomes necessary, it can be moved
     // to the reducer class
-    TIndex in_block_size = data.size_from_dim(num_reduce_dims_);
+    TIndex in_block_size = FirstDim
+        ? data.size_from_dim(num_reduce_dims_)
+        : data.size_to_dim(data.ndim() - num_reduce_dims_);
     return DispatchHelper<typename Reducer::FixedDispatch>::call(
         this, in_block_size);
   }
@@ -303,7 +306,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
 
     CAFFE_ENFORCE_LE(num_reduce_dims_, data.ndim());
 
-    typename Reducer::Meta ctx;
+    typename Reducer::Meta ctx(FirstDim);
     ctx.observeInput(0, data, num_reduce_dims_);
     for (int i = 1; i < Reducer::kInputCount; ++i) {
       auto& aux_in = Input(i);
@@ -320,14 +323,18 @@ class AbstractReduceFrontOp : public Operator<Context> {
     ctx.appendOutputShape(&shape);
     output->Resize(shape);
 
-    TIndex in_block_size = data.size_from_dim(num_reduce_dims_);
-    TIndex block_num = in_block_size > 0 ? data.size() / in_block_size : 0;
     T* out = output->template mutable_data<T>();
 
+    const int block_size = FirstDim
+        ? data.size_from_dim(num_reduce_dims_)
+        : data.size_from_dim(data.ndim() - num_reduce_dims_);
+
+    const int num_blocks = block_size > 0 ? data.size() / block_size : 0;
+
     Reducer r(ctx, out, &context_);
-    for (TIndex i = 0; i < block_num; ++i) {
+    for (TIndex i = 0; i < num_blocks; ++i) {
       r.template process<FixedSize>(
-          ctx, inputAccessor_.getBlockPtr(in_block_size, i), i, &context_);
+          ctx, inputAccessor_.getBlockPtr(block_size, i), i, &context_);
     }
     r.template finish<FixedSize>(ctx, &context_);
     return true;
@@ -340,12 +347,18 @@ class AbstractReduceFrontOp : public Operator<Context> {
   InputAccessor inputAccessor_;
 };
 
-template <typename T, class Context, class ReducerGradient>
-class AbstractReduceFrontGradientOp : public Operator<Context> {
+template <
+    typename T,
+    class Context,
+    class ReducerGradient,
+    bool FirstDim = true>
+class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  AbstractReduceFrontGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  AbstractReduceFrontOrBackGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(int, "num_reduce_dim", num_reduce_dims_, 1) {}
 
@@ -364,7 +377,7 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
 
     auto* data_grads = Output(0);
 
-    typename ReducerGradient::Meta ctx(reduction_grad, 0);
+    typename ReducerGradient::Meta ctx(reduction_grad, 0, FirstDim);
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       ctx.observeOriginalInput(
@@ -377,20 +390,28 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
     const T* r_grad = reduction_grad.template data<T>();
 
     CAFFE_ENFORCE_LE(num_reduce_dims_, source_shape.size());
+
     vector<TIndex> shape(
         source_shape.template data<TIndex>(),
-        source_shape.template data<TIndex>() + num_reduce_dims_);
-    ctx.appendGradShape(&shape);
+        source_shape.template data<TIndex>() + source_shape.size());
+
     data_grads->Resize(shape);
 
-    TIndex block_size = data_grads->size_from_dim(num_reduce_dims_);
+    TIndex block_size = FirstDim
+        ? data_grads->size_from_dim(num_reduce_dims_)
+        : data_grads->size_from_dim(data_grads->ndim() - num_reduce_dims_);
     TIndex block_num = block_size > 0 ? data_grads->size() / block_size : 0;
+
     T* out = data_grads->template mutable_data<T>();
 
     ReducerGradient r(ctx, r_grad, &context_);
     for (TIndex i = 0; i < block_num; ++i) {
       r.template fillGrad<FixedSize>(
-          ctx, out + block_size * i, i, &context_, block_num);
+          ctx,
+          out + block_size * i,
+          i,
+          &context_,
+          FirstDim ? block_num : block_size);
     }
     return true;
   }
@@ -424,11 +445,70 @@ UnsortedSegment{op} but as if all input slices belong to a single segment.
   }
   using ReducerGradient =
       typename ReducerDef::template ReducerGradient<T, Context>;
-  using ForwardOp = AbstractReduceFrontOp<
+  using ForwardOp = AbstractReduceFrontOrBackOp<
       T,
       Context,
-      typename ReducerDef::template Reducer<T, Context>>;
-  using BackwardOp = AbstractReduceFrontGradientOp<T, Context, ReducerGradient>;
+      typename ReducerDef::template Reducer<T, Context>,
+      true>;
+  using BackwardOp =
+      AbstractReduceFrontOrBackGradientOp<T, Context, ReducerGradient, true>;
+  struct GetGradient : public GradientMakerBase {
+    using GradientMakerBase::GradientMakerBase;
+    vector<OperatorDef> GetGradientDefs() override {
+      // Have utility function generating these names?
+      string tmp_dims = "_" + O(0) + "_dims";
+
+      vector<string> grad_ins;
+      for (const int i : ReducerGradient::originalInputs()) {
+        grad_ins.push_back(I(i));
+      }
+      grad_ins.push_back(GO(0));
+      grad_ins.push_back(tmp_dims);
+
+      vector<Argument> args;
+      if (HasArgument(def_, "num_reduce_dim")) {
+        args.push_back(GetArgument(def_, "num_reduce_dim"));
+      }
+      // FIXME: pass in num_reduce_dims?!
+      return vector<OperatorDef>{
+          CreateOperatorDef(
+              "Shape", "", vector<string>{I(0)}, vector<string>{tmp_dims}),
+          CreateOperatorDef(
+              string(basename) + ReducerDef::name + "Gradient",
+              "",
+              grad_ins,
+              // no gradient on auxiliary inputs for now
+              vector<string>{GI(0)}),
+      };
+    }
+  };
+};
+
+template <typename T, typename Context, typename ReducerDef>
+struct AbstractReduceBackDef {
+  using OpDef = ReducerDef;
+  static constexpr const char* basename = "ReduceBack";
+  static constexpr const char* doc = R"DOC(
+Reduces the input tensor along the last dimension of the input tensor by
+applying '{op}'. This op acts in a similar way to SortedSegment{op} and
+UnsortedSegment{op} but as if all input slices belong to a single segment.
+
+{op_doc}
+  )DOC";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Input(
+        0, "DATA", "Input tensor to be reduced on the first dimension");
+    ReducerDef::PopulateSchema(schema);
+  }
+  using ReducerGradient =
+      typename ReducerDef::template ReducerGradient<T, Context>;
+  using ForwardOp = AbstractReduceFrontOrBackOp<
+      T,
+      Context,
+      typename ReducerDef::template Reducer<T, Context>,
+      false>;
+  using BackwardOp =
+      AbstractReduceFrontOrBackGradientOp<T, Context, ReducerGradient, false>;
   struct GetGradient : public GradientMakerBase {
     using GradientMakerBase::GradientMakerBase;
     vector<OperatorDef> GetGradientDefs() override {

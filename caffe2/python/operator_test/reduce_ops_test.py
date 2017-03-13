@@ -32,7 +32,7 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
             device, op, [in_data], 0, [0], stepsize=1e-2, threshold=1e-2)
 
     @given(num_reduce_dim=st.integers(1, 3), **hu.gcs)
-    def test_reduce_from_sum(self, num_reduce_dim, gc, dc):
+    def test_reduce_front_sum(self, num_reduce_dim, gc, dc):
         X = np.random.rand(7, 4, 3, 5).astype(np.float32)
 
         def ref_sum(X):
@@ -41,10 +41,29 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
         self.reduce_op_test("ReduceFrontSum", ref_sum, X, num_reduce_dim, gc)
 
     @given(num_reduce_dim=st.integers(1, 3), **hu.gcs)
-    def test_reduce_from_mean(self, num_reduce_dim, gc, dc):
+    def test_reduce_front_mean(self, num_reduce_dim, gc, dc):
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
         def ref_mean(X):
             return [np.mean(X, axis=(tuple(range(num_reduce_dim))))]
 
         self.reduce_op_test("ReduceFrontMean", ref_mean, X, num_reduce_dim, gc)
+
+    @given(num_reduce_dim=st.integers(1, 3), **hu.gcs)
+    def test_reduce_back_sum(self, num_reduce_dim, dc, gc):
+        X = np.random.rand(6, 7, 8, 2).astype(np.float32)
+
+        def ref_sum(X):
+            return [np.sum(X, axis=(0, 1, 2, 3)[4 - num_reduce_dim:])]
+
+        self.reduce_op_test("ReduceBackSum", ref_sum, X, num_reduce_dim, gc)
+
+    @given(num_reduce_dim=st.integers(1, 3), **hu.gcs)
+    def test_reduce_back_mean(self, num_reduce_dim, dc, gc):
+        num_reduce_dim = 2
+        X = np.random.rand(6, 7, 8, 2).astype(np.float32)
+
+        def ref_sum(X):
+            return [np.mean(X, axis=(0, 1, 2, 3)[4 - num_reduce_dim:])]
+
+        self.reduce_op_test("ReduceBackMean", ref_sum, X, num_reduce_dim, gc)
