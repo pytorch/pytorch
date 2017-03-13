@@ -27,6 +27,23 @@ auto ConvParams::is_dilated() const -> bool {
   return is_dilated;
 }
 
+auto ConvParams::is_output_padding_non_neg() const -> bool {
+  bool is_non_neg = true;
+  for (int p : output_padding) {
+    is_non_neg &= (p >= 0);
+  }
+  return is_non_neg;
+}
+
+auto ConvParams::is_padding_non_neg() const -> bool {
+  bool is_non_neg = true;
+  for (int p : padding) {
+    is_non_neg &= (p >= 0);
+  }
+  return is_non_neg;
+}
+
+
 auto ConvParams::view1d_as_2d() -> void {
   if (stride.size() == 1) {
     stride.insert(stride.begin(), 1);
@@ -106,7 +123,11 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000));
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled
+  && is_padding_non_neg();
+  if (transposed) {
+     use_cudnn = use_cudnn && (is_output_padding_non_neg()) ;
+  }
 #endif
 
   std::unique_ptr<Tensor> output;
@@ -191,7 +212,11 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000));
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled
+  && is_padding_non_neg();
+  if (transposed) {
+     use_cudnn = use_cudnn && (is_output_padding_non_neg()) ;
+  }
 #endif
 
   std::unique_ptr<Tensor> grad_input;

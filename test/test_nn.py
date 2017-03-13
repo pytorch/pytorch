@@ -2152,6 +2152,14 @@ new_module_tests = [
     ),
     dict(
         module_name='ConvTranspose2d',
+        constructor_args=(3, 4, 3, (3, 2), 1, (-1, -1)),
+        cudnn=True,
+        input_size=(1, 3, 7, 6),
+        desc='neg_output_padding'
+    ),
+
+    dict(
+        module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
         input_size=(1, 3, 6, 7),
         cudnn=True,
