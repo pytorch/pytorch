@@ -39,6 +39,7 @@ train_net.LearningRate(200, "LR", base_lr=-0.1,
   .Arg("power", "(float, default 1.0) used only for inv policy type")
   .Arg("gamma", "(float, default 1.0) momentum of change")
   .Arg("stepsize", "(float, default 1.0) sampling rate on iterations")
+  .Arg("max_iter", "(int, default -1) maximum iterations in this training run")
   .Input(0, "input", "description needed")
   .Output(0, "output", "description needed");
 
