@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
+from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
@@ -50,7 +50,7 @@ class Concat(ModelLayer):
             self.input_record.field_blobs(),
             [
                 self.output_schema.field_blobs()[0],
-                ("_" + self.output_schema.field_blobs()[0] + "_concat_dims")
+                self.output_schema.field_blobs()[0] + "_concat_dims"
             ],
             axis=self.axis,
         )
