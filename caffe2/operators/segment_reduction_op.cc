@@ -70,6 +70,9 @@ REGISTER_REDUCER_WITH_ALL_OPS(SumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(WeightedSumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(MeanReducerDef);
 
+REGISTER_SEGMENT_DEF(AbstractReduceBackDef<float, CPUContext, SumReducerDef>);
+REGISTER_SEGMENT_DEF(AbstractReduceBackDef<float, CPUContext, MeanReducerDef>);
+
 // Auxiliary output gradients are currently implemented only for Lengths version
 #define REGISTER_GRADIENT_WITH_MAIN_INPUT(...)                     \
   REGISTER_CPU_OPERATOR_STR(                                       \
