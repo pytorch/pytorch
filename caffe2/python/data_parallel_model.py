@@ -177,19 +177,43 @@ def Parallelize_GPU(
 
 
 def _AddGradientOperators(devices, model, losses_by_gpu):
-        def create_grad(lossp):
-            return model.ConstantFill(lossp, str(lossp) + "_grad", value=1.0)
+    def create_grad(lossp):
+        return model.ConstantFill(lossp, str(lossp) + "_grad", value=1.0)
 
-        loss_grad = {}
-        # Explicitly need to create gradients on each GPU
-        for gpu_id in devices:
-            device = core.DeviceOption(caffe2_pb2.CUDA, gpu_id)
-            with core.DeviceScope(device):
-                for l in losses_by_gpu[gpu_id]:
-                    lg = create_grad(l)
-                    loss_grad[str(l)] = str(lg)
+    loss_grad = {}
+    # Explicitly need to create gradients on each GPU
+    for gpu_id in devices:
+        device = core.DeviceOption(caffe2_pb2.CUDA, gpu_id)
+        with core.DeviceScope(device):
+            for l in losses_by_gpu[gpu_id]:
+                lg = create_grad(l)
+                loss_grad[str(l)] = str(lg)
 
-        model.AddGradientOperators(loss_grad)
+    model.AddGradientOperators(loss_grad)
+
+
+def ExtractPredictorNet(model, inputs, outputs, device):
+    '''
+    Returns (net, params) that can be exported to be used as a prediction
+    net.
+    '''
+    master_device = model._devices[0]
+    prefix = "gpu_{}/".format(master_device)
+    prefix_inputs = [prefix + str(b) for b in inputs]
+    prefix_outputs = [prefix + str(b) for b in outputs]
+    predictor_net = model_helper.ExtractPredictorNet(
+        net_proto=model.net.Proto(),
+        input_blobs=prefix_inputs,
+        output_blobs=prefix_outputs,
+        device=device,
+        renames={
+            a: b
+            for (a, b) in zip(prefix_inputs + prefix_outputs, inputs + outputs)
+        }
+    )
+
+    params = set(predictor_net.Proto().external_input) - set(inputs)
+    return (predictor_net, params)
 
 
 def FinalizeAfterCheckpoint(model, blobs, sync_iter=True):

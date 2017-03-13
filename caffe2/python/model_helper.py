@@ -330,3 +330,104 @@ class ModelHelperBase(object):
             logging.warning("You are creating an op that the ModelHelperBase "
                             "does not recognize: {}.".format(op_type))
         return self.net.__getattr__(op_type)
+
+
+def ExtractPredictorNet(
+    net_proto,
+    input_blobs,
+    output_blobs,
+    device=None,
+    renames=None
+):
+    '''
+    Takes a model net for training and returns a net which can be
+    used for prediction. For example, all gradient operators and
+    input operators are removed.
+    @param net_proto protobuf of the net you want to process (net.Proto())
+    @param input_blobs list/set of blob names that are the inputs of predictor
+    @param output_blobs list/set of blob names that are outputs of predictor
+    @param device optional device option that is assigned
+    @param renames dictionary of blob name to a new name (optional)
+    '''
+    predict_net = core.Net(net_proto.name + "_predict")
+    predict_proto = predict_net.Proto()
+
+    orig_external_inputs = set(net_proto.external_input)
+    orig_external_outputs = set(net_proto.external_output)
+    input_blobs = {str(b) for b in input_blobs}
+    known_blobs = set(orig_external_inputs).union(input_blobs)
+    output_blobs = {str(b) for b in output_blobs}
+    external_inputs = set(input_blobs)
+    external_outputs = set(output_blobs)
+
+    ops = list(net_proto.op)
+
+    # Find the range of ops that we should include
+    try:
+        first_op_with_input = min(
+            [
+                j for j in range(len(ops))
+                if input_blobs.intersection(ops[j].input) and ops[j].type !=
+                'StopGradient'
+            ]
+        )
+    except ValueError:
+        raise Exception("No ops with input={}".format(input_blobs))
+    try:
+        last_op_with_output = max(
+            [
+                j for j in range(len(ops))
+                if output_blobs.intersection(ops[j].output)
+            ]
+        )
+    except ValueError:
+        raise Exception("No ops with output={}".format(output_blobs))
+
+    # Iterate through the ops and only include those whose inputs
+    # we can satisfy.
+    for op in ops[first_op_with_input:(last_op_with_output + 1)]:
+        if known_blobs.issuperset(op.input):
+            if device is not None:
+                op.device_option.device_type = device.device_type
+                op.device_option.cuda_gpu_id = device.cuda_gpu_id
+            predict_proto.op.extend([op])
+            known_blobs.update(op.output)
+            external_inputs.update(
+                set(op.input).intersection(orig_external_inputs)
+            )
+            external_outputs.update(
+                set(op.output).intersection(orig_external_outputs)
+            )
+        else:
+            logging.warning(
+                "Op {} had unknown inputs: {}".format(
+                    op.type, set(op.input).difference(known_blobs)
+                )
+            )
+
+    def rename_list(proto_list):
+        if renames is None:
+            return
+
+        # proto lists don't support assignments
+        new_list = proto_list[:]
+        for j, b in enumerate(new_list):
+            if b in renames:
+                new_list[j] = renames[b]
+
+        del proto_list[:]
+        proto_list.extend(new_list)
+
+    # Predictor net's external inputs and outputs include only those
+    # that are part of this net.
+    predict_proto.external_input.extend(external_inputs)
+    predict_proto.external_output.extend(external_outputs)
+
+    rename_list(predict_proto.external_input)
+    rename_list(predict_proto.external_output)
+
+    for op in predict_proto.op:
+        rename_list(op.input)
+        rename_list(op.output)
+
+    return predict_net
