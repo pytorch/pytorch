@@ -1,4 +1,5 @@
 set(GLOO_RENDEZVOUS_SRCS
+  "${CMAKE_CURRENT_SOURCE_DIR}/context.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/hash_store.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/prefix_store.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/store.cc"

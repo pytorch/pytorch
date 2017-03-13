@@ -20,9 +20,8 @@ include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(ibverbs DEFAULT_MSG ibverbs_INCLUDE_DIR ibverbs_LIBRARIES)
 
 if(IBVERBS_FOUND)
-  message(STATUS "\
-Found ibverbs \
-(include: ${ibverbs_INCLUDE_DIR}, library: ${ibverbs_LIBRARIES})"
-    )
+  set(include_message "include: ${ibverbs_INCLUDE_DIR}")
+  set(library_message "library: ${ibverbs_LIBRARIES}")
+  message(STATUS "Found ibverbs (${include_message}, ${library_message})")
   mark_as_advanced(ibverbs_INCLUDE_DIR ibverbs_LIBRARIES)
 endif()
