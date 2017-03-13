@@ -39,6 +39,11 @@ class LearningRateOp final : public Operator<Context> {
       DCHECK_GT(gamma, 0);
       DCHECK_GT(power, 0);
       functor_.reset(new InvLearningRate<T>(gamma, power));
+    } else if (policy == "poly") {
+      int max_iter = OperatorBase::template GetSingleArgument<int>("max_iter", -1);
+      T power = OperatorBase::template GetSingleArgument<float>("power", 0);
+      DCHECK_GT(power, 0);
+      functor_.reset(new PolyLearningRate<T>(power, max_iter));
     } else {
       LOG(FATAL) << "Unknown learning rate policy: " << policy;
     }
