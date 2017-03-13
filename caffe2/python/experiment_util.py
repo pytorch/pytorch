@@ -64,6 +64,8 @@ class ModelTrainerLog():
             runtime_args['experiment_id'] = self.experiment_id
             for logger in self.external_loggers:
                 logger.set_runtime_args(runtime_args)
+        else:
+            self.external_loggers = []
 
     def logstr(self, str):
         with open(self.filename, "a") as f:
@@ -98,10 +100,9 @@ class ModelTrainerLog():
 
         self.logstr(",".join([str(v) for v in logdict.values()]))
 
-        if self.external_loggers:
-            for logger in self.external_loggers:
-                try:
-                    logger.log(logdict)
-                except Exception as e:
-                    logging.warn(
-                        "Failed to call ExternalLogger: {}".format(e), e)
+        for logger in self.external_loggers:
+            try:
+                logger.log(logdict)
+            except Exception as e:
+                logging.warn(
+                    "Failed to call ExternalLogger: {}".format(e), e)
