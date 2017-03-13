@@ -1,5 +1,7 @@
 # Gloo
 
+[![Build Status](https://travis-ci.org/facebookincubator/gloo.svg?branch=master)](https://travis-ci.org/facebookincubator/gloo)
+
 Gloo is a collective communications library. It comes with a number of
 collective algorithms useful for machine learning applications. These
 include a barrier, broadcast, and allreduce.

@@ -1,0 +1,23 @@
+dist: trusty
+sudo: required
+language: cpp
+
+matrix:
+  include:
+    - os: linux
+      compiler: gcc
+      env: BUILD_CUDA=OFF
+    
+    # Note: CUDA and NCCL source files not included in cmake yet.
+    #- os: linux
+    #  compiler: gcc
+    #  env: BUILD_CUDA=ON
+
+cache:
+  apt: true
+
+install:
+  - ./.travis/install.sh
+
+script:
+  - ./.travis/build.sh
