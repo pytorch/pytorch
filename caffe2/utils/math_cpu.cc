@@ -1,4 +1,4 @@
-// Implementes the math functions for CPU.
+// Implements the math functions for CPU.
 // The implementation in this file allows us to route the underlying numerical
 // computation library to different backends. Notably:
 // (1) For all BLAS-related functions, one can explicitly request a BLAS backend
