@@ -9,7 +9,6 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
   auto* mask = Output(1);
   Y->Resize(X.dims());
   mask->Resize(X.dims());
-  DCHECK_GT(X.size(), 0);
   if (is_test_) {
     if (Y != &X) {
       context_.Copy<float, CPUContext, CPUContext>(
@@ -38,7 +37,6 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto& mask = Input(1);
   auto* dX = Output(0);
-  DCHECK_GT(dY.size(), 0);
   DCHECK_EQ(dY.size(), mask.size());
   dX->Resize(dY.dims());
   if (is_test_) {
