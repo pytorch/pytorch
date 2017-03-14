@@ -22,7 +22,6 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
   auto* mask = Output(1);
   Y->Resize(X.dims());
   mask->Resize(X.dims());
-  DCHECK_GT(X.size(), 0);
   if (is_test_) {
     if (Y != &X) {
       context_.Copy<float, CUDAContext, CUDAContext>(
@@ -58,7 +57,6 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto& mask = Input(1);
   auto* dX = Output(0);
-  DCHECK_GT(dY.size(), 0);
   DCHECK_EQ(dY.size(), mask.size());
   dX->Resize(dY.dims());
   if (is_test_) {
