@@ -62,7 +62,7 @@ class ImageInputOp final
 
   // thread pool for parse + decode
   int num_decode_threads_;
-  std::shared_ptr<ThreadPool> thread_pool_;
+  std::shared_ptr<TaskThreadPool> thread_pool_;
 };
 
 
@@ -86,7 +86,7 @@ ImageInputOp<Context>::ImageInputOp(
               "use_gpu_transform", 0)),
         num_decode_threads_(OperatorBase::template GetSingleArgument<int>(
               "decode_threads", 4)),
-        thread_pool_(new ThreadPool(num_decode_threads_))
+        thread_pool_(new TaskThreadPool(num_decode_threads_))
 {
   if (operator_def.input_size() == 0) {
     LOG(ERROR) << "You are using an old ImageInputOp format that creates "
