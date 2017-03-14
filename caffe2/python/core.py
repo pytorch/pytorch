@@ -1355,7 +1355,7 @@ class Net(object):
             return new_op
 
         del new_proto.op[:]
-        new_proto.op.extend(remap_op(proto.op[op_id]) for op_id in op_id_mask)
+        new_proto.op.extend([remap_op(proto.op[op_id]) for op_id in op_id_mask])
         remap_list(new_proto.external_input)
         remap_list(new_proto.external_output)
         new_net = Net(new_proto)
