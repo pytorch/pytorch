@@ -39,13 +39,16 @@ class Functional(ModelLayer):
                 if blob not in types or blob not in shapes:
                     had_issues = True
                     continue
-                # If batch dimension is not first - give up on shape
-                # inference for that blob
-                if shapes[blob][0] != 0:
+                if shapes[blob] == []:
+                    # Scalar type
+                    shape = tuple()
+                elif shapes[blob][0] == 0:
+                    shape = tuple(shapes[blob][1:])
+                else:
+                    # If batch dimension is not first - give up on shape
+                    # inference for that blob
                     had_issues = True
                     continue
-
-                shape = tuple(shapes[blob][1:])
 
                 # TODO(amalevich): Move it to some shared library
                 dtype = None
