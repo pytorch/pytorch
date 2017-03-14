@@ -30,6 +30,21 @@ class BroadcastOp final : public Operator<Context> {
  protected:
   void initialize();
 
+  template <typename T>
+  std::vector<T*> getPointers() {
+    std::vector<T*> result;
+
+    CAFFE_ENFORCE_EQ(InputSize(), OutputSize() + 1);
+    for (auto i = 1; i < InputSize(); i++) {
+      auto& input = Input(i);
+      auto* output = Output(i - 1);
+      CAFFE_ENFORCE_EQ(input.template data<T>(), output->template data<T>());
+      result.push_back(output->template mutable_data<T>());
+    }
+
+    return result;
+  }
+
   const int root_;
   std::once_flag once_;
   std::unique_ptr<::gloo::Algorithm> algorithm_;

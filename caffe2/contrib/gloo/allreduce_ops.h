@@ -51,6 +51,20 @@ class AllreduceOp final : public Operator<Context> {
     CAFFE_ENFORCE(false, "Unreachable code");
   }
 
+  std::vector<T*> getPointers() {
+    std::vector<T*> result;
+
+    CAFFE_ENFORCE_EQ(InputSize(), OutputSize() + 1);
+    for (auto i = 1; i < InputSize(); i++) {
+      auto& input = Input(i);
+      auto* output = Output(i - 1);
+      CAFFE_ENFORCE_EQ(input.template data<T>(), output->template data<T>());
+      result.push_back(output->template mutable_data<T>());
+    }
+
+    return result;
+  }
+
   void initializeRingFull();
   void initializeRingChunked();
 

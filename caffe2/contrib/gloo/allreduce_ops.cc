@@ -8,27 +8,21 @@ namespace gloo {
 
 template <typename T, class Context>
 void AllreduceOp<T, Context>::initializeRingFull() {
-  auto& input = Input(INPUT);
-  auto* output = Output(OUTPUT);
-  CAFFE_ENFORCE_EQ(input.template data<T>(), output->template data<T>());
-
   const auto& context =
       OperatorBase::Input<std::shared_ptr<::gloo::Context>>(COMM);
-  std::vector<T*> ptrs = {output->template mutable_data<T>()};
-  algorithm_.reset(new ::gloo::AllreduceRing<T>(context, ptrs, output->size()));
+  auto pointers = getPointers();
+  auto size = Output(0)->size();
+  algorithm_.reset(new ::gloo::AllreduceRing<T>(context, pointers, size));
 }
 
 template <typename T, class Context>
 void AllreduceOp<T, Context>::initializeRingChunked() {
-  auto& input = Input(INPUT);
-  auto* output = Output(OUTPUT);
-  CAFFE_ENFORCE_EQ(input.template data<T>(), output->template data<T>());
-
   const auto& context =
       OperatorBase::Input<std::shared_ptr<::gloo::Context>>(COMM);
-  std::vector<T*> ptrs = {output->template mutable_data<T>()};
+  auto pointers = getPointers();
+  auto size = Output(0)->size();
   algorithm_.reset(
-      new ::gloo::AllreduceRingChunked<T>(context, ptrs, output->size()));
+      new ::gloo::AllreduceRingChunked<T>(context, pointers, size));
 }
 
 namespace {

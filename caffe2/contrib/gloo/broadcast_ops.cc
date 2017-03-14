@@ -7,20 +7,17 @@ namespace gloo {
 
 template <class Context>
 void BroadcastOp<Context>::initialize() {
-  auto& input = Input(INPUT);
-  auto* output = Output(OUTPUT);
-  CAFFE_ENFORCE_EQ(input.raw_data(), output->raw_data());
-
+  auto* output = Output(0);
   const auto& context =
       OperatorBase::Input<std::shared_ptr<::gloo::Context>>(COMM);
   if (output->template IsType<float>()) {
-    auto ptr = output->template mutable_data<float>();
+    auto ptrs = getPointers<float>();
     algorithm_.reset(new ::gloo::BroadcastOneToAll<float>(
-        context, {ptr}, output->size(), root_));
+        context, ptrs, output->size(), root_));
   } else if (output->template IsType<long>()) {
-    auto ptr = output->template mutable_data<long>();
+    auto ptrs = getPointers<long>();
     algorithm_.reset(new ::gloo::BroadcastOneToAll<long>(
-        context, {ptr}, output->size(), root_));
+        context, ptrs, output->size(), root_));
   } else {
     CAFFE_ENFORCE(false, "Unhandled type: ", output->meta().name());
   }

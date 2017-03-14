@@ -143,6 +143,7 @@ class TestCase(hu.HypothesisTestCase):
                         comm_rank=None,
                         comm_size=None,
                         blob_size=None,
+                        num_blobs=None,
                         tmpdir=None,
                         ):
         store_handler, common_world = self.create_common_world(
@@ -155,29 +156,44 @@ class TestCase(hu.HypothesisTestCase):
             blob_size,
             comm_rank=comm_rank)
 
-        for i in range(comm_size):
-            blob = "blob_{}".format(i)
-            value = np.full(blob_size, comm_rank, np.float32)
+        num_blobs = self.synchronize(
+            store_handler,
+            num_blobs,
+            comm_rank=comm_rank)
 
-            workspace.FeedBlob(blob, value)
+        for i in range(comm_size):
+            blobs = []
+            for j in range(num_blobs):
+                blob = "blob_{}".format(j)
+                offset = (comm_rank * num_blobs) + j
+                value = np.full(blob_size, offset, np.float32)
+                workspace.FeedBlob(blob, value)
+                blobs.append(blob)
+
             workspace.RunOperatorOnce(
                 core.CreateOperator(
                     "Broadcast",
-                    [common_world, blob],
-                    [blob],
+                    [common_world] + blobs,
+                    blobs,
                     root=i,
                     engine=op_engine))
-            np.testing.assert_array_equal(workspace.FetchBlob(blob), i)
+
+            for j in range(num_blobs):
+                np.testing.assert_array_equal(
+                    workspace.FetchBlob(blobs[j]),
+                    i * num_blobs)
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
+           num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]))
-    def test_broadcast(self, comm_size, blob_size, device_option):
+    def test_broadcast(self, comm_size, blob_size, num_blobs, device_option):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
             self.run_test_distributed(
                 self._test_broadcast,
                 blob_size=blob_size,
+                num_blobs=num_blobs,
                 device_option=device_option)
         else:
             with TemporaryDirectory() as tmpdir:
@@ -185,6 +201,7 @@ class TestCase(hu.HypothesisTestCase):
                     self._test_broadcast,
                     comm_size=comm_size,
                     blob_size=blob_size,
+                    num_blobs=num_blobs,
                     device_option=device_option,
                     tmpdir=tmpdir)
 
@@ -192,6 +209,7 @@ class TestCase(hu.HypothesisTestCase):
                         comm_rank=None,
                         comm_size=None,
                         blob_size=None,
+                        num_blobs=None,
                         tmpdir=None,
                         ):
         store_handler, common_world = self.create_common_world(
@@ -204,30 +222,41 @@ class TestCase(hu.HypothesisTestCase):
             blob_size,
             comm_rank=comm_rank)
 
-        blob = "blob"
-        value = np.full(blob_size, comm_rank, np.float32)
+        num_blobs = self.synchronize(
+            store_handler,
+            num_blobs,
+            comm_rank=comm_rank)
 
-        workspace.FeedBlob(blob, value)
+        blobs = []
+        for i in range(num_blobs):
+            blob = "blob_{}".format(i)
+            value = np.full(blob_size, (comm_rank * num_blobs) + i, np.float32)
+            workspace.FeedBlob(blob, value)
+            blobs.append(blob)
+
         workspace.RunOperatorOnce(
             core.CreateOperator(
                 "Allreduce",
-                [common_world, blob],
-                [blob],
+                [common_world] + blobs,
+                blobs,
                 engine=op_engine))
 
-        np.testing.assert_array_equal(
-            workspace.FetchBlob(blob),
-            comm_size * (comm_size - 1) / 2)
+        for i in range(num_blobs):
+            np.testing.assert_array_equal(
+                workspace.FetchBlob(blobs[i]),
+                (num_blobs * comm_size) * (num_blobs * comm_size - 1) / 2)
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
+           num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]))
-    def test_allreduce(self, comm_size, blob_size, device_option):
+    def test_allreduce(self, comm_size, blob_size, num_blobs, device_option):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
             self.run_test_distributed(
                 self._test_allreduce,
                 blob_size=blob_size,
+                num_blobs=num_blobs,
                 device_option=device_option)
         else:
             with TemporaryDirectory() as tmpdir:
@@ -235,6 +264,7 @@ class TestCase(hu.HypothesisTestCase):
                     self._test_allreduce,
                     comm_size=comm_size,
                     blob_size=blob_size,
+                    num_blobs=num_blobs,
                     device_option=device_option,
                     tmpdir=tmpdir)
 
