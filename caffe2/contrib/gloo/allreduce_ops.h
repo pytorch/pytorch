@@ -33,7 +33,11 @@ class AllreduceOp final : public Operator<Context> {
   void initialize() {
     Mode mode = RING_FULL;
     auto bytes = Input(INPUT).nbytes();
-    if (bytes < 4096) {
+
+    // Pretty arbitrary threshold but seems to work well.
+    // Logic for switching between algorithms in a topology
+    // dependent manner will eventually move to Gloo itself.
+    if (bytes < (256 * 1024)) {
       mode = RING_FULL;
     } else {
       mode = RING_CHUNKED;
