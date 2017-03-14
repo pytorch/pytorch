@@ -575,11 +575,12 @@ class DAGNet : public DAGNetBase {
     bool success = true;
     const auto& net_name = name_.c_str();
     for (const auto i : chain) {
-      const auto& op_name = operator_nodes_[i].operator_->def().name().c_str();
-      const auto& op_type = operator_nodes_[i].operator_->def().type().c_str();
-      CAFFE_SDT(operator_start, net_name, op_name, op_type);
+      const auto& op = operator_nodes_[i].operator_.get();
+      const auto& op_name = op->def().name().c_str();
+      const auto& op_type = op->def().type().c_str();
+      CAFFE_SDT(operator_start, net_name, op_name, op_type, op);
       success &= operator_nodes_[i].operator_->Run();
-      CAFFE_SDT(operator_done, net_name, op_name, op_type);
+      CAFFE_SDT(operator_done, net_name, op_name, op_type, op);
     }
     return success;
   }
