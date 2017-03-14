@@ -82,7 +82,8 @@ FileReader::FileReader(const std::string& path, size_t bufferSize)
   fd_ = open(path.c_str(), O_RDONLY, 0777);
   if (fd_ < 0) {
     throw std::runtime_error(
-        "Error opening file for reading: " + std::string(std::strerror(errno)));
+        "Error opening file for reading: " + std::string(std::strerror(errno)) +
+        " Path=" + path);
   }
 }
 
