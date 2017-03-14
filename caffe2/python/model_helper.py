@@ -145,7 +145,8 @@ class ModelHelperBase(object):
         if namescope == '':
             return self.params[:]
         else:
-            return [p for p in self.params if p.GetNameScope() == namescope]
+            return [p for p in self.params if
+                    p.GetNameScope().startswith(namescope)]
 
     def Proto(self):
         return self.net.Proto()

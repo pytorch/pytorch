@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
+from caffe2.python.scope import CurrentNameScope
 from caffe2.python.cnn import CNNModelHelper
 from caffe2.python.attention import (
     apply_regular_attention,
@@ -45,6 +46,14 @@ def recurrent_net(
     '''
     assert len(inputs) == 1, "Only one input blob is supported so far"
 
+    # Validate scoping
+    for einp in cell_net.Proto().external_input:
+        assert einp.startswith(CurrentNameScope()), \
+            '''
+            Cell net external inputs are not properly scoped, use
+            AddScopedExternalInputs() when creating them
+            '''
+
     input_blobs = [str(i[0]) for i in inputs]
     initial_input_blobs = [str(x[1]) for x in initial_cell_inputs]
     op_name = net.NextName('recurrent')
@@ -62,7 +71,7 @@ def recurrent_net(
     if timestep is not None:
         known_inputs.append(str(timestep))
     references = [
-        b for b in cell_net.Proto().external_input
+        core.BlobReference(b) for b in cell_net.Proto().external_input
         if b not in known_inputs]
 
     inner_outputs = list(cell_net.Proto().external_output)
@@ -223,7 +232,7 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     """ the step net """
     step_model = CNNModelHelper(name='lstm_cell', param_model=model)
     input_t, timestep, cell_t_prev, hidden_t_prev = (
-        step_model.net.AddExternalInputs(
+        step_model.net.AddScopedExternalInputs(
             'input_t', 'timestep', 'cell_t_prev', 'hidden_t_prev'))
     gates_t = step_model.FC(
         hidden_t_prev, s('gates_t'), dim_in=dim_out,
@@ -358,20 +367,21 @@ def LSTMWithAttention(
         timestep,
         cell_t_prev,
         hidden_t_prev,
-        _,
-        _,
         attention_weighted_encoder_context_t_prev,
     ) = (
-        step_model.net.AddExternalInputs(
+        step_model.net.AddScopedExternalInputs(
             'input_t',
             'timestep',
             'cell_t_prev',
             'hidden_t_prev',
-            encoder_outputs_transposed,
-            weighted_encoder_outputs,
             'attention_weighted_encoder_context_t_prev',
         )
     )
+    step_model.net.AddExternalInputs(
+        encoder_outputs_transposed,
+        weighted_encoder_outputs
+    )
+
     gates_concatenated_input_t, _ = step_model.net.Concat(
         [hidden_t_prev, attention_weighted_encoder_context_t_prev],
         [
@@ -488,7 +498,7 @@ def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     """ the step net """
     step_model = CNNModelHelper(name='milstm_cell', param_model=model)
     input_t, timestep, cell_t_prev, hidden_t_prev = (
-        step_model.net.AddExternalInputs(
+        step_model.net.AddScopedExternalInputs(
             'input_t', 'timestep', 'cell_t_prev', 'hidden_t_prev'))
     # hU^T
     # Shape: [1, batch_size, 4 * hidden_size]

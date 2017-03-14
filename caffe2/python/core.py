@@ -1587,6 +1587,16 @@ class Net(object):
         for output in outputs:
             self.Proto().external_output.extend([str(output)])
 
+    def AddScopedExternalInputs(self, *inputs):
+        return self.AddExternalInput(
+            * [ScopedBlobReference(str(b)) for b in inputs]
+        )
+
+    def AddScopedExternalOutputs(self, *outputs):
+        return self.AddExternalOutput(
+            * [ScopedBlobReference(str(b)) for b in outputs]
+        )
+
     @property
     def external_inputs(self):
         return map(_get_blob_ref, self._net.external_input)
