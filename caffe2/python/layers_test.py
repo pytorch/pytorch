@@ -98,3 +98,9 @@ class TestLayers(test_util.TestCase):
             self.model.input_feature_schema.float_features()
         assert len(ops[0].output) == 1
         assert ops[0].output[0] in ops[1].input
+
+    def testFunctionalLayerHelperAutoInferenceScalar(self):
+        loss = self.model.AveragedLoss(self.model.input_feature_schema, 1)
+        self.assertEquals(1, len(loss.field_types()))
+        self.assertEquals(np.float32, loss.field_types()[0].base)
+        self.assertEquals(tuple(), loss.field_types()[0].shape)
