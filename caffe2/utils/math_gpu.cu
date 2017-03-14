@@ -1,4 +1,4 @@
-// Implementes the math functions for CPU.
+// Implements the math functions for CPU.
 
 #include <thrust/device_ptr.h>
 #include <thrust/reduce.h>
