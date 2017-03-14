@@ -78,7 +78,7 @@ class CNNModelHelper(ModelHelperBase):
 
     def Conv(
         self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-        bias_init=None, group=1, **kwargs
+            bias_init=None, group=1, transform_inputs=None, **kwargs
     ):
         """Convolution. We intentionally do not provide odd kernel/stride/pad
         settings in order to discourage the use of odd cases.
@@ -128,11 +128,13 @@ class CNNModelHelper(ModelHelperBase):
             if self.ws_nbytes_limit:
                 kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
 
-        inputs = []
         if use_bias:
             inputs = [blob_in, weight, bias]
         else:
             inputs = [blob_in, weight]
+
+        if transform_inputs is not None:
+            transform_inputs(self, blob_out, inputs)
 
         # For the operator, we no longer need to provide the no_bias field
         # because it can automatically figure this out from the number of
