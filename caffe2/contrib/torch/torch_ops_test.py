@@ -10,7 +10,14 @@ from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 import os
-from libfb import parutil
+import unittest
+
+try:
+    from libfb import parutil
+except ImportError as e:
+    # If libfb not found, skip all tests in this file
+    raise unittest.SkipTest(str(e))
+
 core.GlobalInit(["python", "--caffe2_log_level=0"])
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/torch:torch_ops')
