@@ -15,9 +15,10 @@ Creates a common world for communication operators.
     .Arg("rank", "(int) rank of this node in the common world.");
 
 OPERATOR_SCHEMA(Broadcast)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .EnforceInplace({{1, 0}})
+    .NumInputsOutputs([](int in, int out) {
+      return in >= 2 && out == (in - 1);
+    })
+    .EnforceInplace([](int in, int out) { return (in - 1) == out; })
     .SetDoc(R"DOC(
 Does a broadcast operation from the root node to every other node. The tensor
 on each node should have been pre-created with the same shape and data type.
@@ -40,9 +41,10 @@ Sum is supported.
     .Arg("root", "(int, default 0) the root to run reduce into.");
 
 OPERATOR_SCHEMA(Allreduce)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .AllowInplace({{1, 0}})
+    .NumInputsOutputs([](int in, int out) {
+      return in >= 2 && out == (in - 1);
+    })
+    .EnforceInplace([](int in, int out) { return (in - 1) == out; })
     .SetDoc(R"DOC(
 Does an allreduce operation among the nodes. Currently only Sum is supported.
 )DOC")
