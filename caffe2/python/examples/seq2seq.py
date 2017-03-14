@@ -603,6 +603,7 @@ def gen_vocab(corpus, unk_threshold):
     vocab[PAD]
     vocab[GO]
     vocab[EOS]
+    vocab[UNK]
 
     with open(corpus) as f:
         for sentence in f:
@@ -729,12 +730,12 @@ def main():
                         help='Training batch size')
     parser.add_argument('--epochs', type=int, default=10,
                         help='Number of iterations over training data')
-    parser.add_argument('--learning-rate', type=float, default=0.1,
+    parser.add_argument('--learning-rate', type=float, default=0.01,
                         help='Learning rate')
-    parser.add_argument('--unk-threshold', type=int, default=5,
+    parser.add_argument('--unk-threshold', type=int, default=50,
                         help='Threshold frequency under which token becomes '
                         'labelled unknown token')
-    parser.add_argument('--max-grad-value', type=float, default=5.0,
+    parser.add_argument('--max-grad-value', type=float, default=0.1,
                         help='Max clip value of gradients at the end of each '
                         'backward pass')
     parser.add_argument('--use-bidirectional-encoder', action='store_true',
