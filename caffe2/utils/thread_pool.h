@@ -7,7 +7,7 @@
 #include <queue>
 #include <thread>
 
-class ThreadPool{
+class TaskThreadPool{
  private:
     std::queue< std::function< void() > > tasks_;
     std::vector<std::thread> threads_;
@@ -21,17 +21,17 @@ class ThreadPool{
 
  public:
     /// @brief Constructor.
-    explicit ThreadPool(std::size_t pool_size)
+    explicit TaskThreadPool(std::size_t pool_size)
         :  threads_(pool_size), running_(true), complete_(true),
            available_(pool_size), total_(pool_size) {
         for ( std::size_t i = 0; i < pool_size; ++i ) {
             threads_[i] = std::thread(
-                std::bind(&ThreadPool::main_loop, this));
+                std::bind(&TaskThreadPool::main_loop, this));
         }
     }
 
     /// @brief Destructor.
-    ~ThreadPool() {
+    ~TaskThreadPool() {
         // Set running flag to false then notify all threads.
         {
             std::unique_lock< std::mutex > lock(mutex_);
