@@ -27,6 +27,7 @@ SwitchWorkspace = C.switch_workspace
 RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
+Predictor = C.Predictor
 
 is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
