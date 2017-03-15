@@ -10,6 +10,8 @@
 #pragma once
 
 #include <nccl.h>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "gloo/common/logging.h"
@@ -56,26 +58,27 @@ struct NCCLElement {
 };
 
 template <typename T>
-class NCCLContext {
+class NCCLExecution {
  public:
-  NCCLContext(std::vector<NCCLElement<T>>&& elements, int root);
-  NCCLContext(NCCLContext&&) = default;
-  ~NCCLContext();
+  NCCLExecution(std::vector<NCCLElement<T>>&& elements, int root);
+  NCCLExecution(NCCLExecution&&) = default;
+  ~NCCLExecution();
 
-  // Instances cannot be copied or copy-assigned
-  NCCLContext(const NCCLContext&) = delete;
-  NCCLContext& operator=(const NCCLContext&) = delete;
+  std::vector<int> getDevices() const;
+  std::string getKey() const;
 
   const int root;
   std::vector<NCCLElement<T>> elements;
-  std::vector<ncclComm_t> comms;
   std::vector<cudaEvent_t> ncclEvents;
 };
 
 template <typename T>
+class NCCLContext;
+
+template <typename T>
 class NCCLOp {
  public:
-  explicit NCCLOp(NCCLContext<T>&& context) : context_(std::move(context)) {}
+  explicit NCCLOp(NCCLExecution<T>&& execution);
   NCCLOp(NCCLOp&&) = default;
   virtual ~NCCLOp() = default;
 
@@ -90,21 +93,23 @@ class NCCLOp {
   template <typename F>
   void runNCCL(F&& f);
 
-  NCCLContext<T> context_;
+  NCCLExecution<T> execution_;
+  std::shared_ptr<NCCLContext<T>> context_;
 };
 
 template <typename T>
 class ReduceOp : public NCCLOp<T> {
  public:
-  explicit ReduceOp(NCCLContext<T>&& context) : NCCLOp<T>(std::move(context)) {}
+  explicit ReduceOp(NCCLExecution<T>&& execution)
+      : NCCLOp<T>(std::move(execution)) {}
   void runAsync() override;
 };
 
 template <typename T>
 class BroadcastOp : public NCCLOp<T> {
  public:
-  explicit BroadcastOp(NCCLContext<T>&& context)
-      : NCCLOp<T>(std::move(context)) {}
+  explicit BroadcastOp(NCCLExecution<T>&& execution)
+      : NCCLOp<T>(std::move(execution)) {}
   void runAsync() override;
 };
 

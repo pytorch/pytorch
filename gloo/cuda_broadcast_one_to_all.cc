@@ -34,11 +34,11 @@ struct CudaBroadcastOneToAll<T>::LocalBroadcast {
     }
 
     auto& rootDevicePtr = devicePtrs[rootPointerRank];
-    nccl::NCCLContext<T> context(
+    nccl::NCCLExecution<T> execution(
       std::move(elements),
       rootDevicePtr.getDeviceID());
 
-    broadcastOp.reset(new nccl::BroadcastOp<T>(std::move(context)));
+    broadcastOp.reset(new nccl::BroadcastOp<T>(std::move(execution)));
   }
 
   void runAsync() {

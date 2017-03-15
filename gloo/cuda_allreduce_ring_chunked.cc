@@ -26,10 +26,10 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
       : rootDevicePtr(std::move(rootDevicePtr)),
         hostPtr(hostPtr),
         length(rootDevicePtr.getCount()),
-        reduceOp(nccl::NCCLContext<T>(
+        reduceOp(nccl::NCCLExecution<T>(
             std::move(reduceElements),
             this->rootDevicePtr.getDeviceID())),
-        broadcastOp(nccl::NCCLContext<T>(
+        broadcastOp(nccl::NCCLExecution<T>(
             std::move(broadcastElements),
             this->rootDevicePtr.getDeviceID())) {}
   ChunkContext(ChunkContext&& other) = default;

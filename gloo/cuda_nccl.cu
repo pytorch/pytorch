@@ -10,6 +10,7 @@
 #include "gloo/cuda_nccl.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 #include "gloo/cuda_private.h"
 
@@ -26,27 +27,61 @@ static CudaDeviceStreams& getNcclStreams() {
 }
 
 template <typename T>
-NCCLContext<T>::NCCLContext(std::vector<NCCLElement<T>>&& elements, int root)
-    : root(root), elements(std::move(elements)) {
-  std::vector<int> devices;
-  const size_t numElements = this->elements.size();
-  devices.reserve(numElements);
-  for (auto& el : this->elements) {
-    GLOO_ENFORCE(
-        // Performing a linear search given small set of devices
-        std::find(devices.begin(), devices.end(), el.device) == devices.end(),
-        "NCCL elements must map to unique devices");
-    devices.push_back(el.device);
-  }
-  {
+class NCCLContext {
+ public:
+  NCCLContext(const std::vector<int>& devices) : devices(devices) {
     // Initialze comms. Synchronize with conflicting CUDA and NCCL operations.
-    comms.resize(numElements);
+    comms.resize(devices.size());
     std::lock_guard<std::mutex> lock(CudaShared::getMutex());
     NCCL_CHECK(ncclCommInitAll(comms.data(), devices.size(), devices.data()));
   }
+  ~NCCLContext() {
+    for (auto i = 0; i < devices.size(); ++i) {
+      CudaDeviceScope scope(devices[i]);
+      {
+        // Synchronize memory allocation with NCCL operations
+        std::lock_guard<std::mutex> lock(CudaShared::getMutex());
+        ncclCommDestroy(comms[i]);
+      }
+    }
+  }
+
+  // Instances cannot be copied or copy-assigned
+  NCCLContext(const NCCLContext&) = delete;
+  NCCLContext& operator=(const NCCLContext&) = delete;
+
+  const std::vector<int> devices;
+  std::vector<ncclComm_t> comms;
+};
+
+// Initializing NCCL communications is expensive. Allocate context as needed per
+// unique device set and cache for reuse.
+template <typename T>
+static std::shared_ptr<NCCLContext<T>> getNcclContext(
+    const NCCLExecution<T>& ex) {
+  static std::unordered_map<std::string, std::shared_ptr<NCCLContext<T>>>
+      contexts;
+  const auto key = ex.getKey();
+  {
+    static std::mutex m;
+    std::lock_guard<std::mutex> lock(m);
+    if (!contexts[key]) {
+      contexts[key] = std::make_shared<NCCLContext<T>>(ex.getDevices());
+    }
+  }
+  const auto context = contexts[key];
+  GLOO_ENFORCE_NE(context.get(), (void*)nullptr);
+  return context;
+}
+
+template <typename T>
+NCCLExecution<T>::NCCLExecution(
+    std::vector<NCCLElement<T>>&& elements,
+    int root)
+    : root(root), elements(std::move(elements)) {
   // Allocate events to synchronize source, destination, and NCCL streams
-  ncclEvents.resize(numElements);
-  for (auto i = 0; i < numElements; i++) {
+  ncclEvents.resize(this->elements.size());
+  for (auto i = 0; i < this->elements.size(); i++) {
     CudaDeviceScope scope(this->elements[i].device);
     CUDA_CHECK(cudaEventCreateWithFlags(
         &ncclEvents[i], cudaEventDefault | cudaEventDisableTiming));
@@ -54,16 +89,37 @@ NCCLContext<T>::NCCLContext(std::vector<NCCLElement<T>>&& elements, int root)
 }
 
 template <typename T>
-NCCLContext<T>::~NCCLContext() {
-  for (auto i = 0; i < elements.size(); ++i) {
-    CudaDeviceScope scope(elements[i].device);
+NCCLExecution<T>::~NCCLExecution() {
+  for (auto i = 0; i < this->elements.size(); i++) {
+    CudaDeviceScope scope(this->elements[i].device);
     CUDA_CHECK(cudaEventDestroy(ncclEvents[i]));
-    {
-      // Synchronize memory allocation with NCCL operations
-      std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-      ncclCommDestroy(comms[i]);
-    }
   }
+}
+
+template <typename T>
+std::vector<int> NCCLExecution<T>::getDevices() const {
+  std::vector<int> result;
+  result.reserve(elements.size());
+  for (const auto& el : elements) {
+    GLOO_ENFORCE(
+        // Performing a linear search given small set of devices
+        std::find(result.begin(), result.end(), el.device) == result.end(),
+        "NCCL elements must map to unique devices");
+    result.push_back(el.device);
+  }
+  return result;
+}
+
+template <typename T>
+std::string NCCLExecution<T>::getKey() const {
+  // Construct a key representing the order-dependent devices in this NCCL
+  // execution. This is used to index into the NCCL context map and allows an
+  // implicit association between elements[i].device and NCCLContext::comms[i]
+  std::string result;
+  for (const auto& el : elements) {
+    result += std::to_string(el.device) + ",";
+  }
+  return result;
 }
 
 template <typename T>
@@ -76,8 +132,12 @@ class ncclTypeWrapper<float> {
 };
 
 template <typename T>
+NCCLOp<T>::NCCLOp(NCCLExecution<T>&& execution)
+    : execution_(std::move(execution)), context_(getNcclContext(execution_)) {}
+
+template <typename T>
 void NCCLOp<T>::wait() {
-  auto& elements = context_.elements;
+  auto& elements = execution_.elements;
   for (auto i = 0; i < elements.size(); ++i) {
     CudaDeviceScope scope(elements[i].device);
     elements[i].dst.wait();
@@ -87,9 +147,9 @@ void NCCLOp<T>::wait() {
 template <typename T>
 template <typename F>
 void NCCLOp<T>::runNCCL(F&& f) {
-  const auto& elements = context_.elements;
-  const auto& comms = context_.comms;
-  const auto& ncclEvents = context_.ncclEvents;
+  const auto& elements = execution_.elements;
+  const auto& ncclEvents = execution_.ncclEvents;
+  const auto& comms = context_->comms;
 
   // Synchronize memory allocation with NCCL operations
   std::lock_guard<std::mutex> lock(CudaShared::getMutex());
@@ -125,7 +185,7 @@ void NCCLOp<T>::runNCCL(F&& f) {
 
 template <typename T>
 void ReduceOp<T>::runAsync() {
-  const auto root = this->context_.root;
+  const auto root = this->execution_.root;
   this->runNCCL([root](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclReduce(
@@ -142,7 +202,7 @@ void ReduceOp<T>::runAsync() {
 
 template <typename T>
 void BroadcastOp<T>::runAsync() {
-  const auto root = this->context_.root;
+  const auto root = this->execution_.root;
   this->runNCCL([root](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclBcast(
@@ -155,6 +215,7 @@ void BroadcastOp<T>::runAsync() {
   });
 }
 
+template class NCCLExecution<float>;
 template class NCCLContext<float>;
 template class NCCLOp<float>;
 template class ReduceOp<float>;
