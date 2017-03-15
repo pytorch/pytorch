@@ -56,9 +56,9 @@ else
   if [[ $BLAS == 'MKL' ]]; then
     wget http://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
     sudo apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
-    sudo sh -c 'echo deb http://apt.repos.intel.com/mkl stable main > /etc/apt/sources.list.d/intel-mkl.list'
+    sudo sh -c 'echo deb http://apt.repos.intel.com/mkl all main > /etc/apt/sources.list.d/intel-mkl.list'
     sudo apt-get update
-    sudo apt-get install intel-mkl
+    sudo apt-get install intel-mkl-64bit-2017.2-050
   fi
 
   ################
