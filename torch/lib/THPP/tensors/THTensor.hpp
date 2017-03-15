@@ -25,7 +25,7 @@ struct th_tensor_traits {};
 namespace thpp {
 
 template <typename real>
-  struct THStorage;
+struct THStorage;
 
 template<typename real>
 struct THTensor : public interface_traits<real>::tensor_interface_type {

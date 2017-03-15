@@ -45,7 +45,7 @@ static void tensorMaskedSelect(rpc::RPCMessage& raw_message) {
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   thpp::Tensor *mask = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  t->maskedCopy(*src, *mask);
+  t->maskedSelect(*src, *mask);
 }
 
 static void tensorNonzero(rpc::RPCMessage& raw_message) {
