@@ -12,6 +12,7 @@ from caffe2.python.attention import (
     AttentionType,
 )
 
+_workspace_seq = 0
 
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
@@ -172,9 +173,10 @@ def recurrent_net(
     params = [x for x in references if x in backward_mapping.keys()]
     recurrent_inputs = [str(x[1]) for x in initial_cell_inputs]
 
+    global _workspace_seq
     results = net.RecurrentNetwork(
         all_inputs,
-        all_outputs + [s("step_workspaces")],
+        all_outputs + [s("step_workspaces_{}".format(_workspace_seq))],
         param=map(all_inputs.index, params),
         alias_src=alias_src,
         alias_dst=map(str, alias_dst),
@@ -192,6 +194,7 @@ def recurrent_net(
         timestep="timestep" if timestep is None else str(timestep),
         outputs_with_grads=outputs_with_grads,
     )
+    _workspace_seq += 1
     # The last output is a list of step workspaces,
     # which is only needed internally for gradient propogation
     return results[:-1]

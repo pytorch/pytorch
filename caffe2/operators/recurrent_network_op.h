@@ -256,7 +256,14 @@ class RecurrentNetworkOp final : public Operator<Context> {
         CAFFE_ENFORCE(stepNet, "Step Net construction failure");
       }
       // Since we have a SimpleNet, there are no races here.
+
       NetBase* stepNet = (*stepWorkspaces)[t]->GetNet(stepNetDef_.name());
+      CAFFE_ENFORCE(
+          stepNet != nullptr,
+          "Net ",
+          stepNetDef_.name(),
+          " was not in the shared workspace. Perhaps two RecurrentNetworkOps ",
+          "share the same shared_workspace? This is not allowed.");
       stepNet->RunAsync();
     }
 
