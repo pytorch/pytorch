@@ -190,6 +190,11 @@ struct options parseOptions(int argc, char** argv) {
     }
   }
 
+#ifdef GLOO_USE_MPI
+  // Use MPI if started through mpirun
+  result.mpi = (getenv("OMPI_UNIVERSE_SIZE") != nullptr);
+#endif
+
   if (result.busyPoll && !result.sync) {
     fprintf(stderr, "%s: busy poll can only be used with sync mode\n", argv[0]);
     usage(EXIT_FAILURE, argv[0]);

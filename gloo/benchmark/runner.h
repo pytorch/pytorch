@@ -29,6 +29,7 @@ class Runner {
      std::shared_ptr<::gloo::Context>&)>;
 
   explicit Runner(const options& options);
+  ~Runner();
 
   void run(BenchmarkFn& fn);
   void run(BenchmarkFn& fn, int n);

@@ -36,6 +36,17 @@ Suppress this warning with -DUSE_IBVERBS=OFF")
   endif()
 endif()
 
+if(USE_MPI)
+  find_package(MPI)
+  if(MPI_C_FOUND)
+    message(STATUS "MPI include path: " ${MPI_CXX_INCLUDE_PATH})
+    message(STATUS "MPI libraries: " ${MPI_CXX_LIBRARIES})
+    include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
+    list(APPEND gloo_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
+    add_definitions(-DGLOO_USE_MPI=1)
+  endif()
+endif()
+
 # Make sure we can find googletest if building the tests
 if(BUILD_TEST)
   if (EXISTS "${PROJECT_SOURCE_DIR}/third-party/googletest")

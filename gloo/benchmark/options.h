@@ -23,6 +23,10 @@ struct options {
   int redisPort = 6379;
   std::string prefix = "prefix";
 
+#ifdef GLOO_USE_MPI
+  bool mpi = false;
+#endif
+
   // Transport
   std::string transport;
   std::string ibverbsDevice = "mlx5_0";

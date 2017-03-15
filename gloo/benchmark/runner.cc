@@ -20,6 +20,10 @@
 #include "gloo/rendezvous/redis_store.h"
 #include "gloo/transport/device.h"
 
+#ifdef GLOO_USE_MPI
+#include "gloo/mpi/context.h"
+#endif
+
 #ifdef BENCHMARK_TCP
 #include "gloo/transport/tcp/device.h"
 #endif
@@ -50,12 +54,29 @@ Runner::Runner(const options& options) : options_(options) {
 #endif
   GLOO_ENFORCE(device_, "Unknown transport: ", options_.transport);
 
+#ifdef GLOO_USE_MPI
+  if (options_.mpi) {
+    auto rv = MPI_Init(nullptr, nullptr);
+    GLOO_ENFORCE_EQ(rv, MPI_SUCCESS);
+    MPI_Comm_rank(MPI_COMM_WORLD, &options_.contextRank);
+    MPI_Comm_size(MPI_COMM_WORLD, &options_.contextSize);
+  }
+#endif
+
   // Create broadcast algorithm to synchronize between participants
   broadcast_.reset(
     new BroadcastOneToAll<long>(newContext(), {&broadcastValue_}, 1));
 
   // Create barrier for run-to-run synchronization
   barrier_.reset(new BarrierAllToOne(newContext()));
+}
+
+Runner::~Runner() {
+#ifdef GLOO_USE_MPI
+  if (options_.mpi) {
+    MPI_Finalize();
+  }
+#endif
 }
 
 long Runner::broadcast(long value) {
@@ -70,6 +91,14 @@ long Runner::broadcast(long value) {
 }
 
 std::shared_ptr<Context> Runner::newContext() {
+#ifdef GLOO_USE_MPI
+  if (options_.mpi) {
+    auto context = std::make_shared<::gloo::mpi::Context>(MPI_COMM_WORLD);
+    context->connectFullMesh(device_);
+    return context;
+  }
+#endif
+
   std::stringstream prefix;
   prefix << options_.prefix << "-" << prefixCounter_++;
 
