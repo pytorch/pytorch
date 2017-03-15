@@ -149,21 +149,20 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   if (!sizes) {
     // TODO Make it work with N-dimensional values
     THArgCheck(nDimV > 0, 3, "size must be provided when nDimV > 0");
-    THCudaLongTensor *ignore, *s;
     THLongTensor *computed_sizes;
-    ignore = THCudaLongTensor_new(state);
-    s = THCudaLongTensor_new(state);
-    THCudaLongTensor_max(state, s, ignore, indices, 1);
-    THCudaLongTensor_add(state, s, s, 1);
+    THCudaLongTensor *ignore = THCudaLongTensor_new(state);
+    THCIndexTensor *s = THCIndexTensor_(new)(state);
+    THCIndexTensor_(max)(state, s, ignore, indices, 1);
+    THCIndexTensor_(add)(state, s, s, 1);
 
     // TODO make sure this doesn't sync the hell out of everything
     //      Should be fine according to sam's memory manager.
-    computed_sizes = THLongTensor_newWithSize(THCudaLongTensor_newSizeOf(state, s), NULL);
-    THLongTensor_copyCudaLong(state, computed_sizes, s);
+    computed_sizes = THLongTensor_newWithSize(THCIndexTensor_(newSizeOf)(state, s), NULL);
+    THLongTensor_copyCudaInt(state, computed_sizes, s);
     THCSTensor_(rawResize)(state, self, nDimI, nDimV, THLongTensor_data(computed_sizes));
 
-    THCudaFree(state, s);
-    THCudaFree(state, ignore);
+    THCIndexTensor_(free)(state, s);
+    THCudaLongTensor_free(state, ignore);
     THLongTensor_free(computed_sizes);
   }
   else {
@@ -237,6 +236,18 @@ THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self, int d1,
   return other;
 }
 
+THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, long nnz) {
+  THCTensor *new_values;
+  if (THCTensor_(nDimension)(state, values) == 0) { // values tensor uninitialized
+    new_values = THCTensor_(newWithSize1d)(state, nnz);
+  } else {
+    THLongStorage *size = THCTensor_(newSizeOf)(state, values);
+    size->data[0] = nnz;
+    new_values = THCTensor_(newWithSize)(state, size, NULL);
+    THLongStorage_free(size);
+  }
+  return new_values;
+}
 
 /******************************************************************************
  * reshaping methods
@@ -244,13 +255,24 @@ THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self, int d1,
 
 int THCSTensor_(isSameSizeAs)(THCState *state, const THCSTensor *self, const THCSTensor* src)
 {
-  int d;
   if (self->nDimensionI != src->nDimensionI || self->nDimensionV != src->nDimensionV)
     return 0;
-  for(d = 0; d < self->nDimensionI + self->nDimensionV; ++d)
-  {
-    if(self->size[d] != src->size[d])
+  for(int d = 0; d < self->nDimensionI + self->nDimensionV; ++d) {
+    if(self->size[d] != src->size[d]) {
       return 0;
+    }
+  }
+  return 1;
+}
+
+int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, const THCTensor* src)
+{
+  if (self->nDimensionI + self->nDimensionV != src->nDimension)
+    return 0;
+  for(int d = 0; d < src->nDimension; ++d) {
+    if(self->size[d] != src->size[d]) {
+      return 0;
+    }
   }
   return 1;
 }
@@ -291,6 +313,14 @@ THCSTensor *THCSTensor_(resize4d)(THCState *state, THCSTensor *self, long size0,
   return self;
 }
 
+void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src) {
+  if (self == src) return;
+  THCSTensor_(rawResize)(state, self, src->nDimensionI, src->nDimensionV, src->size);
+  THCSTensor_(_set)(state, self, src->indices, src->values);
+  self->nnz = src->nnz;
+  self->contiguous = src->contiguous;
+}
+
 int THCSTensor_(isContiguous)(THCState *state, const THCSTensor *self) {
   return self->contiguous;
 }
@@ -311,6 +341,114 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
 void THCSTensor_(retain)(THCState *state, THCSTensor *self)
 {
   THAtomicIncrementRef(&self->refcount);
+}
+
+int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)
+{
+  /* FIXME: remove this flag after any users stop using it since it is
+     now superseded by the runtime option */
+#ifdef DISABLE_CHECK_GPU
+  return 1;
+#else
+  int kernelP2PEnabled =
+    THCState_getKernelPeerToPeerAccessEnabled(state);
+
+  int curDev = -1;
+  unsigned int nDenseTensors = nTensors - nSparseTensors;
+  THCudaCheck(cudaGetDevice(&curDev));
+  va_list(args);
+  va_start(args, nTensors);
+  int valid = 1;
+  int sparse = 1;
+  for (unsigned int i = 0; i < nSparseTensors + nDenseTensors; i++) {
+    THCSTensor *sparseTensor;
+    THCTensor *denseTensor;
+    if (i < nSparseTensors) {
+      sparseTensor = va_arg(args, THCSTensor*);
+      if (sparseTensor == NULL) {
+        continue;
+      }
+    } else {
+      denseTensor = va_arg(args, THCTensor*);
+      if (denseTensor == NULL) {
+        continue;
+      }
+    }
+    int tensorDev = i < nSparseTensors ?
+      THCSTensor_(getDevice)(state, sparseTensor) :
+      THCTensor_(getDevice)(state, denseTensor);
+    if (tensorDev == -1) {
+      /* This tensor does not have GPU memory (empty) */
+      continue;
+    }
+
+    if (tensorDev != curDev) {
+      if (kernelP2PEnabled) {
+        /* Kernel p2p access is allowed */
+        /* Can `curDev` access `tensorDev` directly? */
+        if (!THCState_getPeerToPeerAccess(state, curDev, tensorDev)) {
+          valid = 0;
+          break;
+        }
+      } else {
+        /* No kernel p2p access allowed */
+        valid = 0;
+        break;
+      }
+    }
+  }
+
+  va_end(args);
+  return valid;
+#endif // DISABLE_CHECK_GPU
+}
+
+void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask) {
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, mask, t));
+  if(!THCSTensor_(isSameSizeAsDense)(state, mask, t)) {
+    THError("sparseMask operands have incompatible sizes");
+  }
+  THCSTensor_(resizeAs)(state, r_, mask);
+  if (mask->nnz == 0) {
+    THCSTensor_(zero)(state, r_);
+    return;
+  }
+  THCIndexTensor *maskIndices = THCSTensor_(indices)(state, mask);
+  THCTensor *maskValues = THCSTensor_(values)(state, mask);
+  THCTensor *rValues = THCTensor_(new)(state);
+  THCTensor_(resizeAs)(state, rValues, maskValues);
+  THCSTensor_(move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
+  r_->contiguous = mask->contiguous;
+  r_->nnz = mask->nnz;
+
+  THCudaLongTensor *indices = THCudaLongTensor_newWithSize1d(state, mask->nnz);
+  THCudaLongTensor *indicesBuffer = THCudaLongTensor_new(state);
+
+  // FIXME remove after fixing CUDA index type
+  THCudaLongTensor *maskIndicesLong = THCudaLongTensor_newWithSize2d(state, maskIndices->size[0], maskIndices->size[1]);
+  THCudaLongTensor_copyCudaInt(state, maskIndicesLong, maskIndices);
+
+  THCudaLongTensor_zero(state, indices);
+  for (long d = 0; d < mask->nDimensionI; d++) {
+    THCudaLongTensor_mul(state, indices, indices, mask->size[d]);
+    THCudaLongTensor_select(state, indicesBuffer, maskIndicesLong, 0, d);
+    THCudaLongTensor_cadd(state, indices, indices, 1, indicesBuffer);
+  }
+  THLongStorage *viewSize = THLongStorage_newWithSize(1 + mask->nDimensionV);
+  viewSize->data[0] = -1;
+  for (long d = 0; d < mask->nDimensionV; d++) {
+    viewSize->data[1 + d] = mask->size[mask->nDimensionI + d];
+  }
+  THCTensor *t_view = THCTensor_(newView)(state, t, viewSize);
+  THCTensor_(indexSelect)(state, rValues, t_view, 0, indices);
+
+  THCudaLongTensor_free(state, maskIndicesLong);
+  THCudaLongTensor_free(state, indices);
+  THCudaLongTensor_free(state, indicesBuffer);
+  THLongStorage_free(viewSize);
+  THCTensor_(free)(state, t_view);
+  THCIndexTensor_(free)(state, maskIndices);
+  THCTensor_(free)(state, maskValues);
 }
 
 #endif

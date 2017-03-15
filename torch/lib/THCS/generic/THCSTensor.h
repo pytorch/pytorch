@@ -45,6 +45,8 @@ TH_API THCSTensor *THCSTensor_(newContiguous)(THCState *state, THCSTensor *self)
 TH_API THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self, int dimension1_, int dimension2_);
 
 /**** reshaping methods ***/
+TH_API int THCSTensor_(isSameSizeAs)(THCState *state, const THCSTensor *self, const THCSTensor* src);
+TH_API int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, const THCTensor* src);
 TH_API THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size);
 TH_API THCSTensor *THCSTensor_(resizeAs)(THCState *state, THCSTensor *self, THCSTensor *src);
 TH_API THCSTensor *THCSTensor_(resize1d)(THCState *state, THCSTensor *self, long size0);
@@ -53,6 +55,7 @@ TH_API THCSTensor *THCSTensor_(resize3d)(THCState *state, THCSTensor *self, long
 TH_API THCSTensor *THCSTensor_(resize4d)(THCState *state, THCSTensor *self, long size0, long size1, long size2, long size3);
 
 TH_API THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self);
+TH_API void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src);
 
 TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimension1_, int dimension2_);
 TH_API int THCSTensor_(isContiguous)(THCState *state, const THCSTensor *self);
@@ -65,5 +68,11 @@ TH_API void THCSTensor_(retain)(THCState *state, THCSTensor *self);
 
 /* CUDA-specific functions */
 TH_API int THCSTensor_(getDevice)(THCState *state, const THCSTensor *self);
+TH_API int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...);
+
+/* internal methods */
+TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, long nnz);
+TH_API THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
+TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 
 #endif

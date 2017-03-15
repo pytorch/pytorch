@@ -15,7 +15,7 @@ cpu_triplet = (
 type_triplets = [cpu_triplet]
 if torch.cuda.is_available():
     cuda_triplet = (
-        torch.cuda.LongTensor,
+        torch.cuda.IntTensor,
         torch.cuda.DoubleTensor,
         torch.cuda.sparse.DoubleTensor)
     type_triplets.append(cuda_triplet)
@@ -312,27 +312,33 @@ class TestSparse(TestCase):
         test_shape(3000, 64, 300)
 
     def _test_spadd_shape(self, shape_i, shape_v=None):
-        shape = shape_i + (shape_v or [])
-        x, _, _ = self._gen_sparse(len(shape_i), 10, shape)
-        y = torch.randn(*shape)
-        r = random.random()
+        for is_cuda in [False, True]:
+            shape = shape_i + (shape_v or [])
+            x, _, _ = self._gen_sparse(len(shape_i), 10, shape, is_cuda)
+            y = torch.randn(*shape)
+            if is_cuda:
+                y = y.cuda()
+            r = random.random()
 
-        expected = y + r * x.to_dense()
-        res = torch.add(y, r, x)
+            expected = y + r * x.to_dense()
+            res = torch.add(y, r, x)
 
-        self.assertEqual(res, expected)
+            self.assertEqual(res, expected)
 
-        # Non contiguous dense tensor
-        s = list(shape)
-        s[0] = shape[-1]
-        s[-1] = shape[0]
-        y = torch.randn(*s).transpose_(0, len(s) - 1)
-        r = random.random()
+            # Non contiguous dense tensor
+            s = list(shape)
+            s[0] = shape[-1]
+            s[-1] = shape[0]
+            y = torch.randn(*s)
+            if is_cuda:
+                y = y.cuda()
+            y.transpose_(0, len(s) - 1)
+            r = random.random()
 
-        expected = y + r * x.to_dense()
-        res = torch.add(y, r, x)
+            expected = y + r * x.to_dense()
+            res = torch.add(y, r, x)
 
-        self.assertEqual(res, expected)
+            self.assertEqual(res, expected)
 
     def test_spadd(self):
         self._test_spadd_shape([5, 6])
@@ -347,49 +353,50 @@ class TestSparse(TestCase):
         self._test_spadd_shape([5, 5, 5, 5, 5, 5], [2])
 
     def _test_basic_ops_shape(self, shape_i, shape_v=None):
-        shape = shape_i + (shape_v or [])
-        x1, _, _ = self._gen_sparse(len(shape_i), 9, shape)
-        x2, _, _ = self._gen_sparse(len(shape_i), 12, shape)
+        for is_cuda in [False, True]:
+            shape = shape_i + (shape_v or [])
+            x1, _, _ = self._gen_sparse(len(shape_i), 9, shape, is_cuda)
+            x2, _, _ = self._gen_sparse(len(shape_i), 12, shape, is_cuda)
 
-        y1 = x1 + x2
-        y2 = x1.clone()
-        y2.add_(x2)
-        expected = x1.to_dense() + x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+            y1 = x1 + x2
+            y2 = x1.clone()
+            y2.add_(x2)
+            expected = x1.to_dense() + x2.to_dense()
+            self.assertEqual(y1.to_dense(), expected)
+            self.assertEqual(y2.to_dense(), expected)
 
-        y1 = x1 - x2
-        y2 = x1.clone()
-        y2.sub_(x2)
-        expected = x1.to_dense() - x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+            y1 = x1 - x2
+            y2 = x1.clone()
+            y2.sub_(x2)
+            expected = x1.to_dense() - x2.to_dense()
+            self.assertEqual(y1.to_dense(), expected)
+            self.assertEqual(y2.to_dense(), expected)
 
-        y1 = x1 * x2
-        y2 = x1.clone()
-        y2.mul_(x2)
-        expected = x1.to_dense() * x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+            y1 = x1 * x2
+            y2 = x1.clone()
+            y2.mul_(x2)
+            expected = x1.to_dense() * x2.to_dense()
+            self.assertEqual(y1.to_dense(), expected)
+            self.assertEqual(y2.to_dense(), expected)
 
-        y1 = x1 * 37.5
-        y2 = x1.clone()
-        y2.mul_(37.5)
-        expected = x1.to_dense() * 37.5
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+            y1 = x1 * 37.5
+            y2 = x1.clone()
+            y2.mul_(37.5)
+            expected = x1.to_dense() * 37.5
+            self.assertEqual(y1.to_dense(), expected)
+            self.assertEqual(y2.to_dense(), expected)
 
-        y1 = x1 / 37.5
-        y2 = x1.clone()
-        y2.div_(37.5)
-        expected = x1.to_dense() / 37.5
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+            y1 = x1 / 37.5
+            y2 = x1.clone()
+            y2.div_(37.5)
+            expected = x1.to_dense() / 37.5
+            self.assertEqual(y1.to_dense(), expected)
+            self.assertEqual(y2.to_dense(), expected)
 
-        y = x1.clone()
-        y.zero_()
-        expected = torch.zeros(x1.size())
-        self.assertEqual(y.to_dense(), expected)
+            y = x1.clone()
+            y.zero_()
+            expected = torch.zeros(x1.size())
+            self.assertEqual(y.to_dense(), expected)
 
     def test_basic_ops(self):
         self._test_basic_ops_shape([5, 6])
@@ -402,6 +409,59 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape([10, 10, 10], [3])
         self._test_basic_ops_shape([50, 30, 20], [2])
         self._test_basic_ops_shape([5, 5, 5, 5, 5, 5], [2])
+
+    def _test_sparse_mask_shape(self, shape_i, shape_v=None):
+        for is_cuda in [False, True]:
+            shape = shape_i + (shape_v or [])
+            x1, _, _ = self._gen_sparse(len(shape_i), 9, shape, is_cuda)
+            x2, _, _ = self._gen_sparse(len(shape_i), 12, shape, is_cuda)
+
+            y1 = x1 + x2
+            y2 = x1.clone()
+            y2.add_(x2)
+            expected = x1.to_dense() + x2.to_dense()
+            self.assertEqual(y1.to_dense(), expected)
+            self.assertEqual(y2.to_dense(), expected)
+
+    def test_sparse_mask(self):
+        for IndexTensor, ValueTensor, SparseTensor in type_triplets:
+            i = IndexTensor([
+                [1, 3, 3, 0, 4],
+                [2, 1, 1, 2, 3],
+            ])
+            v = ValueTensor([1, 2, 3, 4, 5])
+            x = SparseTensor(i, v, torch.Size([5, 4]))
+            dense = ValueTensor([
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                [9, 10, 11, 12],
+                [13, 14, 15, 16],
+                [17, 18, 19, 20],
+            ])
+            exp_v = ValueTensor([7, 14, 14, 3, 20])
+            expected = SparseTensor(i, exp_v, torch.Size([5, 4]))
+            res = dense.sparse_mask(x)
+            self.assertEqual(res, expected)
+
+    def test_sparse_mask_hybrid(self):
+        for IndexTensor, ValueTensor, SparseTensor in type_triplets:
+            i = IndexTensor([
+                [1, 3, 3, 0, 4],
+                [2, 1, 1, 2, 3],
+            ])
+            v = ValueTensor([[1, 2], [2, 3], [3, 4], [4, 5], [5, 6]])
+            x = SparseTensor(i, v, torch.Size([5, 4, 2]))
+            dense = ValueTensor([
+                [[1, 3], [2, 2], [3, 3], [4, 2]],
+                [[5, 7], [6, 7], [7, 9], [8, 9]],
+                [[9, 2], [10, 4], [11, 1], [12, 3]],
+                [[13, 5], [14, 1], [15, 1], [16, 6]],
+                [[17, 7], [18, 2], [19, 7], [20, 1]],
+            ])
+            exp_v = ValueTensor([[7, 9], [14, 1], [14, 1], [3, 3], [20, 1]])
+            expected = SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
+            res = dense.sparse_mask(x)
+            self.assertEqual(res, expected)
 
 
 if __name__ == '__main__':

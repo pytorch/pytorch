@@ -344,6 +344,7 @@ void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
   THSTensor_(rawResize)(self, src->nDimensionI, src->nDimensionV, src->size);
   THSTensor_(_set)(self, src->indices, src->values);
   self->nnz = src->nnz;
+  self->contiguous = src->contiguous;
 }
 
 // In place transpose
