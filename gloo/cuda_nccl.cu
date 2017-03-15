@@ -101,7 +101,7 @@ void NCCLOp<T>::runNCCL(F&& f) {
     const auto& dstStream = element.dst.getStream();
     const auto& ncclStream = getNcclStreams()[element.device];
     const auto& srcEvent = element.src.getEvent();
-    const auto& dstEvent = element.src.getEvent();
+    const auto& dstEvent = element.dst.getEvent();
 
     CudaDeviceScope scope(element.device);
     // Synchronize the source and destination with the NCCL stream. Record
