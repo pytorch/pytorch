@@ -3,13 +3,19 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from collections import namedtuple
+
 from caffe2.python import (
+    core,
     layer_model_instantiator,
     layer_model_helper,
     schema,
     test_util,
 )
 import numpy as np
+
+
+OpSpec = namedtuple("OpSpec", "type input output")
 
 
 class TestLayers(test_util.TestCase):
@@ -25,6 +31,81 @@ class TestLayers(test_util.TestCase):
             'test_model',
             input_feature_schema=input_feature_schema,
             trainer_extra_schema=trainer_extra_schema)
+
+    def get_training_nets(self):
+        """
+        We don't use
+        layer_model_instantiator.generate_training_nets_forward_only()
+        here because it includes initialization of global constants, which make
+        testing tricky
+        """
+        train_net = core.Net('train_net')
+        train_init_net = core.Net('trai_init_net')
+        for layer in self.model.layers:
+            layer.add_operators(train_net, train_init_net)
+        return train_init_net, train_net
+
+    def get_predict_net(self):
+        return layer_model_instantiator.generate_predict_net(self.model)
+
+    def assertBlobsEqual(self, spec_blobs, op_blobs):
+        """
+        spec_blobs can either be None or a list of blob names. If it's None,
+        then no assertion is performed. The elements of the list can be None,
+        in that case, it means that position will not be checked.
+        """
+        if spec_blobs is None:
+            return
+        self.assertEqual(len(spec_blobs), len(op_blobs))
+        for spec_blob, op_blob in zip(spec_blobs, op_blobs):
+            if spec_blob is None:
+                continue
+            self.assertEqual(spec_blob, op_blob)
+
+    def assertNetContainOps(self, net, op_specs):
+        """
+        Given a net and a list of OpSpec's, check that the net match the spec
+        """
+        ops = net.Proto().op
+        self.assertEqual(len(op_specs), len(ops))
+        for op, op_spec in zip(ops, op_specs):
+            self.assertEqual(op_spec.type, op.type)
+            self.assertBlobsEqual(op_spec.input, op.input)
+            self.assertBlobsEqual(op_spec.output, op.output)
+        return ops
+
+    def testFCWithoutBias(self):
+        output_dims = 2
+        fc_without_bias = self.model.FCWithoutBias(
+            self.model.input_feature_schema.float_features, output_dims)
+
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dims, ))),
+            fc_without_bias
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("UniformFill", None, None),
+            ]
+        )
+
+        mat_mul_spec = OpSpec(
+            "MatMul",
+            [
+                self.model.input_feature_schema.float_features(),
+                init_ops[0].output[0],
+            ],
+            fc_without_bias.field_blobs()
+        )
+
+        self.assertNetContainOps(train_net, [mat_mul_spec])
+
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(predict_net, [mat_mul_spec])
 
     def testFunctionalLayer(self):
         def normalize(net, in_record, out_record):
@@ -101,6 +182,6 @@ class TestLayers(test_util.TestCase):
 
     def testFunctionalLayerHelperAutoInferenceScalar(self):
         loss = self.model.AveragedLoss(self.model.input_feature_schema, 1)
-        self.assertEquals(1, len(loss.field_types()))
-        self.assertEquals(np.float32, loss.field_types()[0].base)
-        self.assertEquals(tuple(), loss.field_types()[0].shape)
+        self.assertEqual(1, len(loss.field_types()))
+        self.assertEqual(np.float32, loss.field_types()[0].base)
+        self.assertEqual(tuple(), loss.field_types()[0].shape)
