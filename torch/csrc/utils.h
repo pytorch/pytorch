@@ -143,7 +143,6 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
 
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
 
-#define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 // https://bugsfiles.kde.org/attachment.cgi?id=61186
 #if PY_VERSION_HEX >= 0x03020000
@@ -175,6 +174,7 @@ struct THPUtils_typeTraits {};
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
+PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
 
 #endif /* _THP_CORE */
 
