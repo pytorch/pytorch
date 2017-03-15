@@ -229,7 +229,10 @@ class RecurrentNetworkOp final : public Operator<Context> {
         OperatorBase::Output<std::vector<std::shared_ptr<Workspace>>>(
             OutputSize() - 1);
 
-    stepWorkspaces->resize(seqLen);
+    if (stepWorkspaces->size() < seqLen) {
+      stepWorkspaces->clear();
+      stepWorkspaces->resize(seqLen);
+    }
 
     for (auto t = 0; t < seqLen; ++t) {
       if (!(*stepWorkspaces)[t].get()) {
