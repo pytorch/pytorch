@@ -36,10 +36,6 @@ class Function(_C._FunctionBase):
         num_outputs: Number of tensors returned by :func:`forward`.
         requires_grad: Boolean indicating whether the :func:`backward` will
             ever need to be called.
-        previous_functions: Tuple of (int, Function) pairs of length
-            :attr:`num_inputs`. Each entry contains a reference to a
-            :class:`Function` that created corresponding input, and an index
-            of the previous function output that's been used.
     """
     __call__ = _C._FunctionBase._do_forward
 

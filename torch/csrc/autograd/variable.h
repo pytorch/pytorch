@@ -15,13 +15,15 @@ struct VariableVersion;
 struct Variable : public Function {
   Variable(
       std::unique_ptr<thpp::Tensor> data,
-      std::shared_ptr<Function> creator);
+      std::shared_ptr<Function> grad_fn);
+
   Variable(
       std::unique_ptr<thpp::Tensor> data,
       bool requires_grad,
-      bool is_volatile);
+      bool is_volatile,
+      bool is_leaf = true);
 
-  void backward(std::shared_ptr<Variable> gradOutput);
+  void accumulate_grad(std::shared_ptr<Variable> gradOutput);
   virtual variable_list apply(const variable_list& gradOutputs) override;
 
   SavedVariable save() const;
@@ -31,13 +33,16 @@ struct Variable : public Function {
     if (!data) {
       return std::shared_ptr<Variable>();
     }
-    return std::make_shared<Variable>(std::move(data), 0, 0);
+    return std::make_shared<Variable>(std::move(data), false, false);
   }
 
   std::unique_ptr<thpp::Tensor> data;
-  std::shared_ptr<Function> creator;
+  std::shared_ptr<Function> grad_fn;
   std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
+  bool requires_grad;
+  bool is_volatile;
+  bool is_leaf;
   int output_nr;
   PyObject *pyobj;  // weak reference
 };
