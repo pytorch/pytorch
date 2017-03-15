@@ -3,12 +3,11 @@ import os
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util, workspace
+from caffe2.python import core, test_util, workspace, cnn
 
 import caffe2.python.hypothesis_test_util as htu
 import hypothesis.strategies as st
 from hypothesis import given
-from caffe2.proto import caffe2_pb2
 
 
 class TestWorkspace(unittest.TestCase):
@@ -467,6 +466,49 @@ class TestCWorkspace(htu.HypothesisTestCase):
         ws = workspace.C.Workspace()
         with self.assertRaises(RuntimeError):
             ws.create_net("...")
+
+
+class TestPredictor(unittest.TestCase):
+    def _create_model(self):
+        m = cnn.CNNModelHelper()
+        y = m.FC("data", "y",
+             dim_in=4, dim_out=2,
+             weight_init=m.ConstantInit(1.0),
+             bias_init=m.ConstantInit(0.0),
+             axis=0)
+        m.net.AddExternalOutput(y)
+        return m
+
+    # Use this test with a bigger model to see how using Predictor allows to
+    # avoid issues with low protobuf size limit in Python
+    #
+    # def test_predictor_predefined(self):
+    #     workspace.ResetWorkspace()
+    #     path = 'caffe2/caffe2/test/assets/'
+    #     with open(path + 'squeeze_predict_net.pb') as f:
+    #         self.predict_net = f.read()
+    #     with open(path + 'squeeze_init_net.pb') as f:
+    #         self.init_net = f.read()
+    #     self.predictor = workspace.Predictor(self.init_net, self.predict_net)
+
+    #     inputs = [np.zeros((1, 3, 256, 256), dtype='f')]
+    #     outputs = self.predictor.run(inputs)
+    #     self.assertEqual(len(outputs), 1)
+    #     self.assertEqual(outputs[0].shape, (1, 1000, 1, 1))
+    #     self.assertAlmostEqual(outputs[0][0][0][0][0], 5.19026289e-05)
+
+
+    def test_predictor_memory_model(self):
+        workspace.ResetWorkspace()
+        m = self._create_model()
+        workspace.FeedBlob("data", np.zeros([4], dtype='float32'))
+        self.predictor = workspace.Predictor(
+            workspace.StringifyProto(m.param_init_net.Proto()),
+            workspace.StringifyProto(m.net.Proto()))
+
+        inputs = np.array([1, 3, 256, 256], dtype='float32')
+        outputs = self.predictor.run([inputs])
+        np.testing.assert_array_almost_equal(np.array([[516, 516]], dtype='float32'), outputs)
 
 
 if __name__ == '__main__':

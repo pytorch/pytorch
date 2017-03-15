@@ -536,11 +536,38 @@ void addObjectMethods(py::module& m) {
       .def(
           "__init__",
           [](Predictor& instance, py::bytes init_net, py::bytes predict_net) {
+            CAFFE_ENFORCE(gWorkspace);
             NetDef init_net_, predict_net_;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(init_net, &init_net_));
             CAFFE_ENFORCE(
                 ParseProtobufFromLargeString(predict_net, &predict_net_));
-            new (&instance) Predictor(init_net_, predict_net_);
+            new (&instance) Predictor(init_net_, predict_net_, gWorkspace);
+          })
+      .def(
+          "run",
+          [](Predictor& instance,
+             std::vector<py::object> inputs) -> std::vector<py::object> {
+            std::vector<TensorCPU*> tensors;
+            std::vector<TensorCPU> tensors_data(inputs.size());
+            for (auto i = 0; i < inputs.size(); ++i) {
+              auto input = inputs[i];
+              CAFFE_ENFORCE(
+                  PyArray_Check(input.ptr()),
+                  "Input must be of type numpy array.");
+              PyArrayObject* array =
+                  reinterpret_cast<PyArrayObject*>(input.ptr());
+              TensorFeeder<CPUContext>().FeedTensor(
+                  DeviceOption(), array, &(tensors_data[i]));
+              tensors.push_back(&(tensors_data[i]));
+            }
+            std::vector<TensorCPU*> out;
+            instance.run(tensors, &out);
+            std::vector<py::object> pyout;
+            for (auto t : out) {
+              pyout.push_back(
+                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+            }
+            return pyout;
           });
 }
 
