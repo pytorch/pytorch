@@ -11,7 +11,7 @@ from caffe2.python.session import LocalSession
 import unittest
 
 
-def test_loop():
+def _test_loop():
     x = ops.Const(5)
     y = ops.Const(0)
     with ops.loop():
@@ -21,20 +21,20 @@ def test_loop():
     return y
 
 
-def test_inner_stop(x):
+def _test_inner_stop(x):
     ops.stop_if(ops.LT([x, ops.Const(5)]))
 
 
-def test_outer():
+def _test_outer():
     x = ops.Const(10)
     # test stop_if(False)
     with ops.stop_guard() as g1:
-        test_inner_stop(x)
+        _test_inner_stop(x)
 
     # test stop_if(True)
     y = ops.Const(3)
     with ops.stop_guard() as g2:
-        test_inner_stop(y)
+        _test_inner_stop(y)
 
     # test no stop
     with ops.stop_guard() as g4:
@@ -48,7 +48,7 @@ def test_outer():
         g1.has_stopped(), g2.has_stopped(), g3.has_stopped(), g4.has_stopped())
 
 
-def test_if(x):
+def _test_if(x):
     y = ops.Const(1)
     with ops.If(ops.GT([x, ops.Const(50)])):
         ops.Const(2, blob_out=y)
@@ -62,10 +62,10 @@ def test_if(x):
 class TestNetBuilder(unittest.TestCase):
     def test_ops(self):
         with NetBuilder() as nb:
-            y = test_loop()
-            z, w, a, b = test_outer()
-            p = test_if(ops.Const(75))
-            q = test_if(ops.Const(25))
+            y = _test_loop()
+            z, w, a, b = _test_outer()
+            p = _test_if(ops.Const(75))
+            q = _test_if(ops.Const(25))
         plan = Plan('name')
         plan.AddStep(to_execution_step(nb))
         ws = workspace.C.Workspace()

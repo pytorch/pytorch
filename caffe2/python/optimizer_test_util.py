@@ -6,7 +6,13 @@ import numpy as np
 from caffe2.python import core, workspace, cnn
 
 
-class TestBase(object):
+class OptimizerTestBase(object):
+    """
+    This is an abstract base class.
+    Don't inherit from unittest.TestCase, and don't name it 'Test*'.
+    Do, however, do these things in classes which inherit from this.
+    """
+
     def testDense(self):
         perfect_model = np.array([2, 6, 5, 0, 1]).astype(np.float32)
         np.random.seed(123)  # make test deterministic
