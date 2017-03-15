@@ -10,7 +10,8 @@ from caffe2.python import model_helper, dyndep, scope, workspace, core, memonger
 from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
-dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/fbcollective:fbcollective_ops")
+dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
+dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 
 log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
@@ -325,10 +326,7 @@ def _AddDistributedParameterSync(
     for param_name in sorted(uniq_param_names):
         param = model._device_grouped_blobs[param_name][devices[0]]
 
-        with core.DeviceScope(device_opt):
-            param_cpu = net.CopyGPUToCPU(param, str(param) + "cpu")
-
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+        def broadcast(param):
             comm_world = init_net.CreateCommonWorld(
                 rendezvous['kv_handler'],
                 "{}_cw".format(param_name),
@@ -338,14 +336,23 @@ def _AddDistributedParameterSync(
                 engine=rendezvous['engine'],
             )
 
-            # Temp: copy to CPU
             net.Broadcast(
-                inputs=[comm_world, param_cpu],
-                outputs=[param_cpu],
+                inputs=[comm_world, param],
+                outputs=[param],
                 engine=rendezvous['engine'],
             )
-        with core.DeviceScope(device_opt):
-            net.CopyCPUToGPU(param_cpu, param)
+
+        if rendezvous['engine'] == 'GLOO':
+            with core.DeviceScope(device_opt):
+                broadcast(param)
+        else:
+            # Copy between GPU and CPU
+            with core.DeviceScope(device_opt):
+                param_cpu = net.CopyGPUToCPU(param, str(param) + "cpu")
+            with core.DeviceOption(caffe2_pb2.CPU):
+                broadcast(param_cpu)
+            with core.DeviceScope(device_opt):
+                net.CopyCPUToGPU(param_cpu, param)
 
 
 def _AllReduceGradients(devices, model, rendezvous):
@@ -367,11 +374,8 @@ def _AllReduceGradientsDistributed(
     # Make list of gradients in reverse order
     reverse_ordered_grads = _GetReverseOrderedGrads(model)
 
-    # Step 1: sum gradients from local GPUs to master GPU
     master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
     reducing_device_opt = master_device_opt
-    if all_reduce_engine == "FBCOLLECTIVE":
-        reducing_device_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
 
     # We need to specify a partial order using control_input to
     # ensure progress (since all machines need to do same all reduces
@@ -394,60 +398,52 @@ def _AllReduceGradientsDistributed(
         # so we need a temporary gradient blob
         reduced_grad = str(master_grad) + "_red"
 
-        with core.DeviceScope(master_device_opt):
-            model.ConstantFill(master_grad, reduced_grad, value=0.0)
-
-            # Temp fix since NCCLReduce does not work
-            model.net.NCCLAllreduce(
-                grads_group,
-                grads_group,
-                control_input=nccl_control_blob,
-            )
-            nccl_control_blob = grads_group[0]
-            model.net.Copy(master_grad, reduced_grad)
-
-        # FBCOLLECTIVE currently works only on CPU context, so we need
-        # a temporary cpu-bound scratch blob.
-        if all_reduce_engine == "FBCOLLECTIVE":
-            with core.DeviceScope(reducing_device_opt):
-                model.param_init_net.ConstantFill(
-                    [], reduced_grad + "cpu", shape=[1], value=0.0
-                )
-            with core.DeviceScope(master_device_opt):
-                # Hack to ensure the cpu-scratch blob is initialized
-                # prior to running the net.
-                model.param_init_net.CopyGPUToCPU(
-                    str(master_grad).replace("_grad", ""), reduced_grad + "cpu"
-                )
-                model.net.CopyGPUToCPU(reduced_grad, reduced_grad + "cpu")
-                reduced_grad = reduced_grad + "cpu"
-
         control_input = None if len(cyclical_controls) < num_controls \
                         else cyclical_controls[counter % num_controls]
 
-        with core.DeviceScope(reducing_device_opt):
-            # Step 2: allreduce between all hosts, between master GPUs
-            comm_world = model.param_init_net.CreateCommonWorld(
-                rendezvous['kv_handler'],
-                "{}_cw".format(grad_name),
-                name="{}_cw_op".format(grad_name),
-                size=rendezvous['num_shards'],
-                rank=rendezvous['shard_id'],
-                engine=rendezvous['engine'],
-            )
-            model.net.Allreduce(
-                inputs=[comm_world, reduced_grad],
-                outputs=[reduced_grad],
-                engine=all_reduce_engine,
-                control_input=control_input,
-            )
+        def allreduce(grads):
+            with core.DeviceScope(reducing_device_opt):
+                comm_world = model.param_init_net.CreateCommonWorld(
+                    rendezvous['kv_handler'],
+                    "{}_cw".format(grad_name),
+                    name="{}_cw_op".format(grad_name),
+                    size=rendezvous['num_shards'],
+                    rank=rendezvous['shard_id'],
+                    engine=rendezvous['engine'],
+                )
+                model.net.Allreduce(
+                    inputs=[comm_world] + grads,
+                    outputs=grads,
+                    engine=all_reduce_engine,
+                    control_input=control_input,
+                )
 
-        if reducing_device_opt != master_device_opt:
-            with core.DeviceScope(master_device_opt):
-                model.net.CopyCPUToGPU(reduced_grad, master_grad)
+        if rendezvous['engine'] == 'GLOO':
+            # With Gloo cross GPU and cross machine allreduce
+            # can be executed in a single operation
+            allreduce(grads_group)
         else:
+            # Step 1: sum gradients from local GPUs to master GPU
+            with core.DeviceScope(master_device_opt):
+                model.ConstantFill(master_grad, reduced_grad, value=0.0)
+
+                # Temp fix since NCCLReduce does not work
+                model.net.NCCLAllreduce(
+                    grads_group,
+                    grads_group,
+                    control_input=nccl_control_blob,
+                )
+                nccl_control_blob = grads_group[0]
+                model.net.Copy(master_grad, reduced_grad)
+
+            # Step 2: allreduce between all hosts, between master GPUs
+            allreduce([reduced_grad])
+
             with core.DeviceScope(master_device_opt):
                 model.net.Copy(reduced_grad, master_grad)
+
+            # Step 3: broadcast locally
+            _Broadcast(devices, model, model.net, grad_name)
 
         if len(cyclical_controls) < num_controls:
             cyclical_controls.append(reduced_grad)
@@ -455,9 +451,6 @@ def _AllReduceGradientsDistributed(
             cyclical_controls[counter % num_controls] = reduced_grad
 
         counter += 1
-
-        # Step 3: broadcast locally
-        _Broadcast(devices, model, model.net, grad_name)
 
 
 def _AllReduceGradientsSingleHost(devices, model):
@@ -557,6 +550,9 @@ def _AnalyzeOperators(model):
     for op in model.Proto().op:
         if "NCCL" in op.type or "Copy" in op.type:
             continue
+        if "Allreduce" in op.type and "GLOO" in op.engine:
+            continue
+
         op_dev = op.device_option
         op_gpu = op_dev.cuda_gpu_id
 
