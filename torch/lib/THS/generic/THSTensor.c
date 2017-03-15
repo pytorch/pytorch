@@ -508,6 +508,10 @@ void THSTensor_(contiguous)(THSTensor *self) {
   self->contiguous = 1;
 }
 
+void THSTensor_(markContiguous)(THSTensor *self) {
+  self->contiguous = 1;
+}
+
 void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THSTensor_(resizeAs)(r_, mask);
   if (mask->nnz == 0) {
