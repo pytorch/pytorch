@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import schema
+from caffe2.python import core, schema
 import numpy as np
 
 import unittest
@@ -149,7 +149,113 @@ class TestDB(unittest.TestCase):
         s = s1 + s2
         self.assertIn("a", s.fields)
         self.assertIn("b", s.fields)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             s1 + s1
         with self.assertRaises(TypeError):
             s1 + schema.Scalar()
+
+    def testStructNestedAddition(self):
+        s1 = schema.Struct(
+            ('a', schema.Scalar()),
+            ('b', schema.Struct(
+                ('c', schema.Scalar())
+            )),
+        )
+        s2 = schema.Struct(
+            ('b', schema.Struct(
+                ('d', schema.Scalar())
+            ))
+        )
+        s = s1 + s2
+        self.assertEqual(['a', 'b:c', 'b:d'], s.field_names())
+
+        s3 = schema.Struct(
+            ('b', schema.Scalar()),
+        )
+        with self.assertRaises(TypeError):
+            s = s1 + s3
+
+    def testGetFieldByNestedName(self):
+        st = schema.Struct(
+            ('a', schema.Scalar()),
+            ('b', schema.Struct(
+                ('c', schema.Struct(
+                    ('d', schema.Scalar()),
+                )),
+            )),
+        )
+        self.assertRaises(KeyError, st.__getitem__, '')
+        self.assertRaises(KeyError, st.__getitem__, 'x')
+        self.assertRaises(KeyError, st.__getitem__, 'x:y')
+        self.assertRaises(KeyError, st.__getitem__, 'b:c:x')
+        a = st['a']
+        self.assertTrue(isinstance(a, schema.Scalar))
+        bc = st['b:c']
+        self.assertIn('d', bc.fields)
+        bcd = st['b:c:d']
+        self.assertTrue(isinstance(bcd, schema.Scalar))
+
+    def testAddFieldByNestedName(self):
+        f_a = schema.Scalar(blob=core.BlobReference('blob1'))
+        f_b = schema.Struct(
+            ('c', schema.Struct(
+                ('d', schema.Scalar(blob=core.BlobReference('blob2'))),
+            )),
+        )
+        f_x = schema.Struct(
+            ('x', schema.Scalar(blob=core.BlobReference('blob3'))),
+        )
+
+        with self.assertRaises(TypeError):
+            st = schema.Struct(
+                ('a', f_a),
+                ('b', f_b),
+                ('b:c:d', f_x),
+            )
+        with self.assertRaises(TypeError):
+            st = schema.Struct(
+                ('a', f_a),
+                ('b', f_b),
+                ('b:c:d:e', f_x),
+            )
+
+        st = schema.Struct(
+            ('a', f_a),
+            ('b', f_b),
+            ('e:f', f_x),
+        )
+        self.assertEqual(['a', 'b:c:d', 'e:f:x'], st.field_names())
+        self.assertEqual(['blob1', 'blob2', 'blob3'], st.field_blobs())
+
+        st = schema.Struct(
+            ('a', f_a),
+            ('b:c:e', f_x),
+            ('b', f_b),
+        )
+        self.assertEqual(['a', 'b:c:e:x', 'b:c:d'], st.field_names())
+        self.assertEqual(['blob1', 'blob3', 'blob2'], st.field_blobs())
+
+        st = schema.Struct(
+            ('a:a1', f_a),
+            ('b:b1', f_b),
+            ('a', f_x),
+        )
+        self.assertEqual(['a:a1', 'a:x', 'b:b1:c:d'], st.field_names())
+        self.assertEqual(['blob1', 'blob3', 'blob2'], st.field_blobs())
+
+    def testContains(self):
+        st = schema.Struct(
+            ('a', schema.Scalar()),
+            ('b', schema.Struct(
+                ('c', schema.Struct(
+                    ('d', schema.Scalar()),
+                )),
+            )),
+        )
+        self.assertTrue('a' in st)
+        self.assertTrue('b:c' in st)
+        self.assertTrue('b:c:d' in st)
+        self.assertFalse('' in st)
+        self.assertFalse('x' in st)
+        self.assertFalse('b:c:x' in st)
+        self.assertFalse('b:c:d:x' in st)
