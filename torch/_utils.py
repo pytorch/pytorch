@@ -57,7 +57,7 @@ def _cuda(self, device=None, async=False):
     with torch.cuda.device(device):
         if self.is_sparse:
             new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
-            indices = self.indices().cuda(device, async).int()
+            indices = self.indices().cuda(device, async)
             values = self.values().cuda(device, async)
             return new_type(indices, values, self.size())
         else:
