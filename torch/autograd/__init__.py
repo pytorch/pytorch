@@ -38,7 +38,10 @@ def backward(variables, grad_variables, retain_variables=False):
             specify ``True`` if you want to differentiate some subgraph multiple
             times.
     """
+    grad_variables = tuple(var if isinstance(var, Variable) or var is None
+                           else Variable(var, volatile=True)
+                           for var in grad_variables)
     Variable._execution_engine.run_backward(
-        tuple(variables), tuple(grad_variables), retain_variables)
+        tuple(variables), grad_variables, retain_variables)
 
 assert torch._C._autograd_init()
