@@ -2636,7 +2636,7 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
-        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_serialized.pt'
+        DATA_URL = 'https://download.pytorch.org/test_data/legacy_serialized.pt'
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
         test_file_path = os.path.join(data_dir, 'legacy_serialized.pt')
         succ = download_file(DATA_URL, test_file_path)
@@ -2693,6 +2693,28 @@ class TestTorch(TestCase):
                 self.assertTrue(isinstance(loaded, module.Net))
                 self.assertEquals(len(w), 1)
                 self.assertTrue(w[0].category, 'SourceChangeWarning')
+
+    def test_serialization_map_location(self):
+        DATA_URL = 'https://download.pytorch.org/test_data/gpu_tensors.pt'
+        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        test_file_path = os.path.join(data_dir, 'gpu_tensors.pt')
+        succ = download_file(DATA_URL, test_file_path)
+        if not succ:
+            warnings.warn(
+                "Couldn't download the test file for map_location! "
+                "Tests will be incomplete!", RuntimeWarning)
+            return
+
+        def map_location(storage, loc):
+            return storage
+
+        tensor = torch.load(test_file_path, map_location=map_location)
+        self.assertEqual(type(tensor), torch.FloatTensor)
+        self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+
+        tensor = torch.load(test_file_path, map_location={'cuda:0': 'cpu'})
+        self.assertEqual(type(tensor), torch.FloatTensor)
+        self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

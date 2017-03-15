@@ -1,4 +1,5 @@
 import torch
+import importlib
 
 
 def _type(self, new_type=None, async=False):
@@ -62,6 +63,13 @@ def _cuda(self, device=None, async=False):
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
             return new_type(self.size()).copy_(self, async)
+
+
+def _rebuild_tensor(storage, storage_offset, size, stride):
+    class_name = storage.__class__.__name__.replace('Storage', 'Tensor')
+    module = importlib.import_module(storage.__module__)
+    tensor_class = getattr(module, class_name)
+    return tensor_class().set_(storage, storage_offset, size, stride)
 
 
 def _range(*args, **kwargs):
