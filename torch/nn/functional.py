@@ -541,7 +541,7 @@ def pad(input, pad, mode='constant', value=0):
     In case of 4D input tensor pad should be in form (pad_l, pad_r, pad_t, pad_b )
     In case of 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
 
-    Args
+    Args:
         input (Variable): 4D or 5D tensor
         pad (tuple): 4-elem or 6-elem tuple
         mode: 'constant', 'reflect' or 'replicate'
