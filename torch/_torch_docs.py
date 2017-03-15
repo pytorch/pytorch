@@ -52,9 +52,12 @@ and returns a new resulting tensor.
 
 :math:`out = tensor + value`
 
+If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`value` must be a real number, otherwise it should be an
+integer
+
 Args:
     input (Tensor): the input `Tensor`
-    value (float): the number to be added to each element of :attr:`input`
+    value (Number): the number to be added to each element of :attr:`input`
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -91,9 +94,12 @@ The total number of elements in each Tensor need to be the same.
 
 :math:`out = input + (other * value)`
 
+If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`value` must be a real number, otherwise it should be an
+integer
+
 Args:
     input (Tensor): the first input `Tensor`
-    value (float): the scalar multiplier for :attr:`other`
+    value (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input `Tensor`
     out (Tensor, optional): The result `Tensor`
 
@@ -145,10 +151,13 @@ Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
 In other words,
 :math:`res = (beta * M) + (alpha * sum(batch1_i @ batch2_i, i = 0, b))`
 
+For inputs of type `FloatTensor` or `DoubleTensor`, args `beta` and `alpha` must be real numbers, otherwise they should
+be integers
+
 Args:
-    beta (float, optional): multiplier for :attr:`mat`
+    beta (Number, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (float, optional): multiplier for `batch1 @ batch2`
+    alpha (Number, optional): multiplier for `batch1 @ batch2`
     batch1 (Tensor): First batch of matrices to be multiplied
     batch2 (Tensor): Second batch of matrices to be multiplied
     out (Tensor, optional): Output tensor
@@ -175,9 +184,11 @@ multiply the result by the scalar :attr:`value` and add it to :attr:`tensor`.
 
 The number of elements must match, but sizes do not matter.
 
+For inputs of type `FloatTensor` or `DoubleTensor`, :attr:`value` must be a real number, otherwise an integer
+
 Args:
     tensor (Tensor): the tensor to be added
-    value (float, optional): multiplier for `tensor1 ./ tensor2`
+    value (Number, optional): multiplier for `tensor1 ./ tensor2`
     tensor1 (Tensor): Numerator tensor
     tensor2 (Tensor): Denominator tensor
     out (Tensor, optional): Output tensor
@@ -204,9 +215,11 @@ and add it to :attr:`tensor`.
 
 The number of elements must match, but sizes do not matter.
 
+For inputs of type `FloatTensor` or `DoubleTensor`, :attr:`value` must be a real number, otherwise an integer
+
 Args:
     tensor (Tensor): the tensor to be added
-    value (float, optional): multiplier for `tensor1 .* tensor2`
+    value (Number, optional): multiplier for `tensor1 .* tensor2`
     tensor1 (Tensor): tensor to be multiplied
     tensor2 (Tensor): tensor to be multiplied
     out (Tensor, optional): Output tensor
@@ -238,10 +251,13 @@ If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor,
 In other words,
 :math:`out = (beta * M) + (alpha * mat1 @ mat2)`
 
+For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and :attr:`alpha` must be real numbers, otherwise
+they should be integers
+
 Args:
-    beta (float, optional): multiplier for :attr:`mat`
+    beta (Number, optional): multiplier for :attr:`mat`
     mat (Tensor): matrix to be added
-    alpha (float, optional): multiplier for `mat1 @ mat2`
+    alpha (Number, optional): multiplier for `mat1 @ mat2`
     mat1 (Tensor): First matrix to be multiplied
     mat2 (Tensor): Second matrix to be multiplied
     out (Tensor, optional): Output tensor
@@ -275,10 +291,13 @@ In other words:
 
 :math:`out = (beta * tensor) + (alpha * (mat @ vec2))`
 
+For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and :attr:`alpha` must be real numbers, otherwise
+they should be integers
+
 Args:
-    beta (float, optional): multiplier for :attr:`tensor`
+    beta (Number, optional): multiplier for :attr:`tensor`
     tensor (Tensor): vector to be added
-    alpha (float, optional): multiplier for `mat @ vec`
+    alpha (Number, optional): multiplier for `mat @ vec`
     mat (Tensor): matrix to be multiplied
     vec (Tensor): vector to be multiplied
     out (Tensor, optional): Output tensor
@@ -311,10 +330,13 @@ In other words,
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`,
 then :attr:`mat` must be a matrix of size `n x m`
 
+For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and :attr:`alpha` must be real numbers, otherwise
+they should be integers
+
 Args:
-    beta (float, optional): Multiplier for :attr:`mat`
+    beta (Number, optional): Multiplier for :attr:`mat`
     mat (Tensor): Matrix to be added
-    alpha (float, optional): Multiplier for outer product of for :attr:`vec1` and :attr:`vec2`
+    alpha (Number, optional): Multiplier for outer product of for :attr:`vec1` and :attr:`vec2`
     vec1 (Tensor): First vector of the outer product
     vec2 (Tensor): Second vector of the outer product
     out (Tensor, optional): Output tensor
@@ -434,10 +456,13 @@ Tensor, :attr:`out` and :attr:`mat` will be `b x n x p` Tensors.
 In other words,
 :math:`res_i = (beta * M_i) + (alpha * batch1_i \times batch2_i)`
 
+For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and :attr:`alpha` must be real numbers, otherwise
+they should be integers
+
 Args:
-    beta (float, optional): multiplier for :attr:`mat`
+    beta (Number, optional): multiplier for :attr:`mat`
     mat (Tensor): tensor to be added
-    alpha (float, optional): multiplier for `batch1 @ batch2`
+    alpha (Number, optional): multiplier for `batch1 @ batch2`
     batch1 (Tensor): First batch of matrices to be multiplied
     batch2 (Tensor): Second batch of matrices to be multiplied
     out (Tensor, optional): Output tensor
@@ -648,10 +673,13 @@ Clamp all elements in :attr:`input` into the range `[min, max]` and return a res
     y_i = | x_i, if min <= x_i <= max
           | max, if x_i > max
 
+If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, args :attr:`min` and :attr:`max` must be real numbers,
+otherwise they should be integers
+
 Args:
     input (Tensor): the input `Tensor`
-    min (float): lower-bound of the range to be clamped to
-    max (float): upper-bound of the range to be clamped to
+    min (Number): lower-bound of the range to be clamped to
+    max (Number): upper-bound of the range to be clamped to
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -677,9 +705,12 @@ Example::
 
 Clamps all elements in :attr:`input` to be larger or equal :attr:`min`.
 
+If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value` should be a real number, otherwise it should
+be an integer
+
 Args:
     input (Tensor): the input `Tensor`
-    value (float): minimal value of each element in the output
+    value (Number): minimal value of each element in the output
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -705,9 +736,12 @@ Example::
 
 Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
 
+If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value` should be a real number, otherwise it should
+be an integer
+
 Args:
     input (Tensor): the input `Tensor`
-    value (float): maximal value of each element in the output
+    value (Number): maximal value of each element in the output
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -1075,9 +1109,12 @@ Divides each element of the input :attr:`input` with the scalar :attr:`value` an
 
 :math:`out = tensor / value`
 
+If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value` should be a real number, otherwise it should
+be an integer
+
 Args:
     input (Tensor): the input `Tensor`
-    value (float): the number to be divided to each element of :attr:`input`
+    value (Number): the number to be divided to each element of :attr:`input`
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -2463,9 +2500,12 @@ Multiplies each element of the input :attr:`input` with the scalar :attr:`value`
 
 :math:`out = tensor * value`
 
+If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value` should be a real number, otherwise it should
+be an integer
+
 Args:
     input (Tensor): the input `Tensor`
-    value (float): the number to be multiplied to each element of :attr:`input`
+    value (Number): the number to be multiplied to each element of :attr:`input`
     out (Tensor, optional): The result `Tensor`
 
 Example::
