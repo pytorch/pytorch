@@ -14,7 +14,6 @@ def uniform(tensor, a=0, b=1):
         b: the upper bound of the uniform distribution
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.uniform(w)
     """
@@ -33,7 +32,6 @@ def normal(tensor, mean=0, std=1):
         std: the standard deviation of the normal distribution
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.normal(w)
     """
@@ -51,7 +49,6 @@ def constant(tensor, val):
         val: the value to fill the tensor with
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.constant(w)
     """
@@ -91,7 +88,6 @@ def xavier_uniform(tensor, gain=1):
         gain: an optional scaling factor to be applied
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.xavier_uniform(w, gain=math.sqrt(2.0))
     """
@@ -116,7 +112,6 @@ def xavier_normal(tensor, gain=1):
         gain: an optional scaling factor to be applied
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.xavier_normal(w)
     """
@@ -155,7 +150,6 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
               weights in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.kaiming_uniform(w, mode='fan_in')
     """
@@ -182,7 +176,6 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
               weights in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.kaiming_normal(w, mode='fan_out')
     """
@@ -207,7 +200,6 @@ def orthogonal(tensor, gain=1):
         gain: optional gain to be applied
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.orthogonal(w)
     """
@@ -241,7 +233,6 @@ def sparse(tensor, sparsity, std=0.01):
         std: the standard deviation of the normal distribution used to generate the non-zero values
 
     Examples:
-        >>> from torch import nn
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.sparse(w, sparsity=0.1)
     """
