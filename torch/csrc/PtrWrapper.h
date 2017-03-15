@@ -1,6 +1,7 @@
 #ifndef THP_PTR_WRAPPER_H
 #define THP_PTR_WRAPPER_H
 
+#include <Python.h>
 #include <functional>
 
 /**

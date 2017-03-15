@@ -1251,6 +1251,8 @@ class TestNN(NNTestCase):
                 self.assertIsInstance(module, type(reference))
 
 
+prepare_tests()
+
+
 if __name__ == '__main__':
-    prepare_tests()
     run_tests()
