@@ -221,6 +221,7 @@ THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self) {
       );
 
   other->nnz = self->nnz;
+  other->contiguous = self->contiguous;
   return other;
 }
 
@@ -341,6 +342,24 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
 void THCSTensor_(retain)(THCState *state, THCSTensor *self)
 {
   THAtomicIncrementRef(&self->refcount);
+}
+
+void THCSTensor_(contiguous)(THCState *state, THCSTensor *self) {
+  if (self->contiguous) return;
+  THCSTensor_(reorder)(state, self);
+  self->contiguous = 1;
+}
+
+void THCSTensor_(markContiguous)(THCState *state, THCSTensor *self) {
+  self->contiguous = 1;
+}
+
+void THCSTensor_(contiguousValues)(THCState *state, THCSTensor *self) {
+  if (!THCTensor_(isContiguous)(state, self->values)) {
+    THCTensor *newValues = THCTensor_(newContiguous)(state, self->values);
+    THCTensor_(free)(state, self->values);
+    self->values = newValues;
+  }
 }
 
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)

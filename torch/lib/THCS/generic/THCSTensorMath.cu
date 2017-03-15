@@ -155,7 +155,7 @@ void THCSTensor_(sspaddmm)(THCState *state, THCSTensor *r_, real beta, THCSTenso
 void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real value, THCSTensor *sparse) {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
   THCTensor_(resizeAs)(state, r_, dense);
-  THCSTensor_(contiguous)(state, sparse);
+  THCSTensor_(contiguousValues)(state, sparse);
 
   THCIndexTensor *indices = THCSTensor_(indices)(state, sparse);
   THCTensor *values = THCSTensor_(values)(state, sparse);
