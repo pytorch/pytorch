@@ -12,8 +12,8 @@
 using thpp::Tensor;
 using torch::autograd::variable_list;
 
-static THPObjectPtr wrap_variables(const variable_list& grads);
-static variable_list unwrap_variables(PyObject* grads);
+static THPObjectPtr wrap_variables(const variable_list& c_variables);
+static variable_list unwrap_variables(PyObject* py_variables);
 static std::string hook_name(PyObject* hook);
 static void check_result(PyObject* original, PyObject* result, PyObject* hook);
 static void check_single_result(PyObject* original, PyObject* result, PyObject* hook);
@@ -21,9 +21,9 @@ static void check_single_result(PyObject* original, PyObject* result, PyObject* 
 
 namespace torch { namespace autograd {
 
-PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int grad_index)
+PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
   : dict(dict)
-  , grad_index(grad_index)
+  , value_idx(value_idx)
 {
   Py_INCREF(dict);
 }
@@ -33,25 +33,25 @@ PyFunctionPreHook::~PyFunctionPreHook() {
   Py_DECREF(dict);
 }
 
-auto PyFunctionPreHook::operator()(const variable_list& _grads) -> variable_list
+auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
 {
   AutoGIL gil;
 
-  THPObjectPtr grad = THPVariable_Wrap(_grads.at(grad_index));
-  if (!grad) throw python_error();
+  THPObjectPtr value = THPVariable_Wrap(values.at(value_idx));
+  if (!value) throw python_error();
 
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
-    THPObjectPtr res = PyObject_CallFunctionObjArgs(hook, grad.get(), nullptr);
+    THPObjectPtr res = PyObject_CallFunctionObjArgs(hook, value.get(), nullptr);
     if (!res) throw python_error();
     if (res == Py_None) continue;
-    check_single_result(grad.get(), res.get(), hook);
-    grad = std::move(res);
+    check_single_result(value.get(), res.get(), hook);
+    value = std::move(res);
   }
 
-  variable_list results(_grads);
-  results[grad_index] = ((THPVariable*)grad.get())->cdata;
+  variable_list results(values);
+  results[value_idx] = ((THPVariable*)value.get())->cdata;
   return results;
 }
 
@@ -65,47 +65,48 @@ PyFunctionPostHook::~PyFunctionPostHook() {
 }
 
 auto PyFunctionPostHook::operator()(
-    const variable_list& _grad_inputs,
-    const variable_list& _grad_outputs) -> variable_list
+    const variable_list& _outputs, /* grad_inputs */
+    const variable_list& _inputs /* grad_outputs */) -> variable_list
 {
   AutoGIL gil;
 
-  THPObjectPtr grad_inputs = wrap_variables(_grad_inputs);
-  THPObjectPtr grad_outputs = wrap_variables(_grad_outputs);
+  THPObjectPtr outputs = wrap_variables(_outputs);
+  THPObjectPtr inputs = wrap_variables(_inputs);
 
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
     THPObjectPtr res = PyObject_CallFunctionObjArgs(
-        hook, grad_inputs.get(), grad_outputs.get(), nullptr);
+        hook, outputs.get(), inputs.get(), nullptr);
     if (!res) throw python_error();
     if (res == Py_None) continue;
-    check_result(grad_inputs, res, hook);
-    grad_inputs = std::move(res);
+    check_result(outputs, res, hook);
+    outputs = std::move(res);
   }
 
-  return unwrap_variables(grad_inputs.get());
+  return unwrap_variables(outputs.get());
 }
 
 }} // namespace torch::autograd
 
 
-static THPObjectPtr wrap_variables(const variable_list& grads)
+static THPObjectPtr wrap_variables(const variable_list& c_variables)
 {
-  THPObjectPtr tuple = PyTuple_New(grads.size());
+  size_t num_vars = c_variables.size();
+  THPObjectPtr tuple = PyTuple_New(num_vars);
   if (!tuple) throw python_error();
-  for (size_t i = 0; i < grads.size(); i++) {
-    THPObjectPtr grad = THPVariable_Wrap(grads[i]);
-    if (!grad) throw python_error();
-    PyTuple_SET_ITEM(tuple.get(), i, grad.release());
+  for (size_t i = 0; i < num_vars; ++i) {
+    THPObjectPtr var = THPVariable_Wrap(c_variables[i]);
+    if (!var) throw python_error();
+    PyTuple_SET_ITEM(tuple.get(), i, var.release());
   }
   return tuple;
 }
 
-static variable_list unwrap_variables(PyObject* grads)  {
-  variable_list results(PyTuple_GET_SIZE(grads));
+static variable_list unwrap_variables(PyObject* py_variables)  {
+  variable_list results(PyTuple_GET_SIZE(py_variables));
   for (size_t i = 0; i < results.size(); i++) {
-    PyObject* item = PyTuple_GET_ITEM(grads, i);
+    PyObject* item = PyTuple_GET_ITEM(py_variables, i);
     if (item == Py_None) {
       continue;
     } else if (THPVariable_Check(item)) {
@@ -132,8 +133,8 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
   if (prev_size != result_size) {
     std::stringstream ss;
     auto name = hook_name(hook);
-    ss << "backward hook '" << name << "' has returned an incorrect number ";
-    ss << "of gradients (got " << result_size << ", but expected ";
+    ss << "hook '" << name << "' has returned an incorrect number ";
+    ss << "of values (got " << result_size << ", but expected ";
     ss << prev_size << ")";
     throw std::runtime_error(ss.str());
   }
@@ -156,7 +157,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
   if (original.type() != result.type()) {
     std::stringstream ss;
     auto name = hook_name(hook);
-    ss << "backward hook '" << name << "' has changed the type of grad_input (";
+    ss << "hook '" << name << "' has changed the type of value (";
     ss << "was " << thpp::toString(original.type()) << " got ";
     ss << thpp::toString(result.type()) << ")";
     throw std::runtime_error(ss.str());
@@ -165,7 +166,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
   if (original.isCuda() != result.isCuda()) {
     std::stringstream ss;
     auto name = hook_name(hook);
-    ss << "backward hook '" << name << "' has changed the type of grad_input";
+    ss << "hook '" << name << "' has changed the type of value";
     if (original.isCuda()) {
       ss << " (was CUDA tensor got CPU tensor)";
     } else {
@@ -177,7 +178,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
   if (original.sizes() != result.sizes()) {
     std::stringstream ss;
     auto name = hook_name(hook);
-    ss << "backward hook '" << name << "' has changed the size of grad_input";
+    ss << "hook '" << name << "' has changed the size of value";
     throw std::runtime_error(ss.str());
   }
 }

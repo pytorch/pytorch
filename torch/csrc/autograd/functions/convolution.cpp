@@ -1,6 +1,7 @@
 #include "convolution.h"
 
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -178,14 +179,13 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
     output = view3d(*output);
   }
 
-  auto creator = std::make_shared<ConvBackward>(
-      flags(inputs), *this,
-      inputs[0]->save(), inputs[1]->save(), Variable::save_opt(inputs[2].get()),
-      std::move(columns), std::move(ones), std::move(convolution));
-
-  variable_list results(1);
-  results[0] = std::make_shared<Variable>(std::move(output), creator);
-  return results;
+  auto outputs = as_tensor_list(std::move(output));
+  return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<ConvBackward>(
+        f, *this,
+        inputs[0]->save(), inputs[1]->save(), Variable::save_opt(inputs[2].get()),
+        std::move(columns), std::move(ones), std::move(convolution));
+  });
 };
 
 auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
@@ -219,7 +219,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   std::unique_ptr<Tensor> grad_weight;
   std::unique_ptr<Tensor> grad_bias;
 
-  if (needs_input_grad(0)) {
+  if (should_compute_output(0)) {
     if (use_cudnn) {
 #ifdef WITH_CUDNN
       grad_input = input->newTensor();
@@ -256,7 +256,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     }
   }
 
-  if (needs_input_grad(1) || needs_input_grad(2)) {
+  if (should_compute_output(1) || should_compute_output(2)) {
     if (use_cudnn) {
 #ifdef WITH_CUDNN
       grad_weight = weight->newTensor();
@@ -266,7 +266,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
           (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)input->cdata(), (THVoidTensor*)grad_weight->cdata(),
           convolution.get(), benchmark);
 
-      if (bias && needs_input_grad(2)) {
+      if (bias && should_compute_output(2)) {
         grad_bias = bias->newTensor();
         grad_bias->resizeAs(*bias);
         cudnn_convolution_backward_bias(
@@ -297,17 +297,15 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
   if (k == 3) {
-    if (needs_input_grad(0)) {
+    if (should_compute_output(0)) {
         grad_input = view3d(*grad_input);
     }
     grad_weight = view3d(*grad_weight);
   }
 
-  variable_list results(3);
-  results[0] = Variable::of(std::move(grad_input));
-  results[1] = Variable::of(std::move(grad_weight));
-  results[2] = Variable::of(std::move(grad_bias));
-  return results;
+  return as_variable_list(Variable::of(std::move(grad_input)),
+                          Variable::of(std::move(grad_weight)),
+                          Variable::of(std::move(grad_bias)));
 };
 
 auto ConvBackward::releaseVariables() -> void {
@@ -440,7 +438,7 @@ static tensor_pair compute_grad_params(
   grad_weight->resizeAs(*weight).zero();
 
   std::unique_ptr<Tensor> grad_bias;
-  if (bias && params.needs_input_grad(2)) {
+  if (bias && params.should_compute_output(2)) {
     grad_bias = bias->newTensor();
     grad_bias->resizeAs(*bias).zero();
   }

@@ -39,17 +39,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 {
   PyObject *variables = NULL;
   PyObject *grad_variables = NULL;
-  unsigned char retain_variables = 0;
+  unsigned char keep_graph = 0;
   const char *accepted_kwargs[] = {"variables", "grad_variables",
-      "retain_variables", NULL};
+      "keep_graph", NULL};
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb", (char**)accepted_kwargs,
-        &variables, &grad_variables, &retain_variables))
+        &variables, &grad_variables, &keep_graph))
     return NULL;
-  PyObject *retain_variables_obj = retain_variables ? Py_True : Py_False;
 
-  THPUtils_assert(retain_variables_obj == Py_True || retain_variables_obj == Py_False,
-      "retain_variables argument is expected to be a bool, but got %s",
-      THPUtils_typename(retain_variables_obj));
   THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(variables));
   THPUtils_assert(PyTuple_Check(grad_variables), "variables argument is "
@@ -60,28 +56,29 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   THPUtils_assert(num_variables == num_gradients, "got %ld variables and %ld "
       "gradients", num_variables, num_gradients);
 
-  variable_list vars(num_variables);
-  tensor_list grads(num_variables);
+  function_list vars(num_variables);
+  variable_list grads(num_variables);
   for (int i = 0; i < num_variables; i++) {
-    PyObject *variable = PyTuple_GET_ITEM(variables, i);
-    THPUtils_assert(THPVariable_Check(variable), "element %d of variables "
+    PyObject *_variable = PyTuple_GET_ITEM(variables, i);
+    THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
-    vars[i] = ((THPVariable*)variable)->cdata;
+    auto& variable = ((THPVariable*)_variable)->cdata;
+    vars[i] = std::make_pair<>(variable, 0);
 
     PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
-    if (THPModule_isTensor(grad)) {
-      grads[i] = torch::createTensor(grad);
+    if (THPVariable_Check(grad)) {
+      grads[i] = ((THPVariable*)grad)->cdata;
     } else {
       THPUtils_assert(grad == Py_None,
-          "element %d of gradients tuple is not a Tensor or None", i);
-      THPUtils_assert(!vars[i]->requires_grad,
+          "element %d of gradients tuple is not a Variable or None", i);
+      THPUtils_assert(!variable->requires_grad,
           "element %d of gradients tuple is None, but the corresponding Variable requires grad");
     }
   }
 
   try {
     AutoNoGIL no_gil;
-    engine.backward(vars, grads, retain_variables);
+    engine.execute(vars, grads, keep_graph);
   } catch (python_error &e) {
     e.restore();
     return nullptr;
