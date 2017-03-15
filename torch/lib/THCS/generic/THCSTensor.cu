@@ -13,6 +13,9 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
+#define I_INFO(tensor) getTensorInfo<THCIndexTensor, unsigned long>(state, tensor)
+#define V_INFO(tensor) getTensorInfo<THCTensor, unsigned long>(state, tensor)
+
 THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   THLongStorage *storage;
   THCTensor *other;
@@ -24,22 +27,21 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   other = THCTensor_(newWithSize)(state, storage, NULL);
   THCTensor_(zero)(state, other);
 
-  // Some necessary dimensions and sizes
   const ptrdiff_t nnz = THCSTensor_(nnz)(state, self);
+  if (nnz == 0) {
+    THLongStorage_free(storage);
+    return other;
+  }
+
   const dim3 block = getApplyBlock();
   dim3 grid;
   THArgCheck(getApplyGrid(state, nnz, grid), 1, CUTORCH_DIM_WARNING);
 
-  TensorInfo<real, unsigned long> otherInfo =
-    getTensorInfo<THCTensor, unsigned long>(state, other);
-  TensorInfo<long, unsigned long> indicesInfo =
-    getTensorInfo<THCudaLongTensor, unsigned long>(state, self->indices);
-  TensorInfo<real, unsigned long> valuesInfo =
-    getTensorInfo<THCTensor, unsigned long>(state, self->values);
-
-  THCSTensor_toDenseKernel<unsigned long, real>
+  THCSTensor_spcKernel<TensorAddOp<real>, unsigned long, real>
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-        otherInfo, indicesInfo, valuesInfo, (unsigned long)(nnz));
+        TensorAddOp<real>(),
+        V_INFO(other), I_INFO(self->indices), V_INFO(self->values),
+        (unsigned long)(nnz));
 
   THCudaCheck(cudaGetLastError());
   THLongStorage_free(storage);
@@ -47,6 +49,7 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
 }
 
 void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
+  if (self->nnz < 2) return;
 #if CUDA_VERSION >= 7000
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
@@ -56,10 +59,10 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
 
   THCIndexTensor *indices = THCSTensor_(indices)(state, self);
   THCIndexTensor *indicesSlice = THCIndexTensor_(new)(state);
-  THCIndexTensor *permutation = THCIndexTensor_(newWithSize1d)(state, self->nnz);
+  THCudaLongTensor *permutation = THCudaLongTensor_newWithSize1d(state, self->nnz);
 
   // Sort indices in lexicographic order (following thrust's example recipe)
-  thrust::device_ptr<integer> permutationIter(THCIndexTensor_(data)(state, permutation));
+  thrust::device_ptr<long> permutationIter(THCudaLongTensor_data(state, permutation));
   thrust::device_vector<integer> indicesBuffer(self->nnz);
   THRUST_EXEC(thrust::sequence, permutationIter, permutationIter + self->nnz);
 
@@ -77,35 +80,33 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
     THRUST_EXEC(thrust::gather, permutationIter, permutationIter + self->nnz, indicesBuffer.begin(), indicesIter);
   }
 
+  THCTensor *values = THCSTensor_(values)(state, self);
   THCTensor *newValues = THCTensor_(new)(state);
-  THCTensor_(indexSelect)(state, newValues, self->values, 0, permutation);
+  THCTensor_(indexSelect)(state, newValues, values, 0, permutation);
+  THCTensor_(free)(state, values);
   THCTensor_(free)(state, self->values);
   self->values = newValues;
 
-  // Some necessary dimensions and sizes
+  // Make indices unique
+  // TODO for the moment the only parallelism is when copying/adding non-scalar values
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, self->nnz, grid), 1, CUTORCH_DIM_WARNING);
-
-  TensorInfo<integer, unsigned long> indicesInfo =
-    getTensorInfo<THCudaLongTensor, unsigned long>(state, self->indices);
-  TensorInfo<real, unsigned long> valuesInfo =
-    getTensorInfo<THCTensor, unsigned long>(state, self->values);
+  THArgCheck(getApplyGrid(state, newValues->stride[0], grid), 1, CUTORCH_DIM_WARNING);
 
   THCSTensor_uniqueValuesReorderKernel<unsigned long, real>
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-        indicesInfo, valuesInfo, (unsigned long)(self->nnz));
+        I_INFO(indices), V_INFO(newValues), (unsigned long)(self->nnz));
   THCudaCheck(cudaGetLastError());
 
   THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
   THCSTensor_uniqueIndicesReorderKernel<unsigned long, real>
     <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
-        indicesInfo, (unsigned long)(self->nnz), (unsigned long*)resultNnz->data);
+        I_INFO(indices), (unsigned long)(self->nnz), (unsigned long*)resultNnz->data);
   THCudaCheck(cudaGetLastError());
   self->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);
 
-  THCIndexTensor_(free)(state, permutation);
+  THCudaLongTensor_free(state, permutation);
   THCIndexTensor_(free)(state, indicesSlice);
   THCIndexTensor_(free)(state, indices);
 
@@ -141,10 +142,6 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
 int THCSTensor_(getDevice)(THCState* state, const THCSTensor* tensor) {
   if (!tensor->values || !tensor->values->storage) return -1;
   return THCStorage_(getDevice)(state, tensor->values->storage);
-}
-
-void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask) {
-  THError("WARNING: Sparse Cuda Tensor op sparseMask is not implemented");
 }
 
 #endif

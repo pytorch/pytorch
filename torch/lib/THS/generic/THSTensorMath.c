@@ -6,12 +6,12 @@
 #define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride[1])
 
 void THSTensor_(zero)(THSTensor *self) {
-    if (self->indices->nDimension) {
-      THLongTensor_resizeNd(self->indices, 0, NULL, NULL);
-    }
-    if (self->values->nDimension) {
-      THTensor_(resizeNd)(self->values, 0, NULL, NULL);
-    }
+  if (self->indices->nDimension) {
+    THLongTensor_resizeNd(self->indices, 0, NULL, NULL);
+  }
+  if (self->values->nDimension) {
+    THTensor_(resizeNd)(self->values, 0, NULL, NULL);
+  }
   self->nnz = 0;
 }
 
@@ -94,7 +94,6 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   THLongTensor *r_indices_ = THLongTensor_newWithSize2d(nDimI, max_nnz);
   THTensor *r_values_ = THSTensor_(newValuesWithSizeOf)(s_values_, max_nnz);
   THTensor_(zero)(r_values_);
-  // TODO handle case where src values is empty
   THSTensor_(resizeAs)(r_, src);
   THSTensor_(move)(r_, r_indices_, r_values_);
 
@@ -408,6 +407,9 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
 }
 
 void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse) {
+  THTensor_(resizeAs)(r_, dense);
+  THSTensor_(contiguous)(sparse);
+
   long k;
   THLongTensor  *indices = THSTensor_(indices)(sparse);
   THTensor      *values = THSTensor_(values)(sparse);
@@ -416,11 +418,7 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
   long          nDim = THTensor_(nDimension)(dense);
   long          nDimI = THSTensor_(nDimensionI)(sparse);
 
-  THTensor_(resizeAs)(r_, dense);
-  THSTensor_(contiguous)(sparse);
-
   if (r_ != dense) THTensor_(copy)(r_, dense);
-
 
   if (nDim > nDimI) {
     THTensor *srcBuffer = THTensor_(new)();

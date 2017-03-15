@@ -101,6 +101,13 @@ struct TensorSignOp<half> {
 #endif
 
 template <typename T>
+struct TensorAssignOp {
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = *in;
+  }
+};
+
+template <typename T>
 struct TensorAddOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
     *out += *in;

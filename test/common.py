@@ -128,11 +128,12 @@ class TestCase(unittest.TestCase):
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
-                max_err = 0
                 super(TestCase, self).assertEqual(a.size(), b.size())
-                for index in iter_indices(a):
-                    max_err = max(max_err, abs(a[index] - b[index]))
-                self.assertLessEqual(max_err, prec, message)
+                if a.numel() > 0:
+                    b = b.type_as(a)
+                    b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
+                    max_err = (a - b).abs().max()
+                    self.assertLessEqual(max_err, prec, message)
             self.assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
                 assertTensorsEqual(x.indices(), y.indices())
@@ -161,11 +162,12 @@ class TestCase(unittest.TestCase):
             y = y.data
 
         if torch.is_tensor(x) and torch.is_tensor(y):
-            max_err = 0
             if x.size() != y.size():
                 super(TestCase, self).assertNotEqual(x.size(), y.size())
-            for index in iter_indices(x):
-                max_err = max(max_err, abs(x[index] - y[index]))
+            self.assertGreater(x.numel(), 0)
+            y = y.type_as(x)
+            y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
+            max_err = (x - y).abs().max()
             self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertNotEqual(x, y)

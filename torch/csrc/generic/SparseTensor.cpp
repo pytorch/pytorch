@@ -26,9 +26,9 @@ static void THSPTensor_(dealloc)(THSPTensor* self)
 static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
 #ifdef THC_GENERIC_FILE
-#define THPIndexTensor_Check THCPLongTensor_Check
-#define THPIndexTensor THCPLongTensor
-#define THIndexTensor THCudaLongTensor
+#define THPIndexTensor_Check THCPIntTensor_Check
+#define THPIndexTensor THCPIntTensor
+#define THIndexTensor THCudaIntTensor
 #else
 #define THPIndexTensor_Check THPLongTensor_Check
 #define THPIndexTensor THPLongTensor

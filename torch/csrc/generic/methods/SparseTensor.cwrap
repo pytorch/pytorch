@@ -83,11 +83,10 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: indices
   defined_if: "IS_CUDA"
   sparse: yes
-  return: THCudaLongTensor*
+  return: THCudaIntTensor*
   arguments:
   - THSTensor* self
 ]]
-
 
 [[
   name: values
@@ -371,4 +370,14 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
       output: True
     - THTensor* self
     - THSTensor* mask
+]]
+
+[[
+  name: getDevice
+  sparse: yes
+  python_name: get_device
+  defined_if: IS_CUDA
+  return: long
+  arguments:
+    - THSTensor* self
 ]]
