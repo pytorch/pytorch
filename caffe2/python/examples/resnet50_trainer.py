@@ -16,11 +16,17 @@ import caffe2.python.models.resnet as resnet
 Parallelized multi-GPU distributed trainer for Resnet 50. Can be used to train
 on imagenet data, for example.
 
-The trainer run with single machine multi-gpu mode by setting num_shards = 1.
-To run the trainer distribted multi-gpu mode with M machines, in every machine
-run the trainer with num_shards = M, shard_id = a unique integer in the set
-[0, M-1] and set file_store_path to a directory path thats globally visible to
-all machines (ex. NFS directory).
+To run the trainer in single-machine multi-gpu mode by setting num_shards = 1.
+
+To run the trainer in multi-machine multi-gpu mode with M machines,
+run the same program on all machines, specifying num_shards = M, and
+shard_id = a unique integer in the set [0, M-1].
+
+For rendezvous (the trainer processes have to know about each other),
+you can either use a directory path that is visible to all processes
+(e.g. NFS directory), or use a Redis instance. Use the former by
+passing the `file_store_path` argument. Use the latter by passing the
+`redis_host` and `redis_port` arguments.
 '''
 
 
@@ -29,6 +35,7 @@ log = logging.getLogger("resnet50_trainer")
 log.setLevel(logging.DEBUG)
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:file_store_handler_ops')
+dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:redis_store_handler_ops')
 
 def AddImageInput(model, reader, batch_size, img_size):
     '''
@@ -170,17 +177,29 @@ def Train(args):
     if args.num_shards > 1:
         # Create rendezvous for distributed computation
         store_handler = "store_handler"
-        workspace.RunOperatorOnce(
-            core.CreateOperator(
-                "FileStoreHandlerCreate", [], [store_handler],
-                path=args.file_store_path
+        if args.redis_host is not None:
+            # Use Redis for rendezvous if Redis host is specified
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "RedisStoreHandlerCreate", [], [store_handler],
+                    host=args.redis_host,
+                    port=args.redis_port,
+                    prefix=args.run_id,
+                )
             )
-        )
+        else:
+            # Use filesystem for rendezvous otherwise
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "FileStoreHandlerCreate", [], [store_handler],
+                    path=args.file_store_path,
+                )
+            )
         rendezvous = dict(
             kv_handler=store_handler,
             shard_id=args.shard_id,
             num_shards=args.num_shards,
-            engine="FBCOLLECTIVE",
+            engine="GLOO",
             exit_nets=None)
     else:
         rendezvous = None
@@ -338,9 +357,14 @@ def main():
                         help="Number of machines in distributed run")
     parser.add_argument("--shard_id", type=int, default=0,
                         help="Shard id.")
+    parser.add_argument("--run_id", type=str,
+                        help="Unique run identifier (e.g. uuid)")
+    parser.add_argument("--redis_host", type=str,
+                        help="Host of Redis server (for rendezvous)")
+    parser.add_argument("--redis_port", type=int, default=6379,
+                        help="Port of Redis server (for rendezvous)")
     parser.add_argument("--file_store_path", type=str, default="/tmp",
-                        help="A path to a directory for machines rendezvous"
-                        "file store kv_handler.")
+                        help="Path to directory to use for rendezvous")
     args = parser.parse_args()
 
     Train(args)
