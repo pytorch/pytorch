@@ -15,7 +15,7 @@ def uniform(tensor, a=0, b=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.uniform(w)
+        >>> nn.init.uniform(w)
     """
     if isinstance(tensor, Variable):
         uniform(tensor.data, a=a, b=b)
@@ -33,7 +33,7 @@ def normal(tensor, mean=0, std=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.normal(w)
+        >>> nn.init.normal(w)
     """
     if isinstance(tensor, Variable):
         normal(tensor.data, mean=mean, std=std)
@@ -50,7 +50,7 @@ def constant(tensor, val):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.constant(w)
+        >>> nn.init.constant(w)
     """
     if isinstance(tensor, Variable):
         constant(tensor.data, val)
@@ -89,7 +89,7 @@ def xavier_uniform(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.xavier_uniform(w, gain=math.sqrt(2.0))
+        >>> nn.init.xavier_uniform(w, gain=math.sqrt(2.0))
     """
     if isinstance(tensor, Variable):
         xavier_uniform(tensor.data, gain=gain)
@@ -113,7 +113,7 @@ def xavier_normal(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.xavier_normal(w)
+        >>> nn.init.xavier_normal(w)
     """
     if isinstance(tensor, Variable):
         xavier_normal(tensor.data, gain=gain)
@@ -151,7 +151,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_uniform(w, mode='fan_in')
+        >>> nn.init.kaiming_uniform(w, mode='fan_in')
     """
     if isinstance(tensor, Variable):
         kaiming_uniform(tensor.data, a=a, mode=mode)
@@ -177,7 +177,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_normal(w, mode='fan_out')
+        >>> nn.init.kaiming_normal(w, mode='fan_out')
     """
     if isinstance(tensor, Variable):
         kaiming_normal(tensor.data, a=a, mode=mode)
@@ -201,7 +201,7 @@ def orthogonal(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.orthogonal(w)
+        >>> nn.init.orthogonal(w)
     """
     if isinstance(tensor, Variable):
         orthogonal(tensor.data, gain=gain)
@@ -234,7 +234,7 @@ def sparse(tensor, sparsity, std=0.01):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.sparse(w, sparsity=0.1)
+        >>> nn.init.sparse(w, sparsity=0.1)
     """
     if isinstance(tensor, Variable):
         sparse(tensor.data, sparsity, std=std)
