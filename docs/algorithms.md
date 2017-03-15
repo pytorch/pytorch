@@ -31,7 +31,7 @@ There's 3 phases to each implementation of this algorithm:
 ### allreduce_ring
 
 * Communication steps: P-1
-* Bytes on the wire: P*S
+* Bytes on the wire: P\*S
 
 Phase 2 is implemented as follows:
 1. Transmit local result to right side neighbor
@@ -41,20 +41,20 @@ Phase 2 is implemented as follows:
 
 ### allreduce_ring_chunked
 
-* Communication steps: 4*P
-* Bytes on the wire: 2*S
+* Communication steps: 4\*P
+* Bytes on the wire: 2\*S
 
 Phase 2 is implemented in 2 sub-phases:
 1. First, the algorithm iterates over the local reduction,
    transmitting chunks of the buffer and reducing at every step. The
-   number of chunks is equal to 2*P, allowing double buffering to be
+   number of chunks is equal to 2\*P, allowing double buffering to be
    used. This means there is always one chunk in flight while
    reduction is done on another chunk concurrently. At the end of this
    phase, every process P holds 1/P of the reduced result.
 2. Second, the algorithm iterates over the local reduction again, now
    broadcasting the local results.
 
-With 2*P chunks and two sub-phases, we arrive at 4*P communication
+With 2\*P chunks and two sub-phases, we arrive at 4\*P communication
 steps.
 
 These sub-phases are implemented as followed (roughly):
@@ -124,7 +124,7 @@ Broadcast contents of buffer on one process to other P-1 processes.
 ### broadcast_one_to_all
 
 * Communication steps: 1
-* Bytes on the wire: P*S
+* Bytes on the wire: P\*S
 
 _Non-root processes_: receive buffer from root.
 

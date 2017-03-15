@@ -17,18 +17,22 @@ host and device; this is taken care of by the algorithm implementations.
 ## Requirements
 
 Gloo is built to run on Linux and has no hard dependencies other than libstdc++.
+That said, it will generally only be useful when used in combination with a few
+optional dependencies below.
 
 Optional dependencies are:
 * [CUDA][cuda] and [NCCL][nccl] -- for CUDA aware algorithms, tests, and benchmark
 * [Google Test][gtest] -- to build and run tests
 * [Eigen][eigen] -- for fast floating point routines
 * [Hiredis][hiredis] -- for coordinating machine rendezvous through Redis
+* [MPI][mpi] -- for coordinating machine rendezvous through MPI
 
 [cuda]: http://www.nvidia.com/object/cuda_home_new.html
 [nccl]: https://github.com/nvidia/nccl
 [gtest]: https://github.com/google/googletest
 [eigen]: http://eigen.tuxfamily.org
 [hiredis]: https://github.com/redis/hiredis
+[mpi]: https://www.open-mpi.org/
 
 ## Documentation
 
