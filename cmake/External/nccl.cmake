@@ -22,7 +22,7 @@ if (NOT __NCCL_INCLUDED)
       SOURCE_DIR ${nccl_PREFIX}
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
-      BUILD_COMMAND make
+      BUILD_COMMAND make "CXX=${CMAKE_CXX_COMPILER}"
       INSTALL_COMMAND ""
       )
 
@@ -36,4 +36,3 @@ if (NOT __NCCL_INCLUDED)
   endif()
 
 endif()
-
