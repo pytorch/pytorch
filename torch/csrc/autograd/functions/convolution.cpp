@@ -276,7 +276,9 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
   if (k == 3) {
-    grad_input = view3d(*grad_input);
+    if (needs_input_grad(0)) {
+        grad_input = view3d(*grad_input);
+    }
     grad_weight = view3d(*grad_weight);
   }
 

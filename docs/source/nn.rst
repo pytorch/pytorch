@@ -765,6 +765,11 @@ Vision functions
 
 .. autofunction:: pixel_shuffle
 
+:hidden:`pad`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pad
+
 torch.nn.init
 =============
 

@@ -32,16 +32,19 @@ class SetItem(InplaceFunction):
 
     def forward(self, i, value=None):
         self.mark_dirty(i)
-        if value is None:
+        if value is None:  # value is scalar
             value = self.value
+        else:  # value is Tensor
+            self.value_size = value.size()
         i._set_index(self.index, value)
         return i
 
     def backward(self, grad_output):
-        if self.value is None:
+        if self.value is None:  # value is Tensor
             grad_input = grad_output.clone()
             grad_input._set_index(self.index, 0)
             grad_value = grad_output.index(self.index).clone()
+            grad_value = grad_value.view(self.value_size)
             return grad_input, grad_value
         else:
             grad_input = grad_output.clone()
