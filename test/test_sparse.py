@@ -15,7 +15,7 @@ cpu_triplet = (
 type_triplets = [cpu_triplet]
 if torch.cuda.is_available():
     cuda_triplet = (
-        torch.cuda.IntTensor,
+        torch.cuda.LongTensor,
         torch.cuda.DoubleTensor,
         torch.cuda.sparse.DoubleTensor)
     type_triplets.append(cuda_triplet)

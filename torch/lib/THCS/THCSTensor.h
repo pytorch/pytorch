@@ -9,10 +9,9 @@
 #define THCSTensor          TH_CONCAT_3(THCS,Real,Tensor)
 #define THCSTensor_(NAME)   TH_CONCAT_4(THCS,Real,Tensor_,NAME)
 
-// Using int for indices because that's what cuSparse uses...
-#define THCIndexTensor          THCudaIntTensor
-#define THCIndexTensor_(NAME)   THCudaIntTensor_ ## NAME
-#define integer                 int
+#define THCIndexTensor          THCudaLongTensor
+#define THCIndexTensor_(NAME)   THCudaLongTensor_ ## NAME
+#define integer                 long
 
 #include "generic/THCSTensor.h"
 #include "THCSGenerateAllTypes.h"

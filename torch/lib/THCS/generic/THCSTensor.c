@@ -158,7 +158,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
     // TODO make sure this doesn't sync the hell out of everything
     //      Should be fine according to sam's memory manager.
     computed_sizes = THLongTensor_newWithSize(THCIndexTensor_(newSizeOf)(state, s), NULL);
-    THLongTensor_copyCudaInt(state, computed_sizes, s);
+    THLongTensor_copyCudaLong(state, computed_sizes, s);
     THCSTensor_(rawResize)(state, self, nDimI, nDimV, THLongTensor_data(computed_sizes));
 
     THCIndexTensor_(free)(state, s);
@@ -424,14 +424,10 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCudaLongTensor *indices = THCudaLongTensor_newWithSize1d(state, mask->nnz);
   THCudaLongTensor *indicesBuffer = THCudaLongTensor_new(state);
 
-  // FIXME remove after fixing CUDA index type
-  THCudaLongTensor *maskIndicesLong = THCudaLongTensor_newWithSize2d(state, maskIndices->size[0], maskIndices->size[1]);
-  THCudaLongTensor_copyCudaInt(state, maskIndicesLong, maskIndices);
-
   THCudaLongTensor_zero(state, indices);
   for (long d = 0; d < mask->nDimensionI; d++) {
     THCudaLongTensor_mul(state, indices, indices, mask->size[d]);
-    THCudaLongTensor_select(state, indicesBuffer, maskIndicesLong, 0, d);
+    THCudaLongTensor_select(state, indicesBuffer, maskIndices, 0, d);
     THCudaLongTensor_cadd(state, indices, indices, 1, indicesBuffer);
   }
   THLongStorage *viewSize = THLongStorage_newWithSize(1 + mask->nDimensionV);
@@ -442,7 +438,6 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCTensor *t_view = THCTensor_(newView)(state, t, viewSize);
   THCTensor_(indexSelect)(state, rValues, t_view, 0, indices);
 
-  THCudaLongTensor_free(state, maskIndicesLong);
   THCudaLongTensor_free(state, indices);
   THCudaLongTensor_free(state, indicesBuffer);
   THLongStorage_free(viewSize);
