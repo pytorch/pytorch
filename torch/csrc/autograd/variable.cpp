@@ -10,41 +10,41 @@ namespace torch { namespace autograd {
 Variable::Variable(
   std::unique_ptr<thpp::Tensor> data,
   bool requires_grad,
-  bool is_volatile)
+  bool is_volatile,
+  bool is_leaf)
     : data(std::move(data))
-    , creator(nullptr)
+    , grad_fn(nullptr)
     , grad(nullptr)
     , version_counter(new VariableVersion())
+    , requires_grad(requires_grad)
+    , is_volatile(is_volatile)
+    , is_leaf(is_leaf)
     , output_nr(0)
     , pyobj(nullptr)
 {
-  if (!this->data) {
-    throw std::runtime_error("Variable data is NULL");
-  }
-  this->is_volatile = is_volatile;
-  this->requires_grad = requires_grad;
+  if (!this->data) throw std::runtime_error("Variable data is NULL");
+  // Function fields
+  this->is_executable = requires_grad;
 }
 
 Variable::Variable(
   std::unique_ptr<thpp::Tensor> data,
-  std::shared_ptr<Function> creator)
+  std::shared_ptr<Function> grad_fn)
     : data(std::move(data))
-    , creator(creator)
+    , grad_fn(grad_fn)
     , grad(nullptr)
     , version_counter(new VariableVersion())
-    , output_nr(creator->num_outputs++)
+    , requires_grad(grad_fn->is_executable)
+    , is_volatile(false)
+    , is_leaf(false)
+    , output_nr(grad_fn->num_inputs++)
     , pyobj(nullptr)
 {
-  if (!this->data) {
-    throw std::runtime_error("Variable data is NULL");
-  }
-  this->is_volatile = creator->is_volatile;
-  this->requires_grad = creator->requires_grad;
-  previous_functions.resize(1);
-  previous_functions[0] = std::make_pair<>(creator, output_nr);
+  if (!this->data) throw std::runtime_error("Variable data is NULL");
+  this->is_executable = this->requires_grad;
 }
 
-auto Variable::backward(std::shared_ptr<Variable> gradOutput) -> void {
+auto Variable::accumulate_grad(std::shared_ptr<Variable> gradOutput) -> void {
   if (!pre_hooks.empty()) {
     for (auto& hook : pre_hooks) {
       gradOutput = (*hook)(variable_list({gradOutput}))[0];
@@ -64,13 +64,17 @@ auto Variable::backward(std::shared_ptr<Variable> gradOutput) -> void {
 }
 
 auto Variable::apply(const variable_list& gradOutputs) -> variable_list {
-  if (creator || **version_counter != 0) {
+  if (grad_fn) {
+    throw std::logic_error("non-leaf variable saved in a graph!");
+  }
+  if (**version_counter != 0) {
     throw std::runtime_error("leaf variable was used in an inplace operation");
   }
   if (gradOutputs.size() != 1) {
-    throw std::runtime_error("incorrect number of gradOutputs");
+    throw std::runtime_error(std::string("variable expected 1 grad_output but got ") +
+                             std::to_string(gradOutputs.size()));
   }
-  backward(gradOutputs[0]);
+  accumulate_grad(gradOutputs[0]);
   return variable_list();
 }
 
