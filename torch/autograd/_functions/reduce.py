@@ -46,7 +46,7 @@ class Prod(_DimReduceFunction):
     def backward(self, grad_output):
         if self.dim is None:
             input, = self.saved_tensors
-            grad_input = grad_output.new(self.input_size).fill_(self.result)
+            grad_input = grad_output.new(self.input_size).fill_(self.result * grad_output[0])
             return grad_input.div(input)
         else:
             input, output = self.saved_tensors
