@@ -60,6 +60,7 @@ TH_API void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src
 TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimension1_, int dimension2_);
 TH_API int THCSTensor_(isContiguous)(THCState *state, const THCSTensor *self);
 TH_API void THCSTensor_(contiguous)(THCState *state, THCSTensor *self);
+TH_API void THCSTensor_(markContiguous)(THCState *state, THCSTensor *self);
 
 TH_API void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask);
 

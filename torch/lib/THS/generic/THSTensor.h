@@ -59,6 +59,7 @@ TH_API void THSTensor_(transpose)(THSTensor *self, int dimension1_, int dimensio
 TH_API int THSTensor_(isContiguous)(const THSTensor *self);
 TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src);
 TH_API void THSTensor_(contiguous)(THSTensor *self);
+TH_API void THSTensor_(markContiguous)(THSTensor *self);
 
 TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask);
 

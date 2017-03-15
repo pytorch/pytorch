@@ -119,6 +119,10 @@ void THCSTensor_(contiguous)(THCState *state, THCSTensor *self) {
   self->contiguous = 1;
 }
 
+void THCSTensor_(markContiguous)(THCState *state, THCSTensor *self) {
+  self->contiguous = 1;
+}
+
 // In place transpose
 void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   /* TODO
