@@ -1214,13 +1214,15 @@ def unpack_variables(args):
 
 
 ignore_inplace = set((
-    'test_DivConstant_by_tensor',
+    'test_DivConstantFunction_by_tensor',
 ))
 
 
 for test in function_tests:
     cls, constructor_args, call_args = test[:3]
-    test_name = 'test_' + cls.__name__ + ('_' + test[3] if len(test) == 4 else '')
+    test_name = 'test_{}Function'.format(cls.__name__)
+    if len(test) == 4:
+        test_name += '_' + test[3]
 
     def do_test(self, cls=cls, constructor_args=constructor_args,
                 call_args=call_args, test_name=test_name):
