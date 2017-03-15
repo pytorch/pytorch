@@ -13,7 +13,7 @@ class Variable(_C._VariableBase):
     Variable is a thin wrapper around a Tensor object, that also holds
     the gradient w.r.t. to it, and a reference to a function that created it.
     This reference allows retracing the whole chain of operations that
-    created the data. If the Variable has been created by the user, its creator
+    created the data. If the Variable has been created by the user, its grad_fn
     will be ``None`` and we call such objects *leaf* Variables.
 
     Since autograd only supports scalar valued function differentiation, grad
@@ -33,8 +33,9 @@ class Variable(_C._VariableBase):
             inference mode, i.e. don't save the history. See
             :ref:`excluding-subgraphs` for more details.
             Can be changed only on leaf Variables.
-        creator: Function of which the variable was an output. For leaf
-            (user created) variables it's ``None``. Read-only attribute.
+        is_leaf: Boolean indicating if the Variable is a graph leaf (i.e
+            if it was created by the user).
+        grad_fn: Gradient function graph trace.
 
     Parameters:
         data (any tensor class): Tensor to wrap.
@@ -82,7 +83,7 @@ class Variable(_C._VariableBase):
                 return SetItem(key, value)(self)
 
     def __deepcopy__(self, memo):
-        if self.creator is not None:
+        if not self.is_leaf:
             raise RuntimeError("Only Variables created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
         result = type(self)(self.data.clone())
@@ -106,7 +107,7 @@ class Variable(_C._VariableBase):
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
-        if self.creator is not None:
+        if not self.is_leaf:
             raise RuntimeError('__setstate__ can be only called on leaf variables')
         self.requires_grad, self.volatile, self._backward_hooks = state
 
@@ -143,6 +144,10 @@ class Variable(_C._VariableBase):
                     'backward should be called only on a scalar (i.e. 1-element tensor) '
                     'or with gradient w.r.t. the variable')
             gradient = self.data.new().resize_as_(self.data).fill_(1)
+        if not isinstance(gradient, Variable):
+            if gradient is not None and not torch.is_tensor(gradient):
+                raise TypeError("gradient has to be a Tensor, Variable or None")
+            gradient = Variable(gradient, volatile=True)
         self._execution_engine.run_backward((self,), (gradient,), retain_variables)
 
     def register_hook(self, hook):
@@ -177,8 +182,8 @@ class Variable(_C._VariableBase):
                                "doesn't require gradient")
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
-            if self.creator is not None:
-                self.creator._register_hook_dict(self)
+            if self.grad_fn is not None:
+                self.grad_fn._register_hook_dict(self)
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
@@ -194,10 +199,10 @@ class Variable(_C._VariableBase):
             reward(Tensor): Tensor with per-element rewards. It has to match
                 the device location and shape of Variable's data.
         """
-        if not isinstance(self.creator, StochasticFunction):
+        if not isinstance(self.grad_fn, StochasticFunction):
             raise RuntimeError("reinforce() can be only called on outputs "
                                "of stochastic functions")
-        self.creator._reinforce(reward)
+        self.grad_fn._reinforce(reward)
 
     def detach(self):
         """Returns a new Variable, detached from the current graph.
@@ -212,12 +217,12 @@ class Variable(_C._VariableBase):
           errors in correctness checks.
         """
         result = NoGrad()(self)  # this is needed, because it merges version counters
-        result._creator = None
+        result._grad_fn = None
         return result
 
     def detach_(self):
         """Detaches the Variable from the graph that created it, making it a leaf."""
-        self._creator = None
+        self._grad_fn = None
         self.requires_grad = False
 
     def contiguous(self):
@@ -887,5 +892,5 @@ for method in dir(Variable):
     setattr(Variable._torch, method, as_static)
 
 
-from .engine import ImperativeEngine
+from torch._C import _ImperativeEngine as ImperativeEngine
 Variable._execution_engine = ImperativeEngine()

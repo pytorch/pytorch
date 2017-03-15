@@ -68,7 +68,7 @@ def to_gpu(obj, type_map={}):
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, Variable):
-        assert obj.creator is None
+        assert obj.is_leaf
         t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
         return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
     elif isinstance(obj, list):

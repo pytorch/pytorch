@@ -11,7 +11,7 @@ struct PyFunctionPreHook : public FunctionPreHook {
   ~PyFunctionPreHook();
   variable_list operator()(const variable_list& grads) override;
   PyObject* dict;
-  int grad_index;
+  int value_idx;
 };
 
 struct PyFunctionPostHook : public FunctionPostHook {

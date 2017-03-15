@@ -140,8 +140,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
         def fn(input):
             return _as_tuple(func(*input))[i].data
 
-        numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
         analytical = get_analytical_jacobian(_as_tuple(inputs), o)
+        numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
         for a, n in zip(analytical, numerical):
             if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
