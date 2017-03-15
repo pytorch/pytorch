@@ -266,7 +266,7 @@ auto THCTensor<real>::unfold(const Tensor& src, int dimension,
 
 template<>
 auto THCTensor<real>::squeeze(const Tensor& src) -> THCTensor& {
-  auto src_raw = (dynamic_cast<const THCTensor<real>&>(src)).tensor;
+  auto src_raw = dynamic_cast<const THCTensor<real>&>(src).tensor;
   THCTensor_(squeeze)(state, tensor, src_raw);
   return *this;
 }
@@ -285,7 +285,7 @@ auto THCTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THCTensor& 
   return *this;
 }
 
-#define LAPACK_ERROR "Lapack operations not yet available for CUDA tensors"
+#define LAPACK_ERROR "Lapack operations not available for CUDA tensors"
 
 template<>
 auto THCTensor<real>::gesv(const Tensor& ra, const Tensor& b, const Tensor& a) -> THCTensor& {

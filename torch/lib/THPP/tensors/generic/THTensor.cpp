@@ -38,7 +38,7 @@ THTensor<real>::THTensor(const Storage& storage, ptrdiff_t storageOffset,
 
 template<>
 THTensor<real>::THTensor(THLongStorage *size, THLongStorage *stride):
-  tensor(THTensor_(newWithSize(size, stride)))
+  tensor(THTensor_(newWithSize)(size, stride))
   {};
 
 template<>

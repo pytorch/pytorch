@@ -107,6 +107,7 @@ THDTensor *THDTensor_(newWithTensor)(THDTensor *self) {
     ),
     THDState::s_current_worker
   );
+  return tensor;
 }
 
 THDTensor *THDTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride) {
@@ -136,22 +137,30 @@ THDTensor *THDTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride) {
 
 THDTensor *THDTensor_(newWithSize1d)(long size0) {
   THLongStorage *size = THLongStorage_newWithSize1(size0);
-  return THDTensor_(newWithSize)(size, NULL);
+  THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
+  THLongStorage_free(size);
+  return tensor;
 }
 
 THDTensor *THDTensor_(newWithSize2d)(long size0, long size1) {
   THLongStorage *size = THLongStorage_newWithSize2(size0, size1);
-  return THDTensor_(newWithSize)(size, NULL);
+  THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
+  THLongStorage_free(size);
+  return tensor;
 }
 
 THDTensor *THDTensor_(newWithSize3d)(long size0, long size1, long size2) {
   THLongStorage *size = THLongStorage_newWithSize3(size0, size1, size2);
-  return THDTensor_(newWithSize)(size, NULL);
+  THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
+  THLongStorage_free(size);
+  return tensor;
 }
 
 THDTensor *THDTensor_(newWithSize4d)(long size0, long size1, long size2, long size3) {
   THLongStorage *size = THLongStorage_newWithSize4(size0, size1, size2, size3);
-  return THDTensor_(newWithSize)(size, NULL);
+  THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
+  THLongStorage_free(size);
+  return tensor;
 }
 
 
@@ -178,20 +187,27 @@ THDTensor *THDTensor_(newWithStorage)(THDStorage *storage, ptrdiff_t storageOffs
     ),
     THDState::s_current_worker
   );
+  return tensor;
 }
 
 THDTensor *THDTensor_(newWithStorage1d)(THDStorage *storage, ptrdiff_t storageOffset,
                                         long size0, long stride0) {
   THLongStorage *size = THLongStorage_newWithSize1(size0);
   THLongStorage *stride = THLongStorage_newWithSize1(stride0);
-  return THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
+  THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
+  THLongStorage_free(size);
+  THLongStorage_free(stride);
+  return tensor;
 }
 
 THDTensor *THDTensor_(newWithStorage2d)(THDStorage *storage, ptrdiff_t storageOffset,
                                         long size0, long stride0, long size1, long stride1) {
   THLongStorage *size = THLongStorage_newWithSize2(size0, size1);
   THLongStorage *stride = THLongStorage_newWithSize2(stride0, stride1);
-  return THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
+  THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
+  THLongStorage_free(size);
+  THLongStorage_free(stride);
+  return tensor;
 }
 
 THDTensor *THDTensor_(newWithStorage3d)(THDStorage *storage, ptrdiff_t storageOffset,
@@ -199,6 +215,9 @@ THDTensor *THDTensor_(newWithStorage3d)(THDStorage *storage, ptrdiff_t storageOf
                                         long size2, long stride2) {
   THLongStorage *size = THLongStorage_newWithSize3(size0, size1, size2);
   THLongStorage *stride = THLongStorage_newWithSize3(stride0, stride1, stride2);
+  THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
+  THLongStorage_free(size);
+  THLongStorage_free(stride);
   return THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
 }
 
@@ -207,6 +226,9 @@ THDTensor *THDTensor_(newWithStorage4d)(THDStorage *storage, ptrdiff_t storageOf
                                         long size2, long stride2, long size3, long stride3) {
   THLongStorage *size = THLongStorage_newWithSize4(size0, size1, size2, size3);
   THLongStorage *stride = THLongStorage_newWithSize4(stride0, stride1, stride2, stride3);
+  THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
+  THLongStorage_free(size);
+  THLongStorage_free(stride);
   return THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
 }
 
@@ -780,8 +802,7 @@ void THDTensor_(retain)(THDTensor *tensor) {
 
 void THDTensor_(free)(THDTensor *tensor) {
   // TODO: free storage?
-  THAtomicDecrementRef(&tensor->refcount);
-  if (!tensor->refcount) {
+  if (!THAtomicDecrementRef(&tensor->refcount)) {
     delete[] tensor->size;
     delete[] tensor->stride;
     masterCommandChannel->sendMessage(
