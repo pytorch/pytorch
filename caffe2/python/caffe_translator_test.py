@@ -13,6 +13,37 @@ import sys
 import unittest
 
 
+@unittest.skipIf(not os.path.exists('data/testdata/caffe_translator'),
+                 'No testdata existing for the caffe translator test. Exiting.')
+def setUpModule():
+    # We will do all the computation stuff in the global space.
+    caffenet = caffe_pb2.NetParameter()
+    caffenet_pretrained = caffe_pb2.NetParameter()
+    text_format.Merge(
+        open('data/testdata/caffe_translator/deploy.prototxt').read(), caffenet
+    )
+    caffenet_pretrained.ParseFromString(
+        open(
+            'data/testdata/caffe_translator/bvlc_reference_caffenet.caffemodel')
+        .read()
+    )
+    net, pretrained_params = caffe_translator.TranslateModel(
+        caffenet, caffenet_pretrained, is_test=True
+    )
+    with open('data/testdata/caffe_translator/'
+              'bvlc_reference_caffenet.translatedmodel',
+              'w') as fid:
+        fid.write(str(net))
+    for param in pretrained_params.protos:
+        workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
+    # Let's also feed in the data from the Caffe test code.
+    data = np.load('data/testdata/caffe_translator/data_dump.npy').astype(
+        np.float32)
+    workspace.FeedBlob('data', data)
+    # Actually running the test.
+    workspace.RunNetOnce(net.SerializeToString())
+
+
 class TestNumericalEquivalence(test_util.TestCase):
     def testBlobs(self):
         names = [
@@ -41,33 +72,4 @@ if __name__ == '__main__':
             'Pass in any argument to have the test run for you.'
         )
         sys.exit(0)
-    if not os.path.exists('data/testdata/caffe_translator'):
-        print('No testdata existing for the caffe translator test. Exiting.')
-        sys.exit(0)
-    # We will do all the computation stuff in the global space.
-    caffenet = caffe_pb2.NetParameter()
-    caffenet_pretrained = caffe_pb2.NetParameter()
-    text_format.Merge(
-        open('data/testdata/caffe_translator/deploy.prototxt').read(), caffenet
-    )
-    caffenet_pretrained.ParseFromString(
-        open(
-            'data/testdata/caffe_translator/bvlc_reference_caffenet.caffemodel')
-        .read()
-    )
-    net, pretrained_params = caffe_translator.TranslateModel(
-        caffenet, caffenet_pretrained, is_test=True
-    )
-    with open('data/testdata/caffe_translator/'
-              'bvlc_reference_caffenet.translatedmodel',
-              'w') as fid:
-        fid.write(str(net))
-    for param in pretrained_params.protos:
-        workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
-    # Let's also feed in the data from the Caffe test code.
-    data = np.load('data/testdata/caffe_translator/data_dump.npy').astype(
-        np.float32)
-    workspace.FeedBlob('data', data)
-    # Actually running the test.
-    workspace.RunNetOnce(net.SerializeToString())
     unittest.main()

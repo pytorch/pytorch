@@ -27,36 +27,36 @@ class TestLengthsToShapeOps(TestCase):
                  workspace.FetchBlob('res')).all())
 
     def test_basic_reshape(self):
-        test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4))
-        test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False)
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4))
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False)
 
     def test_missing_dim(self):
-        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8))
-        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), arg_shape=False)
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8))
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), arg_shape=False)
 
     def test_in_place(self):
-        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), in_place=True)
-        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8),
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), in_place=True)
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8),
                      in_place=True, arg_shape=False)
 
     def test_zero_dim(self):
-        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
                      expected_shape=(4, 2, 1))
-        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
                      expected_shape=(4, 2, 1), arg_shape=False)
-        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 2, 1),
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(0, 2, 1),
                      expected_shape=(4, 2, 1))
-        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 2, 1),
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(0, 2, 1),
                      expected_shape=(4, 2, 1), arg_shape=False)
 
     def test_zero_dim_and_missing_dim(self):
-        test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
                      expected_shape=(4, 2, 1))
-        test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
                      expected_shape=(4, 2, 1), arg_shape=False)
-        test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
+        _test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
                      expected_shape=(8, 3))
-        test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
+        _test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
                      expected_shape=(8, 3), arg_shape=False)
 
     def test_backprop(self):
@@ -105,7 +105,7 @@ class TestLengthsToShapeOps(TestCase):
         workspace.RunNet(net)
 
 
-def test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
+def _test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
                  in_place=False):
     devices = [core.DeviceOption(caffe2_pb2.CPU, 0)]
     if workspace.NumCudaDevices() > 0:
