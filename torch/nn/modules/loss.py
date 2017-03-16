@@ -26,14 +26,16 @@ class _Loss(Module):
 
 class _WeightedLoss(_Loss):
 
-    def __init__(self, weight=None, size_average=True):
+    def __init__(self, weight=None, size_average=True, total_weight=None):
         super(_WeightedLoss, self).__init__(size_average)
         self.register_buffer('weight', weight)
+        self.register_buffer('total_weight', total_weight)
 
     def forward(self, input, target):
         _assert_no_grad(target)
         backend_fn = getattr(self._backend, type(self).__name__)
-        return backend_fn(self.size_average, weight=self.weight)(input, target)
+        return backend_fn(self.size_average, weight=self.weight,
+                          total_weight=self.total_weight)(input, target)
 
 
 class L1Loss(_Loss):

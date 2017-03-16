@@ -391,7 +391,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 # loss
 
-def nll_loss(input, target, weight=None, size_average=True):
+def nll_loss(input, target, weight=None, size_average=True, total_weight=None):
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -405,6 +405,7 @@ def nll_loss(input, target, weight=None, size_average=True):
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
+        total_weight (Variable, optional): a element-wise rescaling weight.
 
     Attributes:
         weight: the class-weights given as input to the constructor
@@ -417,7 +418,14 @@ def nll_loss(input, target, weight=None, size_average=True):
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
-    return _functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
+    dim = input.dim()
+    if dim == 2:
+        f = _functions.thnn.NLLLoss(size_average, weight=weight, total_weight=total_weight)
+    elif dim == 4:
+        f = _functions.thnn.NLLLoss2d(size_average, weight=weight, total_weight=total_weight)
+    else:
+        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
+    return f(input, target)
 
 
 def kl_div(input, target, size_average=True):
@@ -434,7 +442,7 @@ def kl_div(input, target, size_average=True):
     return _functions.thnn.KLDivLoss(size_average)(input, target)
 
 
-def cross_entropy(input, target, weight=None, size_average=True):
+def cross_entropy(input, target, weight=None, size_average=True, total_weight=None):
     r"""This criterion combines `log_softmax` and `nll_loss` in one single class.
 
     See :class:`torch.nn.CrossEntropyLoss` for details.
@@ -448,26 +456,9 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
+        total_weight (Variable, optional): a element-wise rescaling weight.
     """
-    dim = input.dim()
-    if dim == 2:
-        return nll_loss(log_softmax(input), target, weight, size_average)
-    elif dim == 4:
-        N, C, H, W = input.size()
-        log_p = F.log_softmax(input)  # (N, C, H, W)
-        log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, C)
-        log_p = log_p[target.view(N, H, W, 1).repeat(1, 1, 1, C) >= 0]
-        log_p = log_p.view(-1, C)  # (M, C) where M = (target >= 0).sum()
-        mask = target >= 0  # (M,)
-        target = target[mask]
-        loss = F.nll_loss(log_p, target, weight=weight, size_average=False)
-        if size_average:
-            loss /= mask.sum().data[0]
-        else:
-            loss /= N
-        return loss
-    else:
-        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
+    return nll_loss(log_softmax(input), target, weight, size_average, total_weight)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
