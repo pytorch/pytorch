@@ -30,6 +30,32 @@
 #define BAR(type, barid, nthreads) \
     BAR_EXPAND(type, barid, ROUNDUP(nthreads, WARP_SIZE))
 
+template<typename T> inline __device__
+T vFetch(const volatile T* ptr) {
+  return *ptr;
+}
+
+#ifdef CUDA_HAS_HALF
+template<> inline __device__
+half vFetch<half>(const volatile half* ptr) {
+  half r;
+  r.x = ptr->x;
+  return r;
+}
+#endif
+
+template<typename T> inline __device__
+void vStore(volatile T* ptr, const T val) {
+  *ptr = val;
+}
+
+#ifdef CUDA_HAS_HALF
+template<> inline __device__
+void vStore<half>(volatile half* ptr, const half val) {
+  ptr->x = val.x;
+}
+#endif
+
 __device__ unsigned int spinct;
 
 // Spin wait until func evaluates to true
@@ -224,32 +250,6 @@ __device__ inline volatile T* AlignUp(volatile T * ptr, size_t align) {
   size_t ptrval = reinterpret_cast<size_t>(ptr);
   return reinterpret_cast<volatile T*>(ALIGNUP(ptrval, align));
 }
-
-template<typename T> inline __device__
-T vFetch(const volatile T* ptr) {
-  return *ptr;
-}
-
-#ifdef CUDA_HAS_HALF
-template<> inline __device__
-half vFetch<half>(const volatile half* ptr) {
-  half r;
-  r.x = ptr->x;
-  return r;
-}
-#endif
-
-template<typename T> inline __device__
-void vStore(volatile T* ptr, const T val) {
-  *ptr = val;
-}
-
-#ifdef CUDA_HAS_HALF
-template<> inline __device__
-void vStore<half>(volatile half* ptr, const half val) {
-  ptr->x = val.x;
-}
-#endif
 
 // Assumptions:
 // - there is exactly 1 block
