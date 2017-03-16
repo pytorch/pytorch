@@ -241,7 +241,6 @@ void THCSTensor_(div)(THCState *state, THCSTensor *r_, THCSTensor *t, real value
   }
 }
 
-// TODO for the moment the only parallelism is when copying/adding non-scalar values
 void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real value, THCSTensor *src) {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 3, 3, r_, t, src));
   if(!THCSTensor_(isSameSizeAs)(state, t, src)) {

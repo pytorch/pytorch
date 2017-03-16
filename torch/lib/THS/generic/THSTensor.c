@@ -110,6 +110,7 @@ THSTensor* THSTensor_(move)(THSTensor *self, THLongTensor *indices, THTensor *va
   self->indices = indices;
   self->values = values;
   self->nnz = empty ? 0 : THTensor_(size)(values, 0);
+  self->contiguous = 0;
 
   return self;
 }

@@ -65,7 +65,7 @@ __global__ void THCSTensor_uniqueValuesReorderKernel(
   for (IndexType j = 1; j < nnz; j++) {
     int cmp = 1;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      if (indices.data[d * indskip + i] != indices.data[d * indskip + j]) {
+      if (indices.data[d * indskip + j - 1] != indices.data[d * indskip + j]) {
         cmp = 0;
         break;
       }
@@ -89,6 +89,8 @@ __global__ void THCSTensor_uniqueIndicesReorderKernel(
   for (IndexType j = 1; j < nnz; j++) {
     int cmp = 1;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
+      // note the difference with uniqueValuesReorderKernel:
+      // i instead of j - 1, because we're moving the indices
       if (indices.data[d * indskip + i] != indices.data[d * indskip + j]) {
         cmp = 0;
         break;
