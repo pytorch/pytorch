@@ -60,6 +60,7 @@ class ModelTrainerLog():
         self.external_loggers = None
 
         if external_loggers is not None:
+            self.external_loggers = external_loggers
             runtime_args = dict(vars(runtime_args))
             runtime_args['experiment_id'] = self.experiment_id
             for logger in self.external_loggers:
