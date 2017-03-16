@@ -669,6 +669,17 @@ typedef Tensor<CPUContext> TensorCPU;
 
 constexpr int k_limit_default_ = 1000;
 
+// Type call registry
+typedef TypeMeta (*TypeCall)(void*);
+TypeCall GetTypeCallFunction(CaffeTypeId id);
+void RegisterTypeCallFunction(CaffeTypeId id, TypeCall c);
+
+template <class Context>
+TypeMeta GetTensorType(void* c) {
+  Tensor<Context>* tc = static_cast<Tensor<Context>*>(c);
+  return tc->meta();
+}
+
 // Shape call registry
 typedef vector<TIndex> (*ShapeCall)(void*);
 ShapeCall GetShapeCallFunction(CaffeTypeId id);
