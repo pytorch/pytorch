@@ -419,6 +419,39 @@ class TestTorch(TestCase):
         res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
+    def test_btrf(self):
+        a = torch.Tensor((((1.8849,  1.9169),
+                        (1.3722, -0.9020)),
+                        ((0.7187, -1.1695),
+                        (-0.0139,  1.3572)),
+                        ((-1.6181,  0.7148),
+                        (1.3728,  0.1319))))
+        a_LU = a.btrf()
+        I_U = torch.triu(torch.ones(2,2)).unsqueeze(0).expand(3,2,2).type_as(a).byte()
+        I_L = 1-I_U
+        a_L = torch.zeros(a.size()).type_as(a)
+        a_U = a_L.clone()
+        a_L[torch.eye(2).unsqueeze(0).expand(3,2,2).type_as(a).byte()] = 1.0
+        a_L[I_L] = a_LU[I_L]
+        a_U[I_U] = a_LU[I_U]
+        a_ = torch.bmm(a_L, a_U)
+        self.assertEqual(a_, a)
+
+    def test_btrs(self):
+        a = torch.Tensor((((1.8849,  1.9169),
+                        (1.3722, -0.9020)),
+                        ((0.7187, -1.1695),
+                        (-0.0139,  1.3572)),
+                        ((-1.6181,  0.7148),
+                        (1.3728,  0.1319))))
+        b = torch.Tensor(((4.02, 6.19),
+                          (-1.56, 4.00),
+                          (9.81, -4.09)))
+        a_LU = a.btrf()
+        x = b.btrs(a_LU)
+        b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
+        self.assertEqual(b_, b)
+
     def test_bmm(self):
         num_batches = 10
         M, N, O = 23, 8, 12
