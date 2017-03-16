@@ -59,6 +59,8 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     batch_size = input.size(1)
     if len(lengths) != batch_size:
         raise ValueError("lengths array has incorrect size")
+    if lengths_iter[0] <= 0:
+        raise ValueError("length has to be greater than 0")
 
     for step, step_value in enumerate(input, 1):
         steps.append(step_value[:batch_size])
