@@ -25,7 +25,7 @@ namespace rendezvous {
 
 class RedisStore : public Store {
  public:
-  RedisStore(const std::string& host, int port);
+  explicit RedisStore(const std::string& host, int port = 6379);
   virtual ~RedisStore();
 
   virtual void set(const std::string& key, const std::vector<char>& data)
