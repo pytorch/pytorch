@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
+from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
@@ -33,7 +33,7 @@ class SparseToDense(ModelLayer):
                 outputs.append((
                     field,
                     schema.Scalar(
-                        (np.float32, len(feature_specs.feature_ids)),
+                        (np.float32, (len(feature_specs.feature_ids), )),
                         model.net.NextScopedBlob(name + '_' + field + '_output')
                     )
                 ))
