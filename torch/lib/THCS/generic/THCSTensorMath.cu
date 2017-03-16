@@ -246,8 +246,8 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   if(!THCSTensor_(isSameSizeAs)(state, t, src)) {
     THError("cadd operands have incompatible sizes or dimension types");
   }
-  // THCSTensor_(contiguous)(state, t);
-  // THCSTensor_(contiguous)(state, src);
+  THCSTensor_(contiguous)(state, t);
+  THCSTensor_(contiguous)(state, src);
 
   if (src->nnz == 0) {
     THCSTensor_(copy)(state, r_, t);
@@ -258,64 +258,42 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
     return;
   }
 
-  // We deliberately choose to simply concat the indices and values tensors
-  // rather than merging them. This removes the need to synchronously fetch nnz
-  // at the end of the operation, at the cost of having a non-contiguous result.
-  // This trade-off is preferable for the common use-case of gradient accumulation.
-  // TODO have two distinct functions? The other option is commented out below
+  // saving those because they can be overwritten when doing in-place operations
+  ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
+  long nDimI = src->nDimensionI;
   THCIndexTensor *t_indices_ = THCSTensor_(indices)(state, t);
   THCTensor *t_values_ = THCSTensor_(values)(state, t);
   THCIndexTensor *s_indices_ = THCSTensor_(indices)(state, src);
   THCTensor *s_values_ = THCSTensor_(values)(state, src);
-  if (value != ScalarConvert<int, real>::to(1)) {
-    THCTensor *s_values_orig = s_values_;
-    s_values_ = THCTensor_(new)(state);
-    THCTensor_(mul)(state, s_values_, s_values_orig, value);
-    THCTensor_(free)(state, s_values_orig);
-  }
-  THCIndexTensor *r_indices_ = THCIndexTensor_(new)(state);
-  THCTensor *r_values_ = THCTensor_(new)(state);
-  THCIndexTensor_(cat)(state, r_indices_, t_indices_, s_indices_, 1);
-  THCTensor_(cat)(state, r_values_, t_values_, s_values_, 0);
+  THCIndexTensor *r_indices_ = THCIndexTensor_(newWithSize2d)(state, nDimI, max_nnz);
+  THCTensor *r_values_ = THCSTensor_(newValuesWithSizeOf)(state, s_values_, max_nnz);
+  THCTensor_(zero)(state, r_values_);
   THCSTensor_(resizeAs)(state, r_, src);
   THCSTensor_(move)(state, r_, r_indices_, r_values_);
 
-  // // saving those because they can be overwritten when doing in-place operations
-  // ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
-  // long nDimI = src->nDimensionI;
-  // THCIndexTensor *t_indices_ = THCSTensor_(indices)(state, t);
-  // THCTensor *t_values_ = THCSTensor_(values)(state, t);
-  // THCIndexTensor *s_indices_ = THCSTensor_(indices)(state, src);
-  // THCTensor *s_values_ = THCSTensor_(values)(state, src);
-  // THCIndexTensor *r_indices_ = THCIndexTensor_(newWithSize2d)(state, nDimI, max_nnz);
-  // THCTensor *r_values_ = THCSTensor_(newValuesWithSizeOf)(state, s_values_, max_nnz);
-  // THCTensor_(zero)(state, r_values_);
-  // THCSTensor_(resizeAs)(state, r_, src);
-  // THCSTensor_(move)(state, r_, r_indices_, r_values_);
-  //
-  // const dim3 block = getApplyBlock();
-  // dim3 grid;
-  // THArgCheck(getApplyGrid(state, t_values_->stride[0], grid), 1, CUTORCH_DIM_WARNING);
-  //
-  // THCSTensor_valueSparseUnionKernel<TensorCAddOp<real>, TensorAddOp<real>, TensorCAddOp<real>, unsigned long, real>
-  //   <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-  //     TensorCAddOp<real>(value),
-  //     TensorAddOp<real>(),
-  //     TensorCAddOp<real>(value),
-  //     I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-  //     V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
-  //     (unsigned long)t_nnz, (unsigned long)s_nnz);
-  // THCudaCheck(cudaGetLastError());
-  //
-  // THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
-  // THCSTensor_indexSparseUnionKernel<unsigned long, real>
-  //   <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
-  //     I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-  //     (unsigned long)t_nnz, (unsigned long)s_nnz, (unsigned long*)resultNnz->data);
-  // THCudaCheck(cudaGetLastError());
-  // r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
-  // THCudaLongStorage_free(state, resultNnz);
-  // r_->contiguous = 1;
+  const dim3 block = getApplyBlock();
+  dim3 grid;
+  THArgCheck(getApplyGrid(state, t_values_->stride[0], grid), 1, CUTORCH_DIM_WARNING);
+
+  THCSTensor_valueSparseUnionKernel<TensorCAddOp<real>, TensorAddOp<real>, TensorCAddOp<real>, unsigned long, real>
+    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      TensorCAddOp<real>(value),
+      TensorAddOp<real>(),
+      TensorCAddOp<real>(value),
+      I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
+      V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
+      (unsigned long)t_nnz, (unsigned long)s_nnz);
+  THCudaCheck(cudaGetLastError());
+
+  THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
+  THCSTensor_indexSparseUnionKernel<unsigned long, real>
+    <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+      I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
+      (unsigned long)t_nnz, (unsigned long)s_nnz, (unsigned long*)resultNnz->data);
+  THCudaCheck(cudaGetLastError());
+  r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
+  THCudaLongStorage_free(state, resultNnz);
+  r_->contiguous = 1;
 
   THCIndexTensor_(free)(state, t_indices_);
   THCTensor_(free)(state, t_values_);
