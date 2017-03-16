@@ -3,6 +3,7 @@ set(GLOO_COMMON_SRCS
   )
 
 set(GLOO_COMMON_HDRS
+  "${CMAKE_CURRENT_SOURCE_DIR}/error.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/logging.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/string.h"
   )

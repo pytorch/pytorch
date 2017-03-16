@@ -40,20 +40,16 @@ class EnforceNotMet : public std::exception {
   std::string full_msg_;
 };
 
-#define GLOO_ENFORCE(condition, ...)                 \
-  do {                                              \
-    if (!(condition)) {                             \
+#define GLOO_ENFORCE(condition, ...)        \
+  do {                                      \
+    if (!(condition)) {                     \
       throw ::gloo::EnforceNotMet(          \
-          __FILE__,                                 \
-          __LINE__,                                 \
-          #condition,                               \
+          __FILE__,                         \
+          __LINE__,                         \
+          #condition,                       \
           ::gloo::MakeString(__VA_ARGS__)); \
-    }                                               \
+    }                                       \
   } while (false)
-
-#define GLOO_THROW(...)                 \
-  throw ::gloo::EnforceNotMet( \
-      __FILE__, __LINE__, "", ::gloo::MakeString(__VA_ARGS__))
 
 /**
  * Rich logging messages
@@ -134,9 +130,9 @@ BINARY_COMP_HELPER(Less, <)
 BINARY_COMP_HELPER(LessEquals, <=)
 #undef BINARY_COMP_HELPER
 
-#define GLOO_ENFORCE_THAT_IMPL(condition, expr, ...)         \
+#define GLOO_ENFORCE_THAT_IMPL(condition, expr, ...)        \
   do {                                                      \
-    using namespace ::gloo::enforce_detail;         \
+    using namespace ::gloo::enforce_detail;                 \
     const EnforceFailMessage& r = (condition);              \
     if (r.bad()) {                                          \
       throw EnforceNotMet(                                  \

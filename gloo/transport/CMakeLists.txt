@@ -9,6 +9,7 @@ set(GLOO_TRANSPORT_HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/address.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/buffer.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/device.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/error.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/pair.h"
   )
 
