@@ -49,6 +49,8 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Returns:
         a :class:`PackedSequence` object
     """
+    if lengths[-1] <= 0:
+        raise ValueError("length has to be greater than 0")
     if batch_first:
         input = input.transpose(0, 1)
 
