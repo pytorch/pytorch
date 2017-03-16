@@ -63,6 +63,7 @@ class Adagrad(Optimizer):
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
                 if p.grad.data.is_sparse:
+                    grad.contiguous()  # the update is non-linear so indices must be unique
                     grad_indices = grad.indices()
                     grad_values = grad.values()
                     size = torch.Size([x for x in grad.size()])
