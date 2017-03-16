@@ -713,7 +713,7 @@ class GetEnsureDenseGradient : public GradientMakerBase {
       return SingleGradientDef(
           "SparseToDense",
           "",
-          vector<string>{GO_I(0), GO_V(0)},
+          vector<string>{GO_I(0), GO_V(0), I(0)},
           vector<string>{GI(0)});
     }
   }
