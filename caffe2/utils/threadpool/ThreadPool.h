@@ -169,6 +169,7 @@ class alignas(kCacheLineSize) ThreadPool {
   // threadpool; work sizes smaller than this will just be run on the
   // main (calling) thread
   void setMinWorkSize(size_t size);
+  size_t getMinWorkSize() const { return minWorkSize_; }
 
 #ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
   // Set imbalance factor for the main thread versus other threads;
