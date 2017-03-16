@@ -5,23 +5,19 @@ import torch.cuda
 from torch.backends.cudnn import int_array
 
 lib = None
-libname = 'libnccl.so'
 
 __all__ = ['all_reduce', 'reduce', 'broadcast', 'all_gather', 'reduce_scatter']
 
 
-def _loadlib():
+def _libnccl():
     global lib
-    thisdir = os.path.dirname(os.path.abspath(__file__))
-    paths = ['', os.path.join(thisdir, '../lib')]
-    for path in paths:
-        try:
-            lib = ctypes.cdll.LoadLibrary(os.path.join(path, libname))
-            break
-        except OSError:
-            continue
-    if lib is not None:
-        lib.ncclCommDestroy.restype = None
+    if lib is None:
+        lib = ctypes.cdll.LoadLibrary(None)
+        if hasattr(lib, 'ncclCommDestroy'):
+            lib.ncclCommDestroy.restype = None
+        else:
+            lib = None
+    return lib
 
 
 def is_available(tensors):
@@ -36,14 +32,12 @@ def is_available(tensors):
             return False
         devices.add(device)
 
-    if lib is None:
-        try:
-            _loadlib()
-        except Exception:
-            warnings.warn('NCCL library not found. Check your LD_LIBRARY_PATH')
-            return False
+    if _libnccl() is None:
+        warnings.warn('NCCL library not found. Check your LD_LIBRARY_PATH')
+        return False
 
     return True
+
 
 _communicators = {}
 
@@ -125,8 +119,8 @@ def check_error(status):
 
 
 def communicator(inputs, outputs=None):
-    if lib is None:
-        _loadlib()
+    if _libnccl() is None:
+        raise RuntimeError('Unable to load NCCL library')
 
     devices = [input.get_device() for input in inputs]
     if outputs is not None:
