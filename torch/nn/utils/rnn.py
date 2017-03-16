@@ -50,7 +50,8 @@ def pack_padded_sequence(input, lengths, batch_first=False):
         a :class:`PackedSequence` object
     """
     if lengths[-1] <= 0:
-        raise ValueError("length has to be greater than 0")
+        raise ValueError("length of all samples has to be greater than 0, "
+                         "but found an element in 'lengths' that is <=0")
     if batch_first:
         input = input.transpose(0, 1)
 
