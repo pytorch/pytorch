@@ -286,6 +286,33 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+    def testCast(self):
+        model = cnn.CNNModelHelper()
+
+        types = [
+            ('bool', np.bool, caffe2_pb2.TensorProto.BOOL),
+            #('byte', None, caffe2_pb2.TensorProto.BYTE),
+            ('int8', np.int8, caffe2_pb2.TensorProto.INT8),
+            ('uint8', np.uint8, caffe2_pb2.TensorProto.UINT8),
+            ('int16', np.int16, caffe2_pb2.TensorProto.INT16),
+            ('uint16', np.uint16, caffe2_pb2.TensorProto.UINT16),
+            #('float16', np.float16, caffe2_pb2.TensorProto.FLOAT16),
+            ('int32', np.int32, caffe2_pb2.TensorProto.INT32),
+            ('float', np.float32, caffe2_pb2.TensorProto.FLOAT),
+            ('int64', np.int64, caffe2_pb2.TensorProto.INT64),
+            ('double', np.float64, caffe2_pb2.TensorProto.DOUBLE),
+            #('string', None, caffe2_pb2.TensorProto.STRING),
+        ]
+
+        for (xstr, xnp, xc2) in types:
+            xname = 'X%s' % xstr
+            workspace.FeedBlob(xname, np.random.rand(1).astype(xnp))
+            for (ystr, ynp, yc2) in types:
+                yname = 'Y%s_to_%s' % (xstr, ystr)
+                model.Cast(xname, yname, to=yc2)
+
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model):
         '''
         Runs shape inference, and then the model to check
@@ -307,16 +334,30 @@ class TestShapeInference(test_util.TestCase):
             arr = workspace.FetchBlob(b)
             correct_shapes[b] = arr.shape
             if type(arr) is np.ndarray:
-                if arr.dtype == np.dtype('float64'):
-                    correct_types[b] = caffe2_pb2.TensorProto.DOUBLE
-                elif arr.dtype == np.dtype('float32'):
+                if arr.dtype == np.dtype('float32'):
                     correct_types[b] = caffe2_pb2.TensorProto.FLOAT
                 elif arr.dtype == np.dtype('int32'):
                     correct_types[b] = caffe2_pb2.TensorProto.INT32
+                # BYTE
+                # STRING
+                elif arr.dtype == np.dtype('bool'):
+                    correct_types[b] = caffe2_pb2.TensorProto.BOOL
+                elif arr.dtype == np.dtype('uint8'):
+                    correct_types[b] = caffe2_pb2.TensorProto.UINT8
+                elif arr.dtype == np.dtype('int8'):
+                    correct_types[b] = caffe2_pb2.TensorProto.INT8
+                elif arr.dtype == np.dtype('uint16'):
+                    correct_types[b] = caffe2_pb2.TensorProto.UINT16
+                elif arr.dtype == np.dtype('int16'):
+                    correct_types[b] = caffe2_pb2.TensorProto.INT16
                 elif arr.dtype == np.dtype('int64'):
                     correct_types[b] = caffe2_pb2.TensorProto.INT64
+                elif arr.dtype == np.dtype('float16'):
+                    correct_types[b] = caffe2_pb2.TensorProto.FLOAT16
+                elif arr.dtype == np.dtype('float64'):
+                    correct_types[b] = caffe2_pb2.TensorProto.DOUBLE
                 else:
-                    correct_types[b] = "unknown {}".format(np.dtype)
+                    correct_types[b] = "unknown {}".format(arr.dtype)
             else:
                 correct_types[b] = str(type(arr))
 
@@ -334,11 +375,6 @@ class TestShapeInference(test_util.TestCase):
                 b not in types and b in correct_types,
                 "Type for {} not defined".format(b),
             )
-
-            # BUG: Workspace blob type not being set correctly T16121392
-            if correct_types[b] == caffe2_pb2.TensorProto.INT32:
-                continue
-
             self.assertEqual(
                 types[b],
                 correct_types[b],

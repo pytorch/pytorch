@@ -261,9 +261,13 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
   const std::vector<string>& ws_blobs = ws->Blobs();
   for (const auto& s : ws_blobs) {
     Blob* b = ws->GetBlob(s);
+    TypeCall type_fun = GetTypeCallFunction(b->meta().id());
     ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
     TensorShape tp;
 
+    if (type_fun) {
+        tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
+    }
     if (shape_fun) {
       auto shape = shape_fun(b->GetRaw());
       for (auto d : shape) {
