@@ -417,7 +417,14 @@ def nll_loss(input, target, weight=None, size_average=True):
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
-    return _functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
+    dim = input.dim()
+    if dim == 2:
+        f = _functions.thnn.NLLLoss(size_average, weight=weight)
+    elif dim == 4:
+        f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
+    else:
+        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
+    return f(input, target)
 
 
 def kl_div(input, target, size_average=True):
