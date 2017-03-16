@@ -111,6 +111,7 @@ THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor 
   self->indices = indices;
   self->values = values;
   self->nnz = empty ? 0 : THCTensor_(size)(state, values, 0);
+  self->contiguous = 0;
 
   return self;
 }
