@@ -146,4 +146,15 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
         for a, n in zip(analytical, numerical):
             if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
                 return False
+
+    # check if the backward multiplies by grad_output
+    zero_gradients(inputs)
+    output = _as_tuple(func(*inputs))
+    torch.autograd.backward(output, [o.data.new(o.size()).zero_() for o in output])
+    for i in inputs:
+        if i.grad is None:
+            continue
+        if not i.grad.data.eq(0).all():
+            return False
+
     return True
