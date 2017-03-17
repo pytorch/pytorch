@@ -10,21 +10,14 @@ namespace gloo {
 
 template <typename T, class Context>
 void AllreduceOp<T, Context>::initializeRingFull() {
-  const auto& context =
-      OperatorBase::Input<std::shared_ptr<::gloo::Context>>(COMM);
-  auto pointers = getPointers();
-  auto size = Output(0)->size();
-  algorithm_.reset(new ::gloo::CudaAllreduceRing<T>(context, pointers, size));
+  algorithm_.reset(new ::gloo::CudaAllreduceRing<T>(
+      init_.context, init_.outputs, init_.size));
 }
 
 template <typename T, class Context>
 void AllreduceOp<T, Context>::initializeRingChunked() {
-  const auto& context =
-      OperatorBase::Input<std::shared_ptr<::gloo::Context>>(COMM);
-  auto pointers = getPointers();
-  auto size = Output(0)->size();
-  algorithm_.reset(
-      new ::gloo::CudaAllreduceRingChunked<T>(context, pointers, size));
+  algorithm_.reset(new ::gloo::CudaAllreduceRingChunked<T>(
+      init_.context, init_.outputs, init_.size));
 }
 
 namespace {

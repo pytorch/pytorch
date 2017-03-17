@@ -170,18 +170,25 @@ class TestCase(hu.HypothesisTestCase):
                 workspace.FeedBlob(blob, value)
                 blobs.append(blob)
 
-            workspace.RunOperatorOnce(
-                core.CreateOperator(
-                    "Broadcast",
-                    [common_world] + blobs,
-                    blobs,
-                    root=i,
-                    engine=op_engine))
+            net = core.Net("broadcast")
+            net.Broadcast(
+                [common_world] + blobs,
+                blobs,
+                root=i,
+                engine=op_engine)
+
+            workspace.CreateNet(net)
+            workspace.RunNet(net.Name())
 
             for j in range(num_blobs):
                 np.testing.assert_array_equal(
                     workspace.FetchBlob(blobs[j]),
                     i * num_blobs)
+
+            # Run the net a few more times to check the operator
+            # works not just the first time it's called
+            for _tmp in range(4):
+                workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
@@ -234,17 +241,24 @@ class TestCase(hu.HypothesisTestCase):
             workspace.FeedBlob(blob, value)
             blobs.append(blob)
 
-        workspace.RunOperatorOnce(
-            core.CreateOperator(
-                "Allreduce",
-                [common_world] + blobs,
-                blobs,
-                engine=op_engine))
+        net = core.Net("allreduce")
+        net.Allreduce(
+            [common_world] + blobs,
+            blobs,
+            engine=op_engine)
+
+        workspace.CreateNet(net)
+        workspace.RunNet(net.Name())
 
         for i in range(num_blobs):
             np.testing.assert_array_equal(
                 workspace.FetchBlob(blobs[i]),
                 (num_blobs * comm_size) * (num_blobs * comm_size - 1) / 2)
+
+        # Run the net a few more times to check the operator
+        # works not just the first time it's called
+        for _tmp in range(4):
+            workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
