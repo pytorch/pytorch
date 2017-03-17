@@ -57,9 +57,9 @@ PyObject * THPVariable_New(PyObject *data, PyObject *_grad_fn)
 }
 
 // This function DOES NOT steal a reference to data
-PyObject * THPVariable_NewVolatile(PyObject *data, bool is_leaf)
+PyObject * THPVariable_NewVolatile(PyObject *data)
 {
-  auto v = std::make_shared<Variable>(torch::createTensor(data), false, true, is_leaf);
+  auto v = std::make_shared<Variable>(torch::createTensor(data), false, true);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
@@ -77,7 +77,7 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
     if (auto fn = dynamic_cast<PyFunction*>(self->cdata->grad_fn.get())) {
       Py_VISIT(fn->obj);
     }
-    for (auto& hook : self->cdata->pre_hooks) {
+    for (auto& hook : self->cdata->hooks) {
       if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
@@ -91,6 +91,9 @@ static int THPVariable_clear(THPVariable *self)
   Py_CLEAR(self->data);
   Py_CLEAR(self->backward_hooks);
   if (self->cdata) {
+    if (auto grad_acc = self->cdata->grad_accumulator.lock()) {
+      grad_acc->pre_hooks.clear();
+    }
     self->cdata->pyobj = nullptr;
   }
   self->cdata.reset();
@@ -194,7 +197,7 @@ int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 
 PyObject *THPVariable_is_leaf(THPVariable *self)
 {
-  return PyBool_FromLong(self->cdata->is_leaf);
+  return PyBool_FromLong(!self->cdata->grad_fn);
 }
 
 PyObject * THPVariable_get_data(THPVariable *self)
@@ -259,7 +262,7 @@ PyObject *THPVariable_get_volatile(THPVariable *self)
 int THPVariable_set_volatile(THPVariable *self, PyObject *obj)
 {
   THPUtils_assertRet(-1, PyBool_Check(obj), "volatile must be a bool");
-  THPUtils_assertRet(-1, self->cdata->is_leaf,
+  THPUtils_assertRet(-1, !self->cdata->grad_fn,
       "volatile can only be set on leaf variables");
   auto& var = *self->cdata;
   var.is_volatile = (obj == Py_True);
@@ -282,7 +285,7 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
   THPUtils_assertRet(-1, PyBool_Check(obj), "requires_grad must be a bool");
   auto& var = *self->cdata;
-  if (!var.is_leaf) {
+  if (var.grad_fn) {
     const char *hint = "";
     if (obj == Py_False) {
       hint = " If you want to use a computed variable in a subgraph "
@@ -292,7 +295,11 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     THPUtils_setError("you can only change requires_grad flags of leaf variables.%s", hint);
     return -1;
   }
-  var.is_executable = var.requires_grad = (obj == Py_True);
+  var.requires_grad = obj == Py_True;
+  auto grad_accumulator = var.grad_accumulator.lock();
+  if (grad_accumulator) {
+    grad_accumulator->is_executable = var.requires_grad;
+  }
   return 0;
 }
 
@@ -313,9 +320,9 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
   Py_XINCREF(obj);
   Py_XDECREF(self->backward_hooks);
   self->backward_hooks = obj;
-  self->cdata->pre_hooks.clear();
+  self->cdata->hooks.clear();
   if (obj) {
-    self->cdata->pre_hooks.emplace_back(new PyFunctionPreHook(obj, 0));
+    self->cdata->hooks.emplace_back(new PyFunctionPreHook(obj, 0));
   }
   return 0;
 }

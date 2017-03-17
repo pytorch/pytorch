@@ -22,6 +22,13 @@ using thpp::Tensor;
 
 namespace torch { namespace autograd {
 
+// XXX: Changes to the way multithreading works in execute should be done with
+// great care. Right now the implementation guarantees that a single function's
+// apply will never be entered concurrently (even if multiple graphs are
+// executed at the same time). Adding multiple threads per-device or removing
+// engine thread affinity to the device can break this invariant, and we depend
+// on it in a few places (e.g. AccumulateGrad function).
+
 struct FunctionTask {
   GraphTask* base;
   std::shared_ptr<Function> fn;
@@ -164,20 +171,6 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     }
 
     std::lock_guard<std::mutex> lock(task.base->mutex);
-    // NOTE: Variables appear in the graph only when computing backward
-    if (auto var = dynamic_cast<Variable*>(next_fn.get())) {
-      if (!output) {
-        // NOTE: output can be NULL if e.g. a backward function returns None for a
-        // non_differentiable output. We may need to track additional information
-        // at the function level to determine if this is an error.
-        std::stringstream ss;
-        ss << "Function '" << fn.name() << "' missing gradient at " << i;
-        throw std::runtime_error(ss.str());
-      }
-      var->accumulate_grad(output);
-      continue;
-    }
-
     // Check if the next function is ready to be computed
     bool is_ready = false;
     auto& dependencies = task.base->dependencies;
@@ -253,7 +246,6 @@ auto Engine::compute_dependencies(function_queue queue, GraphTask& task) -> void
     for (auto& next_fn_pair : fn->next_functions) {
       Function* next_ptr = next_fn_pair.first.get();
       if (!next_ptr) continue;
-      if (dynamic_cast<Variable*>(next_ptr)) continue;
       if (!next_ptr->is_executable) continue;
       if (next_ptr->is_stochastic) continue; // Stochastic nodes were in the queue already
       dependencies[next_ptr] += 1;
@@ -275,24 +267,6 @@ auto Engine::find_roots(const function_list& input_roots,
     auto& root_info = input_roots[i];
     auto root = root_info.first;
     int input_nr = root_info.second;
-    // NOTE: variables will only appear in roots in backward graphs
-    if (auto var = dynamic_cast<Variable*>(root.get())) {
-      if (!var->grad_fn) {
-        if (var->requires_grad) {
-          var->accumulate_grad(input);
-          task.has_any_work = true;
-        }
-        continue;
-      } else {
-        root = var->grad_fn;
-        input_nr = var->output_nr;
-      }
-    } else {
-      if (root->num_inputs != 1) {
-        throw std::runtime_error("graph roots need to have a single input");
-      }
-    }
-
     auto& buf = root_value[root];
     if (root->is_executable) {
       if (!buf) buf.reset(new InputBuffer(root->num_inputs));
@@ -315,8 +289,6 @@ auto Engine::find_roots(const function_list& input_roots,
   return roots;
 }
 
-// NOTE: input_roots can be quite messy - it can contain Variables or duplicate
-// functions. roots will be the cleaned up value
 auto Engine::execute(const function_list& input_roots,
                       variable_list& inputs,
                       bool keep_graph) -> void {

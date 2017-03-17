@@ -240,32 +240,12 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
         // returned unchanged, and we can simply return a new Variable
         // referencing the same storage.
         if (dirty_inputs.count(output) > 0) {
-          Py_INCREF(input_var);
-          output_var = input_var;
-          auto& output_var_ = *output_var->cdata;
-          output_var_.grad_fn = THPFunction_asFunction(self);
-          if (!output_var_.requires_grad) {
-            // Now, there's another subtlety. We move the input in the graph
-            // and possibly change its requires_grad to True. However, remember
-            // that we're still holding a reference to is as a previous
-            // function. Backward engine will think that it was really a
-            // leaf that initialy did require grad and call its _do_backward
-            // and that will throw. Because of this, we need to allocate
-            // a dummy leaf that doesn't require grad and put it as our (grad's)
-            // next function.
-            // Even if the function doesn't require grad, creating a dummy leaf
-            // prevents the creation of reference cycles.
-            output_var_.requires_grad = self->cdata.is_executable;
-            auto dummy_prev_fn = std::make_shared<Variable>(
-                std::unique_ptr<Tensor>(output_var_.data->clone_shallow()), false, false);
-            // Replace all references to the variable
-            auto& next_functions = self->cdata.next_functions;
-            for (int inp = 0; inp < self->num_forward_inputs; inp++) {
-              if (next_functions[inp].first.get() == &output_var_) {
-                next_functions[inp] = std::make_pair<>(dummy_prev_fn, 0);
-              }
-            }
-          } else { // output_var_.requires_grad
+          if (!input_var_.requires_grad) {
+            Py_INCREF(input_var);
+            output_var = input_var;
+            input_var_.grad_fn = THPFunction_asFunction(self);
+            input_var_.requires_grad = self->cdata.is_executable;
+          } else { // input_var_.requires_grad
             throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
           }
         } else {
@@ -487,7 +467,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
         if (input_var->cdata->grad_fn) {
           next_fn = input_var->cdata->grad_fn;
         } else {
-          next_fn = input_var->cdata;
+          next_fn = input_var->cdata->get_grad_accumulator();
         }
         self->cdata.next_functions[i] = std::make_pair<>(next_fn, input_var->cdata->output_nr);
       }
