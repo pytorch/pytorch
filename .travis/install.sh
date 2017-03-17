@@ -31,8 +31,11 @@ elif [[ $TRAVIS_OS_NAME == 'osx' ]]; then
   # Install dependencies #
   ########################
 
-  brew install glog automake protobuf leveldb lmdb
+  brew install glog automake protobuf leveldb lmdb ninja
   sudo pip install numpy
+  # Dependencies needed for NNPACK: PeachPy and confu
+  sudo pip install --upgrade git+https://github.com/Maratyszcza/PeachPy
+  sudo pip install --upgrade git+https://github.com/Maratyszcza/confu
 
 else
 #********************#
@@ -45,8 +48,19 @@ else
   sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
   sudo apt-get update
   sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev
+  # Dependency needed for NNPACK: the most recent version of ninja build
+  git clone https://github.com/ninja-build/ninja.git /tmp/ninja
+  pushd /tmp/ninja
+  git checkout release
+  python configure.py --bootstrap
+  mkdir -p $HOME/.local/bin
+  install -m 755 /tmp/ninja/ninja $HOME/.local/bin/ninja
+  popd
+  export PATH=$HOME/.local/bin:$PATH
+  # Dependencies needed for NNPACK: PeachPy and confu
+  pip install --upgrade git+https://github.com/Maratyszcza/PeachPy
+  pip install --upgrade git+https://github.com/Maratyszcza/confu
   pip install numpy
-
 
   #########################
   # Install MKL if needed #

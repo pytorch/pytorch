@@ -20,11 +20,13 @@ file(GLOB_RECURSE tmp *_test.cc)
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
 
-# ---[ If Windows, remove the pthread files.
-if(WIN32)
-  file(GLOB_RECURSE tmp pthread*)
-  exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
-endif()
+# ---[ threadpool/pthreadpool* is a local modification of the NNPACK
+# pthreadpool with a very similar interface. We used it internally to
+# wait on such changes to be merged to the upstream pthreadpool repo.
+# For the open source version, we do not need to use these files as we
+# will directly link nnpack pthreadpool.
+file(GLOB_RECURSE tmp pthreadpool*)
+exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
 
 # ---[ GPU test files
 file(GLOB_RECURSE tmp *_gpu_test.cc)

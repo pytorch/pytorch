@@ -1,4 +1,6 @@
+#ifdef CAFFE2_USE_MKL
 #include <mkl_service.h>
+#endif
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -6,8 +8,15 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-namespace caffe2 {
+CAFFE2_DEFINE_int(
+    caffe2_nnpack_num_threads, 1,
+    "The number of nnpack pthreadpool threads.");
+CAFFE2_DEFINE_bool(
+    caffe2_nnpack_use_mkl_num_threads, true,
+    "If MKL is built, this sets nnpack to use the same number of threads as "
+    "MKL does. This overrides caffe2_nnpack_num_threads if set.");
 
+namespace caffe2 {
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions
 ////////////////////////////////////////////////////////////////////////////////
@@ -53,8 +62,16 @@ pthreadpool_t nnpack_threadpool() {
     enum nnp_status nnpack_status = nnp_initialize();
     CAFFE_ENFORCE(
         nnpack_status == nnp_status_success, "NNPack is not supported here!");
-    auto num_mkl_threads = mkl_get_max_threads();
-    nnpack_threadpool_ = pthreadpool_create(num_mkl_threads);
+    int num_threads = FLAGS_caffe2_nnpack_num_threads;
+    if (FLAGS_caffe2_nnpack_use_mkl_num_threads) {
+#ifdef CAFFE2_USE_MKL
+      num_threads = mkl_get_max_threads();
+#else
+      VLOG(1) << "I am asked to use MKL num of threads for NNPACK but this "
+                 "Caffe2 is not built with MKL. Skipping.";
+#endif
+    }
+    nnpack_threadpool_ = pthreadpool_create(num_threads);
   }
   return nnpack_threadpool_;
 }
@@ -76,8 +93,12 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
         this->order_ == StorageOrder::NCHW,
         "NNPack only supports NCHW order. Please consider adding "
         "TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
+#ifdef CAFFE2_USE_FBCODE
+    // Facebook's nnpack build assumes existence of avx2, so we explicitly
+    // check if the machine has avx2 support.
     OPERATOR_NEEDS_FEATURE(
         __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
+#endif
   }
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -201,8 +222,12 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
     OPERATOR_NEEDS_FEATURE(
         this->pad_b_ == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
+#ifdef CAFFE2_USE_FBCODE
+    // Facebook's nnpack build assumes existence of avx2, so we explicitly
+    // check if the machine has avx2 support.
     OPERATOR_NEEDS_FEATURE(
         __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
+#endif
   }
   bool RunOnDeviceWithOrderNCHW() override;
 
