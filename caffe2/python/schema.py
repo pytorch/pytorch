@@ -635,20 +635,25 @@ def Map(
     )
 
 
+def NamedTuple(name_prefix, *fields):
+    return Struct(* [('%s_%d' % (name_prefix, i), field)
+                     for i, field in enumerate(fields)])
+
+
 def Tuple(*fields):
     """
     Creates a Struct with default, sequential, field names of given types.
     """
-    return Struct(* [('field_%d' % i, field) for i, field in enumerate(fields)])
+    return NamedTuple('field', *fields)
 
 
-def RawTuple(num_fields):
+def RawTuple(num_fields, name_prefix='field'):
     """
     Creates a tuple of `num_field` untyped scalars.
     """
     assert isinstance(num_fields, int)
     assert num_fields >= 0
-    return Tuple(*([np.void] * num_fields))
+    return NamedTuple(name_prefix, *([np.void] * num_fields))
 
 
 def from_dtype(dtype, _outer_shape=()):

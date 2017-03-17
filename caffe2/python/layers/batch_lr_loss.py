@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
+from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
@@ -15,10 +15,13 @@ import numpy as np
 
 class BatchLRLoss(ModelLayer):
 
-    def __init__(self, model, input_record, name='batch_lr_loss', **kwargs):
+    def __init__(self, model, input_record, name='batch_lr_loss',
+                 average_loss=True, **kwargs):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
 
-        schema.is_schema_subset(
+        self.average_loss = average_loss
+
+        assert schema.is_schema_subset(
             schema.Struct(
                 ('label', schema.Scalar()),
                 ('prediction', schema.Scalar())
@@ -46,4 +49,13 @@ class BatchLRLoss(ModelLayer):
             [class_probabilities] + label,
             net.NextScopedBlob('cross_entropy'),
         )
-        net.AveragedLoss(xent, self.output_schema.field_blobs())
+        if 'weight' in self.input_record.fields:
+            xent = net.Mul(
+                [xent, self.input_record.weight()],
+                net.NextScopedBlob('weighted_scross_entropy'),
+            )
+
+        if self.average_loss:
+            net.AveragedLoss(xent, self.output_schema.field_blobs())
+        else:
+            net.ReduceFrontSum(xent, self.output_schema.field_blobs())
