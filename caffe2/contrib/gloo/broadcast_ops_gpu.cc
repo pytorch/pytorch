@@ -8,16 +8,12 @@ namespace caffe2 {
 namespace gloo {
 
 template <class Context>
-void BroadcastOp<Context>::initialize() {
-  auto* output = Output(OUTPUT);
-  const auto& context =
-      OperatorBase::Input<std::shared_ptr<::gloo::Context>>(COMM);
-  if (output->template IsType<float>()) {
-    auto ptrs = getPointers<float>();
+void BroadcastOp<Context>::initializeAlgorithm() {
+  if (init_.template IsType<float>()) {
     algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<float>(
-        context, ptrs, output->size(), root_));
+        init_.context, init_.template getOutputs<float>(), init_.size, root_));
   } else {
-    CAFFE_ENFORCE(false, "Unhandled type: ", output->meta().name());
+    CAFFE_ENFORCE(false, "Unhandled type: ", init_.meta.name());
   }
 }
 
