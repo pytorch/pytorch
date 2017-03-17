@@ -384,9 +384,9 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(a.grad_fn)
         next_functions = a.grad_fn.next_functions
         self.assertEqual(len(next_functions), 2)
-        self.assertIs(next_functions[0][0], x)
+        self.assertIsInstance(next_functions[0][0], torch._C._functions.AccumulateGrad)
         self.assertEqual(next_functions[0][1], 0)
-        self.assertIs(next_functions[1][0], y)
+        self.assertIsInstance(next_functions[1][0], torch._C._functions.AccumulateGrad)
         self.assertEqual(next_functions[1][1], 0)
 
         b = a + 5
@@ -980,7 +980,7 @@ function_tests = [
     (Mul, (), ((M, M), (M, M))),
     (Div, (), ((M, M), torch.rand(M, M) + 5e-2)),
     (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M, M) + 0.1)),
-    (AddConstant, (3.14,), ((L, L),)),
+    (AddConstant, (3.14,), ((2, 2),)),
     (SubConstant, (3.14,), ((L, L),)),
     (SubConstant, (3.14, True), ((L, L),), 'from_tensor'),
     (MulConstant, (3.14,), ((L, L),)),

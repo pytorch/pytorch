@@ -212,9 +212,11 @@ class TestNN(NNTestCase):
         if hasattr(module, 'weight') and module.weight is not None:
             if module.weight.grad is not None:
                 module.weight.grad.data.zero_()
+                module.weight.grad.detach_()
         if hasattr(module, 'bias') and module.bias is not None:
             if module.bias.grad is not None:
                 module.bias.grad.data.zero_()
+                module.bias.grad.detach_()
 
     def _get_parameters(self, module):
         params = []

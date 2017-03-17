@@ -1,6 +1,7 @@
 #include <Python.h>
 #include "batch_normalization.h"
 #include "convolution.h"
+#include "accumulate_grad.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/utils/tuple_parser.h"
 
@@ -69,6 +70,9 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   static PyTypeObject ConvClass, ConvBackwardClass;
   addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd");
   addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward");
+
+  static PyTypeObject AccumulateGradClass;
+  addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad");
 
   THPObjectPtr parent = PyImport_ImportModule("torch._C");
   if (!parent) return false;
