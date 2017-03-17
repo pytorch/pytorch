@@ -21,6 +21,16 @@
 #include <unistd.h>
 #endif
 
+// Caffe2 version. The plan is to increment the minor version every other week
+// as a track point for bugs, until we find a proper versioning cycle.
+
+#define CAFFE2_VERSION_MAJOR 0
+#define CAFFE2_VERSION_MINOR 5
+#define CAFFE2_VERSION_PATCH 0
+#define CAFFE2_VERSION                                         \
+  (CAFFE2_VERSION_MAJOR * 10000 + CAFFE2_VERSION_MINOR * 100 + \
+   CAFFE2_VERSION_PATCH)
+
 namespace caffe2 {
 
 // Data type for caffe2 Index/Size. We use size_t to be safe here as well as for
