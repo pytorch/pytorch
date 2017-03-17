@@ -118,6 +118,17 @@ class TestLayers(test_util.TestCase):
         loss = self.model.BatchSigmoidCrossEntropyLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
+    def testBatchSoftmaxLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, tuple()))),
+            ('prediction', schema.Scalar((np.float32, (32,))))
+        ))
+        loss = self.model.BatchSoftmaxLoss(input_record)
+        self.assertEqual(schema.Struct(
+            ('softmax', schema.Scalar((np.float32, (32,)))),
+            ('loss', schema.Scalar(np.float32)),
+        ), loss)
+
     def testFunctionalLayer(self):
         def normalize(net, in_record, out_record):
             mean = net.ReduceFrontMean(in_record(), 1)
