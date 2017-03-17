@@ -9,7 +9,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   result.reserve(outputs.size());
   if (flags.is_volatile) {
     for (auto& output : outputs) {
-     result.emplace_back(std::make_shared<Variable>(std::move(output), false, true));
+     result.emplace_back(Variable::of(std::move(output), true));
     }
   } else {
     auto grad_fn = ctr(std::move(flags));

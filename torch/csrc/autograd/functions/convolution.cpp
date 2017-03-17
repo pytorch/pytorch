@@ -2,6 +2,7 @@
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"
+#include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -309,9 +310,12 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     grad_weight = view3d(*grad_weight);
   }
 
-  return as_variable_list(Variable::of(std::move(grad_input)),
-                          Variable::of(std::move(grad_weight)),
-                          Variable::of(std::move(grad_bias)));
+  auto outputs =  as_tensor_list(std::move(grad_input),
+                                 std::move(grad_weight),
+                                 std::move(grad_bias));
+  return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<Error>("ConvBackward is not differentiable", std::move(f));
+  });
 };
 
 auto ConvBackward::releaseVariables() -> void {

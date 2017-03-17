@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/variable.h"
 
+#include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
 using namespace torch;
@@ -10,21 +11,17 @@ namespace torch { namespace autograd {
 Variable::Variable(
   std::unique_ptr<thpp::Tensor> data,
   bool requires_grad,
-  bool is_volatile,
-  bool is_leaf)
+  bool is_volatile)
     : data(std::move(data))
     , grad_fn(nullptr)
     , grad(nullptr)
     , version_counter(new VariableVersion())
     , requires_grad(requires_grad)
     , is_volatile(is_volatile)
-    , is_leaf(is_leaf)
     , output_nr(0)
     , pyobj(nullptr)
 {
   if (!this->data) throw std::runtime_error("Variable data is NULL");
-  // Function fields
-  this->is_executable = requires_grad;
 }
 
 Variable::Variable(
@@ -36,46 +33,33 @@ Variable::Variable(
     , version_counter(new VariableVersion())
     , requires_grad(grad_fn->is_executable)
     , is_volatile(false)
-    , is_leaf(false)
     , output_nr(grad_fn->num_inputs++)
     , pyobj(nullptr)
 {
   if (!this->data) throw std::runtime_error("Variable data is NULL");
-  this->is_executable = this->requires_grad;
 }
 
-auto Variable::accumulate_grad(std::shared_ptr<Variable> gradOutput) -> void {
-  if (!pre_hooks.empty()) {
-    for (auto& hook : pre_hooks) {
-      gradOutput = (*hook)(variable_list({gradOutput}))[0];
-    }
-  }
-  AutoGPU auto_gpu(gradOutput->data->getDevice());
-  if (!grad) {
-    std::unique_ptr<Tensor> data(gradOutput->data->clone());
-    grad = std::make_shared<Variable>(std::move(data), false, true);
-  } else if (grad->data->isSparse() && !gradOutput->data->isSparse()) {
-    auto* sum = gradOutput->data->clone();
-    sum->cadd(*sum, *grad->data);
-    grad->data.reset(sum);
-  } else {
-    grad->data->cadd(*grad->data, *gradOutput->data);
-  }
-}
+auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
+  using weak_type = std::weak_ptr<Function>;
 
-auto Variable::apply(const variable_list& gradOutputs) -> variable_list {
-  if (grad_fn) {
-    throw std::logic_error("non-leaf variable saved in a graph!");
-  }
-  if (**version_counter != 0) {
-    throw std::runtime_error("leaf variable was used in an inplace operation");
-  }
-  if (gradOutputs.size() != 1) {
-    throw std::runtime_error(std::string("variable expected 1 grad_output but got ") +
-                             std::to_string(gradOutputs.size()));
-  }
-  accumulate_grad(gradOutputs[0]);
-  return variable_list();
+  static std::shared_ptr<Function> null_shared_ptr;
+  static weak_type null_weak_ptr;
+
+  if (!requires_grad) return std::shared_ptr<Function>();
+
+  auto result = grad_accumulator.lock();
+  if (result) return result;
+
+  // That didn't work, we need to allocate it, but taking into account that other
+  // threads might be doing the same thing.
+  std::lock_guard<std::mutex> lock(grad_accumulator_lock);
+
+  result = grad_accumulator.lock();
+  if (result) return result;
+
+  result = std::make_shared<AccumulateGrad>(shared_from_this());
+  grad_accumulator = result;
+  return result;
 }
 
 auto Variable::save() const -> SavedVariable {

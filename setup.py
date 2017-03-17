@@ -281,6 +281,8 @@ main_sources = [
     "torch/csrc/autograd/functions/batch_normalization.cpp",
     "torch/csrc/autograd/functions/convolution.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
+    "torch/csrc/autograd/functions/tensor.cpp",
+    "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN_generic.cpp",
