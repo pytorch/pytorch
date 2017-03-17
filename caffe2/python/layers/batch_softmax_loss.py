@@ -1,0 +1,58 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from caffe2.python import core, schema
+from caffe2.python.layers.layers import ModelLayer
+from caffe2.python.layers.tags import Tags
+import numpy as np
+
+
+class BatchSoftmaxLoss(ModelLayer):
+    def __init__(
+        self,
+        model,
+        input_record,
+        name='batch_softmax_loss',
+        **kwargs
+    ):
+        super(BatchSoftmaxLoss, self).__init__(
+            model, name, input_record, **kwargs)
+
+        assert schema.is_schema_subset(
+            schema.Struct(
+                ('label', schema.Scalar()),
+                ('prediction', schema.Scalar()),
+            ),
+            input_record
+        )
+        self.tags.update({Tags.TRAIN_ONLY})
+
+        self.output_schema = schema.Struct(
+            (
+                'softmax', schema.Scalar(
+                    input_record.prediction.field_type(),
+                    model.net.NextScopedBlob(name + '_softmax')
+                )
+            ),
+            (
+                'loss', schema.Scalar(
+                    np.float32, model.net.NextScopedBlob(name + '_loss')
+                )
+            ),
+        )
+
+    def add_ops(self, net):
+        label = self.input_record.label.field_blobs()
+        if self.input_record.label.field_types()[0].base != np.int32:
+            label = [
+                net.Cast(label,
+                         net.NextScopedBlob('int32_label'),
+                         to=core.DataType.INT32)
+            ]
+
+        net.SoftmaxWithLoss(
+            self.input_record.prediction.field_blobs() + label,
+            self.output_schema.field_blobs()
+        )
