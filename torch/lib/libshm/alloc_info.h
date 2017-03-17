@@ -1,3 +1,6 @@
+#pragma once
+
+#include <unistd.h>
 
 struct AllocInfo {
   pid_t pid;
