@@ -21,7 +21,7 @@ auto Function::flags(const variable_list& inputs) -> FunctionFlags {
       if (var->grad_fn) {
         f.next_functions[i] = std::make_pair<>(var->grad_fn, var->output_nr);
       } else {
-        f.next_functions[i] = std::make_pair<>(var, 0);
+        f.next_functions[i] = std::make_pair<>(var->get_grad_accumulator(), 0);
       }
     }
   }

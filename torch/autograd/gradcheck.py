@@ -12,10 +12,14 @@ def iter_gradients(x):
                 yield result
 
 
-def zero_gradients(i):
-    for t in iter_gradients(i):
-        if t is not None:
-            t.zero_()
+def zero_gradients(x):
+    if isinstance(x, Variable):
+        if x.grad is not None:
+            x.grad.detach_()
+            x.grad.data.zero_()
+    else:
+        for elem in x:
+            zero_gradients(elem)
 
 
 def make_jacobian(input, num_out):
