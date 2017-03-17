@@ -132,7 +132,7 @@ class ModelHelperBase(object):
         else:
             return self._param_info
 
-    def GetParams(self, namescope=None):
+    def GetParams(self, namescope=None, top_scope=False):
         '''
         Returns the params in current namescope
         '''
@@ -144,6 +144,11 @@ class ModelHelperBase(object):
 
         if namescope == '':
             return self.params[:]
+        elif top_scope:
+            return [
+                p for p in self.params
+                if p.GetNameScope().startswith(namescope)
+            ]
         else:
             return [p for p in self.params if
                     p.GetNameScope().startswith(namescope)]
