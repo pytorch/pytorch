@@ -56,14 +56,16 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   THPUtils_assert(num_variables == num_gradients, "got %ld variables and %ld "
       "gradients", num_variables, num_gradients);
 
-  function_list vars(num_variables);
+  function_list roots(num_variables);
   variable_list grads(num_variables);
   for (int i = 0; i < num_variables; i++) {
     PyObject *_variable = PyTuple_GET_ITEM(variables, i);
     THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
     auto& variable = ((THPVariable*)_variable)->cdata;
-    vars[i] = std::make_pair<>(variable, 0);
+    auto grad_fn = variable->grad_fn ? variable->grad_fn : variable->get_grad_accumulator();
+    int output_nr = variable->grad_fn ? variable->output_nr : 0;
+    roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
 
     PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
     if (THPVariable_Check(grad)) {
@@ -78,7 +80,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
   try {
     AutoNoGIL no_gil;
-    engine.execute(vars, grads, keep_graph);
+    engine.execute(roots, grads, keep_graph);
   } catch (python_error &e) {
     e.restore();
     return nullptr;
