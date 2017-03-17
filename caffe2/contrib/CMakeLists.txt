@@ -1,4 +1,5 @@
 add_subdirectory(nccl)
+add_subdirectory(nnpack)
 
 # Finally pass the src lists back to the parent
 

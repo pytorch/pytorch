@@ -42,6 +42,18 @@ else()
   message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
 endif()
 
+# ---[ NNPACK
+if (USE_NNPACK)
+  include("cmake/External/nnpack.cmake")
+  if (NNPACK_FOUND)
+    include_directories(SYSTEM ${NNPACK_INCLUDE_DIRS})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${NNPACK_LIBRARIES})
+  else()
+    message(WARNING "Not compiling with NNPACK. Suppress this warning with -DUSE_NNPACK=OFF")
+    set(USE_NNPACK OFF)
+  endif()
+endif()
+
 # ---[ Google-glog
 if (USE_GLOG)
   include("cmake/External/glog.cmake")
