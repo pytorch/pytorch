@@ -1,7 +1,7 @@
 #ifndef CAFFE2_OPERATORS_TOP_K_H_
 #define CAFFE2_OPERATORS_TOP_K_H_
 
-#include "caffe2/caffe2/core/logging.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 

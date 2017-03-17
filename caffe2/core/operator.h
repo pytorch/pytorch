@@ -117,7 +117,7 @@ class OperatorBase {
 #define USE_SIMPLE_BASE_CTOR_DTOR(name)                                        \
   name(const OperatorDef& operator_def, Workspace* ws)                         \
       : OperatorBase(operator_def, ws) {}                                      \
-  virtual ~name() {}
+  virtual ~name() noexcept {}
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
@@ -153,7 +153,7 @@ class Operator : public OperatorBase {
     // constructors will run on that device.
     context_.SwitchToDevice(0);
   }
-  virtual ~Operator() {}
+  virtual ~Operator() noexcept {}
 
   inline const Tensor<Context>& Input(int idx) {
     return OperatorBase::template Input<Tensor<Context> >(idx); }
@@ -220,7 +220,7 @@ class Operator : public OperatorBase {
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
   name(const OperatorDef& operator_def, Workspace* ws)                         \
       : Operator<Context>(operator_def, ws) {}                                 \
-  virtual ~name() {}
+  virtual ~name() noexcept {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
 // an op work on different input types (e.g. i32 vs i64 indices) or special-case
