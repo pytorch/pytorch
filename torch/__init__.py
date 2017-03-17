@@ -31,6 +31,13 @@ __all__ = [
 # automatically filled by the dynamic loader.
 import os as _dl_flags
 
+# if we have numpy, it *must* be imported before the call to setdlopenflags()
+# or there is risk that later c modules will segfault when importing numpy
+try:
+    import numpy as np
+except:
+    pass
+
 # first check if the os package has the required flags
 if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
     try:

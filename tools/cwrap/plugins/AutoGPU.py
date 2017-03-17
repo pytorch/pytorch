@@ -16,6 +16,8 @@ class AutoGPU(CWrapPlugin):
 """
 
     def process_option_code_template(self, template, option):
+        if not option.get('auto_gpu', True):
+            return template
         call = 'THCPAutoGPU __autogpu_guard = THCPAutoGPU(args{});'.format(
             ', (PyObject*)self' if self.has_self else '')
 

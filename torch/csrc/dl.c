@@ -18,9 +18,9 @@ static struct PyModuleDef torchdlmodule = {
 #endif
 
 #if PY_MAJOR_VERSION == 2
-PyMODINIT_FUNC init_dl()
+PyMODINIT_FUNC init_dl(void)
 #else
-PyMODINIT_FUNC PyInit__dl()
+PyMODINIT_FUNC PyInit__dl(void)
 #endif
 {
 

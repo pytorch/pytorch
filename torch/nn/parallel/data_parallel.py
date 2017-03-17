@@ -1,7 +1,6 @@
 import torch
-from torch.autograd import Variable
 from ..modules import Module
-from .scatter_gather import scatter, gather
+from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
 from .parallel_apply import parallel_apply
 
@@ -35,10 +34,7 @@ class DataParallel(Module):
 
     Example::
 
-        >>> device_ids=[0, 1, 2]
-        >>> net = torch.nn.DataParallel(model, device_ids=device_ids)
-        >>> input_var.size(0) % len(device_ids)
-        0
+        >>> net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
         >>> output = net(input_var)
     """
 
@@ -58,46 +54,18 @@ class DataParallel(Module):
             self.module.cuda(device_ids[0])
 
     def forward(self, *inputs, **kwargs):
-        def _to_cuda(obj):
-            if isinstance(obj, Variable):
-                return obj.cuda()
-            if isinstance(obj, tuple) or isinstance(obj, list):
-                return type(obj)((map(_to_cuda, obj)))
-            return obj
-
+        inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         if len(self.device_ids) == 1:
-            with torch.cuda.device(self.device_ids[0]):
-                inputs_cuda = _to_cuda(inputs)
-                if kwargs:
-                    gpu_dict = {}
-                    for key in kwargs.keys():
-                        gpu_dict[key] = _to_cuda(kwargs[key])
-                    return self.module(*inputs_cuda, **gpu_dict)
-                else:
-                    return self.module(*inputs_cuda)
-
-        replicas = self.replicate(self.module, self.device_ids)
-        scattered = self.scatter(inputs, self.device_ids)
-
-        gpu_dicts = None
-        if kwargs:
-            scatter_kwargs = {}
-            for key in kwargs.keys():
-                scatter_kwargs[key] = self.scatter(
-                    _to_cuda(kwargs[key]), self.device_ids)
-            gpu_dicts = tuple(
-                {key: values[i] for key, values in scatter_kwargs.items()}
-                for i in self.device_ids
-            )
-        replicas = replicas[:len(scattered)]
-        outputs = self.parallel_apply(replicas, scattered, gpu_dicts)
+            return self.module(*inputs[0], **kwargs[0])
+        replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
+        outputs = self.parallel_apply(replicas, inputs, kwargs)
         return self.gather(outputs, self.output_device)
 
     def replicate(self, module, device_ids):
         return replicate(module, device_ids)
 
-    def scatter(self, input, device_ids):
-        return scatter(input, device_ids, dim=self.dim)
+    def scatter(self, inputs, kwargs, device_ids):
+        return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
     def parallel_apply(self, replicas, inputs, kwargs):
         return parallel_apply(replicas, inputs, kwargs)
@@ -124,28 +92,12 @@ def data_parallel(module, inputs, device_ids, output_device=None, dim=0, module_
     if not isinstance(inputs, tuple):
         inputs = (inputs,)
 
-    if not device_ids:
-        if module_kwargs is None:
-            return module(*inputs)
-        else:
-            return module(*inputs, **module_kwargs)
-
     if output_device is None:
         output_device = device_ids[0]
 
-    replicas = replicate(module, device_ids)
-    scattered = scatter(inputs, device_ids, dim)
-
-    gpu_dicts = None
-    if module_kwargs:
-        scatter_kwargs = {}
-        for key in module_kwargs.keys():
-            scatter_kwargs[key] = scatter(module_kwargs[key], device_ids, dim)
-        gpu_dicts = tuple(
-            {key: values[i] for key, values in scatter_kwargs.items()}
-            for i in device_ids
-        )
-
-    replicas = replicas[:len(scattered)]
-    outputs = parallel_apply(replicas, scattered, gpu_dicts)
+    inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
+    if len(device_ids) == 1:
+        return module(*inputs[0], **module_kwargs[0])
+    replicas = replicate(module, device_ids[:len(inputs)])
+    outputs = parallel_apply(replicas, inputs, module_kwargs)
     return gather(outputs, output_device, dim)

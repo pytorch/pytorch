@@ -97,7 +97,7 @@ class NLLLoss(_WeightedLoss):
         >>> m = nn.LogSoftmax()
         >>> loss = nn.NLLLoss()
         >>> # input is of size nBatch x nClasses = 3 x 5
-        >>> input = autograd.Variable(torch.randn(3, 5))
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
         >>> # each element in target has to have 0 <= value < nclasses
         >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
         >>> output = loss(m(input), target)

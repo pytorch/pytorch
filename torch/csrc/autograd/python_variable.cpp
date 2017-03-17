@@ -6,6 +6,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
+#include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
@@ -28,7 +29,9 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, std::shared_ptr<Vari
 
 PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
 {
-  if (var->pyobj) {
+  if (!var) {
+    Py_RETURN_NONE;
+  } else if (var->pyobj) {
     Py_INCREF(var->pyobj);
   } else {
     var->pyobj = THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var);
@@ -63,6 +66,16 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->data);
   Py_VISIT(self->backward_hooks);
+  if (self->cdata) {
+    if (auto fn = dynamic_cast<PyFunction*>(self->cdata->creator.get())) {
+      Py_VISIT(fn->obj);
+    }
+    for (auto& hook : self->cdata->pre_hooks) {
+      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+  }
   return 0;
 }
 
@@ -70,15 +83,17 @@ static int THPVariable_clear(THPVariable *self)
 {
   Py_CLEAR(self->data);
   Py_CLEAR(self->backward_hooks);
+  if (self->cdata) {
+    self->cdata->pyobj = nullptr;
+  }
+  self->cdata.reset();
   return 0;
 }
 
 static void THPVariable_dealloc(THPVariable* self)
 {
   PyObject_GC_UnTrack(self);
-  Py_XDECREF(self->data);
-  Py_XDECREF(self->backward_hooks);
-  self->cdata->pyobj = nullptr;
+  THPVariable_clear(self);
   self->cdata.~shared_ptr<Variable>();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -173,13 +188,7 @@ int THPVariable_set_creator(THPVariable *self, PyObject *obj)
 PyObject * THPVariable_get_data(THPVariable *self)
 {
   if (!self->data) {
-    auto& var = *self->cdata;
-    PyTypeObject* type = torch::getPyTypeObject(*var.data);
-    self->data = type->tp_alloc(type, 0);
-    if (self->data) {
-      ((torch::THPVoidTensor*)self->data)->cdata =
-          (torch::THVoidTensor *)var.data->retain().cdata();
-    }
+    self->data = torch::createPyObject(*self->cdata->data);
   }
   Py_INCREF(self->data);
   return self->data;
@@ -275,40 +284,6 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
   return 0;
 }
 
-struct PyVariableHook : public VariableHook {
-  PyVariableHook(PyObject* dict) : dict(dict) {
-    Py_INCREF(dict);
-  }
-  ~PyVariableHook() {
-    AutoGIL gil;
-    Py_DECREF(dict);
-  }
-
-  std::shared_ptr<Variable> operator()(const std::shared_ptr<Variable>& _grad) override {
-    AutoGIL gil;
-
-    THPObjectPtr grad = THPVariable_Wrap(_grad);
-    if (!grad) throw python_error();
-
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while (PyDict_Next(dict, &pos, &key, &value)) {
-      THPObjectPtr res = PyObject_CallFunctionObjArgs(value, grad.get(), nullptr);
-      if (!res) throw python_error();
-      if (res == Py_None) continue;
-      if (!PyObject_IsInstance(res.get(), THPVariableClass)) {
-        PyErr_Format(PyExc_TypeError, "expected Variable, but hook returned '%s'",
-            THPUtils_typename(res.get()));
-        throw python_error();
-      }
-      grad = std::move(res);
-    }
-    return ((THPVariable*)grad.get())->cdata;
-  }
-
-  PyObject* dict;
-};
-
 PyObject *THPVariable_get_backwards_hooks(THPVariable *self)
 {
   if (self->backward_hooks) {
@@ -326,10 +301,9 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
   Py_XINCREF(obj);
   Py_XDECREF(self->backward_hooks);
   self->backward_hooks = obj;
+  self->cdata->pre_hooks.clear();
   if (obj) {
-    self->cdata->backward_hook.reset(new PyVariableHook(obj));
-  } else {
-    self->cdata->backward_hook.reset();
+    self->cdata->pre_hooks.emplace_back(new PyFunctionPreHook(obj, 0));
   }
   return 0;
 }

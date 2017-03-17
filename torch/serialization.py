@@ -193,7 +193,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
 
 
 def load(f, map_location=None, pickle_module=pickle):
-    """Loads an object saved with torch.save from a disk file.
+    """Loads an object saved with :func:`torch.save` from a file.
 
     torch.load can dynamically remap storages to be loaded on a different device
     using the map_location argument. If it's a callable, it will be called with
@@ -213,6 +213,13 @@ def load(f, map_location=None, pickle_module=pickle):
         map_location: a function or a dict specifying how to remap storage locations
         pickle_module: module used for unpickling metadata and objects (has to match
             the pickle_module used to serialize file)
+
+    Example:
+        >>> torch.load('tensors.pt')
+        # Load all tensors onto the CPU
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
+        # Map tensors from GPU 1 to GPU 0
+        >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
     """
     new_fd = False
     if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
@@ -237,7 +244,7 @@ def _load(f, map_location, pickle_module):
     else:
         def restore_location(storage, location):
             result = map_location(storage, location)
-            if not result:
+            if result is None:
                 result = default_restore_location(storage, location)
             return result
 

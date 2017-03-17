@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/function_hook.h"
 
 namespace torch { namespace autograd {
 
@@ -23,8 +24,8 @@ using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
 // State used to create "backward" functions
 struct FunctionFlags {
-  bool requires_grad;
-  bool is_volatile;
+  bool requires_grad = false;
+  bool is_volatile = false;
   function_list previous_functions;
 };
 
@@ -35,14 +36,18 @@ struct Function {
     , requires_grad(false)
     , is_volatile(false)
     , is_stochastic(false)
+    , pre_hooks()
+    , post_hooks()
     {}
 
-  Function(FunctionFlags flags)
+  Function(FunctionFlags&& flags)
     : num_outputs(0)
     , previous_functions(std::move(flags.previous_functions))
     , requires_grad(flags.requires_grad)
     , is_volatile(flags.is_volatile)
     , is_stochastic(false)
+    , pre_hooks()
+    , post_hooks()
     {}
 
   Function(const Function& other) = delete;
@@ -59,6 +64,14 @@ struct Function {
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
 
+  // Function name for debugging
+  virtual std::string name();
+
+  inline bool needs_input_grad(int i) const {
+    auto& fn = previous_functions[i].first;
+    return fn && fn->requires_grad;
+  }
+
   // These variables are usually only meaningful for "backward" functions.
   // num_outputs is the number of outputs of corresponding "forward" function;
   // it's actually the number of inputs of this function.
@@ -67,6 +80,8 @@ struct Function {
   bool requires_grad;
   bool is_volatile;
   bool is_stochastic;
+  std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
+  std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 };
 
 
