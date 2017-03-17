@@ -282,19 +282,21 @@ set_default_tensor_type('torch.FloatTensor')
 
 from .functional import *
 
+
 ################################################################################
 # Initialize extension
 ################################################################################
 
+def manager_path():
+    import os
+    path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
+    if not os.path.exists(path):
+        raise RuntimeError("Unable to find torch_shm_manager at " + path)
+    return path.encode('utf-8')
+
+
 # Shared memory manager needs to know the exact location of manager executable
-import os
-manager_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
-if sys.version_info[0] >= 3:
-    manager_path = bytes(manager_path, 'ascii')
-
-_C._initExtension(manager_path)
-
-del os
+_C._initExtension(manager_path())
 del manager_path
 
 ################################################################################
