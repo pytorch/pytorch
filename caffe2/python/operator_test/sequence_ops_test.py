@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.proto import caffe2_pb2
 import hypothesis.strategies as st
 import numpy as np
 from functools import partial
@@ -218,7 +217,6 @@ class TestSequenceOps(hu.HypothesisTestCase):
             op=op,
             inputs=[data, lengths],
             reference=op_ref,
-            input_device_options={"lengths": core.DeviceOption(caffe2_pb2.CPU)},
             output_to_grad='reversed_data',
             grad_reference=op_grad_ref)
 

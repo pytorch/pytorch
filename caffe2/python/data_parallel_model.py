@@ -121,6 +121,7 @@ def Parallelize_GPU(
     grads_ordered = [param_to_grad[p] for p in
                      model_helper_obj.params if p in param_to_grad]
     non_datapar_grads = [param_to_grad[p] for p in non_datapar_params]
+
     gradients_grouped = _GroupByDevice(
         devices,
         grads_ordered,
@@ -534,7 +535,7 @@ def _GetReverseOrderedGrads(model):
 
 # A helper function to extract a parameter's name
 def stripParamName(param):
-    # Format is "a/b/c/d" -> d
+    # Format is "a/b/c/d" -> "b/c/d"
     if isinstance(param, core.GradientSlice):
         # We index GradientSlices by the indices name
         name = str(param.indices)
@@ -596,6 +597,8 @@ def _IsGPUBlob(model, blob_name):
         return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
     else:
         blob_name = "gpu_{}/{}".format(model._devices[0], blob_name)
+        if blob_name not in model._blob_to_device:
+            return True
         return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
 
 

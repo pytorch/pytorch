@@ -20,8 +20,7 @@ class ReversePackedSegsOp final : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    if (OperatorBase::Input<Tensor<CPUContext>>(LENGTHS)
-            .template IsType<int>()) {
+    if (Input(LENGTHS).template IsType<int>()) {
       DoRunWithLengthType<T, int>();
     } else {
       DoRunWithLengthType<T, long>();
@@ -35,7 +34,7 @@ class ReversePackedSegsOp final : public Operator<Context> {
   template <typename T, typename LengthType>
   void DoRunWithLengthType() {
     const auto& data = Input(DATA);
-    const auto& lengths = OperatorBase::Input<Tensor<CPUContext>>(LENGTHS);
+    const auto& lengths = Input(LENGTHS);
 
     CAFFE_ENFORCE(
         data.ndim() == 3,
@@ -58,9 +57,14 @@ class ReversePackedSegsOp final : public Operator<Context> {
     const T* data_ptr = data.template data<T>();
     const LengthType* lengths_ptr = lengths.template data<LengthType>();
 
+    vector<LengthType> lengths_host(batch_size);
+    context_.template Copy<LengthType, Context, CPUContext>(
+        batch_size, lengths_ptr, &lengths_host[0]);
+    context_.FinishDeviceComputation();
+
     T* rev_data_ptr = output->template mutable_data<T>();
     for (TIndex i = 0; i < batch_size; i++) {
-      const auto& seg_length = lengths_ptr[i];
+      const auto& seg_length = lengths_host[i];
       CAFFE_ENFORCE_LE(seg_length, max_length);
       TIndex j = 0;
       for (; j < seg_length; j++) {
