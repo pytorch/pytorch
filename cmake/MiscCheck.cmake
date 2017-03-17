@@ -54,5 +54,13 @@ endif()
 
 # ---[ If we are using msvc, set no warning flags
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
-  message(STATUS "Adding no warning argument to the compiler")
+  add_compile_options(
+      /wd4018 # (3): Signed/unsigned mismatch
+      /wd4065 # (3): switch with default but no case. Protobuf related.
+      /wd4244 # (2/3/4): Possible loss of precision
+      /wd4267 # (3): Conversion of size_t to smaller type. Possible loss of data.
+      /wd4506 # (1): no definition for inline function. Protobuf related.
+      /wd4800 # (3): Forcing non-boolean value to true or false.
+      /wd4996 # (3): Use of a deprecated member
+  )
 endif()
