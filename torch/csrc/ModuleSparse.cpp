@@ -89,13 +89,7 @@ static PyObject * TH_CONCAT_2(THSPModule_, name)(PyObject *_unused, PyObject *ar
   }                                                                            \
                                                                                \
 dispatch:                                                                      \
-  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
-  THPUtils_assert(methods, "Type %s doesn't implement stateless methods",      \
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor)); \
-  THPObjectPtr method = PyObject_GetAttrString(methods, #name);                \
-  THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor)); \
-  return PyObject_Call(method, args, kwargs);                                  \
+  return THPUtils_dispatchStateless(tensor, #name, args, kwargs);              \
 }
 
 IMPLEMENT_SPARSE_STATELESS(spmm);

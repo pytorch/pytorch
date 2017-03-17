@@ -62,7 +62,7 @@ Just pass an additional ``async=True`` argument to a :meth:`~torch.Tensor.cuda`
 call. This can be used to overlap data transfers with computation.
 
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
-pinned memory by passing ``pinned=True`` to its constructor.
+pinned memory by passing ``pin_memory=True`` to its constructor.
 
 .. _cuda-nn-dataparallel-instead:
 

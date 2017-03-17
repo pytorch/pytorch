@@ -32,16 +32,19 @@ class SetItem(InplaceFunction):
 
     def forward(self, i, value=None):
         self.mark_dirty(i)
-        if value is None:
+        if value is None:  # value is scalar
             value = self.value
+        else:  # value is Tensor
+            self.value_size = value.size()
         i._set_index(self.index, value)
         return i
 
     def backward(self, grad_output):
-        if self.value is None:
+        if self.value is None:  # value is Tensor
             grad_input = grad_output.clone()
             grad_input._set_index(self.index, 0)
             grad_value = grad_output.index(self.index).clone()
+            grad_value = grad_value.view(self.value_size)
             return grad_input, grad_value
         else:
             grad_input = grad_output.clone()
@@ -110,15 +113,17 @@ class Expand(Function):
 
     def forward(self, i):
         result = i.expand(*self.sizes)
-        unsqueezed = (1,) * (len(self.sizes) - len(i.size()))
+        self.num_unsqueezed = len(self.sizes) - i.dim()
         self.expanded_dims = [dim for dim, (expanded, original)
-                              in enumerate(zip(self.sizes, unsqueezed + i.size()))
+                              in enumerate(zip(self.sizes[self.num_unsqueezed:], i.size()))
                               if expanded != original]
         self.mark_shared_storage((i, result))
         return result
 
     def backward(self, grad_output):
         grad_input = grad_output
+        for i in range(self.num_unsqueezed):
+            grad_input = grad_input.sum(0).squeeze(0)
         for dim in self.expanded_dims:
             grad_input = grad_input.sum(dim)
         return grad_input

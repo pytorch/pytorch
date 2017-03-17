@@ -70,6 +70,51 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5))
         self.assertEqual(y.grad.data, (x.data + 1) * 4)
 
+    def test_hooks_cpp(self):
+        # Tests hooks for autograd function implemented in C++
+        bn = torch.nn.BatchNorm1d(5, affine=False)
+        bn.eval()
+
+        counter = [0]
+
+        def bw_hook(grad):
+            counter[0] += 1
+            return grad * 2
+
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+        z = bn(x)
+        z.register_hook(bw_hook)
+        z.sum().backward()
+
+        self.assertEqual(counter[0], 1, 'bw_hook not called')
+        self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
+
+    @unittest.skipIf(sys.version_info[0] == 2, "Python 2 doesn't collect cycles involving __del__")
+    def test_hooks_cycle(self):
+        import gc
+        counter = [0]
+
+        class GradHook(object):
+            def __init__(self, var):
+                self.var = var
+
+            def __del__(self):
+                counter[0] += 1
+
+            def __call__(self, *args):
+                pass
+
+        def run_test():
+            x = Variable(torch.ones(5, 5), requires_grad=True)
+            y = x * 2
+            x.register_hook(GradHook(x))
+            y.register_hook(GradHook(y))
+            y._backward_hooks[1] = GradHook(y)
+
+        run_test()
+        gc.collect()
+        self.assertEqual(counter[0], 3)
+
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
         # You should never have to use such things in your code.
@@ -84,7 +129,6 @@ class TestAutograd(TestCase):
                 return grad_x, None
 
         fn = NoneGradientFunction()
-        fn._backward_hooks = OrderedDict()
         was_called = [False]
 
         def hook(grad_input, grad_output):
@@ -95,7 +139,7 @@ class TestAutograd(TestCase):
             self.assertIsNotNone(grad_output[0])
             self.assertIsNotNone(grad_output[1])
             was_called[0] = True
-        fn._backward_hooks[id(hook)] = hook
+        fn.register_hook(hook)
 
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5))
@@ -434,6 +478,13 @@ class TestAutograd(TestCase):
         expected_grad_input[index] = 0
         self.assertEqual(x.grad.data, expected_grad_input)
         self.assertEqual(value.grad.data, torch.ones(value.size()))
+
+        # case when x is not same shape as y[1]
+        x = Variable(torch.randn(1, 2), requires_grad=True)
+        y = Variable(torch.zeros(10, 2))
+        y[1] = x
+        y.backward(torch.randn(10, 2))
+        self.assertEqual(x.size(), x.grad.size())
 
     def test_setitem(self):
         self._test_setitem((5, 5), 1)
@@ -889,6 +940,20 @@ def gather_variable(shape, index_dim, max_indices):
     return Variable(index, requires_grad=False)
 
 
+def prod_zeros(dim_size):
+    result = torch.randn(dim_size, dim_size, dim_size)
+    result[0, 1] = 0
+    result[2, 3] = 0
+    result[4, 3] = 0
+    return Variable(result, requires_grad=True)
+
+
+def prod_single_zero(dim_size):
+    result = torch.randn(dim_size, dim_size)
+    result[0, 1] = 0
+    return Variable(result, requires_grad=True)
+
+
 L = 20
 M = 10
 S = 5
@@ -952,7 +1017,10 @@ function_tests = [
     (Sum, (), ((S, S, S),)),
     (Sum, (1,), ((S, S, S),), 'dim'),
     (Prod, (), ((S, S, S),)),
+    (Prod, (), (prod_zeros(S),), 'zeros'),
+    (Prod, (), (prod_single_zero(S),), 'single_zero'),
     (Prod, (1,), ((S, S, S),), 'dim'),
+    (Prod, (1,), (prod_zeros(S),), 'zeros_dim'),
     (Addmm, (), ((S, M), (S, S), (S, M)),),
     (Addmm, (0.1, 1), ((S, M), (S, S), (S, M)), 'coef'),
     (Addbmm, (), ((S, M), (S, S, S), (S, S, M)),),
@@ -1163,13 +1231,15 @@ def unpack_variables(args):
 
 
 ignore_inplace = set((
-    'test_DivConstant_by_tensor',
+    'test_DivConstantFunction_by_tensor',
 ))
 
 
 for test in function_tests:
     cls, constructor_args, call_args = test[:3]
-    test_name = 'test_' + cls.__name__ + ('_' + test[3] if len(test) == 4 else '')
+    test_name = 'test_{}Function'.format(cls.__name__)
+    if len(test) == 4:
+        test_name += '_' + test[3]
 
     def do_test(self, cls=cls, constructor_args=constructor_args,
                 call_args=call_args, test_name=test_name):

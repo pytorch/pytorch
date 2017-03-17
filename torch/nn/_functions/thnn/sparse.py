@@ -20,7 +20,7 @@ class Embedding(Function):
 
     def _renorm(self, indices, weight):
         if indices.dim() == 2:
-            indices = indices.view(-1)
+            indices = indices.clone().view(-1)
 
         self._backend.LookupTable_renorm(
             self._backend.library_state,
@@ -77,7 +77,7 @@ class Embedding(Function):
                 indices = indices.view(-1)
 
             with torch.cuda.device_of(grad_output):
-                if torch.typename(grad_output) == 'torch.cuda.FloatTensor':
+                if grad_output.is_cuda:
                     _sorted = torch.cuda.LongTensor()
                     _indices = torch.cuda.LongTensor()
                     _count = torch.cuda.LongTensor()

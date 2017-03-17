@@ -4,6 +4,9 @@
 #include <unordered_map>
 #include <TH/TH.h>
 #include <THC/THCCachingAllocator.h>
+#ifdef WITH_NCCL
+#include <nccl.h>
+#endif
 
 #include "THCP.h"
 
@@ -312,3 +315,12 @@ PyObject * THCPModule_initExtension(PyObject *self)
   }
   return PyBool_FromLong(THCPModule_initCuda(torch_module));
 }
+
+#ifdef WITH_NCCL
+void THCPModule_useNccl()
+{
+  // Use NCCL to ensure that the symbols are loaded
+  ncclUniqueId uniqueId;
+  ncclGetUniqueId(&uniqueId);
+}
+#endif

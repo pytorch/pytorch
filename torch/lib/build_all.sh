@@ -3,10 +3,13 @@
 set -e
 
 WITH_CUDA=0
+WITH_NCCL=0
 WITH_DISTRIBUTED=0
 for arg in "$@"; do
     if [[ "$arg" == "--with-cuda" ]]; then
         WITH_CUDA=1
+    elif [[ "$arg" == "--with-nccl" ]]; then
+        WITH_NCCL=1
     elif [[ "$arg" == "--with-distributed" ]]; then
         WITH_DISTRIBUTED=1
     else
@@ -79,7 +82,7 @@ function build_nccl() {
                -DCMAKE_C_FLAGS="$C_FLAGS" \
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
-   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
+   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
    cd ../..
 }
 
@@ -91,11 +94,9 @@ if [[ $WITH_CUDA -eq 1 ]]; then
     build THC
     build THCS
     build THCUNN
-    if [[ $(uname) != 'Darwin' ]]; then
-        if [[ `ldconfig -p | grep libnccl` == '' ]]; then
-          build_nccl
-        fi
-    fi
+fi
+if [[ $WITH_NCCL -eq 1 ]]; then
+    build_nccl
 fi
 
 build THPP

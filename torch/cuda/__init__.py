@@ -39,23 +39,16 @@ def _sleep(cycles):
 
 
 def _load_cudart():
-    system = platform.system()
-    lib_name = 'libcudart.' + ('dylib' if system == 'Darwin' else 'so')
-    lib_paths = [
-        lib_name,
-        os.path.join(torch._C._cuda_getLibPath(), lib_name),
-        os.path.join('/usr/local/cuda/lib64', lib_name),
-        os.path.join('/usr/local/cuda/lib', lib_name),
-    ]
-    for path in lib_paths:
-        try:
-            return ctypes.cdll.LoadLibrary(path)
-        except OSError:
-            pass
-    raise RuntimeError("couldn't find libcudart. Make sure CUDA libraries "
-                       "are installed in a default location, or that they're in " +
-                       ("DYLD_LIBRARY_PATH" if system == 'Darwin' else "LD_LIBRARY_PATH") +
-                       ".")
+    # First check the main program for CUDA symbols
+    lib = ctypes.cdll.LoadLibrary(None)
+    if hasattr(lib, 'cudaGetErrorName'):
+        return lib
+
+    raise RuntimeError(
+        "couldn't find libcudart. Make sure CUDA libraries are installed in a"
+        "default location, or that they're in {}."
+        .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
+                'LD_LIBRARY_PATH'))
 
 
 def _check_driver():
