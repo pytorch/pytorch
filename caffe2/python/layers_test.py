@@ -32,6 +32,9 @@ class TestLayers(test_util.TestCase):
             input_feature_schema=input_feature_schema,
             trainer_extra_schema=trainer_extra_schema)
 
+    def new_record(self, schema_obj):
+        return schema.NewRecord(self.model.net, schema_obj)
+
     def get_training_nets(self):
         """
         We don't use
@@ -106,6 +109,14 @@ class TestLayers(test_util.TestCase):
 
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
+
+    def testBatchSigmoidCrossEntropyLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, (32,)))),
+            ('prediction', schema.Scalar((np.float32, (32,))))
+        ))
+        loss = self.model.BatchSigmoidCrossEntropyLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
     def testFunctionalLayer(self):
         def normalize(net, in_record, out_record):
