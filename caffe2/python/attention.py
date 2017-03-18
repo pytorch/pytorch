@@ -3,8 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
-
 
 class AttentionType:
     Regular, Recurrent = range(2)
@@ -70,6 +68,7 @@ def _calc_attention_logits_from_sum_match(
     model,
     decoder_hidden_encoder_outputs_sum,
     encoder_output_dim,
+    batch_size,
     scope
 ):
     # [encoder_length, batch_size, encoder_output_dim]
@@ -99,45 +98,14 @@ def _calc_attention_logits_from_sum_match(
         [decoder_hidden_encoder_outputs_sum_tanh_2d, attention_v],
         s(scope, 'attention_logits'),
     )
-
-    # Retrieve output shape
-    decoder_hidden_encoder_outputs_sum_shape = model.net.Shape(
-        decoder_hidden_encoder_outputs_sum,
-        s(scope, 'decoder_hidden_encoder_outputs_sum_shape')
-    )
-
-    slice_start = model.param_init_net.ConstantFill(
-        [],
-        s(scope, 'slice_start'),
-        shape=[1],
-        value=0,
-        dtype=core.DataType.INT32,
-    )
-
-    slice_end = model.param_init_net.ConstantFill(
-        [],
-        s(scope, 'slice_end'),
-        shape=[1],
-        value=2,
-        dtype=core.DataType.INT32,
-    )
-
-    encoder_length_by_batch_size_shape = model.net.Slice(
-        [
-            decoder_hidden_encoder_outputs_sum_shape,
-            slice_start,
-            slice_end
-        ],
-        s(scope, 'encoder_length_by_batch_size_shape')
-    )
-
     # [encoder_length, batch_size]
     attention_logits, _ = model.net.Reshape(
-        [attention_logits, encoder_length_by_batch_size_shape],
+        attention_logits,
         [
             attention_logits,
             s(scope, 'attention_logits_old_shape'),
         ],
+        shape=[-1, batch_size],
     )
     # [batch_size, encoder_length]
     attention_logits_transposed = model.net.Transpose(
@@ -181,6 +149,9 @@ def apply_recurrent_attention(
     decoder_hidden_state_t,
     decoder_hidden_state_dim,
     attention_weighted_encoder_context_t_prev,
+    # TODO: we need to provide batch_size for some reshape methods,
+    # ideally, we should be able to not specify it
+    batch_size,
     scope,
 ):
     weighted_prev_attention_context = _apply_fc_weight_for_sum_match(
@@ -232,6 +203,7 @@ def apply_recurrent_attention(
         model=model,
         decoder_hidden_encoder_outputs_sum=decoder_hidden_encoder_outputs_sum,
         encoder_output_dim=encoder_output_dim,
+        batch_size=batch_size,
         scope=scope
     )
 
@@ -259,6 +231,9 @@ def apply_regular_attention(
     weighted_encoder_outputs,
     decoder_hidden_state_t,
     decoder_hidden_state_dim,
+    # TODO: we need to provide batch_size for some reshape methods,
+    # ideally, we should be able to not specify it
+    batch_size,
     scope,
 ):
     weighted_decoder_hidden_state = _apply_fc_weight_for_sum_match(
@@ -288,6 +263,7 @@ def apply_regular_attention(
         model=model,
         decoder_hidden_encoder_outputs_sum=decoder_hidden_encoder_outputs_sum,
         encoder_output_dim=encoder_output_dim,
+        batch_size=batch_size,
         scope=scope
     )
 

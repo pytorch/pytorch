@@ -153,8 +153,6 @@ def lstm_with_attention_reference(
     weighted_decoder_hidden_state_t_w,
     weighted_decoder_hidden_state_t_b,
     attention_v,
-    slice_start,
-    slice_end
 ):
     encoder_outputs = np.transpose(encoder_outputs_transposed, axes=[2, 0, 1])
     decoder_input_length = input.shape[0]
@@ -241,8 +239,6 @@ def lstm_with_recurrent_attention_reference(
     weighted_decoder_hidden_state_t_w,
     weighted_decoder_hidden_state_t_b,
     attention_v,
-    slice_start,
-    slice_end
 ):
     encoder_outputs = np.transpose(encoder_outputs_transposed, axes=[2, 0, 1])
     decoder_input_length = input.shape[0]
@@ -601,7 +597,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             np.random.randn(
                 1, batch_size, encoder_output_dim).astype(np.float32)
         )
-
         inputs = [workspace.FetchBlob(name) for name in op.input]
         self.assertReferenceChecks(
             device_option=gc,
@@ -614,9 +609,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         )
         gradients_to_check = [
             index for (index, input_name) in enumerate(op.input)
-            if input_name != "decoder_input_lengths" and
-            input_name != "external/LSTMWithAttention/slice_start" and
-            input_name != "external/LSTMWithAttention/slice_end"
+            if input_name != "decoder_input_lengths"
         ]
         for param in gradients_to_check:
             self.assertGradientChecks(
@@ -741,9 +734,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         )
         gradients_to_check = [
             index for (index, input_name) in enumerate(op.input)
-            if input_name != "decoder_input_lengths" and
-            input_name != "external/LSTMWithAttention/slice_start" and
-            input_name != "external/LSTMWithAttention/slice_end"
+            if input_name != "decoder_input_lengths"
         ]
         for param in gradients_to_check:
             self.assertGradientChecks(
