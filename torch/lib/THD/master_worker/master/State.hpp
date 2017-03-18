@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace thd {
@@ -14,6 +15,7 @@ struct THDState {
   static std::vector<WorkerState> s_workers;
   thread_local static std::size_t s_current_worker;
   static std::uint64_t s_nextId;
+  static std::vector<std::string> s_errors;
 };
 
 } // namespace master

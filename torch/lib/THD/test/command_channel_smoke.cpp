@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <exception>
+#include <iostream>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -23,6 +24,9 @@ void init_worker(const int& rank, const std::string& master_addr) {
   g_mutex.unlock();
 
   assert(channel->init());
+
+  // Send error
+  channel->sendError("something went wrong");
 
   // Send.
   rpc::ByteArray arr;
@@ -55,6 +59,13 @@ void init_master(int world_size, const std::string& master_port) {
   g_mutex.unlock();
 
   assert(channel->init());
+
+  // test receiving error
+  for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
+    auto error = channel->recvError();
+    std::cout << std::get<0>(error) << " sent error: " << std::get<1>(error) << std::endl;
+    assert(std::get<1>(error) == "something went wrong");
+  }
 
   for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
     rpc::ByteArray arr;

@@ -18,14 +18,25 @@ std::unordered_map<object_id_type, std::unique_ptr<thpp::Generator>> workerGener
 } // namespace worker
 } // namespace thd
 
-using namespace thd;
+using namespace thd::rpc;
+using namespace thd::worker;
 
-void THDWorkerMain() {
-  std::unique_ptr<thd::rpc::RPCMessage> command;
-  for (;;) {
-    command = worker::workerCommandChannel->recvMessage();
-    auto msg = worker::execute(std::move(command));
-    if (msg != "")
-      fprintf(stderr, "WORKER %d: %s\n", (int)dataChannel->getRank(), msg.c_str());
+bool THDWorkerMain() {
+  std::unique_ptr<RPCMessage> command;
+  workerCommandChannel.reset(new thd::WorkerCommandChannel());
+  if (!workerCommandChannel->init()) {
+    return false;
   }
+
+  while (true) {
+    command = workerCommandChannel->recvMessage();
+    try {
+      execute(std::move(command));
+    } catch (std::exception& e) {
+      workerCommandChannel->sendError(e.what());
+      throw e;
+    }
+  }
+
+  return false;
 }
