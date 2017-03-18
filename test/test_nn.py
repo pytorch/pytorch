@@ -259,7 +259,8 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
-        test_bwd = module.register_backward_hook(lambda *args: bw_hook(1, *args))
+        test_bwd = module.register_backward_hook(
+            lambda *args: bw_hook(1, *args))
 
         output = module(input)
         self.assertEqual(counter['forwards'], 3)
@@ -816,7 +817,8 @@ class TestNN(NNTestCase):
         inputs = ((i1,), (i2,))
         modules = (l1, l2)
         expected_outputs = (expected1, expected2)
-        outputs = dp.parallel_apply(modules, inputs)
+
+        outputs = dp.parallel_apply(modules, inputs, None)
         for out, expected in zip(outputs, expected_outputs):
             self.assertEqual(out.data, expected)
 
@@ -833,27 +835,70 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
-            def forward(self, x, y):
-                return x + y
+
+            def forward(self, var1, var2, float1, var3=None):
+                if var3 is None:
+                    return float1 * (var1 * var2)
+                else:
+                    return float1 * (var1 * var2 + var3)
 
         m = TestModule()
-        x = Variable(torch.randn(5, 5).float())
-        y = Variable(torch.randn(5, 5).float())
-        expected = m(x, y)
+        var1 = Variable(torch.randn(5, 5).float(), requires_grad=True)
+        var2 = Variable(torch.randn(5, 5).float(), requires_grad=True)
+        var3 = Variable(torch.randn(5, 5).float(), requires_grad=False)
 
-        out = dp.data_parallel(m, (x, y), (0, 1))
-        self.assertEqual(out, expected)
+        float1 = torch.randn(1)[0]
+        target = Variable(torch.randn(5, 5).float()).cuda()
+        crit = nn.MSELoss()
 
-        out = dp.data_parallel(m, (x, y), (0,))
-        self.assertEqual(out, expected)
+        expected = m(var1, var2, float1)
+        loss = expected.sum()
+        loss.backward()
+        gvar1_exp = var1.grad.clone()
+        gvar2_exp = var2.grad.clone()
+
+        def local_test(out):
+            var1.grad.data.fill_(0.0)
+            var2.grad.data.fill_(0.0)
+            loss = out.sum()
+            loss.backward()
+            self.assertEqual(out, expected)
+            self.assertEqual(gvar1_exp, var1.grad)
+            self.assertEqual(gvar2_exp, var2.grad)
+
+        out = dp.data_parallel(m, (var1, var2, float1), (0, 1))
+        local_test(out)
+
+        out = dp.data_parallel(m, (var1, var2, float1), (1, 0))
+        local_test(out)
+
+        out = dp.data_parallel(m, (var1, var2, float1), (0,))
+        local_test(out)
+
+        var1.grad.data.fill_(0.0)
+        var2.grad.data.fill_(0.0)
+        expected = m(var1, var2, float1, var3=var3)
+        loss = expected.sum()
+        loss.backward()
+        gvar1_exp = var1.grad.clone()
+        gvar2_exp = var2.grad.clone()
 
         dpm = nn.DataParallel(TestModule())
-        out = dpm(x, y)
-        self.assertEqual(out, expected)
+        out = dpm(var1, var2, float1, var3=var3)
+        local_test(out)
 
         dpm = nn.DataParallel(TestModule(), device_ids=[0])
-        out = dpm(x, y)
-        self.assertEqual(out, expected)
+        out = dpm(var1, var2, float1, var3=var3)
+        local_test(out)
+
+        kwarg_wrap = {'var3': var3}
+        out = dp.data_parallel(
+            m, (var1, var2, float1), (0, 1), module_kwargs=kwarg_wrap)
+        local_test(out)
+
+        out = dp.data_parallel(
+            m, (var1, var2, float1), (0,), module_kwargs=kwarg_wrap)
+        local_test(out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_small_back(self):
@@ -1423,8 +1468,10 @@ class TestNN(NNTestCase):
         for nonlinearity in ('tanh', 'relu'):
             hx_val = torch.randn(num_layers, batch, hidden_size)
             input_val = torch.randn(seq_length, batch, input_size)
-            grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
-            grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
+            grad_output = torch.randn(
+                seq_length, batch, hidden_size * num_directions)
+            grad_hy = torch.randn(
+                num_layers * num_directions, batch, hidden_size)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
             outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
