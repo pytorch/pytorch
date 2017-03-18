@@ -369,8 +369,8 @@ class _ConvTransposeMixin(object):
         padding_shift = [0 for d in range(k)]
         for d in range(k):
             if output_diff[d] >= self.kernel_size[d]:
-                padding_shift = - \
-                    ((output_diff[d] - self.kernel_size[d] + 2) // 2)
+                padding_shift[d] = \
+                    - ((output_diff[d] - self.kernel_size[d] + 2) // 2)
             elif output_diff[d] < 0:
                 padding_shift[d] = (-output_diff[d] + 1) // 2
         padding = tuple(self.padding[d] + padding_shift[d] for d in range(k))
