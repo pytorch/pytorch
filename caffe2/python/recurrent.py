@@ -414,6 +414,7 @@ def LSTMWithAttention(
             weighted_encoder_outputs=weighted_encoder_outputs,
             decoder_hidden_state_t=hidden_t_intermediate,
             decoder_hidden_state_dim=decoder_state_dim,
+            batch_size=batch_size,
             scope=scope,
             attention_weighted_encoder_context_t_prev=(
                 attention_weighted_encoder_context_t_prev
@@ -427,6 +428,7 @@ def LSTMWithAttention(
             weighted_encoder_outputs=weighted_encoder_outputs,
             decoder_hidden_state_t=hidden_t_intermediate,
             decoder_hidden_state_dim=decoder_state_dim,
+            batch_size=batch_size,
             scope=scope,
         )
     hidden_t = step_model.Copy(hidden_t_intermediate, s('hidden_t'))
