@@ -15,7 +15,7 @@ def uniform(tensor, a=0, b=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.uniform(w)
+        >>> nn.init.uniform(w)
     """
     if isinstance(tensor, Variable):
         uniform(tensor.data, a=a, b=b)
@@ -33,7 +33,7 @@ def normal(tensor, mean=0, std=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.normal(w)
+        >>> nn.init.normal(w)
     """
     if isinstance(tensor, Variable):
         normal(tensor.data, mean=mean, std=std)
@@ -50,7 +50,7 @@ def constant(tensor, val):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.constant(w)
+        >>> nn.init.constant(w)
     """
     if isinstance(tensor, Variable):
         constant(tensor.data, val)
@@ -78,10 +78,10 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method described in "Understanding the difficulty
-       of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform distribution.
-
-       The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in + fan_out)) * sqrt(3)
+    """Fills the input Tensor or Variable with values according to the method described in "Understanding the
+    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform
+    distribution. The resulting tensor will have values sampled from U(-a, a) where a = gain * sqrt(2/(fan_in +
+    fan_out)) * sqrt(3)
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -89,7 +89,7 @@ def xavier_uniform(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.xavier_uniform(w, gain=math.sqrt(2.0))
+        >>> nn.init.xavier_uniform(w, gain=math.sqrt(2.0))
     """
     if isinstance(tensor, Variable):
         xavier_uniform(tensor.data, gain=gain)
@@ -102,11 +102,10 @@ def xavier_uniform(tensor, gain=1):
 
 
 def xavier_normal(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method described in "Understanding the difficulty
-       of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal distribution.
-
-       The resulting tensor will have values sampled from normal distribution with mean=0 and
-       std = gain * sqrt(2/(fan_in + fan_out))
+    """Fills the input Tensor or Variable with values according to the method described in "Understanding the
+    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal
+    distribution. The resulting tensor will have values sampled from normal distribution with mean=0 and std = gain *
+    sqrt(2/(fan_in + fan_out))
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -114,7 +113,7 @@ def xavier_normal(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.xavier_normal(w)
+        >>> nn.init.xavier_normal(w)
     """
     if isinstance(tensor, Variable):
         xavier_normal(tensor.data, gain=gain)
@@ -139,11 +138,10 @@ def _calculate_correct_fan(tensor, mode):
 
 
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
-    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
-       Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform distribution.
-
-       The resulting tensor will have values sampled from U(-bound, bound)
-       where bound = sqrt(2/((1 + a^2) * fan_in)) * sqrt(3)
+    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform
+    distribution. The resulting tensor will have values sampled from U(-bound, bound) where bound = sqrt(2/((1 + a^2)
+    * fan_in)) * sqrt(3)
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -153,7 +151,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_uniform(w, mode='fan_in')
+        >>> nn.init.kaiming_uniform(w, mode='fan_in')
     """
     if isinstance(tensor, Variable):
         kaiming_uniform(tensor.data, a=a, mode=mode)
@@ -166,11 +164,10 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
 
 def kaiming_normal(tensor, a=0, mode='fan_in'):
-    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into rectifiers:
-       Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal distribution.
-
-       The resulting tensor will have values sampled from normal distribution with mean=0 and
-       std = sqrt(2/((1 + a^2) * fan_in))
+    """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal
+    distribution. The resulting tensor will have values sampled from normal distribution with mean=0 and std = sqrt(
+    2/((1 + a^2) * fan_in))
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -180,7 +177,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.kaiming_normal(w, mode='fan_out')
+        >>> nn.init.kaiming_normal(w, mode='fan_out')
     """
     if isinstance(tensor, Variable):
         kaiming_normal(tensor.data, a=a, mode=mode)
@@ -192,11 +189,11 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
 
 
 def orthogonal(tensor, gain=1):
-    """Fills the input Tensor or Variable with a (semi) orthogonal matrix. The input tensor must have at least 2 dimensions,
-       and for tensors with more than 2 dimensions the trailing dimensions are flattened. viewed as 2D representation
-       with rows equal to the first dimension and columns equal to the product of  as a sparse matrix, where the
-       non-zero elements will be drawn from a normal distribution with mean=0 and std=`std`.
-       Reference: "Exact solutions to the nonlinear dynamics of learning in deep linear neural networks"-Saxe, A. et al.
+    """Fills the input Tensor or Variable with a (semi) orthogonal matrix. The input tensor must have at least 2
+    dimensions, and for tensors with more than 2 dimensions the trailing dimensions are flattened. viewed as 2D
+    representation with rows equal to the first dimension and columns equal to the product of  as a sparse matrix,
+    where the non-zero elements will be drawn from a normal distribution with mean=0 and std=`std`. Reference: "Exact
+    solutions to the nonlinear dynamics of learning in deep linear neural networks"-Saxe, A. et al.
 
     Args:
         tensor: a n-dimension torch.Tensor, where n >= 2
@@ -204,7 +201,7 @@ def orthogonal(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.orthogonal(w)
+        >>> nn.init.orthogonal(w)
     """
     if isinstance(tensor, Variable):
         orthogonal(tensor.data, gain=gain)
@@ -228,7 +225,7 @@ def orthogonal(tensor, gain=1):
 
 def sparse(tensor, sparsity, std=0.01):
     """Fills the 2D input Tensor or Variable as a sparse matrix, where the non-zero elements will be drawn from a
-       normal distribution with mean=0 and std=`std`.
+    normal distribution with mean=0 and std=`std`.
 
     Args:
         tensor: a n-dimension torch.Tensor
@@ -237,7 +234,7 @@ def sparse(tensor, sparsity, std=0.01):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nninit.sparse(w, sparsity=0.1)
+        >>> nn.init.sparse(w, sparsity=0.1)
     """
     if isinstance(tensor, Variable):
         sparse(tensor.data, sparsity, std=std)

@@ -1,6 +1,6 @@
 import torch
 from . import _tensor_str
-from ._utils import _type, _cuda, _range
+from ._utils import _type, _cuda, _range, _rebuild_tensor
 import sys
 
 
@@ -104,7 +104,9 @@ class _TensorBase(object):
         return new_tensor
 
     def __reduce__(self):
-        return (type(self), (), self.__getstate__())
+        # NOTE: _rebuild_tensor does not call __setstate__
+        args = self.__getstate__()
+        return (_rebuild_tensor, args)
 
     def __getstate__(self):
         return (self.storage(),

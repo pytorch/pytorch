@@ -180,13 +180,7 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   }                                                                            \
                                                                                \
 dispatch:                                                                      \
-  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
-  THPUtils_assert(methods, "Type %s doesn't implement stateless methods",      \
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor)); \
-  THPObjectPtr method = PyObject_GetAttrString(methods, #name);                \
-  THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor)); \
-  return PyObject_Call(method, args, kwargs);                                  \
+  return THPUtils_dispatchStateless(tensor, #name, args, kwargs);              \
 }
 
 IMPLEMENT_STATELESS(sigmoid)
@@ -326,13 +320,7 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   }                                                                            \
                                                                                \
 dispatch:                                                                      \
-  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
-  THPUtils_assert(methods, "Type %s doesn't implement stateless methods",      \
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor)); \
-  THPObjectPtr method = PyObject_GetAttrString(methods, #name);                \
-  THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor)); \
-  return PyObject_Call(method, args, kwargs);                                  \
+  return THPUtils_dispatchStateless(tensor, #name, args, kwargs);              \
 }
 
 IMPLEMENT_STATELESS_REVERSED(gt)
@@ -354,14 +342,7 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args, PyObject 
     tensor = PyTuple_GET_ITEM(args, 0);
   else if (PyTuple_Size(args) == 2)
     tensor = PyTuple_GET_ITEM(args, 1);
-
-  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
-  THPUtils_assert(methods, "Type %s doesn't implement stateless methods",
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  THPObjectPtr method = PyObject_GetAttrString(methods, "nonzero");
-  THPUtils_assert(method, "Type %s doesn't implement stateless method nonzero",
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  return PyObject_Call(method, args, kwargs);
+  return THPUtils_dispatchStateless(tensor, "nonzero", args, kwargs);
 }
 
 static PyObject * THPModule_randperm(PyObject *_unused, PyObject *args, PyObject *kwargs)
@@ -370,13 +351,7 @@ static PyObject * THPModule_randperm(PyObject *_unused, PyObject *args, PyObject
   PyObject *out;
   if (kwargs && (out = PyDict_GetItemString(kwargs, "out")))
       tensor = out;
-  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
-  THPUtils_assert(methods, "Type %s doesn't implement stateless methods",
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  THPObjectPtr method = PyObject_GetAttrString(methods, "randperm");
-  THPUtils_assert(method, "Type %s doesn't implement stateless method randperm",
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  return PyObject_Call(method, args, kwargs);
+  return THPUtils_dispatchStateless(tensor, "randperm", args, kwargs);
 }
 
 static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
@@ -397,13 +372,7 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
     PyErr_Clear();
   }
 
-  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
-  THPUtils_assert(methods, "Type %s doesn't implement statless methods",
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  THPObjectPtr method = PyObject_GetAttrString(methods, "cat");
-  THPUtils_assert(method, "Type %s doesn't implement stateless method cat",
-      tensor == THPDefaultTensorClass ? THPUtils_classname(tensor) : THPUtils_typename(tensor));
-  return PyObject_Call(method, args, NULL);
+  return THPUtils_dispatchStateless(tensor, "cat", args, NULL);
 }
 
 PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)

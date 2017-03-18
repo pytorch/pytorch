@@ -179,7 +179,7 @@ class Module(object):
         that removes the hook from the module.
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[id(handle)] = hook
+        self._backward_hooks[handle.id] = hook
         return handle
 
     def register_forward_hook(self, hook):
@@ -195,7 +195,7 @@ class Module(object):
         that removes the hook from the module.
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        self._forward_hooks[id(handle)] = hook
+        self._forward_hooks[handle.id] = hook
         return handle
 
     def __call__(self, *input, **kwargs):
@@ -211,12 +211,10 @@ class Module(object):
             var = var[0]
         creator = var.creator
         if creator is not None and len(self._backward_hooks) > 0:
-            if creator._backward_hooks is None:
-                creator._backward_hooks = OrderedDict()
             for hook in self._backward_hooks.values():
                 wrapper = functools.partial(hook, self)
                 functools.update_wrapper(wrapper, hook)
-                creator._backward_hooks[id(wrapper)] = wrapper
+                creator.register_hook(wrapper)
         return result
 
     def __getattr__(self, name):
@@ -232,14 +230,20 @@ class Module(object):
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        return object.__getattribute__(self, name)
+        return object.__getattr__(self, name)
 
     def __setattr__(self, name, value):
+        def remove_from(*dicts):
+            for d in dicts:
+                if name in d:
+                    del d[name]
+
         params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
+            remove_from(self.__dict__, self._buffers, self._modules)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -253,6 +257,7 @@ class Module(object):
                 if modules is None:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
+                remove_from(self.__dict__, self._parameters, self._buffers)
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
@@ -261,11 +266,21 @@ class Module(object):
                                     .format(torch.typename(value), name))
                 modules[name] = value
             else:
-                object.__setattr__(self, name, value)
+                buffers = self.__dict__.get('_buffers')
+                if buffers is not None and name in buffers:
+                    if value is not None and not torch.is_tensor(value):
+                        raise TypeError("cannot assign '{}' as buffer '{}' "
+                                        "(torch.Tensor or None expected)"
+                                        .format(torch.typename(value), name))
+                    buffers[name] = value
+                else:
+                    object.__setattr__(self, name, value)
 
     def __delattr__(self, name):
         if name in self._parameters:
             del self._parameters[name]
+        elif name in self._buffers:
+            del self._buffers[name]
         elif name in self._modules:
             del self._modules[name]
         else:

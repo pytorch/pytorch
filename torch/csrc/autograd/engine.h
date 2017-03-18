@@ -14,22 +14,39 @@
 
 namespace torch { namespace autograd {
 
+struct ReadyQueue;
+struct FunctionTask;
+struct BackwardTask;
+
 struct Engine {
+  Engine();
+  virtual ~Engine();
+
   using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, GradBuffer>>;
   using function_queue = std::vector<Function*>;
   using dependencies_type = std::unordered_map<Function*, int>;
 
   // Given a list of output variables and their gradients, computes the
   // gradients of "root" variables by backpropagation.
-  static void backward(
+  void backward(
       const variable_list& variables,
       tensor_list& grad_variables,
       bool retain_variables);
 
-private:
-  static dependencies_type compute_dependencies(
-      function_queue queue,
-      ready_queue_type& ready);
+protected:
+  function_queue find_creators(
+      const variable_list& variables,
+      tensor_list& grad_variables,
+      BackwardTask& task);
+  void find_stochastic_functions(function_queue& queue, BackwardTask& task);
+  void compute_dependencies(function_queue queue, BackwardTask& task);
+  void evaluate_function(FunctionTask& task);
+  ReadyQueue& ready_queue(int device);
+  void start_threads();
+  virtual void thread_main(ReadyQueue& queue);
+  virtual void thread_on_exception(FunctionTask& task, std::exception& e);
+
+  std::vector<std::unique_ptr<ReadyQueue>> ready_queues;
 };
 
 }} // namespace torch::autograd

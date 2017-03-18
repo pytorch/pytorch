@@ -8,6 +8,7 @@ Tensors
 .. autofunction:: is_storage
 .. autofunction:: set_default_tensor_type
 .. autofunction:: numel
+.. autofunction:: set_printoptions
 
 
 Creation Ops

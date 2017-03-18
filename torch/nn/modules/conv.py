@@ -268,7 +268,7 @@ class Conv3d(_ConvNd):
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
-          the second `int` for the width dimension and the third `int` for the width dimension
+          the second `int` for the height dimension and the third `int` for the width dimension
 
     .. note::
 

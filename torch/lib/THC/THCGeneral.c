@@ -303,6 +303,10 @@ void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator)
   state->cudaDeviceAllocator = allocator;
 }
 
+int THCState_isCachingAllocatorEnabled(THCState* state) {
+  return state->cudaHostAllocator == &THCCachingHostAllocator;
+}
+
 int THCState_getNumDevices(THCState *state)
 {
   return state->numDevices;

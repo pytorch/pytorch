@@ -301,6 +301,20 @@ class TestNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    def test_hook_cpp(self):
+        counter = [0]
+        bn = nn.BatchNorm1d(5)
+
+        def hook(module, grad_inputs, grad_outputs):
+            counter[0] += 1
+            self.assertEqual(len(grad_inputs), 3)
+            self.assertEqual(len(grad_outputs), 1)
+            self.assertEqual(module, bn)
+
+        bn.register_backward_hook(hook)
+        output = bn(Variable(torch.randn(5, 5), requires_grad=True))
+        output.sum().backward()
+
     def test_hook_fail(self):
         module = nn.Sigmoid()
         input = Variable(torch.randn(5, 5), requires_grad=True)
@@ -825,13 +839,6 @@ class TestNN(NNTestCase):
         inputs = (i1, Variable(i2.data.new()))
         expected_outputs = (expected1, expected2.new())
 
-    def test_data_parallel_noop(self):
-        l = nn.Linear(10, 5).float()
-        i = Variable(torch.randn(20, 10).float())
-        out = dp.data_parallel(l, i, [])
-        self.assertEqual(out, l(i))
-        self.assertFalse(out.is_cuda)
-
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
@@ -848,8 +855,6 @@ class TestNN(NNTestCase):
         var3 = Variable(torch.randn(5, 5).float(), requires_grad=False)
 
         float1 = torch.randn(1)[0]
-        target = Variable(torch.randn(5, 5).float()).cuda()
-        crit = nn.MSELoss()
 
         expected = m(var1, var2, float1)
         loss = expected.sum()
@@ -1066,6 +1071,72 @@ class TestNN(NNTestCase):
         # But replacing it with None should be fine
         l.param_attr = None
         self.assertEqual(num_params(), 3)
+
+    def test_assignment(self):
+        l = nn.Module()
+        a = nn.Parameter(torch.randn(2))
+        b = nn.Parameter(torch.randn(3))
+        c = nn.Parameter(torch.randn(4))
+        q = nn.Linear(4, 4)
+        r = nn.Linear(5, 5)
+        w = nn.Linear(6, 6)
+
+        def test_assignments(get_list, a, b, c):
+            # Check that None can be shadowed
+            l.a = None
+            self.assertIsNone(l.a)
+            self.assertIn('a', l.__dict__)
+            l.a = a
+            self.assertIs(l.a, a)
+            self.assertEqual(get_list(), [a])
+            self.assertNotIn('a', l.__dict__)
+
+            # Assign second object
+            l.b = None
+            self.assertIsNone(l.b)
+            self.assertIn('b', l.__dict__)
+            l.b = b
+            self.assertIs(l.b, b)
+            self.assertEqual(get_list(), [a, b])
+            self.assertNotIn('b', l.__dict__)
+
+            # Remove and add the object back. Order should be unchanged.
+            l.a = None
+            self.assertIsNone(l.a)
+            self.assertEqual(get_list(), [b])
+            l.a = a
+            self.assertIs(l.a, a)
+            self.assertEqual(get_list(), [a, b])
+
+            # Replace object with another one. Order should be unchanged.
+            l.a = c
+            self.assertIs(l.a, c)
+            self.assertEqual(get_list(), [c, b])
+
+            # Remove and reassign an attribute. It should appear at the end of the list now.
+            del l.a
+            self.assertFalse(hasattr(l, 'a'))
+            l.a = a
+            self.assertIs(l.a, a)
+            self.assertEqual(get_list(), [b, a])
+
+        test_assignments(lambda: list(l.parameters()), a, b, c)
+        del l.a, l.b
+        self.assertEqual(list(l.parameters()), [])
+
+        test_assignments(lambda: list(l.children()), q, r, w)
+        del l.a, l.b
+        self.assertEqual(list(l.children()), [])
+
+        buf = torch.randn(10)
+        l.register_buffer('buf', buf)
+        self.assertIs(l.buf, buf)
+        l.buf = None
+        self.assertIs(l.buf, None)
+        self.assertNotIn('buf', l.__dict__)  # should be stored in l._buffers
+        l.buf = buf
+        self.assertIn('buf', l.state_dict())
+        self.assertIs(l.state_dict()['buf'], buf)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_large_workspace(self):

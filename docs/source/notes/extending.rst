@@ -86,6 +86,19 @@ small helper functions::
         # return it.
         return Linear()(input, weight, bias)
 
+You probably want to check if the backward method you implemented actually
+computes the derivatives of your function. It is possible by comparing with
+numerical approximations using small finite differences::
+
+    from torch.autograd import gradcheck
+   
+    # gradchek takes a tuple of tensor as input, check if your gradient
+    # evaluated with these tensors are close enough to numerical
+    # approximations and returns True if they all verify this condition.
+    input = (Variable(torch.randn(20,20).double(), requires_grad=True),)
+    test = gradcheck.gradcheck(Linear(), input, eps=1e-6, atol=1e-4)
+    print(test)
+
 Extending :mod:`torch.nn`
 -------------------------
 

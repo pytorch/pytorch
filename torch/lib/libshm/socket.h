@@ -1,3 +1,5 @@
+#pragma once
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -21,9 +23,8 @@ protected:
     SYSCHECK(socket_fd = socket(AF_UNIX, SOCK_STREAM, 0));
   }
   Socket(const Socket& other) = delete;
-  Socket(Socket&& other): socket_fd(other.socket_fd) { other.socket_fd = -1; };
-
-  Socket(int fd): socket_fd(fd) {}
+  Socket(Socket&& other) noexcept : socket_fd(other.socket_fd) { other.socket_fd = -1; };
+  explicit Socket(int fd) : socket_fd(fd) {}
 
   virtual ~Socket() {
     if (socket_fd != -1)
@@ -43,19 +44,19 @@ protected:
 
   void recv(void *_buffer, size_t num_bytes) {
     char *buffer = (char*)_buffer;
-    size_t bytes_recieved = 0;
-    ssize_t step_recieved;
+    size_t bytes_received = 0;
+    ssize_t step_received;
     struct pollfd pfd = {0};
     pfd.fd = socket_fd;
     pfd.events = POLLIN;
-    while (bytes_recieved < num_bytes) {
+    while (bytes_received < num_bytes) {
       SYSCHECK(poll(&pfd, 1, 1000));
       if (pfd.revents & POLLIN) {
-        SYSCHECK(step_recieved = ::read(socket_fd, buffer, num_bytes - bytes_recieved));
-        if (step_recieved == 0)
+        SYSCHECK(step_received = ::read(socket_fd, buffer, num_bytes - bytes_received));
+        if (step_received == 0)
           throw std::runtime_error("Other end has closed the connection");
-        bytes_recieved += step_recieved;
-        buffer += step_recieved;
+        bytes_received += step_received;
+        buffer += step_received;
       } else if (pfd.revents & (POLLERR | POLLHUP)) {
         throw std::runtime_error("An error occured while waiting for the data");
       } else {
@@ -80,9 +81,9 @@ protected:
 
 class ManagerSocket: public Socket {
 public:
-  ManagerSocket(int fd): Socket(fd) {}
+  explicit ManagerSocket(int fd): Socket(fd) {}
 
-  AllocInfo recieve() {
+  AllocInfo receive() {
     AllocInfo info;
     recv(&info, sizeof(info));
     return info;
@@ -97,7 +98,7 @@ public:
 
 class ManagerServerSocket: public Socket {
 public:
-  ManagerServerSocket(const std::string &path) {
+  explicit ManagerServerSocket(const std::string &path) {
     socket_path = path;
     try {
       struct sockaddr_un address = prepare_address(path.c_str());
@@ -127,7 +128,7 @@ public:
 
 class ClientSocket: public Socket {
 public:
-  ClientSocket(const std::string &path) {
+  explicit ClientSocket(const std::string &path) {
     try {
       struct sockaddr_un address = prepare_address(path.c_str());
       size_t len = address_length(address);
