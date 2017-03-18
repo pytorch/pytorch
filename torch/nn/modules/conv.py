@@ -4,6 +4,7 @@ from torch.nn.parameter import Parameter
 from .. import functional as F
 from .module import Module
 from .utils import _single, _pair, _triple
+from builtins import range
 
 
 class _ConvNd(Module):
@@ -355,13 +356,27 @@ class _ConvTransposeMixin(object):
                 "output_size must have {} or {} elements (got {})"
                 .format(k, k + 2, len(output_size)))
 
-        # 2*padding - output_padding = (input - 1)*stride - output + kernel_size
-        #                            = no_pad_diff
-        # padding = math.ceil(no_pad_diff / 2)
-        def no_pad_diff(d):
-            return ((input.size(d + 2) - 1) * self.stride[d] - output_size[d] + self.kernel_size[d])
-        padding = tuple([(no_pad_diff(d) + 1) // 2 for d in range(k)])
-        output_padding = tuple([2 * padding[d] - no_pad_diff(d) for d in range(k)])
+        # output_padding - 2*padding_shift = 2*padding_orig - kernel_size + output - (input - 1)*stride
+        #                                  = output_diff
+        # 1) output_padding is in [0, kernal_size - 1]
+        # 2) want to minimize padding_shift
+        # solution:
+        # padding_shift = 0                       when output_diff in [0, kernel_size-1]
+        #                 floor(-output_diff / 2) when output_diff < 0
+        #                 -ceil((output_diff - kernel_size + 1) / 2) when output_diff >= kernel_size
+        #
+        output_diff = [2 * self.padding[d] - self.kernel_size[d] + output_size[d] -
+                       (input.size(d + 2) - 1) * self.stride[d] for d in range(k)]
+        padding_shift = [0 for d in range(k)]
+        for d in range(k):
+            if output_diff[d] >= self.kernel_size[d]:
+                padding_shift = - \
+                    ((output_diff[d] - self.kernel_size[d] + 2) // 2)
+            elif output_diff[d] < 0:
+                padding_shift[d] = (-output_diff[d] + 1) // 2
+        padding = tuple(self.padding[d] + padding_shift[d] for d in range(k))
+        output_padding = tuple(
+            output_diff[d] + 2 * padding_shift[d] for d in range(k))
         return padding, output_padding
 
 
