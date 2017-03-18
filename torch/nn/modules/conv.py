@@ -4,7 +4,6 @@ from torch.nn.parameter import Parameter
 from .. import functional as F
 from .module import Module
 from .utils import _single, _pair, _triple
-from builtins import range
 
 
 class _ConvNd(Module):
