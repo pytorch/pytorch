@@ -57,7 +57,7 @@ using dispatch_fn = void (*)(rpc::RPCMessage&);
 using Functions = thd::Functions;
 
 
-static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
+static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::generatorNew, generatorNew},
     {Functions::generatorFree, generatorFree},
     {Functions::generatorCopy, generatorCopy},
@@ -266,19 +266,17 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
 
 } // namespace detail
 
-std::string execute(std::unique_ptr<rpc::RPCMessage> raw_message_ptr) {
-  try {
-    // TODO: unify the function id type (it's in rpc:: now)
-    auto &raw_message = *raw_message_ptr;
-    uint16_t fid = rpc::unpackFunctionId(raw_message);
-    auto iter = detail::functions.find(fid);
-    if (iter != detail::functions.end())
-      (*iter->second)(raw_message);
-    else
-      throw std::invalid_argument(std::string("invalid function id: ") + std::to_string(fid));
-    return std::string();
-  } catch(std::exception& e) {
-    return std::string(e.what());
+/* On fail throws exceptions which should be caught in worker's loop and reported
+ * to master.
+ */
+void execute(std::unique_ptr<rpc::RPCMessage> raw_message_ptr) {
+  auto &raw_message = *raw_message_ptr;
+  rpc::function_id_type fid = rpc::unpackFunctionId(raw_message);
+  auto iter = detail::functions.find(fid);
+  if (iter != detail::functions.end()) {
+    (*iter->second)(raw_message);
+  } else {
+    throw std::invalid_argument("invalid function id: " + std::to_string(fid));
   }
 }
 

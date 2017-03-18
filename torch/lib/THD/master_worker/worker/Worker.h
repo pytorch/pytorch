@@ -2,4 +2,4 @@
 
 #include "../../THD.h"
 
-THD_API void THDWorkerMain();
+THD_API bool THDWorkerMain();

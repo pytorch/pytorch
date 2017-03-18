@@ -578,7 +578,7 @@ void DataChannelTCP::receive(thpp::Tensor& data) {
     if (!this->_poll_events) {
       // cache poll events array, it will be reused in another `receive` calls
       this->_poll_events.reset(new struct pollfd[this->_processes.size()]);
-      for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
+      for (std::size_t rank = 0; rank < this->_processes.size(); ++rank) {
         this->_poll_events[rank] = {
           .fd = this->_processes[rank].socket,
           .events = POLLIN
@@ -587,16 +587,16 @@ void DataChannelTCP::receive(thpp::Tensor& data) {
     }
 
     // cleanup
-    for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
+    for (std::size_t rank = 0; rank < this->_processes.size(); ++rank) {
       this->_poll_events[rank].revents = 0;
     }
 
     SYSCHECK(::poll(this->_poll_events.get(), this->_processes.size(), -1)) // infinite timeout
-    for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
+    for (std::size_t rank = 0; rank < this->_processes.size(); ++rank) {
       if (this->_poll_events[rank].revents == 0)
         continue;
 
-      if (!(this->_poll_events[rank].revents & POLLIN))
+      if (this->_poll_events[rank].revents ^ POLLIN)
         throw std::system_error(ECONNABORTED, std::system_category());
 
       this->_receive(data, rank);
