@@ -225,14 +225,16 @@ class RecurrentNetworkOp final : public Operator<Context> {
           ri, seqLen, batchSize, sharedWs_, &context_);
     }
 
-    std::vector<std::shared_ptr<Workspace>>* stepWorkspaces =
-        OperatorBase::Output<std::vector<std::shared_ptr<Workspace>>>(
+    std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
+        *OperatorBase::Output<std::vector<std::shared_ptr<Workspace>>>(
             OutputSize() - 1);
-    stepWorkspaces->clear();
+    stepWorkspaces.resize(seqLen);
 
     for (auto t = 0; t < seqLen; ++t) {
-      stepWorkspaces->push_back(std::make_shared<Workspace>(sharedWs_));
-      auto& currentStepWorkspace = stepWorkspaces->back();
+      auto& currentStepWorkspace = stepWorkspaces[t];
+      if (!currentStepWorkspace) {
+        currentStepWorkspace = std::make_shared<Workspace>(sharedWs_);
+      }
 
       for (const auto& link : links_) {
         detail::applyLink<T, Context>(link, t, currentStepWorkspace.get());
@@ -246,7 +248,10 @@ class RecurrentNetworkOp final : public Operator<Context> {
       timestepBlob->template GetMutable<TensorCPU>()
           ->template mutable_data<int32_t>()[0] = t;
 
-      NetBase* stepNet = currentStepWorkspace->CreateNet(stepNetDef_);
+      auto* stepNet = currentStepWorkspace->GetNet(stepNetDef_.name());
+      if (stepNet == nullptr) {
+        stepNet = currentStepWorkspace->CreateNet(stepNetDef_);
+      }
       CAFFE_ENFORCE(stepNet, "Step Net construction failure");
       // Since we have a SimpleNet, there are no races here.
       stepNet->RunAsync();
@@ -517,7 +522,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       for (const auto& link : links_) {
         detail::applyLink<T, Context>(link, t, stepWorkspaces[t].get());
       }
-      NetBase* stepNet_ = stepWorkspaces[t]->CreateNet(stepNetDef_);
+      auto* stepNet_ = stepWorkspaces[t]->GetNet(stepNetDef_.name());
+      if (stepNet_ == nullptr) {
+        stepNet_ = stepWorkspaces[t]->CreateNet(stepNetDef_);
+      }
+
       CAFFE_ENFORCE(stepNet_);
       stepNet_->RunAsync();
       accumulateParameterGradients();
