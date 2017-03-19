@@ -228,39 +228,27 @@ class RecurrentNetworkOp final : public Operator<Context> {
     std::vector<std::shared_ptr<Workspace>>* stepWorkspaces =
         OperatorBase::Output<std::vector<std::shared_ptr<Workspace>>>(
             OutputSize() - 1);
-
-    stepWorkspaces->resize(seqLen);
+    stepWorkspaces->clear();
 
     for (auto t = 0; t < seqLen; ++t) {
-      if (!(*stepWorkspaces)[t].get()) {
-        VLOG(1) << "Create step workspace " << t;
-        (*stepWorkspaces)[t] = std::make_shared<Workspace>(sharedWs_);
-        auto& currentStepWorkspace = (*stepWorkspaces)[t];
+      stepWorkspaces->push_back(std::make_shared<Workspace>(sharedWs_));
+      auto& currentStepWorkspace = stepWorkspaces->back();
 
-        for (const auto& link : links_) {
-          detail::applyLink<T, Context>(link, t, currentStepWorkspace.get());
-        }
-
-        currentStepWorkspace->CreateBlob(timestep_)
-            ->template GetMutable<TensorCPU>()
-            ->Resize(1);
-        auto timestepBlob = currentStepWorkspace->GetBlob(timestep_);
-        CAFFE_ENFORCE(timestepBlob);
-        timestepBlob->template GetMutable<TensorCPU>()
-            ->template mutable_data<int32_t>()[0] = t;
-
-        NetBase* stepNet = currentStepWorkspace->CreateNet(stepNetDef_);
-        CAFFE_ENFORCE(stepNet, "Step Net construction failure");
+      for (const auto& link : links_) {
+        detail::applyLink<T, Context>(link, t, currentStepWorkspace.get());
       }
-      // Since we have a SimpleNet, there are no races here.
 
-      NetBase* stepNet = (*stepWorkspaces)[t]->GetNet(stepNetDef_.name());
-      CAFFE_ENFORCE(
-          stepNet != nullptr,
-          "Net ",
-          stepNetDef_.name(),
-          " was not in the shared workspace. Perhaps two RecurrentNetworkOps ",
-          "share the same shared_workspace? This is not allowed.");
+      currentStepWorkspace->CreateBlob(timestep_)
+          ->template GetMutable<TensorCPU>()
+          ->Resize(1);
+      auto timestepBlob = currentStepWorkspace->GetBlob(timestep_);
+      CAFFE_ENFORCE(timestepBlob);
+      timestepBlob->template GetMutable<TensorCPU>()
+          ->template mutable_data<int32_t>()[0] = t;
+
+      NetBase* stepNet = currentStepWorkspace->CreateNet(stepNetDef_);
+      CAFFE_ENFORCE(stepNet, "Step Net construction failure");
+      // Since we have a SimpleNet, there are no races here.
       stepNet->RunAsync();
     }
 
@@ -526,13 +514,10 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     accumulateFinalInputGradients();
     for (int32_t t = seqLen - 1; t >= 0; --t) {
       accumulateInputGradients(t);
-      if (stepWorkspaces[t]->GetNet(stepNetDef_.name()) == nullptr) {
-        for (const auto& link : links_) {
-          detail::applyLink<T, Context>(link, t, stepWorkspaces[t].get());
-        }
-        stepWorkspaces[t]->CreateNet(stepNetDef_);
+      for (const auto& link : links_) {
+        detail::applyLink<T, Context>(link, t, stepWorkspaces[t].get());
       }
-      NetBase* stepNet_ = stepWorkspaces[t]->GetNet(stepNetDef_.name());
+      NetBase* stepNet_ = stepWorkspaces[t]->CreateNet(stepNetDef_);
       CAFFE_ENFORCE(stepNet_);
       stepNet_->RunAsync();
       accumulateParameterGradients();
