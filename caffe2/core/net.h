@@ -62,10 +62,6 @@ class NetBase {
     return external_input_;
   }
 
-  std::string name() const {
-    return name_;
-  }
-
  protected:
   vector<string> external_input_;
   vector<string> external_output_;
