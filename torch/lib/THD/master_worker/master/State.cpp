@@ -8,7 +8,7 @@ namespace master {
 
 thread_local size_t THDState::s_current_worker = 1;
 std::uint64_t THDState::s_nextId = 0;
-std::vector<std::string> THDState::s_errors = {};
+std::string THDState::s_error = "";
 
 } // namespace master
 } // namespace thd
