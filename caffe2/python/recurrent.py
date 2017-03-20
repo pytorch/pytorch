@@ -279,7 +279,6 @@ def LSTMWithAttention(
     encoder_outputs,
     decoder_input_dim,
     decoder_state_dim,
-    batch_size,
     scope,
     attention_type=AttentionType.Regular,
     outputs_with_grads=(0, 4),
@@ -319,8 +318,6 @@ def LSTMWithAttention(
     decoder_input_dim: input dimention (last dimension on decoder_inputs)
 
     decoder_state_dim: size of hidden states of LSTM
-
-    batch_size: batch size
 
     attention_type: One of: AttentionType.Regular, AttentionType.Recurrent.
     Determines which type of attention mechanism to use.
@@ -414,7 +411,6 @@ def LSTMWithAttention(
             weighted_encoder_outputs=weighted_encoder_outputs,
             decoder_hidden_state_t=hidden_t_intermediate,
             decoder_hidden_state_dim=decoder_state_dim,
-            batch_size=batch_size,
             scope=scope,
             attention_weighted_encoder_context_t_prev=(
                 attention_weighted_encoder_context_t_prev
@@ -428,7 +424,6 @@ def LSTMWithAttention(
             weighted_encoder_outputs=weighted_encoder_outputs,
             decoder_hidden_state_t=hidden_t_intermediate,
             decoder_hidden_state_dim=decoder_state_dim,
-            batch_size=batch_size,
             scope=scope,
         )
     hidden_t = step_model.Copy(hidden_t_intermediate, s('hidden_t'))

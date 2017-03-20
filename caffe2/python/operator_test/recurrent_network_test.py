@@ -547,7 +547,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 encoder_outputs=encoder_outputs,
                 decoder_input_dim=decoder_state_dim,
                 decoder_state_dim=decoder_state_dim,
-                batch_size=batch_size,
                 scope='external/LSTMWithAttention',
             )
             op = model.net._net.op[-1]
@@ -670,7 +669,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 encoder_outputs=encoder_outputs,
                 decoder_input_dim=decoder_state_dim,
                 decoder_state_dim=decoder_state_dim,
-                batch_size=batch_size,
                 scope='external/LSTMWithAttention',
                 attention_type=AttentionType.Recurrent
             )
