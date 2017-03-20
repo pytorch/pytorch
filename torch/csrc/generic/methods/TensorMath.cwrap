@@ -1559,19 +1559,8 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THIntTensor* pivots
+    - arg: THIntegerTensor* pivots
       output: True
-    - THTensor* self
-]]
-
-[[
-  name: btrf_
-  cname: btrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  return: argument 0,1
-  arguments:
-    - THTensor* self
-    - THIntTensor* pivots
     - THTensor* self
 ]]
 
@@ -1584,8 +1573,8 @@
     - arg: THTensor* result
       output: True
     - THTensor* Atf
-    - THIntTensor* pivots
     - THTensor* self
+    - THIntegerTensor* pivots
 ]]
 
 [[
@@ -1596,8 +1585,8 @@
   arguments:
     - THTensor* self
     - THTensor* Atf
-    - THIntTensor* pivots
     - THTensor* self
+    - THIntegerTensor* pivots
 ]]
 
 [[
