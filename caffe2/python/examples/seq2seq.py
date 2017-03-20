@@ -372,8 +372,6 @@ class Seq2SeqModelCaffe2:
                     encoder_outputs=encoder_outputs,
                     decoder_input_dim=self.model_params['decoder_embedding_size'],
                     decoder_state_dim=decoder_num_units,
-                    # TODO: remove that later
-                    batch_size=self.batch_size,
                     scope='decoder',
                     outputs_with_grads=[0, 4],
                 )

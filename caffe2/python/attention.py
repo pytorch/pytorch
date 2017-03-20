@@ -68,7 +68,6 @@ def _calc_attention_logits_from_sum_match(
     model,
     decoder_hidden_encoder_outputs_sum,
     encoder_output_dim,
-    batch_size,
     scope
 ):
     # [encoder_length, batch_size, encoder_output_dim]
@@ -145,9 +144,6 @@ def apply_recurrent_attention(
     decoder_hidden_state_t,
     decoder_hidden_state_dim,
     attention_weighted_encoder_context_t_prev,
-    # TODO: we need to provide batch_size for some reshape methods,
-    # ideally, we should be able to not specify it
-    batch_size,
     scope,
 ):
     weighted_prev_attention_context = _apply_fc_weight_for_sum_match(
@@ -199,7 +195,6 @@ def apply_recurrent_attention(
         model=model,
         decoder_hidden_encoder_outputs_sum=decoder_hidden_encoder_outputs_sum,
         encoder_output_dim=encoder_output_dim,
-        batch_size=batch_size,
         scope=scope
     )
 
@@ -227,9 +222,6 @@ def apply_regular_attention(
     weighted_encoder_outputs,
     decoder_hidden_state_t,
     decoder_hidden_state_dim,
-    # TODO: we need to provide batch_size for some reshape methods,
-    # ideally, we should be able to not specify it
-    batch_size,
     scope,
 ):
     weighted_decoder_hidden_state = _apply_fc_weight_for_sum_match(
@@ -259,7 +251,6 @@ def apply_regular_attention(
         model=model,
         decoder_hidden_encoder_outputs_sum=decoder_hidden_encoder_outputs_sum,
         encoder_output_dim=encoder_output_dim,
-        batch_size=batch_size,
         scope=scope
     )
 
