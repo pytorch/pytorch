@@ -181,13 +181,23 @@ bool PoolOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNCHW() {
 
 #ifdef __ARM_NEON__
   // We specialize certain variants on ARM for vectorization
-  if (isNeonEligible(X.dim32(2), X.dim32(3),
-                     Y->dim32(2), Y->dim32(3),
-                     kernel_h_, kernel_w_,
-                     stride_h_, stride_w_,
-                     pad_t_, pad_l_, pad_b_, pad_r_,
-                     dilation_h_, dilation_w_,
-                     Xdata, Ydata)) {
+  if (isNeonEligible(
+          X.dim32(2),
+          X.dim32(3),
+          Y->dim32(2),
+          Y->dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          pad_b(),
+          pad_r(),
+          dilation_h(),
+          dilation_w(),
+          Xdata,
+          Ydata)) {
     runNeonAveragePool4x4p0s0NCHW(X.dim32(0), X.dim32(1),
                                   X.dim32(2), X.dim32(3),
                                   Xdata, Ydata);
@@ -199,10 +209,10 @@ bool PoolOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNCHW() {
     for (int c = 0; c < channels; ++c) {
       for (int ph = 0; ph < pooled_height; ++ph) {
         for (int pw = 0; pw < pooled_width; ++pw) {
-          int hstart = ph * stride_h_ - pad_t_;
-          int wstart = pw * stride_w_ - pad_l_;
-          int hend = min(hstart + kernel_h_, height);
-          int wend = min(wstart + kernel_w_, width);
+          int hstart = ph * stride_h() - pad_t();
+          int wstart = pw * stride_w() - pad_l();
+          int hend = min(hstart + kernel_h(), height);
+          int wend = min(wstart + kernel_w(), width);
           hstart = max(hstart, 0);
           wstart = max(wstart, 0);
           const int pool_index = ph * pooled_width + pw;
@@ -240,10 +250,10 @@ bool PoolOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNHWC() {
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {
-        int hstart = ph * stride_h_ - pad_t_;
-        int wstart = pw * stride_w_ - pad_l_;
-        int hend = min(hstart + kernel_h_, height);
-        int wend = min(wstart + kernel_w_, width);
+        int hstart = ph * stride_h() - pad_t();
+        int wstart = pw * stride_w() - pad_l();
+        int hend = min(hstart + kernel_h(), height);
+        int wend = min(wstart + kernel_w(), width);
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         const int pool_index = (ph * pooled_width + pw) * channels;
@@ -288,10 +298,10 @@ bool PoolOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
     for (int c = 0; c < channels; ++c) {
       for (int ph = 0; ph < pooled_height; ++ph) {
         for (int pw = 0; pw < pooled_width; ++pw) {
-          int hstart = ph * stride_h_ - pad_t_;
-          int wstart = pw * stride_w_ - pad_l_;
-          int hend = min(hstart + kernel_h_, height);
-          int wend = min(wstart + kernel_w_, width);
+          int hstart = ph * stride_h() - pad_t();
+          int wstart = pw * stride_w() - pad_l();
+          int hend = min(hstart + kernel_h(), height);
+          int wend = min(wstart + kernel_w(), width);
           hstart = max(hstart, 0);
           wstart = max(wstart, 0);
           const int pool_index = ph * pooled_width + pw;
@@ -332,12 +342,12 @@ bool PoolOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   // The main loop
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
-      int hstart = ph * stride_h_ - pad_t_;
-      int hend = min(hstart + kernel_h_, height);
+      int hstart = ph * stride_h() - pad_t();
+      int hend = min(hstart + kernel_h(), height);
       hstart = max(hstart, 0);
       for (int pw = 0; pw < pooled_width; ++pw) {
-        int wstart = pw * stride_w_ - pad_l_;
-        int wend = min(wstart + kernel_w_, width);
+        int wstart = pw * stride_w() - pad_l();
+        int wend = min(wstart + kernel_w(), width);
         wstart = max(wstart, 0);
         // compute max in range X[n, hstart:hend, wstart:wend, :]
         auto Y_col = Ymat.col((n * pooled_height + ph) * pooled_width + pw);

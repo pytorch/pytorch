@@ -255,12 +255,12 @@ bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNCHW() {
       X.dim32(3),
       Y->dim32(2),
       Y->dim32(3),
-      kernel_h_,
-      kernel_w_,
-      stride_h_,
-      stride_w_,
-      pad_t_,
-      pad_l_,
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
       Y->mutable_data<float>(),
       OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;
@@ -285,12 +285,12 @@ bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNHWC() {
       X.dim32(3),
       Y->dim32(1),
       Y->dim32(2),
-      kernel_h_,
-      kernel_w_,
-      stride_h_,
-      stride_w_,
-      pad_t_,
-      pad_l_,
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
       Y->mutable_data<float>(),
       OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;
@@ -305,7 +305,7 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
+  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
   LpPoolBackwardNCHW<float><<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -321,12 +321,12 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
       X.dim32(3),
       dY.dim32(2),
       dY.dim32(3),
-      kernel_h_,
-      kernel_w_,
-      stride_h_,
-      stride_w_,
-      pad_t_,
-      pad_l_,
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
       dX->mutable_data<float>(),
       OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;
@@ -341,7 +341,7 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(1), X.dim32(2));
+  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(1), X.dim32(2)});
   LpPoolBackwardNHWC<float><<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -357,12 +357,12 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
       X.dim32(3),
       dY.dim32(1),
       dY.dim32(2),
-      kernel_h_,
-      kernel_w_,
-      stride_h_,
-      stride_w_,
-      pad_t_,
-      pad_l_,
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
       dX->mutable_data<float>(),
       OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;

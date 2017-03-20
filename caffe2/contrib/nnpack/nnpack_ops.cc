@@ -122,18 +122,18 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.ndim(), 4);
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(filter.dim32(1) == C, "");
-  CAFFE_ENFORCE(filter.dim32(2) == this->kernel_h_, "");
-  CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w_, "");
+  CAFFE_ENFORCE(filter.dim32(2) == this->kernel_h(), "");
+  CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w(), "");
   CAFFE_ENFORCE(bias.size() == M, "");
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
   if (N > 1) {
     // NNPack only supports stride = 1 when doing batch feedforward
-    CAFFE_ENFORCE(this->stride_h_ == 1, "");
-    CAFFE_ENFORCE(this->stride_w_ == 1, "");
+    CAFFE_ENFORCE(this->stride_h() == 1, "");
+    CAFFE_ENFORCE(this->stride_w() == 1, "");
   }
   std::vector<int> pads(
-      {this->pad_t_, this->pad_b_, this->pad_l_, this->pad_r_});
-  std::vector<int> stride({this->stride_h_, this->stride_w_});
+      {this->pad_t(), this->pad_b(), this->pad_l(), this->pad_r()});
+  std::vector<int> stride({this->stride_h(), this->stride_w()});
 
   const size_t batch_size = X.dim32(0);
   const size_t input_channels = X.dim32(1);
@@ -203,24 +203,24 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
         "NNPack only supports NCHW order. Please consider add "
         "TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
     OPERATOR_NEEDS_FEATURE(
-        this->kernel_h_ == 2, "NNPack only supports MaxPool kernel size 2*2!");
+        this->kernel_h() == 2, "NNPack only supports MaxPool kernel size 2*2!");
     OPERATOR_NEEDS_FEATURE(
-        this->kernel_w_ == 2, "NNPack only supports MaxPool kernel size 2*2!");
+        this->kernel_w() == 2, "NNPack only supports MaxPool kernel size 2*2!");
     OPERATOR_NEEDS_FEATURE(
-        this->stride_h_ == 2, "NNPack only supports MaxPool stride size 2*2!");
+        this->stride_h() == 2, "NNPack only supports MaxPool stride size 2*2!");
     OPERATOR_NEEDS_FEATURE(
-        this->stride_w_ == 2, "NNPack only supports MaxPool stride size 2*2!");
+        this->stride_w() == 2, "NNPack only supports MaxPool stride size 2*2!");
     OPERATOR_NEEDS_FEATURE(
-        this->pad_t_ == 0,
+        this->pad_t() == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
     OPERATOR_NEEDS_FEATURE(
-        this->pad_l_ == 0,
+        this->pad_l() == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
     OPERATOR_NEEDS_FEATURE(
-        this->pad_r_ == 0,
+        this->pad_r() == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
     OPERATOR_NEEDS_FEATURE(
-        this->pad_b_ == 0,
+        this->pad_b() == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
 #ifdef CAFFE2_USE_FBCODE
     // Facebook's nnpack build assumes existence of avx2, so we explicitly
@@ -245,9 +245,9 @@ bool NNPACKMaxPoolOp::RunOnDeviceWithOrderNCHW() {
   const int H = X.dim32(2), W = X.dim32(3);
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
   std::vector<int> pads(
-      {this->pad_t_, this->pad_b_, this->pad_l_, this->pad_r_});
-  std::vector<int> stride({this->stride_h_, this->stride_w_});
-  std::vector<int> pooling({this->kernel_h_, this->kernel_w_});
+      {this->pad_t(), this->pad_b(), this->pad_l(), this->pad_r()});
+  std::vector<int> stride({this->stride_h(), this->stride_w()});
+  std::vector<int> pooling({this->kernel_h(), this->kernel_w()});
 
   // Input X is in NCHW order
   const size_t batch_size = X.dim32(0);

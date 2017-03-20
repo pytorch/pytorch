@@ -49,17 +49,17 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
     CAFFE_ENFORCE(group_ > 0);
     CAFFE_ENFORCE(!deterministic_ || !exhaustive_search_);
     OPERATOR_NEEDS_FEATURE(
-        pad_t_ == pad_b_,
+        pad_t() == pad_b(),
         "The current padding scheme leads to unequal padding on the top and "
         "bottom, which is not supported by cudnn.");
     OPERATOR_NEEDS_FEATURE(
-        pad_l_ == pad_r_,
+        pad_l() == pad_r(),
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
     // dilated convolution supported by some algorithms in cuDNN v6
 #if !(CUDNN_VERSION_MIN(6,0,0))
     OPERATOR_NEEDS_FEATURE(
-        dilation_h_ == 1 && dilation_w_ == 1,
+        dilation_h() == 1 && dilation_w() == 1,
         "The cudnn convolution does not support dilation yet.");
 #endif
 
@@ -216,8 +216,8 @@ bool CudnnConvOp<T>::RunOnDevice() {
   case StorageOrder::NHWC:
     N = X.dim32(0); H = X.dim32(1); W = X.dim32(2); C = X.dim32(3);
     H_out = Y->dim32(1); W_out = Y->dim32(2);
-    CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h_);
-    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w_);
+    CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
     CAFFE_ENFORCE_EQ(filter.dim32(3), C / group_);
     group_offset_X = C / group_;
     group_offset_Y = M / group_;
@@ -226,8 +226,8 @@ bool CudnnConvOp<T>::RunOnDevice() {
     N = X.dim32(0); C = X.dim32(1); H = X.dim32(2); W = X.dim32(3);
     H_out = Y->dim32(2); W_out = Y->dim32(3);
     CAFFE_ENFORCE_EQ(filter.dim32(1), C / group_);
-    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h_);
-    CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w_);
+    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h());
+    CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w());
     group_offset_X = C / group_ * H * W;
     group_offset_Y = M / group_ * H_out * W_out;
     break;
@@ -253,8 +253,8 @@ bool CudnnConvOp<T>::RunOnDevice() {
           GetCudnnTensorFormat(order_),
           M / group_,
           C / group_,
-          kernel_h_,
-          kernel_w_));
+          kernel_h(),
+          kernel_w()));
       if (InputSize() == 3) {
         CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
             bias_desc_,
@@ -281,21 +281,21 @@ bool CudnnConvOp<T>::RunOnDevice() {
 #if CUDNN_VERSION_MIN(6,0,0)
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
-        dilation_h_,
-        dilation_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
+        dilation_h(),
+        dilation_w(),
         CUDNN_CROSS_CORRELATION,
         cudnnTypeWrapper<T>::type));
 #else
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
         1,
         1,
         CUDNN_CROSS_CORRELATION));
@@ -425,8 +425,8 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
   case StorageOrder::NHWC:
     N = X.dim32(0); H = X.dim32(1); W = X.dim32(2); C = X.dim32(3);
     H_out = dY.dim32(1); W_out = dY.dim32(2);
-    CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h_);
-    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w_);
+    CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
     CAFFE_ENFORCE_EQ(filter.dim32(3), C / group_);
     group_offset_X = C / group_;
     group_offset_Y = M / group_;
@@ -435,8 +435,8 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
     N = X.dim32(0); C = X.dim32(1); H = X.dim32(2); W = X.dim32(3);
     H_out = dY.dim32(2); W_out = dY.dim32(3);
     CAFFE_ENFORCE_EQ(filter.dim32(1), C / group_);
-    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h_);
-    CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w_);
+    CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h());
+    CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w());
     group_offset_X = C / group_ * H * W;
     group_offset_Y = M / group_ * H_out * W_out;
     break;
@@ -444,7 +444,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
     LOG(FATAL) << "Unknown storage order: " << order_;
   }
   int group_offset_filter = filter.size() / group_;
-  ConvPoolOpBase<CUDAContext>::ComputePads(H, W);
+  ConvPoolOpBase<CUDAContext>::ComputePads({H, W});
   dfilter->ResizeLike(filter);
 
   // Set up the cudnn algorithms & workspace if necessary
@@ -464,8 +464,8 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
           GetCudnnTensorFormat(order_),
           M / group_,
           C / group_,
-          kernel_h_,
-          kernel_w_));
+          kernel_h(),
+          kernel_w()));
       if (!no_bias_) {
         CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
             bias_desc_,
@@ -492,21 +492,21 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
 #if CUDNN_VERSION_MIN(6,0,0)
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
-        dilation_h_,
-        dilation_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
+        dilation_h(),
+        dilation_w(),
         CUDNN_CROSS_CORRELATION,
         cudnnTypeWrapper<T>::type));
 #else
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
         1,
         1,
         CUDNN_CROSS_CORRELATION));

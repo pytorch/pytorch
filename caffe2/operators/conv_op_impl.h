@@ -34,11 +34,11 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(
       M % group_ == 0,
       "The number of output channels is not divisible by group.");
-  CAFFE_ENFORCE(filter.dim32(2) == kernel_h_);
-  CAFFE_ENFORCE(filter.dim32(3) == kernel_w_);
+  CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
+  CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
   // The dimension of each kernel
-  const int kernel_dim = C / group_ * kernel_h_ * kernel_w_;
+  const int kernel_dim = C / group_ * kernel_h() * kernel_w();
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = C / group_ * H * W;
@@ -69,7 +69,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   auto f = [&](Tensor<Context>* col_buffer) {
     col_buffer->Resize(vector<TIndex>{
-        C / group_, kernel_h_, kernel_w_, Y->dim32(2), Y->dim32(3)});
+        C / group_, kernel_h(), kernel_w(), Y->dim32(2), Y->dim32(3)});
 
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2col, followed by gemm.
@@ -80,16 +80,16 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
             C / group_,
             H,
             W,
-            kernel_h_,
-            kernel_w_,
-            dilation_h_,
-            dilation_w_,
-            pad_t_,
-            pad_l_,
-            pad_b_,
-            pad_r_,
-            stride_h_,
-            stride_w_,
+            kernel_h(),
+            kernel_w(),
+            dilation_h(),
+            dilation_w(),
+            pad_t(),
+            pad_l(),
+            pad_b(),
+            pad_r(),
+            stride_h(),
+            stride_w(),
             col_buffer_data,
             &context_);
         // Weight term
@@ -145,13 +145,13 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   CAFFE_ENFORCE(4 == filter.ndim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(filter.dim32(1) == kernel_h_);
-  CAFFE_ENFORCE(filter.dim32(2) == kernel_w_);
+  CAFFE_ENFORCE(filter.dim32(1) == kernel_h());
+  CAFFE_ENFORCE(filter.dim32(2) == kernel_w());
   CAFFE_ENFORCE(filter.dim32(3) == C);
 
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
   // The dimension of each kernel
-  const int kernel_dim = kernel_h_ * kernel_w_ * C;
+  const int kernel_dim = kernel_h() * kernel_w() * C;
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = H * W * C;
@@ -165,8 +165,8 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // Specialized path for 1 by 1 convolution with stride 1, pad 0 - we
   // can skip im2col.
   if (kernel_dim == C && Y->dim32(1) == X.dim32(1) &&
-      Y->dim32(2) == X.dim32(2) && stride_h_ == 1 && stride_w_ == 1 &&
-      pad_t_ == 0 && pad_b_ == 0 && pad_l_ == 0 && pad_r_ == 0) {
+      Y->dim32(2) == X.dim32(2) && stride_h() == 1 && stride_w() == 1 &&
+      pad_t() == 0 && pad_b() == 0 && pad_l() == 0 && pad_r() == 0) {
     math::Gemm<T, Context>(
         CblasNoTrans,
         CblasTrans,
@@ -222,7 +222,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     }
     auto f = [&](Tensor<Context>* col_buffer) {
       col_buffer->Resize(
-          vector<TIndex>{Y->dim32(1), Y->dim32(2), kernel_h_, kernel_w_, C});
+          vector<TIndex>{Y->dim32(1), Y->dim32(2), kernel_h(), kernel_w(), C});
       T* col_buffer_data = col_buffer->template mutable_data<T>();
       // Im2col, followed by gemm.
       for (int image_id = 0; image_id < N; ++image_id) {
@@ -231,16 +231,16 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             C,
             H,
             W,
-            kernel_h_,
-            kernel_w_,
-            dilation_h_,
-            dilation_w_,
-            pad_t_,
-            pad_l_,
-            pad_b_,
-            pad_r_,
-            stride_h_,
-            stride_w_,
+            kernel_h(),
+            kernel_w(),
+            dilation_h(),
+            dilation_w(),
+            pad_t(),
+            pad_l(),
+            pad_b(),
+            pad_r(),
+            stride_h(),
+            stride_w(),
             col_buffer_data,
             &context_);
         // Weight term
@@ -291,16 +291,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  ConvPoolOpBase<Context>::ComputePads(H, W);
+  ConvPoolOpBase<Context>::ComputePads({H, W});
   CAFFE_ENFORCE(4 == filter.ndim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(filter.dim32(1) * group_ == C);
-  CAFFE_ENFORCE(filter.dim32(2) == kernel_h_);
-  CAFFE_ENFORCE(filter.dim32(3) == kernel_w_);
+  CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
+  CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
   CAFFE_ENFORCE(M % group_ == 0);
   dfilter->ResizeLike(filter);
   // The dimension of each kernel
-  const int kernel_dim = C / group_ * kernel_h_ * kernel_w_;
+  const int kernel_dim = C / group_ * kernel_h() * kernel_w();
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = C / group_ * H * W;
@@ -346,16 +346,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           C / group_,
           H,
           W,
-          kernel_h_,
-          kernel_w_,
-          dilation_h_,
-          dilation_w_,
-          pad_t_,
-          pad_l_,
-          pad_b_,
-          pad_r_,
-          stride_h_,
-          stride_w_,
+          kernel_h(),
+          kernel_w(),
+          dilation_h(),
+          dilation_w(),
+          pad_t(),
+          pad_l(),
+          pad_b(),
+          pad_r(),
+          stride_h(),
+          stride_w(),
           col_buffer_data,
           &context_);
       // Gradient with respect to filter.
@@ -414,16 +414,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
             C / group_,
             H,
             W,
-            kernel_h_,
-            kernel_w_,
-            dilation_h_,
-            dilation_w_,
-            pad_t_,
-            pad_l_,
-            pad_b_,
-            pad_r_,
-            stride_h_,
-            stride_w_,
+            kernel_h(),
+            kernel_w(),
+            dilation_h(),
+            dilation_w(),
+            pad_t(),
+            pad_l(),
+            pad_b(),
+            pad_r(),
+            stride_h(),
+            stride_w(),
             dXdata,
             &context_);
         dXdata += input_offset;
@@ -442,16 +442,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto* dfilter = Output(FILTER_GRAD);
 
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-  ConvPoolOpBase<Context>::ComputePads(H, W);
+  ConvPoolOpBase<Context>::ComputePads({H, W});
   CAFFE_ENFORCE(4 == filter.ndim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(filter.dim32(1) == kernel_h_);
-  CAFFE_ENFORCE(filter.dim32(2) == kernel_w_);
+  CAFFE_ENFORCE(filter.dim32(1) == kernel_h());
+  CAFFE_ENFORCE(filter.dim32(2) == kernel_w());
   CAFFE_ENFORCE(filter.dim32(3) == C);
   dfilter->ResizeLike(filter);
 
   // The dimension of each kernel
-  const int kernel_dim = kernel_h_ * kernel_w_ * C;
+  const int kernel_dim = kernel_h() * kernel_w() * C;
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = H * W * C;
@@ -496,16 +496,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         C,
         H,
         W,
-        kernel_h_,
-        kernel_w_,
-        dilation_h_,
-        dilation_w_,
-        pad_t_,
-        pad_l_,
-        pad_b_,
-        pad_r_,
-        stride_h_,
-        stride_w_,
+        kernel_h(),
+        kernel_w(),
+        dilation_h(),
+        dilation_w(),
+        pad_t(),
+        pad_l(),
+        pad_b(),
+        pad_r(),
+        stride_h(),
+        stride_w(),
         col_buffer_data,
         &context_);
     // Gradient with respect to filter.
@@ -561,16 +561,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           C,
           H,
           W,
-          kernel_h_,
-          kernel_w_,
-          dilation_h_,
-          dilation_w_,
-          pad_t_,
-          pad_l_,
-          pad_b_,
-          pad_r_,
-          stride_h_,
-          stride_w_,
+          kernel_h(),
+          kernel_w(),
+          dilation_h(),
+          dilation_w(),
+          pad_t(),
+          pad_l(),
+          pad_b(),
+          pad_r(),
+          stride_h(),
+          stride_w(),
           dXdata,
           &context_);
       dXdata += input_offset;
