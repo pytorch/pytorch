@@ -227,6 +227,37 @@ void Axpby(const int N, const T alpha, const T* x, const T b, T* y,
            Context* context);
 
 template <typename T, class Context, int order>
+void Im2colNd(
+    const T* data_img,
+    const int* im_shape,
+    const int* col_shape,
+    const int img_size,
+    const int col_size,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const int N,
+    T* data_col,
+    Context* context,
+    bool accumulate_output = false);
+
+template <typename T, class Context, int order>
+void Col2imNd(
+    const T* data_col,
+    const int* img_shape,
+    const int* col_shape,
+    const int img_size,
+    const int col_size,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const int N,
+    T* data_img,
+    Context* context);
+
+template <typename T, class Context, int order>
 void Im2col(
     const T* data_im,
     const int channels,

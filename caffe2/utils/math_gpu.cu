@@ -602,7 +602,9 @@ __global__ void col2im_gpu_kernel_nchw(const int n, const T* data_col,
           h_k /= dilation_h;
           w_k /= dilation_w;
           int data_col_index =
-            (((c * patch_h + h_k) * patch_w + w_k) * height_col + h_col) * width_col + w_col;
+              (((c * patch_h + h_k) * patch_w + w_k) * height_col + h_col) *
+                  width_col +
+              w_col;
           val += data_col[data_col_index];
         }
       }
@@ -650,6 +652,211 @@ __global__ void col2im_gpu_kernel_nhwc(const int n, const T* data_col,
     }
     data_im[index] = val;
   }
+}
+
+// Ported from caffe1
+template <typename T, int num_axes>
+__global__ void im2col_nd_gpu_kernel(
+    const int n,
+    const T* data_im,
+    const int* im_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* pad,
+    const int* stride,
+    const int* dilation,
+    T* data_col) {
+  int d_temp[num_axes]; // NOLINT(runtime/arrays)
+  int d_iter[num_axes]; // NOLINT(runtime/arrays)
+
+  __shared__ int shared_dilation[num_axes];
+  __shared__ int shared_kernel_shape[num_axes];
+  __shared__ int shared_pad[num_axes];
+  __shared__ int shared_stride[num_axes];
+  __shared__ int shared_col_shape[num_axes + 1];
+  __shared__ int shared_im_shape[num_axes + 1];
+
+  if (threadIdx.x < num_axes) {
+    shared_dilation[threadIdx.x] = dilation[threadIdx.x];
+    shared_kernel_shape[threadIdx.x] = kernel_shape[threadIdx.x];
+    shared_pad[threadIdx.x] = pad[threadIdx.x];
+    shared_stride[threadIdx.x] = stride[threadIdx.x];
+  }
+  if (threadIdx.x < num_axes + 1) {
+    shared_col_shape[threadIdx.x] = col_shape[threadIdx.x];
+    shared_im_shape[threadIdx.x] = im_shape[threadIdx.x];
+  }
+  __syncthreads();
+
+  int i;
+  CUDA_1D_KERNEL_LOOP(index, n) {
+    // Initialize channel_in, computed in the loop below, with intermediate
+    // computations used to compute the spatial indices.
+    int channel_in = index;
+    int channel_out = 1;
+    for (i = num_axes - 1; i >= 0; --i) {
+      d_temp[i] = channel_in % shared_col_shape[i + 1];
+      channel_in /= shared_col_shape[i + 1];
+      channel_out *= shared_kernel_shape[i];
+    }
+    channel_out *= channel_in;
+    int data_col_inc = 1;
+    for (i = 0; i < num_axes; ++i) {
+      channel_out *= shared_col_shape[i + 1];
+      channel_out += d_temp[i];
+      d_temp[i] = d_temp[i] * shared_stride[i] - shared_pad[i];
+      channel_in *= shared_im_shape[i + 1];
+      channel_in += d_temp[i];
+      data_col_inc *= shared_col_shape[i + 1];
+      d_iter[i] = 0;
+    }
+    T* data_col_ptr = data_col + channel_out;
+    const T* data_im_ptr = data_im + channel_in;
+    bool incremented;
+    do {
+      bool in_range = true;
+      for (i = 0; i < num_axes; ++i) {
+        const int d_iter_im = d_iter[i] * shared_dilation[i] + d_temp[i];
+        in_range &= d_iter_im >= 0 && d_iter_im < shared_im_shape[i + 1];
+        if (!in_range) {
+          break;
+        }
+      }
+      if (in_range) {
+        int data_im_offset = d_iter[0] * shared_dilation[0];
+        for (i = 1; i < num_axes; ++i) {
+          data_im_offset *= shared_im_shape[i + 1];
+          data_im_offset += d_iter[i] * shared_dilation[i];
+        }
+        *data_col_ptr = data_im_ptr[data_im_offset];
+      } else {
+        *data_col_ptr = 0;
+      }
+      data_col_ptr += data_col_inc;
+      incremented = false;
+      for (i = num_axes - 1; i >= 0; --i) {
+        const int d_max = shared_kernel_shape[i];
+        if (d_iter[i] == d_max - 1) {
+          d_iter[i] = 0;
+        } else { // d_iter[i] < d_max - 1
+          ++d_iter[i];
+          incremented = true;
+          break;
+        }
+      } // for (int i = num_axes - 1; i >= 0; --i)
+    } while (incremented); // do
+  } // CUDA_KERNEL_LOOP(index, n)
+}
+
+template <typename T, int num_axes>
+__global__ void col2im_nd_gpu_kernel(
+    const int n,
+    const T* data_col,
+    const int* im_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* pad,
+    const int* stride,
+    const int* dilation,
+    T* data_im) {
+  int d_im[num_axes]; // NOLINT(runtime/arrays)
+  int d_col_iter[num_axes]; // NOLINT(runtime/arrays)
+  int d_col_start[num_axes]; // NOLINT(runtime/arrays)
+  int d_col_end[num_axes]; // NOLINT(runtime/arrays)
+
+  __shared__ int shared_dilation[num_axes];
+  __shared__ int shared_kernel_shape[num_axes];
+  __shared__ int shared_pad[num_axes];
+  __shared__ int shared_stride[num_axes];
+  __shared__ int shared_col_shape[num_axes + 1];
+  __shared__ int shared_im_shape[num_axes + 1];
+
+  if (threadIdx.x < num_axes) {
+    shared_dilation[threadIdx.x] = dilation[threadIdx.x];
+    shared_kernel_shape[threadIdx.x] = kernel_shape[threadIdx.x];
+    shared_pad[threadIdx.x] = pad[threadIdx.x];
+    shared_stride[threadIdx.x] = stride[threadIdx.x];
+  }
+
+  if (threadIdx.x < num_axes + 1) {
+    shared_col_shape[threadIdx.x] = col_shape[threadIdx.x];
+    shared_im_shape[threadIdx.x] = im_shape[threadIdx.x];
+  }
+  __syncthreads();
+
+  CUDA_1D_KERNEL_LOOP(index, n) {
+    // Initialize channel_in, computed in the loop below, with intermediate
+    // computations used to compute the spatial indices.
+    int c_im = index;
+    // Calculate d_im (image dimensions).
+    for (int i = num_axes - 1; i >= 0; --i) {
+      d_im[i] = c_im % shared_im_shape[i + 1] + shared_pad[i];
+      c_im /= shared_im_shape[i + 1];
+    }
+    // Calculate col start/end indices.
+    bool done = false;
+    for (int i = 0; i < num_axes; ++i) {
+      const int kernel_extent =
+          shared_dilation[i] * (shared_kernel_shape[i] - 1) + 1;
+      d_col_start[i] = d_col_iter[i] = (d_im[i] < kernel_extent)
+          ? 0
+          : (d_im[i] - kernel_extent) / shared_stride[i] + 1;
+      d_col_end[i] =
+          min(d_im[i] / shared_stride[i] + 1, shared_col_shape[i + 1]);
+      if (d_col_start[i] >= d_col_end[i]) {
+        // Skip computation if the dimension is 0 at any spatial axis --
+        // final val will be 0.
+        data_im[index] = 0;
+        done = true;
+        break; // for (int i = 0; i < num_axes; ++i)
+      }
+    }
+    if (done) {
+      continue; // CUDA_KERNEL_LOOP(index, n)
+    }
+    // Loop over the col to compute the output val.
+    T val = 0;
+    bool incremented = true;
+    bool skip = false;
+    do {
+      // Compute the final offset.
+      int final_offset = 0;
+      int kernel_shape_prod = 1;
+      int kernel_index;
+      for (int i = num_axes - 1; i >= 0; --i) {
+        kernel_index = d_im[i] - d_col_iter[i] * shared_stride[i];
+        if (kernel_index % shared_dilation[i]) {
+          skip = true;
+          break;
+        } else {
+          kernel_index /= shared_dilation[i];
+          final_offset += kernel_index * kernel_shape_prod;
+          kernel_shape_prod *= shared_kernel_shape[i];
+        }
+      }
+      if (!skip) {
+        final_offset += kernel_shape_prod * c_im;
+        for (int i = 0; i < num_axes; ++i) {
+          final_offset *= shared_col_shape[i + 1];
+          final_offset += d_col_iter[i];
+        }
+        val += data_col[final_offset];
+      }
+      skip = false;
+      incremented = false;
+      for (int i = num_axes - 1; i >= 0; --i) {
+        const int d_max = d_col_end[i];
+        if (d_col_iter[i] == d_max - 1) {
+          d_col_iter[i] = d_col_start[i];
+        } else { // d_col_iter[i] < d_max - 1
+          ++d_col_iter[i];
+          incremented = true;
+          break; // for (int i = num_axes - 1; i >= 0; --i)
+        }
+      } // for (int i = num_axes - 1; i >= 0; --i)
+    } while (incremented);
+    data_im[index] = val;
+  } // CUDA_KERNEL_LOOP(index, n)
 }
 
 }  // namespace
@@ -759,9 +966,125 @@ void Col2im<float, CUDAContext, StorageOrder::NHWC>(
 }
 
 template <>
+void Col2imNd<float, CUDAContext, StorageOrder::NCHW>(
+    const float* data_col,
+    const int* img_shape,
+    const int* col_shape,
+    const int img_size,
+    const int col_size,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const int N,
+    float* data_img,
+    CUDAContext* context) {
+  CAFFE_ENFORCE_LT(
+      N, CAFFE_CUDA_NUM_THREADS, "num_axes should be smaller than block size.");
+
+#define COL2IM_ND_KERNEL(n)                                                   \
+  col2im_nd_gpu_kernel<float, n> /* NOLINT_NEXT_LINE(whitespace/operators) */ \
+      <<<CAFFE_GET_BLOCKS(img_size),                                          \
+         CAFFE_CUDA_NUM_THREADS,                                              \
+         0,                                                                   \
+         context->cuda_stream()>>>(                                           \
+          img_size,                                                           \
+          data_col,                                                           \
+          img_shape,                                                          \
+          col_shape,                                                          \
+          kernel_shape,                                                       \
+          pad,                                                                \
+          stride,                                                             \
+          dilation,                                                           \
+          data_img)
+
+  switch (N) {
+    case 1:
+      COL2IM_ND_KERNEL(1);
+      break;
+    case 2:
+      COL2IM_ND_KERNEL(2);
+      break;
+    case 3:
+      COL2IM_ND_KERNEL(3);
+      break;
+    case 4:
+      COL2IM_ND_KERNEL(4);
+      break;
+    case 5:
+      COL2IM_ND_KERNEL(5);
+      break;
+    default:
+      CAFFE_THROW(
+          "Col2imNd does not support computation with ", N, " spatial axes");
+  }
+}
+
+template <>
+void Im2colNd<float, CUDAContext, StorageOrder::NCHW>(
+    const float* data_img,
+    const int* img_shape,
+    const int* col_shape,
+    const int img_size,
+    const int col_size,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const int N,
+    float* data_col,
+    CUDAContext* context,
+    bool /*accumlate_output*/) {
+  CAFFE_ENFORCE_LT(
+      N, CAFFE_CUDA_NUM_THREADS, "num_axes should be smaller than block size.");
+
+#define IM2COL_ND_KERNEL(n)                                                   \
+  im2col_nd_gpu_kernel<float, n> /* NOLINT_NEXT_LINE(whitespace/operators) */ \
+      <<<CAFFE_GET_BLOCKS(col_size),                                          \
+         CAFFE_CUDA_NUM_THREADS,                                              \
+         0,                                                                   \
+         context->cuda_stream()>>>(                                           \
+          col_size,                                                           \
+          data_img,                                                           \
+          img_shape,                                                          \
+          col_shape,                                                          \
+          kernel_shape,                                                       \
+          pad,                                                                \
+          stride,                                                             \
+          dilation,                                                           \
+          data_col)
+
+  switch (N) {
+    case 1:
+      IM2COL_ND_KERNEL(1);
+      break;
+    case 2:
+      IM2COL_ND_KERNEL(2);
+      break;
+    case 3:
+      IM2COL_ND_KERNEL(3);
+      break;
+    case 4:
+      IM2COL_ND_KERNEL(4);
+    case 5:
+      IM2COL_ND_KERNEL(5);
+      break;
+    default:
+      CAFFE_THROW(
+          "Im2colNd does not support computation with ", N, " spatial axes");
+  }
+}
+
+template <>
 void CopyMatrix<CUDAContext>(
-    const size_t itemsize, const int M, const int N, const void* A,
-    const int lda, void* B, const int ldb, CUDAContext* context) {
+    const size_t itemsize,
+    const int M,
+    const int N,
+    const void* A,
+    const int lda,
+    void* B,
+    const int ldb,
+    CUDAContext* context) {
   cudaMemcpy2DAsync(B, ldb * itemsize, A, lda * itemsize, N * itemsize, M,
                     cudaMemcpyDeviceToDevice, context->cuda_stream());
 }

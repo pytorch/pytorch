@@ -27,6 +27,8 @@ class ConvOp final : public ConvPoolOpBase<Context> {
  private:
   Tensor<Context> col_buffer_;
   Tensor<Context> bias_multiplier_;
+  Tensor<Context> img_shape_device_;
+  Tensor<Context> col_buffer_shape_device_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -54,6 +56,8 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  private:
   Tensor<Context> col_buffer_;
   Tensor<Context> bias_multiplier_;
+  Tensor<Context> img_shape_device_;
+  Tensor<Context> col_buffer_shape_device_;
   bool no_bias_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
