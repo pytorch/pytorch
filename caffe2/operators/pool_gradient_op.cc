@@ -30,7 +30,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::
   CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
-  ConvPoolOpBase<CPUContext>::ComputePads(height, width);
+  ConvPoolOpBase<CPUContext>::ComputePads({height, width});
   int pooled_height = dY.dim32(2);
   int pooled_width = dY.dim32(3);
   // The main loop
@@ -38,10 +38,10 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::
     for (int c = 0; c < channels; ++c) {
       for (int ph = 0; ph < pooled_height; ++ph) {
         for (int pw = 0; pw < pooled_width; ++pw) {
-          int hstart = ph * stride_h_ - pad_t_;
-          int wstart = pw * stride_w_ - pad_l_;
-          int hend = min(hstart + kernel_h_, height);
-          int wend = min(wstart + kernel_w_, width);
+          int hstart = ph * stride_h() - pad_t();
+          int wstart = pw * stride_w() - pad_l();
+          int hend = min(hstart + kernel_h(), height);
+          int wend = min(wstart + kernel_w(), width);
           hstart = max(hstart, 0);
           wstart = max(wstart, 0);
           float scale = 1. / (hend - hstart) / (wend - wstart);
@@ -77,7 +77,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::
   // The main loop
   int height = X.dim32(1);
   int width = X.dim32(2);
-  ConvPoolOpBase<CPUContext>::ComputePads(height, width);
+  ConvPoolOpBase<CPUContext>::ComputePads({height, width});
   int pooled_height = dY.dim32(1);
   int pooled_width = dY.dim32(2);
   int channels = X.dim32(3);
@@ -85,10 +85,10 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {
-        int hstart = ph * stride_h_ - pad_t_;
-        int wstart = pw * stride_w_ - pad_l_;
-        int hend = min(hstart + kernel_h_, height);
-        int wend = min(wstart + kernel_w_, width);
+        int hstart = ph * stride_h() - pad_t();
+        int wstart = pw * stride_w() - pad_l();
+        int hend = min(hstart + kernel_h(), height);
+        int wend = min(wstart + kernel_w(), width);
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         float scale = 1. / (hend - hstart) / (wend - wstart);
@@ -127,17 +127,17 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
-  ConvPoolOpBase<CPUContext>::ComputePads(height, width);
+  ConvPoolOpBase<CPUContext>::ComputePads({height, width});
   int pooled_height = dY.dim32(2);
   int pooled_width = dY.dim32(3);
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int c = 0; c < channels; ++c) {
       for (int ph = 0; ph < pooled_height; ++ph) {
         for (int pw = 0; pw < pooled_width; ++pw) {
-          int hstart = ph * stride_h_ - pad_t_;
-          int wstart = pw * stride_w_ - pad_l_;
-          int hend = min(hstart + kernel_h_, height);
-          int wend = min(wstart + kernel_w_, width);
+          int hstart = ph * stride_h() - pad_t();
+          int wstart = pw * stride_w() - pad_l();
+          int hend = min(hstart + kernel_h(), height);
+          int wend = min(wstart + kernel_w(), width);
           hstart = max(hstart, 0);
           wstart = max(wstart, 0);
           const int pool_index = ph * pooled_width + pw;
@@ -185,7 +185,7 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   dXmat.setZero();
   int height = X.dim32(1);
   int width = X.dim32(2);
-  ConvPoolOpBase<CPUContext>::ComputePads(height, width);
+  ConvPoolOpBase<CPUContext>::ComputePads({height, width});
   int pooled_height = dY.dim32(1);
   int pooled_width = dY.dim32(2);
 
@@ -196,10 +196,10 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {
-        int hstart = ph * stride_h_ - pad_t_;
-        int wstart = pw * stride_w_ - pad_l_;
-        int hend = min(hstart + kernel_h_, height);
-        int wend = min(wstart + kernel_w_, width);
+        int hstart = ph * stride_h() - pad_t();
+        int wstart = pw * stride_w() - pad_l();
+        int hend = min(hstart + kernel_h(), height);
+        int wend = min(wstart + kernel_w(), width);
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         const int pool_index = (n * pooled_height + ph) * pooled_width + pw;

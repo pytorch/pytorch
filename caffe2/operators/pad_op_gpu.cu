@@ -265,25 +265,59 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 
   switch (mode_) {
     case PadMode::CONSTANT:
-      PadImageConstNCHW<float><<<CAFFE_GET_BLOCKS(output_size),
-                             CAFFE_CUDA_NUM_THREADS,
-                             0, context_.cuda_stream()>>>(
-          output_size, Xdata, num, channels, height, width, padded_height,
-          padded_width, pad_t_, pad_l_, value_, Ydata);
+      PadImageConstNCHW<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          Xdata,
+          num,
+          channels,
+          height,
+          width,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          value_,
+          Ydata);
       break;
     case PadMode::REFLECT:
-      PadImageReflectNCHW<float><<<CAFFE_GET_BLOCKS(output_size),
-                               CAFFE_CUDA_NUM_THREADS,
-                               0, context_.cuda_stream()>>>(
-          output_size, Xdata, num, channels, height, width, padded_height,
-          padded_width, pad_t_, pad_l_, Ydata);
+      PadImageReflectNCHW<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          Xdata,
+          num,
+          channels,
+          height,
+          width,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          Ydata);
       break;
     case PadMode::EDGE:
-      PadImageEdgeNCHW<float><<<CAFFE_GET_BLOCKS(output_size),
-                            CAFFE_CUDA_NUM_THREADS,
-                            0, context_.cuda_stream()>>>(
-          output_size, Xdata, num, channels, height, width, padded_height,
-          padded_width, pad_t_, pad_l_, Ydata);
+      PadImageEdgeNCHW<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          Xdata,
+          num,
+          channels,
+          height,
+          width,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          Ydata);
       break;
   }
 
@@ -307,25 +341,59 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 
   switch (mode_) {
     case PadMode::CONSTANT:
-      PadImageConstNHWC<float><<<CAFFE_GET_BLOCKS(output_size),
-                             CAFFE_CUDA_NUM_THREADS,
-                             0, context_.cuda_stream()>>>(
-          output_size, Xdata, num, height, width, channels, padded_height,
-          padded_width, pad_t_, pad_l_, value_, Ydata);
+      PadImageConstNHWC<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          Xdata,
+          num,
+          height,
+          width,
+          channels,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          value_,
+          Ydata);
       break;
     case PadMode::REFLECT:
-      PadImageReflectNHWC<float><<<CAFFE_GET_BLOCKS(output_size),
-                               CAFFE_CUDA_NUM_THREADS,
-                               0, context_.cuda_stream()>>>(
-          output_size, Xdata, num, height, width, channels, padded_height,
-          padded_width, pad_t_, pad_l_, Ydata);
+      PadImageReflectNHWC<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          Xdata,
+          num,
+          height,
+          width,
+          channels,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          Ydata);
       break;
     case PadMode::EDGE:
-      PadImageEdgeNHWC<float><<<CAFFE_GET_BLOCKS(output_size),
-                            CAFFE_CUDA_NUM_THREADS,
-                            0, context_.cuda_stream()>>>(
-          output_size, Xdata, num, height, width, channels, padded_height,
-          padded_width, pad_t_, pad_l_, Ydata);
+      PadImageEdgeNHWC<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          Xdata,
+          num,
+          height,
+          width,
+          channels,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          Ydata);
       break;
   }
 
@@ -339,8 +407,8 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   dX->Resize(
       dY.dim32(0),
       dY.dim32(1),
-      dY.dim32(2) - pad_t_ - pad_b_,
-      dY.dim32(3) - pad_l_ - pad_r_);
+      dY.dim32(2) - pad_t() - pad_b(),
+      dY.dim32(3) - pad_l() - pad_r());
   const int input_size = dY.size();
   const int padded_height = dY.dim32(2);
   const int padded_width = dY.dim32(3);
@@ -355,25 +423,58 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 
   switch (mode_) {
     case PadMode::CONSTANT:
-      PadImageGradientConstNCHW<float><<<CAFFE_GET_BLOCKS(output_size),
-                                     CAFFE_CUDA_NUM_THREADS,
-                                     0, context_.cuda_stream()>>>(
-          output_size, dYdata, num, channels, height, width, padded_height,
-          padded_width, pad_t_, pad_l_, dXdata);
+      PadImageGradientConstNCHW<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          dYdata,
+          num,
+          channels,
+          height,
+          width,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          dXdata);
       break;
     case PadMode::REFLECT:
-      PadImageGradientReflectNCHW<float><<<CAFFE_GET_BLOCKS(input_size),
-                                       CAFFE_CUDA_NUM_THREADS,
-                                       0, context_.cuda_stream()>>>(
-          input_size, dYdata, num, channels, height, width, padded_height,
-          padded_width, pad_t_, pad_l_, dXdata);
+      PadImageGradientReflectNCHW<float><<<
+          CAFFE_GET_BLOCKS(input_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          input_size,
+          dYdata,
+          num,
+          channels,
+          height,
+          width,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          dXdata);
       break;
     case PadMode::EDGE:
-      PadImageGradientEdgeNCHW<float><<<CAFFE_GET_BLOCKS(input_size),
-                                    CAFFE_CUDA_NUM_THREADS,
-                                    0, context_.cuda_stream()>>>(
-          input_size, dYdata, num, channels, height, width, padded_height,
-          padded_width, pad_t_, pad_l_, dXdata);
+      PadImageGradientEdgeNCHW<float><<<
+          CAFFE_GET_BLOCKS(input_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          input_size,
+          dYdata,
+          num,
+          channels,
+          height,
+          width,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          dXdata);
       break;
   }
 
@@ -386,8 +487,8 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto* dX = Output(0);
   dX->Resize(
       dY.dim32(0),
-      dY.dim32(1) - pad_t_ - pad_b_,
-      dY.dim32(2) - pad_l_ - pad_r_,
+      dY.dim32(1) - pad_t() - pad_b(),
+      dY.dim32(2) - pad_l() - pad_r(),
       dY.dim32(3));
   const int input_size = dY.size();
   const int padded_height = dY.dim32(1);
@@ -403,25 +504,58 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 
   switch (mode_) {
     case PadMode::CONSTANT:
-      PadImageGradientConstNHWC<float><<<CAFFE_GET_BLOCKS(output_size),
-                                     CAFFE_CUDA_NUM_THREADS,
-                                     0, context_.cuda_stream()>>>(
-          output_size, dYdata, num, height, width, channels, padded_height,
-          padded_width, pad_t_, pad_l_, dXdata);
+      PadImageGradientConstNHWC<float><<<
+          CAFFE_GET_BLOCKS(output_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output_size,
+          dYdata,
+          num,
+          height,
+          width,
+          channels,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          dXdata);
       break;
     case PadMode::REFLECT:
-      PadImageGradientReflectNHWC<float><<<CAFFE_GET_BLOCKS(input_size),
-                                       CAFFE_CUDA_NUM_THREADS,
-                                       0, context_.cuda_stream()>>>(
-          input_size, dYdata, num, height, width, channels, padded_height,
-          padded_width, pad_t_, pad_l_, dXdata);
+      PadImageGradientReflectNHWC<float><<<
+          CAFFE_GET_BLOCKS(input_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          input_size,
+          dYdata,
+          num,
+          height,
+          width,
+          channels,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          dXdata);
       break;
     case PadMode::EDGE:
-      PadImageGradientEdgeNHWC<float><<<CAFFE_GET_BLOCKS(input_size),
-                                    CAFFE_CUDA_NUM_THREADS,
-                                    0, context_.cuda_stream()>>>(
-          input_size, dYdata, num, height, width, channels, padded_height,
-          padded_width, pad_t_, pad_l_, dXdata);
+      PadImageGradientEdgeNHWC<float><<<
+          CAFFE_GET_BLOCKS(input_size),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          input_size,
+          dYdata,
+          num,
+          height,
+          width,
+          channels,
+          padded_height,
+          padded_width,
+          pad_t(),
+          pad_l(),
+          dXdata);
       break;
   }
 

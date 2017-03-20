@@ -158,12 +158,26 @@ bool PoolOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNCHW() {
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
   int output_size = Y->size();
-  AveragePoolForwardNCHW<float><<<CAFFE_GET_BLOCKS(output_size),
-                              CAFFE_CUDA_NUM_THREADS,
-                              0, context_.cuda_stream()>>>(
-      output_size, X.data<float>(), X.dim32(0), X.dim32(1), X.dim32(2), X.dim32(3),
-      Y->dim32(2), Y->dim32(3), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, Y->mutable_data<float>());
+  AveragePoolForwardNCHW<float><<<
+      CAFFE_GET_BLOCKS(output_size),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      output_size,
+      X.data<float>(),
+      X.dim32(0),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      Y->dim32(2),
+      Y->dim32(3),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      Y->mutable_data<float>());
   return true;
 }
 
@@ -173,12 +187,26 @@ bool PoolOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNHWC() {
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(3));
   int output_size = Y->size();
-  AveragePoolForwardNHWC<float><<<CAFFE_GET_BLOCKS(output_size),
-                              CAFFE_CUDA_NUM_THREADS,
-                              0, context_.cuda_stream()>>>(
-      output_size, X.data<float>(), X.dim32(0), X.dim32(1), X.dim32(2), X.dim32(3),
-      Y->dim32(1), Y->dim32(2), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, Y->mutable_data<float>());
+  AveragePoolForwardNHWC<float><<<
+      CAFFE_GET_BLOCKS(output_size),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      output_size,
+      X.data<float>(),
+      X.dim32(0),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      Y->dim32(1),
+      Y->dim32(2),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      Y->mutable_data<float>());
   return true;
 }
 
@@ -189,13 +217,27 @@ bool PoolGradientOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNCHW()
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
-  AvePoolBackwardNCHW<float><<<CAFFE_GET_BLOCKS(X.size()),
-                               CAFFE_CUDA_NUM_THREADS,
-                               0, context_.cuda_stream()>>>(
-      X.size(), dY.data<float>(), X.dim32(0), X.dim32(1), X.dim32(2), X.dim32(3),
-      dY.dim32(2), dY.dim32(3), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, dX->mutable_data<float>());
+  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
+  AvePoolBackwardNCHW<float><<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      X.size(),
+      dY.data<float>(),
+      X.dim32(0),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      dY.dim32(2),
+      dY.dim32(3),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      dX->mutable_data<float>());
   return true;
 }
 
@@ -206,13 +248,27 @@ bool PoolGradientOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNHWC()
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(1), X.dim32(2));
-  AvePoolBackwardNHWC<float><<<CAFFE_GET_BLOCKS(X.size()),
-                               CAFFE_CUDA_NUM_THREADS,
-                               0, context_.cuda_stream()>>>(
-      X.size(), dY.data<float>(), X.dim32(0), X.dim32(1), X.dim32(2), X.dim32(3),
-      dY.dim32(1), dY.dim32(2), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, dX->mutable_data<float>());
+  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(1), X.dim32(2)});
+  AvePoolBackwardNHWC<float><<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      X.size(),
+      dY.data<float>(),
+      X.dim32(0),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      dY.dim32(1),
+      dY.dim32(2),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      dX->mutable_data<float>());
   return true;
 }
 
@@ -354,12 +410,25 @@ bool PoolOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
   int output_size = Y->size();
-  MaxPoolForwardNCHW<float><<<CAFFE_GET_BLOCKS(output_size),
-                              CAFFE_CUDA_NUM_THREADS,
-                              0, context_.cuda_stream()>>>(
-      output_size, X.data<float>(), X.dim32(1), X.dim32(2), X.dim32(3),
-      Y->dim32(2), Y->dim32(3), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, Y->mutable_data<float>());
+  MaxPoolForwardNCHW<float><<<
+      CAFFE_GET_BLOCKS(output_size),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      output_size,
+      X.data<float>(),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      Y->dim32(2),
+      Y->dim32(3),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      Y->mutable_data<float>());
   return true;
 }
 
@@ -369,12 +438,25 @@ bool PoolOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(3));
   int output_size = Y->size();
-  MaxPoolForwardNHWC<float><<<CAFFE_GET_BLOCKS(output_size),
-                              CAFFE_CUDA_NUM_THREADS,
-                              0, context_.cuda_stream()>>>(
-      output_size, X.data<float>(), X.dim32(1), X.dim32(2), X.dim32(3),
-      Y->dim32(1), Y->dim32(2), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, Y->mutable_data<float>());
+  MaxPoolForwardNHWC<float><<<
+      CAFFE_GET_BLOCKS(output_size),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      output_size,
+      X.data<float>(),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      Y->dim32(1),
+      Y->dim32(2),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      Y->mutable_data<float>());
   return true;
 }
 
@@ -386,14 +468,29 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
-  MaxPoolBackwardNCHW<float><<<CAFFE_GET_BLOCKS(X.size()),
-                               CAFFE_CUDA_NUM_THREADS,
-                               0, context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y.data<float>(), dY.data<float>(),
-      X.dim32(0), X.dim32(1), X.dim32(2), X.dim32(3),
-      dY.dim32(2), dY.dim32(3), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, dX->mutable_data<float>());
+  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
+  MaxPoolBackwardNCHW<float><<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      X.size(),
+      X.data<float>(),
+      Y.data<float>(),
+      dY.data<float>(),
+      X.dim32(0),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      dY.dim32(2),
+      dY.dim32(3),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      dX->mutable_data<float>());
   return true;
 }
 
@@ -405,14 +502,29 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(1), X.dim32(2));
-  MaxPoolBackwardNHWC<float><<<CAFFE_GET_BLOCKS(X.size()),
-                               CAFFE_CUDA_NUM_THREADS,
-                               0, context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y.data<float>(), dY.data<float>(),
-      X.dim32(0), X.dim32(1), X.dim32(2), X.dim32(3),
-      dY.dim32(1), dY.dim32(2), kernel_h_, kernel_w_, stride_h_, stride_w_,
-      pad_t_, pad_l_, dX->mutable_data<float>());
+  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(1), X.dim32(2)});
+  MaxPoolBackwardNHWC<float><<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      X.size(),
+      X.data<float>(),
+      Y.data<float>(),
+      dY.data<float>(),
+      X.dim32(0),
+      X.dim32(1),
+      X.dim32(2),
+      X.dim32(3),
+      dY.dim32(1),
+      dY.dim32(2),
+      kernel_h(),
+      kernel_w(),
+      stride_h(),
+      stride_w(),
+      pad_t(),
+      pad_l(),
+      dX->mutable_data<float>());
   return true;
 }
 

@@ -88,7 +88,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
           C,
           order_ == StorageOrder::NCHW ? Y->dim32(2) : Y->dim32(1),
           order_ == StorageOrder::NCHW ? Y->dim32(3) : Y->dim32(2)));
-      if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
+      if (pad_t() != pad_l() || pad_l() != pad_r()) {
         CAFFE_ENFORCE(
             legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING,
             "Cudnn pooling only supports even padding on both sides, with "
@@ -99,12 +99,12 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
           pooling_desc_,
           mode_,
           CUDNN_PROPAGATE_NAN,
-          kernel_h_,
-          kernel_w_,
-          pad_t_,
-          pad_l_,
-          stride_h_,
-          stride_w_));
+          kernel_h(),
+          kernel_w(),
+          pad_t(),
+          pad_l(),
+          stride_h(),
+          stride_w()));
     }
     // Carry out the pooling computation.
     CUDNN_ENFORCE(cudnnPoolingForward(
@@ -203,7 +203,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     default:
       LOG(FATAL) << "Unknown storage order: " << order_;
     }
-    ConvPoolOpBase<CUDAContext>::ComputePads(H, W);
+    ConvPoolOpBase<CUDAContext>::ComputePads({H, W});
 
     if (cudnn_input_dims_ != X.dims()) {
       // Dimensions changed; we will need to re-initialize things.
@@ -225,7 +225,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
           C,
           order_ == StorageOrder::NCHW ? Y.dim32(2) : Y.dim32(1),
           order_ == StorageOrder::NCHW ? Y.dim32(3) : Y.dim32(2)));
-      if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
+      if (pad_t() != pad_l() || pad_l() != pad_r()) {
         CAFFE_ENFORCE(
             legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING,
             "Cudnn pooling only supports even padding on both sides, with "
@@ -236,12 +236,12 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
           pooling_desc_,
           mode_,
           CUDNN_PROPAGATE_NAN,
-          kernel_h_,
-          kernel_w_,
-          pad_t_,
-          pad_l_,
-          stride_h_,
-          stride_w_));
+          kernel_h(),
+          kernel_w(),
+          pad_t(),
+          pad_l(),
+          stride_h(),
+          stride_w()));
     }
     // Carry out the pooling computation.
     CUDNN_ENFORCE(cudnnPoolingBackward(

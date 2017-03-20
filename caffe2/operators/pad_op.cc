@@ -40,8 +40,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
         for (int c = 0; c < channels; ++c) {
           for (int ph = 0; ph < padded_height; ++ph) {
             for (int pw = 0; pw < padded_width; ++pw) {
-              int h = ph - pad_t_;
-              int w = pw - pad_l_;
+              int h = ph - pad_t();
+              int w = pw - pad_l();
               Ydata[ph * padded_width + pw] =
                   (h < 0 || w < 0 || h >= height || w >= width)
                   ? value_
@@ -55,12 +55,12 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       }
       break;
     case PadMode::REFLECT:
-      if (pad_r_ >= 0 && pad_t_ >= 0 && pad_l_ >= 0 && pad_b_ >= 0) {
+      if (pad_r() >= 0 && pad_t() >= 0 && pad_l() >= 0 && pad_b() >= 0) {
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             // Handle the valid region:
             // i.e. Y[n][c][pad_t:pad_t+h][pad_l:pad_l+w]
-            auto* Ystart = Ydata + pad_t_ * padded_width + pad_l_;
+            auto* Ystart = Ydata + pad_t() * padded_width + pad_l();
             math::CopyMatrix<CPUContext>(
                 sizeof(float),
                 height,
@@ -73,8 +73,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
 // Fixup areas where we need to reflect
 #define X(ph, pw)                 \
-  int h = ph - pad_t_;            \
-  int w = pw - pad_l_;            \
+  int h = ph - pad_t();           \
+  int w = pw - pad_l();           \
   h = max(h, -h);                 \
   h = min(h, 2 * height - h - 2); \
   w = max(w, -w);                 \
@@ -82,27 +82,27 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   Ydata[ph * padded_width + pw] = Xdata[h * width + w]
 
             // Top part
-            for (int ph = 0; ph < pad_t_; ++ph) {
+            for (int ph = 0; ph < pad_t(); ++ph) {
               for (int pw = 0; pw < padded_width; ++pw) {
                 X(ph, pw);
               }
             }
 
             // Bottom part
-            for (int ph = padded_height - pad_b_; ph < padded_height; ++ph) {
+            for (int ph = padded_height - pad_b(); ph < padded_height; ++ph) {
               for (int pw = 0; pw < padded_width; ++pw) {
                 X(ph, pw);
               }
             }
 
             // Interior
-            for (int ph = pad_t_; ph < padded_height - pad_b_; ++ph) {
+            for (int ph = pad_t(); ph < padded_height - pad_b(); ++ph) {
               // Left
-              for (int pw = 0; pw < pad_l_; ++pw) {
+              for (int pw = 0; pw < pad_l(); ++pw) {
                 X(ph, pw);
               }
               // Right
-              for (int pw = padded_width - pad_r_; pw < padded_width; ++pw) {
+              for (int pw = padded_width - pad_r(); pw < padded_width; ++pw) {
                 X(ph, pw);
               }
             }
@@ -118,8 +118,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
           for (int c = 0; c < channels; ++c) {
             for (int ph = 0; ph < padded_height; ++ph) {
               for (int pw = 0; pw < padded_width; ++pw) {
-                int h = ph - pad_t_;
-                int w = pw - pad_l_;
+                int h = ph - pad_t();
+                int w = pw - pad_l();
                 // max(h, -h) does reflection over 0
                 h = max(h, -h);
                 // min(h, 2 * height - h - 2) does reflection over height.
@@ -142,8 +142,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
           for (int ph = 0; ph < padded_height; ++ph) {
             for (int pw = 0; pw < padded_width; ++pw) {
               // Bounds to the right range.
-              int h = min(height - 1, max(ph - pad_t_, 0));
-              int w = min(width - 1, max(pw - pad_l_, 0));
+              int h = min(height - 1, max(ph - pad_t(), 0));
+              int w = min(width - 1, max(pw - pad_l(), 0));
               Ydata[ph * padded_width + pw] = Xdata[h * width + w];
             }
           }
@@ -177,8 +177,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
       for (int n = 0; n < X.dim32(0); ++n) {
         for (int ph = 0; ph < padded_height; ++ph) {
           for (int pw = 0; pw < padded_width; ++pw) {
-            int h = ph - pad_t_;
-            int w = pw - pad_l_;
+            int h = ph - pad_t();
+            int w = pw - pad_l();
             const int pad_index = (ph * padded_width + pw) * channels;
             if (h < 0 || w < 0 || h >= height || w >= width) {
               for (int c = 0; c < channels; ++c) {
@@ -202,8 +202,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
         for (int ph = 0; ph < padded_height; ++ph) {
           for (int pw = 0; pw < padded_width; ++pw) {
             const int pad_index = (ph * padded_width + pw) * channels;
-            int h = ph - pad_t_;
-            int w = pw - pad_l_;
+            int h = ph - pad_t();
+            int w = pw - pad_l();
             // max(h, -h) does reflection over 0
             h = max(h, -h);
             // min(h, 2 * height - h - 2) does reflection over height.
@@ -226,8 +226,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
         for (int ph = 0; ph < padded_height; ++ph) {
           for (int pw = 0; pw < padded_width; ++pw) {
             const int pad_index = (ph * padded_width + pw) * channels;
-            int h = min(height - 1, max(ph - pad_t_, 0));
-            int w = min(width - 1, max(pw - pad_l_, 0));
+            int h = min(height - 1, max(ph - pad_t(), 0));
+            int w = min(width - 1, max(pw - pad_l(), 0));
             const int input_index = (h * width + w) * channels;
             for (int c = 0; c < channels; ++c) {
               Ydata[pad_index + c] = Xdata[input_index + c];
@@ -250,8 +250,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   dX->Resize(
       dY.dim32(0),
       dY.dim32(1),
-      dY.dim32(2) - pad_t_ - pad_b_,
-      dY.dim32(3) - pad_l_ - pad_r_);
+      dY.dim32(2) - pad_t() - pad_b(),
+      dY.dim32(3) - pad_l() - pad_r());
   int padded_height = dY.dim32(2);
   int padded_width = dY.dim32(3);
   int channels = dX->dim32(1);
@@ -268,8 +268,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
         for (int c = 0; c < channels; ++c) {
           for (int ph = 0; ph < padded_height; ++ph) {
             for (int pw = 0; pw < padded_width; ++pw) {
-              int h = ph - pad_t_;
-              int w = pw - pad_l_;
+              int h = ph - pad_t();
+              int w = pw - pad_l();
               if (!(h < 0 || w < 0 || h >= height || w >= width)) {
                 dXdata[h * width + w] += dYdata[ph * padded_width + pw];
               }
@@ -286,8 +286,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
         for (int c = 0; c < channels; ++c) {
           for (int ph = 0; ph < padded_height; ++ph) {
             for (int pw = 0; pw < padded_width; ++pw) {
-              int h = ph - pad_t_;
-              int w = pw - pad_l_;
+              int h = ph - pad_t();
+              int w = pw - pad_l();
               // max(h, -h) does reflection over 0
               h = max(h, -h);
               // min(h, 2 * height - h - 2) does reflection over height.
@@ -308,8 +308,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
         for (int c = 0; c < channels; ++c) {
           for (int ph = 0; ph < padded_height; ++ph) {
             for (int pw = 0; pw < padded_width; ++pw) {
-              int h = min(height - 1, max(ph - pad_t_, 0));
-              int w = min(width - 1, max(pw - pad_l_, 0));
+              int h = min(height - 1, max(ph - pad_t(), 0));
+              int w = min(width - 1, max(pw - pad_l(), 0));
               dXdata[h * width + w] += dYdata[ph * padded_width + pw];
             }
           }
@@ -329,8 +329,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto* dX = Output(0);
   dX->Resize(
       dY.dim32(0),
-      dY.dim32(1) - pad_t_ - pad_b_,
-      dY.dim32(2) - pad_l_ - pad_r_,
+      dY.dim32(1) - pad_t() - pad_b(),
+      dY.dim32(2) - pad_l() - pad_r(),
       dY.dim32(3));
   int padded_height = dY.dim32(1);
   int padded_width = dY.dim32(2);
@@ -347,8 +347,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
       for (int n = 0; n < dY.dim32(0); ++n) {
         for (int ph = 0; ph < padded_height; ++ph) {
           for (int pw = 0; pw < padded_width; ++pw) {
-            int h = ph - pad_t_;
-            int w = pw - pad_l_;
+            int h = ph - pad_t();
+            int w = pw - pad_l();
             const int pad_index = (ph * padded_width + pw) * channels;
             if (!(h < 0 || w < 0 || h >= height || w >= width)) {
               const int input_index = (h * width + w) * channels;
@@ -368,8 +368,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
         for (int ph = 0; ph < padded_height; ++ph) {
           for (int pw = 0; pw < padded_width; ++pw) {
             const int pad_index = (ph * padded_width + pw) * channels;
-            int h = ph - pad_t_;
-            int w = pw - pad_l_;
+            int h = ph - pad_t();
+            int w = pw - pad_l();
             // max(h, -h) does reflection over 0
             h = max(h, -h);
             // min(h, 2 * height - h - 2) does reflection over height.
@@ -393,8 +393,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           for (int pw = 0; pw < padded_width; ++pw) {
             const int pad_index = (ph * padded_width + pw) * channels;
             // Bounds to the right range.
-            int h = min(height - 1, max(ph - pad_t_, 0));
-            int w = min(width - 1, max(pw - pad_l_, 0));
+            int h = min(height - 1, max(ph - pad_t(), 0));
+            int w = min(width - 1, max(pw - pad_l(), 0));
             const int input_index = (h * width + w) * channels;
             for (int c = 0; c < channels; ++c) {
               dXdata[input_index + c] += dYdata[pad_index + c];

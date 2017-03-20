@@ -15,9 +15,10 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
   MKLConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<MKLContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(
-        dilation_h_ == 1 && dilation_w_ == 1, "Dilation not supported.");
+        dilation_h() == 1 && dilation_w() == 1, "Dilation not supported.");
     OPERATOR_NEEDS_FEATURE(
-        pad_l_ == pad_r_ && pad_t_ == pad_b_, "Uneven padding not supported.");
+        pad_l() == pad_r() && pad_t() == pad_b(),
+        "Uneven padding not supported.");
     OPERATOR_NEEDS_FEATURE(
         order_ == StorageOrder::NCHW, "Only NCHW order supported.");
     OPERATOR_NEEDS_FEATURE(
@@ -47,8 +48,8 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
           C,
           " is not equal to kernel channels:",
           filter.dim32(1));
-      CAFFE_ENFORCE(filter.dim32(2) == kernel_h_);
-      CAFFE_ENFORCE(filter.dim32(3) == kernel_w_);
+      CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
+      CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
       CAFFE_ENFORCE(bias.ndim() == 1);
       CAFFE_ENFORCE(bias.dim32(0) == M);
 
@@ -63,9 +64,9 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
       size_t tdata_sizes[4] = {
           dummy_output.dim(3), dummy_output.dim(2),
           dummy_output.dim(1), dummy_output.dim(0)};
-      size_t fdata_sizes[4] = {kernel_w_, kernel_h_, C, M};
-      size_t strides[2] = {stride_w_, stride_h_};
-      int pads[2] = {-pad_l_, -pad_t_};
+      size_t fdata_sizes[4] = {kernel_w(), kernel_h(), C, M};
+      size_t strides[2] = {stride_w(), stride_h()};
+      int pads[2] = {-pad_l(), -pad_t()};
 
       primitive_.Reset(
           dnnConvolutionCreateForwardBias<float>,

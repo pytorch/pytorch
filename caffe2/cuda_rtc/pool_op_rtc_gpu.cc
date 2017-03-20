@@ -199,9 +199,19 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
       // recompile
       VLOG(1) << "MaxPool RTC recompiling";
       CAFFE_ENFORCE_LT(Y->size(), std::numeric_limits<int>::max());
-      func_.Compile(static_cast<int>(Y->size()), X.dim32(1), X.dim32(2),
-                    X.dim32(3), Y->dim32(2), Y->dim32(3), kernel_h_, kernel_w_,
-                    stride_h_, stride_w_, pad_t_, pad_l_);
+      func_.Compile(
+          static_cast<int>(Y->size()),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          Y->dim32(2),
+          Y->dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l());
       input_dims_ = X.dims();
     }
     // Carry out the pooling computation.
@@ -237,13 +247,24 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
     CAFFE_ENFORCE_EQ(dY.ndim(), 4);
     auto* dX = Output(0);
     dX->ResizeLike(X);
-    ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
+    ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
     if (input_dims_ != X.dims()) {
       VLOG(1) << "MaxPoolGradient RTC recompiling";
       CAFFE_ENFORCE_LT(X.size(), std::numeric_limits<int>::max());
-      func_.Compile(static_cast<int>(X.size()), X.dim32(0), X.dim32(1),
-                    X.dim32(2), X.dim32(3), dY.dim32(2), dY.dim32(3),
-                    kernel_h_, kernel_w_, stride_h_, stride_w_, pad_t_, pad_l_);
+      func_.Compile(
+          static_cast<int>(X.size()),
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          dY.dim32(2),
+          dY.dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l());
       input_dims_ = X.dims();
     }
     func_.Launch(CAFFE_GET_BLOCKS(X.size()), 1, 1, CAFFE_CUDA_NUM_THREADS, 1, 1,
