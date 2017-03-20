@@ -12,6 +12,7 @@
 #include <chrono>
 #include <thread>
 
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 
 namespace gloo {
@@ -21,7 +22,9 @@ RedisStore::RedisStore(const std::string& host, int port) {
   struct timeval timeout = {.tv_sec = 2};
   redis_ = redisConnectWithTimeout(host.c_str(), port, timeout);
   GLOO_ENFORCE(redis_ != nullptr);
-  GLOO_ENFORCE_EQ(0, redis_->err, "Connecting to Redis: ", redis_->errstr);
+  if (redis_->err != 0) {
+    GLOO_THROW_IO_EXCEPTION("Connecting to Redis: ", redis_->errstr);
+  }
 }
 
 RedisStore::~RedisStore() {
@@ -38,9 +41,13 @@ void RedisStore::set(const std::string& key, const std::vector<char>& data) {
       (size_t)key.size(),
       data.data(),
       (size_t)data.size());
-  GLOO_ENFORCE_NE(ptr, (void*)nullptr, redis_->errstr);
+  if (ptr == nullptr) {
+    GLOO_THROW_IO_EXCEPTION(redis_->errstr);
+  }
   redisReply* reply = static_cast<redisReply*>(ptr);
-  GLOO_ENFORCE_NE(reply->type, REDIS_REPLY_ERROR, "Error: ", reply->str);
+  if (reply->type == REDIS_REPLY_ERROR) {
+    GLOO_THROW_IO_EXCEPTION("Error: ", reply->str);
+  }
   GLOO_ENFORCE_EQ(reply->type, REDIS_REPLY_INTEGER);
   GLOO_ENFORCE_EQ(reply->integer, 1, "Key '", key, "' already set");
   freeReplyObject(reply);
@@ -52,7 +59,9 @@ std::vector<char> RedisStore::get(const std::string& key) {
 
   // Get value
   void* ptr = redisCommand(redis_, "GET %b", key.c_str(), (size_t)key.size());
-  GLOO_ENFORCE_NE(ptr, (void*)nullptr, redis_->errstr);
+  if (ptr == nullptr) {
+    GLOO_THROW_IO_EXCEPTION(redis_->errstr);
+  }
   redisReply* reply = static_cast<redisReply*>(ptr);
   GLOO_ENFORCE_EQ(reply->type, REDIS_REPLY_STRING);
   std::vector<char> result(reply->str, reply->str + reply->len);
@@ -76,7 +85,9 @@ bool RedisStore::check(const std::vector<std::string>& keys) {
 
   auto argc = argv.size();
   void* ptr = redisCommandArgv(redis_, argc, argv.data(), argvlen.data());
-  GLOO_ENFORCE_NE(ptr, (void*)nullptr, redis_->errstr);
+  if (ptr == nullptr) {
+    GLOO_THROW_IO_EXCEPTION(redis_->errstr);
+  }
   redisReply* reply = static_cast<redisReply*>(ptr);
   GLOO_ENFORCE_EQ(reply->type, REDIS_REPLY_INTEGER);
   auto result = (reply->integer == keys.size());

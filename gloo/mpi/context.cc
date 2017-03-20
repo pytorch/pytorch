@@ -11,6 +11,7 @@
 
 #include <algorithm>
 
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 #include "gloo/transport/address.h"
 
@@ -63,7 +64,9 @@ void Context::connectFullMesh(std::shared_ptr<transport::Device>& dev) {
   // Agree on maximum length so we can prepare buffers
   rv = MPI_Allreduce(
     &maxLength, &maxLength, 1, MPI_INT, MPI_MAX, comm_);
-  GLOO_ENFORCE(rv == MPI_SUCCESS, "MPI_Allreduce: ", rv);
+  if (rv != MPI_SUCCESS) {
+    GLOO_THROW_IO_EXCEPTION("MPI_Allreduce: ", rv);
+  }
 
   // Prepare input and output
   std::vector<char> in(size * maxLength);
@@ -80,7 +83,9 @@ void Context::connectFullMesh(std::shared_ptr<transport::Device>& dev) {
   // Allgather to collect all addresses of all pairs
   rv = MPI_Allgather(
     in.data(), in.size(), MPI_BYTE, out.data(), in.size(), MPI_BYTE, comm_);
-  GLOO_ENFORCE(rv == MPI_SUCCESS, "MPI_Allgather: ", rv);
+  if (rv != MPI_SUCCESS) {
+    GLOO_THROW_IO_EXCEPTION("MPI_Allgather: ", rv);
+  }
 
   // Connect every pair
   for (int i = 0; i < size; i++) {

@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 #include "gloo/transport/tcp/buffer.h"
 
@@ -73,7 +74,9 @@ static void setSocketBlocking(int fd, bool enable) {
 void Pair::setSync(bool sync, bool busyPoll) {
   std::unique_lock<std::mutex> lock(m_);
 
-  GLOO_ENFORCE(sync, "Can only switch to sync mode");
+  if (!sync) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("Can only switch to sync mode");
+  }
 
   // Wait for pair to be connected
   while (state_ < CONNECTED) {
@@ -126,7 +129,9 @@ void Pair::listen() {
     // listen(2) on socket
     fd_ = fd;
     rv = ::listen(fd_, 1);
-    GLOO_ENFORCE_NE(rv, -1, "listen");
+    if (rv == -1) {
+      GLOO_THROW_IO_EXCEPTION("listen: ", strerror(errno));
+    }
     break;
   }
 
@@ -141,7 +146,7 @@ void Pair::listen() {
         err << ", ";
       }
     }
-    GLOO_ENFORCE_NE(fd_, -1, "Attempted to bind to: ", err);
+    GLOO_THROW_IO_EXCEPTION("Attempted to bind to: ", err);
   }
 
   freeaddrinfo(result);
@@ -161,8 +166,9 @@ void Pair::connect(const Address& peer) {
   peer_ = peer;
 
   // Addresses have to have same family
-  GLOO_ENFORCE_EQ(
-      self_.ss_.ss_family, peer_.ss_.ss_family, "address family mismatch");
+  if (self_.ss_.ss_family != peer_.ss_.ss_family) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("address family mismatch");
+  }
 
   if (self_.ss_.ss_family == AF_INET) {
     struct sockaddr_in* sa = (struct sockaddr_in*)&self_.ss_;
@@ -181,10 +187,12 @@ void Pair::connect(const Address& peer) {
       rv = sa->sin6_port - sb->sin6_port;
     }
   } else {
-    GLOO_ENFORCE(false, "unknown sa_family");
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("unknown sa_family");
   }
 
-  GLOO_ENFORCE_NE(rv, 0, "cannot connect to self");
+  if (rv == 0) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("cannot connect to self");
+  }
 
   // self_ < peer_; we are listening side.
   if (rv < 0) {
@@ -201,12 +209,14 @@ void Pair::connect(const Address& peer) {
 
   // Create new socket to connect to peer.
   fd_ = socket(peer_.ss_.ss_family, SOCK_STREAM | SOCK_NONBLOCK, 0);
-  GLOO_ENFORCE_NE(fd_, -1, "socket: ", strerror(errno));
+  if (fd_ == -1) {
+    GLOO_THROW_IO_EXCEPTION("socket: ", strerror(errno));
+  }
 
   // Connect to peer
   rv = ::connect(fd_, (struct sockaddr*)&peer_.ss_, addrlen);
   if (rv == -1 && errno != EINPROGRESS) {
-    GLOO_ENFORCE_NE(rv, -1, "connect: ", strerror(errno));
+    GLOO_THROW_IO_EXCEPTION("connect: ", strerror(errno));
   }
 
   // Register with device so we're called when connection completes.
@@ -258,7 +268,9 @@ bool Pair::write(Op& op) {
     return false;
   }
 
-  GLOO_ENFORCE_NE(rv, -1, "writev: ", strerror(errno));
+  if (rv == -1) {
+    GLOO_THROW_IO_EXCEPTION("writev: ", strerror(errno));
+  }
   op.nwritten_ += rv;
   if (rv < nbytes) {
     return false;
@@ -326,12 +338,11 @@ bool Pair::read(Op& op) {
         // ECONNRESET happens when the remote peer unexpectedly terminates
         if (errno == ECONNRESET) {
           changeState(CLOSED);
-          return false;
         }
 
         // Unexpected error
-        GLOO_ENFORCE_EQ(
-            errno, 0, "reading from ", peer_.str(), ": ", strerror(errno));
+        GLOO_THROW_IO_EXCEPTION(
+            "reading from ", peer_.str(), ": ", strerror(errno));
       }
       break;
     }
@@ -413,7 +424,9 @@ void Pair::handleListening() {
   int rv;
 
   rv = accept(fd_, (struct sockaddr*)&addr, &addrlen);
-  GLOO_ENFORCE_NE(rv, -1, "accept: ", strerror(errno));
+  if (rv == -1) {
+    GLOO_THROW_IO_EXCEPTION("accept: ", strerror(errno));
+  }
 
   // Connected, replace file descriptor
   dev_->unregisterDescriptor(fd_);

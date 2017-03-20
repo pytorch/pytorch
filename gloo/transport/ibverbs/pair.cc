@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "gloo/common/common.h"
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 
 namespace gloo {
@@ -48,7 +49,7 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
 
     // Arm notification mechanism for completion queue.
     rv = ibv_req_notify_cq(cq_, kNotifyOnAnyCompletion);
-    GLOO_ENFORCE_NE(rv, -1);
+    GLOO_ENFORCE_EQ(rv, 0);
   }
 
   // Create queue pair
@@ -78,7 +79,7 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
         qp_,
         &attr,
         IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
-    GLOO_ENFORCE_NE(rv, -1);
+    GLOO_ENFORCE_EQ(rv, 0);
   }
 
   // Populate local address.
@@ -89,13 +90,13 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
     struct ibv_port_attr attr;
     memset(&attr, 0, sizeof(struct ibv_port_attr));
     rv = ibv_query_port(dev_->context_, dev_->attr_.port, &attr);
-    GLOO_ENFORCE_NE(rv, -1);
+    GLOO_ENFORCE_EQ(rv, 0);
     rv = ibv_query_gid(
         dev_->context_,
         dev_->attr_.port,
         dev_->attr_.index,
         &self_.addr_.ibv_gid);
-    GLOO_ENFORCE_NE(rv, -1);
+    GLOO_ENFORCE_EQ(rv, 0);
     self_.addr_.lid = attr.lid;
     self_.addr_.qpn = qp_->qp_num;
     self_.addr_.psn = rand() & 0xffffff;
@@ -118,10 +119,10 @@ Pair::~Pair() {
   ibv_ack_cq_events(cq_, completionEventsHandled_);
 
   rv = ibv_destroy_qp(qp_);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 
   rv = ibv_destroy_cq(cq_);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 }
 
 const Address& Pair::address() const {
@@ -153,7 +154,7 @@ void Pair::connect(const std::vector<char>& bytes) {
       &attr,
       IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
           IBV_QP_AV | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTS;
@@ -170,7 +171,7 @@ void Pair::connect(const std::vector<char>& bytes) {
       &attr,
       IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
           IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 }
 
 // Switches the pair into synchronous mode.
@@ -182,12 +183,13 @@ void Pair::connect(const std::vector<char>& bytes) {
 // can be revisited and we can add a completion channel per pair.
 //
 void Pair::setSync(bool sync, bool busyPoll) {
-  GLOO_ENFORCE(
-    sync,
-    "Can only switch to sync mode");
-  GLOO_ENFORCE(
-    busyPoll,
-    "The ibverbs transport only supports busy polling in sync mode");
+  if (!sync) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("Can only switch to sync mode");
+  }
+  if (!busyPoll) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION(
+        "The ibverbs transport only supports busy polling in sync mode");
+  }
 
   // The notification mechanism for this pair's completion queue is
   // still armed. This means the device thread will still call
@@ -211,7 +213,9 @@ void Pair::receiveMemoryRegion() {
   // doesn't need to be valid after the ibv_post_recv call.
   struct ibv_recv_wr* bad_wr;
   int rv = ibv_post_recv(qp_, &wr, &bad_wr);
-  GLOO_ENFORCE_NE(rv, -1);
+  if (rv != 0) {
+    GLOO_THROW_IO_EXCEPTION("ibv_post_recv: ", rv);
+  }
 
   // Keep memory region around so that the other side of this pair can
   // write into it. They are written in a FIFO order so the handler
@@ -238,7 +242,9 @@ void Pair::sendMemoryRegion(struct ibv_mr* src, int slot) {
   // doesn't need to be valid after the ibv_post_send call.
   struct ibv_send_wr* bad_wr;
   int rv = ibv_post_send(qp_, &wr, &bad_wr);
-  GLOO_ENFORCE_NE(rv, -1);
+  if (rv != 0) {
+    GLOO_THROW_IO_EXCEPTION("ibv_post_send: ", rv);
+  }
 
   // Keep memory region around until this send operation completes.
   // They are posted in a FIFO order so the handler can always pop off
@@ -272,7 +278,9 @@ void Pair::postReceive() {
   memset(&wr, 0, sizeof(wr));
   struct ibv_recv_wr* bad_wr;
   rv = ibv_post_recv(qp_, &wr, &bad_wr);
-  GLOO_ENFORCE_NE(rv, -1);
+  if (rv != 0) {
+    GLOO_THROW_IO_EXCEPTION("ibv_post_recv: ", rv);
+  }
 }
 
 std::unique_ptr<::gloo::transport::Buffer>
@@ -307,7 +315,7 @@ void Pair::handleCompletionEvent() {
 
   // Arm notification mechanism for completion queue.
   rv = ibv_req_notify_cq(cq_, kNotifyOnAnyCompletion);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 
   // Now poll for work completions to drain the completion queue.
   pollCompletions();

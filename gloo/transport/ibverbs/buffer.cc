@@ -15,6 +15,7 @@
 
 #include <iostream>
 
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 
 namespace gloo {
@@ -113,7 +114,9 @@ void Buffer::send(size_t offset, size_t length) {
 
   struct ibv_send_wr* bad_wr;
   rv = ibv_post_send(pair_->qp_, &wr, &bad_wr);
-  GLOO_ENFORCE_NE(rv, -1);
+  if (rv != 0) {
+    GLOO_THROW_IO_EXCEPTION("ibv_post_send: ", rv);
+  }
 }
 
 void Buffer::handleCompletion(struct ibv_wc* wc) {

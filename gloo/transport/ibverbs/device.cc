@@ -14,6 +14,7 @@
 
 #include <array>
 
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 #include "gloo/transport/ibverbs/pair.h"
 
@@ -68,7 +69,10 @@ static ibv_context* createContext(const std::string& name) {
 std::shared_ptr<::gloo::transport::Device> CreateDevice(
     const struct attr& attr) {
   auto context = createContext(attr.name);
-  GLOO_ENFORCE(context, "Unable to find device named: ", attr.name);
+  if (!context) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION(
+        "Unable to find device named: ", attr.name);
+  }
   return std::make_shared<Device>(attr, context);
 }
 
@@ -96,13 +100,13 @@ Device::~Device() {
   loop_->join();
 
   rv = ibv_destroy_comp_channel(comp_channel_);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 
   rv = ibv_dealloc_pd(pd_);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 
   rv = ibv_close_device(context_);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 }
 
 std::unique_ptr<transport::Pair> Device::createPair() {
@@ -137,7 +141,9 @@ void Device::loop() {
     struct ibv_cq* cq;
     void* cqContext;
     rv = ibv_get_cq_event(comp_channel_, &cq, &cqContext);
-    GLOO_ENFORCE_NE(rv, -1);
+    if (rv != 0) {
+      GLOO_THROW_IO_EXCEPTION("ibv_get_cq_event");
+    }
 
     // Completion queue context is a Pair*.
     // Delegate handling of this event to the pair itself.

@@ -16,13 +16,33 @@
 namespace gloo {
 
 // A base class for all gloo runtime errors
-class Exception : public std::runtime_error {
- public:
+struct Exception : public std::runtime_error {
   Exception() = default;
   explicit Exception(const std::string& msg) : std::runtime_error(msg) {}
 };
 
-#define GLOO_THROW(...)                                    \
+#define GLOO_THROW(...) \
   throw ::gloo::Exception(::gloo::MakeString(__VA_ARGS__))
+
+
+// Thrown for invalid operations on gloo APIs
+struct InvalidOperationException : public ::gloo::Exception {
+  InvalidOperationException() = default;
+  explicit InvalidOperationException(const std::string& msg)
+      : ::gloo::Exception(msg) {}
+};
+
+#define GLOO_THROW_INVALID_OPERATION_EXCEPTION(...) \
+  throw ::gloo::InvalidOperationException(::gloo::MakeString(__VA_ARGS__))
+
+
+// Thrown for unrecoverable IO errors
+struct IoException : public ::gloo::Exception {
+  IoException() = default;
+  explicit IoException(const std::string& msg) : ::gloo::Exception(msg) {}
+};
+
+#define GLOO_THROW_IO_EXCEPTION(...) \
+  throw ::gloo::IoException(::gloo::MakeString(__VA_ARGS__))
 
 } // namespace gloo

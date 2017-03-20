@@ -23,6 +23,7 @@ MemoryRegion::MemoryRegion(struct ibv_pd* pd) {
   // Map this region so it can be used as source for a send, or as a
   // target for a receive.
   mr_ = ibv_reg_mr(pd, &src_, sizeof(src_), IBV_ACCESS_LOCAL_WRITE);
+  GLOO_ENFORCE(mr_);
 }
 
 MemoryRegion::MemoryRegion(struct ibv_pd* pd, struct ibv_mr* src)
@@ -34,7 +35,7 @@ MemoryRegion::~MemoryRegion() {
   int rv;
 
   rv = ibv_dereg_mr(mr_);
-  GLOO_ENFORCE_NE(rv, -1);
+  GLOO_ENFORCE_EQ(rv, 0);
 }
 
 } // namespace ibverbs
