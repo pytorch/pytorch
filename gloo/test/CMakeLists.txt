@@ -5,5 +5,5 @@ set(GLOO_TEST_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/main.cc"
   )
 
-add_executable(gloo_test ${GLOO_TEST_SRCS})
-target_link_libraries(gloo_test gloo gtest)
+add_executable(test ${GLOO_TEST_SRCS})
+target_link_libraries(test gloo gtest)

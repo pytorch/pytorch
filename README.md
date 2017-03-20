@@ -45,13 +45,18 @@ You can build Gloo using CMake.
 Since it is a library, it is most convenient to vendor it in your own
 project and include the project root in your own CMake configuration.
 
-For standalone builds (e.g. to run tests or benchmarks), first
-populate the `third-party` directory with a few dependencies to
-compile both the tests and the benchmark tool:
+For standalone builds (e.g. to run tests or benchmarks), first check
+out the submodules in `third-party` by running:
+
+```shell
+git submodule update --init
+```
+
+Also install the dependencies required by the benchmark tool. On
+Ubuntu, you can do so by running:
 
 ``` shell
-cd third-party
-./fetch.sh
+sudo apt-get install -y libhiredis-dev libeigen3-dev
 ```
 
 Then, to build:
@@ -60,7 +65,7 @@ Then, to build:
 mkdir build
 cd build
 cmake ../ -DBUILD_TEST=1 -DBUILD_BENCHMARK=1
-ls -l gloo/gloo_{test,benchmark}
+ls -l gloo/{test,benchmark}/{test,benchmark}
 ```
 
 ## Benchmarking
@@ -75,10 +80,10 @@ To run a benchmark:
 
 2. Start a Redis server on any host (either a client machine or one of
    the machines participating in the test).
-   
+
 3. Determine some unique ID for the benchmark run (e.g. the `uuid`
    tool or some number).
-   
+
 4. On each machine, run (or pass `--help` for more options):
 
     ```

@@ -9,5 +9,5 @@ set(GLOO_BENCHMARK_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/runner.cc"
   )
 
-add_executable(gloo_benchmark ${GLOO_BENCHMARK_SRCS})
-target_link_libraries(gloo_benchmark gloo)
+add_executable(benchmark ${GLOO_BENCHMARK_SRCS})
+target_link_libraries(benchmark gloo)
