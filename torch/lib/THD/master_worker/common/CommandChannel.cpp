@@ -2,6 +2,8 @@
 #include "../../base/ChannelEnvVars.hpp"
 #include "../../base/ChannelUtils.hpp"
 
+#include "../master/State.hpp"
+
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -91,6 +93,10 @@ bool MasterCommandChannel::init() {
 }
 
 void MasterCommandChannel::sendMessage(std::unique_ptr<rpc::RPCMessage> msg, int rank) {
+  if (thd::master::THDState::s_error != "") {
+    throw std::runtime_error(thd::master::THDState::s_error);
+  }
+
   if ((rank <= 0) || (rank >= _connections.size())) {
     throw std::domain_error("sendMessage received invalid rank as parameter");
   }

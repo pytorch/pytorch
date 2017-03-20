@@ -16,8 +16,7 @@ std::thread masterErrorThread;
 void errorHandler() {
   for (;;) {
     auto error = masterCommandChannel->recvError();
-    std::string full_error = "Error (worker " + std::to_string(std::get<0>(error)) + "): " + std::get<1>(error);
-    THDState::s_errors.push_back(full_error); // TODO: errors should be displayed somewhere
+    THDState::s_error = "Error (worker " + std::to_string(std::get<0>(error)) + "): " + std::get<1>(error);
   }
 }
 
