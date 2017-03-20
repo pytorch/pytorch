@@ -141,6 +141,18 @@ class ConvPoolOpBase : public Operator<Context> {
       }
     }
 
+    auto allocate_and_copy = [&](
+        const vector<int>& vec, Tensor<Context>& tensor) {
+      tensor.Resize(vec.size());
+      context_.template Copy<int, CPUContext, Context>(
+          vec.size(), vec.data(), tensor.template mutable_data<int>());
+    };
+
+    allocate_and_copy(kernel_, kernel_device_);
+    allocate_and_copy(stride_, stride_device_);
+    allocate_and_copy(dilation_, dilation_device_);
+    allocate_and_copy(pads_, pads_device_);
+
     // Check kernel only if we are doing conv or pooling. The reason is that a
     // few other ops, like PadImage, are also using this base class. We really
     // need to clean this up.
@@ -172,6 +184,46 @@ class ConvPoolOpBase : public Operator<Context> {
     }
   }
 
+  // Returns the input image dimensions for the current storage order type.
+  vector<int> GetDims(const Tensor<Context>& input) {
+    vector<int> dims;
+    switch (order_) {
+      case StorageOrder::NCHW:
+        dims.assign(input.dims().begin() + 2, input.dims().end());
+        break;
+      case StorageOrder::NHWC:
+        dims.assign(input.dims().begin() + 1, input.dims().end() - 1);
+        break;
+      default:
+        CAFFE_THROW("Unknown storage order : ", order_);
+    }
+    return dims;
+  }
+
+  // Returns the size of the input image for the current storage type.
+  int GetDimsSize(const Tensor<Context>& input) {
+    int size = 0;
+    switch (order_) {
+      case StorageOrder::NCHW:
+        size = std::accumulate(
+            input.dims().begin() + 2,
+            input.dims().end(),
+            1,
+            std::multiplies<int>());
+        break;
+      case StorageOrder::NHWC:
+        size = std::accumulate(
+            input.dims().begin() + 1,
+            input.dims().end() - 1,
+            1,
+            std::multiplies<int>());
+        break;
+      default:
+        CAFFE_THROW("Unknown storage order : ", order_);
+    }
+    return size;
+  }
+
   // Sets the output size. The output channel is manually provided since
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
@@ -185,7 +237,6 @@ class ConvPoolOpBase : public Operator<Context> {
       const Tensor<AlternativeContext>& input,
       Tensor<AlternativeContext>* output,
       int output_channel) {
-    CAFFE_ENFORCE(4 == input.ndim());
     CAFFE_ENFORCE(input.size() > 0);
     vector<int> output_dims;
     int N = input.dim32(0);
@@ -427,6 +478,12 @@ protected:
  vector<int> stride_;
  vector<int> pads_;
 
+ // We need the above parameters to be available for the devices.
+ Tensor<Context> kernel_device_;
+ Tensor<Context> dilation_device_;
+ Tensor<Context> stride_device_;
+ Tensor<Context> pads_device_;
+
  int group_;
  StorageOrder order_;
  bool shared_buffer_;
@@ -556,30 +613,35 @@ protected:
   }
 
  private:
-};
-
-#define USE_CONV_POOL_BASE_FUNCTIONS(Context)     \
-  USE_OPERATOR_FUNCTIONS(Context);                \
-  using ConvPoolOpBase<Context>::pads_;           \
-  using ConvPoolOpBase<Context>::pad_t;           \
-  using ConvPoolOpBase<Context>::pad_l;           \
-  using ConvPoolOpBase<Context>::pad_b;           \
-  using ConvPoolOpBase<Context>::pad_r;           \
-  using ConvPoolOpBase<Context>::legacy_pad_;     \
-  using ConvPoolOpBase<Context>::global_pooling_; \
-  using ConvPoolOpBase<Context>::kernel_;         \
-  using ConvPoolOpBase<Context>::kernel_h;        \
-  using ConvPoolOpBase<Context>::kernel_w;        \
-  using ConvPoolOpBase<Context>::dilation_;       \
-  using ConvPoolOpBase<Context>::dilation_h;      \
-  using ConvPoolOpBase<Context>::dilation_w;      \
-  using ConvPoolOpBase<Context>::stride_;         \
-  using ConvPoolOpBase<Context>::stride_h;        \
-  using ConvPoolOpBase<Context>::stride_w;        \
-  using ConvPoolOpBase<Context>::group_;          \
-  using ConvPoolOpBase<Context>::order_;          \
-  using ConvPoolOpBase<Context>::shared_buffer_;  \
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
+  USE_OPERATOR_FUNCTIONS(Context);                 \
+  using ConvPoolOpBase<Context>::pads_;            \
+  using ConvPoolOpBase<Context>::pads_device_;     \
+  using ConvPoolOpBase<Context>::pad_t;            \
+  using ConvPoolOpBase<Context>::pad_l;            \
+  using ConvPoolOpBase<Context>::pad_b;            \
+  using ConvPoolOpBase<Context>::pad_r;            \
+  using ConvPoolOpBase<Context>::legacy_pad_;      \
+  using ConvPoolOpBase<Context>::global_pooling_;  \
+  using ConvPoolOpBase<Context>::kernel_;          \
+  using ConvPoolOpBase<Context>::kernel_device_;   \
+  using ConvPoolOpBase<Context>::kernel_h;         \
+  using ConvPoolOpBase<Context>::kernel_w;         \
+  using ConvPoolOpBase<Context>::dilation_;        \
+  using ConvPoolOpBase<Context>::dilation_device_; \
+  using ConvPoolOpBase<Context>::dilation_h;       \
+  using ConvPoolOpBase<Context>::dilation_w;       \
+  using ConvPoolOpBase<Context>::stride_;          \
+  using ConvPoolOpBase<Context>::stride_device_;   \
+  using ConvPoolOpBase<Context>::stride_h;         \
+  using ConvPoolOpBase<Context>::stride_w;         \
+  using ConvPoolOpBase<Context>::group_;           \
+  using ConvPoolOpBase<Context>::order_;           \
+  using ConvPoolOpBase<Context>::shared_buffer_;   \
+  using ConvPoolOpBase<Context>::GetDims;          \
+  using ConvPoolOpBase<Context>::GetDimsSize;      \
   using ConvPoolOpBase<Context>::ws_
+};
 
 } // namespace caffe2
 
