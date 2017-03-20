@@ -1469,6 +1469,62 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
   THTensor_(free)(result_matrix);
 }
 
+void THTensor_(btrf)(THTensor *ra_, THIntTensor *rpivots_, THTensor *a)
+{
+  long batch;
+
+  THArgCheck(THTensor_(nDimension)(a) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(a));
+
+  if (ra_ != a) {
+    THTensor_(resizeAs)(ra_, a);
+    THTensor_(copy)(ra_, a);
+  }
+
+  int m = a->size[1];
+  int n = a->size[2];
+  int lda;
+  /* THTensor *ra__; */
+
+  /* if (ra_->stride[1] == 1) { */
+  /*   // column ordered, what BLAS wants */
+  /*   lda = ra_->stride[2]; */
+  /*   ra__ = ra_; */
+  /* } else { */
+  /*   // not column ordered, need to make it such (requires copy) */
+  /*   THTensor *transp_r_ = THTensor_(newTranspose)(ra_, 1, 2); */
+  /*   ra__ = THTensor_(newClone)(transp_r_); */
+  /*   THTensor_(free)(transp_r_); */
+  /*   THTensor_(transpose)(ra__, NULL, 1, 2); */
+  /*   lda = ra__->stride[2]; */
+  /* } */
+
+  THTensor *ai = THTensor_(new)();
+  THTensor *rai = THTensor_(new)();
+
+  /* for (batch = 0; batch < THTensor_(size)(a, 0); ++batch) { */
+  /*   THTensor_(select)(ai, a, 0, batch); */
+  /*   THTensor_(select)(rai_, ra_, 0, batch); */
+
+  /*   THLapack_(getrf)(n, n,) */
+/* #if defined(TH_REAL_IS_FLOAT) */
+/*     THLapack_sgetrf(n, n, d_result, lda, NULL); */
+/* #elif defined(TH_REAL_IS_DOUBLE) */
+/*     THError("TODO"); */
+/* #elif defined(TH_REAL_IS_HALF) */
+/*     THError("btrf is not supported for torch.HalfTensor"); */
+/* #endif */
+  /* } */
+  /* TODO */
+
+  THTensor_(free)(ai);
+  THTensor_(free)(rai);
+}
+
+void THTensor_(btrs)(THTensor *rb_, THTensor *a, THTensor *b, THIntTensor *rpivots_)
+{
+  /* TODO */
+}
+
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
   return THTensor_(nElement)(t);

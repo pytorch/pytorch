@@ -66,6 +66,9 @@ TH_API void THTensor_(addr)(THTensor *r_,  real beta, THTensor *t, real alpha, T
 TH_API void THTensor_(addbmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *batch1, THTensor *batch2);
 TH_API void THTensor_(baddbmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *batch1, THTensor *batch2);
 
+TH_API void THTensor_(btrf)(THTensor *ra_, THIntTensor *rpivots_, THTensor *a);
+TH_API void THTensor_(btrs)(THTensor *rb_, THTensor *a, THTensor *b, THIntTensor *pivots);
+
 TH_API void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain);
 
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);

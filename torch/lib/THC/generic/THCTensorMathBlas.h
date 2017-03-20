@@ -9,8 +9,8 @@ THC_API void THCTensor_(addr)(THCState *state, THCTensor *self, real beta, THCTe
 THC_API void THCTensor_(addbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t, real alpha, THCTensor *batch1, THCTensor *batch2);
 THC_API void THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t, real alpha, THCTensor *batch1, THCTensor *batch2);
 
-THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a);
-THC_API void THCTensor_(btrs)(THCState *state, THCTensor *rb_, THCTensor *a, THCTensor *b);
+THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCudaIntTensor *rpivots_, THCTensor *a);
+THC_API void THCTensor_(btrs)(THCState *state, THCTensor *rb_, THCTensor *a, THCTensor *b, THCudaIntTensor *pivots);
 
 
 #endif

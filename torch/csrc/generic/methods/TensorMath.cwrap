@@ -1553,11 +1553,13 @@
 
 [[
   name: btrf
-  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: true
-  return: argument 0
+  return: argument 0,1
   arguments:
     - arg: THTensor* result
+      output: True
+    - arg: THIntTensor* pivots
       output: True
     - THTensor* self
 ]]
@@ -1565,33 +1567,36 @@
 [[
   name: btrf_
   cname: btrf
-  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  return: argument 0
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  return: argument 0,1
   arguments:
     - THTensor* self
+    - THIntTensor* pivots
     - THTensor* self
 ]]
 
 [[
   name: btrs
-  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: true
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
     - THTensor* Atf
+    - THIntTensor* pivots
     - THTensor* self
 ]]
 
 [[
   name: btrs_
   cname: btrs
-  defined_if: CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   return: argument 0
   arguments:
     - THTensor* self
     - THTensor* Atf
+    - THIntTensor* pivots
     - THTensor* self
 ]]
 

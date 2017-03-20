@@ -617,22 +617,21 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 #endif
 }
 
-// TODO: add support for pivoting
-THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a)
+THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCudaIntTensor *rpivots_, THCTensor *a)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THAssert(THCTensor_(checkGPU)(state, 2, ra_, a));
   THArgCheck(THCTensor_(nDimension)(state, a) == 3, 3, "expected 3D tensor");
-  THArgCheck(THCTensor_(size)(state, a, 1) == 
+  THArgCheck(THCTensor_(size)(state, a, 1) ==
              THCTensor_(size)(state, a, 2), 3, "matrices must be square");
 
   if (ra_ != a) {
     THCTensor_(resizeAs)(state, ra_, a);
     // not sure if this is kosher, but things are nicer if we return in column major
     if (ra_->stride[0] == 1) {
-      THCTensor_(transpose)(state, ra_, NULL, 1, 0);  
+      THCTensor_(transpose)(state, ra_, NULL, 1, 0);
     } else if (ra_->stride[2] == 1) {
-      THCTensor_(transpose)(state, ra_, NULL, 1, 2);  
+      THCTensor_(transpose)(state, ra_, NULL, 1, 2);
     }
     THCTensor_(copy)(state, ra_, a);
   }
@@ -655,18 +654,21 @@ THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a)
     lda = ra__->stride[2];
   }
 
-
-  long num_batches = ra__->size[0];
-  size_t matrices_size = num_batches * sizeof(real*);
-
   // Copy pointers to device.
   real **d_result;
+  long num_batches = ra__->size[0];
+  size_t matrices_size = num_batches * sizeof(real*);
   THCudaCheck(THCudaMalloc(state, (void**)&d_result, matrices_size));
+
+  THCudaIntTensor_resize1d(state, rpivots_, num_batches*n);
+
+  int *pivots_gpu;
+  THCudaCheck(THCudaMalloc(state, (void**)&pivots_gpu, sizeof(int)*num_batches*n));
 
   const long block = 512;
   const long grid = (num_batches + block - 1) / block;
   createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    (const real**)d_result, THCTensor_(data)(state, ra__), 
+    (const real**)d_result, THCTensor_(data)(state, ra__),
     ra__->stride[0], num_batches);
 
   int info[num_batches];
@@ -674,12 +676,14 @@ THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a)
   THCudaCheck(THCudaMalloc(state, (void**)&info_gpu, sizeof(int)*num_batches));
 
 #ifdef THC_REAL_IS_FLOAT
-  THCudaBlas_Sgetrf(state, n, d_result, lda, NULL, info_gpu, num_batches);
+  THCudaBlas_Sgetrf(state, n, d_result, lda, pivots_gpu, info_gpu, num_batches);
 #elif defined(THC_REAL_IS_DOUBLE)
-  THCudaBlas_Dgetrf(state, n, d_result, lda, NULL, info_gpu, num_batches);
+  THCudaBlas_Dgetrf(state, n, d_result, lda, pivots_gpu, info_gpu, num_batches);
 #endif
 
   THCudaCheck(cudaMemcpy(info, info_gpu, sizeof(int)*num_batches, cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(THCudaIntTensor_data(state, rpivots_), pivots_gpu, sizeof(int)*num_batches*n, cudaMemcpyDeviceToHost));
+  THCudaIntTensor_resize2d(state, rpivots_, num_batches, n);
 
   for (int i = 0; i < num_batches; i++) {
     if (info[i] > 0) {
@@ -691,8 +695,8 @@ THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a)
 
   THCudaFree(state, d_result);
   THCudaFree(state, info_gpu);
+  THCudaFree(state, pivots_gpu);
 
-  
   if (ra__ != ra_) {
     THCTensor_(freeCopyTo)(state, ra__, ra_);
   }
@@ -704,20 +708,20 @@ THC_API void THCTensor_(btrf)(THCState *state, THCTensor *ra_, THCTensor *a)
 
 
 THC_API void THCTensor_(btrs)(THCState *state, THCTensor *rb_, THCTensor *atf,
-                              THCTensor *b)
+                              THCTensor *b, THCudaIntTensor *pivots)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THAssert(THCTensor_(checkGPU)(state, 3, rb_, atf, b));
   THArgCheck(THCTensor_(nDimension)(state, atf) == 3, 3, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimension)(state, b) == 3 ||
              THCTensor_(nDimension)(state, b) == 2, 4, "expected 2D or 3D tensor");
-  THArgCheck(THCTensor_(size)(state, atf, 0) == 
+  THArgCheck(THCTensor_(size)(state, atf, 0) ==
              THCTensor_(size)(state, b, 0), 3, "number of batches must be equal");
-  THArgCheck(THCTensor_(size)(state, atf, 1) == 
+  THArgCheck(THCTensor_(size)(state, atf, 1) ==
              THCTensor_(size)(state, atf, 2), 3, "A matrices must be square");
-  THArgCheck(THCTensor_(size)(state, atf, 1) == 
+  THArgCheck(THCTensor_(size)(state, atf, 1) ==
              THCTensor_(size)(state, b, 1), 3, "dimensions of A and b must be equal");
-  
+
   if (rb_ != b) {
     THCTensor_(resizeAs)(state, rb_, b);
     THCTensor_(copy)(state, rb_, b);
@@ -782,10 +786,10 @@ THC_API void THCTensor_(btrs)(THCState *state, THCTensor *rb_, THCTensor *atf,
   const long block = 512;
   const long grid = (num_batches + block - 1) / block;
   createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    (const real**)d_result, THCTensor_(data)(state, rb__), 
+    (const real**)d_result, THCTensor_(data)(state, rb__),
     rb__->stride[0], num_batches);
   createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    d_atf, THCTensor_(data)(state, atf_), 
+    d_atf, THCTensor_(data)(state, atf_),
     atf_->stride[0], num_batches);
 
   int info;
