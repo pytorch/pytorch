@@ -153,6 +153,7 @@ def lstm_with_attention_reference(
     weighted_decoder_hidden_state_t_w,
     weighted_decoder_hidden_state_t_b,
     attention_v,
+    attention_zeros,
 ):
     encoder_outputs = np.transpose(encoder_outputs_transposed, axes=[2, 0, 1])
     decoder_input_length = input.shape[0]
@@ -239,6 +240,7 @@ def lstm_with_recurrent_attention_reference(
     weighted_decoder_hidden_state_t_w,
     weighted_decoder_hidden_state_t_b,
     attention_v,
+    attention_zeros,
 ):
     encoder_outputs = np.transpose(encoder_outputs_transposed, axes=[2, 0, 1])
     decoder_input_length = input.shape[0]

@@ -76,36 +76,32 @@ def _calc_attention_logits_from_sum_match(
         decoder_hidden_encoder_outputs_sum,
         decoder_hidden_encoder_outputs_sum,
     )
-    # [encoder_length * batch_size, encoder_output_dim]
-    decoder_hidden_encoder_outputs_sum_tanh_2d, _ = model.net.Reshape(
-        decoder_hidden_encoder_outputs_sum,
-        [
-            s(scope, 'decoder_hidden_encoder_outputs_sum_tanh_2d'),
-            s(scope, 'decoder_hidden_encoder_outputs_sum_tanh_t_old_shape'),
-        ],
-        shape=[-1, encoder_output_dim],
-    )
 
     attention_v = model.param_init_net.XavierFill(
         [],
         s(scope, 'attention_v'),
-        shape=[encoder_output_dim, 1],
+        shape=[1, encoder_output_dim],
     )
     model.add_param(attention_v)
 
-    # [encoder_length * batch_size, 1]
-    attention_logits = model.net.MatMul(
-        [decoder_hidden_encoder_outputs_sum_tanh_2d, attention_v],
-        s(scope, 'attention_logits'),
+    attention_zeros = model.param_init_net.ConstantFill(
+        [],
+        s(scope, 'attention_zeros'),
+        value=0.0,
+        shape=[1],
+    )
+
+    # [encoder_length, batch_size, 1]
+    attention_logits = model.net.FC(
+        [decoder_hidden_encoder_outputs_sum, attention_v, attention_zeros],
+        [s(scope, 'attention_logits')],
+        axis=2
     )
     # [encoder_length, batch_size]
-    attention_logits, _ = model.net.Reshape(
-        attention_logits,
-        [
-            attention_logits,
-            s(scope, 'attention_logits_old_shape'),
-        ],
-        shape=[-1, batch_size],
+    attention_logits = model.net.Squeeze(
+        [attention_logits],
+        [attention_logits],
+        dims=[2],
     )
     # [batch_size, encoder_length]
     attention_logits_transposed = model.net.Transpose(
