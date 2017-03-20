@@ -1090,6 +1090,31 @@ random_(generator=None, from=0, to=None)
 Fills this tensor with numbers sampled from the uniform distribution or
 discrete uniform distribution over [from, to]. If not specified, :attr:`to`
 defaults to the largest value representable by this tensor's data type.
+
+It has 6 argument combinations:
+ * (int to)
+ * no arguments
+ * (int from, int to)
+ * (torch.Generator generator)
+ * (torch.Generator generator, int to)
+ * (torch.Generator generator, int from, int to)
+Note that if :attr:`to` is given while :attr:`from` isn't, then this tensor
+will be fiiled with numbers form uniform distribution over [0 to-1]
+
+Example:
+    >>> x = torch.Tensor(2, 3)
+    >>> x.random_(1, 3) # uniform distribution over [1, 3]
+    3  1  2
+    2  3  1
+    [torch.FloatTensor of size 2x3]
+    >>> x.random_(0, 1) # uniform distribution over [0, 1]
+    0  1  1
+    1  1  0
+    [torch.FloatTensor of size 2x3]
+    >>> x.random_(1) # uniform distribution over [0, 0]
+    0  0  0
+    0  0  0
+    [torch.FloatTensor of size 2x3]
 """)
 
 add_docstr(torch._C.FloatTensorBase.reciprocal,
