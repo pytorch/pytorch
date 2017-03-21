@@ -14,7 +14,7 @@ std::unique_ptr<MasterCommandChannel> masterCommandChannel;
 std::thread masterErrorThread;
 
 void errorHandler() {
-  for (;;) {
+  while (true) {
     auto error = masterCommandChannel->recvError();
     THDState::s_error = "Error (worker " + std::to_string(std::get<0>(error)) + "): " + std::get<1>(error);
   }
@@ -30,14 +30,18 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
   if (!THDProcessGroupInit(channel_type)) return false;
 
   if (dataChannel->getRank() > 0) {
-    // Worker initialization. Can fail at start but then goes into inifity loop.
+    /* Worker initialization. Can fail at start but then goes into infinite loop
+     * in which waits for commands from master.
+     */
     return THDWorkerMain();
   }
 
-  // Master initilization
+  /* Master initialization. We need to make sure that all connections which
+   * are created in `init` function are set up because only then we can start
+   * `masterErrorThread`.
+   */
   masterCommandChannel.reset(new MasterCommandChannel());
-  bool ok = masterCommandChannel->init();
-  if (!ok) {
+  if (!masterCommandChannel->init()) {
     return false;
   }
 
