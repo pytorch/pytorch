@@ -4,6 +4,7 @@
 #include <mutex>
 
 #include "caffe2/core/blob.h"
+#include "caffe2/utils/proto_utils.h"
 
 CAFFE2_DEFINE_int(
     caffe2_tensor_chunk_size,
@@ -49,37 +50,6 @@ class StringDeserializer : public BlobDeserializerBase {
     *blob->GetMutable<std::string>() = proto.content();
   }
 };
-
-namespace {
-
-// A wrapper function to return tensor type string appended with the device
-// name, for use in blob serialization / deserialization. This should have one
-// to one correspondence with caffe2/proto/caffe2.proto: enum DeviceType.
-//
-// Note that we can't use DeviceType_Name, because that is only available in
-// protobuf-full, and some platforms (like mobile) may want to use
-// protobuf-lite instead.
-std::string TensorDeviceTypeName(const int32_t& d) {
-  switch (d) {
-    case CPU:
-      return "TensorCPU";
-    case CUDA:
-      return "TensorCUDA";
-    case MKLDNN:
-      return "TensorMKLDNN";
-    default:
-      CAFFE_THROW(
-          "Unknown device: ",
-          d,
-          ". If you have recently updated the caffe2.proto file to add a new "
-          "device type, did you forget to update the TensorDeviceTypeName() "
-          "function to reflect such recent changes?");
-      // The below code won't run but is needed to suppress some compiler
-      // warnings.
-      return "";
-  }
-};
-}
 
 // The blob serialization member function implementation.
 void Blob::Serialize(
@@ -128,8 +98,9 @@ void Blob::Deserialize(const BlobProto& blob_proto) {
   if (blob_proto.type() == kTensorBlobType) {
     // This is a tensor object. Depending on the device type, we will
     // use the corresponding TensorDeserializer.
-    auto deserializer = CreateDeserializer(TensorDeviceTypeName(
-        blob_proto.tensor().device_detail().device_type()));
+    auto deserializer = CreateDeserializer(
+        "Tensor" +
+        DeviceTypeName(blob_proto.tensor().device_detail().device_type()));
     // Tensor's deserializer should always be registered, but we will double
     // check if it is not null anyway.
     CAFFE_ENFORCE(deserializer.get());

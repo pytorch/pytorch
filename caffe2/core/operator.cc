@@ -99,6 +99,8 @@ unique_ptr<OperatorBase> CreateOperator(
       op,
       "Cannot create operator of type '",
       operator_def.type(),
+      "' on the device '",
+      DeviceTypeName(operator_def.device_option().device_type()),
       "'. Verify that implementation for the corresponding device exist. It "
       "might also happen if the binary is not linked with the operator "
       "implementation code. If Python frontend is used it might happen if "
