@@ -128,7 +128,7 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
             meant to be installed as pip packages) (default: False).
         relative_to (str, optional): path of the build file. Required when
             ``package is True``. It's best to use ``__file__`` for this argument.
-        kwargs: additional arguments that are passed to ffi to declar the
+        kwargs: additional arguments that are passed to ffi to declare the
             extension. See `Extension API reference`_ for details.
 
     .. _`Extension API reference`: https://docs.python.org/3/distutils/apiref.html#distutils.core.Extension
