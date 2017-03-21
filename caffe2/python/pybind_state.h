@@ -203,7 +203,7 @@ class TensorFeeder : public BlobFeederBase {
 };
 
 namespace python_detail {
-class Func;
+struct Func;
 }
 
 class PythonOpBase : public Operator<CPUContext> {

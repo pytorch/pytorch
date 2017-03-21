@@ -75,7 +75,7 @@ bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   float X2, Y2;
-  const float kEps = 1e-12;
+  const float kEps = 1e-12f;
   for (int i = 0; i < N; ++i) { // TODO: multithreading
     auto offset = i * D;
     math::Dot<float, CPUContext>(

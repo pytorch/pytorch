@@ -47,7 +47,7 @@ class AdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   AdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {}
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());
     CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
@@ -78,7 +78,7 @@ class SparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {}
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(

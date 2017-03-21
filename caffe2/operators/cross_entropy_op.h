@@ -17,7 +17,7 @@ class LabelCrossEntropyOp final : public Operator<Context> {
 
  protected:
   static constexpr T kLOG_THRESHOLD() {
-    return 1e-20;
+    return static_cast<T>(1e-20);
   }
   // Input: X, label
   // Output: Y
@@ -34,7 +34,7 @@ class LabelCrossEntropyGradientOp final : public Operator<Context> {
   // Input: X, label, dY
   // Ouptut: dX. There is no gradient with respect to the label.
   static constexpr T kLOG_THRESHOLD() {
-    return 1e-20;
+    return static_cast<T>(1e-20);
   }
 };
 
@@ -91,7 +91,7 @@ class CrossEntropyOp final : public Operator<Context> {
   // Input: X, label
   // Output: Y
   static constexpr T kLOG_THRESHOLD() {
-    return 1e-20;
+    return static_cast<T>(1e-20);
   }
 };
 
@@ -106,7 +106,7 @@ class CrossEntropyGradientOp final : public Operator<Context> {
   // Input: X, label, dY
   // Ouptut: dX. There is no gradient with respect to the label.
   static constexpr T kLOG_THRESHOLD() {
-    return 1e-20;
+    return static_cast<T>(1e-20);
   }
 };
 

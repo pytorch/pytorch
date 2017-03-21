@@ -7,10 +7,10 @@ namespace caffe2 {
 template <typename T>
 struct FtrlParams {
   explicit FtrlParams(OperatorBase* op)
-      : alphaInv(1.0 / op->GetSingleArgument<float>("alpha", 0.005)),
-        beta(op->GetSingleArgument<float>("beta", 1.0)),
-        lambda1(op->GetSingleArgument<float>("lambda1", 0.001)),
-        lambda2(op->GetSingleArgument<float>("lambda2", 0.001)) {}
+      : alphaInv(1.0 / op->GetSingleArgument<float>("alpha", 0.005f)),
+        beta(op->GetSingleArgument<float>("beta", 1.0f)),
+        lambda1(op->GetSingleArgument<float>("lambda1", 0.001f)),
+        lambda2(op->GetSingleArgument<float>("lambda2", 0.001f)) {}
   T alphaInv;
   T beta;
   T lambda1;
