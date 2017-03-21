@@ -1,4 +1,5 @@
 set(gloo_DEPENDENCY_LIBS "")
+set(gloo_cuda_DEPENDENCY_LIBS "")
 
 # Configure path to modules (for find_package)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake/Modules/")
@@ -16,9 +17,7 @@ if(USE_REDIS)
     include_directories(SYSTEM ${hiredis_INCLUDE_DIR})
     list(APPEND gloo_DEPENDENCY_LIBS ${hiredis_LIBRARIES})
   else()
-    message(WARNING "\
-Not compiling with Redis support. \
-Suppress this warning with -DUSE_REDIS=OFF")
+    message(WARNING "Not compiling with Redis support. Suppress this warning with -DUSE_REDIS=OFF.")
     set(USE_REDIS OFF)
   endif()
 endif()
@@ -29,9 +28,7 @@ if(USE_IBVERBS)
     include_directories(SYSTEM ${ibverbs_INCLUDE_DIR})
     list(APPEND gloo_DEPENDENCY_LIBS ${ibverbs_LIBRARIES})
   else()
-    message(WARNING "\
-Not compiling with ibverbs support. \
-Suppress this warning with -DUSE_IBVERBS=OFF")
+    message(WARNING "Not compiling with ibverbs support. Suppress this warning with -DUSE_IBVERBS=OFF.")
     set(USE_IBVERBS OFF)
   endif()
 endif()
@@ -47,12 +44,34 @@ if(USE_MPI)
   endif()
 endif()
 
+if(USE_CUDA)
+  include(cmake/Cuda.cmake)
+  if(NOT HAVE_CUDA)
+    message(WARNING "Not compiling with CUDA support. Suppress this warning with -DUSE_CUDA=OFF.")
+    set(USE_CUDA OFF)
+  else()
+    include("cmake/External/nccl.cmake")
+    if(NCCL_FOUND)
+      include_directories(SYSTEM ${nccl_INCLUDE_DIRS})
+      list(APPEND gloo_cuda_DEPENDENCY_LIBS ${nccl_LIBRARIES})
+    else()
+      message(FATAL_ERROR "Could not find NCCL; cannot compile with CUDA.")
+    endif()
+  endif()
+endif()
+
 # Make sure we can find googletest if building the tests
 if(BUILD_TEST)
-  if (EXISTS "${PROJECT_SOURCE_DIR}/third-party/googletest")
+  set(GOOGLETEST_ROOT_DIR "${PROJECT_SOURCE_DIR}/third-party/googletest")
+  if (EXISTS "${GOOGLETEST_ROOT_DIR}")
     set(BUILD_GTEST ON CACHE INTERNAL "Builds the googletest subproject")
     set(BUILD_GMOCK OFF CACHE INTERNAL "Builds the googlemock subproject")
     add_subdirectory(third-party/googletest)
+
+    # Explicitly add googletest include path.
+    # If this is not done, the include path is not passed to
+    # nvcc for CUDA sources for some reason...
+    include_directories(SYSTEM "${GOOGLETEST_ROOT_DIR}/googletest/include")
   else()
     message(FATAL_ERROR "Could not find googletest; cannot compile tests")
   endif()

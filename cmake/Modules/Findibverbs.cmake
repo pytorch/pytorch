@@ -1,4 +1,4 @@
-# Find the Ibverbs libraries
+# Find the ibverbs libraries
 #
 # The following variables are optionally searched for defaults
 #  IBVERBS_ROOT_DIR: Base directory where all Ibverbs components are found
