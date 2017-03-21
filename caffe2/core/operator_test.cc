@@ -67,9 +67,11 @@ class ThrowException : public Operator<CPUContext> {
 };
 
 OPERATOR_SCHEMA(JustTest).NumInputs(0, 1).NumOutputs(0, 1);
+OPERATOR_SCHEMA(JustTestCPUOnly).NumInputs(0, 1).NumOutputs(0, 1);
 OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
 
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
+REGISTER_CPU_OPERATOR(JustTestCPUOnly, JustTest);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, FOO, JustTestAndNeverConstructs);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAR, JustTestAndDoesConstruct);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
@@ -89,6 +91,19 @@ TEST(OperatorTest, RegistryWorks) {
   op_def.mutable_device_option()->set_device_type(CUDA);
   op = CreateOperator(op_def, &ws);
   EXPECT_NE(nullptr, op.get());
+}
+
+TEST(OperatorTest, RegistryWrongDevice) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("JustTypeCPUOnly");
+  op_def.mutable_device_option()->set_device_type(CUDA);
+  try {
+    CreateOperator(op_def, &ws);
+    LOG(FATAL) << "No exception was thrown";
+  } catch (const std::exception& e) {
+    LOG(INFO) << "Exception " << e.what();
+  }
 }
 
 TEST(OperatorTest, ExceptionWorks) {

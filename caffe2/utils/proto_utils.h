@@ -15,6 +15,15 @@ namespace caffe2 {
 using std::string;
 using ::google::protobuf::MessageLite;
 
+// A wrapper function to return device name string for use in blob serialization
+// / deserialization. This should have one to one correspondence with
+// caffe2/proto/caffe2.proto: enum DeviceType.
+//
+// Note that we can't use DeviceType_Name, because that is only available in
+// protobuf-full, and some platforms (like mobile) may want to use
+// protobuf-lite instead.
+std::string DeviceTypeName(const int32_t& d);
+
 // Common interfaces that reads file contents into a string.
 bool ReadStringFromFile(const char* filename, string* str);
 bool WriteStringToFile(const string& str, const char* filename);
