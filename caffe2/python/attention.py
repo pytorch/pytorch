@@ -35,7 +35,7 @@ def _calc_weighted_context(
             attention_weighted_encoder_context,
             s(scope, 'attention_weighted_encoder_context_old_shape')
         ],
-        shape=[-1, encoder_output_dim],
+        shape=[1, -1, encoder_output_dim],
     )
     return attention_weighted_encoder_context
 
