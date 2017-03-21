@@ -198,7 +198,7 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
     auto* dX_data = dX->template mutable_data<T>();
     auto* dY_data = dY->template mutable_data<T>();
     T XN, YN, XY;
-    const T kEps = 1e-12;
+    const T kEps = 1e-12f;
     for (int i = 0; i < N; ++i) { // TODO: multithreading
       auto offset = i * D;
 

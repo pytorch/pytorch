@@ -53,13 +53,19 @@ if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
 endif()
 
 # ---[ If we are using msvc, set no warning flags
+# Note(jiayq): if you are going to add an warning flag, check if this is
+# totally necessary, and only add when you see fit. If it is needed due to
+# a third party library (like Protobuf), mention it in the comment as
+# "THIRD_PARTY_NAME related"
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_compile_options(
       /wd4018 # (3): Signed/unsigned mismatch
       /wd4065 # (3): switch with default but no case. Protobuf related.
       /wd4244 # (2/3/4): Possible loss of precision
       /wd4267 # (3): Conversion of size_t to smaller type. Possible loss of data.
+      /wd4503 # (1): decorated name length exceeded, name was truncated. Eigen related.
       /wd4506 # (1): no definition for inline function. Protobuf related.
+      /wd4554 # (3)： check operator precedence for possible error. Eigen related.
       /wd4800 # (3): Forcing non-boolean value to true or false.
       /wd4996 # (3): Use of a deprecated member
   )

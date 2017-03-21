@@ -58,9 +58,9 @@ class AdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   AdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {}
+        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsType<TensorCPU>(ITER));
@@ -110,9 +110,9 @@ class SparseAdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {}
+        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
