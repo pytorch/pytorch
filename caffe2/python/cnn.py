@@ -76,22 +76,39 @@ class CNNModelHelper(ModelHelperBase):
                 blob_in, blob_out, **kwargs)
         return data, label
 
-    def Conv(
-        self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-            bias_init=None, group=1, transform_inputs=None, **kwargs
+    def _ConvBase(  # noqa
+        self, is_nd, blob_in, blob_out, dim_in, dim_out, kernel,
+        weight_init=None, bias_init=None, group=1, transform_inputs=None,
+        **kwargs
     ):
-        """Convolution. We intentionally do not provide odd kernel/stride/pad
-        settings in order to discourage the use of odd cases.
-        """
-        use_bias = False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
+        kernels = []
+        if is_nd:
+            if not isinstance(kernel, list):
+                kernels = [kernel]
+            else:
+                kernels = kernel
+        else:
+            kernels = [kernel] * 2
+
+        if self.use_cudnn:
+            kwargs['engine'] = 'CUDNN'
+            kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
+            if self.ws_nbytes_limit:
+                kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
+
+        use_bias =\
+            False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
         weight_init = weight_init if weight_init else ('XavierFill', {})
         bias_init = bias_init if bias_init else ('ConstantFill', {})
         blob_out = blob_out or self.net.NextName()
-        weight_shape = (
-            [dim_out, int(dim_in / group), kernel, kernel]
-            if self.order == "NCHW" else
-            [dim_out, kernel, kernel, int(dim_in / group)]
-        )
+        weight_shape = [dim_out]
+        if self.order == "NCHW":
+            weight_shape.append(int(dim_in / group))
+            weight_shape.extend(kernels)
+        else:
+            weight_shape.extend(kernels)
+            weight_shape.append(int(dim_in / group))
+
         if self.init_params:
             weight = self.param_init_net.__getattr__(weight_init[0])(
                 [],
@@ -122,12 +139,6 @@ class CNNModelHelper(ModelHelperBase):
         if use_bias:
             self.biases.append(bias)
 
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-            kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
-            if self.ws_nbytes_limit:
-                kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
-
         if use_bias:
             inputs = [blob_in, weight, bias]
         else:
@@ -146,10 +157,27 @@ class CNNModelHelper(ModelHelperBase):
         return self.net.Conv(
             inputs,
             blob_out,
-            kernel=kernel,
+            kernels=kernels,
             order=self.order,
-            **kwargs
-        )
+            **kwargs)
+
+    def ConvNd(self, blob_in, blob_out, dim_in, dim_out, kernel,
+               weight_init=None, bias_init=None, group=1, transform_inputs=None,
+               **kwargs):
+        """N-dimensional convolution for inputs with NCHW storage order.
+        """
+        assert self.order == "NCHW", "ConvNd only supported for NCHW storage."
+        return self._ConvBase(True, blob_in, blob_out, dim_in, dim_out, kernel,
+                              weight_init, bias_init, group, transform_inputs,
+                              **kwargs)
+
+    def Conv(self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
+             bias_init=None, group=1, transform_inputs=None, **kwargs):
+        """2-dimensional convolution.
+        """
+        return self._ConvBase(False, blob_in, blob_out, dim_in, dim_out, kernel,
+                              weight_init, bias_init, group, transform_inputs,
+                              **kwargs)
 
     def ConvTranspose(
         self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
