@@ -413,7 +413,7 @@ def LSTMWithAttention(
         ['hidden_t_intermediate', s('cell_t')],
     )
     if attention_type == AttentionType.Recurrent:
-        attention_weighted_encoder_context_t = apply_recurrent_attention(
+        attention_weighted_encoder_context_t, _ = apply_recurrent_attention(
             model=step_model,
             encoder_output_dim=encoder_output_dim,
             encoder_outputs_transposed=encoder_outputs_transposed,
@@ -426,7 +426,7 @@ def LSTMWithAttention(
             ),
         )
     else:
-        attention_weighted_encoder_context_t = apply_regular_attention(
+        attention_weighted_encoder_context_t, _ = apply_regular_attention(
             model=step_model,
             encoder_output_dim=encoder_output_dim,
             encoder_outputs_transposed=encoder_outputs_transposed,
