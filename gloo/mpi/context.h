@@ -19,7 +19,7 @@ namespace mpi {
 
 class Context : public ::gloo::Context {
  public:
-  explicit Context(MPI_Comm comm);
+  explicit Context(const MPI_Comm& comm);
   virtual ~Context();
 
   void connectFullMesh(std::shared_ptr<transport::Device>& dev);
