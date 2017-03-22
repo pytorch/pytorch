@@ -78,8 +78,8 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   THCIndexTensor *projectIndices = THCIndexTensor_(newWithSize2d)(state, 2, self->nnz);
   THCTensor *projectValues = THCTensor_(newWithSize1d)(state, self->nnz);
   THCTensor_(fill)(state, projectValues, ScalarConvert<int, real>::to(1));
-  THCudaLongTensor *permutation = THCudaLongTensor_new(state);
   THCudaLongTensor *mapping = THCudaLongTensor_new(state);
+  THCudaLongTensor *permutation = THCudaLongTensor_new(state);
   THCudaLongTensor_select(state, mapping, projectIndices, 0, 0);
   THCudaLongTensor_select(state, permutation, projectIndices, 0, 1);
   THCudaLongTensor *unique = THCudaLongTensor_newWithSize1d(state, self->nnz);
@@ -94,7 +94,17 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
     factor *= self->size[i];
   }
   thrust::device_ptr<integer> indicesIter(THCIndexTensor_(data)(state, indicesScalar));
-  THRUST_EXEC(thrust::stable_sort_by_key, indicesIter, indicesIter + self->nnz, permutationIter);
+
+  // HACK *theoretically* we need stable sort, so that indices mapped to the same
+  // location are sorted in the permutation. This is necessary to ensure that
+  // the projection matrix is contiguous
+  // However, it seems to work even with non-stable sort, which is nice because it's faster...
+  // Revert this if bugs arise, or add a step to sort the projection matrix indices explicitly
+  // THRUST_EXEC(thrust::stable_sort_by_key, indicesIter, indicesIter + self->nnz, permutationIter);
+  THCIndexTensor *indicesScalarClone = THCIndexTensor_(newClone)(state, indicesScalar);
+  THCIndexTensor_(sort)(state, indicesScalar, permutation, indicesScalarClone, 0, 0);
+  THCIndexTensor_(free)(state, indicesScalarClone);
+
   thrust::device_ptr<long> uniqueIter(THCudaLongTensor_data(state, unique));
   thrust::device_vector<integer> indicesBuffer(self->nnz); // not used, can we optimize?
   thrust::pair<thrust::device_vector<integer>::iterator, thrust::device_ptr<long> > newEnd =
