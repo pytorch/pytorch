@@ -111,6 +111,7 @@ class EnforceNotMet : public std::exception {
  private:
   vector<string> msg_stack_;
   string full_msg_;
+  string stack_trace_;
 };
 
 #define CAFFE_ENFORCE(condition, ...)                                         \
