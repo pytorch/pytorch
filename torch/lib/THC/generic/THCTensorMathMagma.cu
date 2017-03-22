@@ -293,6 +293,7 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
   int n = a->size[1];
   int k = m < n ? m : n;
   int j = (jobu == MagmaAllVec) ? m : k;
+  int jv = (jobvt == MagmaAllVec) ? n : k;
 
   real *a_data = th_magma_malloc_pinned<real>(m * n);
   THCTensor_(copyTensor2d)(state, a_data, a);
@@ -326,6 +327,8 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
 
   THCTensor_(copyArray2d)(state, rv_, rv_data, n, n);
   THCTensor_(transpose)(state, rv_, NULL, 0, 1);
+  if (jobvt != MagmaAllVec)
+    THCTensor_(narrow)(state, rv_, rv_, 1, 0, jv);
   THCTensor_(copyArray2d)(state, ru_, ru_data, m, j);
   THCTensor_(copyArray1d)(state, rs_, rs_data, k);
   THCTensor_(copyArray2d)(state, ra_, a_data,  m, n);
