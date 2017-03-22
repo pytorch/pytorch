@@ -28,8 +28,8 @@ struct ConvParams {
   bool cudnn_enabled;
 
   bool is_dilated() const;
-  bool is_output_padding_non_neg() const;
-  bool is_padding_non_neg() const;
+  bool is_output_padding_neg() const;
+  bool is_padding_neg() const;
   void view1d_as_2d();
 
 };
