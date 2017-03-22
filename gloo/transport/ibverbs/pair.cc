@@ -26,7 +26,8 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
       sync_(false),
       busyPoll_(false),
       completionEventsHandled_(0),
-      peerMemoryRegionsReady_(0) {
+      peerMemoryRegionsReady_(0),
+      ex_(nullptr) {
   int rv;
 
   memset(peerMemoryRegions_.data(), 0, sizeof(peerMemoryRegions_));
@@ -132,6 +133,7 @@ const Address& Pair::address() const {
 void Pair::connect(const std::vector<char>& bytes) {
   struct ibv_qp_attr attr;
   int rv;
+  checkErrorState();
 
   peer_ = Address(bytes);
 
@@ -183,6 +185,7 @@ void Pair::connect(const std::vector<char>& bytes) {
 // can be revisited and we can add a completion channel per pair.
 //
 void Pair::setSync(bool sync, bool busyPoll) {
+  checkErrorState();
   if (!sync) {
     GLOO_THROW_INVALID_OPERATION_EXCEPTION("Can only switch to sync mode");
   }
@@ -214,7 +217,7 @@ void Pair::receiveMemoryRegion() {
   struct ibv_recv_wr* bad_wr;
   int rv = ibv_post_recv(qp_, &wr, &bad_wr);
   if (rv != 0) {
-    GLOO_THROW_IO_EXCEPTION("ibv_post_recv: ", rv);
+    signalIoFailure(GLOO_ERROR_MSG("ibv_post_recv: ", rv));
   }
 
   // Keep memory region around so that the other side of this pair can
@@ -243,7 +246,7 @@ void Pair::sendMemoryRegion(struct ibv_mr* src, int slot) {
   struct ibv_send_wr* bad_wr;
   int rv = ibv_post_send(qp_, &wr, &bad_wr);
   if (rv != 0) {
-    GLOO_THROW_IO_EXCEPTION("ibv_post_send: ", rv);
+    signalIoFailure(GLOO_ERROR_MSG("ibv_post_send: ", rv));
   }
 
   // Keep memory region around until this send operation completes.
@@ -279,7 +282,7 @@ void Pair::postReceive() {
   struct ibv_recv_wr* bad_wr;
   rv = ibv_post_recv(qp_, &wr, &bad_wr);
   if (rv != 0) {
-    GLOO_THROW_IO_EXCEPTION("ibv_post_recv: ", rv);
+    signalIoFailure(GLOO_ERROR_MSG("ibv_post_recv: ", rv));
   }
 }
 
@@ -313,12 +316,19 @@ void Pair::handleCompletionEvent() {
     return;
   }
 
-  // Arm notification mechanism for completion queue.
-  rv = ibv_req_notify_cq(cq_, kNotifyOnAnyCompletion);
-  GLOO_ENFORCE_EQ(rv, 0);
+  try {
+    checkErrorState();
 
-  // Now poll for work completions to drain the completion queue.
-  pollCompletions();
+    // Arm notification mechanism for completion queue.
+    rv = ibv_req_notify_cq(cq_, kNotifyOnAnyCompletion);
+    GLOO_ENFORCE_EQ(rv, 0);
+
+    // Now poll for work completions to drain the completion queue.
+    pollCompletions();
+  } catch (const ::gloo::IoException&) {
+    // Catch IO exceptions on the event handling thread. The exception has
+    // already been saved and user threads signaled.
+  }
 }
 
 void Pair::pollCompletions() {
@@ -335,6 +345,7 @@ void Pair::pollCompletions() {
         continue;
       }
 
+      checkErrorState();
       handleCompletion(&wc[i]);
     }
 
@@ -402,6 +413,37 @@ void Pair::handleCompletion(struct ibv_wc* wc) {
     mappedSendRegions_.pop_front();
   } else {
     GLOO_ENFORCE(false, "Unexpected completion with opcode: ", wc->opcode);
+  }
+}
+
+void Pair::signalIoFailure(const std::string& msg) {
+  std::lock_guard<std::mutex> lock(m_);
+  auto ex = ::gloo::IoException(msg);
+  if (ex_ == nullptr) {
+    // If we haven't seen an error yet, store the exception to throw on future
+    // calling threads.
+    ex_ = std::make_exception_ptr(ex);
+    // Loop through the completion handlers and signal that an error has
+    // occurred.
+    for (auto handler : recvCompletionHandlers_) {
+      if (handler) {
+        handler->signalError(ex_);
+      }
+    }
+    for (auto handler : sendCompletionHandlers_) {
+      if (handler) {
+        handler->signalError(ex_);
+      }
+    }
+  }
+  // Finally, throw the exception on this thread.
+  throw ex;
+};
+
+void Pair::checkErrorState() {
+  // If we previously encountered an error, rethrow here.
+  if (ex_ != nullptr) {
+    std::rethrow_exception(ex_);
   }
 }
 

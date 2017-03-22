@@ -21,7 +21,8 @@ Buffer::Buffer(Pair* pair, int slot, void* ptr, size_t size)
     : ::gloo::transport::Buffer(slot, ptr, size),
       pair_(pair),
       recvCompletions_(0),
-      sendCompletions_(0) {}
+      sendCompletions_(0),
+      ex_(nullptr) {}
 
 Buffer::~Buffer() {
   pair_->unregisterBuffer(this);
@@ -49,8 +50,10 @@ void Buffer::waitRecv() {
     // The device thread will signal completion. If the completion
     // hasn't arrived yet, wait until it does.
     std::unique_lock<std::mutex> lock(m_);
+    checkErrorState();
     while (recvCompletions_ == 0) {
       recvCv_.wait(lock);
+      checkErrorState();
     }
     recvCompletions_--;
   }
@@ -73,8 +76,10 @@ void Buffer::waitSend() {
     // The device thread will signal completion. If the completion
     // hasn't arrived yet, wait until it does.
     std::unique_lock<std::mutex> lock(m_);
+    checkErrorState();
     while (sendCompletions_ == 0) {
       sendCv_.wait(lock);
+      checkErrorState();
     }
     sendCompletions_--;
   }
@@ -93,6 +98,19 @@ void Buffer::send(size_t offset, size_t length) {
 
   // Pass to pair
   pair_->send(op);
+}
+
+void Buffer::signalError(const std::exception_ptr& ex) {
+  std::lock_guard<std::mutex> lock(m_);
+  ex_ = ex;
+  recvCv_.notify_all();
+  sendCv_.notify_all();
+}
+
+void Buffer::checkErrorState() {
+  if (ex_ != nullptr) {
+    std::rethrow_exception(ex_);
+  }
 }
 
 } // namespace tcp

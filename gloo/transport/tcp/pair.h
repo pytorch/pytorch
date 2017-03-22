@@ -11,9 +11,11 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <exception>
 #include <list>
 #include <map>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include <sys/socket.h>
@@ -108,6 +110,8 @@ class Pair : public ::gloo::transport::Pair {
   Op rx_;
   Op tx_;
 
+  std::exception_ptr ex_;
+
   bool write(Op& op);
   bool read(Op& op);
 
@@ -115,7 +119,11 @@ class Pair : public ::gloo::transport::Pair {
   void handleConnecting();
   void handleConnected();
 
-  void changeState(state state);
+  void changeState(state nextState);
+
+  // Used to signal IO exceptions from one thread and propagate onto others.
+  void signalIoFailure(const std::string& msg);
+  void checkErrorState();
 };
 
 } // namespace tcp

@@ -27,6 +27,8 @@
 #include "gloo/common/logging.h"
 #include "gloo/transport/tcp/buffer.h"
 
+#define FD_INVALID (-1)
+
 namespace gloo {
 namespace transport {
 namespace tcp {
@@ -36,8 +38,9 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
       state_(INITIALIZING),
       sync_(false),
       busyPoll_(false),
-      fd_(-1),
-      sendBufferSize_(0) {
+      fd_(FD_INVALID),
+      sendBufferSize_(0),
+      ex_(nullptr) {
   memset(&rx_, 0, sizeof(rx_));
   memset(&tx_, 0, sizeof(tx_));
   listen();
@@ -73,6 +76,7 @@ static void setSocketBlocking(int fd, bool enable) {
 
 void Pair::setSync(bool sync, bool busyPoll) {
   std::unique_lock<std::mutex> lock(m_);
+  checkErrorState();
 
   if (!sync) {
     GLOO_THROW_INVALID_OPERATION_EXCEPTION("Can only switch to sync mode");
@@ -81,6 +85,7 @@ void Pair::setSync(bool sync, bool busyPoll) {
   // Wait for pair to be connected
   while (state_ < CONNECTED) {
     cv_.wait(lock);
+    checkErrorState();
   }
 
   // Unregister from loop and switch socket to blocking mode
@@ -130,7 +135,9 @@ void Pair::listen() {
     fd_ = fd;
     rv = ::listen(fd_, 1);
     if (rv == -1) {
-      GLOO_THROW_IO_EXCEPTION("listen: ", strerror(errno));
+      close(fd_);
+      fd_ = FD_INVALID;
+      signalIoFailure(GLOO_ERROR_MSG("listen: ", strerror(errno)));
     }
     break;
   }
@@ -138,7 +145,7 @@ void Pair::listen() {
   // Expect listening file descriptor at this point.
   // If there is none, build error message that includes all
   // addresses that we attempted to bind to.
-  if (fd_ == -1) {
+  if (fd_ == FD_INVALID) {
     std::stringstream err;
     for (auto rp = result; rp != nullptr; rp = rp->ai_next) {
       err << Address(rp->ai_addr, rp->ai_addrlen).str();
@@ -146,7 +153,7 @@ void Pair::listen() {
         err << ", ";
       }
     }
-    GLOO_THROW_IO_EXCEPTION("Attempted to bind to: ", err);
+    signalIoFailure(GLOO_ERROR_MSG("Attempted to bind to: ", err));
   }
 
   freeaddrinfo(result);
@@ -162,6 +169,7 @@ void Pair::connect(const Address& peer) {
   std::unique_lock<std::mutex> lock(m_);
   int rv;
   socklen_t addrlen;
+  checkErrorState();
 
   peer_ = peer;
 
@@ -198,6 +206,7 @@ void Pair::connect(const Address& peer) {
   if (rv < 0) {
     while (state_ < CONNECTED) {
       cv_.wait(lock);
+      checkErrorState();
     }
     return;
   }
@@ -210,13 +219,15 @@ void Pair::connect(const Address& peer) {
   // Create new socket to connect to peer.
   fd_ = socket(peer_.ss_.ss_family, SOCK_STREAM | SOCK_NONBLOCK, 0);
   if (fd_ == -1) {
-    GLOO_THROW_IO_EXCEPTION("socket: ", strerror(errno));
+    signalIoFailure(GLOO_ERROR_MSG("socket: ", strerror(errno)));
   }
 
   // Connect to peer
   rv = ::connect(fd_, (struct sockaddr*)&peer_.ss_, addrlen);
   if (rv == -1 && errno != EINPROGRESS) {
-    GLOO_THROW_IO_EXCEPTION("connect: ", strerror(errno));
+    close(fd_);
+    fd_ = FD_INVALID;
+    signalIoFailure(GLOO_ERROR_MSG("connect: ", strerror(errno)));
   }
 
   // Register with device so we're called when connection completes.
@@ -226,6 +237,7 @@ void Pair::connect(const Address& peer) {
   // Wait for connection to complete
   while (state_ < CONNECTED) {
     cv_.wait(lock);
+    checkErrorState();
   }
 }
 
@@ -269,7 +281,7 @@ bool Pair::write(Op& op) {
   }
 
   if (rv == -1) {
-    GLOO_THROW_IO_EXCEPTION("writev: ", strerror(errno));
+    signalIoFailure(GLOO_ERROR_MSG("writev: ", strerror(errno)));
   }
   op.nwritten_ += rv;
   if (rv < nbytes) {
@@ -341,8 +353,8 @@ bool Pair::read(Op& op) {
         }
 
         // Unexpected error
-        GLOO_THROW_IO_EXCEPTION(
-            "reading from ", peer_.str(), ": ", strerror(errno));
+        signalIoFailure(GLOO_ERROR_MSG(
+            "reading from ", peer_.str(), ": ", strerror(errno)));
       }
       break;
     }
@@ -378,44 +390,50 @@ void Pair::handleEvents(int events) {
   // skip handling the events until the next tick if the lock cannot
   // be acquired.
   std::unique_lock<std::mutex> lock(m_, std::try_to_lock);
-  if (!lock) {
-    return;
-  }
-
-  if (state_ == CONNECTED) {
-    if (events & EPOLLOUT) {
-      GLOO_ENFORCE(
-          tx_.buf_ != nullptr,
-          "tx_.buf_ cannot be NULL because EPOLLOUT happened");
-      if (write(tx_)) {
-        tx_.buf_->handleSendCompletion();
-        memset(&tx_, 0, sizeof(tx_));
-        dev_->registerDescriptor(fd_, EPOLLIN, this);
-        cv_.notify_all();
-      } else {
-        // Write didn't complete, wait for epoll again
-      }
+  try {
+    if (!lock) {
+      return;
     }
-    if (events & EPOLLIN) {
-      while (read(rx_)) {
-        rx_.buf_->handleRecvCompletion();
-        memset(&rx_, 0, sizeof(rx_));
+    checkErrorState();
+
+    if (state_ == CONNECTED) {
+      if (events & EPOLLOUT) {
+        GLOO_ENFORCE(
+            tx_.buf_ != nullptr,
+            "tx_.buf_ cannot be NULL because EPOLLOUT happened");
+        if (write(tx_)) {
+          tx_.buf_->handleSendCompletion();
+          memset(&tx_, 0, sizeof(tx_));
+          dev_->registerDescriptor(fd_, EPOLLIN, this);
+          cv_.notify_all();
+        } else {
+          // Write didn't complete, wait for epoll again
+        }
       }
+      if (events & EPOLLIN) {
+        while (read(rx_)) {
+          rx_.buf_->handleRecvCompletion();
+          memset(&rx_, 0, sizeof(rx_));
+        }
+      }
+      return;
     }
-    return;
-  }
 
-  if (state_ == LISTENING) {
-    handleListening();
-    return;
-  }
+    if (state_ == LISTENING) {
+      handleListening();
+      return;
+    }
 
-  if (state_ == CONNECTING) {
-    handleConnecting();
-    return;
-  }
+    if (state_ == CONNECTING) {
+      handleConnecting();
+      return;
+    }
 
-  GLOO_ENFORCE(false, "Unexpected state: ", state_);
+    GLOO_ENFORCE(false, "Unexpected state: ", state_);
+  } catch (const ::gloo::IoException&) {
+    // Catch IO exceptions on the event handling thread. The exception has
+    // already been saved and user threads signaled.
+  }
 }
 
 void Pair::handleListening() {
@@ -424,13 +442,18 @@ void Pair::handleListening() {
   int rv;
 
   rv = accept(fd_, (struct sockaddr*)&addr, &addrlen);
+
+  // Close the listening file descriptor whether we've successfully connected
+  // or run into an error and will throw an exception.
+  dev_->unregisterDescriptor(fd_);
+  close(fd_);
+  fd_ = FD_INVALID;
+
   if (rv == -1) {
-    GLOO_THROW_IO_EXCEPTION("accept: ", strerror(errno));
+    signalIoFailure(GLOO_ERROR_MSG("accept: ", strerror(errno)));
   }
 
   // Connected, replace file descriptor
-  dev_->unregisterDescriptor(fd_);
-  close(fd_);
   fd_ = rv;
 
   // Common connection-made code
@@ -508,31 +531,38 @@ void Pair::unregisterBuffer(Buffer* buf) {
 }
 
 // changeState must only be called when holding lock.
-void Pair::changeState(state state) {
+void Pair::changeState(state nextState) {
   // Ignore nops
-  if (state == state_) {
+  if (nextState == state_) {
     return;
   }
 
   // State can only move forward
-  GLOO_ENFORCE_GT(state, state_);
+  GLOO_ENFORCE_GT(nextState, state_);
 
-  // Clean up file descriptor when transitioning to CLOSED
-  if (state == CLOSED) {
-    GLOO_ENFORCE_EQ(state_, CONNECTED);
-    if (!sync_) {
-      dev_->unregisterDescriptor(fd_);
+  // Clean up file descriptor when transitioning to CLOSED.
+  if (nextState == CLOSED) {
+    if (state_ == CONNECTED) {
+      if (!sync_) {
+        dev_->unregisterDescriptor(fd_);
+      }
+      close(fd_);
+      fd_ = FD_INVALID;
+    } else {
+      // The LISTENING and CONNECTING states ensures the file descriptor is
+      // unregistered and closed before throwing exceptions that may result in
+      // destruction of the pair.
+      GLOO_ENFORCE_EQ(fd_, FD_INVALID, "File descriptor not closed");
     }
-    close(fd_);
-    fd_ = -1;
   }
 
-  state_ = state;
+  state_ = nextState;
   cv_.notify_all();
 }
 
 void Pair::send(Op& op) {
   std::unique_lock<std::mutex> lock(m_);
+  checkErrorState();
 
   // The connect function already wait for the pair to become
   // connected (both in listening and connecting mode).
@@ -564,6 +594,7 @@ void Pair::send(Op& op) {
   if (!sync_) {
     while (tx_.buf_ != nullptr) {
       cv_.wait(lock);
+      checkErrorState();
     }
   }
 
@@ -587,6 +618,7 @@ void Pair::send(Op& op) {
 
 void Pair::recv() {
   std::unique_lock<std::mutex> lock(m_);
+  checkErrorState();
 
   auto rv = read(rx_);
   GLOO_ENFORCE(rv, "Read must always succeed in sync mode");
@@ -605,6 +637,28 @@ Pair::createRecvBuffer(int slot, void* ptr, size_t size) {
   auto buffer = new Buffer(this, slot, ptr, size);
   registerBuffer(buffer);
   return std::unique_ptr<::gloo::transport::Buffer>(buffer);
+}
+
+void Pair::signalIoFailure(const std::string& msg) {
+  auto ex = ::gloo::IoException(msg);
+  if (ex_ == nullptr) {
+    // If we haven't seen an error yet, store the exception to throw on future
+    // calling threads.
+    ex_ = std::make_exception_ptr(ex);
+    // Loop through the buffers and signal that an error has occurred.
+    for (auto it = buffers_.begin(); it != buffers_.end(); it++) {
+      it->second->signalError(ex_);
+    }
+  }
+  // Finally, throw the exception on this thread.
+  throw ex;
+};
+
+void Pair::checkErrorState() {
+  // If we previously encountered an error, rethrow here.
+  if (ex_ != nullptr) {
+    std::rethrow_exception(ex_);
+  }
 }
 
 } // namespace tcp

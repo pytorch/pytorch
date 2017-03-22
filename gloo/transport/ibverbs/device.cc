@@ -141,9 +141,7 @@ void Device::loop() {
     struct ibv_cq* cq;
     void* cqContext;
     rv = ibv_get_cq_event(comp_channel_, &cq, &cqContext);
-    if (rv != 0) {
-      GLOO_THROW_IO_EXCEPTION("ibv_get_cq_event");
-    }
+    GLOO_ENFORCE_EQ(rv, 0, "ibv_get_cq_event");
 
     // Completion queue context is a Pair*.
     // Delegate handling of this event to the pair itself.

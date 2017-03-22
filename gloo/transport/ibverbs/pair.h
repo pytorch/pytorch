@@ -11,9 +11,11 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <exception>
 #include <list>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "gloo/transport/ibverbs/address.h"
@@ -78,6 +80,9 @@ class Pair : public ::gloo::transport::Pair {
 
   void handleCompletion(struct ibv_wc* wc);
 
+  // Used to signal IO exceptions from one thread and propagate onto others.
+  void signalIoFailure(const std::string& msg);
+
  protected:
   std::shared_ptr<Device> dev_;
 
@@ -133,6 +138,11 @@ class Pair : public ::gloo::transport::Pair {
   const struct ibv_mr* getMemoryRegion(int slot);
 
   void postReceive();
+
+ private:
+  std::exception_ptr ex_;
+
+  void checkErrorState();
 
   friend class Buffer;
 };

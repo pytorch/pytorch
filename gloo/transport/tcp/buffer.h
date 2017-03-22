@@ -10,6 +10,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <exception>
 #include <map>
 #include <mutex>
 #include <queue>
@@ -38,6 +39,9 @@ class Buffer : public ::gloo::transport::Buffer {
   void handleRecvCompletion();
   void handleSendCompletion();
 
+  void signalError(const std::exception_ptr& ex);
+  void checkErrorState();
+
   Pair* pair_;
 
   std::mutex m_;
@@ -46,6 +50,8 @@ class Buffer : public ::gloo::transport::Buffer {
 
   int recvCompletions_;
   int sendCompletions_;
+
+  std::exception_ptr ex_;
 
   friend class Pair;
 };

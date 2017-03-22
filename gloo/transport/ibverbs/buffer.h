@@ -10,6 +10,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <exception>
 #include <map>
 #include <mutex>
 
@@ -34,6 +35,9 @@ class Buffer : public ::gloo::transport::Buffer {
 
   void handleCompletion(struct ibv_wc* wc);
 
+  void signalError(const std::exception_ptr& ex);
+  void checkErrorState();
+
  protected:
   // May only be constructed from helper function in pair.cc
   Buffer(Pair* pair, int slot, void* ptr, size_t size);
@@ -48,6 +52,8 @@ class Buffer : public ::gloo::transport::Buffer {
 
   int recvCompletions_;
   int sendCompletions_;
+
+  std::exception_ptr ex_;
 
   friend class Pair;
 };
