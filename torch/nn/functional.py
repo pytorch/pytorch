@@ -597,7 +597,7 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
         >>> output.backward()
     """
     assert x1.size() == x2.size(), "Input sizes must be equal."
-    assert x1.dim() == 2, "Input rank must be equal to two."
+    assert x1.dim() == 2, "Input must be a 2D matrix."
     diff = torch.abs(x1 - x2)
     out = torch.pow(diff + eps, p).sum(dim=1)
     return torch.pow(out, 1. / p)
