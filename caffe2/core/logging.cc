@@ -60,7 +60,6 @@ EnforceNotMet::EnforceNotMet(
     const char* condition,
     const string& msg)
     : msg_stack_{MakeString(
-          FetchStackTrace(),
           "[enforce fail at ",
           StripBasename(std::string(file)),
           ":",
@@ -69,7 +68,8 @@ EnforceNotMet::EnforceNotMet(
           condition,
           ". ",
           msg,
-          " ")} {
+          " ")},
+      stack_trace_(FetchStackTrace()) {
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << msg_stack_[0];
   }
@@ -82,7 +82,8 @@ void EnforceNotMet::AppendMessage(const string& msg) {
 }
 
 string EnforceNotMet::msg() const {
-  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string(""));
+  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string("")) +
+      stack_trace_;
 }
 
 const char* EnforceNotMet::what() const noexcept {
