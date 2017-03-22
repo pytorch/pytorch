@@ -185,7 +185,7 @@ void THNN_(LookupTable_renorm)(
     THCIndex_t k = idx_ptr[i] - TH_INDEX_BASE;
     thrust::device_ptr<real> row_ptr = weight_ptr + k * stride;
     accreal norm = thrust::transform_reduce(row_ptr, row_ptr + stride,
-      unary_pow, 0, binary_plus);
+      unary_pow, (accreal)0, binary_plus);
     norm = std::pow(norm, (accreal) (1.0 / normType));
     if (norm > ScalarConvert<real, accreal>::to(maxNorm))
     {
