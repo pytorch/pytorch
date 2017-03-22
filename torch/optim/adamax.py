@@ -10,17 +10,17 @@ class Adamax(Optimizer):
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
+        lr (float, optional): learning rate (default: 2e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square
         eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-38)
+            numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
     __ https://arxiv.org/abs/1412.6980
     """
 
-    def __init__(self, params, lr=1e-2, betas=(0.9, 0.999), eps=1e-38,
+    def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super(Adamax, self).__init__(params, defaults)
