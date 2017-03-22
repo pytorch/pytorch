@@ -113,7 +113,6 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<Tensor> weight(inputs[1]->data->clone_shallow());
   std::unique_ptr<Tensor> bias(inputs[2] ? inputs[2]->data->clone_shallow() : nullptr);
 
-
   int k = input->nDim();
   if (k == 3) {
     view1d_as_2d();
