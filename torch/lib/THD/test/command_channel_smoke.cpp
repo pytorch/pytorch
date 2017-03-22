@@ -5,7 +5,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <exception>
-#include <iostream>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -25,16 +24,18 @@ void init_worker(const int& rank, const std::string& master_addr) {
 
   assert(channel->init());
 
-  // Send error
-  channel->sendError("something went wrong");
-
-  // Recieve.
   auto msg = channel->recvMessage();
   std::string expected = std::string("hello to worker ") +
       std::to_string(rank) + " from master";
   fprintf(stderr, "Worker %d: received '%.*s'\n", rank,
       (int)msg.get()->bytes().length(), msg.get()->bytes().data());
   assert(expected.compare(msg.get()->bytes().to_string()) == 0);
+
+  /*
+   * We need to sleep for a while because instant exiting will cause closing
+   * the socket and in result error in `errorHandler` function.
+   */
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
 }
 
 void init_master(int world_size, const std::string& master_port) {
@@ -46,13 +47,6 @@ void init_master(int world_size, const std::string& master_port) {
   g_mutex.unlock();
 
   assert(channel->init());
-
-  // test receiving error
-  for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
-    auto error = channel->recvError();
-    std::cout << std::get<0>(error) << " sent error: " << std::get<1>(error) << std::endl;
-    assert(std::get<1>(error) == "something went wrong");
-  }
 
   for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
     rpc::ByteArray arr;
