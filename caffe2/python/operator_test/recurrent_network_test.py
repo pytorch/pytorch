@@ -401,12 +401,30 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
-    def test_mul_rnn(self, T, n, d):
-        model = CNNModelHelper(name='external')
+    def test_sum_mul(self, T, n, d):
+        model = ModelHelperBase(name='external')
 
-        one_blob = model.param_init_net.ConstantFill(
-            [], value=1.0, shape=[1, n, d])
-        input_blob = model.net.AddExternalInput('input')
+        input_blob, initial_input_blob = model.net.AddExternalInputs(
+            'input', 'initial_input')
+
+        step = ModelHelperBase(name='step', param_model=model)
+        input_t, output_t_prev = step.net.AddExternalInput(
+            'input_t', 'output_t_prev')
+        output_t_internal = step.net.Sum([input_t, output_t_prev])
+        output_t = step.net.Mul([input_t, output_t_internal])
+        step.net.AddExternalOutput(output_t)
+
+        self.simple_rnn(T, n, d, model, step, input_t, output_t, output_t_prev,
+                        input_blob, initial_input_blob)
+
+    @given(T=st.integers(1, 4),
+           n=st.integers(1, 5),
+           d=st.integers(1, 5))
+    def test_mul(self, T, n, d):
+        model = ModelHelperBase(name='external')
+
+        input_blob, initial_input_blob = model.net.AddExternalInputs(
+            'input', 'initial_input')
 
         step = ModelHelperBase(name='step', param_model=model)
         input_t, output_t_prev = step.net.AddExternalInput(
@@ -414,59 +432,73 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         output_t = step.net.Mul([input_t, output_t_prev])
         step.net.AddExternalOutput(output_t)
 
+        self.simple_rnn(T, n, d, model, step, input_t, output_t, output_t_prev,
+                        input_blob, initial_input_blob)
+
+    def simple_rnn(self, T, n, d, model, step, input_t, output_t, output_t_prev,
+                   input_blob, initial_input_blob):
+
+        input = np.random.randn(T, n, d).astype(np.float32)
+        initial_input = np.random.randn(1, n, d).astype(np.float32)
+
         recurrent.recurrent_net(
             net=model.net,
             cell_net=step.net,
             inputs=[(input_t, input_blob)],
-            initial_cell_inputs=[(output_t_prev, one_blob)],
+            initial_cell_inputs=[(output_t_prev, initial_input_blob)],
             links={output_t_prev: output_t},
-            scope="test_mul_rnn",
+            scope="test_rnn_sum_mull",
         )
 
-        workspace.FeedBlob(
-            str(input_blob), np.random.randn(T, n, d).astype(np.float32))
-        workspace.RunNetOnce(model.param_init_net)
+        workspace.blobs[input_blob] = input
+        workspace.blobs[initial_input_blob] = initial_input
 
         op = model.net._net.op[-1]
+        # Just conviniently store all inputs in an array in the same
+        # order as op.input
+        inputs = [workspace.blobs[name] for name in op.input]
 
         def reference(input, initial_input):
-            recurrent_input = initial_input
-            result = np.zeros(shape=input.shape)
+            global_ws_name = workspace.CurrentWorkspace()
+            input_all = workspace.blobs[input_blob]
+
+            workspace.SwitchWorkspace("ref", create_if_missing=True)
+            workspace.blobs[input_blob] = input
+            workspace.blobs[output_t_prev] = initial_input.reshape(n, d)
+            res_all = np.zeros(shape=input.shape, dtype=np.float32)
 
             for t_cur in range(T):
-                recurrent_input = recurrent_input * input[t_cur]
-                result[t_cur] = recurrent_input
+                workspace.blobs[input_t] = input_all[t_cur]
+                workspace.RunNetOnce(step.net)
+                result_t = workspace.blobs[output_t]
+                workspace.blobs[output_t_prev] = result_t
+                res_all[t_cur] = result_t
+
+            workspace.SwitchWorkspace(global_ws_name)
 
             shape = list(input.shape)
             shape[0] = 1
-            return (result, result[-1].reshape(shape))
-
-        def grad_reference(output_grad, ref_output, inputs):
-            input = inputs[0]
-            output = ref_output[0]
-            initial_input = inputs[1]
-            input_grad = np.zeros(shape=input.shape)
-            right_grad = 0
-
-            for t_cur in range(T - 1, -1, -1):
-                prev_output = output[t_cur - 1] if t_cur > 0 else initial_input
-                input_grad[t_cur] = (output_grad[t_cur] +
-                                     right_grad) * prev_output
-                right_grad = input[t_cur] * (output_grad[t_cur] + right_grad)
-            return (input_grad, right_grad.reshape([1, n, d]))
+            return (res_all, res_all[-1].reshape(shape))
 
         self.assertReferenceChecks(
             device_option=hu.cpu_do,
             op=op,
-            inputs=[
-                workspace.FetchBlob(name)
-                for name in [input_blob, one_blob]
-            ],
+            inputs=inputs,
             reference=reference,
-            grad_reference=grad_reference,
             output_to_grad=op.output[0],
             outputs_to_check=[0, 1],
         )
+
+        self.assertGradientChecks(
+            device_option=hu.cpu_do,
+            op=op,
+            inputs=inputs,
+            outputs_to_check=0,
+            outputs_with_grads=[0],
+            threshold=0.01,
+            stepsize=0.005,
+        )
+
 
     @given(n=st.integers(1, 10),
            d=st.integers(1, 10),
