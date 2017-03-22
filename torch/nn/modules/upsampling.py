@@ -41,8 +41,8 @@ class UpsamplingNearest2d(_UpsamplingBase):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor((H_{in} * scale_factor`
-          :math:`W_{out} = floor((W_{in}  * scale_factor`
+          :math:`H_{out} = floor(H_{in} * scale\_factor)`
+          :math:`W_{out} = floor(W_{in}  * scale\_factor)`
 
     Examples::
 
@@ -86,8 +86,8 @@ class UpsamplingBilinear2d(_UpsamplingBase):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor((H_{in} * scale_factor`
-          :math:`W_{out} = floor((W_{in}  * scale_factor`
+          :math:`H_{out} = floor(H_{in} * scale\_factor)`
+          :math:`W_{out} = floor(W_{in}  * scale\_factor)`
 
     Examples::
 
