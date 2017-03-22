@@ -8,7 +8,9 @@
 
 #ifdef WITH_CUDA
 #include <THC/THC.h>
+#include <THCS/THCS.h>
 #include <THPP/tensors/THCTensor.hpp>
+#include <THPP/tensors/THCSTensor.hpp>
 extern THCState* state;
 #endif
 
@@ -84,7 +86,25 @@ static std::unique_ptr<Tensor> createTensor(void *tensor, Type type, bool is_cud
 {
   if (is_cuda) {
 #ifdef WITH_CUDA
-    if (type == Type::UCHAR) {
+    if (is_sparse) {
+      if (type == Type::UCHAR) {
+        return std::unique_ptr<Tensor>(new THCSTensor<unsigned char>(state, (THCSByteTensor*)tensor));
+      } else if (type == Type::CHAR) {
+        return std::unique_ptr<Tensor>(new THCSTensor<char>(state, (THCSCharTensor*)tensor));
+      } else if (type == Type::SHORT) {
+        return std::unique_ptr<Tensor>(new THCSTensor<short>(state, (THCSShortTensor*)tensor));
+      } else if (type == Type::INT) {
+        return std::unique_ptr<Tensor>(new THCSTensor<int>(state, (THCSIntTensor*)tensor));
+      } else if (type == Type::LONG) {
+        return std::unique_ptr<Tensor>(new THCSTensor<long>(state, (THCSLongTensor*)tensor));
+      } else if (type == Type::FLOAT) {
+        return std::unique_ptr<Tensor>(new THCSTensor<float>(state, (THCSFloatTensor*)tensor));
+      } else if (type == Type::DOUBLE) {
+        return std::unique_ptr<Tensor>(new THCSTensor<double>(state, (THCSDoubleTensor*)tensor));
+      } else if (type == Type::HALF) {
+        return std::unique_ptr<Tensor>(new THCSTensor<half>(state, (THCSHalfTensor*)tensor));
+      }
+    } else if (type == Type::UCHAR) {
       return std::unique_ptr<Tensor>(new THCTensor<unsigned char>(state, (THCudaByteTensor*)tensor));
     } else if (type == Type::CHAR) {
       return std::unique_ptr<Tensor>(new THCTensor<char>(state, (THCudaCharTensor*)tensor));

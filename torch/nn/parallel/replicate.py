@@ -1,42 +1,73 @@
-from copy import copy
-from collections import OrderedDict
-
-from ..modules import Module
 import torch.cuda.comm as comm
 
 
-def _replicate_module(module, gpu, param_remap):
-    if module is None:
-        return module
-    replica = copy(module)
-    replica._parameters = OrderedDict()
-    for key, param in module._parameters.items():
-        replica._parameters[key] = param_remap.get(param)
-    replica._buffers = {}
-    for key, buffer in module._buffers.items():
-        replica._buffers[key] = param_remap.get(buffer)
-    if replica._modules:
-        replica._modules = OrderedDict()
-        for name, child in module._modules.items():
-            replica._modules[name] = _replicate_module(child, gpu, param_remap)
-    return replica
-
-
-def replicate(module, device_ids):
+def replicate(network, devices):
     from ._functions import Broadcast
-    seen_params = set()
-    param_remap = [{} for dev_id in device_ids]
-    for param in module.parameters():
-        if param in seen_params:
-            continue
-        seen_params.add(param)
-        param_copies = Broadcast(device_ids)(param)
-        for param_copy, remap in zip(param_copies, param_remap):
-            remap[param] = param_copy
-    for m in module.modules():
-        for buffer in m._buffers.values():
-            copies = comm.broadcast(buffer, device_ids)
-            for buf_copy, remap in zip(copies, param_remap):
-                remap[buffer] = buf_copy
-    return [_replicate_module(module, device_id, remap)
-            for device_id, remap in zip(device_ids, param_remap)]
+
+    devices = tuple(devices)
+    num_replicas = len(devices)
+
+    params = list(network.parameters())
+    param_indices = {param: idx for idx, param in enumerate(params)}
+    param_copies = Broadcast(devices)(*params)
+    if len(params) > 0:
+        param_copies = [param_copies[i:i + len(params)]
+                        for i in range(0, len(param_copies), len(params))]
+
+    buffers = _buffers(network)
+    buffer_indices = {buf: idx for idx, buf in enumerate(buffers)}
+    buffer_copies = comm.broadcast_coalesced(buffers, devices)
+
+    modules = list(network.modules())
+    module_copies = [[] for device in devices]
+    module_indices = {}
+
+    for i, module in enumerate(modules):
+        module_indices[module] = i
+        for j in range(num_replicas):
+            replica = module.__new__(type(module))
+            replica.__dict__ = module.__dict__.copy()
+            replica._parameters = replica._parameters.copy()
+            replica._buffers = replica._buffers.copy()
+            replica._modules = replica._modules.copy()
+            module_copies[j].append(replica)
+
+    for i, module in enumerate(modules):
+        for key, child in module._modules.items():
+            module_idx = module_indices[child]
+            for j in range(num_replicas):
+                replica = module_copies[j][i]
+                replica._modules[key] = module_copies[j][module_idx]
+        for key, param in module._parameters.items():
+            if param is None:
+                for j in range(num_replicas):
+                    replica = module_copies[j][i]
+                    replica._parameters[key] = None
+            else:
+                param_idx = param_indices[param]
+                for j in range(num_replicas):
+                    replica = module_copies[j][i]
+                    replica._parameters[key] = param_copies[j][param_idx]
+        for key, buf in module._buffers.items():
+            if buf is None:
+                for j in range(num_replicas):
+                    replica = module_copies[j][i]
+                    replica._buffers[key] = None
+            else:
+                buffer_idx = buffer_indices[buf]
+                for j in range(num_replicas):
+                    replica = module_copies[j][i]
+                    replica._buffers[key] = buffer_copies[j][buffer_idx]
+
+    return [module_copies[j][0] for j in range(num_replicas)]
+
+
+def _buffers(network):
+    buffers = []
+    seen = set()
+    for module in network.modules():
+        for buf in module._buffers.values():
+            if buf not in seen and buf is not None:
+                seen.add(buf)
+                buffers.append(buf)
+    return buffers

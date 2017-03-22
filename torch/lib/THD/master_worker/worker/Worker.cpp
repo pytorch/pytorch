@@ -1,6 +1,6 @@
 #include "../../process_group/General.hpp"
-#include "../../base/Storage.hpp"
-#include "../../base/Tensor.hpp"
+#include <THPP/Storage.hpp>
+#include <THPP/Tensor.hpp>
 #include "../common/RPC.hpp"
 #include "Dispatch.hpp"
 #include "Worker.h"
@@ -12,8 +12,8 @@ namespace thd {
 namespace worker {
 
 std::unique_ptr<WorkerCommandChannel> workerCommandChannel;
-std::unordered_map<object_id_type, std::unique_ptr<Tensor>> workerTensors;
-std::unordered_map<object_id_type, std::unique_ptr<Storage>> workerStorages;
+std::unordered_map<object_id_type, std::unique_ptr<thpp::Tensor>> workerTensors;
+std::unordered_map<object_id_type, std::unique_ptr<thpp::Storage>> workerStorages;
 
 } // namespace worker
 } // namespace thd
@@ -21,7 +21,6 @@ std::unordered_map<object_id_type, std::unique_ptr<Storage>> workerStorages;
 using namespace thd;
 
 void THDWorkerMain() {
-  // TODO: initialize worker
   std::unique_ptr<thd::rpc::RPCMessage> command;
   for (;;) {
     command = worker::workerCommandChannel->recvMessage();

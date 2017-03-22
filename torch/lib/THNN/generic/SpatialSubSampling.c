@@ -40,7 +40,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
     int kW, int kH,
     int dW, int dH)
 {
-  
+
   real *weight_data = THTensor_(data)(weight);
   real *bias_data = THTensor_(data)(bias);
   real *output_data;
@@ -76,11 +76,11 @@ void THNN_(SpatialSubSampling_updateOutput)(
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
     THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
-  
+
   input = THTensor_(newContiguous)(input);
   input_data = THTensor_(data)(input);
   output_data = THTensor_(data)(output);
-  
+
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
   {
@@ -97,7 +97,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
       long i;
       for(i = 0; i < outputWidth*outputHeight; i++)
         ptr_output[i] = z;
-      
+
       for(yy = 0; yy < outputHeight; yy++)
       {
         for(xx = 0; xx < outputWidth; xx++)
@@ -214,8 +214,9 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     THTensor *gradBias,
     int kW, int kH,
     int dW, int dH,
-    real scale)
+    accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_(SpatialSubSampling_shapeCheck)(input, gradOutput, gradWeight, kW, kH);
 
   long nbatch = 1;

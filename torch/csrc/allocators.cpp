@@ -44,11 +44,9 @@ void* NumpyArrayAllocator::realloc(void* ptr, long size) {
 
 void NumpyArrayAllocator::free(void* ptr) {
   PyArrayObject *array_ptr = (PyArrayObject*)object.get();
-  if (array_ptr && ptr == PyArray_DATA(array_ptr)) {
-    object = nullptr;
-    return;
-  }
-  allocator->free(allocatorContext, ptr);
+  if (!array_ptr || ptr != PyArray_DATA(array_ptr))
+    throw std::logic_error("invalid call to NumpyArrayAllocator::free()");
+  object = nullptr;
   delete this;
 }
 #endif

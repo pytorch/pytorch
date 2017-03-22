@@ -28,6 +28,18 @@ Containers
 .. autoclass:: Sequential
     :members:
 
+:hidden:`ModuleList`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleList
+    :members:
+
+:hidden:`ParameterList`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterList
+    :members:
+
 Convolution Layers
 ----------------------------------
 
@@ -482,6 +494,26 @@ Utilities
 .. autofunction:: torch.nn.utils.clip_grad_norm
 
 
+.. currentmodule:: torch.nn.utils.rnn
+
+:hidden:`PackedSequence`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.PackedSequence
+
+
+:hidden:`pack_padded_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pack_padded_sequence
+
+
+:hidden:`pad_packed_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pad_packed_sequence
+
+
 torch.nn.functional
 ===================
 
@@ -732,3 +764,22 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pixel_shuffle
+
+:hidden:`pad`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pad
+
+torch.nn.init
+=============
+
+.. currentmodule:: torch.nn.init
+.. autofunction:: uniform
+.. autofunction:: normal
+.. autofunction:: constant
+.. autofunction:: xavier_uniform
+.. autofunction:: xavier_normal
+.. autofunction:: kaiming_uniform
+.. autofunction:: kaiming_normal
+.. autofunction:: orthogonal
+.. autofunction:: sparse

@@ -46,22 +46,22 @@ class UpsamplingNearest2d(_UpsamplingBase):
 
     Examples::
 
-    >>> inp
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1  2
-      3  4
-    [torch.FloatTensor of size 1x1x2x2]
+        >>> inp
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  2
+          3  4
+        [torch.FloatTensor of size 1x1x2x2]
 
-    >>> m = nn.UpsamplingNearest2d(scale_factor=2)
-    >>> m(inp)
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1  1  2  2
-      1  1  2  2
-      3  3  4  4
-      3  3  4  4
-    [torch.FloatTensor of size 1x1x4x4]
+        >>> m = nn.UpsamplingNearest2d(scale_factor=2)
+        >>> m(inp)
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  1  2  2
+          1  1  2  2
+          3  3  4  4
+          3  3  4  4
+        [torch.FloatTensor of size 1x1x4x4]
 
     """
 
@@ -91,22 +91,22 @@ class UpsamplingBilinear2d(_UpsamplingBase):
 
     Examples::
 
-    >>> inp
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1  2
-      3  4
-    [torch.FloatTensor of size 1x1x2x2]
+        >>> inp
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  2
+          3  4
+        [torch.FloatTensor of size 1x1x2x2]
 
-    >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
-    >>> m(inp)
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1.0000  1.3333  1.6667  2.0000
-      1.6667  2.0000  2.3333  2.6667
-      2.3333  2.6667  3.0000  3.3333
-      3.0000  3.3333  3.6667  4.0000
-    [torch.FloatTensor of size 1x1x4x4]
+        >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
+        >>> m(inp)
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1.0000  1.3333  1.6667  2.0000
+          1.6667  2.0000  2.3333  2.6667
+          2.3333  2.6667  3.0000  3.3333
+          3.0000  3.3333  3.6667  4.0000
+        [torch.FloatTensor of size 1x1x4x4]
 
     """
 

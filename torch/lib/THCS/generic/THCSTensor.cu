@@ -69,4 +69,13 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   THError("WARNING: Sparse Cuda Tensor op transpose is not implemented");
 }
 
+int THCSTensor_(getDevice)(THCState* state, const THCSTensor* tensor) {
+  if (!tensor->values || !tensor->values->storage) return -1;
+  return THCStorage_(getDevice)(state, tensor->values->storage);
+}
+
+void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask) {
+  THError("WARNING: Sparse Cuda Tensor op sparseMask is not implemented");
+}
+
 #endif

@@ -1,11 +1,9 @@
 #pragma once
-
-#include "../../base/Tensor.hpp"
-#include "../../base/Storage.hpp"
 #include "../master/THDTensor.h"
 #include "ByteArray.hpp"
 #include "TH/THStorage.h"
 
+#include <THPP/Type.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -43,8 +41,8 @@ std::unique_ptr<RPCMessage> packMessage(
                         const Args&... args
                         );
 
-Type unpackType(RPCMessage& raw_message);
-Type peekType(RPCMessage& raw_message);
+thpp::Type unpackType(RPCMessage& raw_message);
+thpp::Type peekType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 std::uint16_t unpackFunctionId(RPCMessage& raw_message);
 long long unpackInteger(RPCMessage& raw_message);

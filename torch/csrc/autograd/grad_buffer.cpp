@@ -1,8 +1,6 @@
 #include "torch/csrc/autograd/grad_buffer.h"
 
-#ifdef WITH_CUDA
-#include "torch/csrc/cuda/AutoGPU.h"
-#endif
+#include "torch/csrc/utils/auto_gpu.h"
 
 namespace torch { namespace autograd {
 
@@ -19,15 +17,28 @@ auto GradBuffer::addGrad(size_t pos, std::shared_ptr<Variable>&& var) -> void {
   if (!item.first) {
     buffer[pos] = std::make_pair<>(std::move(tensor), true);
   } else {
-#ifdef WITH_CUDA
-    THCPAutoGPU auto_gpu(tensor->getDevice());
-#endif
-    if (item.second) {
-      item.first.reset(item.first->clone());
-      item.second = false;
+    AutoGPU auto_gpu(item.first->getDevice());
+    if (item.first->isSparse() && !tensor->isSparse()) {
+      auto* sum = tensor->clone();
+      sum->cadd(*sum, *item.first);
+      item.first.reset(sum);
+    } else {
+      if (item.second) {
+        item.first.reset(item.first->clone());
+      }
+      item.first->cadd(*item.first, *tensor);
     }
-    item.first->cadd(*item.first, *tensor);
+    item.second = false;
   }
+}
+
+auto GradBuffer::device() const -> int {
+  for (auto& pair : buffer) {
+    if (pair.first) {
+      return pair.first->getDevice();
+    }
+  }
+  return -1;
 }
 
 auto GradBuffer::variables(GradBuffer&& g) -> std::vector<std::shared_ptr<Variable>> {

@@ -152,7 +152,8 @@ static void THNN_(unfolded_acc_vol)(
                   }
                   else
                   {
-                    THVector_(add)(dst+it*inputHeight*inputWidth+iy*inputWidth+ix, src+t*outputHeight*outputWidth+y*outputWidth+x, 1, 1);
+                    real *dst_slice = dst+it*inputHeight*inputWidth+iy*inputWidth+ix;
+                    THVector_(cadd)(dst_slice, dst_slice, src+t*outputHeight*outputWidth+y*outputWidth+x, 1, 1);
                   }
                 }
               }
@@ -169,7 +170,8 @@ static void THNN_(unfolded_acc_vol)(
                 for(x = 0; x < outputWidth; x++)
                 {
                   ix = x*dW + kw;
-                  THVector_(add)(dst+it*inputHeight*inputWidth+iy*inputWidth+ix, src+t*outputHeight*outputWidth+y*outputWidth+x, 1, 1);
+                  real *dst_slice = dst+it*inputHeight*inputWidth+iy*inputWidth+ix;
+                  THVector_(cadd)(dst_slice, dst_slice, src+t*outputHeight*outputWidth+y*outputWidth+x, 1, 1);
                 }
               }
             }
@@ -581,8 +583,9 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
           int kT, int kW, int kH,
           int dT, int dW, int dH,
           int pT, int pW, int pH,
-          real scale)
+          accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   int freeWeight;
   int nOutputPlane = (int)gradWeight->size[0];
 

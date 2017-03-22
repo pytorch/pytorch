@@ -145,10 +145,9 @@ There is no wrapper code that needs to be written. [You can see an example here]
 ## Installation
 
 ### Binaries
-- Anaconda
-```bash
-conda install pytorch torchvision -c soumith
-```
+Commands to install from binaries via Conda or pip wheels are on our website:
+
+[http://pytorch.org](http://pytorch.org)
 
 ### From source
 

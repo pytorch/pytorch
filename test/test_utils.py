@@ -6,7 +6,6 @@ import shutil
 import random
 import tempfile
 import unittest
-import sys
 import traceback
 import torch
 import torch.cuda
@@ -298,7 +297,7 @@ class TestLuaReader(TestCase):
 
     @classmethod
     def init(cls):
-        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_modules.t7'
+        DATA_URL = 'https://download.pytorch.org/test_data/legacy_modules.t7'
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
         test_file_path = os.path.join(data_dir, 'legacy_modules.t7')
         succ = download_file(DATA_URL, test_file_path)

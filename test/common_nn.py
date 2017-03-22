@@ -7,8 +7,8 @@ from itertools import product
 import torch
 import torch.cuda
 from torch.autograd import Variable
-from common import TestCase, to_gpu, get_numerical_jacobian, iter_tensors, contiguous, \
-    freeze_rng_state
+from common import TestCase, to_gpu, freeze_rng_state
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
 
 # tarfile module tries to obtain a file object name in python 3.3
@@ -337,15 +337,18 @@ class NNTestCase(TestCase):
 
     def _flatten_tensors(self, x):
         if torch.is_tensor(x):
-            return x.view(-1)
+            if x.is_sparse:
+                return x.to_dense().view(-1)
+            else:
+                return x.view(-1)
         elif isinstance(x, Variable):
-            return x.data.view(-1)
+            return self._flatten_tensors(x.data)
         else:
             return tuple(self._flatten_tensors(a) for a in x)
 
     def _zero_grad_input(self, input):
         if isinstance(input, Variable):
-            if input.requires_grad:
+            if input.requires_grad and input.grad is not None:
                 input.grad.data.zero_()
         elif torch.is_tensor(input):
             return
@@ -410,9 +413,9 @@ class NNTestCase(TestCase):
         # TODO: enable non-contig tests
         input = contiguous(input)
         if jacobian_input:
-            res += get_numerical_jacobian(fw, input, input),
+            res += get_numerical_jacobian(fw, input, input, eps=1e-6),
         if jacobian_parameters:
-            res += torch.cat(list(get_numerical_jacobian(fw, input, p) for p in param), 0),
+            res += torch.cat(list(get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param), 0),
         return res
 
     def check_jacobian(self, module, input, jacobian_input=True):

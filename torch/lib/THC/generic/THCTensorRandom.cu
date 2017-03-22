@@ -159,8 +159,9 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
     int maxThreads = props->maxThreadsPerBlock;
     dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
     dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
-    sampleMultinomialOnce
-      <<<grid, block, block.x * sizeof(real),
+    sampleMultinomialOnce<real, accreal>
+      <<<grid, block,
+         block.x * (sizeof(real) * sizeof(accreal)),
          THCState_getCurrentStream(state)>>>(
       THCudaLongTensor_data(state, self),
       numDist,

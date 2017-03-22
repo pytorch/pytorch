@@ -2,8 +2,9 @@
 #ifdef WITH_MPI
 #include "../base/channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
-#include "../base/tensors/THTensor.hpp"
 #include "TestUtils.hpp"
+
+#include <THPP/tensors/THTensor.hpp>
 
 #include <unistd.h>
 #include <cassert>
@@ -128,8 +129,8 @@ void test_allReduce(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void test_scatter(std::shared_ptr<thd::DataChannel> data_channel) {
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors;
-  std::vector<thd::Tensor*> raw_tensors;
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
+  std::vector<thpp::Tensor*> raw_tensors;
   if (data_channel->getRank() == 0) {
     for (std::size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, i));
@@ -143,8 +144,8 @@ void test_scatter(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void test_gather(std::shared_ptr<thd::DataChannel> data_channel) {
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors;
-  std::vector<thd::Tensor*> raw_tensors;
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
+  std::vector<thpp::Tensor*> raw_tensors;
   auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
   if (data_channel->getRank() == 0) {
     for (std::size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
@@ -161,8 +162,8 @@ void test_gather(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void test_allGather(std::shared_ptr<thd::DataChannel> data_channel) {
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors;
-  std::vector<thd::Tensor*> raw_tensors;
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
+  std::vector<thpp::Tensor*> raw_tensors;
   auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
   for (std::size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
     tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
@@ -215,7 +216,7 @@ void test_isend(std::shared_ptr<thd::DataChannel> data_channel) {
 void test_irecv(std::shared_ptr<thd::DataChannel> data_channel) {
   if (data_channel->getRank() == 0) {
     std::vector<std::shared_ptr<thd::DataChannel::Request>> requests;
-    std::vector<std::shared_ptr<thd::IntTensor>> tensors;
+    std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
     for (std::size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
       requests.push_back(std::shared_ptr<thd::DataChannel::Request>(
@@ -327,8 +328,8 @@ void test_allReduce_group(std::shared_ptr<thd::DataChannel> data_channel,
 
 void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
                         THDGroup group, std::vector<int> group_ranks) {
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors;
-  std::vector<thd::Tensor*> raw_tensors;
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
+  std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
     if (data_channel->getRank() == group_ranks[0]) {
       for (std::size_t i = 0; i < group_ranks.size(); ++i) {
@@ -350,8 +351,8 @@ void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
 
 void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
                        THDGroup group, std::vector<int> group_ranks) {
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors;
-  std::vector<thd::Tensor*> raw_tensors;
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
+  std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
     if (data_channel->getRank() == group_ranks[0]) {
@@ -375,8 +376,8 @@ void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
 
 void test_allGather_group(std::shared_ptr<thd::DataChannel> data_channel,
                           THDGroup group, std::vector<int> group_ranks) {
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors;
-  std::vector<thd::Tensor*> raw_tensors;
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
+  std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
     for (std::size_t i = 0; i < group_ranks.size(); ++i) {
@@ -451,10 +452,10 @@ void test_process_not_in_group(std::shared_ptr<thd::DataChannel> data_channel) {
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
 
   THDGroup group = data_channel->newGroup({1});
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors = {
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors = {
     buildTensor<int>({1, 2, 3, 4, 5}, -1)
   };
-  std::vector<thd::Tensor*> raw_tensors = {
+  std::vector<thpp::Tensor*> raw_tensors = {
     tensors.back().get()
   };
 
@@ -485,10 +486,10 @@ void test_process_not_in_group(std::shared_ptr<thd::DataChannel> data_channel) {
 void test_tensors_do_not_match_group_size(std::shared_ptr<thd::DataChannel> data_channel) {
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
   THDGroup group = data_channel->newGroup({1, 2});
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors = {
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors = {
     buildTensor<int>({1, 2, 3, 4, 5}, -1)
   };
-  std::vector<thd::Tensor*> raw_tensors = {
+  std::vector<thpp::Tensor*> raw_tensors = {
     tensors.back().get()
   };
 
@@ -516,11 +517,11 @@ void test_tensors_do_not_match_group_size(std::shared_ptr<thd::DataChannel> data
 void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channel) {
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
   THDGroup group = data_channel->newGroup({1, 2});
-  std::vector<std::shared_ptr<thd::IntTensor>> tensors = {
+  std::vector<std::shared_ptr<thpp::IntTensor>> tensors = {
     buildTensor<int>({1, 2, 3, 4, 5}, -1),
     buildTensor<int>({1, 2, 3, 4}, -1)
   };
-  std::vector<thd::Tensor*> raw_tensors = {
+  std::vector<thpp::Tensor*> raw_tensors = {
     tensors[0].get(),
     tensors[1].get()
   };

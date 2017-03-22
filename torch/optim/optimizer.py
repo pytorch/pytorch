@@ -66,6 +66,9 @@ class Optimizer(object):
             'param_groups': self.param_groups,
         }
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     def state_dict(self):
         """Returns the state of the optimizer as a :class:`dict`.
 
@@ -115,20 +118,22 @@ class Optimizer(object):
         id_map = {old_id: p for old_id, p in
                   zip(chain(*(g['params'] for g in saved_groups)),
                       chain(*(g['params'] for g in groups)))}
-        self.state = {id_map.get(k, k): v for k, v in state_dict['state'].items()}
+        state = {id_map.get(k, k): v for k, v in state_dict['state'].items()}
 
         # Update parameter groups, setting their 'params' value
         def update_group(group, new_group):
             new_group['params'] = group['params']
             return new_group
-        self.param_groups = [
+        param_groups = [
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+        self.__setstate__({'state': state, 'param_groups': param_groups})
 
     def zero_grad(self):
         """Clears the gradients of all optimized :class:`Variable` s."""
         for group in self.param_groups:
             for param in group['params']:
-                param.grad.data.zero_()
+                if param.grad is not None:
+                    param.grad.data.zero_()
 
     def step(self, closure):
         """Performs a single optimization step (parameter update).

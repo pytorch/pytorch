@@ -97,7 +97,7 @@ class NLLLoss(_WeightedLoss):
         >>> m = nn.LogSoftmax()
         >>> loss = nn.NLLLoss()
         >>> # input is of size nBatch x nClasses = 3 x 5
-        >>> input = autograd.Variable(torch.randn(3, 5))
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
         >>> # each element in target has to have 0 <= value < nclasses
         >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
         >>> output = loss(m(input), target)
@@ -167,7 +167,7 @@ class MSELoss(_Loss):
     r"""Creates a criterion that measures the mean squared error between
     `n` elements in the input `x` and target `y`:
 
-    ..math:: loss(x, y) = 1/n \sum |x_i - y_i|^2
+    :math:`{loss}(x, y)  = 1/n \sum |x_i - y_i|^2`
 
     `x` and `y` arbitrary shapes with a total of `n` elements each.
 
@@ -191,8 +191,7 @@ class BCELoss(_WeightedLoss):
     ..math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
     This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1,
-    for instance, the output of an `nn.Sigmoid` layer.
+    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.
 
     By default, the losses are averaged for each minibatch over observations
     *as well as* over dimensions. However, if the field `sizeAverage` is set
@@ -407,6 +406,7 @@ class MultiMarginLoss(Module):
     a 1D `weights` tensor into the constructor.
 
     The loss function then becomes:
+
         loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] - x[i]))^p) / x.size(0)
 
     By default, the losses are averaged over observations for each minibatch.

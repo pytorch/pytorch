@@ -92,8 +92,9 @@ void THNN_(PReLU_accGradParameters)(
            THCTensor *gradWeightBuf,
            THCTensor *gradWeightBuf2,
            long nOutputPlane,
-           real scale)
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCUNN_check_nElement(state, input, gradOutput);
   // use grad input for temporary storage, then call updateGradInput again
 

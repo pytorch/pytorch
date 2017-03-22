@@ -43,4 +43,26 @@ inline bool isInteger(Type t) {
           t == Type::LONG_LONG || t == Type::ULONG_LONG);
 }
 
+inline const char* toString(Type t) {
+  switch (t) {
+    case Type::CHAR: return "Char";
+    case Type::UCHAR: return "Byte";
+    case Type::FLOAT: return "Float";
+    case Type::DOUBLE: return "Double";
+    case Type::HALF: return "Half";
+    case Type::SHORT: return "Short";
+    case Type::USHORT: return "UShort";
+    case Type::INT: return "Int";
+    case Type::UINT: return "UInt";
+    case Type::LONG: return "Long";
+    case Type::ULONG: return "ULong";
+    case Type::LONG_LONG: return "LongLong";
+    case Type::ULONG_LONG: return "ULongLong";
+    case Type::LONG_STORAGE: return "LongStorage";
+    case Type::TENSOR: return "Tensor";
+    case Type::STORAGE: return "Storage";
+    default: return "<unknown>";
+  }
+}
+
 } // namespace thpp

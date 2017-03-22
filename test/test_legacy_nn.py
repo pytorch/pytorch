@@ -483,14 +483,14 @@ tests = [
                   input_size=(1, 2, 4, 4, 4)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2),
-                  input_size=(2, 3, 5, 5, 5)),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2, 2, 2, 2),
-                  input_size=(2, 3, 5, 5, 5),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
                   desc='stride'),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2, 2, 2, 2, 1, 1, 1),
-                  input_size=(2, 3, 5, 5, 5),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
                   desc='stride_padding'),
     OldModuleTest(nn.VolumetricReplicationPadding,
                   (1, 2, 3, 4, 5, 6),
@@ -1251,6 +1251,8 @@ class TestNN(NNTestCase):
                 self.assertIsInstance(module, type(reference))
 
 
+prepare_tests()
+
+
 if __name__ == '__main__':
-    prepare_tests()
     run_tests()

@@ -7,12 +7,12 @@ using namespace rpc;
 using namespace master;
 
 real THDStorage_(receiveValueFromWorker)(int worker_id) {
-  Type type = type_traits<real>::type;
-  if (isInteger(type)) {
+  thpp::Type type = thpp::type_traits<real>::type;
+  if (thpp::isInteger(type)) {
     IntScalar wrapped_value;
     dataChannel->receive(wrapped_value, worker_id);
     return static_cast<real>(wrapped_value.value());
-  } else if (isFloat(type)) {
+  } else if (thpp::isFloat(type)) {
     FloatScalar wrapped_value;
     dataChannel->receive(wrapped_value, worker_id);
     return static_cast<real>(wrapped_value.value());
@@ -37,7 +37,7 @@ ptrdiff_t THDStorage_(size)(const THDStorage* storage) {
 
 THDStorage* THDStorage_(new)() {
   THDStorage* storage = THDStorage_(_alloc)();
-  Type type = type_traits<real>::type;
+  thpp::Type type = thpp::type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::storageConstruct,
@@ -67,7 +67,7 @@ real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
       Functions::storageGet,
       storage,
       offset,
-      thd::type_traits<real>::type
+      thpp::type_traits<real>::type
     ),
     THDState::s_current_worker
   );
@@ -75,7 +75,7 @@ real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
 }
 
 THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
-  Type type = type_traits<real>::type;
+  thpp::Type type = thpp::type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = size;
   masterCommandChannel->sendMessage(
@@ -91,7 +91,7 @@ THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
 }
 
 THDStorage* THDStorage_(newWithSize1)(real value) {
-  Type type = type_traits<real>::type;
+  thpp::Type type = thpp::type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 1;
   masterCommandChannel->sendMessage(
@@ -107,7 +107,7 @@ THDStorage* THDStorage_(newWithSize1)(real value) {
 }
 
 THDStorage* THDStorage_(newWithSize2)(real value1, real value2) {
-  Type type = type_traits<real>::type;
+  thpp::Type type = thpp::type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 2;
   masterCommandChannel->sendMessage(
@@ -124,7 +124,7 @@ THDStorage* THDStorage_(newWithSize2)(real value1, real value2) {
 }
 
 THDStorage* THDStorage_(newWithSize3)(real value1, real value2, real value3) {
-  Type type = type_traits<real>::type;
+  thpp::Type type = thpp::type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 3;
   masterCommandChannel->sendMessage(
@@ -142,7 +142,7 @@ THDStorage* THDStorage_(newWithSize3)(real value1, real value2, real value3) {
 }
 
 THDStorage* THDStorage_(newWithSize4)(real value1, real value2, real value3, real value4) {
-  Type type = type_traits<real>::type;
+  thpp::Type type = thpp::type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 4;
   masterCommandChannel->sendMessage(

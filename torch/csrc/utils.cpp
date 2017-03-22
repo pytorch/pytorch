@@ -10,6 +10,9 @@
 #include "generic/utils.cpp"
 #include <TH/THGenerateAllTypes.h>
 
+#include "generic/utils.cpp"
+#include <TH/THGenerateHalfType.h>
+
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
     return 0;
@@ -120,6 +123,34 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
     }
     methods++;
   }
+}
+
+static const char* classOrTypename(PyObject* obj) {
+  if (PyType_Check(obj)) {
+    return ((PyTypeObject*)obj)->tp_name;
+  }
+  return Py_TYPE(obj)->tp_name;
+}
+
+PyObject * THPUtils_dispatchStateless(
+    PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs)
+{
+  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
+  if (!methods) {
+    return PyErr_Format(
+        PyExc_TypeError,
+        "Type %s doesn't implement stateless methods",
+        classOrTypename(tensor));
+  }
+  THPObjectPtr method = PyObject_GetAttrString(methods, name);
+  if (!method) {
+    return PyErr_Format(
+        PyExc_TypeError,
+        "Type %s doesn't implement stateless method %s",
+        classOrTypename(tensor),
+        name);
+  }
+  return PyObject_Call(method.get(), args, kwargs);
 }
 
 std::string _THPUtils_typename(PyObject *object)

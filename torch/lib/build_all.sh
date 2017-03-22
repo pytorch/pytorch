@@ -3,10 +3,13 @@
 set -e
 
 WITH_CUDA=0
+WITH_NCCL=0
 WITH_DISTRIBUTED=0
 for arg in "$@"; do
     if [[ "$arg" == "--with-cuda" ]]; then
         WITH_CUDA=1
+    elif [[ "$arg" == "--with-nccl" ]]; then
+        WITH_NCCL=1
     elif [[ "$arg" == "--with-distributed" ]]; then
         WITH_DISTRIBUTED=1
     else
@@ -18,7 +21,10 @@ cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
-BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
+BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
+  -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
+  -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
+  -I$INSTALL_DIR/include/THPP "
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
@@ -42,8 +48,10 @@ function build() {
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
+              -DTHPP_LIBRARIES="$INSTALL_DIR/lib/libTHPP$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
               -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
+              -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
               -DTH_SO_VERSION=1 \
               -DTHC_SO_VERSION=1 \
               -DTHNN_SO_VERSION=1 \
@@ -74,7 +82,7 @@ function build_nccl() {
                -DCMAKE_C_FLAGS="$C_FLAGS" \
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
-   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
+   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
    cd ../..
 }
 
@@ -82,25 +90,22 @@ mkdir -p tmp_install
 build TH
 build THS
 build THNN
-if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
-    build THD
-fi
-
 if [[ $WITH_CUDA -eq 1 ]]; then
     build THC
     build THCS
     build THCUNN
-    if [[ $(uname) != 'Darwin' ]]; then
-        if [[ `ldconfig -p | grep libnccl` == '' ]]; then
-          build_nccl
-        fi
-    fi
+fi
+if [[ $WITH_NCCL -eq 1 ]]; then
+    build_nccl
 fi
 
 build THPP
 CPP_FLAGS=" -std=c++11 "
 build libshm
 
+if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
+    build THD
+fi
 
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .

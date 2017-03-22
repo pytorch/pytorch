@@ -21,7 +21,7 @@ libshm_context * libshm_context_new(const char *manager_handle, const char *file
   } else {
     size_t handle_length = std::strlen(manager_handle);
     ctx->manager_handle = new char[handle_length+1];
-    std::strcpy(ctx->manager_handle, manager_handle);
+    memcpy(ctx->manager_handle, manager_handle, handle_length+1);
   }
   ctx->th_context = THMapAllocatorContext_new(filename, flags);
   return ctx;
@@ -43,7 +43,7 @@ void start_manager() {
     dup2(pipe_ends[1], 1); // Replace stdout
     close(pipe_ends[1]);
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
-    exit(0);
+    exit(1);
   }
   SYSCHECK(close(pipe_ends[1]));
 
@@ -53,10 +53,18 @@ void start_manager() {
   for (;;) {
     SYSCHECK(bytes_read = read(pipe_ends[0], buffer, sizeof(buffer)));
     handle.append(buffer, bytes_read);
-    if (handle[handle.length()-1] == '\n')
+    if (bytes_read == 0 || handle[handle.length() - 1] == '\n') {
       break;
+    }
   }
   SYSCHECK(close(pipe_ends[0]));
+  if (handle.length() == 0) {
+    std::string msg("error executing torch_shm_manager at \"");
+    msg += manager_executable_path;
+    msg += "\"";
+    throw std::runtime_error(msg);
+  }
+
   handle.pop_back(); // remove \n
   if (handle == "ERROR")
     throw std::exception();
@@ -79,7 +87,7 @@ ClientSocket& get_manager_socket(char *manager_handle) {
 
 char * copy_handle(const std::string &handle) {
   char *new_handle = new char[handle.length()+1];
-  std::strcpy(new_handle, handle.c_str());
+  memcpy(new_handle, handle.c_str(), handle.length() + 1);
   return new_handle;
 }
 
@@ -87,9 +95,12 @@ AllocInfo get_alloc_info(libshm_context *ctx) {
   AllocInfo info = {0};
   info.pid = getpid();
   info.free = false;
-  // TODO: make sure full name has fit into the buffer
-  char *filename = THMapAllocatorContext_filename(ctx->th_context);
-  strncpy(info.filename, filename, sizeof(info.filename));
+  const char *filename = THMapAllocatorContext_filename(ctx->th_context);
+  size_t len = strlen(filename);
+  if (len >= sizeof(info.filename)) {
+    throw std::runtime_error("THMapAllocatorContext_filename too long");
+  }
+  memcpy(info.filename, filename, len + 1);
   return info;
 }
 

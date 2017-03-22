@@ -21,6 +21,7 @@ torch/csrc/nn/THNN_generic.cpp
 torch/csrc/nn/THNN_generic.h
 docs/src/**/*
 test/data/legacy_modules.t7
+test/data/gpu_tensors.pt
 test/htmlcov
 test/.coverage
 */*.pyc
@@ -31,3 +32,4 @@ test/.coverage
 */*.so*
 */**/*.so*
 */**/*.dylib*
+test/data/legacy_serialized.pt

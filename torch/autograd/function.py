@@ -106,12 +106,13 @@ class Function(_C._FunctionBase):
         """
         self.non_differentiable = args
 
-    def register_hook(self, hook):
-        if self._backward_hooks is None:
-            self._backward_hooks = OrderedDict()
-        handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[id(handle)] = hook
-        return handle
+    @staticmethod
+    def _register_hook(backward_hooks, hook):
+        if backward_hooks is None:
+            backward_hooks = OrderedDict()
+        handle = hooks.RemovableHandle(backward_hooks)
+        backward_hooks[handle.id] = hook
+        return backward_hooks, handle
 
     def forward(self, *input):
         """Performs the operation.
