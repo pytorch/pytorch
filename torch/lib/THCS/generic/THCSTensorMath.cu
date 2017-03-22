@@ -2,6 +2,10 @@
 #define THCS_GENERIC_FILE "generic/THCSTensorMath.cu"
 #else
 
+#include "THCThrustAllocator.cuh"
+#include <thrust/device_ptr.h>
+#include <thrust/sequence.h>
+
 #define ROW_PTR2(t, r) (THCTensor_(data)(THCState *state, t) + (r) * (t)->stride[0])
 #define COL_PTR2(t, c) (THCTensor_(data)(THCState *state, t) + (c) * (t)->stride[1])
 
@@ -152,6 +156,61 @@ void THCSTensor_(sspaddmm)(THCState *state, THCSTensor *r_, real beta, THCSTenso
   // TODO Write some kernels
 }
 
+void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor *sparse, THCTensor *dense) {
+#if CUDA_VERSION >= 7000
+  THCThrustAllocator thrustAlloc(state);
+#define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
+#else
+#define THRUST_EXEC(fn, ...) fn(##__VA_ARGS__)
+#endif
+
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, sparse, dense));
+
+  THArgCheck(sparse->nDimensionI == 2, 2,
+      "matrices expected, got %dD tensor", sparse->nDimensionI);
+  THArgCheck(sparse->nDimensionV == 0, 2,
+      "scalar values expected, got %dD values", sparse->nDimensionV);
+  THArgCheck(dense->nDimension == 2, 2,
+      "matrices expected, got %dD tensor", dense->nDimension);
+
+  long m = THCSTensor_(size)(state, sparse, 0);
+  long k = THCSTensor_(size)(state, sparse, 1);
+  long n = THCTensor_(size)(state, dense, 1);
+
+  THArgCheck(THCTensor_(size)(state, dense, 0) == k, 3,
+      "Expected dim 0 size %d, got %d", k, THCTensor_(size)(state, dense, 0));
+  long size[2] = {m, n};
+  THCSTensor_(rawResize)(state, r_, 1, 1, size);
+
+  THCSTensor_(contiguous)(state, sparse);
+
+  long nnz = THCSTensor_(nnz)(state, sparse);
+  THCIndexTensor *indices = THCIndexTensor_(newWithSize2d)(state, 1, nnz);
+  // create values in column-major format to avoid copying in spaddmm
+  THCTensor *values = THCTensor_(newWithSize2d)(state, n, nnz);
+  THCTensor_(transpose)(state, values, NULL, 0, 1);
+
+  THCSTensor *newSparse = THCSTensor_(newClone)(state, sparse);
+  THCIndexTensor *spIndices = THCSTensor_(indices)(state, newSparse);
+  THCIndexTensor *dstIndices = THCIndexTensor_(new)(state);
+  THCIndexTensor_(select)(state, dstIndices, spIndices, 0, 0);
+  // Save destination indices to output hybrid tensor
+  THCIndexTensor_(copy)(state, indices, dstIndices);
+  // Replace destination indices with 0, 1, 2, 3, ... and compute output values
+  // tensor with sparse * dense multiplication
+  thrust::device_ptr<integer> indicesIter(THCIndexTensor_(data)(state, dstIndices));
+  THRUST_EXEC(thrust::sequence, indicesIter, indicesIter + nnz);
+  newSparse->size[0] = nnz;
+  THCSTensor_(spaddmm)(state, values, ScalarConvert<int, real>::to(0), values, alpha, newSparse, dense);
+  THCSTensor_(move)(state, r_, indices, values);
+
+  THCSTensor_(free)(state, newSparse);
+  THCIndexTensor_(free)(state, spIndices);
+  THCIndexTensor_(free)(state, dstIndices);
+
+#undef THRUST_EXEC
+}
+
 void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real value, THCSTensor *sparse) {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
   THCTensor_(resizeAs)(state, r_, dense);
@@ -159,11 +218,11 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 
   THCIndexTensor *indices = THCSTensor_(indices)(state, sparse);
   THCTensor *values = THCSTensor_(values)(state, sparse);
-  THLongStorage *storage = THCSTensor_(newSizeOf)(state, sparse);
   long nDim = THCTensor_(nDimension)(state, dense);
   long nDimI = THCSTensor_(nDimensionI)(state, sparse);
 
   if (r_ != dense) {
+    THCTensor_(resizeAs)(state, r_, dense);
     THCTensor_(copy)(state, r_, dense);
   } else {
     if(!THCTensor_(isContiguous)(state, r_)) {
@@ -173,20 +232,30 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     }
   }
 
+  // TODO more benchmarking
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, sparse->nnz, grid), 1, CUTORCH_DIM_WARNING);
+  if (sparse->nDimensionV == 0) {
+    THArgCheck(getApplyGrid(state, sparse->nnz, grid), 1, CUTORCH_DIM_WARNING);
 
-  THCSTensor_spcKernel<TensorCAddOp<real>, unsigned long, real>
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-      TensorCAddOp<real>(value),
-      V_INFO(r_), I_INFO(indices), V_INFO(values),
-      (unsigned long)sparse->nnz);
+    THCSTensor_spcKernelScalar<TensorCAddOp<real>, unsigned long, real>
+      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+        TensorCAddOp<real>(value),
+        V_INFO(r_), I_INFO(indices), V_INFO(values),
+        (unsigned long)sparse->nnz);
+  } else {
+    THArgCheck(getApplyGrid(state, sparse->nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
+
+    THCSTensor_spcKernel<TensorCAddOp<real>, unsigned long, real>
+      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+        TensorCAddOp<real>(value),
+        V_INFO(r_), I_INFO(indices), V_INFO(values),
+        (unsigned long)sparse->nnz);
+  }
   THCudaCheck(cudaGetLastError());
 
   THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
-  THLongStorage_free(storage);
 }
 
 void THCSTensor_(mul)(THCState *state, THCSTensor *r_, THCSTensor *t, real value) {
@@ -258,42 +327,75 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
     return;
   }
 
-  // saving those because they can be overwritten when doing in-place operations
-  ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
-  long nDimI = src->nDimensionI;
+  // We deliberately choose to simply concat the indices and values tensors
+  // rather than merging them. This removes the need to synchronously fetch nnz
+  // at the end of the operation, at the cost of having a non-contiguous result.
+  // This trade-off is preferable for the common use-case of gradient accumulation.
+  // TODO have two distinct functions? The other option is commented out below
   THCIndexTensor *t_indices_ = THCSTensor_(indices)(state, t);
   THCTensor *t_values_ = THCSTensor_(values)(state, t);
   THCIndexTensor *s_indices_ = THCSTensor_(indices)(state, src);
   THCTensor *s_values_ = THCSTensor_(values)(state, src);
-  THCIndexTensor *r_indices_ = THCIndexTensor_(newWithSize2d)(state, nDimI, max_nnz);
-  THCTensor *r_values_ = THCSTensor_(newValuesWithSizeOf)(state, s_values_, max_nnz);
-  THCTensor_(zero)(state, r_values_);
+  if (value != ScalarConvert<int, real>::to(1)) {
+    THCTensor *s_values_orig = s_values_;
+    s_values_ = THCTensor_(new)(state);
+    THCTensor_(mul)(state, s_values_, s_values_orig, value);
+    THCTensor_(free)(state, s_values_orig);
+  }
+  THCIndexTensor *r_indices_ = THCIndexTensor_(new)(state);
+  THCTensor *r_values_ = THCTensor_(new)(state);
+  THCIndexTensor_(cat)(state, r_indices_, t_indices_, s_indices_, 1);
+  THCTensor_(cat)(state, r_values_, t_values_, s_values_, 0);
   THCSTensor_(resizeAs)(state, r_, src);
   THCSTensor_(move)(state, r_, r_indices_, r_values_);
 
-  const dim3 block = getApplyBlock();
-  dim3 grid;
-  THArgCheck(getApplyGrid(state, t_values_->stride[0], grid), 1, CUTORCH_DIM_WARNING);
-
-  THCSTensor_valueSparseUnionKernel<TensorCAddOp<real>, TensorAddOp<real>, TensorCAddOp<real>, unsigned long, real>
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-      TensorCAddOp<real>(value),
-      TensorAddOp<real>(),
-      TensorCAddOp<real>(value),
-      I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-      V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
-      (unsigned long)t_nnz, (unsigned long)s_nnz);
-  THCudaCheck(cudaGetLastError());
-
-  THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
-  THCSTensor_indexSparseUnionKernel<unsigned long, real>
-    <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
-      I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-      (unsigned long)t_nnz, (unsigned long)s_nnz, (unsigned long*)resultNnz->data);
-  THCudaCheck(cudaGetLastError());
-  r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
-  THCudaLongStorage_free(state, resultNnz);
-  r_->contiguous = 1;
+  // // saving those because they can be overwritten when doing in-place operations
+  // ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
+  // long nDimI = src->nDimensionI;
+  // THCIndexTensor *t_indices_ = THCSTensor_(indices)(state, t);
+  // THCTensor *t_values_ = THCSTensor_(values)(state, t);
+  // THCIndexTensor *s_indices_ = THCSTensor_(indices)(state, src);
+  // THCTensor *s_values_ = THCSTensor_(values)(state, src);
+  // THCIndexTensor *r_indices_ = THCIndexTensor_(newWithSize2d)(state, nDimI, max_nnz);
+  // THCTensor *r_values_ = THCSTensor_(newValuesWithSizeOf)(state, s_values_, max_nnz);
+  // THCTensor_(zero)(state, r_values_);
+  // THCSTensor_(resizeAs)(state, r_, src);
+  // THCSTensor_(move)(state, r_, r_indices_, r_values_);
+  //
+  // const dim3 block = getApplyBlock();
+  // dim3 grid;
+  // THArgCheck(getApplyGrid(state, t_values_->stride[0], grid), 1, CUTORCH_DIM_WARNING);
+  //
+  // THCSTensor_valueSparseUnionKernel<TensorCAddOp<real>, TensorAddOp<real>, TensorCAddOp<real>, unsigned long, real>
+  //   <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  //     TensorCAddOp<real>(value),
+  //     TensorAddOp<real>(),
+  //     TensorCAddOp<real>(value),
+  //     I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
+  //     V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
+  //     (unsigned long)t_nnz, (unsigned long)s_nnz);
+  // THCudaCheck(cudaGetLastError());
+  //
+  // bool freeScratchSpace = false;
+  // void* scratchSpace = THCState_getCurrentDeviceScratchSpace(state);
+  // if (!scratchSpace) {
+  //   THCudaCheck(THCudaMalloc(state, &scratchSpace,
+  //       THCState_getCurrentDeviceScratchSpaceSize(state)));
+  //   freeScratchSpace = true;
+  // }
+  // THCSTensor_indexSparseUnionKernel<unsigned long, real>
+  //   <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+  //     I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
+  //     (unsigned long)t_nnz, (unsigned long)s_nnz, (unsigned long*)scratchSpace);
+  // THCudaCheck(cudaGetLastError());
+  // // Synchronous!
+  // unsigned long nnzOut;
+  // THCudaCheck(cudaMemcpy(&nnzOut, scratchSpace, sizeof(unsigned long), cudaMemcpyDeviceToHost));
+  // r_->nnz = nnzOut;
+  // r_->contiguous = 1;
+  // if (freeScratchSpace) {
+  //   THCudaCheck(THCudaFree(state, scratchSpace));
+  // }
 
   THCIndexTensor_(free)(state, t_indices_);
   THCTensor_(free)(state, t_values_);

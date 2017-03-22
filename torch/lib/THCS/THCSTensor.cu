@@ -3,28 +3,6 @@
 #include "THCTensorMathPointwise.cuh"
 #include "stdio.h"
 
-template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_spcKernel(
-    Op op,
-    TensorInfo<Real, IndexType> dense,
-    TensorInfo<integer, IndexType> indices,
-    TensorInfo<Real, IndexType> values,
-    const IndexType nnz) {
-  IndexType indskip = indices.strides[0];
-  IndexType valueSize = values.strides[0];
-  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
-       linearId < nnz;
-       linearId += gridDim.x * blockDim.x) {
-    IndexType index = 0;
-    for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      index = dense.sizes[d] * index + indices.data[d * indskip + linearId];
-    }
-    for (IndexType k = 0; k < valueSize; k++) {
-      op(dense.data + index * valueSize + k, values.data + linearId * valueSize + k);
-    }
-  }
-}
-
 template <typename IndexType, typename Real, typename Op>
 __device__ void applyOp2(
     Op op, IndexType blockSize,
@@ -52,60 +30,47 @@ __device__ void applyOp3(
   }
 }
 
-template <typename IndexType, typename Real>
-__global__ void THCSTensor_uniqueValuesReorderKernel(
+template <typename Op, typename IndexType, typename Real>
+__global__ void THCSTensor_spcKernel(
+    Op op,
+    TensorInfo<Real, IndexType> dense,
     TensorInfo<integer, IndexType> indices,
     TensorInfo<Real, IndexType> values,
     const IndexType nnz) {
-  IndexType i = 0;
   IndexType indskip = indices.strides[0];
   IndexType valueSize = values.strides[0];
-  TensorAddOp<Real> addOp = TensorAddOp<Real>();
-  TensorAssignOp<Real> assignOp = TensorAssignOp<Real>();
-  for (IndexType j = 1; j < nnz; j++) {
-    int cmp = 1;
+  for (IndexType linearId = blockIdx.x;
+       linearId < nnz;
+       linearId += gridDim.x) {
+    IndexType index = 0;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      if (indices.data[d * indskip + j - 1] != indices.data[d * indskip + j]) {
-        cmp = 0;
-        break;
-      }
+      index = dense.sizes[d] * index + indices.data[d * indskip + linearId];
     }
-    if (cmp) {
-      applyOp2(addOp, valueSize, values, i, values, j);
-    } else {
-      ++i;
-      applyOp2(assignOp, valueSize, values, i, values, j);
+    Real *dst = dense.data + index * valueSize;
+    Real *src = values.data + linearId * valueSize;
+    for (IndexType linearId2 = threadIdx.x; linearId2 < valueSize; linearId2 += blockDim.x) {
+      op(dst + linearId2, src + linearId2);
     }
   }
 }
 
-template <typename IndexType, typename Real>
-__global__ void THCSTensor_uniqueIndicesReorderKernel(
+template <typename Op, typename IndexType, typename Real>
+__global__ void THCSTensor_spcKernelScalar(
+    Op op,
+    TensorInfo<Real, IndexType> dense,
     TensorInfo<integer, IndexType> indices,
-    const IndexType nnz,
-    IndexType* resultNnz) {
-  IndexType i = 0;
+    TensorInfo<Real, IndexType> values,
+    const IndexType nnz) {
   IndexType indskip = indices.strides[0];
-  for (IndexType j = 1; j < nnz; j++) {
-    int cmp = 1;
+  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+       linearId < nnz;
+       linearId += gridDim.x * blockDim.x) {
+    IndexType index = 0;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      // note the difference with uniqueValuesReorderKernel:
-      // i instead of j - 1, because we're moving the indices
-      if (indices.data[d * indskip + i] != indices.data[d * indskip + j]) {
-        cmp = 0;
-        break;
-      }
+      index = dense.sizes[d] * index + indices.data[d * indskip + linearId];
     }
-    if (!cmp) {
-      ++i;
-      if (blockIdx.x == 0 && threadIdx.x == 0) {
-        for (IndexType d = 0; d < indices.sizes[0]; d++) {
-          indices.data[d * indskip + i] = indices.data[d * indskip + j];
-        }
-      }
-    }
+    op(dense.data + index, values.data + linearId);
   }
-  *resultNnz = i + 1;
 }
 
 template <typename OpBoth, typename OpLeft, typename OpRight, typename IndexType, typename Real>

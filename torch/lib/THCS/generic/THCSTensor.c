@@ -77,7 +77,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->refcount = 1;
 }
 
-static void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, long *size) {
+void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, long *size) {
   // Only resize valid sizes into tensor.
   self->size = THRealloc(self->size, sizeof(long)*(nDimI + nDimV));
 
@@ -105,6 +105,10 @@ THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor 
         "indices must be nDim x nnz");
     THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 2,
         "indices and values must have same nnz");
+    THArgCheck(THCIndexTensor_(size)(state, indices, 0) == self->nDimensionI, 2,
+        "indices has incorrect first dimension, expected %d, got %d", self->nDimensionI, THCIndexTensor_(size)(state, indices, 0));
+    THArgCheck(THCTensor_(nDimension)(state, values) == self->nDimensionV + 1, 3,
+        "values has incorrect number of dimensions, expected %d, got %d", self->nDimensionV + 1, THCTensor_(nDimension)(state, values));
   }
   THCIndexTensor_(free)(state, self->indices);
   THCTensor_(free)(state, self->values);
@@ -143,7 +147,6 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
 
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
-  THCSTensor_(_set)(state, self, indices, values);
 
   nDimI = THCIndexTensor_(size)(state, indices, 0);
   nDimV = THCTensor_(nDimension)(state, values) - 1;
@@ -171,6 +174,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
         "number of dimensions must be nDimI + nDimV");
     THCSTensor_(rawResize)(state, self, nDimI, nDimV, THLongStorage_data(sizes));
   }
+  THCSTensor_(_set)(state, self, indices, values);
 
   return self;
 }

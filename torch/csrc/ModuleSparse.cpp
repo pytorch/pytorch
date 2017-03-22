@@ -95,5 +95,6 @@ dispatch:                                                                      \
 IMPLEMENT_SPARSE_STATELESS(spmm);
 IMPLEMENT_SPARSE_STATELESS(sspmm);
 IMPLEMENT_SPARSE_STATELESS(sspaddmm);
+IMPLEMENT_SPARSE_STATELESS(hspmm);
 
 #undef IMPLEMENT_SPARSE_STATELESS
