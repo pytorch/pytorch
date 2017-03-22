@@ -186,18 +186,14 @@ class LBFGS(Optimizer):
             ############################################################
             # compute step length
             ############################################################
-            # directional derivative
-            gtd = flat_grad.dot(d)  # g * d
-
-            # check that progress can be made along that direction
-            if gtd > -tolerance_change:
-                break
-
             # reset initial guess for step size
             if state['n_iter'] == 1:
                 t = min(1., 1. / abs_grad_sum) * lr
             else:
                 t = lr
+
+            # directional derivative
+            gtd = flat_grad.dot(d)  # g * d
 
             # optional line search: user function
             ls_func_evals = 0
@@ -230,6 +226,9 @@ class LBFGS(Optimizer):
                 break
 
             if abs_grad_sum <= tolerance_grad:
+                break
+
+            if gtd > -tolerance_change:
                 break
 
             if d.mul(t).abs_().sum() <= tolerance_change:
