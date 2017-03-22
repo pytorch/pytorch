@@ -89,8 +89,9 @@ def recurrent_net(
     backward_cell_net.Proto().op.extend(backward_ops)
 
     # compute blobs used but not defined in the backward pass
-    ssa, _ = core.get_ssa(backward_cell_net.Proto())
-    undefined = core.get_undefined_blobs(ssa)
+    backward_ssa, backward_blob_versions = core.get_ssa(
+        backward_cell_net.Proto())
+    undefined = core.get_undefined_blobs(backward_ssa)
 
     # also add to the output list the intermediate outputs of fwd_step that
     # are used by backward.
@@ -146,6 +147,14 @@ def recurrent_net(
         all_outputs.extend([cell_output + "_all", cell_output + "_last"])
 
         recurrent_states.append(state)
+
+        recurrent_input_grad = cell_input + "_grad"
+        if not backward_blob_versions.get(recurrent_input_grad, 0):
+            # If nobody writes to this recurrent input gradient, we need
+            # to perform a munual copy. This is a case if SumOp is being
+            # used as first operator of the cell net
+            backward_cell_net.Copy(
+                backward_mapping[cell_input], recurrent_input_grad)
 
     for input_t, input_blob in inputs:
         forward_links.append((str(input_t), str(input_blob), 0))
