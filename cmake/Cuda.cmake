@@ -71,6 +71,36 @@ function(gloo_select_nvcc_arch_flags out_variable)
 endfunction()
 
 ################################################################################
+# Function to append to list if specified sequence does not yet exist in list.
+# Usage:
+#   gloo_list_append_if_unique(list_variable arg1 arg2 ...)
+function(gloo_list_append_if_unique list)
+  list(LENGTH ARGN __match_length)
+  set(__match_index 0)
+  set(__match OFF)
+  foreach(__elem ${${list}})
+    list(GET ARGN ${__match_index} __match_elem)
+    if("${__elem}" STREQUAL "${__match_elem}")
+      MATH(EXPR __match_index "${__match_index}+1")
+      if(${__match_index} EQUAL ${__match_length})
+        set(__match ON)
+        break()
+      endif()
+    else()
+      # Mismatch; start from scratch.
+      # This doesn't do backtracking but shouldn't be needed either.
+      set(__match_index 0)
+    endif()
+  endforeach()
+
+  # Only append arguments if we didn't find a match.
+  if(NOT __match)
+    list(APPEND ${list} ${ARGN})
+    set(${list} ${${list}} PARENT_SCOPE)
+  endif()
+endfunction()
+
+################################################################################
 # Short command for cuda compilation
 # Usage:
 #   gloo_cuda_compile(<objlist_variable> <cuda_files>)
@@ -127,10 +157,12 @@ find_library(CUDA_NVRTC_LIB nvrtc
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64)
 
-# Setting nvcc arch flags
-gloo_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA)
-list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
-message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
+# Setting nvcc arch flags (or inherit if already set)
+if (NOT ";${CUDA_NVCC_FLAGS};" MATCHES ";-gencode;")
+  gloo_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA)
+  list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
+  message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
+endif()
 
 if(CUDA_CUDA_LIB)
   message(STATUS "Found libcuda: ${CUDA_CUDA_LIB}")
@@ -148,16 +180,16 @@ endif()
 
 # Disable some nvcc diagnostic that apears in boost, glog, glags, opencv, etc.
 foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration set_but_not_used)
-  list(APPEND CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
+  gloo_list_append_if_unique(CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
 endforeach()
 
 # Set C++11 support
 set(CUDA_PROPAGATE_HOST_FLAGS OFF)
-list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
-list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+gloo_list_append_if_unique(CUDA_NVCC_FLAGS "-std=c++11")
+gloo_list_append_if_unique(CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
 
 # Set :expt-relaxed-constexpr to suppress Eigen warnings
-list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
+gloo_list_append_if_unique(CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
 mark_as_advanced(CUDA_BUILD_CUBIN CUDA_BUILD_EMULATION CUDA_VERBOSE_BUILD)
 mark_as_advanced(CUDA_SDK_ROOT_DIR CUDA_SEPARABLE_COMPILATION)
