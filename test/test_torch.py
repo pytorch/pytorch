@@ -1030,15 +1030,16 @@ class TestTorch(TestCase):
 
     def test_cat(self):
         SIZE = 10
-        for dim in range(3):
-            x = torch.rand(13, SIZE, SIZE).transpose(0, dim)
-            y = torch.rand(17, SIZE, SIZE).transpose(0, dim)
-            z = torch.rand(19, SIZE, SIZE).transpose(0, dim)
+        for dim in range(-3, 3):
+            pos_dim = dim if dim >= 0 else 3 + dim
+            x = torch.rand(13, SIZE, SIZE).transpose(0, pos_dim)
+            y = torch.rand(17, SIZE, SIZE).transpose(0, pos_dim)
+            z = torch.rand(19, SIZE, SIZE).transpose(0, pos_dim)
 
             res1 = torch.cat((x, y, z), dim)
-            self.assertEqual(res1.narrow(dim, 0, 13), x, 0)
-            self.assertEqual(res1.narrow(dim, 13, 17), y, 0)
-            self.assertEqual(res1.narrow(dim, 30, 19), z, 0)
+            self.assertEqual(res1.narrow(pos_dim, 0, 13), x, 0)
+            self.assertEqual(res1.narrow(pos_dim, 13, 17), y, 0)
+            self.assertEqual(res1.narrow(pos_dim, 30, 19), z, 0)
 
         x = torch.randn(20, SIZE, SIZE)
         self.assertEqual(torch.cat(torch.split(x, 7)), x)
@@ -1048,7 +1049,7 @@ class TestTorch(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-        self.assertRaises(TypeError, lambda: torch.cat([]))
+        self.assertRaises(RuntimeError, lambda: torch.cat([]))
 
     def test_stack(self):
         x = torch.rand(2, 3, 4)

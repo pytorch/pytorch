@@ -363,8 +363,8 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
     PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
     if (THPModule_isTensor(first_arg)) {
       tensor = first_arg;
-    } else if ((iterator = PyObject_GetIter(first_arg))) {
-      item = PyIter_Next(iterator);
+    } else if (PySequence_Check(first_arg)) {
+      item = PySequence_GetItem(first_arg, 0);
       if (item && (THPModule_isTensor(item) || THPVariable_Check(item))) {
         tensor = item;
       }
