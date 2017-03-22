@@ -28,19 +28,6 @@ void init_worker(const int& rank, const std::string& master_addr) {
   // Send error
   channel->sendError("something went wrong");
 
-  // Send.
-  rpc::ByteArray arr;
-  arr.append("hello to master from worker ",
-      sizeof("hello to master from worker ") - 1);
-  arr.append(std::to_string(rank).c_str(), std::to_string(rank).size());
-
-  fprintf(stderr, "worker %d: about to send a message\n", rank);
-
-  auto rpc_msg = std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(std::move(arr)));
-  channel->sendMessage(std::move(rpc_msg));
-
-  fprintf(stderr, "worker %d: sent message\n", rank);
-
   // Recieve.
   auto msg = channel->recvMessage();
   std::string expected = std::string("hello to worker ") +
@@ -76,18 +63,6 @@ void init_master(int world_size, const std::string& master_port) {
     fprintf(stderr, "master: about to send a message to worker %d\n", worker_rank);
     auto rpc_msg = std::unique_ptr<rpc::RPCMessage>(new rpc::RPCMessage(arr));
     channel->sendMessage(std::move(rpc_msg), worker_rank);
-  }
-
-  for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
-    std::unique_ptr<rpc::RPCMessage> msg;
-    fprintf(stderr, "master: about to recv a message from worker %d\n", worker_rank);
-    msg = channel->recvMessage(worker_rank);
-    std::string expected = std::string("hello to master from worker ") +
-      std::to_string(worker_rank);
-    fprintf(stderr, "Master: received '%.*s' from worker %d\n",
-        (int)msg.get()->bytes().length(), msg.get()->bytes().data(),
-        worker_rank);
-    assert(expected.compare(msg.get()->bytes().to_string()) == 0);
   }
 
   // wait for all workers to finish
