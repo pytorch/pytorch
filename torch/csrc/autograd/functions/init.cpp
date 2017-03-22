@@ -11,12 +11,13 @@ struct BatchNormCtor {
   BatchNormForward* operator()(PyObject* args) {
     BatchNormParams params;
 
-    TupleParser parser(args, 5);
+    TupleParser parser(args, 6);
     parser.parse(params.running_mean);
     parser.parse(params.running_var);
     parser.parse(params.training);
     parser.parse(params.momentum);
     parser.parse(params.eps);
+    parser.parse(params.cudnn_enabled);
 
     return new BatchNormForward(std::move(params));
   }
@@ -26,7 +27,7 @@ struct ConvCtor {
   ConvForward* operator()(PyObject* args) {
     ConvParams params;
 
-    TupleParser parser(args, 7);
+    TupleParser parser(args, 8);
     parser.parse(params.stride);
     parser.parse(params.padding);
     parser.parse(params.dilation);
@@ -34,6 +35,7 @@ struct ConvCtor {
     parser.parse(params.output_padding);
     parser.parse(params.groups);
     parser.parse(params.benchmark);
+    parser.parse(params.cudnn_enabled);
 
     return new ConvForward(std::move(params));
   }

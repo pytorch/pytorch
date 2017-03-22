@@ -14,6 +14,7 @@ struct BatchNormParams {
   bool training;
   double momentum;
   double eps;
+  bool cudnn_enabled;
 };
 
 struct BatchNormForward : public Function, public BatchNormParams {

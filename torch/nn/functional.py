@@ -35,7 +35,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv2d(inputs, filters, padding=1)
     """
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
-               _pair(0), groups, torch.backends.cudnn.benchmark)
+               _pair(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -58,7 +58,7 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv1d(inputs, filters)
     """
     f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
-               _single(0), groups, torch.backends.cudnn.benchmark)
+               _single(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -84,14 +84,14 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv3d(inputs, filters)
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
-               _triple(0), groups, torch.backends.cudnn.benchmark)
+               _triple(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1):
     f = ConvNd(_single(stride), _single(padding), _single(1), True,
-               _single(output_padding), groups, torch.backends.cudnn.benchmark)
+               _single(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -116,7 +116,7 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           added to the output. Can be a single number or a tuple. Default: 0
     """
     f = ConvNd(_pair(stride), _pair(padding), _pair(1), True,
-               _pair(output_padding), groups, torch.backends.cudnn.benchmark)
+               _pair(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -137,7 +137,7 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           tuple (padh x padw). Default: 0
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(1), True,
-               _triple(output_padding), groups, torch.backends.cudnn.benchmark)
+               _triple(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -385,7 +385,7 @@ def linear(input, weight, bias=None):
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps)
+    f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
