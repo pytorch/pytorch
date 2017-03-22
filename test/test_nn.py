@@ -622,8 +622,9 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone())
             norm_before = compute_norm(norm_type)
-            clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
+            self.assertEqual(norm, norm_before)
             self.assertEqual(norm_after, max_norm)
             self.assertLessEqual(norm_after, norm_before)
             compare_scaling(grads)
@@ -634,8 +635,9 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p.grad.data.copy_(g)
             norm_before = compute_norm(norm_type)
-            clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
+            self.assertEqual(norm, norm_before)
             self.assertEqual(norm_before, norm_after)
             self.assertLessEqual(norm_after, max_norm)
             scale = compare_scaling(grads)
