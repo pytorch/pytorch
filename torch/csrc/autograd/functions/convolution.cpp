@@ -27,18 +27,18 @@ auto ConvParams::is_dilated() const -> bool {
   return is_dilated;
 }
 
-auto ConvParams::is_output_padding_non_neg() const -> bool {
-  bool is_non_neg = true;
+auto ConvParams::is_output_padding_neg() const -> bool {
+  bool is_non_neg = false;
   for (int p : output_padding) {
-    is_non_neg &= (p >= 0);
+    is_non_neg |= (p < 0);
   }
   return is_non_neg;
 }
 
-auto ConvParams::is_padding_non_neg() const -> bool {
-  bool is_non_neg = true;
+auto ConvParams::is_padding_neg() const -> bool {
+  bool is_non_neg = false;
   for (int p : padding) {
-    is_non_neg &= (p >= 0);
+    is_non_neg |= (p < 0);
   }
   return is_non_neg;
 }
@@ -105,11 +105,14 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
+  if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
+  if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
   AutoGPU guard(inputs[0]->data->getDevice());
   auto input = inputs[0]->data->contiguous();
   std::unique_ptr<Tensor> weight(inputs[1]->data->clone_shallow());
   std::unique_ptr<Tensor> bias(inputs[2] ? inputs[2]->data->clone_shallow() : nullptr);
+
 
   int k = input->nDim();
   if (k == 3) {
@@ -123,11 +126,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled
-  && is_padding_non_neg();
-  if (transposed) {
-     use_cudnn = use_cudnn && (is_output_padding_non_neg()) ;
-  }
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
 #endif
 
   std::unique_ptr<Tensor> output;
@@ -192,6 +191,8 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
 auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
+  if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
+  if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
   AutoGPU guard(input_.data->getDevice());
 
@@ -212,11 +213,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled
-  && is_padding_non_neg();
-  if (transposed) {
-     use_cudnn = use_cudnn && (is_output_padding_non_neg()) ;
-  }
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
 #endif
 
   std::unique_ptr<Tensor> grad_input;
