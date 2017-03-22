@@ -235,17 +235,18 @@ class TestSparse(TestCase):
             self.assertEqual(exp_v, x.values())
 
     def test_transpose(self):
-        x = self._gen_sparse(4, 20, 5)[0]
-        y = x.to_dense()
+        for is_cuda in [False, True]:
+            x = self._gen_sparse(4, 20, 5, is_cuda=is_cuda)[0]
+            y = x.to_dense()
 
-        for i, j in itertools.combinations(range(4), 2):
-            x = x.transpose_(i, j)
-            y = y.transpose(i, j)
-            self.assertEqual(x.to_dense(), y)
+            for i, j in itertools.combinations(range(4), 2):
+                x = x.transpose_(i, j)
+                y = y.transpose(i, j)
+                self.assertEqual(x.to_dense(), y)
 
-            x = x.transpose(i, j)
-            y = y.transpose(i, j)
-            self.assertEqual(x.to_dense(), y)
+                x = x.transpose(i, j)
+                y = y.transpose(i, j)
+                self.assertEqual(x.to_dense(), y)
 
     def test_mm(self):
         def test_shape(di, dj, dk):
@@ -306,6 +307,22 @@ class TestSparse(TestCase):
                 expected = torch.mm(x.to_dense(), y)
                 res = torch.dsmm(x, y)
                 self.assertEqual(res, expected)
+
+        test_shape(7, 5, 3)
+        test_shape(1000, 100, 100)
+        test_shape(3000, 64, 300)
+
+    def test_hsmm(self):
+        def test_shape(di, dj, dk):
+            for is_cuda in [True]:
+                x = self._gen_sparse(2, 20, [di, dj], is_cuda)[0]
+                y = torch.randn(dj, dk)
+                if is_cuda:
+                    y = y.cuda()
+
+                expected = torch.mm(x.to_dense(), y)
+                res = torch.hsmm(x, y)
+                self.assertEqual(res.to_dense(), expected)
 
         test_shape(7, 5, 3)
         test_shape(1000, 100, 100)

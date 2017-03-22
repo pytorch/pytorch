@@ -73,6 +73,7 @@ TH_API int THCSTensor_(getDevice)(THCState *state, const THCSTensor *self);
 TH_API int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...);
 
 /* internal methods */
+TH_API void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, long *size);
 TH_API void THCSTensor_(reorder)(THCState *state, THCSTensor *self);
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, long nnz);
 TH_API THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);

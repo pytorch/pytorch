@@ -62,6 +62,8 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
                                  THCState_getCurrentStream(state));
     if(err != cudaSuccess) {
       THCHeapUpdate(state, -size * sizeof(real));
+      // FIXME REMOVE ME
+      abort();
     }
     THCudaCheck(err);
 

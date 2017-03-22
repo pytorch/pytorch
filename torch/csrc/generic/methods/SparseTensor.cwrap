@@ -155,6 +155,37 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: t
+  sparse: yes
+  with_stateless: True
+  cname: newTranspose
+  return: THSTensor*
+  before_call: |
+    long nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
+    long nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
+    THPUtils_assert(nDimI == 2 && nDimV == 0, "t() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
+  arguments:
+    - THSTensor* self
+    - CONSTANT 0
+    - CONSTANT 1
+]]
+
+[[
+  name: t_
+  sparse: yes
+  cname: transpose
+  return: self
+  before_call: |
+    long nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
+    long nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
+    THPUtils_assert(nDimI == 2 && nDimV == 0, "t_() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
+  arguments:
+    - THSTensor* self
+    - CONSTANT 0
+    - CONSTANT 1
+]]
+
+[[
   name: mm
   sparse: yes
   only_stateless: True
@@ -181,6 +212,20 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
       output: True
     - CONSTANT AS_REAL(0)
     - argument 0
+    - CONSTANT AS_REAL(1)
+    - THSTensor* mat1
+    - THTensor* mat2
+]]
+
+[[
+  name: hspmm
+  only_stateless: True
+  sparse: yes
+  cname: hspmm
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
     - CONSTANT AS_REAL(1)
     - THSTensor* mat1
     - THTensor* mat2

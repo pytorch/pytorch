@@ -50,6 +50,7 @@ class Adagrad(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
+
                 grad = p.grad.data
                 state = self.state[p]
 

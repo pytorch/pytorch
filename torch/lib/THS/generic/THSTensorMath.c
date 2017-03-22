@@ -406,6 +406,10 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   THTensor_(free)(values);
 }
 
+void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse, THTensor *dense) {
+  THError("WARNING: Sparse Tensor op hspmm is not implemented");
+}
+
 void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse) {
   THTensor_(resizeAs)(r_, dense);
   THSTensor_(contiguous)(sparse);
