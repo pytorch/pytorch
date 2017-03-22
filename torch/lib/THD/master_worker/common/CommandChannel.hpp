@@ -3,8 +3,10 @@
 #include "RPC.hpp"
 
 #include <sys/poll.h>
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -17,12 +19,17 @@ struct MasterCommandChannel {
   bool init();
 
   void sendMessage(std::unique_ptr<rpc::RPCMessage> msg, int rank);
-  std::tuple<rank_type, std::string> recvError();
 
 private:
+  std::tuple<rank_type, std::string> recvError();
+  void errorHandler();
+
   rank_type _rank;
   std::vector<int> _sockets;
   std::unique_ptr<struct pollfd[]> _poll_events;
+
+  std::atomic_bool _exiting; // informs error handler thread that we are exiting
+  std::unique_ptr<std::string> _error;
 
   port_type _port;
 };

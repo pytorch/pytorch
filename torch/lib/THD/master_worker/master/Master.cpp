@@ -4,21 +4,10 @@
 #include "../worker/Worker.h"
 #include "../../process_group/General.hpp"
 
-#include <string>
-#include <thread>
-
 namespace thd {
 namespace master {
 
 std::unique_ptr<MasterCommandChannel> masterCommandChannel;
-std::thread masterErrorThread;
-
-void errorHandler() {
-  while (true) {
-    auto error = masterCommandChannel->recvError();
-    THDState::s_error = "Error (worker " + std::to_string(std::get<0>(error)) + "): " + std::get<1>(error);
-  }
-}
 
 } // namespace master
 } // namespace thd
@@ -33,7 +22,8 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
     /* Worker initialization. Can fail at start but then goes into infinite loop
      * in which waits for commands from master.
      */
-    return THDWorkerMain();
+    THDWorkerMain();
+    return false;
   }
 
   /* Master initialization. We need to make sure that all connections which
@@ -44,10 +34,6 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
   if (!masterCommandChannel->init()) {
     return false;
   }
-
-  // start error handling thread
-  std::thread tmp_thread(errorHandler);
-  std::swap(masterErrorThread, tmp_thread);
 
   return true;
 }

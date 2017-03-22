@@ -2,8 +2,6 @@
 #include "../../base/ChannelEnvVars.hpp"
 #include "../../base/ChannelUtils.hpp"
 
-#include "../master/State.hpp"
-
 #include <unistd.h>
 #include <climits>
 #include <cstdlib>
@@ -46,15 +44,18 @@ std::unique_ptr<rpc::RPCMessage> receiveMessage(int socket) {
 MasterCommandChannel::MasterCommandChannel()
   : _rank(0)
   , _poll_events(nullptr)
+  , _exiting(false)
+  , _error(nullptr)
 {
   rank_type world_size;
   std::tie(_port, world_size) = load_master_env();
 
-  _sockets.resize(world_size);
-  std::fill(_sockets.begin(), _sockets.end(), -1);
+  _sockets.assign(world_size, -1);
 }
 
 MasterCommandChannel::~MasterCommandChannel() {
+  _exiting = true;
+
   for (auto socket : _sockets) {
     if (socket != -1)
       ::close(socket);
@@ -83,13 +84,29 @@ bool MasterCommandChannel::init() {
    // close listen socket
   ::close(_sockets[0]);
   _sockets[0] = -1;
+
+  std::thread error_thread(&MasterCommandChannel::errorHandler, this);
+  error_thread.detach();
   return true;
 }
 
+void MasterCommandChannel::errorHandler() {
+  while (true) {
+    auto error = recvError();
+    if (_exiting) {
+      return;
+    }
+
+    _error.reset(new std::string(
+      "error (rank " + std::to_string(std::get<0>(error)) + "): " + std::get<1>(error)
+    ));
+  }
+}
+
 void MasterCommandChannel::sendMessage(std::unique_ptr<rpc::RPCMessage> msg, int rank) {
-  // Throw error which we get from worker.
-  if (thd::master::THDState::s_error != "") {
-    throw std::runtime_error(thd::master::THDState::s_error);
+  // Throw error received from a worker.
+  if (_error) {
+    throw std::runtime_error(*_error);
   }
 
   if ((rank <= 0) || (rank >= _sockets.size())) {
@@ -111,34 +128,44 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
     }
   }
 
-  // cleanup
   for (std::size_t rank = 0; rank < _sockets.size(); ++rank) {
     _poll_events[rank].revents = 0;
   }
 
-  SYSCHECK(::poll(_poll_events.get(), _sockets.size(), -1)) // infinite timeout
+  try {
+    SYSCHECK(::poll(_poll_events.get(), _sockets.size(), -1)) // infinite timeout
+  } catch (const std::exception& e) {
+    return std::make_tuple(0, "poll: " + std::string(e.what()));
+  }
+
+  if (_exiting) {
+    return std::make_tuple(0, "");
+  }
+
   for (std::size_t rank = 0; rank < _sockets.size(); ++rank) {
     if (this->_poll_events[rank].revents == 0)
       continue;
 
-    /* If `POLLIN` is not set or there is different flag set it means that
-     * something is wrong.
-     */
     if (_poll_events[rank].revents ^ POLLIN) {
       _poll_events[rank].fd = -1; // mark worker as ignored
-      return std::make_tuple(rank, "Connection with worker has been closed");
+      return std::make_tuple(rank, "connection with worker has been closed");
     }
 
-    // receive error
-    std::uint64_t error_length;
-    recv_bytes<std::uint64_t>(_poll_events[rank].fd, &error_length, 1);
+    try {
+      // receive error
+      std::uint64_t error_length;
+      recv_bytes<std::uint64_t>(_poll_events[rank].fd, &error_length, 1);
 
-    std::unique_ptr<char[]> error(new char[error_length + 1]);
-    recv_bytes<char>(_poll_events[rank].fd, error.get(), error_length);
-    return std::make_tuple(rank, std::string(error.get(), error_length));
+      std::unique_ptr<char[]> error(new char[error_length + 1]);
+      recv_bytes<char>(_poll_events[rank].fd, error.get(), error_length);
+      return std::make_tuple(rank, std::string(error.get(), error_length));
+    } catch (const std::exception& e) {
+      return std::make_tuple(rank, "recv: " + std::string(e.what()));
+    }
   }
 
-  throw std::runtime_error("Failed to receive error from worker");
+  // We did not receive error from any worker despite being notified.
+  return std::make_tuple(0, "failed to receive error from worker");
 }
 
 

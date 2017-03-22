@@ -21,11 +21,11 @@ std::unordered_map<object_id_type, std::unique_ptr<thpp::Generator>> workerGener
 using namespace thd::rpc;
 using namespace thd::worker;
 
-bool THDWorkerMain() {
+void THDWorkerMain() {
   std::unique_ptr<RPCMessage> command;
   workerCommandChannel.reset(new thd::WorkerCommandChannel());
   if (!workerCommandChannel->init()) {
-    return false;
+    return;
   }
 
   while (true) {
@@ -37,6 +37,4 @@ bool THDWorkerMain() {
       throw e;
     }
   }
-
-  return false;
 }
