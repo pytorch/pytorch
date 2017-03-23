@@ -7,3 +7,4 @@ from .pooling import *
 from .sparse import *
 from .loss import *
 from .upsampling import *
+from .rnnFusedPointwise import *

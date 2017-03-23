@@ -34,19 +34,25 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    gi = F.linear(input, w_ih, b_ih)
-    gh = F.linear(hidden, w_hh, b_hh)
-    i_r, i_i, i_n = gi.chunk(3, 1)
-    h_r, h_i, h_n = gh.chunk(3, 1)
 
-    resetgate = F.sigmoid(i_r + h_r)
-    inputgate = F.sigmoid(i_i + h_i)
-    newgate = F.tanh(i_n + resetgate * h_n)
-    hy = newgate + inputgate * (hidden - newgate)
+    if not input.is_cuda:
+        gi = F.linear(input, w_ih, b_ih)
+        gh = F.linear(hidden, w_hh, b_hh)
+        i_r, i_i, i_n = gi.chunk(3, 1)
+        h_r, h_i, h_n = gh.chunk(3, 1)
 
-    return hy
-
-
+        resetgate = F.sigmoid(i_r + h_r)
+        inputgate = F.sigmoid(i_i + h_i)
+        newgate = F.tanh(i_n + resetgate * h_n)
+        hy = newgate + inputgate * (hidden - newgate)
+        
+        return hy
+    else:
+        gi = F.linear(input, w_ih, False)
+        gh = F.linear(hidden, w_hh, False)
+        hy = F.grufused(gi, gh, b_ih, b_hh, hidden)
+        return hy
+    
 def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
 
     num_directions = len(inners)

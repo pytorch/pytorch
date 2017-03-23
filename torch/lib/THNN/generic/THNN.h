@@ -168,6 +168,21 @@ TH_API void THNN_(LeakyReLU_updateGradInput)(
           accreal negval,              // negative part slope
           bool inplace);               // if true, modifies gradOutput and sets gradInput onto it (no additional memory is allocated)
 
+TH_API void THNN_(GRUFused_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+	  THTensor *hidden,
+	  THTensor *bias1,
+	  THTensor *bias2,
+	  THTensor *prevHidden,
+	  THTensor *output);
+TH_API void THNN_(GRUFused_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *hidden,
+          THTensor *gradOutput,
+          THTensor *gradInput);
+
 TH_API void THNN_(LogSigmoid_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor

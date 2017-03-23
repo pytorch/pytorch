@@ -166,6 +166,22 @@ TH_API void THNN_(LeakyReLU_updateGradInput)(
                   accreal negval,
                   bool inplace);
 
+TH_API void THNN_(GRUFused_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *hidden,
+		  THCTensor *bias1,
+		  THCTensor *bias2,
+                  THCTensor *prevHidden,
+                  THCTensor *output);
+
+TH_API void THNN_(GRUFused_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *hidden,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput);
+					    
 TH_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,
