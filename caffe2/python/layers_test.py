@@ -207,3 +207,17 @@ class TestLayers(test_util.TestCase):
         self.assertEqual(1, len(loss.field_types()))
         self.assertEqual(np.float32, loss.field_types()[0].base)
         self.assertEqual(tuple(), loss.field_types()[0].shape)
+
+    def testFunctionalLayerWithOutputNames(self):
+        k = 3
+        topk = self.model.TopK(
+            self.model.input_feature_schema,
+            output_names_or_num=['values', 'indices'],
+            k=k,
+        )
+        self.assertEqual(2, len(topk.field_types()))
+        self.assertEqual(np.float32, topk.field_types()[0].base)
+        self.assertEqual((k,), topk.field_types()[0].shape)
+        self.assertEqual(np.int32, topk.field_types()[1].base)
+        self.assertEqual((k,), topk.field_types()[1].shape)
+        self.assertEqual(['TopK/values', 'TopK/indices'], topk.field_blobs())
