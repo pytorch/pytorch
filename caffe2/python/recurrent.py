@@ -82,12 +82,11 @@ def recurrent_net(
     # compute the backward pass of the cell net
     backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
         cell_net.Proto().op, inner_outputs_map)
-    backward_mapping = {str(k): str(v) for k, v in backward_mapping.items()}
+    backward_mapping = {str(k): v for k, v in backward_mapping.items()}
     backward_cell_net = core.Net("RecurrentBackwardStep")
 
     del backward_cell_net.Proto().op[:]
     backward_cell_net.Proto().op.extend(backward_ops)
-
     # compute blobs used but not defined in the backward pass
     backward_ssa, backward_blob_versions = core.get_ssa(
         backward_cell_net.Proto())
@@ -155,6 +154,14 @@ def recurrent_net(
             # used as first operator of the cell net
             backward_cell_net.Copy(
                 backward_mapping[cell_input], recurrent_input_grad)
+    # Similarly, we need to copy over gradient values for the parameters that
+    # are added as ExternalInputs (excluding timestep) to the step net
+    for reference in references:
+        reference_grad = reference + "_grad"
+        if (reference in backward_mapping and
+                reference_grad != str(backward_mapping[reference])):
+            backward_cell_net.Copy(
+                backward_mapping[reference], reference_grad)
 
     for input_t, input_blob in inputs:
         forward_links.append((str(input_t), str(input_blob), 0))

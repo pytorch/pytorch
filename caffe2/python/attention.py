@@ -164,16 +164,10 @@ def apply_recurrent_attention(
         name='weighted_decoder_hidden_state'
     )
 
-    # TODO: remove that excessive when RecurrentNetwork supports
-    # Sum op at the beginning of step_net
-    weighted_encoder_outputs_copy = model.net.Copy(
-        weighted_encoder_outputs,
-        s(scope, 'weighted_encoder_outputs_copy'),
-    )
     # [encoder_length, batch_size, encoder_output_dim]
     decoder_hidden_encoder_outputs_sum_tmp = model.net.Add(
         [
-            weighted_encoder_outputs_copy,
+            weighted_encoder_outputs,
             weighted_decoder_hidden_state
         ],
         s(scope, 'decoder_hidden_encoder_outputs_sum_tmp'),
@@ -234,15 +228,9 @@ def apply_regular_attention(
         name='weighted_decoder_hidden_state'
     )
 
-    # TODO: remove that excessive when RecurrentNetwork supports
-    # Sum op at the beginning of step_net
-    weighted_encoder_outputs_copy = model.net.Copy(
-        weighted_encoder_outputs,
-        s(scope, 'weighted_encoder_outputs_copy'),
-    )
     # [encoder_length, batch_size, encoder_output_dim]
     decoder_hidden_encoder_outputs_sum = model.net.Add(
-        [weighted_encoder_outputs_copy, weighted_decoder_hidden_state],
+        [weighted_encoder_outputs, weighted_decoder_hidden_state],
         s(scope, 'decoder_hidden_encoder_outputs_sum'),
         broadcast=1,
         use_grad_hack=1,
