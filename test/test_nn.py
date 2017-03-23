@@ -2040,24 +2040,6 @@ class TestNNInit(TestCase):
                                          torch.eye(rows) * gain ** 2, prec=1e-6)
 
 
-class unpack_args(object):
-
-    def __init__(self, obj):
-        self.obj = obj
-
-    def __getattr__(self, name):
-        print(name)
-        return getattr(self.obj, name)
-
-    def __setattr__(self, name, val):
-        if name == 'obj':
-            return super(unpack_args, self).__setattr__(name, val)
-        return setattr(self.obj, name, val)
-
-    def __call__(self, input):
-        return self.obj(*input)
-
-
 def add_test(test):
     test_name = test.get_name()
     cuda_test_name = test_name + '_cuda'
