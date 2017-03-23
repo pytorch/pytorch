@@ -367,7 +367,7 @@ class Module(object):
 
         Note:
             Duplicate modules are returned only once. In the following
-            example, `l` will be returned only once.
+            example, ``l`` will be returned only once.
 
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
@@ -394,7 +394,7 @@ class Module(object):
 
         Note:
             Duplicate modules are returned only once. In the following
-            example, `l` will be returned only once.
+            example, ``l`` will be returned only once.
 
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
