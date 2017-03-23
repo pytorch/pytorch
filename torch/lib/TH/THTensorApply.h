@@ -34,7 +34,7 @@
   TYPE *TENSOR##_data = NULL; \
   long *TENSOR##_counter = NULL, *TENSOR##_sizes = NULL, *TENSOR##_strides = NULL, *TENSOR##_dimOffset = NULL; \
   long TENSOR##_stride = 0, TENSOR##_size = 0, TENSOR##_dim = 0, TENSOR##_i, TENSOR##_n; \
-  int TENSOR##_contiguous = ALLOW_CONTIGUOUS; \
+  int TENSOR##_contiguous = ALLOW_CONTIGUOUS && DIM < 0; \
   TENSOR##_n = (TENSOR->nDimension ? 1 : 0); \
   for(TENSOR##_i = 0; TENSOR##_i < TENSOR->nDimension; TENSOR##_i++) \
     TENSOR##_n *= TENSOR->size[TENSOR##_i]; \
@@ -61,7 +61,7 @@
       TENSOR##_dim = 1; \
       for(TENSOR##_i = TENSOR->nDimension-2; TENSOR##_i >= 0; TENSOR##_i--) \
       { \
-        if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] || TENSOR##_i == DIM) \
+        if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
           TENSOR##_dim++; \
       } \
       /* Allocate an array of 3*dim elements, where dim is the number of contiguous sections */ \
@@ -69,7 +69,7 @@
       TENSOR##_sizes = TENSOR##_counter + TENSOR##_dim; \
       TENSOR##_strides = TENSOR##_counter + 2*TENSOR##_dim; \
       TH_TENSOR_dim_index = TENSOR##_dim-1; \
-      TENSOR##_dimOffset = &TENSOR##_counter[DIM]; \
+      TENSOR##_dimOffset = (DIM == TENSOR##_dim-1) ? &TENSOR##_i : &TENSOR##_counter[DIM]; \
       TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR->nDimension-1]; \
       TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR->nDimension-1]; \
       /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
@@ -79,9 +79,9 @@
         TENSOR##_counter[TENSOR##_i] = 0; \
       } \
       for(TENSOR##_i = TENSOR->nDimension-2; TENSOR##_i >= 0; --TENSOR##_i) { \
-        if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] && TENSOR##_i != DIM) { \
+        if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
           TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i] * TENSOR##_sizes[TH_TENSOR_dim_index]; \
-          if (TENSOR##_i < DIM) \
+          if (DIM != TENSOR##_dim-1 && TENSOR##_i < DIM) \
             TENSOR##_dimOffset--; \
         } else { \
           --TH_TENSOR_dim_index; \
