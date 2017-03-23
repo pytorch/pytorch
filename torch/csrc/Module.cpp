@@ -452,6 +452,7 @@ extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
 extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
 extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
 extern PyObject * THCPModule_getCurrentStream_wrap(PyObject *self);
+extern PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self);
 extern PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *stream);
 extern PyObject * THCPModule_getDriverVersion(PyObject *self);
 extern PyObject * THCPModule_isDriverSufficient(PyObject *self);
@@ -483,6 +484,7 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
+  {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
