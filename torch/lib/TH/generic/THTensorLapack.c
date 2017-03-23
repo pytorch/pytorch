@@ -938,4 +938,138 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
   THTensor_(free)(work);
 }
 
+void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinfo_, THTensor *a)
+{
+  THArgCheck(THTensor_(nDimension)(a) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(a));
+
+  if (ra_ != a) {
+    THTensor_(resizeAs)(ra_, a);
+    THTensor_(copy)(ra_, a);
+  }
+
+  int m = a->size[1];
+  int n = a->size[2];
+  if (m != n) {
+    THError("btrifact is only implemented for square matrices");
+  }
+  long num_batches = THTensor_(size)(a, 0);
+  THTensor *ra__;
+  int lda;
+
+  if (ra_->stride[1] == 1) {
+    // column ordered, what BLAS wants
+    lda = ra_->stride[2];
+    ra__ = ra_;
+  } else {
+    // not column ordered, need to make it such (requires copy)
+    THTensor *transp_r_ = THTensor_(newTranspose)(ra_, 1, 2);
+    ra__ = THTensor_(newClone)(transp_r_);
+    THTensor_(free)(transp_r_);
+    THTensor_(transpose)(ra__, NULL, 1, 2);
+    lda = ra__->stride[2];
+  }
+
+  THTensor *ai = THTensor_(new)();
+  THTensor *rai = THTensor_(new)();
+  THIntTensor *rpivoti = THIntTensor_new();
+
+  if (!THIntTensor_isContiguous(rinfo_)) {
+      THError("Error: rinfo_ is not contiguous.");
+  }
+  if (!THIntTensor_isContiguous(rpivots_)) {
+      THError("Error: rpivots_ is not contiguous.");
+  }
+  THIntTensor_resize2d(rpivots_, num_batches, n);
+  THIntTensor_resize1d(rinfo_, num_batches);
+
+  for (long batch = 0; batch < num_batches; ++batch) {
+    THTensor_(select)(ai, a, 0, batch);
+    THTensor_(select)(rai, ra__, 0, batch);
+    THIntTensor_select(rpivoti, rpivots_, 0, batch);
+
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_FLOAT)
+    THLapack_(getrf)(n, n, THTensor_(data)(rai), lda,
+                     THIntTensor_data(rpivoti), &THIntTensor_data(rinfo_)[batch]);
+#else
+    THError("Unimplemented");
+#endif
+  }
+
+  THTensor_(free)(ai);
+  THTensor_(free)(rai);
+  THIntTensor_free(rpivoti);
+
+  if (ra__ != ra_) {
+    THTensor_(freeCopyTo)(ra__, ra_);
+  }
+}
+
+void THTensor_(btrisolve)(THTensor *rb_, THTensor *atf, THTensor *b, THIntTensor *pivots)
+{
+  THArgCheck(THTensor_(nDimension)(atf) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(atf));
+
+  int lda;
+  THTensor *atf_;
+
+  // correct ordering of A_a
+  if (atf->stride[1] == 1) {
+    // column ordered, what BLAS wants
+    lda = atf->stride[2];
+    atf_ = atf;
+  } else {
+    // not column ordered, need to make it such (requires copy)
+    // it would be nice if we could use the op(A) flags to automatically
+    // transpose A if needed, but this leads to unpredictable behavior if the
+    // user clones A_tf later with a different ordering
+    THTensor *transp_r_ = THTensor_(newTranspose)(atf, 1, 2);
+    atf_ = THTensor_(newClone)(transp_r_);
+    THTensor_(free)(transp_r_);
+    THTensor_(transpose)(atf_, NULL, 1, 2);
+    lda = atf_->stride[2];
+  }
+
+  if (rb_ != b) {
+    THTensor_(resizeAs)(rb_, b);
+    THTensor_(copy)(rb_, b);
+  }
+
+  long num_batches = atf->size[0];
+  long n = atf->size[1];
+
+  THTensor *ai = THTensor_(new)();
+  THTensor *rbi = THTensor_(new)();
+  THIntTensor *pivoti = THIntTensor_new();
+
+  if (!THIntTensor_isContiguous(pivots)) {
+      THError("Error: rpivots_ is not contiguous.");
+  }
+
+  for (long batch = 0; batch < num_batches; ++batch) {
+    THTensor_(select)(ai, atf_, 0, batch);
+    THTensor_(select)(rbi, rb_, 0, batch);
+    THIntTensor_select(pivoti, pivots, 0, batch);
+
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_FLOAT)
+    int info;
+    THLapack_(getrs)('N', n, 1, THTensor_(data)(ai), lda,
+                     THIntTensor_data(pivoti), THTensor_(data)(rbi),
+                     n, &info);
+    if (info != 0) {
+      THError("Error: Nonzero info.");
+    }
+#else
+    THError("Unimplemented");
+#endif
+  }
+
+  THTensor_(free)(ai);
+  THTensor_(free)(rbi);
+  THIntTensor_free(pivoti);
+
+  if (atf_ != atf) {
+    THTensor_(free)(atf_);
+  }
+}
+
+
 #endif
