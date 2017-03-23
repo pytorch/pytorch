@@ -456,6 +456,26 @@ class TestNN(NNTestCase):
         s = nn.Sequential(n, n, n, n)
         self.assertEqual(list(s.modules()), [s, n, l])
 
+    def test_named_modules(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = l
+                self.l2 = l
+                self.param = Variable(torch.Tensor(3, 5))
+                self.block = block
+        l = nn.Linear(10, 20)
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(10, 20)
+        block = nn.Sequential()
+        block.add_module('linear1', l1)
+        block.add_module('linear2', l2)
+        n = Net()
+        s = nn.Sequential(n, n, n, n)
+        self.assertEqual(list(s.named_modules()), [('', s), ('0', n), ('0.l1', l),
+                                                   ('0.block', block), ('0.block.linear1', l1),
+                                                   ('0.block.linear2', l2)])
+
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
         l2 = nn.Linear(20, 30)

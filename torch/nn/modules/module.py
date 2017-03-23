@@ -339,15 +339,21 @@ class Module(object):
             for p in module.parameters(memo):
                 yield p
 
-    def children(self, named=False):
-        """Returns an iterator over children modules.
 
-        Arguments:
-            named (boolean): A boolean indicating if the names of the
-                children modules should also be returned.
+    def children(self):
+        """Returns an iterator over immediate children modules."""
+        memo = set()
+        for module in self._modules.values():
+            if module is not None and module not in memo:
+                memo.add(module)
+                yield module
+
+    def named_children(self):
+        """Returns an iterator over immediate children modules, yielding both
+	the name of the module as well as the module itself.
 
         Example:
-            >>> for name, module in model.children(named=True):
+            >>> for name, module in model.named_children():
             >>>     if name in PRINT_LIST:
             >>>         print(module)
         """
@@ -355,28 +361,62 @@ class Module(object):
         for name, module in self._modules.items():
             if module is not None and module not in memo:
                 memo.add(module)
-                if named is True:
-                    yield name, module
-                else:
-                    yield module
+                yield name, module
 
-    def modules(self, named=False, memo=None, prefix=None):
+    def modules(self, memo=None):
+        """Returns an iterator over all modules in the network.
+
+        Note:
+            Duplicate modules are returned only once. In the following
+            example, `l` will be returned only once.
+
+            >>> l = nn.Linear(2, 2)
+            >>> net = nn.Sequential(l, l)
+            >>> for idx, m in enumerate(net.modules()):
+            >>>     print(idx, '->', m)
+            0 -> Sequential (
+              (0): Linear (2 -> 2)
+              (1): Linear (2 -> 2)
+            )
+            1 -> Linear (2 -> 2)
+        """
+        if memo is None:
+            memo = set()
+        if self not in memo:
+            memo.add(self)
+            yield self
+            for module in self.children():
+                for m in module.modules(memo):
+                    yield m
+
+    def named_modules(self, memo=None, prefix=None):
+        """Returns an iterator over all modules in the network, yielding
+        both the name of the module as well as the module itself.
+
+        Note:
+            Duplicate modules are returned only once. In the following
+            example, `l` will be returned only once.
+
+            >>> l = nn.Linear(2, 2)
+            >>> net = nn.Sequential(l, l)
+            >>> for idx, m in enumerate(net.named_modules()):
+            >>>     print(idx, '->', m)
+            0 -> ('', Sequential (
+              (0): Linear (2 -> 2)
+              (1): Linear (2 -> 2)
+            ))
+            1 -> ('0', Linear (2 -> 2))
+        """
+
         if memo is None:
             memo = set()
             prefix = []
         if self not in memo:
             memo.add(self)
-            if named is True:
-                yield '.'.join(prefix), self
-            else:
-                yield self
-            for child in self.children(named):
-                if named is True:
-                    name, module = child
-                    prefix.append(name)
-                else:
-                    module = child
-                for m in module.modules(named, memo, prefix):
+            yield '.'.join(prefix), self
+            for name, module in self.named_children():
+                prefix.append(name)
+                for m in module.named_modules(memo, prefix):
                     yield m
                 if prefix:
                     prefix.pop()
