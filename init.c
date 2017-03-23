@@ -98,6 +98,9 @@
 #include "generic/LeakyReLU.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/FusedRNNKernel.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/LogSigmoid.c"
 #include "THGenerateFloatTypes.h"
 
