@@ -339,7 +339,6 @@ class Module(object):
             for p in module.parameters(memo):
                 yield p
 
-
     def children(self):
         """Returns an iterator over immediate children modules."""
         memo = set()
@@ -350,7 +349,7 @@ class Module(object):
 
     def named_children(self):
         """Returns an iterator over immediate children modules, yielding both
-	the name of the module as well as the module itself.
+        the name of the module as well as the module itself.
 
         Example:
             >>> for name, module in model.named_children():
