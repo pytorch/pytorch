@@ -17,14 +17,23 @@ logger.setLevel(logging.INFO)
 
 class Functional(ModelLayer):
 
-    def __init__(self, model, input_record, num_outputs, function,
+    def __init__(self, model, input_record, output_names_or_num, function,
                  name='functional', **kwargs):
         super(Functional, self).__init__(model, name, input_record, **kwargs)
         self._function = function
 
         with scope.NameScope(self.name):
-            self.output_schema = schema.NewRecord(
-                model.net, schema.RawTuple(num_outputs))
+            if isinstance(output_names_or_num, int):
+                self.output_schema = schema.NewRecord(
+                    model.net, schema.RawTuple(output_names_or_num))
+            else:
+                if not isinstance(output_names_or_num, list):
+                    output_names_or_num = [output_names_or_num]
+                out_tuple = [(out, np.void) for out in output_names_or_num]
+                self.output_schema = schema.NewRecord(
+                    model.net, schema.Struct(*out_tuple))
+
+        num_outputs = len(self.output_schema.field_blobs())
 
         # Fake execution of the function to infer shapes and types automatically
         had_issues = False
