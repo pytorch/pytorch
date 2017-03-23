@@ -39,9 +39,15 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   // TODO: proper vectorization with Eigen
+  EigenVectorArrayMap<float> Xvec(dXdata, dX->size());
+  ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
+  ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());
+  Xvec = dYvec * Yvec.cwiseSign();
+  /* Previous implementation
   for (int i = 0; i < Y.size(); ++i) {
     dXdata[i] = Ydata[i] > 0 ? dYdata[i] : 0;
   }
+  */
   return true;
 }
 
