@@ -140,18 +140,11 @@ class ConvPoolOpBase : public Operator<Context> {
             "If global_pooling is set dilation and stride shouldn't be set.");
       }
     }
-
-    auto allocate_and_copy = [&](
-        const vector<int>& vec, Tensor<Context>& tensor) {
-      tensor.Resize(vec.size());
-      context_.template Copy<int, CPUContext, Context>(
-          vec.size(), vec.data(), tensor.template mutable_data<int>());
-    };
-
-    allocate_and_copy(kernel_, kernel_device_);
-    allocate_and_copy(stride_, stride_device_);
-    allocate_and_copy(dilation_, dilation_device_);
-    allocate_and_copy(pads_, pads_device_);
+    
+    AllocateAndCopy(kernel_, kernel_device_);
+    AllocateAndCopy(stride_, stride_device_);
+    AllocateAndCopy(dilation_, dilation_device_);
+    AllocateAndCopy(pads_, pads_device_);
 
     // Check kernel only if we are doing conv or pooling. The reason is that a
     // few other ops, like PadImage, are also using this base class. We really
@@ -613,6 +606,12 @@ protected:
   }
 
  private:
+ inline void AllocateAndCopy(const vector<int>& vec, Tensor<Context>& tensor) {
+      tensor.Resize(vec.size());
+      context_.template Copy<int, CPUContext, Context>(
+          vec.size(), vec.data(), tensor.template mutable_data<int>());
+ }
+ 
 #define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
   USE_OPERATOR_FUNCTIONS(Context);                 \
   using ConvPoolOpBase<Context>::pads_;            \
