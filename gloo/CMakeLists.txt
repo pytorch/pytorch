@@ -36,10 +36,10 @@ if(FALSE)
   endforeach()
 endif()
 
-add_library(gloo ${GLOO_SRCS})
+add_library(gloo ${GLOO_STATIC_OR_SHARED} ${GLOO_SRCS})
 target_link_libraries(gloo ${gloo_DEPENDENCY_LIBS})
 if(USE_CUDA)
-  cuda_add_library(gloo_cuda ${GLOO_CUDA_SRCS})
+  cuda_add_library(gloo_cuda ${GLOO_CUDA_SRCS} ${GLOO_STATIC_OR_SHARED})
   target_link_libraries(gloo_cuda gloo ${gloo_cuda_DEPENDENCY_LIBS})
 
   # Add explicit dependency if NCCL is built from third-party.
@@ -52,12 +52,21 @@ endif()
 
 get_filename_component(PARENT_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
 include_directories(${PARENT_DIR})
-install(TARGETS gloo DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-foreach(HEADER ${GLOO_HDRS})
-  string(REGEX MATCH "(.*)[/\\]" DIR ${HEADER})
-  string(REGEX REPLACE "${CMAKE_CURRENT_SOURCE_DIR}" "gloo" DIR ${DIR})
-  install(FILES ${HEADER} DESTINATION ${CMAKE_INSTALL_PREFIX}/include/${DIR})
-endforeach()
+
+# Install if necessary.
+# If the Gloo build is included from another project's build, it may
+# want to statically link with Gloo and not install any artifacts.
+if(GLOO_INSTALL)
+  install(TARGETS gloo DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+  if(USE_CUDA)
+    install(TARGETS gloo_cuda DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+  endif()
+  foreach(HEADER ${GLOO_HDRS})
+    string(REGEX MATCH "(.*)[/\\]" DIR ${HEADER})
+    string(REGEX REPLACE "${CMAKE_CURRENT_SOURCE_DIR}" "gloo" DIR ${DIR})
+    install(FILES ${HEADER} DESTINATION ${CMAKE_INSTALL_PREFIX}/include/${DIR})
+  endforeach()
+endif()
 
 if(BUILD_TEST)
 add_subdirectory(test)

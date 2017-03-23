@@ -12,6 +12,10 @@ set(GLOO_BENCHMARK_SRCS
 add_executable(benchmark ${GLOO_BENCHMARK_SRCS})
 target_link_libraries(benchmark gloo)
 
+if(GLOO_INSTALL)
+  install(TARGETS benchmark DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+endif()
+
 if(USE_CUDA)
   set(GLOO_BENCHMARK_CUDA_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/cuda_main.cc"
@@ -21,4 +25,8 @@ if(USE_CUDA)
 
   cuda_add_executable(benchmark_cuda ${GLOO_BENCHMARK_CUDA_SRCS})
   target_link_libraries(benchmark_cuda gloo_cuda)
+
+  if(GLOO_INSTALL)
+    install(TARGETS benchmark_cuda DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+  endif()
 endif()

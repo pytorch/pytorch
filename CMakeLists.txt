@@ -32,6 +32,14 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+# Add install targets by default (override from parent project)
+set(GLOO_INSTALL ON CACHE BOOL "")
+mark_as_advanced(GLOO_INSTALL)
+
+# Build static or shared libraries (override from parent project)
+set(GLOO_STATIC_OR_SHARED ${BUILD_SHARED_LIBS} CACHE STRING "")
+mark_as_advanced(GLOO_STATIC_OR_SHARED)
+
 # Process dependencies
 include(cmake/Dependencies.cmake)
 
