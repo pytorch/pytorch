@@ -182,7 +182,7 @@ class MSELoss(_Loss):
 
 class BCELoss(_WeightedLoss):
     r"""Creates a criterion that measures the Binary Cross Entropy
-    between the target and the output::
+    between the target and the output:
 
     .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
