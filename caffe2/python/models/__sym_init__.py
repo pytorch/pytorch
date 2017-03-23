@@ -17,4 +17,4 @@ def _parseFile(filename):
 
 
 init_net = _parseFile('init_net.pb')
-exec_net = _parseFile('exec_net.pb')
+predict_net = _parseFile('predict_net.pb')

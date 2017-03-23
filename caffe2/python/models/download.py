@@ -116,7 +116,7 @@ def downloadModel(model, args):
 
     # Now we can safely create the folder and download the model
     os.makedirs(model_folder)
-    for f in ['exec_net.pb', 'init_net.pb']:
+    for f in ['predict_net.pb', 'init_net.pb']:
         try:
             downloadFromURLToFile(getURLFromName(model, f),
                                   '{folder}/{f}'.format(folder=model_folder,
