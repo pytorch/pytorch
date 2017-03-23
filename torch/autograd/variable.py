@@ -685,6 +685,9 @@ class Variable(_C._VariableBase):
     def triu(self, diagonal_idx=0):
         return Triu(diagonal_idx)(self)
 
+    def trace(self):
+        return Trace()(self)
+
     def multinomial(self, num_samples=1, with_replacement=False):
         return Multinomial(num_samples, with_replacement)(self)
 
