@@ -419,15 +419,17 @@ class TestTorch(TestCase):
         res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
-    @skipIfNoLapack
-    def test_btrifact(self):
+    @staticmethod
+    def _test_btrifact(self, cast):
         a = torch.FloatTensor((((1.3722, -0.9020),
                                 (1.8849, 1.9169)),
                                ((0.7187, -1.1695),
                                 (-0.0139, 1.3572)),
                                ((-1.6181, 0.7148),
                                 (1.3728, 0.1319))))
-        LU_data, pivots, info = a.btrifact()
+        a = cast(a)
+        info = cast(torch.IntTensor())
+        LU_data, pivots = a.btrifact(info=info)
         self.assertEqual(info.abs().sum(), 0)
         I_U = torch.triu(torch.ones(2, 2)).unsqueeze(0).expand(3, 2, 2).type_as(a).byte()
         I_L = 1 - I_U
@@ -449,7 +451,11 @@ class TestTorch(TestCase):
         self.assertEqual(a_, a)
 
     @skipIfNoLapack
-    def test_btrisolve(self):
+    def test_btrifact(self):
+        self._test_btrifact(self, lambda t: t)
+
+    @staticmethod
+    def _test_btrisolve(self, cast):
         a = torch.FloatTensor((((1.3722, -0.9020),
                                 (1.8849, 1.9169)),
                                ((0.7187, -1.1695),
@@ -459,11 +465,17 @@ class TestTorch(TestCase):
         b = torch.FloatTensor(((4.02, 6.19),
                                (-1.56, 4.00),
                                (9.81, -4.09)))
-        LU_data, pivots, info = a.btrifact()
+        a, b = cast(a), cast(b)
+        info = cast(torch.IntTensor())
+        LU_data, pivots = a.btrifact(info=info)
         self.assertEqual(info.abs().sum(), 0)
-        x = b.btrisolve(LU_data, pivots)
+        x = torch.btrisolve(LU_data, b, pivots)
         b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
         self.assertEqual(b_, b)
+
+    @skipIfNoLapack
+    def test_btrisolve(self):
+        self._test_btrisolve(self, lambda t: t)
 
     def test_bmm(self):
         num_batches = 10

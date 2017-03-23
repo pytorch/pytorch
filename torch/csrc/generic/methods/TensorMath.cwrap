@@ -1897,14 +1897,15 @@ static const char *R = &__R;
   cname: btrifact
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: true
-  return: argument 0,1,2
+  return: argument 0,1
   arguments:
     - arg: THTensor* result
       output: True
     - arg: THIntegerTensor* pivots
       output: True
     - arg: THIntegerTensor* info
-      output: True
+      kwarg_only: True
+      default: THIntegerTensor_(new)(LIBRARY_STATE_NOARGS)
     - THTensor* self
 ]]
 
@@ -1912,12 +1913,12 @@ static const char *R = &__R;
   name: btrisolve
   cname: btrisolve
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: true
+  only_stateless: true
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* A_LU_data
-    - THTensor* self
-    - THIntegerTensor* A_LU_pivots
+    - THTensor* LU
+    - THTensor* x
+    - THIntegerTensor* pivots
 ]]
