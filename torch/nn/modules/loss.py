@@ -109,8 +109,6 @@ class NLLLoss(_WeightedLoss):
 class NLLLoss2d(_WeightedLoss):
     r"""This is negative log likehood loss, but for image inputs. It computes NLL loss per-pixel.
 
-    This loss does not support per-class weights
-
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
             If given, has to be a 1D Tensor having as many elements, as there are classes.
