@@ -161,7 +161,9 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
 
     // TODO make sure this doesn't sync the hell out of everything
     //      Should be fine according to sam's memory manager.
-    computed_sizes = THLongTensor_newWithSize(THCIndexTensor_(newSizeOf)(state, s), NULL);
+    THLongStorage *newSize = THCIndexTensor_(newSizeOf)(state, s);
+    computed_sizes = THLongTensor_newWithSize(newSize, NULL);
+    THLongStorage_free(newSize);
     THLongTensor_copyCudaLong(state, computed_sizes, s);
     THCSTensor_(rawResize)(state, self, nDimI, nDimV, THLongTensor_data(computed_sizes));
 
@@ -218,12 +220,7 @@ THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self) {
   THCSTensor *other = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, other, self->nDimensionI, self->nDimensionV, self->size);
 
-  THCSTensor_(_set)(
-      state,
-      other,
-      THCIndexTensor_(newClone)(state, self->indices),
-      THCTensor_(newClone)(state, self->values)
-      );
+  THCSTensor_(_set)(state, other, self->indices, self->values);
 
   other->nnz = self->nnz;
   other->contiguous = self->contiguous;
