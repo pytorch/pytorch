@@ -206,5 +206,13 @@ def debug(f):
     return wrapper
 
 
+def AddBlobs(meta_net_def, blob_name, blob_def):
+    meta_net_def.blobs[blob_name] = blob_def
+
+
 def AddPlan(meta_net_def, plan_name, plan_def):
     meta_net_def.plans[plan_name] = str(plan_def)
+
+
+def AddNet(meta_net_def, net_name, net_def):
+    meta_net_def.nets[net_name] = net_def
