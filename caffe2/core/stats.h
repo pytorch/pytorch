@@ -15,7 +15,7 @@ class StatValue {
   std::atomic<int64_t> v_{0};
 
  public:
-  int64_t update(int64_t inc) {
+  int64_t increment(int64_t inc) {
     return v_ += inc;
   }
 
@@ -159,7 +159,7 @@ struct Stat {
   Stat(const std::string& gn, const std::string& n) : groupName(gn), name(n) {}
 
   template <typename... Unused>
-  int64_t operator()(Unused...) {
+  int64_t increment(Unused...) {
     return -1;
   }
 };
@@ -171,15 +171,87 @@ class ExportedStat : public Stat {
   ExportedStat(const std::string& gn, const std::string& n)
       : Stat(gn, n), value_(StatRegistry::get().add(gn + "/" + n)) {}
 
-  template <typename... Unused>
-  int64_t operator()(int64_t increment, Unused...) {
-    return value_->update(increment);
+  int64_t increment(int64_t value = 1) {
+    return value_->increment(value);
   }
 
-  int64_t operator()() {
-    return operator()(1);
+  template <typename T, typename Unused1, typename... Unused>
+  int64_t increment(T value, Unused1, Unused...) {
+    return increment(value);
   }
 };
+
+class AvgExportedStat : public ExportedStat {
+ private:
+  ExportedStat count_;
+
+ public:
+  AvgExportedStat(const std::string& gn, const std::string& n)
+      : ExportedStat(gn, n + "/sum"), count_(gn, n + "/count") {}
+
+  int64_t increment(int64_t value = 1) {
+    count_.increment();
+    return ExportedStat::increment(value);
+  }
+
+  template <typename T, typename Unused1, typename... Unused>
+  int64_t increment(T value, Unused1, Unused...) {
+    return increment(value);
+  }
+};
+
+class DetailedExportedStat : public ExportedStat {
+ private:
+  std::vector<ExportedStat> details_;
+
+ public:
+  DetailedExportedStat(const std::string& gn, const std::string& n)
+      : ExportedStat(gn, n) {}
+
+  void setDetails(const std::vector<std::string>& detailNames) {
+    details_.clear();
+    for (const auto& detailName : detailNames) {
+      details_.emplace_back(groupName, name + "/" + detailName);
+    }
+  }
+
+  template <typename T, typename... Unused>
+  int64_t increment(T value, size_t detailIndex, Unused...) {
+    if (detailIndex < details_.size()) {
+      details_[detailIndex].increment(value);
+    }
+    return ExportedStat::increment(value);
+  }
+};
+
+namespace detail {
+
+template <class T>
+struct _ScopeGuard {
+  T f_;
+  std::chrono::high_resolution_clock::time_point start_;
+
+  explicit _ScopeGuard(T f)
+      : f_(f), start_(std::chrono::high_resolution_clock::now()) {}
+  ~_ScopeGuard() {
+    using namespace std::chrono;
+    auto duration = high_resolution_clock::now() - start_;
+    int64_t nanos = duration_cast<nanoseconds>(duration).count();
+    f_(nanos);
+  }
+
+  // Using implicit cast to bool so that it can be used in an 'if' condition
+  // within CAFFE_DURATION macro below.
+  /* implicit */ operator bool() {
+    return true;
+  }
+};
+
+template <class T>
+_ScopeGuard<T> ScopeGuard(T f) {
+  return _ScopeGuard<T>(f);
+}
+}
 
 #define CAFFE_STAT_CTOR(ClassName)                 \
   ClassName(std::string name) : groupName(name) {} \
@@ -190,18 +262,33 @@ class ExportedStat : public Stat {
     groupName, #name              \
   }
 
+#define CAFFE_AVG_EXPORTED_STAT(name) \
+  AvgExportedStat name {              \
+    groupName, #name                  \
+  }
+
+#define CAFFE_DETAILED_EXPORTED_STAT(name) \
+  DetailedExportedStat name {              \
+    groupName, #name                       \
+  }
+
 #define CAFFE_STAT(name) \
   Stat name {            \
     groupName, #name     \
   }
 
-#define CAFFE_EVENT(stats, field, ...)                    \
-  {                                                       \
-    auto __caffe_event_value_ = stats.field(__VA_ARGS__); \
-    CAFFE_SDT(                                            \
-        field,                                            \
-        stats.field.groupName.c_str(),                    \
-        __caffe_event_value_,                             \
-        ##__VA_ARGS__);                                   \
+#define CAFFE_EVENT(stats, field, ...)                              \
+  {                                                                 \
+    auto __caffe_event_value_ = stats.field.increment(__VA_ARGS__); \
+    CAFFE_SDT(                                                      \
+        field,                                                      \
+        stats.field.groupName.c_str(),                              \
+        __caffe_event_value_,                                       \
+        ##__VA_ARGS__);                                             \
   }
+
+#define CAFFE_DURATION(stats, field, ...)                \
+  if (auto g = detail::ScopeGuard([&](int64_t nanos) {   \
+        CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__); \
+      }))
 }
