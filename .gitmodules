@@ -37,3 +37,15 @@
 [submodule "third_party/gloo"]
 	path = third_party/gloo
 	url = https://github.com/facebookincubator/gloo
+[submodule "third_party/NNPACK_deps/pthreadpool"]
+	path = third_party/NNPACK_deps/pthreadpool
+	url = https://github.com/Maratyszcza/pthreadpool.git
+[submodule "third_party/NNPACK_deps/FXdiv"]
+	path = third_party/NNPACK_deps/FXdiv
+	url = https://github.com/Maratyszcza/FXdiv.git
+[submodule "third_party/NNPACK_deps/FP16"]
+	path = third_party/NNPACK_deps/FP16
+	url = https://github.com/Maratyszcza/FP16.git
+[submodule "third_party/NNPACK_deps/psimd"]
+	path = third_party/NNPACK_deps/psimd
+	url = https://github.com/Maratyszcza/psimd.git
