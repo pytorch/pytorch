@@ -131,7 +131,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
       for (d = 0; d < nDimI; d++) {
         THTensor_fastSet2d(r_indices_, d, r_i, THTensor_fastGet2d(src_indices_, d, s_i));
       }
-      THBlas_(axpy)(blockSize, 1,
+      THBlas_(axpy)(blockSize, value,
         THTensor_(data)(s_values_) + s_i * blockSize, 1,
         THTensor_(data)(r_values_) + r_i * blockSize, 1);
       s_i++;
@@ -335,7 +335,6 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
 
   THSTensor_(resize2d)(r_, dim_i, dim_k);
 
-
   THArgCheck(THTensor_(size)(dense, 0) == dim_j, 3,
       "Expected dim 0 size %d, got %d", dim_j, THTensor_(size)(dense, 0));
   THArgCheck(THSTensor_(size)(t, 0) == dim_i, 1,
@@ -424,31 +423,40 @@ void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse, THTensor *d
   long size[2] = {m, n};
   THSTensor_(rawResize)(r_, 1, 1, size);
 
-  // TODO faster contiguous
   THSTensor_(contiguous)(sparse);
 
   long nnz = THSTensor_(nnz)(sparse);
   THLongTensor *indices = THLongTensor_newWithSize2d(1, nnz);
-  // create values in column-major format to avoid copying in spaddmm
-  THTensor *values = THTensor_(newWithSize2d)(n, nnz);
-  THTensor_(transpose)(values, NULL, 0, 1);
 
+  // Initialize the sparse matrix that will be used with spaddmm to send rows
+  // from the dense matrix to rows of the output's value tensor
   THSTensor *newSparse = THSTensor_(newClone)(sparse);
   THLongTensor *spIndices = THSTensor_(indices)(newSparse);
-  THLongTensor *dstIndices = THLongTensor_new();
-  THLongTensor_select(dstIndices, spIndices, 0, 0);
-  // Save destination indices to output hybrid tensor
-  THLongTensor_copy(indices, dstIndices);
-  // Replace destination indices with 0, 1, 2, 3, ... and compute output values
-  // tensor with sparse * dense multiplication
-  THLongTensor_range(dstIndices, 0, nnz - 1, 1);
-  newSparse->size[0] = nnz;
+  THLongTensor *valueIndices = THLongTensor_new();
+  THLongTensor_select(valueIndices, spIndices, 0, 0);
+
+  // Compute output indices
+  long i = -1, prevIdx = -1;
+  for (long j = 0; j < nnz; j++) {
+    long currIdx = THTensor_fastGet1d(valueIndices, j);
+    if (currIdx != prevIdx) {
+      THTensor_fastSet2d(indices, 0, ++i, currIdx);
+      prevIdx = currIdx;
+    }
+    THTensor_fastSet1d(valueIndices, j, i);
+  }
+  long outNnz = i + 1;
+  THLongTensor_resize2d(indices, 1, outNnz);
+  THTensor *values = THTensor_(newWithSize2d)(outNnz, n);
+  newSparse->size[0] = outNnz;
+
+  // Compute output values tensor with sparse * dense multiplication
   THSTensor_(spaddmm)(values, 0, values, alpha, newSparse, dense);
   THSTensor_(move)(r_, indices, values);
 
   THSTensor_(free)(newSparse);
   THLongTensor_free(spIndices);
-  THLongTensor_free(dstIndices);
+  THLongTensor_free(valueIndices);
 }
 
 void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse) {
