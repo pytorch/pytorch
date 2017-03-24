@@ -154,7 +154,9 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
     THCTensor_(copy)(state, r_, t);
   }
 
-  if(THCNumerics<real>::ne(beta, ScalarConvert<int, real>::to(1))) {
+  if(THCNumerics<real>::eq(beta, ScalarConvert<int, real>::to(0))) {
+    THCTensor_(zero)(state, r_);
+  } else if(THCNumerics<real>::ne(beta, ScalarConvert<int, real>::to(1))) {
     THCTensor_(mul)(state, r_, r_, beta);
   }
 
