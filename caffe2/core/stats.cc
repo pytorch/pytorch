@@ -40,7 +40,7 @@ void StatRegistry::publish(ExportedStatList& exported, bool reset) {
 
 void StatRegistry::update(const ExportedStatList& data) {
   for (const auto& stat : data) {
-    add(stat.key)->update(stat.value);
+    add(stat.key)->increment(stat.value);
   }
 }
 

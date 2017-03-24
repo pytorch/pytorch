@@ -65,6 +65,25 @@ TEST(StatsTest, StatsTestClass) {
       toMap(StatRegistry::get().publish()));
 }
 
+TEST(StatsTest, StatsTestDuration) {
+  struct TestStats {
+    CAFFE_STAT_CTOR(TestStats);
+    CAFFE_STAT(count);
+    CAFFE_AVG_EXPORTED_STAT(time_ns);
+  };
+  TestStats stats("stats");
+  CAFFE_DURATION(stats, time_ns) {}
+
+  ExportedStatList data;
+  StatRegistry::get().publish(data);
+  auto map = toMap(data);
+  auto countIt = map.find("stats/time_ns/count");
+  auto sumIt = map.find("stats/time_ns/sum");
+  EXPECT_TRUE(countIt != map.end() && sumIt != map.end());
+  EXPECT_EQ(countIt->second, 1);
+  EXPECT_GT(sumIt->second, 0);
+}
+
 TEST(StatsTest, StatsTestSimple) {
   struct TestStats {
     CAFFE_STAT_CTOR(TestStats);
