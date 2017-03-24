@@ -795,7 +795,7 @@ class AdaptiveAvgPool1d(Module):
     """
 
     def __init__(self, output_size):
-        super(AdaptiveAvgPool2d, self).__init__()
+        super(AdaptiveAvgPool1d, self).__init__()
         self.output_size = output_size
 
     def forward(self, input):
@@ -832,7 +832,7 @@ class AdaptiveAvgPool2d(Module):
         self.output_size = output_size
 
     def forward(self, input):
-        return F.adaptive_avg_pool1d(input, self.output_size)
+        return F.adaptive_avg_pool2d(input, self.output_size)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
