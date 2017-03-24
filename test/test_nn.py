@@ -458,6 +458,29 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 3)
         self.assertEqual(num_params(s), 3)
 
+    def test_children(self):
+        l1 = nn.Linear(2, 2)
+        l2 = nn.Linear(2, 2)
+        l3 = nn.Linear(2, 2)
+        l4 = nn.Linear(2, 2)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential(l1, l2, l1, l2, subnet)
+        self.assertEqual(list(s.children()), [l1, l2, subnet])
+
+    def test_named_children(self):
+        l1 = nn.Linear(2, 2)
+        l2 = nn.Linear(2, 2)
+        l3 = nn.Linear(2, 2)
+        l4 = nn.Linear(2, 2)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential()
+        s.add_module('layer1', l1)
+        s.add_module('layer2', l2)
+        s.add_module('layer3', l1)
+        s.add_module('layer4', l2)
+        s.add_module('subnet', subnet)
+        self.assertEqual(list(s.named_children()), [('layer1', l1), ('layer2', l2), ('subnet', subnet)])
+
     def test_modules(self):
         class Net(nn.Module):
             def __init__(self):
@@ -470,6 +493,26 @@ class TestNN(NNTestCase):
         n = Net()
         s = nn.Sequential(n, n, n, n)
         self.assertEqual(list(s.modules()), [s, n, l])
+
+    def test_named_modules(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = l
+                self.l2 = l
+                self.param = Variable(torch.Tensor(3, 5))
+                self.block = block
+        l = nn.Linear(10, 20)
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(10, 20)
+        block = nn.Sequential()
+        block.add_module('linear1', l1)
+        block.add_module('linear2', l2)
+        n = Net()
+        s = nn.Sequential(n, n, n, n)
+        self.assertEqual(list(s.named_modules()), [('', s), ('0', n), ('0.l1', l),
+                                                   ('0.block', block), ('0.block.linear1', l1),
+                                                   ('0.block.linear2', l2)])
 
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
