@@ -353,3 +353,8 @@ class LayerModelHelper(model_helper.ModelHelperBase):
                 [param, self._GetOne(), grad, coeff],
                 param
             )
+
+    # A dummy optimizer which allows us to do NO optimization
+    @classmethod
+    def DummyOptim(cls, *args, **kwargs):
+        pass
