@@ -1766,7 +1766,7 @@ class TestNN(NNTestCase):
     def test_pairwise_distance(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
         input2 = Variable(torch.randn(4, 4), requires_grad=True)
-        gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2))
+        self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
 
 
 class TestNNInit(TestCase):
