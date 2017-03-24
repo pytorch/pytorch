@@ -339,9 +339,14 @@ class AvgPool2d(Function):
 
 class AvgPool3d(Function):
 
-    def __init__(self, kernel_size, stride=None):
+    def __init__(self, kernel_size, stride=None, padding=0,
+                 ceil_mode=False, count_include_pad=True):
         self.kernel_size = _triple(kernel_size)
         self.stride = _triple(stride if stride is not None else kernel_size)
+        ##Jeyte 3/23
+        self.padding = _triple(padding)
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
     def forward(self, input):
         backend = type2backend[type(input)]
@@ -351,7 +356,9 @@ class AvgPool3d(Function):
         backend.VolumetricAveragePooling_updateOutput(backend.library_state,
                                                       input, output,
                                                       self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
-                                                      self.stride[0], self.stride[2], self.stride[1])
+                                                      self.stride[0], self.stride[2], self.stride[1],
+                                                      self.padding[0],self.padding[2], self.padding[1],
+                                                      self.ceil_mode, self.count_include_pad)
         return output
 
     def backward(self, grad_output):
@@ -361,7 +368,9 @@ class AvgPool3d(Function):
         backend.VolumetricAveragePooling_updateGradInput(backend.library_state,
                                                          input, grad_output, grad_input,
                                                          self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
-                                                         self.stride[0], self.stride[2], self.stride[1])
+                                                         self.stride[0], self.stride[2], self.stride[1],
+                                                      self.padding[0],self.padding[2], self.padding[1],
+                                                      self.ceil_mode, self.count_include_pad)
         return grad_input
 
 _all_functions.append(AvgPool2d)

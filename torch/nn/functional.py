@@ -200,12 +200,14 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
                                      ceil_mode, count_include_pad)(input)
 
 
-def avg_pool3d(input, kernel_size, stride=None):
+def avg_pool3d(input, kernel_size, stride=None, padding=0,
+               ceil_mode=False, count_include_pad=True):
     """Applies 3D average-pooling operation in kt x kh x kw regions by step
     size kt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
     """
-    return _functions.thnn.AvgPool3d(kernel_size, stride)(input)
+    return _functions.thnn.AvgPool3d(kernel_size, stride, padding,
+                                     ceil_mode, count_include_pad)(input)
 
 
 # share the same interface
