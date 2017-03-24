@@ -22,13 +22,15 @@ class CreateBlobsQueueOp final : public Operator<Context> {
     const auto enforceUniqueName =
         OperatorBase::template GetSingleArgument<int>(
             "enforce_unique_name", false);
+    const auto fieldNames =
+        OperatorBase::template GetRepeatedArgument<std::string>("field_names");
     CAFFE_ENFORCE_EQ(def().output().size(), 1);
     const auto name = def().output().Get(0);
     auto queuePtr = Operator<Context>::Outputs()[0]
                         ->template GetMutable<std::shared_ptr<BlobsQueue>>();
     CAFFE_ENFORCE(queuePtr);
     *queuePtr = std::make_shared<BlobsQueue>(
-        ws_, name, capacity, numBlobs, enforceUniqueName);
+        ws_, name, capacity, numBlobs, enforceUniqueName, fieldNames);
     return true;
   }
 

@@ -6,6 +6,7 @@
 #include <mutex>
 #include <queue>
 
+#include "caffe2/core/blob_stats.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/tensor.h"
@@ -26,8 +27,14 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
       const std::string& queueName,
       size_t capacity,
       size_t numBlobs,
-      bool enforceUniqueName)
+      bool enforceUniqueName,
+      const std::vector<std::string>& fieldNames = {})
       : numBlobs_(numBlobs), stats_(queueName) {
+    if (!fieldNames.empty()) {
+      CAFFE_ENFORCE_EQ(
+          fieldNames.size(), numBlobs, "Wrong number of fieldNames provided.");
+      stats_.queue_dequeued_bytes.setDetails(fieldNames);
+    }
     queue_.reserve(capacity);
     for (auto i = 0; i < capacity; ++i) {
       std::vector<Blob*> blobs;
@@ -68,6 +75,8 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     auto& result = queue_[reader_ % queue_.size()];
     CAFFE_ENFORCE(inputs.size() >= result.size());
     for (auto i = 0; i < result.size(); ++i) {
+      auto bytes = BlobStat::sizeBytes(*result[i]);
+      CAFFE_EVENT(stats_, queue_dequeued_bytes, bytes, i);
       using std::swap;
       swap(*(inputs[i]), *(result[i]));
     }
@@ -146,6 +155,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     CAFFE_STAT_CTOR(QueueStats);
     CAFFE_EXPORTED_STAT(queue_balance);
     CAFFE_EXPORTED_STAT(queue_dequeued_records);
+    CAFFE_DETAILED_EXPORTED_STAT(queue_dequeued_bytes);
   } stats_;
 };
 }
