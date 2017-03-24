@@ -450,7 +450,7 @@ class TestNN(NNTestCase):
         l4 = nn.Linear(2, 2)
         subnet = nn.Sequential(l3, l4)
         s = nn.Sequential(l1, l2, l1, l2, subnet)
-        self.assertEqual(list(s.children()), [l1, l2])
+        self.assertEqual(list(s.children()), [l1, l2, subnet])
 
     def test_named_children(self):
         l1 = nn.Linear(2, 2)
@@ -464,7 +464,7 @@ class TestNN(NNTestCase):
         s.add_module('layer3', l1)
         s.add_module('layer4', l2)
         s.add_module('subnet', subnet)
-        self.assertEqual(list(s.named_children()), [('layer1', l1), ('layer2', l2)])
+        self.assertEqual(list(s.named_children()), [('layer1', l1), ('layer2', l2), ('subnet', subnet)])
 
     def test_modules(self):
         class Net(nn.Module):
