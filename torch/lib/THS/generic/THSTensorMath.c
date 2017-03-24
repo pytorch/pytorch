@@ -97,8 +97,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   THSTensor_(resizeAs)(r_, src);
   THSTensor_(move)(r_, r_indices_, r_values_);
 
-  THTensor *srcBuffer = THTensor_(new)();
-  THTensor *dstBuffer = THTensor_(new)();
+  long blockSize = r_values_->stride[0];
   long cmp, d;
   long r_i = 0, t_i = 0, s_i = 0;
   while (t_i < t_nnz || s_i < s_nnz) {
@@ -123,14 +122,18 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
       for (d = 0; d < nDimI; d++) {
         THTensor_fastSet2d(r_indices_, d, r_i, THTensor_fastGet2d(t_indices_, d, t_i));
       }
-      THSTensor_(addSlice)(dstBuffer, dstBuffer, srcBuffer, r_values_, r_values_, 1, t_values_, 0, r_i, r_i, t_i);
+      THBlas_(axpy)(blockSize, 1,
+        THTensor_(data)(t_values_) + t_i * blockSize, 1,
+        THTensor_(data)(r_values_) + r_i * blockSize, 1);
       t_i++;
     }
     if (cmp <= 0) {
       for (d = 0; d < nDimI; d++) {
         THTensor_fastSet2d(r_indices_, d, r_i, THTensor_fastGet2d(src_indices_, d, s_i));
       }
-      THSTensor_(addSlice)(dstBuffer, dstBuffer, srcBuffer, r_values_, r_values_, value, s_values_, 0, r_i, r_i, s_i);
+      THBlas_(axpy)(blockSize, 1,
+        THTensor_(data)(s_values_) + s_i * blockSize, 1,
+        THTensor_(data)(r_values_) + r_i * blockSize, 1);
       s_i++;
     }
     r_i++;
@@ -143,8 +146,6 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   THTensor_(free)(t_values_);
   THLongTensor_free(src_indices_);
   THTensor_(free)(s_values_);
-  THTensor_(free)(srcBuffer);
-  THTensor_(free)(dstBuffer);
 }
 
 void THSTensor_(csub)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
@@ -407,7 +408,47 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
 }
 
 void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse, THTensor *dense) {
-  THError("WARNING: Sparse Tensor op hspmm is not implemented");
+  THArgCheck(sparse->nDimensionI == 2, 2,
+      "matrices expected, got %dD tensor", sparse->nDimensionI);
+  THArgCheck(sparse->nDimensionV == 0, 2,
+      "scalar values expected, got %dD values", sparse->nDimensionV);
+  THArgCheck(dense->nDimension == 2, 2,
+      "matrices expected, got %dD tensor", dense->nDimension);
+
+  long m = THSTensor_(size)(sparse, 0);
+  long k = THSTensor_(size)(sparse, 1);
+  long n = THTensor_(size)(dense, 1);
+
+  THArgCheck(THTensor_(size)(dense, 0) == k, 3,
+      "Expected dim 0 size %d, got %d", k, THTensor_(size)(dense, 0));
+  long size[2] = {m, n};
+  THSTensor_(rawResize)(r_, 1, 1, size);
+
+  // TODO faster contiguous
+  THSTensor_(contiguous)(sparse);
+
+  long nnz = THSTensor_(nnz)(sparse);
+  THLongTensor *indices = THLongTensor_newWithSize2d(1, nnz);
+  // create values in column-major format to avoid copying in spaddmm
+  THTensor *values = THTensor_(newWithSize2d)(n, nnz);
+  THTensor_(transpose)(values, NULL, 0, 1);
+
+  THSTensor *newSparse = THSTensor_(newClone)(sparse);
+  THLongTensor *spIndices = THSTensor_(indices)(newSparse);
+  THLongTensor *dstIndices = THLongTensor_new();
+  THLongTensor_select(dstIndices, spIndices, 0, 0);
+  // Save destination indices to output hybrid tensor
+  THLongTensor_copy(indices, dstIndices);
+  // Replace destination indices with 0, 1, 2, 3, ... and compute output values
+  // tensor with sparse * dense multiplication
+  THLongTensor_range(dstIndices, 0, nnz - 1, 1);
+  newSparse->size[0] = nnz;
+  THSTensor_(spaddmm)(values, 0, values, alpha, newSparse, dense);
+  THSTensor_(move)(r_, indices, values);
+
+  THSTensor_(free)(newSparse);
+  THLongTensor_free(spIndices);
+  THLongTensor_free(dstIndices);
 }
 
 void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse) {
