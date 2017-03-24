@@ -12,6 +12,12 @@ from caffe2.python import workspace, core, cnn
 
 class CopyOpsTest(unittest.TestCase):
 
+    def tearDown(self):
+        # Reset workspace after each test
+        # Otherwise, the multi-GPU test will use previously created tensors,
+        #   which may have been placed on the wrong device
+        workspace.ResetWorkspace()
+
     def run_test_copy_gradient(self, device_opt):
         model = cnn.CNNModelHelper(name="copy_test")
         with core.DeviceScope(device_opt):
@@ -56,8 +62,6 @@ class CopyOpsTest(unittest.TestCase):
         workspace.FeedBlob("x_cpu", np.random.rand(32).astype(np.float32))
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
-
-        print(model.net.Proto())
 
         self.assertTrue(np.array_equal(
             workspace.FetchBlob("x_gpu_1"),
