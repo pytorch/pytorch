@@ -66,16 +66,6 @@ void THCudaSparse_Scsrmm2(THCState *state, char transa, char transb, long m, lon
 #if TH_INDEX_BASE == 1
     cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
 #endif
-    // cusparseMatDescr_t desc = { \
-    //   CUSPARSE_MATRIX_TYPE_GENERAL, \
-    //   CUSPARSE_FILL_MODE_LOWER, \
-    //   CUSPARSE_DIAG_TYPE_NON_UNIT, \
-    // #if TH_INDEX_BASE==1
-    //   CUSPARSE_INDEX_BASE_ONE \
-    // #else
-    //   CUSPARSE_INDEX_BASE_ZERO \
-    // #endif
-    // };  // completely general sparse matrix
     THCusparseCheck(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
     return;
   }
@@ -105,16 +95,6 @@ void THCudaSparse_Dcsrmm2(THCState *state, char transa, char transb, long m, lon
 #if TH_INDEX_BASE == 1
     cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
 #endif
-    // cusparseMatDescr_t desc = { \
-    //   CUSPARSE_MATRIX_TYPE_GENERAL, \
-    //   CUSPARSE_FILL_MODE_LOWER, \
-    //   CUSPARSE_DIAG_TYPE_NON_UNIT, \
-    // #if TH_INDEX_BASE==1
-    //   CUSPARSE_INDEX_BASE_ONE \
-    // #else
-    //   CUSPARSE_INDEX_BASE_ZERO \
-    // #endif
-    // };  // completely general sparse matrix
     THCusparseCheck(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
     return;
   }

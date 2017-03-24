@@ -116,6 +116,7 @@ __global__ void THCSTensor_valueSparseUnionKernel(
   }
 }
 
+// TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
 __global__ void THCSTensor_indexSparseUnionKernel(
     TensorInfo<integer, IndexType> r_indices,
@@ -198,6 +199,7 @@ __global__ void THCSTensor_valueSparseIntersectionKernel(
   }
 }
 
+// TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
 __global__ void THCSTensor_indexSparseIntersectionKernel(
     TensorInfo<integer, IndexType> r_indices,
