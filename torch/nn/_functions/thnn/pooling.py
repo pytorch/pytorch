@@ -364,6 +364,112 @@ class AvgPool3d(Function):
                                                          self.stride[0], self.stride[2], self.stride[1])
         return grad_input
 
+
+class AdaptiveMaxPool1d(Function):
+
+    def __init__(self, output_size, return_indices=False):
+        self.output_size = output_size
+        self.return_indices = return_indices
+
+    def forward(self, input):
+        if (input.dim() != 3):
+            raise ValueError('expected 3D input (got {}D input)'
+                             .format(input.dim()))
+
+        input2d = input.unsqueeze(2)    # size = N*C*1*L
+        backend = type2backend[type(input)]
+        indices, output = input2d.new().long(), input2d.new()
+        backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
+                                                      input2d, output, indices,
+                                                      self.output_size, 1)
+        indices = indices.squeeze(2)
+        output = output.squeeze(2)
+        if self.return_indices:
+            self.save_for_backward(input, indices)
+            self.mark_non_differentiable(indices)
+            return output, indices
+        else:
+            self.save_for_backward(input)
+            self.indices = indices
+            return output
+
+    def backward(self, grad_output, _indices_grad=None):
+        if self.return_indices:
+            input, indices = self.saved_tensors
+        else:
+            input, = self.saved_tensors
+            indices = self.indices
+
+        input2d = input.unsqueeze(2)
+        indices2d = indices.unsqueeze(2)
+        grad_output2d = grad_output.unsqueeze(2)
+        grad_input = grad_output2d.new()
+        backend = type2backend[type(input)]
+        backend.SpatialAdaptiveMaxPooling_updateGradInput(backend.library_state,
+                                                         input2d, grad_output2d, grad_input, indices2d)
+        grad_input = grad_input.squeeze(2)
+        return grad_input
+
+
+class AdaptiveMaxPool2d(Function):
+
+    def __init__(self, output_size, return_indices=False):
+        self.output_size = output_size
+        self.return_indices = return_indices
+
+    def forward(self, input):
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
+                                                      input, output, indices,
+                                                      self.output_size[1], self.output_size[0])
+        if self.return_indices:
+            self.save_for_backward(input, indices)
+            self.mark_non_differentiable(indices)
+            return output, indices
+        else:
+            self.save_for_backward(input)
+            self.indices = indices
+            return output
+
+    def backward(self, grad_output, _indices_grad=None):
+        if self.return_indices:
+            input, indices = self.saved_tensors
+        else:
+            input, = self.saved_tensors
+            indices = self.indices
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.SpatialAdaptiveMaxPooling_updateGradInput(backend.library_state,
+                                                         input, grad_output, grad_input, indices)
+        return grad_input
+
+
+class AdaptiveAvgPool2d(Function):
+
+    def __init__(self, output_size):
+        self.output_size = _pair(output_size)
+
+    def forward(self, input):
+        backend = type2backend[type(input)]
+        output = input.new()
+        # can avoid this with cudnn
+        self.save_for_backward(input)
+        backend.SpatialAdaptiveAveragePooling_updateOutput(
+            backend.library_state,
+            input, output,
+            self.output_size[1], self.output_size[0])
+        return output
+
+    def backward(self, grad_output):
+        backend = type2backend[type(grad_output)]
+        input, = self.saved_tensors
+        grad_input = grad_output.new()
+        backend.SpatialAdaptiveAveragePooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input)
+        return grad_input
+
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool3d)
 _all_functions.append(MaxPool1d)
@@ -372,3 +478,6 @@ _all_functions.append(MaxPool3d)
 _all_functions.append(MaxUnpool2d)
 _all_functions.append(MaxUnpool3d)
 _all_functions.append(FractionalMaxPool2d)
+_all_functions.append(AdaptiveMaxPool1d)
+_all_functions.append(AdaptiveMaxPool2d)
+_all_functions.append(AdaptiveAvgPool2d)

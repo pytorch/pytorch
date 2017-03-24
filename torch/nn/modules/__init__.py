@@ -11,7 +11,8 @@ from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, NLLLoss2d, \
     SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss
 from .container import Container, Sequential, ModuleList, ParameterList
 from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxPool3d, \
-    MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d
+    MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d, AdaptiveMaxPool1d, \
+    AdaptiveMaxPool2d, AdaptiveAvgPool1d, AdaptiveAvgPool2d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d
 from .dropout import Dropout, Dropout2d, Dropout3d
 from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d
@@ -37,5 +38,6 @@ __all__ = [
     'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'Dropout', 'Dropout2d',
     'Dropout3d', 'ReflectionPad2d', 'ReplicationPad2d', 'ReplicationPad3d', 'CrossMapLRN2d',
     'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
-    'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d',
+    'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'AdaptiveMaxPool1d',
+    'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d'
 ]

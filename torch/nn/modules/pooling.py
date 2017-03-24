@@ -713,4 +713,127 @@ class LPPool2d(Module):
                            self.stride, self.ceil_mode)
 
 
-# TODO: AdaptiveMaxPool2d
+class AdaptiveMaxPool1d(Module):
+    """Applies a 1D adaptive max pooling over an input signal composed of several input planes.
+
+    The output size is H, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size H of the image
+
+    Examples:
+        >>> # target output size of 5
+        >>> m = nn.AdaptiveMaxPool1d(5)
+        >>> input = autograd.Variable(torch.randn(1, 64, 8))
+        >>> output = m(input)
+
+    """
+
+    def __init__(self, output_size, return_indices=False):
+        super(AdaptiveMaxPool1d, self).__init__()
+        self.output_size = output_size
+        self.return_indices = return_indices
+
+    def forward(self, input):
+        return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'output_size=' + str(self.output_size) + ')'
+
+
+class AdaptiveMaxPool2d(Module):
+    """Applies a 2D adaptive max pooling over an input signal composed of several input planes.
+
+    The output is of size H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size of the image of the form H x W.
+                     Can be a tuple (H, W) or a single number H for a square image H x H
+
+    Examples:
+        >>> # target output size of 5x7
+        >>> m = nn.AdaptiveMaxPool2d((5,7))
+        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9))
+        >>> # target output size of 7x7 (square)
+        >>> m = nn.AdaptiveMaxPool2d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> output = m(input)
+
+    """
+
+    def __init__(self, output_size, return_indices=False):
+        super(AdaptiveMaxPool2d, self).__init__()
+        self.output_size = output_size
+        self.return_indices = return_indices
+
+    def forward(self, input):
+        return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'output_size=' + str(self.output_size) + ')'
+
+
+class AdaptiveAvgPool1d(Module):
+    """Applies a 1D adaptive average pooling over an input signal composed of several input planes.
+
+    The output size is H, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size H of the image
+
+    Examples:
+        >>> # target output size of 5
+        >>> m = nn.AdaptiveAvgPool1d(5)
+        >>> input = autograd.Variable(torch.randn(1, 64, 8))
+        >>> output = m(input)
+
+    """
+
+    def __init__(self, output_size):
+        super(AdaptiveAvgPool2d, self).__init__()
+        self.output_size = output_size
+
+    def forward(self, input):
+        return F.adaptive_avg_pool1d(input, self.output_size)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'output_size=' + str(self.output_size) + ')'
+
+
+class AdaptiveAvgPool2d(Module):
+    """Applies a 2D adaptive average pooling over an input signal composed of several input planes.
+
+    The output is of size H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size of the image of the form H x W.
+                     Can be a tuple (H, W) or a single number H for a square image H x H
+
+    Examples:
+        >>> # target output size of 5x7
+        >>> m = nn.AdaptiveAvgPool2d((5,7))
+        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9))
+        >>> # target output size of 7x7 (square)
+        >>> m = nn.AdaptiveAvgPool2d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> output = m(input)
+
+    """
+
+    def __init__(self, output_size):
+        super(AdaptiveAvgPool2d, self).__init__()
+        self.output_size = output_size
+
+    def forward(self, input):
+        return F.adaptive_avg_pool1d(input, self.output_size)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'output_size=' + str(self.output_size) + ')'

@@ -294,6 +294,27 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
+def adaptive_max_pool1d(input, output_size, return_indices):
+    return _functions.thnn.AdaptiveMaxPool1d(output_size, return_indices)(input)
+
+
+def adaptive_max_pool2d(input, output_size, return_indices):
+    return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
+
+
+def adaptive_avg_pool1d(input, output_size):
+    if input.dim() != 3:
+        raise ValueError('expected 3D input (got {} dimensions)'
+                         .format(input.dim()))
+    output_size = _single(output_size) + (1,)
+    f = _functions.thnn.AdaptiveAvgPool2d(output_size)
+    return f(input.unsqueeze(3)).squeeze(3)
+
+
+def adaptive_avg_pool2d(input, output_size):
+    return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
+
+
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
