@@ -204,3 +204,7 @@ def debug(f):
         DebugMode.run(func)
 
     return wrapper
+
+
+def AddPlan(meta_net_def, plan_name, plan_def):
+    meta_net_def.plans[plan_name] = str(plan_def)
