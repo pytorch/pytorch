@@ -221,16 +221,11 @@ class TestNN(NNTestCase):
     def _get_parameters(self, module):
         params = []
         d_params = []
-        if hasattr(module, 'weight') and module.weight is not None:
-            params += [module.weight.data]
-            if module.weight.grad is None:
-                module.weight._grad = Variable(module.weight.data.clone().zero_())
-            d_params += [module.weight.grad.data]
-        if hasattr(module, 'bias') and module.bias is not None:
-            params += [module.bias.data]
-            if module.bias.grad is None:
-                module.bias._grad = Variable(module.bias.data.clone().zero_())
-            d_params += [module.bias.grad.data]
+        for p in module.parameters():
+            if p.grad is None:
+                p._grad = Variable(p.data.clone().zero_(), volatile=True)
+            params.append(p.data)
+            d_params.append(p.grad.data)
         return params, d_params
 
     def test_hooks(self):

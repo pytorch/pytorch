@@ -14,7 +14,11 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   } else {
     auto grad_fn = ctr(std::move(flags));
     for (auto& output : outputs) {
-      result.emplace_back(std::make_shared<Variable>(std::move(output), grad_fn));
+      if (output) {
+        result.emplace_back(std::make_shared<Variable>(std::move(output), grad_fn));
+      } else {
+        result.emplace_back(nullptr);
+      }
     }
   }
   return result;

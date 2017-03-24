@@ -21,7 +21,9 @@ Variable::Variable(
     , output_nr(0)
     , pyobj(nullptr)
 {
-  if (!this->data) throw std::runtime_error("Variable data is NULL");
+  if (!this->data) {
+    throw std::runtime_error("Variable data is NULL");
+  }
 }
 
 Variable::Variable(
@@ -36,7 +38,9 @@ Variable::Variable(
     , output_nr(grad_fn->num_inputs++)
     , pyobj(nullptr)
 {
-  if (!this->data) throw std::runtime_error("Variable data is NULL");
+  if (!this->data) {
+    throw std::runtime_error("Variable data is NULL");
+  }
 }
 
 auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
@@ -62,27 +66,30 @@ auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
   return result;
 }
 
-auto Variable::save() const -> SavedVariable {
-  return SavedVariable(
-    std::unique_ptr<Tensor>(data->clone_shallow()),
-    **version_counter,
-    std::unique_ptr<VariableVersion>(version_counter->new_saved_ref()));
-}
+auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
+  if (!data) return nullptr;
 
-auto Variable::save_opt(Variable* var) -> SavedVariable {
- return var ? var->save() : SavedVariable();
-}
-
-auto SavedVariable::unpack() -> std::unique_ptr<thpp::Tensor>& {
-  if (data) {
-    int current_version = **version;
-    if (expected_version != current_version) {
-      throw std::runtime_error("one of the variables "
-          "needed for gradient computation has been modified by an "
-          "inplace operation");
-    }
+  int current_version = **version;
+  if (expected_version != current_version) {
+    throw std::runtime_error("one of the variables "
+        "needed for gradient computation has been modified by an "
+        "inplace operation");
   }
-  return data;
+
+  auto new_var = std::make_shared<Variable>(
+      std::unique_ptr<thpp::Tensor>(data->clone_shallow()),
+      requires_grad, is_volatile);
+  if (!grad_fn && !weak_grad_fn.expired()) {
+    // there's no risk of race condition here, because weak_grad_fn is
+    // guaranteed to be valid for the entire duration of the call
+    // (of course only if it was used in the first place).
+    new_var->grad_fn = weak_grad_fn.lock();
+  } else {
+    new_var->grad_fn = grad_fn;
+  }
+  new_var->version_counter->join_with(*version);
+
+  return new_var;
 }
 
 }} // namespace torch::autograd
