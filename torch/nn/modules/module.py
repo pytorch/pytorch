@@ -403,7 +403,7 @@ class Module(object):
         if self not in memo:
             memo.add(self)
             yield prefix, self
-            for name, module in self.named_children():
+            for name, module in self._modules.items():
                 submodule_prefix = prefix + ('.' if prefix else '') + name
                 for m in module.named_modules(memo, submodule_prefix):
                     yield m
