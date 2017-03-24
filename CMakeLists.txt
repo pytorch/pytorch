@@ -133,7 +133,6 @@ if (BUILD_PYTHON)
         TARGET python_copy_files PRE_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
         ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-    # file(COPY ${python_src} DESTINATION ${CMAKE_BINARY_DIR}/caffe2/${dir})
   endforeach()
 
   # Install commands
