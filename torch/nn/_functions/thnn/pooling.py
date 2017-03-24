@@ -380,8 +380,8 @@ class AdaptiveMaxPool1d(Function):
         backend = type2backend[type(input)]
         indices, output = input2d.new().long(), input2d.new()
         backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
-                                                      input2d, output, indices,
-                                                      self.output_size, 1)
+                                                       input2d, output, indices,
+                                                       self.output_size, 1)
         indices = indices.squeeze(2)
         output = output.squeeze(2)
         if self.return_indices:
@@ -406,7 +406,7 @@ class AdaptiveMaxPool1d(Function):
         grad_input = grad_output2d.new()
         backend = type2backend[type(input)]
         backend.SpatialAdaptiveMaxPooling_updateGradInput(backend.library_state,
-                                                         input2d, grad_output2d, grad_input, indices2d)
+                                                          input2d, grad_output2d, grad_input, indices2d)
         grad_input = grad_input.squeeze(2)
         return grad_input
 
@@ -421,8 +421,8 @@ class AdaptiveMaxPool2d(Function):
         backend = type2backend[type(input)]
         indices, output = input.new().long(), input.new()
         backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
-                                                      input, output, indices,
-                                                      self.output_size[1], self.output_size[0])
+                                                       input, output, indices,
+                                                       self.output_size[1], self.output_size[0])
         if self.return_indices:
             self.save_for_backward(input, indices)
             self.mark_non_differentiable(indices)
@@ -441,7 +441,7 @@ class AdaptiveMaxPool2d(Function):
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
         backend.SpatialAdaptiveMaxPooling_updateGradInput(backend.library_state,
-                                                         input, grad_output, grad_input, indices)
+                                                          input, grad_output, grad_input, indices)
         return grad_input
 
 
