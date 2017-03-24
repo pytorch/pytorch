@@ -1,43 +1,11 @@
 import torch
 import torch._C as _C
 import torch.utils.hooks as hooks
+from torch._six import with_metaclass
 from collections import OrderedDict
 
 
-class Function(_C._FunctionBase):
-    """Records operation history and defines formulas for differentiating ops.
-
-    Every operation performed on :class:`Variable` s creates a new function
-    object, that performs the computation, and records that it happened.
-    The history is retained in the form of a DAG of functions, with edges
-    denoting data dependencies (``input <- output``). Then, when backward is
-    called, the graph is processed in the topological ordering, by calling
-    :func:`backward` methods of each :class:`Function` object, and passing
-    returned gradients on to next :class:`Function` s.
-
-    Normally, the only way users interact with functions is by creating
-    subclasses and defining new operations. This is a recommended way of
-    extending torch.autograd.
-
-    Since Function logic is a hotspot in most scripts, almost all of it
-    was moved to our C backend, to ensure that the framework overhead is
-    minimal.
-
-    Each function is meant to be used only once (in the forward pass).
-
-    Attributes:
-        saved_tensors: Tuple of Tensors that were saved in the call to
-            :func:`forward`.
-        needs_input_grad: Tuple of booleans of length :attr:`num_inputs`,
-            indicating whether a given input requires gradient. This can be
-            used to optimize buffers saved for backward, and ignoring gradient
-            computation in :func:`~Function.backward`.
-        num_inputs: Number of inputs given to :func:`forward`.
-        num_outputs: Number of tensors returned by :func:`forward`.
-        requires_grad: Boolean indicating whether the :func:`backward` will
-            ever need to be called.
-    """
-    __call__ = _C._FunctionBase._do_forward
+class _ContextMethodMixin(object):
 
     def save_for_backward(self, *tensors):
         """Saves given tensors for a future call to :func:`~Function.backward`.
@@ -102,6 +70,9 @@ class Function(_C._FunctionBase):
         """
         self.non_differentiable = args
 
+
+class _HookMixin(object):
+
     @staticmethod
     def _register_hook(backward_hooks, hook):
         if backward_hooks is None:
@@ -110,7 +81,78 @@ class Function(_C._FunctionBase):
         backward_hooks[handle.id] = hook
         return backward_hooks, handle
 
-    def forward(self, *input):
+
+class CFunction(object):
+    _is_legacy = False
+
+    def apply(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+class BackwardCFunction(CFunction, _C._FunctionBase, _ContextMethodMixin, _HookMixin):
+
+    def apply(self, *args):
+        return self._forward_cls.backward(self, *args)
+
+
+class FunctionMeta(type):
+
+    def __init__(cls, name, bases, attrs):
+        for super_cls in cls.mro():
+            if 'forward' in super_cls.__dict__:
+                has_static_forward = isinstance(super_cls.__dict__['forward'], staticmethod)
+                break
+
+        # old-style functions
+        if not has_static_forward:
+            setattr(cls, '_is_legacy', True)
+            return super(FunctionMeta, cls).__init__(name, bases, attrs)
+
+        backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
+        setattr(cls, '_backward_cls', backward_fn)
+
+        return super(FunctionMeta, cls).__init__(name, bases, attrs)
+
+
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, CFunction, _ContextMethodMixin, _HookMixin)):
+    """Records operation history and defines formulas for differentiating ops.
+
+    Every operation performed on :class:`Variable` s creates a new function
+    object, that performs the computation, and records that it happened.
+    The history is retained in the form of a DAG of functions, with edges
+    denoting data dependencies (``input <- output``). Then, when backward is
+    called, the graph is processed in the topological ordering, by calling
+    :func:`backward` methods of each :class:`Function` object, and passing
+    returned gradients on to next :class:`Function` s.
+
+    Normally, the only way users interact with functions is by creating
+    subclasses and defining new operations. This is a recommended way of
+    extending torch.autograd.
+
+    Since Function logic is a hotspot in most scripts, almost all of it
+    was moved to our C backend, to ensure that the framework overhead is
+    minimal.
+
+    Each function is meant to be used only once (in the forward pass).
+
+    Attributes:
+        saved_tensors: Tuple of Tensors that were saved in the call to
+            :func:`forward`.
+        needs_input_grad: Tuple of booleans of length :attr:`num_inputs`,
+            indicating whether a given input requires gradient. This can be
+            used to optimize buffers saved for backward, and ignoring gradient
+            computation in :func:`~Function.backward`.
+        num_inputs: Number of inputs given to :func:`forward`.
+        num_outputs: Number of tensors returned by :func:`forward`.
+        requires_grad: Boolean indicating whether the :func:`backward` will
+            ever need to be called.
+    """
+
+    # only for backward compatibility
+    __call__ = _C._FunctionBase._do_forward
+
+    @staticmethod
+    def forward(*args, **kwargs):
         """Performs the operation.
 
         This function is to be overriden by all subclasses.
@@ -119,7 +161,8 @@ class Function(_C._FunctionBase):
         """
         raise NotImplementedError
 
-    def backward(self, *grad_output):
+    @staticmethod
+    def backward(*grad_outputs):
         """Defines a formula for differentiating the operation.
 
         This function is to be overriden by all subclasses.
