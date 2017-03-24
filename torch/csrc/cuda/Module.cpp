@@ -324,3 +324,11 @@ void THCPModule_useNccl()
   ncclGetUniqueId(&uniqueId);
 }
 #endif
+
+PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self)
+{
+  HANDLE_TH_ERRORS
+  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  return PyLong_FromVoidPtr(handle);
+  END_HANDLE_TH_ERRORS
+}

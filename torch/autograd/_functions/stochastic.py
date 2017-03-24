@@ -83,8 +83,9 @@ class Normal(StochasticFunction):
             stddevs_cb = stddevs_sq * stddevs
             stddevs_sq += 1e-6
             stddevs_cb += 1e-6
-            grad_stddevs = (grad_means * grad_means) / stddevs_cb
-            grad_stddevs = (stddevs - grad_stddevs) * reward
+            grad_stddevs = (stddevs_sq - (grad_means * grad_means))
+            grad_stddevs /= stddevs_cb
+            grad_stddevs *= reward
             grad_means /= stddevs_sq
         grad_means *= reward
         return grad_means, grad_stddevs

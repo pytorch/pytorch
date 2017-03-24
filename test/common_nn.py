@@ -164,13 +164,42 @@ module_tests = [
     ),
     dict(
         module_name='PReLU',
-        input_size=(2, 3, 4, 5)
+        input_size=(2, 3, 4),
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        desc='1d',
+    ),
+    dict(
+        module_name='PReLU',
+        constructor_args=(3,),
+        input_size=(2, 3, 4),
+        desc='1d_multiparam',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+    ),
+    dict(
+        module_name='PReLU',
+        input_size=(2, 3, 4, 5),
+        desc='2d',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
     ),
     dict(
         module_name='PReLU',
         constructor_args=(3,),
         input_size=(2, 3, 4, 5),
-        desc='multiparam'
+        desc='2d_multiparam',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+    ),
+    dict(
+        module_name='PReLU',
+        input_size=(2, 3, 4, 5, 6),
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        desc='3d',
+    ),
+    dict(
+        module_name='PReLU',
+        constructor_args=(3,),
+        input_size=(2, 3, 4, 5, 6),
+        desc='3d_multiparam',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
     ),
     dict(
         module_name='Softsign',

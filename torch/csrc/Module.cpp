@@ -292,6 +292,8 @@ IMPLEMENT_STATELESS(qr)
 IMPLEMENT_STATELESS(geqrf)
 IMPLEMENT_STATELESS(orgqr)
 IMPLEMENT_STATELESS(ormqr)
+IMPLEMENT_STATELESS(btrifact)
+IMPLEMENT_STATELESS(btrisolve)
 
 #undef IMPLEMENT_STATELESS
 
@@ -363,8 +365,8 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
     PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
     if (THPModule_isTensor(first_arg)) {
       tensor = first_arg;
-    } else if ((iterator = PyObject_GetIter(first_arg))) {
-      item = PyIter_Next(iterator);
+    } else if (PySequence_Check(first_arg)) {
+      item = PySequence_GetItem(first_arg, 0);
       if (item && (THPModule_isTensor(item) || THPVariable_Check(item))) {
         tensor = item;
       }
@@ -452,6 +454,7 @@ extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
 extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
 extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
 extern PyObject * THCPModule_getCurrentStream_wrap(PyObject *self);
+extern PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self);
 extern PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *stream);
 extern PyObject * THCPModule_getDriverVersion(PyObject *self);
 extern PyObject * THCPModule_isDriverSufficient(PyObject *self);
@@ -483,6 +486,7 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
+  {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
@@ -624,6 +628,8 @@ static PyMethodDef TorchMethods[] = {
   {"geqrf",           (PyCFunction)THPModule_geqrf,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"btrifact",        (PyCFunction)THPModule_btrifact,          METH_VARARGS | METH_KEYWORDS, NULL},
+  {"btrisolve",       (PyCFunction)THPModule_btrisolve,         METH_VARARGS | METH_KEYWORDS, NULL},
 
   // Sparse functions
   {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},

@@ -40,6 +40,18 @@
 #endif
 
 #if IS_CUDA
+#define THIntegerTensor THCudaIntTensor
+#define THIntegerTensor_(NAME) TH_CONCAT_2(THCudaIntTensor_,NAME)
+#define THPIntegerTensor THCPIntTensor
+#define THPIntegerTensorClass THCPIntTensorClass
+#else
+#define THIntegerTensor THIntTensor
+#define THIntegerTensor_(NAME) TH_CONCAT_2(THIntTensor_,NAME)
+#define THPIntegerTensor THPIntTensor
+#define THPIntegerTensorClass THPIntTensorClass
+#endif
+
+#if IS_CUDA
 #define THPBoolTensor THCPByteTensor
 #define THPBoolTensorClass THCPByteTensorClass
 #else

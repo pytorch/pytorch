@@ -7,6 +7,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 
+from test_torch import TestTorch
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests
 
 HAS_CUDA = True
@@ -737,6 +738,12 @@ class TestCuda(TestCase):
 
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
+
+    def test_btrifact(self):
+        TestTorch._test_btrifact(self, lambda t: t.cuda())
+
+    def test_btrisolve(self):
+        TestTorch._test_btrisolve(self, lambda t: t.cuda())
 
 
 if HAS_CUDA:

@@ -215,6 +215,11 @@ def current_stream():
     return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream())
 
 
+def current_blas_handle():
+    """Returns cublasHandle_t pointer to current cuBLAS handle"""
+    return torch._C._cuda_getCurrentBlasHandle()
+
+
 def _host_allocator():
     _lazy_init()
     return torch._C._cuda_cudaHostAllocator()

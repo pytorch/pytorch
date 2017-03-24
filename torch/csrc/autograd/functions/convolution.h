@@ -25,8 +25,11 @@ struct ConvParams {
   std::vector<int> output_padding;
   int groups;
   bool benchmark;
+  bool cudnn_enabled;
 
   bool is_dilated() const;
+  bool is_output_padding_neg() const;
+  bool is_padding_neg() const;
   void view1d_as_2d();
 
 };

@@ -211,6 +211,19 @@ struct THCNumerics<half> {
 #endif
   }
 
+  static inline __host__ __device__ half exp10(half a) {
+#ifdef __CUDA_ARCH__
+#ifdef CUDA_HALF_INSTRUCTIONS
+    return hexp10(a);
+#else
+    float fa = __half2float(a);
+    return __float2half(exp10f(fa));
+#endif
+#else // __CUDA_ARCH__
+    return THC_float2half(exp10f(THC_half2float(a)));
+#endif
+  }
+
   static inline __host__ __device__ half log(half a) {
 #ifdef __CUDA_ARCH__
 #ifdef CUDA_HALF_INSTRUCTIONS
@@ -515,6 +528,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
+  static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
   static inline __host__ __device__  float log  (float a) { return   logf(a); }
   static inline __host__ __device__  float log1p(float a) { return log1pf(a); }
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
@@ -558,6 +572,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
+  static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
   static inline __host__ __device__  double log  (double a) { return   ::log(a); }
   static inline __host__ __device__  double log1p(double a) { return ::log1p(a); }
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
