@@ -23,7 +23,8 @@ class _QueueReader(dataio.Reader):
         fields, status_blob = dequeue(
             dequeue_net,
             self._wrapper.queue(),
-            len(self.schema().field_names()))
+            len(self.schema().field_names()),
+            field_names=self.schema().field_names())
         return [dequeue_net], status_blob, fields
 
 
@@ -72,7 +73,8 @@ class Queue(QueueWrapper):
             [],
             [self._queue],
             capacity=self.capacity,
-            num_blobs=len(self._schema.field_names()))
+            num_blobs=len(self._schema.field_names()),
+            field_names=self._schema.field_names())
 
 
 def enqueue(net, queue, data_blobs, status=None):
@@ -82,8 +84,12 @@ def enqueue(net, queue, data_blobs, status=None):
     return results[-1]
 
 
-def dequeue(net, queue, num_blobs, status=None):
-    data_names = [net.NextName('data', i) for i in range(num_blobs)]
+def dequeue(net, queue, num_blobs, status=None, field_names=None):
+    if field_names is not None:
+        assert len(field_names) == num_blobs
+        data_names = [net.NextName(name) for name in field_names]
+    else:
+        data_names = [net.NextName('data', i) for i in range(num_blobs)]
     if status is None:
         status = net.NextName('status')
     results = net.SafeDequeueBlobs(queue, data_names + [status])
