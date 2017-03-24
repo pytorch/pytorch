@@ -1913,7 +1913,7 @@ static const char *R = &__R;
       output: True
     - arg: THIntegerTensor* info
       kwarg_only: True
-      default: THIntegerTensor_(new)(LIBRARY_STATE_NOARGS)
+      default: NULL
     - THTensor* self
 ]]
 
