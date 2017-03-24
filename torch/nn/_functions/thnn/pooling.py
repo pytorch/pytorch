@@ -487,7 +487,6 @@ class AdaptiveAvgPool2d(Function):
     def forward(self, input):
         backend = type2backend[type(input)]
         output = input.new()
-        # can avoid this with cudnn
         self.save_for_backward(input)
         backend.SpatialAdaptiveAveragePooling_updateOutput(
             backend.library_state,
