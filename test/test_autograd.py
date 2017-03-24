@@ -32,6 +32,53 @@ def backward_engine(engine):
 
 class TestAutograd(TestCase):
 
+    def test_function(self):
+        class MyFunction(Function):
+
+            @staticmethod
+            def forward(ctx, tensor1, scalar, tensor2):
+                ctx.scalar = scalar
+                ctx.save_for_backward(tensor1, tensor2)
+                return tensor1 + scalar * tensor2 + tensor1 * tensor2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                var1, var2 = ctx.saved_variables
+                return (grad_output + grad_output * var2,
+                        grad_output * ctx.scalar + grad_output * var1)
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+        result = MyFunction.apply(x, 2, y)
+        go = Variable(torch.ones(1), requires_grad=True)
+        result.sum().backward(go)
+
+        self.assertEqual(x.grad.data, y.data + torch.ones(5, 5))
+        self.assertEqual(y.grad.data, x.data + torch.ones(5, 5) * 2)
+
+        self.assertFalse(x.grad.volatile)
+        self.assertFalse(y.grad.volatile)
+        self.assertIsNotNone(x.grad.grad_fn)
+        self.assertIsNotNone(y.grad.grad_fn)
+
+        def desc_graph(fn):
+            result = type(fn).__name__ + '('
+            next_functions = fn.next_functions
+            for next_fn, _ in next_functions:
+                result += desc_graph(next_fn)
+                result += ', '
+            if next_functions:
+                result = result[:-2]
+            return result + ')'
+        x_grad_desc = desc_graph(x.grad.grad_fn)
+        y_grad_desc = desc_graph(y.grad.grad_fn)
+        self.assertEqual(
+            x_grad_desc,
+            'Identity(Add(Error(AccumulateGrad()), Mul(Error(AccumulateGrad()), AccumulateGrad())))')
+        self.assertEqual(
+            y_grad_desc,
+            'Identity(Add(MulConstant(Error(AccumulateGrad())), Mul(Error(AccumulateGrad()), AccumulateGrad())))')
+
     def test_hooks(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
