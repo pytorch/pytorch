@@ -166,18 +166,18 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
 
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, sparse, dense));
 
-  THArgCheck(sparse->nDimensionI == 2, 2,
+  THArgCheck(sparse->nDimensionI == 2, 3,
       "matrices expected, got %dD tensor", sparse->nDimensionI);
-  THArgCheck(sparse->nDimensionV == 0, 2,
+  THArgCheck(sparse->nDimensionV == 0, 3,
       "scalar values expected, got %dD values", sparse->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 2,
+  THArgCheck(dense->nDimension == 2, 4,
       "matrices expected, got %dD tensor", dense->nDimension);
 
   long m = THCSTensor_(size)(state, sparse, 0);
   long k = THCSTensor_(size)(state, sparse, 1);
   long n = THCTensor_(size)(state, dense, 1);
 
-  THArgCheck(THCTensor_(size)(state, dense, 0) == k, 3,
+  THArgCheck(THCTensor_(size)(state, dense, 0) == k, 4,
       "Expected dim 0 size %d, got %d", k, THCTensor_(size)(state, dense, 0));
   long size[2] = {m, n};
   THCSTensor_(rawResize)(state, r_, 1, 1, size);

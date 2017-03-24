@@ -314,7 +314,7 @@ class TestSparse(TestCase):
 
     def test_hsmm(self):
         def test_shape(di, dj, dk):
-            for is_cuda in [True]:
+            for is_cuda in [False, True]:
                 x = self._gen_sparse(2, 20, [di, dj], is_cuda)[0]
                 y = torch.randn(dj, dk)
                 if is_cuda:

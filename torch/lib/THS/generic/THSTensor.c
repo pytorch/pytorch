@@ -372,20 +372,6 @@ int THSTensor_(isContiguous)(const THSTensor *self) {
 /* Internal slice operations. Buffers can be reused across calls to avoid
 allocating tensors every time */
 
-void THSTensor_(addSlice)(
-  THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
-  THTensor *dst, THTensor *src1, real value, THTensor *src2,
-  long dim, long dstIdx, long src1Idx, long src2Idx) {
-  if (src1->nDimension > 1) {
-    THTensor_(select)(src1Buffer, src1, dim, src1Idx);
-    THTensor_(select)(src2Buffer, src2, dim, src2Idx);
-    THTensor_(select)(dstBuffer, dst, dim, dstIdx);
-    THTensor_(cadd)(dstBuffer, src1Buffer, value, src2Buffer);
-  } else {
-    THTensor_fastSet1d(dst, dstIdx, THTensor_fastGet1d(src1, src1Idx) + value * THTensor_fastGet1d(src2, src2Idx));
-  }
-}
-
 void THSTensor_(mulSlice)(
   THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
   THTensor *dst, THTensor *src1, THTensor *src2,
@@ -414,19 +400,6 @@ void THSTensor_(divSlice)(
   }
 }
 
-void THSTensor_(copySlice)(
-  THTensor *dstBuffer, THTensor *srcBuffer,
-  THTensor *dst, THTensor *src,
-  long dim, long dstIdx, long srcIdx) {
-  if (src->nDimension > 1) {
-    THTensor_(select)(srcBuffer, src, dim, srcIdx);
-    THTensor_(select)(dstBuffer, dst, dim, dstIdx);
-    THTensor_(copy)(dstBuffer, srcBuffer);
-  } else {
-    THTensor_fastSet1d(dst, dstIdx, THTensor_fastGet1d(src, srcIdx));
-  }
-}
-
 THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, long nnz) {
   THTensor *new_values;
   if (THTensor_(nDimension)(values) == 0) { // values tensor uninitialized
@@ -441,66 +414,65 @@ THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, long nnz) {
 }
 
 void THSTensor_(reorder)(THSTensor *self) {
-  /* TODO: We do an insertion sort here, should change to quicksort or shellsort
-  */
   if (self->nnz < 2) return;
-  long d, i, j, p, cmp, nDimI, nDimV, indskip, tmplong;
-  real tmpreal;
-  THLongTensor *indices_ = self->indices;
-  THTensor *values_ = self->values;
+  THLongTensor *indices_ = THSTensor_(indices)(self);
+  THTensor *values_ = THSTensor_(values)(self);
+  THTensor *contiguousValues = THTensor_(newContiguous)(values_);
   long *indices = THLongTensor_data(indices_);
   real *values = THTensor_(data)(values_);
-  indskip = THLongTensor_size(indices_, 1); // To index indices
-  nDimI = THSTensor_(nDimensionI)(self);
-  nDimV = THSTensor_(nDimensionV)(self);
+  long nDimI = THSTensor_(nDimensionI)(self);
+  long nDimV = THSTensor_(nDimensionV)(self);
 
-  THTensor *srcBuffer = THTensor_(new)();
-  THTensor *dstBuffer = THTensor_(new)();
-  THTensor *tmpBuffer = THSTensor_(newValuesWithSizeOf)(values_, 1);
-
-#define IND(i, d) indices[d * indskip + i]
-  for (i = 1; i < self->nnz; i++) {
-    for (j = i-1; j >= 0; j--) {
-      cmp = 0;
-      for (d = 0; d < nDimI; d++) {
-        if (IND(j+1, d) < IND(j, d))
-          cmp = 1;
-        if (IND(j+1, d) != IND(j, d)) break;
-      }
-      if (cmp) {
-        THSTensor_(copySlice)(dstBuffer, srcBuffer, tmpBuffer, values_, 0, 0, j+1);
-        THSTensor_(copySlice)(dstBuffer, srcBuffer, values_, values_, 0, j+1, j);
-        THSTensor_(copySlice)(dstBuffer, srcBuffer, values_, tmpBuffer, 0, j, 0);
-        for (d = 0; d < nDimI; d++) {
-          tmplong = IND(j+1, d); IND(j+1, d) = IND(j, d); IND(j, d) = tmplong;
-        }
-      } else break;
-    }
+  THLongTensor *indicesScalar = THLongTensor_newWithSize1d(self->nnz);
+  THLongTensor *indicesSlice = THLongTensor_new();
+  THLongTensor *indicesBuffer = THLongTensor_newWithSize1d(self->nnz);
+  THLongTensor *indicesPermutation = THLongTensor_newWithSize1d(self->nnz);
+  THLongTensor_zero(indicesScalar);
+  long factor = 1;
+  for (long d = nDimI - 1; d >= 0; d--) {
+    THLongTensor_select(indicesSlice, indices_, 0, d);
+    THLongTensor_cadd(indicesScalar, indicesScalar, factor, indicesSlice);
+    factor *= self->size[d];
   }
 
-  i = 0;
-  for (j = 1; j < self->nnz; j++) {
-    cmp = 1;
-    // TODO: pass eps in as a parameter
-    for (d = 0; d < nDimI; d++)
-      if (IND(i, d) != IND(j, d)) {
-        cmp = 0;
-        break;
+  THLongTensor *newIndices = THLongTensor_new();
+  THTensor *newValues = THTensor_(new)();
+  THLongTensor_resizeAs(newIndices, indices_);
+  THTensor_(resizeAs)(newValues, values_);
+  THSTensor_(move)(self, newIndices, newValues);
+
+  THLongTensor_sort(indicesBuffer, indicesPermutation, indicesScalar, 0, 0);
+
+  long i = -1;
+  long prev = -1;
+  long blockSize = contiguousValues->stride[0];
+  for (long j = 0; j < self->nnz; j++) {
+    long pos = THTensor_fastGet1d(indicesPermutation, j);
+    long curr = THTensor_fastGet1d(indicesBuffer, j);
+    if (curr == prev) {
+      THBlas_(axpy)(blockSize, 1,
+        THTensor_(data)(contiguousValues) + pos * blockSize, 1,
+        THTensor_(data)(newValues) + i * blockSize, 1);
+    } else {
+      ++i;
+      for (long d = 0; d < nDimI; d++) {
+        THTensor_fastSet2d(newIndices, d, i, THTensor_fastGet2d(indices_, d, pos));
       }
-    if (cmp) {
-      THSTensor_(addSlice)(dstBuffer, dstBuffer, srcBuffer, values_, values_, 1, values_, 0, i, i, j);
+      THBlas_(copy)(blockSize,
+        THTensor_(data)(contiguousValues) + pos * blockSize, 1,
+        THTensor_(data)(newValues) + i * blockSize, 1);
     }
-    else {
-      THSTensor_(copySlice)(dstBuffer, srcBuffer, values_, values_, 0, ++i, j);
-      for (d = 0; d < nDimI; d++) IND(i, d) = IND(j, d);
-    }
+    prev = curr;
   }
   self->nnz = i + 1;
-#undef IND
 
-  THTensor_(free)(srcBuffer);
-  THTensor_(free)(dstBuffer);
-  THTensor_(free)(tmpBuffer);
+  THLongTensor_free(indicesScalar);
+  THLongTensor_free(indicesBuffer);
+  THLongTensor_free(indicesPermutation);
+  THLongTensor_free(indicesSlice);
+  THLongTensor_free(indices_);
+  THTensor_(free)(values_);
+  THTensor_(free)(contiguousValues);
 }
 
 void THSTensor_(contiguous)(THSTensor *self) {
