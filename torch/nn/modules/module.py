@@ -341,11 +341,8 @@ class Module(object):
 
     def children(self):
         """Returns an iterator over immediate children modules."""
-        memo = set()
-        for module in self._modules.values():
-            if module is not None and module not in memo:
-                memo.add(module)
-                yield module
+        for name, module in self.named_children():
+            yield module
 
     def named_children(self):
         """Returns an iterator over immediate children modules, yielding both
@@ -353,7 +350,7 @@ class Module(object):
 
         Example:
             >>> for name, module in model.named_children():
-            >>>     if name in PRINT_LIST:
+            >>>     if name in ['conv4', 'conv5']:
             >>>         print(module)
         """
         memo = set()
@@ -362,7 +359,7 @@ class Module(object):
                 memo.add(module)
                 yield name, module
 
-    def modules(self, memo=None):
+    def modules(self):
         """Returns an iterator over all modules in the network.
 
         Note:
@@ -379,16 +376,10 @@ class Module(object):
             )
             1 -> Linear (2 -> 2)
         """
-        if memo is None:
-            memo = set()
-        if self not in memo:
-            memo.add(self)
-            yield self
-            for module in self.children():
-                for m in module.modules(memo):
-                    yield m
+        for name, module in self.named_modules():
+            yield module
 
-    def named_modules(self, memo=None, prefix=None):
+    def named_modules(self, memo=None, prefix=''):
         """Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
 
@@ -409,16 +400,16 @@ class Module(object):
 
         if memo is None:
             memo = set()
-            prefix = []
         if self not in memo:
             memo.add(self)
-            yield '.'.join(prefix), self
+            yield prefix, self
             for name, module in self.named_children():
-                prefix.append(name)
-                for m in module.named_modules(memo, prefix):
-                    yield m
                 if prefix:
-                    prefix.pop()
+                    submodule_prefix = prefix + '.' + name
+                else:
+                    submodule_prefix = name
+                for m in module.named_modules(memo, submodule_prefix):
+                    yield m
 
     def train(self, mode=True):
         """Sets the module in training mode.
