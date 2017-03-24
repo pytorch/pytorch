@@ -160,7 +160,7 @@ def recurrent_net(
         reference_grad = reference + "_grad"
         if (reference in backward_mapping and
                 reference_grad != str(backward_mapping[reference])):
-            backward_cell_net.Copy(
+            backward_cell_net.Alias(
                 backward_mapping[reference], reference_grad)
 
     for input_t, input_blob in inputs:
