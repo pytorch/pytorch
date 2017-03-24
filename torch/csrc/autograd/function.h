@@ -10,7 +10,6 @@
 #include <THPP/THPP.h>
 #include <vector>
 
-#include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/function_hook.h"
 
 namespace torch { namespace autograd {
@@ -68,6 +67,11 @@ struct Function {
   inline bool should_compute_output(int i) const {
     auto& fn = next_functions[i].first;
     return fn && fn->is_executable;
+  }
+
+  inline void set_flags(FunctionFlags&& flags) {
+    is_executable = flags.is_executable;
+    next_functions = std::move(flags.next_functions);
   }
 
   int num_inputs;
