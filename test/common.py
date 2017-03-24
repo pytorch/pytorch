@@ -132,7 +132,13 @@ class TestCase(unittest.TestCase):
                 if a.numel() > 0:
                     b = b.type_as(a)
                     b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
-                    max_err = (a - b).abs().max()
+                    # check that NaNs are in the same locations
+                    self.assertTrue(torch.equal(a != a, b != b))
+                    diff = a - b
+                    if diff.is_signed():
+                        diff = diff.abs()
+                    # remove NaNs with clamp
+                    max_err = diff.clamp(min=0).max()
                     self.assertLessEqual(max_err, prec, message)
             self.assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
@@ -167,8 +173,12 @@ class TestCase(unittest.TestCase):
             self.assertGreater(x.numel(), 0)
             y = y.type_as(x)
             y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
-            max_err = (x - y).abs().max()
-            self.assertGreaterEqual(max_err, prec, message)
+            if torch.equal(x != x, y != y):
+                diff = x - y
+                if diff.is_signed():
+                    diff = diff.abs()
+                max_err = diff.clamp(min=0).max()
+                self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertNotEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
