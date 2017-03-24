@@ -24,7 +24,7 @@ if NOT DEFINED CMAKE_BUILD_TYPE (
 if NOT DEFINED CMAKE_GENERATOR (
   if DEFINED APPVEYOR_BUILD_WORKER_IMAGE (
     if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" (
-      set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
+      set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
     ) else if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2015" (
       set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
     ) else (

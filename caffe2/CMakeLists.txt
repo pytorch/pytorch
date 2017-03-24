@@ -118,13 +118,14 @@ endif()
 
 if (BUILD_PYTHON)
   # ---[ Python.
-  # ---[ Apple specific
-  if (APPLE)
-    set(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
-  endif()
-  add_library(caffe2_pybind11_state SHARED ${Caffe2_CPU_PYTHON_SRCS})
+  add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   add_dependencies(caffe2_pybind11_state ${Caffe2_MAIN_LIBS_ORDER})
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
+  if (APPLE)
+    set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ".so")
+  elseif (MSVC)
+    set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ".pyd")
+  endif()
   set_target_properties(
       caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
       ${CMAKE_BINARY_DIR}/caffe2/python)
@@ -136,9 +137,14 @@ if (BUILD_PYTHON)
       ${CMAKE_INSTALL_PREFIX}/caffe2/python)
 
   if(USE_CUDA)
-    add_library(caffe2_pybind11_state_gpu SHARED ${Caffe2_GPU_PYTHON_SRCS})
+    add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
     add_dependencies(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS_ORDER})
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
+    if (APPLE)
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ".so")
+    elseif (MSVC)
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ".pyd")
+    endif()
     set_target_properties(
         caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
         ${CMAKE_BINARY_DIR}/caffe2/python)
@@ -148,6 +154,27 @@ if (BUILD_PYTHON)
     install(
         TARGETS caffe2_pybind11_state_gpu DESTINATION
         ${CMAKE_INSTALL_PREFIX}/caffe2/python)
+  endif()
+
+  if (MSVC)
+    # If we are building under windows, we will copy the file from
+    # build/caffe2/python/{Debug,Release}/caffe2_pybind11_state.pyd
+    # to its parent folder so that we can do in-build execution.
+    add_custom_target(windows_python_copy_lib ALL)
+    add_dependencies(windows_python_copy_lib caffe2_pybind11_state)
+    add_custom_command(
+        TARGET windows_python_copy_lib POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/caffe2/python/${CMAKE_BUILD_TYPE}/caffe2_pybind11_state.pyd
+        ${CMAKE_BINARY_DIR}/caffe2/python)
+    if (USE_CUDA)
+      add_dependencies(windows_python_copy_lib caffe2_pybind11_state_gpu)
+      add_custom_command(
+          TARGET windows_python_copy_lib POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy
+          ${CMAKE_BINARY_DIR}/caffe2/python/${CMAKE_BUILD_TYPE}/caffe2_pybind11_state_gpu.pyd
+          ${CMAKE_BINARY_DIR}/caffe2/python)
+    endif()
   endif()
 endif()
 
