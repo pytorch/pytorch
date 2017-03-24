@@ -420,20 +420,20 @@ class TestNN(NNTestCase):
 
     def _test_dropout(self, cls, input):
         p = 0.2
-        for v2 in [False, True]:
-            if v2:
-                input.fill_(1)
-            else:
+        for scale_train in [False, True]:
+            if scale_train:
                 input.fill_(1 - p)
+            else:
+                input.fill_(1)
 
-            module = cls(p, v2=v2)
+            module = cls(p, scale_train=scale_train)
             input_var = Variable(input, requires_grad=True)
             output = module(input_var)
             self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
             output.backward(input)
             self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
-            module = cls(p, True, v2=v2)
+            module = cls(p, True, scale_train=scale_train)
             input_var = Variable(input.clone(), requires_grad=True)
             output = module(input_var + 0)
             self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)

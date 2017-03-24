@@ -5,7 +5,7 @@ from itertools import repeat
 
 class Dropout(InplaceFunction):
 
-    def __init__(self, p=0.5, train=False, inplace=False, v2=False):
+    def __init__(self, p=0.5, train=False, inplace=False, scale_train=True):
         super(Dropout, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
@@ -13,7 +13,7 @@ class Dropout(InplaceFunction):
         self.p = p
         self.train = train
         self.inplace = inplace
-        self.v2 = v2
+        self.scale_train = scale_train
 
     def _make_noise(self, input):
         return input.new().resize_as_(input)
@@ -29,13 +29,13 @@ class Dropout(InplaceFunction):
             if self.train:
                 self.noise = self._make_noise(input)
                 self.noise.bernoulli_(1 - self.p)
-                if not self.v2:
+                if self.scale_train:
                     self.noise.div_(1 - self.p)
                 if self.p == 1:
                     self.noise.fill_(0)
                 self.noise = self.noise.expand_as(input)
                 output.mul_(self.noise)
-            elif self.v2:
+            elif not self.scale_train:
                 output.mul_(1 - self.p)
 
         return output
@@ -44,7 +44,7 @@ class Dropout(InplaceFunction):
         if self.p > 0:
             if self.train:
                 return grad_output.mul(self.noise)
-            elif self.v2:
+            elif not self.scale_train:
                 return grad_output.mul(1 - self.p)
         return grad_output
 

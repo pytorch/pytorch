@@ -346,8 +346,8 @@ def adaptive_avg_pool2d(input, output_size):
 
 # Activation functions
 
-def dropout(input, p=0.5, training=False, inplace=False, v2=False):
-    return _functions.dropout.Dropout(p, training, inplace, v2)(input)
+def dropout(input, p=0.5, training=False, inplace=False, scale_train=True):
+    return _functions.dropout.Dropout(p, training, inplace, scale_train)(input)
 
 
 def threshold(input, threshold, value, inplace=False):
