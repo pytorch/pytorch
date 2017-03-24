@@ -294,24 +294,53 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
-def adaptive_max_pool1d(input, output_size, return_indices):
+def adaptive_max_pool1d(input, output_size, return_indices=False):
+    r"""Applies a 1D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+        return_indices: whether to return pooling indices
+    """
     return _functions.thnn.AdaptiveMaxPool1d(output_size, return_indices)(input)
 
 
-def adaptive_max_pool2d(input, output_size, return_indices):
+def adaptive_max_pool2d(input, output_size, return_indices=False):
+    r"""Applies a 2D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+        return_indices: whether to return pooling indices
+    """
     return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
 
 
 def adaptive_avg_pool1d(input, output_size):
-    if input.dim() != 3:
-        raise ValueError('expected 3D input (got {} dimensions)'
-                         .format(input.dim()))
-    output_size = _single(output_size) + (1,)
-    f = _functions.thnn.AdaptiveAvgPool2d(output_size)
-    return f(input.unsqueeze(3)).squeeze(3)
+    r"""Applies a 1D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+    """
+    return _functions.thnn.AdaptiveAvgPool1d(output_size)(input)
 
 
 def adaptive_avg_pool2d(input, output_size):
+    r"""Applies a 2D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+    """
     return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
 
 

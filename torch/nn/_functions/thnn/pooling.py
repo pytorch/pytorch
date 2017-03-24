@@ -368,11 +368,11 @@ class AvgPool3d(Function):
 class AdaptiveMaxPool1d(Function):
 
     def __init__(self, output_size, return_indices=False):
-        self.output_size = output_size
+        self.output_size = _single(output_size)
         self.return_indices = return_indices
 
     def forward(self, input):
-        if (input.dim() != 3):
+        if input.dim() != 3:
             raise ValueError('expected 3D input (got {}D input)'
                              .format(input.dim()))
 
@@ -445,6 +445,40 @@ class AdaptiveMaxPool2d(Function):
         return grad_input
 
 
+class AdaptiveAvgPool1d(Function):
+
+    def __init__(self, output_size):
+        self.output_size = _single(output_size)
+
+    def forward(self, input):
+        if input.dim() != 3:
+            raise ValueError('expected 3D input (got {}D input)'
+                             .format(input.dim()))
+
+        input2d = input.unsqueeze(2)    # size = N*C*1*L
+        backend = type2backend[type(input)]
+        output = input2d.new()
+        self.save_for_backward(input)
+        backend.SpatialAdaptiveAveragePooling_updateOutput(
+            backend.library_state,
+            input2d, output,
+            self.output_size[1], self.output_size[0])
+        output = output.squeeze(2)
+        return output
+
+    def backward(self, grad_output):
+        backend = type2backend[type(grad_output)]
+        input, = self.saved_tensors
+        input2d = input.unsqueeze(2)
+        grad_output2d = grad_output.unsqueeze(2)
+        grad_input = grad_output2d.new()
+        backend.SpatialAdaptiveAveragePooling_updateGradInput(
+            backend.library_state,
+            input2d, grad_output2d, grad_input)
+        grad_input = grad_input.squeeze(2)
+        return grad_input
+
+
 class AdaptiveAvgPool2d(Function):
 
     def __init__(self, output_size):
@@ -480,4 +514,5 @@ _all_functions.append(MaxUnpool3d)
 _all_functions.append(FractionalMaxPool2d)
 _all_functions.append(AdaptiveMaxPool1d)
 _all_functions.append(AdaptiveMaxPool2d)
+_all_functions.append(AdaptiveAvgPool1d)
 _all_functions.append(AdaptiveAvgPool2d)

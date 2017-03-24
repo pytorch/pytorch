@@ -720,7 +720,9 @@ class AdaptiveMaxPool1d(Module):
     The number of output features is equal to the number of input planes.
 
     Args:
-        output_size: the target output size H of the image
+        output_size: the target output size H
+        return_indices: if True, will return the indices along with the outputs.
+                        Useful to pass to nn.MaxUnpool2d . Default: False
 
     Examples:
         >>> # target output size of 5
@@ -752,6 +754,8 @@ class AdaptiveMaxPool2d(Module):
     Args:
         output_size: the target output size of the image of the form H x W.
                      Can be a tuple (H, W) or a single number H for a square image H x H
+        return_indices: if True, will return the indices along with the outputs.
+                        Useful to pass to nn.MaxUnpool2d . Default: False
 
     Examples:
         >>> # target output size of 5x7
@@ -784,7 +788,7 @@ class AdaptiveAvgPool1d(Module):
     The number of output features is equal to the number of input planes.
 
     Args:
-        output_size: the target output size H of the image
+        output_size: the target output size H
 
     Examples:
         >>> # target output size of 5
