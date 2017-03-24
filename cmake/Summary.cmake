@@ -1,4 +1,3 @@
-
 # Prints accumulated Caffe2 configuration summary
 function (Caffe2_print_configuration_summary)
 
@@ -76,5 +75,6 @@ function (Caffe2_print_configuration_summary)
   message(STATUS "  USE_NNPACK            : ${USE_NNPACK}")
   message(STATUS "  USE_OPENMP            : ${USE_OPENMP}")
   message(STATUS "  USE_REDIS             : ${USE_REDIS}")
+  message(STATUS "  USE_GLOO              : ${USE_GLOO}")
 
 endfunction()

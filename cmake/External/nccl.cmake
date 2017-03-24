@@ -28,7 +28,7 @@ if (NOT __NCCL_INCLUDED)
 
     set(NCCL_FOUND TRUE)
     set(NCCL_INCLUDE_DIRS ${nccl_PREFIX}/build/include)
-    set(NCCL_LIBRARIES ${nccl_PREFIX}/build/lib/libnccl.so)
+    set(NCCL_LIBRARIES ${nccl_PREFIX}/build/lib/libnccl_static.a)
     set(NCCL_LIBRARY_DIRS ${nccl_PREFIX}/build/lib)
     set(NCCL_EXTERNAL TRUE)
 

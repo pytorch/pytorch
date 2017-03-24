@@ -1,3 +1,4 @@
+add_subdirectory(gloo)
 add_subdirectory(nccl)
 add_subdirectory(nnpack)
 
