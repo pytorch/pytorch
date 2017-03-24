@@ -21,6 +21,7 @@ from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d
+from .distance import PairwiseDistance
 
 
 __all__ = [
@@ -37,5 +38,5 @@ __all__ = [
     'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'Dropout', 'Dropout2d',
     'Dropout3d', 'ReflectionPad2d', 'ReplicationPad2d', 'ReplicationPad3d', 'CrossMapLRN2d',
     'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
-    'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d',
+    'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
 ]
