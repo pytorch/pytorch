@@ -26,8 +26,8 @@ TH_API int THSTensor_(nDimensionV)(const THSTensor *self);
 TH_API long THSTensor_(size)(const THSTensor *self, int dim);
 TH_API ptrdiff_t THSTensor_(nnz)(const THSTensor *self);
 TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self);
-TH_API THLongTensor *THSTensor_(indices)(const THSTensor *self);
-TH_API THTensor *THSTensor_(values)(const THSTensor *self);
+TH_API THLongTensor *THSTensor_(newIndices)(const THSTensor *self);
+TH_API THTensor *THSTensor_(newValues)(const THSTensor *self);
 
 /**** creation methods ****/
 TH_API THSTensor *THSTensor_(new)(void);
@@ -59,7 +59,6 @@ TH_API void THSTensor_(transpose)(THSTensor *self, int dimension1_, int dimensio
 TH_API int THSTensor_(isContiguous)(const THSTensor *self);
 TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src);
 TH_API void THSTensor_(contiguous)(THSTensor *self);
-TH_API void THSTensor_(markContiguous)(THSTensor *self);
 
 TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask);
 
@@ -75,7 +74,7 @@ TH_API void THSTensor_(select)(THSTensor *self, THSTensor *src, int dimension_, 
 */
 
 // internal methods
-THSTensor* THSTensor_(move)(THSTensor *self, THLongTensor *indices, THTensor *values);
+THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *values);
 THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values);
 
 #endif

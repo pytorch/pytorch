@@ -41,7 +41,7 @@ THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self)
 }
 
 /*** TODO: watch out for memory leaks ***/
-THCIndexTensor *THCSTensor_(indices)(THCState *state, const THCSTensor *self) {
+THCIndexTensor *THCSTensor_(newIndices)(THCState *state, const THCSTensor *self) {
   if (self->nnz == 0) {
     // Narrows don't work on 0-length tensors
     THCIndexTensor_(retain)(state, self->indices);
@@ -50,7 +50,7 @@ THCIndexTensor *THCSTensor_(indices)(THCState *state, const THCSTensor *self) {
   return THCIndexTensor_(newNarrow)(state, self->indices, 1, 0, self->nnz);
 }
 
-THCTensor *THCSTensor_(values)(THCState *state, const THCSTensor *self) {
+THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
   if (self->nnz == 0) {
     THCTensor_(retain)(state, self->values);
     return self->values;
@@ -81,24 +81,16 @@ void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nD
   // Only resize valid sizes into tensor.
   self->size = THRealloc(self->size, sizeof(long)*(nDimI + nDimV));
 
-  long d, nDimI_ = 0, nDimV_ = 0;
-  for (d = 0; d < nDimI; d++) {
-    if (size[d] > 0) {
-      self->size[nDimI_++] = size[d];
-    }
+  for (long d = 0; d < nDimI + nDimV; d++) {
+    self->size[d] = size[d];
   }
-  for (d = nDimI; d < nDimI + nDimV; d++) {
-    if (size[d] > 0) {
-      self->size[nDimI_ + nDimV_++] = size[d];
-    }
-  }
-  self->nDimensionI = nDimI_;
-  self->nDimensionV = nDimV_;
+  self->nDimensionI = nDimI;
+  self->nDimensionV = nDimV;
   self->contiguous = 0;
 }
 
 // directly assign without cloning or retaining (internal method)
-THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
+THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
   int empty = THCTensor_(nDimension)(state, values) == 0;
   if (!empty) {
     THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 2,
@@ -109,6 +101,9 @@ THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor 
         "indices has incorrect first dimension, expected %d, got %d", self->nDimensionI, THCIndexTensor_(size)(state, indices, 0));
     THArgCheck(THCTensor_(nDimension)(state, values) == self->nDimensionV + 1, 3,
         "values has incorrect number of dimensions, expected %d, got %d", self->nDimensionV + 1, THCTensor_(nDimension)(state, values));
+  } else {
+    THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 0, 2,
+        "if values is empty, indices must be empty too");
   }
   THCIndexTensor_(free)(state, self->indices);
   THCTensor_(free)(state, self->values);
@@ -122,7 +117,7 @@ THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor 
 
 THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
   // Note: Not like torch.set, this is an internal method
-  return THCSTensor_(move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
+  return THCSTensor_(_move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
 }
 
 /*** end helper methods ***/
@@ -192,17 +187,35 @@ THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size)
 
 THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, long size0)
 {
-  return THCSTensor_(newWithSize4d)(state, size0, -1, -1, -1);
+  long size[1] = {size0};
+
+  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor_(rawInit)(state, self);
+  THCSTensor_(rawResize)(state, self, 1, 0, size);
+
+  return self;
 }
 
 THCSTensor *THCSTensor_(newWithSize2d)(THCState *state, long size0, long size1)
 {
-  return THCSTensor_(newWithSize4d)(state, size0, size1, -1, -1);
+  long size[2] = {size0, size1};
+
+  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor_(rawInit)(state, self);
+  THCSTensor_(rawResize)(state, self, 2, 0, size);
+
+  return self;
 }
 
 THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, long size0, long size1, long size2)
 {
-  return THCSTensor_(newWithSize4d)(state, size0, size1, size2, -1);
+  long size[3] = {size0, size1, size2};
+
+  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor_(rawInit)(state, self);
+  THCSTensor_(rawResize)(state, self, 3, 0, size);
+
+  return self;
 }
 
 THCSTensor *THCSTensor_(newWithSize4d)(THCState *state, long size0, long size1, long size2, long size3)
@@ -296,17 +309,23 @@ THCSTensor *THCSTensor_(resizeAs)(THCState *state, THCSTensor *self, THCSTensor 
 
 THCSTensor *THCSTensor_(resize1d)(THCState *state, THCSTensor *self, long size0)
 {
-  return THCSTensor_(resize4d)(state, self, size0, -1, -1, -1);
+  long size[1] = {size0};
+  THCSTensor_(rawResize)(state, self, 1, 0, size);
+  return self;
 }
 
 THCSTensor *THCSTensor_(resize2d)(THCState *state, THCSTensor *self, long size0, long size1)
 {
-  return THCSTensor_(resize4d)(state, self, size0, size1, -1, -1);
+  long size[2] = {size0, size1};
+  THCSTensor_(rawResize)(state, self, 2, 0, size);
+  return self;
 }
 
 THCSTensor *THCSTensor_(resize3d)(THCState *state, THCSTensor *self, long size0, long size1, long size2)
 {
-  return THCSTensor_(resize4d)(state, self, size0, size1, size2, -1);
+  long size[3] = {size0, size1, size2};
+  THCSTensor_(rawResize)(state, self, 3, 0, size);
+  return self;
 }
 
 THCSTensor *THCSTensor_(resize4d)(THCState *state, THCSTensor *self, long size0, long size1, long size2, long size3)
@@ -350,18 +369,6 @@ void THCSTensor_(contiguous)(THCState *state, THCSTensor *self) {
   if (self->contiguous) return;
   THCSTensor_(reorder)(state, self);
   self->contiguous = 1;
-}
-
-void THCSTensor_(markContiguous)(THCState *state, THCSTensor *self) {
-  self->contiguous = 1;
-}
-
-void THCSTensor_(contiguousValues)(THCState *state, THCSTensor *self) {
-  if (!THCTensor_(isContiguous)(state, self->values)) {
-    THCTensor *newValues = THCTensor_(newContiguous)(state, self->values);
-    THCTensor_(free)(state, self->values);
-    self->values = newValues;
-  }
 }
 
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)
@@ -434,11 +441,11 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
     THCSTensor_(zero)(state, r_);
     return;
   }
-  THCIndexTensor *maskIndices = THCSTensor_(indices)(state, mask);
-  THCTensor *maskValues = THCSTensor_(values)(state, mask);
+  THCIndexTensor *maskIndices = THCSTensor_(newIndices)(state, mask);
+  THCTensor *maskValues = THCSTensor_(newValues)(state, mask);
   THCTensor *rValues = THCTensor_(new)(state);
   THCTensor_(resizeAs)(state, rValues, maskValues);
-  THCSTensor_(move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
+  THCSTensor_(_move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
   r_->contiguous = mask->contiguous;
   r_->nnz = mask->nnz;
 

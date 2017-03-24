@@ -11,7 +11,7 @@
 
 #define THCIndexTensor          THCudaLongTensor
 #define THCIndexTensor_(NAME)   TH_CONCAT_2(THCudaLongTensor_,NAME)
-#define integer                 long
+#define indexT                  long
 
 #include "generic/THCSTensor.h"
 #include "THCSGenerateAllTypes.h"

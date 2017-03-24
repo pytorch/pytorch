@@ -73,6 +73,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: indices
   sparse: yes
+  cname: newIndices
   return: THIndexTensor*
   arguments:
   - THSTensor* self
@@ -81,6 +82,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: values
   sparse: yes
+  cname: newValues
   return: THTensor*
   arguments:
   - THSTensor* self
@@ -88,15 +90,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: contiguous
-  sparse: yes
-  return: argument 0
-  arguments:
-  - THSTensor* self
-]]
-
-[[
-  name: markContiguous
-  python_name: mark_contiguous
   sparse: yes
   return: argument 0
   arguments:

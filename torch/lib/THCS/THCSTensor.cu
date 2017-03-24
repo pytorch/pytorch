@@ -31,10 +31,10 @@ __device__ void applyOp3(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_spcKernel(
+__global__ void THCSTensor_sparseElementwiseKernel(
     Op op,
     TensorInfo<Real, IndexType> dense,
-    TensorInfo<integer, IndexType> indices,
+    TensorInfo<indexT, IndexType> indices,
     TensorInfo<Real, IndexType> values,
     const IndexType nnz) {
   IndexType indskip = indices.strides[0];
@@ -55,10 +55,10 @@ __global__ void THCSTensor_spcKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_spcKernelScalar(
+__global__ void THCSTensor_sparseElementwiseKernelScalar(
     Op op,
     TensorInfo<Real, IndexType> dense,
-    TensorInfo<integer, IndexType> indices,
+    TensorInfo<indexT, IndexType> indices,
     TensorInfo<Real, IndexType> values,
     const IndexType nnz) {
   IndexType indskip = indices.strides[0];
@@ -78,9 +78,9 @@ __global__ void THCSTensor_valueSparseUnionKernel(
     OpBoth opBoth,
     OpLeft opLeft,
     OpRight opRight,
-    TensorInfo<integer, IndexType> r_indices,
-    TensorInfo<integer, IndexType> t_indices,
-    TensorInfo<integer, IndexType> s_indices,
+    TensorInfo<indexT, IndexType> r_indices,
+    TensorInfo<indexT, IndexType> t_indices,
+    TensorInfo<indexT, IndexType> s_indices,
     TensorInfo<Real, IndexType> r_values,
     TensorInfo<Real, IndexType> t_values,
     TensorInfo<Real, IndexType> s_values,
@@ -116,11 +116,12 @@ __global__ void THCSTensor_valueSparseUnionKernel(
   }
 }
 
+// TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
 __global__ void THCSTensor_indexSparseUnionKernel(
-    TensorInfo<integer, IndexType> r_indices,
-    TensorInfo<integer, IndexType> t_indices,
-    TensorInfo<integer, IndexType> s_indices,
+    TensorInfo<indexT, IndexType> r_indices,
+    TensorInfo<indexT, IndexType> t_indices,
+    TensorInfo<indexT, IndexType> s_indices,
     const IndexType t_nnz, const IndexType s_nnz, IndexType *resultNnz) {
   IndexType r_indskip = r_indices.strides[0];
   IndexType t_indskip = t_indices.strides[0];
@@ -166,9 +167,9 @@ __global__ void THCSTensor_indexSparseUnionKernel(
 template <typename Op, typename IndexType, typename Real>
 __global__ void THCSTensor_valueSparseIntersectionKernel(
     Op op,
-    TensorInfo<integer, IndexType> r_indices,
-    TensorInfo<integer, IndexType> t_indices,
-    TensorInfo<integer, IndexType> s_indices,
+    TensorInfo<indexT, IndexType> r_indices,
+    TensorInfo<indexT, IndexType> t_indices,
+    TensorInfo<indexT, IndexType> s_indices,
     TensorInfo<Real, IndexType> r_values,
     TensorInfo<Real, IndexType> t_values,
     TensorInfo<Real, IndexType> s_values,
@@ -198,11 +199,12 @@ __global__ void THCSTensor_valueSparseIntersectionKernel(
   }
 }
 
+// TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
 __global__ void THCSTensor_indexSparseIntersectionKernel(
-    TensorInfo<integer, IndexType> r_indices,
-    TensorInfo<integer, IndexType> t_indices,
-    TensorInfo<integer, IndexType> s_indices,
+    TensorInfo<indexT, IndexType> r_indices,
+    TensorInfo<indexT, IndexType> t_indices,
+    TensorInfo<indexT, IndexType> s_indices,
     const IndexType t_nnz, const IndexType s_nnz, IndexType *resultNnz) {
   IndexType r_indskip = r_indices.strides[0];
   IndexType t_indskip = t_indices.strides[0];

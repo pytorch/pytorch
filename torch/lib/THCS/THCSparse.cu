@@ -1,17 +1,14 @@
 #include "THCSparse.h"
 
 void THCudaSparse_Xcoo2csr(THCState *state, const int *coorowind, long nnz, long m, int *csrrowptr) {
-  if ((m <= INT_MAX) && (nnz <= INT_MAX))
-  {
-    cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
-    cusparseSetStream(handle, THCState_getCurrentStream(state));
-    THCusparseCheck(cusparseXcoo2csr(handle, coorowind, nnz, m, csrrowptr,
-      TH_INDEX_BASE ? CUSPARSE_INDEX_BASE_ONE : CUSPARSE_INDEX_BASE_ZERO
-    ));
-    return;
-  }
-  THError("cusparseXcoo2csr only supports m, nnz "
-          "with the bound [val] <= %d", INT_MAX);
+  THAssertMsg((m <= INT_MAX) && (nnz <= INT_MAX),
+    "cusparseXcoo2csr only supports m, nnz with the bound [val] <= %d",
+    INT_MAX);
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  THCusparseCheck(cusparseXcoo2csr(handle, coorowind, nnz, m, csrrowptr,
+    TH_INDEX_BASE ? CUSPARSE_INDEX_BASE_ONE : CUSPARSE_INDEX_BASE_ZERO
+  ));
 }
 
 cusparseOperation_t convertTransToCusparseOperation(char trans) {
@@ -50,37 +47,24 @@ void THCudaSparse_Scsrmm2(THCState *state, char transa, char transb, long m, lon
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
 
-  if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
-  {
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_k = (int)k;
-    int i_nnz = (int)nnz;
-    int i_ldb = (int)ldb;
-    int i_ldc = (int)ldc;
+  THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "cusparseScsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= %d",
+    INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_k = (int)k;
+  int i_nnz = (int)nnz;
+  int i_ldb = (int)ldb;
+  int i_ldc = (int)ldc;
 
-    cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
-    cusparseSetStream(handle, THCState_getCurrentStream(state));
-    cusparseMatDescr_t desc;
-    cusparseCreateMatDescr(&desc);
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  cusparseMatDescr_t desc;
+  cusparseCreateMatDescr(&desc);
 #if TH_INDEX_BASE == 1
-    cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
+  cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
 #endif
-    // cusparseMatDescr_t desc = { \
-    //   CUSPARSE_MATRIX_TYPE_GENERAL, \
-    //   CUSPARSE_FILL_MODE_LOWER, \
-    //   CUSPARSE_DIAG_TYPE_NON_UNIT, \
-    // #if TH_INDEX_BASE==1
-    //   CUSPARSE_INDEX_BASE_ONE \
-    // #else
-    //   CUSPARSE_INDEX_BASE_ZERO \
-    // #endif
-    // };  // completely general sparse matrix
-    THCusparseCheck(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
-    return;
-  }
-  THError("cusparseScsrmm2 only supports m, n, k, nnz, ldb, ldc "
-          "with the bound [val] <= %d", INT_MAX);
+  THCusparseCheck(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
 }
 
 void THCudaSparse_Dcsrmm2(THCState *state, char transa, char transb, long m, long n, long k, long nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, long ldb, double beta, double *c, long ldc)
@@ -89,35 +73,95 @@ void THCudaSparse_Dcsrmm2(THCState *state, char transa, char transb, long m, lon
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
 
-  if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
-  {
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_k = (int)k;
-    int i_nnz = (int)nnz;
-    int i_ldb = (int)ldb;
-    int i_ldc = (int)ldc;
+  THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "cusparseDcsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= %d",
+    INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_k = (int)k;
+  int i_nnz = (int)nnz;
+  int i_ldb = (int)ldb;
+  int i_ldc = (int)ldc;
 
-    cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
-    cusparseSetStream(handle, THCState_getCurrentStream(state));
-    cusparseMatDescr_t desc;
-    cusparseCreateMatDescr(&desc);
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  cusparseMatDescr_t desc;
+  cusparseCreateMatDescr(&desc);
 #if TH_INDEX_BASE == 1
-    cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
+  cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
 #endif
-    // cusparseMatDescr_t desc = { \
-    //   CUSPARSE_MATRIX_TYPE_GENERAL, \
-    //   CUSPARSE_FILL_MODE_LOWER, \
-    //   CUSPARSE_DIAG_TYPE_NON_UNIT, \
-    // #if TH_INDEX_BASE==1
-    //   CUSPARSE_INDEX_BASE_ONE \
-    // #else
-    //   CUSPARSE_INDEX_BASE_ZERO \
-    // #endif
-    // };  // completely general sparse matrix
-    THCusparseCheck(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
-    return;
-  }
-  THError("cusparseDcsrmm2 only supports m, n, k, nnz, ldb, ldc "
-          "with the bound [val] <= %d", INT_MAX);
+  THCusparseCheck(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+}
+
+/* format conversion */
+void THCudaSparse_CreateIdentityPermutation(THCState *state, long nnz, int *P) {
+  THAssertMsg((nnz <= INT_MAX),
+    "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
+    INT_MAX);
+  int i_nnz = (int)nnz;
+
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  cusparseCreateIdentityPermutation(handle, i_nnz, P);
+}
+
+void THCudaSparse_Xcsrsort_bufferSizeExt(THCState *state, long m, long n, long nnz, const int *csrRowPtr, const int *csrColInd, size_t *pBufferSizeInBytes)
+{
+  THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+    "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
+    INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_nnz = (int)nnz;
+
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  THCusparseCheck(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nnz, csrRowPtr, csrColInd, pBufferSizeInBytes));
+}
+
+void THCudaSparse_Xcsrsort(THCState *state, long m, long n, long nnz, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
+{
+  THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+    "Xcsrsort only supports m, n, nnz with the bound [val] <= %d",
+    INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_nnz = (int)nnz;
+
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  cusparseMatDescr_t desc;
+  cusparseCreateMatDescr(&desc);
+#if TH_INDEX_BASE == 1
+  cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
+#endif
+  THCusparseCheck(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
+}
+
+void THCudaSparse_Xcoosort_bufferSizeExt(THCState *state, long m, long n, long nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
+{
+  THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+    "Xcoosort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
+    INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_nnz = (int)nnz;
+
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  THCusparseCheck(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nnz, cooRows, cooCols, pBufferSizeInBytes));
+}
+
+THC_API void THCudaSparse_XcoosortByRow(THCState *state, long m, long n, long nnz, int *cooRows, int *cooCols, int *P, void *pBuffer)
+{
+  THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+    "XcoosortByRow only supports m, n, nnz with the bound [val] <= %d",
+    INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_nnz = (int)nnz;
+
+  cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
+  cusparseSetStream(handle, THCState_getCurrentStream(state));
+  THCusparseCheck(cusparseXcoosortByRow(handle, i_m, i_n, i_nnz, cooRows, cooCols, P, pBuffer));
 }
