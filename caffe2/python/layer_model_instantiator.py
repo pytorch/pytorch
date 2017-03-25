@@ -56,8 +56,5 @@ def generate_training_nets(model):
 
     loss = model.loss
     grad_map = train_net.AddGradientOperators(loss.field_blobs())
-    for param, optimizer in model.param_to_optim.items():
-        if not optimizer:
-            optimizer = model.default_optimizer
-        optimizer(train_net, train_init_net, param, grad_map[str(param)])
+    model.apply_optimizers(train_net, train_init_net, grad_map)
     return train_init_net, train_net
