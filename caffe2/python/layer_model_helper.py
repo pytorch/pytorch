@@ -224,6 +224,15 @@ class LayerModelHelper(model_helper.ModelHelperBase):
     def layers(self):
         return self._layers
 
+    def apply_optimizers(self, train_net, train_init_net, grad_map):
+        for param, optimizer in self.param_to_optim.items():
+            if not optimizer:
+                optimizer = self.default_optimizer
+            # note that not all params has gradient and thus we sent None if
+            # gradient does not exists
+            optimizer(
+                train_net, train_init_net, param, grad_map.get(str(param)))
+
     # TODO(amalevich): Optimizer should not really in model. Move it out.
     # Copy over from another Helper
     def SgdOptim(self, base_lr=0.01, policy='fixed', **kwargs):
@@ -354,7 +363,6 @@ class LayerModelHelper(model_helper.ModelHelperBase):
                 param
             )
 
-    # A dummy optimizer which allows us to do NO optimization
-    @classmethod
-    def DummyOptim(cls, *args, **kwargs):
+    # An optimizer which allows us to do NO optimization
+    def NoOptim(self, *args, **kwargs):
         pass
