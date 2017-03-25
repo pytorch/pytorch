@@ -3,11 +3,9 @@
 import torch
 from . import _functions
 from .modules import utils
-from ._functions.padding import ConstantPad2d
+from torch.nn._functions.conv import ConvNd
 from .modules.utils import _single, _pair, _triple
-
 # Convolutions
-ConvNd = torch._C._functions.ConvNd
 
 
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
@@ -35,8 +33,8 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv2d(inputs, filters, padding=1)
     """
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
-               _pair(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
+               _pair(0), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
@@ -58,8 +56,8 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv1d(inputs, filters)
     """
     f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
-               _single(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
+               _single(0), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
@@ -81,18 +79,18 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
-        >>> F.conv3d(inputs, filters)
+        >>> F.conv3d(inputs)
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
-               _triple(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
+               _triple(0), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1):
     f = ConvNd(_single(stride), _single(padding), _single(1), True,
-               _single(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
+               _single(output_padding), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
@@ -116,8 +114,8 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           added to the output. Can be a single number or a tuple. Default: 0
     """
     f = ConvNd(_pair(stride), _pair(padding), _pair(1), True,
-               _pair(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
+               _pair(output_padding), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
@@ -137,8 +135,8 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           tuple (padh x padw). Default: 0
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(1), True,
-               _triple(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
+               _triple(output_padding), groups)
+    return f(input, weight, bias) if bias is not None else f(input, weight)
 
 
 # Pooling
@@ -385,8 +383,9 @@ def linear(input, weight, bias=None):
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
+    state = _functions.batchnorm.BatchNorm(
+        running_mean, running_var, training, momentum, eps)
+    return weight and state(input, weight, bias) or state(input)
 
 
 # loss
@@ -417,14 +416,7 @@ def nll_loss(input, target, weight=None, size_average=True):
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
-    dim = input.dim()
-    if dim == 2:
-        f = _functions.thnn.NLLLoss(size_average, weight=weight)
-    elif dim == 4:
-        f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
-    else:
-        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
-    return f(input, target)
+    return _functions.thnn.NLLLoss(size_average, weight=weight)(input, target)
 
 
 def kl_div(input, target, size_average=True):
@@ -540,70 +532,6 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-
-def pad(input, pad, mode='constant', value=0):
-    """Pads tensor.
-
-    Currently only 2D and 3D padding supported.
-    In case of 4D input tensor pad should be in form (pad_l, pad_r, pad_t, pad_b )
-    In case of 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
-
-    Args:
-        input (Variable): 4D or 5D tensor
-        pad (tuple): 4-elem or 6-elem tuple
-        mode: 'constant', 'reflect' or 'replicate'
-        value: fill value for 'constant' padding
-    """
-    if input.dim() == 4:
-        assert len(pad) == 4, '4D tensors expect 4 values for padding'
-        if mode == 'constant':
-            return ConstantPad2d(pad, value)(input)
-        elif mode == 'reflect':
-            return _functions.thnn.ReflectionPad2d(*pad)(input)
-        elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad2d(*pad)(input)
-    elif input.dim() == 5:
-        assert len(pad) == 6, '5D tensors expect 6 values for padding'
-        if mode == 'constant':
-            raise NotImplementedError
-        elif mode == 'reflect':
-            raise NotImplementedError
-        elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad3d(*pad)(input)
-    else:
-        raise NotImplementedError("Only 4D and 5D padding is supported for now")
-
-
-# distance
-
-def pairwise_distance(x1, x2, p=2, eps=1e-6):
-    r"""
-    Computes the batchwise pairwise distance between vectors v1,v2:
-
-        .. math ::
-            \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
-
-        Args:
-            x (Tensor): input tensor containing the two input batches
-            p (real): the norm degree. Default: 2
-
-        Shape:
-            - Input: :math:`(N, D)` where `D = vector dimension`
-            - Output: :math:`(N, 1)
-
-        >>> input1 = autograd.Variable(torch.randn(100, 128))
-        >>> input2 = autograd.Variable(torch.randn(100, 128))
-        >>> output = F.pairwise_distance(input1, input2, p=2)
-        >>> output.backward()
-    """
-    assert x1.size() == x2.size(), "Input sizes must be equal."
-    assert x1.dim() == 2, "Input must be a 2D matrix."
-    diff = torch.abs(x1 - x2)
-    out = torch.pow(diff + eps, p).sum(dim=1)
-    return torch.pow(out, 1. / p)
 
 def cosine_similarity(x1, x2, eps=1e-12):
     r"""Returns cosine similarity between two vectors ( here batches of vectors )
@@ -622,4 +550,4 @@ def cosine_similarity(x1, x2, eps=1e-12):
     w12 = torch.sum(x1 * x2, 1)
     w1 = torch.norm(x1, 2, 1)
     w2 = torch.norm(x2, 2, 1)
-    return (w12 / (w1 * w2) + eps).squeeze()
+    return (w12 / (w1 * w2 + eps)).squeeze()
