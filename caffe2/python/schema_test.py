@@ -81,6 +81,33 @@ class TestDB(unittest.TestCase):
             )
         )
 
+    def testListInStructIndexing(self):
+        a = schema.List(schema.Scalar(dtype=str))
+        s = schema.Struct(
+            ('field1', schema.Scalar(dtype=np.int32)),
+            ('field2', a)
+        )
+        self.assertEquals(s['field2:lengths'], a.lengths)
+        self.assertEquals(s['field2:items'], a.items)
+        with self.assertRaises(KeyError):
+            s['fields2:items:non_existent']
+        with self.assertRaises(KeyError):
+            s['fields2:non_existent']
+
+    def testMapInStructIndexing(self):
+        a = schema.Map(
+            schema.Scalar(dtype=np.int32),
+            schema.Scalar(dtype=np.float32),
+        )
+        s = schema.Struct(
+            ('field1', schema.Scalar(dtype=np.int32)),
+            ('field2', a)
+        )
+        self.assertEquals(s['field2:keys'], a.keys)
+        self.assertEquals(s['field2:values'], a.values)
+        with self.assertRaises(KeyError):
+            s['fields2:keys:non_existent']
+
     def testPreservesMetadata(self):
         s = schema.Struct(
             ('a', schema.Scalar(np.float32)), (
