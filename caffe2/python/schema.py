@@ -230,6 +230,16 @@ class List(Field):
         else:
             raise AttributeError('Field not found in list: %s.' % item)
 
+    def __getitem__(self, item):
+        if isinstance(self._items, Struct):
+            return self._items[item]
+        elif item == 'lengths':
+            return self.lengths
+        elif item == 'value' or item == 'items':
+            return self._items
+        else:
+            raise KeyError('Field not found in list: %s.' % item)
+
 
 class Struct(Field):
     """Represents a named list of fields sharing the same domain.
@@ -340,15 +350,19 @@ class Struct(Field):
         return Struct(*normalized_fields)
 
     def _get_field_by_nested_name(self, nested_name):
-        names = nested_name.split(FIELD_SEPARATOR)
-        curr = self
-        for name in names:
-            if not isinstance(curr, Struct):
-                return None
-            if name not in curr.fields:
-                return None
-            curr = curr.fields[name]
-        return curr
+        names = nested_name.split(FIELD_SEPARATOR, 1)
+        field = self.fields.get(names[0], None)
+
+        if field is None:
+            return None
+
+        if len(names) == 1:
+            return field
+
+        try:
+            return field[names[1]]
+        except (KeyError, TypeError):
+            return None
 
     def __contains__(self, item):
         field = self._get_field_by_nested_name(item)
@@ -378,7 +392,7 @@ class Struct(Field):
         else:
             field = self._get_field_by_nested_name(item)
             if not field:
-                raise KeyError
+                raise KeyError('field "%s" not found' % (item))
             return field
 
     def __getattr__(self, item):
