@@ -604,15 +604,8 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
     diff = torch.abs(x1 - x2)
     out = torch.pow(diff + eps, p).sum(dim=1)
     return torch.pow(out, 1. / p)
-=======
-def cosine_similarity(input, eps=1e-12):
-=======
-def cosine_similarity(x1,x2, eps=1e-12):
->>>>>>> Changed cosine similarity input to be two vectors
-=======
 
 def cosine_similarity(x1, x2, eps=1e-12):
->>>>>>> Added extra spaces for correct linting
     r"""Returns cosine similarity between two vectors ( here batches of vectors )
     Examples: F.cosine_similarity(Variable(torch.randn(2,5,7)))
     Args: 
@@ -629,9 +622,4 @@ def cosine_similarity(x1, x2, eps=1e-12):
     w12 = torch.sum(x1 * x2, 1)
     w1 = torch.norm(x1, 2, 1)
     w2 = torch.norm(x2, 2, 1)
-<<<<<<< HEAD
     return (w12 / (w1 * w2) + eps).squeeze()
->>>>>>> Moved computation to functional cosine_similarity
-=======
-    return (w12 / (w1 * w2 + eps)).squeeze()
->>>>>>> Fixed parenthesis when dividing by w1*w2 ( leads to divide by zero)
