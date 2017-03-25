@@ -368,7 +368,7 @@ class AvgPool3d(Function):
 class AdaptiveMaxPool1d(Function):
 
     def __init__(self, output_size, return_indices=False):
-        self.output_size = _single(output_size)
+        self.output_size = output_size
         self.return_indices = return_indices
 
     def forward(self, input):
@@ -448,7 +448,7 @@ class AdaptiveMaxPool2d(Function):
 class AdaptiveAvgPool1d(Function):
 
     def __init__(self, output_size):
-        self.output_size = _single(output_size)
+        self.output_size = output_size
 
     def forward(self, input):
         if input.dim() != 3:
