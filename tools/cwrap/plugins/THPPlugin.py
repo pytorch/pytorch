@@ -182,7 +182,7 @@ ${cpu}
         'double': 'float',
         'accreal': '" RealStr "',
         'bool': 'bool',
-        'const char*': 'bool', # Can come only from bool option.
+        'const char*': 'bool',  # Can come only from bool option.
     }
 
     OUT_INIT = """

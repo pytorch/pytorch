@@ -200,13 +200,13 @@ class cwrap(object):
             if arg['type'] == 'CONSTANT':
                 call_arg.append(str(arg['name']))
             else:
-                var_name = "arg_"+str(arg.get('formal_name', arg['name']))
+                var_name = "arg_" + str(arg.get('formal_name', arg['name']))
                 res = self.ARG_ASSIGN_TEMPLATE.substitute(
-                    type = arg['type'],
-                    name = var_name,
-                    unpack = unpack)
+                    type=arg['type'],
+                    name=var_name,
+                    unpack=unpack)
 
-                if not var_name in call_arg:
+                if var_name not in call_arg:
                     assignement.append(res)
                 call_arg.append(var_name)
         return assignement, call_arg
