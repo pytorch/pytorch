@@ -199,7 +199,7 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
     return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                      ceil_mode, count_include_pad)(input)
 
-
+##updated 3/25 Jeyte
 def avg_pool3d(input, kernel_size, stride=None, padding=0,
                ceil_mode=False, count_include_pad=True):
     """Applies 3D average-pooling operation in kt x kh x kw regions by step

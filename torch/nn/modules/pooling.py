@@ -594,6 +594,7 @@ class AvgPool3d(Module):
 
 
     ##first update, 3/23, Jeyte
+    ## added the same parameters as 2d version
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool3d, self).__init__()

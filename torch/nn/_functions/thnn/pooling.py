@@ -343,7 +343,7 @@ class AvgPool3d(Function):
                  ceil_mode=False, count_include_pad=True):
         self.kernel_size = _triple(kernel_size)
         self.stride = _triple(stride if stride is not None else kernel_size)
-        ##Jeyte 3/23
+        ##added paramater 3/23 Jeyte
         self.padding = _triple(padding)
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
