@@ -164,10 +164,10 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
                 additional_args = (output,) + additional_args
 
             if is_inplace and self.inplace:
-                if additional_args[-1] is True:
-                    tmp_args = list(additional_args)
-                    tmp_args[-1] = False
-                    additional_args = tuple(tmp_args)
+                assert additional_args[-1] is True
+                tmp_args = list(additional_args)
+                tmp_args[-1] = False
+                additional_args = tuple(tmp_args)
             grad_input = input.new().resize_as_(input)
             params_without_bias = params if len(params) < 2 else params[:1]
             update_grad_input_fn = getattr(self._backend, update_grad_input.name)
