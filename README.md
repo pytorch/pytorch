@@ -192,11 +192,11 @@ python setup.py install
 
 Dockerfiles are supplied to build images with cuda support and cudnn v5 and cudnn v6 RC. Build them as usual
 ```
-docker build . -t pytorch-cudnnv5 
+docker build -t pytorch-cudnnv5 .
 ```
 or 
 ```
-docker build . -t pytorch-cudnnv6 -f tools/docker/Dockerfile-v6
+docker build -t pytorch-cudnnv6 -f tools/docker/Dockerfile-v6 .
 ```
 and run them with nvidia-docker:
 ```
