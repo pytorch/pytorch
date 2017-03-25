@@ -462,7 +462,7 @@ class AdaptiveAvgPool1d(Function):
         backend.SpatialAdaptiveAveragePooling_updateOutput(
             backend.library_state,
             input2d, output,
-            self.output_size[1], self.output_size[0])
+            self.output_size, 1)
         output = output.squeeze(2)
         return output
 
