@@ -1,4 +1,5 @@
 from string import Template
+import copy
 from copy import deepcopy
 from . import CWrapPlugin
 from itertools import product
@@ -15,6 +16,10 @@ class CuDNNPlugin(CWrapPlugin):
         'Convolution*': Template('(Convolution*)THPWrapper_get($arg)'),
         'bool': Template('$arg == Py_True'),
         'double': Template('THPDoubleUtils_unpackReal($arg)'),
+    }
+
+    INPUT_ARGUMENT_MAP = {
+        'THTensor*': 'THVoidTensor*',
     }
 
     TYPE_CHECK = {
@@ -78,6 +83,16 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 
     def get_type_check(self, arg, option):
         return self.TYPE_CHECK.get(arg['type'], None)
+
+    def get_formal_args(self, arguments):
+        formal_args = []
+        for arg in arguments:
+            arg = copy.copy(arg)
+            new_type = self.INPUT_ARGUMENT_MAP.get(arg['type'])
+            if new_type is not None:
+                arg['type'] = new_type
+            formal_args.append(arg)
+        return formal_args
 
     def get_wrapper_template(self, declaration):
         arg_desc = []

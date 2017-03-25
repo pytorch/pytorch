@@ -64,6 +64,7 @@ void $name($args)
         'THTensor*': 'thpp::Tensor*',
         'THCTensor*': 'thpp::Tensor*',
         'THIndexTensor*': 'thpp::Tensor*',
+        'THCIndexTensor*': 'thpp::Tensor*',
         'THIndex_t': 'long',
         'accreal': 'double',
     }
@@ -98,11 +99,19 @@ void $name($args)
     def get_arg_accessor(self, arg, option):
         return self.get_type_unpack(arg, option)
 
+    def process_pre_arg_assign(self, pre_arg_assign, option):
+        if option['backend'] == 'cunn':
+            # Enclose arg_assign with CUDA guard
+            pre_arg_assign.append('#ifdef WITH_CUDA')
+        return pre_arg_assign
+
     def process_option_code_template(self, template, option):
-        code = '// fill me in'
+        template = []
+        if option['backend'] == 'cunn':
+            template.append('#endif')
 
         def base_cast(arg, CReal, real):
-            name = arg['formal_name']
+            name = 'arg_' + arg['formal_name']
             type = arg['type']
             if type in self.REAL_TENSOR_TYPES:
                 return ('(TH{CReal}Tensor*){name}->cdata()'
@@ -120,7 +129,7 @@ void $name($args)
         def cast(arg, CReal, real):
             expr = base_cast(arg, CReal, real)
             if arg.get('optional', False):
-                name = arg['formal_name']
+                name = 'arg_' + arg['formal_name']
                 return '{name} ? {expr} : NULL'.format(name=name, expr=expr)
             return expr
 
@@ -135,6 +144,7 @@ void $name($args)
                 name=option['cname'],
                 float_args=',\n'.join(float_args),
                 double_args=',\n'.join(double_args))
+            template.append(code)
 
         elif option['backend'] == 'cunn':
             float_args = []
@@ -150,11 +160,13 @@ void $name($args)
                 float_args=',\n'.join(float_args),
                 double_args=',\n'.join(double_args),
                 half_args=',\n'.join(half_args))
+            template.append(code)
 
-        return [code, '']
+        template.append('')
+        return template
 
     def get_type_unpack(self, arg, option):
-        return Template(arg['name'])
+        return Template(arg.get('formal_name', arg['name']))
 
     def get_type_check(self, arg, option):
         if option['backend'] == 'cunn':
