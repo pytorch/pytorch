@@ -458,6 +458,29 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 3)
         self.assertEqual(num_params(s), 3)
 
+    def test_children(self):
+        l1 = nn.Linear(2, 2)
+        l2 = nn.Linear(2, 2)
+        l3 = nn.Linear(2, 2)
+        l4 = nn.Linear(2, 2)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential(l1, l2, l1, l2, subnet)
+        self.assertEqual(list(s.children()), [l1, l2, subnet])
+
+    def test_named_children(self):
+        l1 = nn.Linear(2, 2)
+        l2 = nn.Linear(2, 2)
+        l3 = nn.Linear(2, 2)
+        l4 = nn.Linear(2, 2)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential()
+        s.add_module('layer1', l1)
+        s.add_module('layer2', l2)
+        s.add_module('layer3', l1)
+        s.add_module('layer4', l2)
+        s.add_module('subnet', subnet)
+        self.assertEqual(list(s.named_children()), [('layer1', l1), ('layer2', l2), ('subnet', subnet)])
+
     def test_modules(self):
         class Net(nn.Module):
             def __init__(self):
@@ -470,6 +493,26 @@ class TestNN(NNTestCase):
         n = Net()
         s = nn.Sequential(n, n, n, n)
         self.assertEqual(list(s.modules()), [s, n, l])
+
+    def test_named_modules(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = l
+                self.l2 = l
+                self.param = Variable(torch.Tensor(3, 5))
+                self.block = block
+        l = nn.Linear(10, 20)
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(10, 20)
+        block = nn.Sequential()
+        block.add_module('linear1', l1)
+        block.add_module('linear2', l2)
+        n = Net()
+        s = nn.Sequential(n, n, n, n)
+        self.assertEqual(list(s.named_modules()), [('', s), ('0', n), ('0.l1', l),
+                                                   ('0.block', block), ('0.block.linear1', l1),
+                                                   ('0.block.linear2', l2)])
 
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
@@ -674,14 +717,14 @@ class TestNN(NNTestCase):
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
 
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
-        gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
     def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
@@ -1779,6 +1822,11 @@ class TestNN(NNTestCase):
             grad2 = data.grad.data.clone()
             self.assertEqual(res1, res2)
             self.assertEqual(grad1, grad2)
+
+    def test_pairwise_distance(self):
+        input1 = Variable(torch.randn(4, 4), requires_grad=True)
+        input2 = Variable(torch.randn(4, 4), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
 
 
 class TestNNInit(TestCase):

@@ -973,26 +973,28 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
   THTensor *rai = THTensor_(new)();
   THIntTensor *rpivoti = THIntTensor_new();
 
-  if (!THIntTensor_isContiguous(rinfo_)) {
-      THError("Error: rinfo_ is not contiguous.");
+  int info = 0;
+  int *info_ptr = &info;
+  if (rinfo_) {
+    THIntTensor_resize1d(rinfo_, num_batches);
+    info_ptr = THIntTensor_data(rinfo_);
   }
-  if (!THIntTensor_isContiguous(rpivots_)) {
-      THError("Error: rpivots_ is not contiguous.");
-  }
-  THIntTensor_resize2d(rpivots_, num_batches, n);
-  THIntTensor_resize1d(rinfo_, num_batches);
 
-  for (long batch = 0; batch < num_batches; ++batch) {
+  THIntTensor_resize2d(rpivots_, num_batches, n);
+
+  long batch = 0;
+  for (; batch < num_batches; ++batch) {
     THTensor_(select)(ai, a, 0, batch);
     THTensor_(select)(rai, ra__, 0, batch);
     THIntTensor_select(rpivoti, rpivots_, 0, batch);
 
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_FLOAT)
     THLapack_(getrf)(n, n, THTensor_(data)(rai), lda,
-                     THIntTensor_data(rpivoti), &THIntTensor_data(rinfo_)[batch]);
-#else
-    THError("Unimplemented");
-#endif
+                     THIntTensor_data(rpivoti), info_ptr);
+    if (rinfo_) {
+      info_ptr++;
+    } else if (info != 0) {
+      break;
+    }
   }
 
   THTensor_(free)(ai);
@@ -1001,6 +1003,10 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
 
   if (ra__ != ra_) {
     THTensor_(freeCopyTo)(ra__, ra_);
+  }
+
+  if (!rinfo_ && info != 0) {
+    THError("failed to factorize batch element %ld (info == %d)", batch, info);
   }
 }
 
