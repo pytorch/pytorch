@@ -2,7 +2,7 @@ from torch.autograd.function import Function
 from torch._thnn import type2backend
 
 from . import _all_functions
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
 
 
 class MaxPool1d(Function):
@@ -368,7 +368,7 @@ class AvgPool3d(Function):
 class AdaptiveMaxPool1d(Function):
 
     def __init__(self, output_size, return_indices=False):
-        self.output_size = output_size
+        self.output_size = _single(output_size)
         self.return_indices = return_indices
 
     def forward(self, input):
@@ -381,7 +381,7 @@ class AdaptiveMaxPool1d(Function):
         indices, output = input2d.new().long(), input2d.new()
         backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
                                                        input2d, output, indices,
-                                                       self.output_size, 1)
+                                                       self.output_size[0], 1)
         indices = indices.squeeze(2)
         output = output.squeeze(2)
         if self.return_indices:
@@ -448,7 +448,7 @@ class AdaptiveMaxPool2d(Function):
 class AdaptiveAvgPool1d(Function):
 
     def __init__(self, output_size):
-        self.output_size = output_size
+        self.output_size = _single(output_size)
 
     def forward(self, input):
         if input.dim() != 3:
@@ -462,7 +462,7 @@ class AdaptiveAvgPool1d(Function):
         backend.SpatialAdaptiveAveragePooling_updateOutput(
             backend.library_state,
             input2d, output,
-            self.output_size, 1)
+            self.output_size[0], 1)
         output = output.squeeze(2)
         return output
 
