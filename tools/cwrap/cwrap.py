@@ -154,8 +154,8 @@ class cwrap(object):
     def get_wrapper_template(self, declaration):
         return self.search_plugins('get_wrapper_template', (declaration,), lambda _: None)
 
-    def get_formal_args(self, arguments):
-        return self.search_plugins('get_formal_args', (arguments,), lambda _: arguments)
+    def get_assign_args(self, arguments):
+        return self.search_plugins('get_assign_args', (arguments,), lambda _: arguments)
 
     def get_arg_accessor(self, arg, option):
         def wrap_accessor(arg, _):
@@ -191,16 +191,16 @@ class cwrap(object):
             result.append(res)
         return result
 
-    def build_arg_assign(self, arguments, arg_unpack):
+    def build_option_args(self, arguments, arg_unpack):
         assignement = []
         call_arg = []
-        # If type names needs to be changed
-        arguments = self.get_formal_args(arguments)
+        # If types or names needs to be changed
+        arguments = self.get_assign_args(arguments)
         for arg, unpack in zip(arguments, arg_unpack):
             if arg['type'] == 'CONSTANT':
                 call_arg.append(str(arg['name']))
             else:
-                var_name = "arg_" + str(arg.get('formal_name', arg['name']))
+                var_name = "arg_" + str(arg.get('assign_name', arg['name']))
                 res = self.ARG_ASSIGN_TEMPLATE.substitute(
                     type=arg['type'],
                     name=var_name,
@@ -251,11 +251,11 @@ class cwrap(object):
         # Generate arg assignment and call arguments
         arg_unpack = self.map_selected_arguments('get_type_unpack',
                                                  'process_single_unpack', option, option['arguments'])
-        arg_assign, call_arg = self.build_arg_assign(option['arguments'], arg_unpack)
+        arg_assign, call_arg = self.build_option_args(option['arguments'], arg_unpack)
 
         call_arg = ', '.join(call_arg)
         for plugin in self.plugins:
-            call_arg = plugin.process_all_unpacks(call_arg, option)
+            call_arg = plugin.process_all_call_arg(call_arg, option)
 
         # Generate call
         try:

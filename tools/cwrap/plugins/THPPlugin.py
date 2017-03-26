@@ -386,7 +386,7 @@ ${cpu}
         for option in declaration['options']:
             for arg in option['arguments']:
                 if arg['name'] == 'self':
-                    arg['formal_name'] = 'self'
+                    arg['assign_name'] = 'self'
                     arg['name'] = 'source'
         return declaration
 
@@ -436,7 +436,7 @@ ${cpu}
             return self.preprocessor_guard(code, declaration['defined_if'])
         return code
 
-    def process_all_unpacks(self, code, option):
+    def process_all_call_arg(self, code, option):
         return 'LIBRARY_STATE ' + code
 
     def process_all_checks(self, code, option):

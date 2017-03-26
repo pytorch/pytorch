@@ -16,7 +16,7 @@ class CWrapPlugin(object):
     def get_wrapper_template(self, declaration):
         pass
 
-    def get_formal_args(self, arguments):
+    def get_assign_args(self, arguments):
         pass
 
     def get_arg_accessor(self, arg, option):
@@ -34,7 +34,7 @@ class CWrapPlugin(object):
     def process_single_unpack(self, code, arg, arg_accessor):
         return code
 
-    def process_all_unpacks(self, code, option):
+    def process_all_call_arg(self, code, option):
         return code
 
     def process_option_code(self, code, option):

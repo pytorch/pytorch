@@ -90,8 +90,8 @@ void $name($args)
             base_args = declaration['options'][0]['arguments']
             for option in declaration['options']:
                 for idx, arg in enumerate(option['arguments']):
-                    arg['formal_name'] = base_args[idx]['name']
-                    arg['formal_type'] = base_args[idx]['type']
+                    arg['assign_name'] = base_args[idx]['name']
+                    arg['assign_type'] = base_args[idx]['type']
                     if idx != 1:
                         arg['ignore_check'] = True
         return declarations
@@ -111,7 +111,7 @@ void $name($args)
             template.append('#endif')
 
         def base_cast(arg, CReal, real):
-            name = 'arg_' + arg['formal_name']
+            name = 'arg_' + arg['assign_name']
             type = arg['type']
             if type in self.REAL_TENSOR_TYPES:
                 return ('(TH{CReal}Tensor*){name}->cdata()'
@@ -129,7 +129,7 @@ void $name($args)
         def cast(arg, CReal, real):
             expr = base_cast(arg, CReal, real)
             if arg.get('optional', False):
-                name = 'arg_' + arg['formal_name']
+                name = 'arg_' + arg['assign_name']
                 return '{name} ? {expr} : NULL'.format(name=name, expr=expr)
             return expr
 
@@ -166,7 +166,7 @@ void $name($args)
         return template
 
     def get_type_unpack(self, arg, option):
-        return Template(arg.get('formal_name', arg['name']))
+        return Template(arg.get('assign_name', arg['name']))
 
     def get_type_check(self, arg, option):
         if option['backend'] == 'cunn':
@@ -174,20 +174,20 @@ void $name($args)
         else:
             return Template('!is_cuda')
 
-    def get_formal_args(self, arguments):
-        formal_args = []
+    def get_assign_args(self, arguments):
+        assign_args = []
         for arg in arguments:
             arg = copy.copy(arg)
             new_type = self.INPUT_ARGUMENT_MAP.get(arg['type'])
             if new_type is not None:
                 arg['type'] = new_type
-            formal_args.append(arg)
-        return formal_args
+            assign_args.append(arg)
+        return assign_args
 
     def get_wrapper_template(self, declaration):
-        # get formal arguments string
+        # get assign arguments string
         base_arguments = declaration['options'][0]['arguments']
-        args = self.get_formal_args(base_arguments)
+        args = self.get_assign_args(base_arguments)
         arg_str = ', '.join([arg['type'] + ' ' + arg['name'] for arg in args])
 
         if self.header:
@@ -197,7 +197,7 @@ void $name($args)
             checked_args = []
             for arg in base_arguments:
                 if arg['type'] in tensor_types:
-                    name = arg.get('formal_name', arg['name'])
+                    name = arg.get('assign_name', arg['name'])
                     name_str = name
                     if arg.get('optional', False):
                         name_str = '?' + name_str

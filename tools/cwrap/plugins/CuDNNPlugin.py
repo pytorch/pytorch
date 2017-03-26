@@ -84,15 +84,15 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     def get_type_check(self, arg, option):
         return self.TYPE_CHECK.get(arg['type'], None)
 
-    def get_formal_args(self, arguments):
-        formal_args = []
+    def get_assign_args(self, arguments):
+        assign_args = []
         for arg in arguments:
             arg = copy.copy(arg)
             new_type = self.INPUT_ARGUMENT_MAP.get(arg['type'])
             if new_type is not None:
                 arg['type'] = new_type
-            formal_args.append(arg)
-        return formal_args
+            assign_args.append(arg)
+        return assign_args
 
     def get_wrapper_template(self, declaration):
         arg_desc = []
@@ -158,7 +158,7 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
             return self.preprocessor_guard(code, declaration['defined_if'])
         return code
 
-    def process_all_unpacks(self, code, option):
+    def process_all_call_arg(self, code, option):
         return 'state, ' + code
 
     def declare_methods(self):
