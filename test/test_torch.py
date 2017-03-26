@@ -469,7 +469,7 @@ class TestTorch(TestCase):
         info = cast(torch.IntTensor())
         LU_data, pivots = a.btrifact(info=info)
         self.assertEqual(info.abs().sum(), 0)
-        x = torch.btrisolve(LU_data, b, pivots)
+        x = torch.btrisolve(b, LU_data, pivots)
         b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
         self.assertEqual(b_, b)
 
