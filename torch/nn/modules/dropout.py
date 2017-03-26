@@ -33,6 +33,10 @@ class Dropout(Module):
         self.inplace = inplace
         self.scale_train = scale_train
 
+    def __setstate__(self, state):
+        state.setdefault('scale_train', True)
+        self.__dict__ = state
+
     def forward(self, input):
         return F.dropout(input, self.p, self.training, self.inplace, self.scale_train)
 
