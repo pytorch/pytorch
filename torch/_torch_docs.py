@@ -4365,13 +4365,14 @@ Example::
 
 add_docstr(torch._C.btrifact,
            """
-btrifact(A) -> Tensor, Tensor, IntTensor
+btrifact(A, info=None) -> Tensor, IntTensor
 
 Batch LU factorization.
 
-Returns a tuple containing the LU factorization, pivots, and pivot format,
-and info if the factorizations succeeded across the minibatch.
-The error codes are from dgetrf and a non-zero value indicates an error occurred.
+Returns a tuple containing the LU factorization and pivots.
+The optional argument `info` provides information if the
+factorization succeeded for each minibatch example.
+The info values are from dgetrf and a non-zero value indicates an error occurred.
 The specific values are from cublas if cuda is being used, otherwise LAPACK.
 
 Arguments:
@@ -4380,14 +4381,14 @@ Arguments:
 Example::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> A_LU_data, A_LU_pivots, info = A.btrifact()
+    >>> A_LU = A.btrifact()
 
 """)
 
 
 add_docstr(torch._C.btrisolve,
            """
-btrisolve(b, A_LU_data, A_LU_pivots) -> Tensor
+btrisolve(b, LU_data, LU_pivots) -> Tensor
 
 Batch LU solve.
 
@@ -4395,7 +4396,8 @@ Returns the LU solve of the linear system Ax = b.
 
 Arguments:
     b (Tensor): RHS tensor.
-    A_LU (Tensor, IntTensor, fmt): LU-factorization of A from btrifact.
+    LU_data (Tensor): Pivoted LU factorization of A from btrifact.
+    LU_pivots (IntTensor): Pivots of the LU factorization.
 
 Example::
 
