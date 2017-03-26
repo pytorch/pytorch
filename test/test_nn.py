@@ -795,6 +795,20 @@ class TestNN(NNTestCase):
     def test_MaxPool3d_indices_cuda(self):
         self._test_maxpool_indices(3, torch.cuda.FloatTensor)
 
+    def test_AdaptiveMaxPool1d_indices(self):
+        self._test_maxpool_indices(1)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_AdaptiveMaxPool1d_indices_cuda(self):
+        self._test_maxpool_indices(1, torch.cuda.FloatTensor)
+
+    def test_AdaptiveMaxPool2d_indices(self):
+        self._test_maxpool_indices(2)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_AdaptiveMaxPool2d_indices_cuda(self):
+        self._test_maxpool_indices(2, torch.cuda.FloatTensor)
+
     def _test_scatter(self, tensor):
         x = Variable(tensor, requires_grad=True)
         result = dp.scatter(x, (0, 1))
@@ -2473,6 +2487,40 @@ new_module_tests = [
         constructor_args=(None, 4),
         input_size=(1, 2, 4, 4),
         desc='scale'
+    ),
+    dict(
+        module_name='AdaptiveMaxPool1d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5)
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5, 6),
+        desc='single'
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
+        constructor_args=((3, 4),),
+        input=torch.rand(1, 3, 5, 6),
+        desc='tuple'
+    ),
+    dict(
+        module_name='AdaptiveAvgPool1d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5)
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5, 6),
+        desc='single'
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=((3, 4),),
+        input=torch.rand(1, 3, 5, 6),
+        desc='tuple'
     ),
 ]
 
