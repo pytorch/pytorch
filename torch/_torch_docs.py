@@ -4297,6 +4297,8 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
+A negative dim value can be used and will correspond to :math:`dim + input.dim() + 1`
+
 Args:
     input (Tensor): the input `Tensor`
     dim (int): The index at which to insert the singleton dimension
