@@ -27,7 +27,7 @@ class Buffer : public ::gloo::transport::Buffer {
  public:
   virtual ~Buffer();
 
-  virtual void send(size_t offset, size_t length) override;
+  virtual void send(size_t offset, size_t length, size_t roffset = 0) override;
 
   virtual void waitRecv() override;
   virtual void waitSend() override;

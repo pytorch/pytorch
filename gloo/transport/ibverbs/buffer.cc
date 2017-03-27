@@ -89,8 +89,13 @@ void Buffer::waitSend() {
   }
 }
 
-void Buffer::send(size_t offset, size_t length) {
+void Buffer::send(size_t offset, size_t length, size_t roffset) {
   int rv;
+
+  // Can't assert on roffset, since we don't know the size of
+  // the remote buffer. Refactor of initialization code needed
+  // to support this.
+  GLOO_ENFORCE_LE(offset + length, size_);
 
   {
     std::unique_lock<std::mutex> lock(m_);
@@ -119,7 +124,7 @@ void Buffer::send(size_t offset, size_t length) {
 
   const struct ibv_mr* peer = pair_->getMemoryRegion(slot_);
   GLOO_ENFORCE_NE(peer, (const struct ibv_mr*)nullptr);
-  wr.wr.rdma.remote_addr = (uint64_t)peer->addr;
+  wr.wr.rdma.remote_addr = (uint64_t)peer->addr + roffset;
   wr.wr.rdma.rkey = peer->rkey;
 
   struct ibv_send_wr* bad_wr;

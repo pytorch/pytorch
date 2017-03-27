@@ -24,7 +24,7 @@ class Buffer {
     debug_ = debug;
   }
 
-  virtual void send(size_t offset, size_t length) = 0;
+  virtual void send(size_t offset, size_t length, size_t roffset = 0) = 0;
 
   // Send entire buffer by default
   void send() {

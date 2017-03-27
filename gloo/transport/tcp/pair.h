@@ -38,6 +38,7 @@ struct Op {
     size_t slot_;
     size_t offset_;
     size_t length_;
+    size_t roffset_;
   } preamble_;
 
   // Used internally

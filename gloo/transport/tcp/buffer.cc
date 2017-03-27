@@ -85,8 +85,13 @@ void Buffer::waitSend() {
   }
 }
 
-void Buffer::send(size_t offset, size_t length) {
+void Buffer::send(size_t offset, size_t length, size_t roffset) {
   Op op;
+
+  // Can't assert on roffset, since we don't know the size of
+  // the remote buffer. Refactor of initialization code needed
+  // to support this.
+  GLOO_ENFORCE_LE(offset + length, size_);
 
   memset(&op, 0, sizeof(op));
 
@@ -94,6 +99,7 @@ void Buffer::send(size_t offset, size_t length) {
   op.preamble_.slot_ = slot_;
   op.preamble_.offset_ = offset;
   op.preamble_.length_ = length;
+  op.preamble_.roffset_ = roffset;
   op.buf_ = this;
 
   // Pass to pair

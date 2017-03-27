@@ -319,8 +319,11 @@ bool Pair::read(Op& op) {
         }
       }
       auto offset = op.nread_ - sizeof(op.preamble_);
-      iov.iov_base = ((char*)op.buf_->ptr_) + offset;
+      iov.iov_base = ((char*)op.buf_->ptr_) + offset + op.preamble_.roffset_;
       iov.iov_len = op.preamble_.length_ - offset;
+
+      // There must always be a non-zero number of bytes to read
+      GLOO_ENFORCE_GT(iov.iov_len, 0);
     }
 
     // If busy-poll has been requested AND sync mode has been enabled for pair
@@ -390,10 +393,11 @@ void Pair::handleEvents(int events) {
   // skip handling the events until the next tick if the lock cannot
   // be acquired.
   std::unique_lock<std::mutex> lock(m_, std::try_to_lock);
+  if (!lock) {
+    return;
+  }
+
   try {
-    if (!lock) {
-      return;
-    }
     checkErrorState();
 
     if (state_ == CONNECTED) {
