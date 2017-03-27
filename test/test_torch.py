@@ -429,24 +429,9 @@ class TestTorch(TestCase):
                                 (1.3728, 0.1319))))
         a = cast(a)
         info = cast(torch.IntTensor())
-        LU_data, pivots = a.btrifact(info=info)
+        a_LU = a.btrifact(info=info)
         self.assertEqual(info.abs().sum(), 0)
-        I_U = torch.triu(torch.ones(2, 2)).unsqueeze(0).expand(3, 2, 2).type_as(a).byte()
-        I_L = 1 - I_U
-        a_L = torch.zeros(a.size()).type_as(a)
-        a_U = a_L.clone()
-        a_L[torch.eye(2).unsqueeze(0).expand(3, 2, 2).type_as(a).byte()] = 1.0
-        a_L[I_L] = LU_data[I_L]
-        a_U[I_U] = LU_data[I_U]
-
-        P = torch.eye(2).unsqueeze(0).expand(3, 2, 2).type_as(a)
-        for i in range(3):
-            for j in range(2):
-                k = pivots[i, j] - 1
-                t = P[i, j, :].clone()
-                P[i, j, :] = P[i, k, :]
-                P[i, k, :] = t
-
+        P, a_L, a_U = torch.btriunpack(*a_LU)
         a_ = torch.bmm(P, torch.bmm(a_L, a_U))
         self.assertEqual(a_, a)
 
