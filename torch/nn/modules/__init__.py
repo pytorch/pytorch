@@ -1,5 +1,5 @@
 from .module import Module
-from .linear import Linear
+from .linear import Linear, Bilinear
 from .conv import Conv1d, Conv2d, Conv3d, \
     ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
@@ -43,5 +43,5 @@ __all__ = [
     'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
-    'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d'
+    'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d', 'Bilinear',
 ]

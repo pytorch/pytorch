@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
+import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable, gradcheck
 from torch.nn import Parameter
@@ -2047,6 +2048,35 @@ class TestNN(NNTestCase):
         input3 = Variable(torch.randn(4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
             x1, x2, x3, swap=True), (input1, input2, input3)))
+
+    def test_bilinear(self):
+        module = nn.Bilinear(10, 10, 8)
+        module2 = legacy.Bilinear(10, 10, 8)
+
+        module2.weight.copy_(module.weight.data)
+        module2.bias.copy_(module.bias.data)
+
+        input1 = torch.randn(4, 10)
+        input2 = torch.randn(4, 10)
+
+        output = module(Variable(input1), Variable(input2))
+        output2 = module2.forward([input1, input2])
+
+        input1_1 = Variable(input1, requires_grad=True)
+        input2_1 = Variable(input2, requires_grad=True)
+
+        output3 = module(input1_1, input2_1)
+        grad = torch.randn(*output3.size())
+        output3.backward(grad)
+        gi1 = input1_1.grad.data.clone()
+        gi2 = input2_1.grad.data.clone()
+
+        self.assertEqual(output.data, output2)
+        self.assertEqual([gi1, gi2], output3)
+
+        def forward(x1, x2):
+            F.bilinear(x1, x2, module.weight, module.bias)
+        self.assertTrue(gradcheck(forward, (input1_1, input2_1)))
 
 
 class TestNNInit(TestCase):
