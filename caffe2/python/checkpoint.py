@@ -6,11 +6,15 @@ from __future__ import unicode_literals
 import os
 import logging
 from caffe2.python import core, context
+from caffe2.python.net_builder import ops
 from caffe2.python.task import Node, Task, TaskGroup, TaskOutput, WorkspaceType
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# The name of the special net that is used to store all the blob names in the
+# workspace.
+__BLOB_NAMES_NET__ = 'get_blob_list'
 
 @context.define_context()
 class Job(object):
@@ -121,19 +125,18 @@ class CheckpointManager(object):
         """
         assert nodes is None or len(nodes) == 1, (
             'CheckpointManager only supports single node.')
-        net = core.Net('get_blob_list')
-        if retrieve_from_epoch is None:
-            net.GetAllBlobNames(
-                [],
-                self._blob_names,
-                include_shared=False)
-        else:
-            net.Load(
-                [], self._blob_names,
-                db=self._dbname(retrieve_from_epoch),
-                db_type=self._db_type,
-                absolute_path=True)
-        task = Task(step=net, outputs=[self._blob_names])
+        with Task(outputs=[self._blob_names]) as task:
+            if retrieve_from_epoch is None:
+                ops.GetAllBlobNames(
+                    [],
+                    self._blob_names,
+                    include_shared=False)
+            else:
+                ops.Load(
+                    [], self._blob_names,
+                    db=self._dbname(retrieve_from_epoch),
+                    db_type=self._db_type,
+                    absolute_path=True)
         self._names_output = task.outputs()[0]
         return task
 
@@ -150,14 +153,39 @@ class CheckpointManager(object):
         resumed from a given epoch. This task will run a Load op that will
         load and deserialize all relevant blobs from a persistent storage.
         """
-        net = core.Net('get_blob_list')
-        net.Load(
-            [],
-            self.blob_list(),
-            db=self._dbname(epoch),
-            db_type=self._db_type,
-            absolute_path=True)
-        return Task(step=net)
+        with Task() as task:
+            ops.Load(
+                [],
+                self.blob_list(),
+                db=self._dbname(epoch),
+                db_type=self._db_type,
+                absolute_path=True)
+        return task
+
+    def load_blobs_from_checkpoint(self, blob_names, epoch):
+        """
+        Builds a Task that loads only the necessary blobs from a checkpoint of
+        the given epoch. The necessary blobs are given in the blob_names
+        argument.
+
+        Args:
+            blob_names: A list of strings. Each string is the name of a
+                blob.
+            epoch: The checkpoint epoch to load from.
+
+        Returns:
+            A Task which loads the specified blobs from the checkpoint of the
+            given epoch.
+        """
+        with Task() as task:
+            ops.Load(
+                [],
+                blob_names,
+                db=self._dbname(epoch),
+                db_type=self._db_type,
+                absolute_path=True,
+                allow_incomplete=True)
+        return task
 
     def save(self, epoch):
         """
@@ -165,11 +193,11 @@ class CheckpointManager(object):
         epoch is run. This will execute a Save ops to serialize and persist
         blobs present in the global workspaace.
         """
-        net = core.Net('checkpoint_save')
-        net.Save(
-            self.blob_list(), [], db=self._dbname(epoch),
-            db_type=self._db_type, absolute_path=True)
-        return Task(step=net)
+        with Task() as task:
+            ops.Save(
+                self.blob_list(), [], db=self._dbname(epoch),
+                db_type=self._db_type, absolute_path=True)
+        return task
 
 
 class MultiNodeCheckpointManager(object):
@@ -211,6 +239,21 @@ class MultiNodeCheckpointManager(object):
 
     def load(self, epoch):
         return self._task_group(self._node_manager_class.load, epoch)
+
+    def load_blobs_locally(self, blob_names, epoch, session):
+        """Loads the necessary blobs from the checkpoints to the current node.
+
+        Args:
+            blob_names: A list of strings. Each string is the name of a
+                blob.
+            epoch: An integer. The checkpoint epoch to load from.
+            session: A Session object to execute the Load ops.
+        """
+        assert self._node_managers is not None, 'init must be called first.'
+        for _, manager in self._node_managers:
+            with TaskGroup(WorkspaceType.GLOBAL) as task_group:
+                manager.load_blobs_from_checkpoint(blob_names, epoch)
+            session.run(task_group)
 
     def save(self, epoch):
         return self._task_group(self._node_manager_class.save, epoch)
@@ -274,6 +317,36 @@ class JobRunner(object):
             epoch += 1
         client.run(self.job.exit_group)
         return epoch
+
+    def load_blobs_from_checkpoints(self, blob_names, epoch, session):
+        """Loads the necessary blobs from the checkpoints.
+
+        Checkpoints store the snapshots of the workspace in each node.
+        Sometimes we only need to load a subset of the blobs from the
+        checkpoints. One common scenario is to load only the model blobs from
+        the checkpoints for evaluation purpose. Given the names of the necessary
+        blobs, this function goes over all the checkpoints of all the nodes, but
+        only loads the blobs specified in the blob_names to the current
+        workspace.
+
+        Args:
+            blob_names: A list of strings. Each string is the name of a
+                blob.
+            epoch: An integer. The checkpoint epoch to load from.
+            session: A Session object to execute the load ops.
+
+        Raises:
+            ValueError: When the checkpoint manager is invalid.
+        """
+        if not self.checkpoint:
+            raise ValueError('Checkpoint manager is None')
+        logger.info('Preparing checkpoint ...')
+        session.run(self.checkpoint.init(
+            self.job.nodes_to_checkpoint(),
+            retrieve_from_epoch=self.resume_from_epoch))
+        logger.info('Loading checkpoint for epoch {} ...'.format(epoch))
+        self.checkpoint.load_blobs_locally(blob_names, epoch, session)
+        logger.info('Checkpoint loaded.')
 
 
 def epoch_limiter(num_epochs):
