@@ -1,7 +1,34 @@
 #include "caffe2/operators/metrics_ops.h"
 
 namespace caffe2 {
+
+void QPSMetricStateSerializer::Serialize(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor) {
+  CAFFE_ENFORCE(blob.IsType<std::unique_ptr<QPSMetricState>>());
+  BlobProto blob_proto;
+  blob_proto.set_name(name);
+  blob_proto.set_type("std::unique_ptr<QPSMetricState>");
+  blob_proto.set_content("");
+  acceptor(name, blob_proto.SerializeAsString());
+}
+
+void QPSMetricStateDeserializer::Deserialize(
+    const BlobProto& /* unused */,
+    Blob* blob) {
+  *blob->GetMutable<std::unique_ptr<QPSMetricState>>() =
+      caffe2::make_unique<QPSMetricState>();
+}
+
 namespace {
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<std::unique_ptr<QPSMetricState>>()),
+    QPSMetricStateSerializer);
+REGISTER_BLOB_DESERIALIZER(
+    std::unique_ptr<QPSMetricState>,
+    QPSMetricStateDeserializer);
+
 REGISTER_CPU_OPERATOR(CreateQPSMetric, CreateQPSMetricOp);
 REGISTER_CPU_OPERATOR(QPSMetric, QPSMetricOp);
 REGISTER_CPU_OPERATOR(QPSMetricReport, QPSMetricReportOp);

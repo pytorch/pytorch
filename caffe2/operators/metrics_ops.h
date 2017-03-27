@@ -1,5 +1,6 @@
 #pragma once
 
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
@@ -7,7 +8,6 @@
 #include <mutex>
 
 namespace caffe2 {
-namespace {
 struct QPSMetricState {
   Timer lifetimeTimer;
   Timer windowTimer;
@@ -16,9 +16,26 @@ struct QPSMetricState {
 
   std::mutex mutex;
 };
-}
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<QPSMetricState>);
+
+class QPSMetricStateSerializer : public BlobSerializerBase {
+ public:
+  /**
+   * Serializes a std::unique_ptr<QPSMetricState>. Note that this blob has to
+   * contain std::unique_ptr<QPSMetricState>, otherwise this function produces a
+   * fatal error.
+   */
+  void Serialize(
+      const Blob& blob,
+      const string& name,
+      BlobSerializerBase::SerializationAcceptor acceptor) override;
+};
+
+class QPSMetricStateDeserializer : public BlobDeserializerBase {
+ public:
+  void Deserialize(const BlobProto& proto, Blob* blob) override;
+};
 
 // TODO(amalevich): Consider making all the code below templated, so it'll be
 // easier to share it across different metrics.
