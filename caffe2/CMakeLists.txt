@@ -78,6 +78,10 @@ else()
   list(APPEND Caffe2_MAIN_LIBS ${tmp})
 endif()
 
+# Installing the header files
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/include/
+        FILES_MATCHING PATTERN "*.h")
 
 # ---[ CUDA library.
 if(USE_CUDA)
