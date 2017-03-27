@@ -183,15 +183,16 @@ void NCCLOp<T>::runNCCL(F&& f) {
 
 template <typename T>
 void ReduceOp<T>::runAsync() {
-  const int root = root_;
-  this->runNCCL([root](
+  const auto op = op_;
+  const auto root = root_;
+  this->runNCCL([op, root](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclReduce(
         *element.src,
         *element.dst,
         element.src.getCount(),
         ncclTypeWrapper<T>::type,
-        ncclSum,
+        op,
         root,
         comm,
         stream));
@@ -200,14 +201,15 @@ void ReduceOp<T>::runAsync() {
 
 template <typename T>
 void AllreduceOp<T>::runAsync() {
-  this->runNCCL([](
+  const auto op = op_;
+  this->runNCCL([op](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclAllReduce(
         *element.src,
         *element.dst,
         element.src.getCount(),
         ncclTypeWrapper<T>::type,
-        ncclSum,
+        op,
         comm,
         stream));
   });
@@ -215,14 +217,15 @@ void AllreduceOp<T>::runAsync() {
 
 template <typename T>
 void ReduceScatterOp<T>::runAsync() {
-  this->runNCCL([](
+  const auto op = op_;
+  this->runNCCL([op](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclReduceScatter(
         *element.src,
         *element.dst,
         element.dst.getCount(),
         ncclTypeWrapper<T>::type,
-        ncclSum,
+        op,
         comm,
         stream));
   });

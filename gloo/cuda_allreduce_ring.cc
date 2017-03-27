@@ -93,7 +93,7 @@ void CudaAllreduceRing<T>::run() {
   devicePtrs_[0].wait();
   for (int i = 1; i < devicePtrs_.size(); i++) {
     devicePtrs_[i].wait();
-    this->fn_(hostPtrs_[0], hostPtrs_[i], count_);
+    this->fn_->call(hostPtrs_[0], hostPtrs_[i], count_);
   }
 
   // Intialize outbox with locally reduced values
@@ -108,7 +108,7 @@ void CudaAllreduceRing<T>::run() {
     recvDataBuf_->waitRecv();
 
     // Reduce
-    this->fn_(hostPtrs_[0], inbox_, count_);
+    this->fn_->call(hostPtrs_[0], inbox_, count_);
 
     // Wait for outbox write to complete
     sendDataBuf_->waitSend();

@@ -11,7 +11,9 @@
 
 #include <memory>
 
+#include "gloo/common.h"
 #include "gloo/context.h"
+#include "gloo/math.h"
 
 namespace gloo {
 

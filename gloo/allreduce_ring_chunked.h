@@ -24,7 +24,7 @@ class AllreduceRingChunked : public Allreduce<T> {
       const std::shared_ptr<Context>& context,
       std::vector<T*> ptrs,
       int count,
-      typename Allreduce<T>::ReduceFunction fn = nullptr)
+      ReductionFunction<T>* fn = nullptr)
       : Allreduce<T>(context, fn),
         ptrs_(ptrs),
         count_(count),
@@ -75,7 +75,7 @@ class AllreduceRingChunked : public Allreduce<T> {
   void run() {
     // Reduce specified pointers into ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
-      this->fn_(ptrs_[0], ptrs_[i], count_);
+      this->fn_->call(ptrs_[0], ptrs_[i], count_);
     }
 
     // Kick off copying initial chunks
@@ -122,7 +122,7 @@ class AllreduceRingChunked : public Allreduce<T> {
 
       // Reduce
       if (length > 0) {
-        this->fn_(&ptrs_[0][offset], inbox_[chunkOffset & 1], length);
+        this->fn_->call(&ptrs_[0][offset], inbox_[chunkOffset & 1], length);
       }
 
       // Send notification to node on the left that

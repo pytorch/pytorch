@@ -21,6 +21,7 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
   ChunkContext(
       CudaDevicePointer<T>&& rootDevicePtr,
       T* hostPtr,
+      const ReductionFunction<T>* fn,
       std::vector<nccl::NCCLElement<T>>&& reduceElements,
       std::vector<nccl::NCCLElement<T>>&& broadcastElements)
       : rootDevicePtr(std::move(rootDevicePtr)),
@@ -28,6 +29,7 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
         length(rootDevicePtr.getCount()),
         reduceOp(
           nccl::NCCLExecution<T>(std::move(reduceElements)),
+          fn,
           this->rootDevicePtr.getDeviceID()),
         broadcastOp(
           nccl::NCCLExecution<T>(std::move(broadcastElements)),
@@ -120,6 +122,7 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     chunkContext_.push_back(ChunkContext(
         std::move(rootDevicePtr),
         hostPtr_ + offset,
+        this->fn_,
         std::move(reduceElements),
         std::move(broadcastElements)));
   }
@@ -194,7 +197,8 @@ void CudaAllreduceRingChunked<T>::run() {
         recvDataBuf_[chunkOffset & 1]->waitRecv();
 
         // Reduce
-        this->fn_(context.hostPtr, inbox_[chunkOffset & 1], context.length);
+        this->fn_->call(
+          context.hostPtr, inbox_[chunkOffset & 1], context.length);
       }
     } else {
       // Empty chunk but still need to wait on the inbox write to ensure the

@@ -19,7 +19,6 @@
 #include "gloo/context.h"
 
 #include "gloo/benchmark/benchmark.h"
-#include "gloo/benchmark/math.h"
 #include "gloo/benchmark/runner.h"
 
 using namespace gloo;
@@ -34,7 +33,7 @@ class AllreduceBenchmark : public Benchmark {
  public:
   virtual void initialize(int elements) override {
     auto ptrs = allocate(options_.inputs, elements);
-    algorithm_.reset(new T(context_, ptrs, elements, &sum));
+    algorithm_.reset(new T(context_, ptrs, elements));
   }
 
   virtual void verify() override {

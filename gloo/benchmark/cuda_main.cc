@@ -10,7 +10,6 @@
 #include <memory>
 
 #include "gloo/benchmark/benchmark.h"
-#include "gloo/benchmark/math.h"
 #include "gloo/benchmark/runner.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"

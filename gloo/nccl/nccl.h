@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "gloo/common/logging.h"
+#include "gloo/common.h"
 #include "gloo/cuda.h"
 
 namespace gloo {
@@ -95,10 +96,29 @@ class NCCLOp {
 };
 
 template <typename T>
+ncclRedOp_t toReductionOp(const ReductionFunction<T>* fn) {
+  switch (fn->type()) {
+    case SUM:
+      return ncclSum;
+    case PRODUCT:
+      return ncclProd;
+    case MAX:
+      return ncclMax;
+    case MIN:
+      return ncclMin;
+    default:
+      GLOO_ENFORCE(false, "NCCL does not support reduction type ", fn->type());
+  }
+}
+
+template <typename T>
 class ReduceOp : public NCCLOp<T> {
  public:
-  explicit ReduceOp(NCCLExecution<T>&& execution, int root)
-      : NCCLOp<T>(std::move(execution)), root_(root) {
+  ReduceOp(
+    NCCLExecution<T>&& execution,
+    const ReductionFunction<T>* fn,
+    const int root)
+      : NCCLOp<T>(std::move(execution)), op_(toReductionOp(fn)), root_(root) {
     for (const auto& element : execution.elements) {
       GLOO_ENFORCE_EQ(
         element.src.getCount(),
@@ -110,14 +130,17 @@ class ReduceOp : public NCCLOp<T> {
   void runAsync() override;
 
  protected:
+  const ncclRedOp_t op_;
   const int root_;
 };
 
 template <typename T>
 class AllreduceOp : public NCCLOp<T> {
  public:
-  explicit AllreduceOp(NCCLExecution<T>&& execution)
-      : NCCLOp<T>(std::move(execution)) {
+  AllreduceOp(
+    NCCLExecution<T>&& execution,
+    const ReductionFunction<T>* fn)
+      : NCCLOp<T>(std::move(execution)), op_(toReductionOp(fn)) {
     for (const auto& element : execution.elements) {
       GLOO_ENFORCE_EQ(
         element.src.getCount(),
@@ -127,13 +150,18 @@ class AllreduceOp : public NCCLOp<T> {
   }
 
   void runAsync() override;
+
+ protected:
+  const ncclRedOp_t op_;
 };
 
 template <typename T>
 class ReduceScatterOp : public NCCLOp<T> {
  public:
-  explicit ReduceScatterOp(NCCLExecution<T>&& execution)
-      : NCCLOp<T>(std::move(execution)) {
+  ReduceScatterOp(
+    NCCLExecution<T>&& execution,
+    const ReductionFunction<T>* fn)
+      : NCCLOp<T>(std::move(execution)), op_(toReductionOp(fn)) {
     for (const auto& element : execution.elements) {
       GLOO_ENFORCE_EQ(
         element.src.getCount() / execution.elements.size(),
@@ -145,6 +173,9 @@ class ReduceScatterOp : public NCCLOp<T> {
   }
 
   void runAsync() override;
+
+ protected:
+  const ncclRedOp_t op_;
 };
 
 template <typename T>

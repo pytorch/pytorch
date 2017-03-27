@@ -24,7 +24,7 @@ class AllreduceRing : public Allreduce<T> {
       const std::shared_ptr<Context>& context,
       std::vector<T*> ptrs,
       int count,
-      typename Allreduce<T>::ReduceFunction fn = nullptr)
+      ReductionFunction<T>* fn = nullptr)
       : Allreduce<T>(context, fn),
         ptrs_(ptrs),
         count_(count),
@@ -65,7 +65,7 @@ class AllreduceRing : public Allreduce<T> {
   void run() {
     // Reduce specified pointers into ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
-      this->fn_(ptrs_[0], ptrs_[i], count_);
+      this->fn_->call(ptrs_[0], ptrs_[i], count_);
     }
 
     // Intialize outbox with locally reduced values
@@ -80,7 +80,7 @@ class AllreduceRing : public Allreduce<T> {
       recvDataBuf_->waitRecv();
 
       // Reduce
-      this->fn_(ptrs_[0], inbox_, count_);
+      this->fn_->call(ptrs_[0], inbox_, count_);
 
       // Wait for outbox write to complete
       sendDataBuf_->waitSend();

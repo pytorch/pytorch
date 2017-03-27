@@ -16,24 +16,19 @@ namespace gloo {
 template <typename T>
 class Allreduce : public Algorithm {
  public:
-  using ReduceFunction = void(T*, const T*, size_t n);
-
-  Allreduce(const std::shared_ptr<Context>& context, ReduceFunction fn)
+  Allreduce(
+    const std::shared_ptr<Context>& context,
+    const ReductionFunction<T>* fn)
       : Algorithm(context), fn_(fn) {
     if (fn_ == nullptr) {
-      // Default to addition
-      fn_ = [](T* dst, const T* src, size_t n) {
-        for (int i = 0; i < n; i++) {
-          dst[i] += src[i];
-        }
-      };
+      fn_= ReductionFunction<T>::sum;
     }
   }
 
-  virtual ~Allreduce(){};
+  virtual ~Allreduce() {};
 
  protected:
-  ReduceFunction* fn_;
+  const ReductionFunction<T>* fn_;
 };
 
 } // namespace gloo
