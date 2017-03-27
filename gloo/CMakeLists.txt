@@ -10,18 +10,33 @@ list(APPEND GLOO_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/context.cc"
   )
 
-file(GLOB GLOO_ROOT_HDRS "*.h")
-list(APPEND GLOO_HDRS ${GLOO_ROOT_HDRS})
+list(APPEND GLOO_HDRS
+  "${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/allreduce.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/allreduce_ring_chunked.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/allreduce_ring.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/barrier_all_to_all.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/barrier_all_to_one.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/barrier.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/broadcast.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/broadcast_one_to_all.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/context.h"
+  )
 
 if(USE_CUDA)
   file(GLOB GLOO_CUDA_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/cuda*.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/cuda*.cu"
     )
+
+  file(GLOB GLOO_CUDA_HDRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/cuda*.h"
+    )
 endif()
 
 add_subdirectory(common)
 add_subdirectory(mpi)
+add_subdirectory(nccl)
 add_subdirectory(rendezvous)
 add_subdirectory(transport)
 

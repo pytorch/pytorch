@@ -7,7 +7,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "gloo/cuda_nccl.h"
+#include "gloo/nccl/nccl.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -75,10 +75,8 @@ static std::shared_ptr<NCCLContext<T>> getNcclContext(
 }
 
 template <typename T>
-NCCLExecution<T>::NCCLExecution(
-    std::vector<NCCLElement<T>>&& elements,
-    int root)
-    : root(root), elements(std::move(elements)) {
+NCCLExecution<T>::NCCLExecution(std::vector<NCCLElement<T>>&& elements)
+    : elements(std::move(elements)) {
   // Allocate events to synchronize source, destination, and NCCL streams
   ncclEvents.resize(this->elements.size());
   for (auto i = 0; i < this->elements.size(); i++) {
@@ -185,13 +183,13 @@ void NCCLOp<T>::runNCCL(F&& f) {
 
 template <typename T>
 void ReduceOp<T>::runAsync() {
-  const auto root = this->execution_.root;
+  const int root = root_;
   this->runNCCL([root](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclReduce(
         *element.src,
         *element.dst,
-        element.count,
+        element.src.getCount(),
         ncclTypeWrapper<T>::type,
         ncclSum,
         root,
@@ -201,15 +199,59 @@ void ReduceOp<T>::runAsync() {
 }
 
 template <typename T>
+void AllreduceOp<T>::runAsync() {
+  this->runNCCL([](
+      const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
+    NCCL_CHECK(ncclAllReduce(
+        *element.src,
+        *element.dst,
+        element.src.getCount(),
+        ncclTypeWrapper<T>::type,
+        ncclSum,
+        comm,
+        stream));
+  });
+}
+
+template <typename T>
+void ReduceScatterOp<T>::runAsync() {
+  this->runNCCL([](
+      const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
+    NCCL_CHECK(ncclReduceScatter(
+        *element.src,
+        *element.dst,
+        element.dst.getCount(),
+        ncclTypeWrapper<T>::type,
+        ncclSum,
+        comm,
+        stream));
+  });
+}
+
+template <typename T>
 void BroadcastOp<T>::runAsync() {
-  const auto root = this->execution_.root;
+  const int root = root_;
   this->runNCCL([root](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
     NCCL_CHECK(ncclBcast(
         *element.dst,
-        element.count,
+        element.dst.getCount(),
         ncclTypeWrapper<T>::type,
         root,
+        comm,
+        stream));
+  });
+}
+
+template <typename T>
+void AllgatherOp<T>::runAsync() {
+  this->runNCCL([](
+      const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
+    NCCL_CHECK(ncclAllGather(
+        *element.src,
+        element.src.getCount(),
+        ncclTypeWrapper<T>::type,
+        *element.dst,
         comm,
         stream));
   });
@@ -218,8 +260,12 @@ void BroadcastOp<T>::runAsync() {
 template class NCCLExecution<float>;
 template class NCCLContext<float>;
 template class NCCLOp<float>;
+
 template class ReduceOp<float>;
+template class AllreduceOp<float>;
+template class ReduceScatterOp<float>;
 template class BroadcastOp<float>;
+template class AllgatherOp<float>;
 
 } // namespace nccl
 } // namespace gloo

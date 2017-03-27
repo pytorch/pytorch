@@ -12,7 +12,7 @@
 #include "gloo/common/common.h"
 #include "gloo/common/logging.h"
 #include "gloo/cuda_private.h"
-#include "gloo/cuda_nccl.h"
+#include "gloo/nccl/nccl.h"
 
 namespace gloo {
 
@@ -33,12 +33,8 @@ struct CudaBroadcastOneToAll<T>::LocalBroadcast {
       elements.push_back(std::move(element));
     }
 
-    auto& rootDevicePtr = devicePtrs[rootPointerRank];
-    nccl::NCCLExecution<T> execution(
-      std::move(elements),
-      rootDevicePtr.getDeviceID());
-
-    broadcastOp.reset(new nccl::BroadcastOp<T>(std::move(execution)));
+    int root = devicePtrs[rootPointerRank].getDeviceID();
+    broadcastOp.reset(new nccl::BroadcastOp<T>(std::move(elements), root));
   }
 
   void runAsync() {

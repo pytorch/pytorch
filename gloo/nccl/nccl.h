@@ -39,7 +39,6 @@ struct NCCLElement {
   NCCLElement(CudaDevicePointer<T> src, CudaDevicePointer<T> dst)
       : src(std::move(src)),
         dst(std::move(dst)),
-        count(src.getCount()),
         device(src.getDeviceID()) {
     GLOO_ENFORCE_EQ(
         src.getCount(),
@@ -53,21 +52,19 @@ struct NCCLElement {
 
   CudaDevicePointer<T> src;
   CudaDevicePointer<T> dst;
-  const size_t count;
   const int device;
 };
 
 template <typename T>
 class NCCLExecution {
  public:
-  NCCLExecution(std::vector<NCCLElement<T>>&& elements, int root);
+  /* implicit */ NCCLExecution(std::vector<NCCLElement<T>>&& elements);
   NCCLExecution(NCCLExecution&&) = default;
   ~NCCLExecution();
 
   std::vector<int> getDevices() const;
   std::string getKey() const;
 
-  const int root;
   std::vector<NCCLElement<T>> elements;
   std::vector<cudaEvent_t> ncclEvents;
 };
@@ -100,16 +97,90 @@ class NCCLOp {
 template <typename T>
 class ReduceOp : public NCCLOp<T> {
  public:
-  explicit ReduceOp(NCCLExecution<T>&& execution)
-      : NCCLOp<T>(std::move(execution)) {}
+  explicit ReduceOp(NCCLExecution<T>&& execution, int root)
+      : NCCLOp<T>(std::move(execution)), root_(root) {
+    for (const auto& element : execution.elements) {
+      GLOO_ENFORCE_EQ(
+        element.src.getCount(),
+        element.dst.getCount(),
+        "NCCL source and destination must be the same size");
+    }
+  }
+
+  void runAsync() override;
+
+ protected:
+  const int root_;
+};
+
+template <typename T>
+class AllreduceOp : public NCCLOp<T> {
+ public:
+  explicit AllreduceOp(NCCLExecution<T>&& execution)
+      : NCCLOp<T>(std::move(execution)) {
+    for (const auto& element : execution.elements) {
+      GLOO_ENFORCE_EQ(
+        element.src.getCount(),
+        element.dst.getCount(),
+        "NCCL source and destination must be the same size");
+    }
+  }
+
+  void runAsync() override;
+};
+
+template <typename T>
+class ReduceScatterOp : public NCCLOp<T> {
+ public:
+  explicit ReduceScatterOp(NCCLExecution<T>&& execution)
+      : NCCLOp<T>(std::move(execution)) {
+    for (const auto& element : execution.elements) {
+      GLOO_ENFORCE_EQ(
+        element.src.getCount() / execution.elements.size(),
+        element.dst.getCount(),
+        "NCCL source must be ",
+        execution.elements.size(),
+        " times as big as the destination");
+    }
+  }
+
   void runAsync() override;
 };
 
 template <typename T>
 class BroadcastOp : public NCCLOp<T> {
  public:
-  explicit BroadcastOp(NCCLExecution<T>&& execution)
-      : NCCLOp<T>(std::move(execution)) {}
+  explicit BroadcastOp(NCCLExecution<T>&& execution, int root)
+      : NCCLOp<T>(std::move(execution)), root_(root) {
+    for (const auto& element : execution.elements) {
+      GLOO_ENFORCE_EQ(
+        element.src.getCount(),
+        element.dst.getCount(),
+        "NCCL source and destination must be the same size");
+    }
+  }
+
+  void runAsync() override;
+
+ protected:
+  const int root_;
+};
+
+template <typename T>
+class AllgatherOp : public NCCLOp<T> {
+ public:
+  explicit AllgatherOp(NCCLExecution<T>&& execution)
+      : NCCLOp<T>(std::move(execution)) {
+    for (const auto& element : execution.elements) {
+      GLOO_ENFORCE_EQ(
+        element.src.getCount(),
+        element.dst.getCount() / execution.elements.size(),
+        "NCCL destination must be ",
+        execution.elements.size(),
+        " times as big as the source");
+    }
+  }
+
   void runAsync() override;
 };
 

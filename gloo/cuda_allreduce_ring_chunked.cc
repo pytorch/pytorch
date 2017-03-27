@@ -11,8 +11,8 @@
 
 #include <string.h>
 
-#include "gloo/cuda_nccl.h"
 #include "gloo/cuda_private.h"
+#include "gloo/nccl/nccl.h"
 
 namespace gloo {
 
@@ -26,12 +26,12 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
       : rootDevicePtr(std::move(rootDevicePtr)),
         hostPtr(hostPtr),
         length(rootDevicePtr.getCount()),
-        reduceOp(nccl::NCCLExecution<T>(
-            std::move(reduceElements),
-            this->rootDevicePtr.getDeviceID())),
-        broadcastOp(nccl::NCCLExecution<T>(
-            std::move(broadcastElements),
-            this->rootDevicePtr.getDeviceID())) {}
+        reduceOp(
+          nccl::NCCLExecution<T>(std::move(reduceElements)),
+          this->rootDevicePtr.getDeviceID()),
+        broadcastOp(
+          nccl::NCCLExecution<T>(std::move(broadcastElements)),
+          this->rootDevicePtr.getDeviceID()) {}
   ChunkContext(ChunkContext&& other) = default;
 
   // Instances cannot be copied or copy-assigned
