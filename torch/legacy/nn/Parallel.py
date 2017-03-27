@@ -94,8 +94,9 @@ class Parallel(Container):
         res = torch.typename(self)
         res += ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-            if i == len(self.modules)-1:
-                res += line + tab + next + '(' + str(i) + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
+            if i == len(self.modules) - 1:
+                res += line + tab + next + '(' + str(i) + '): ' + \
+                    str(self.modules[i]).replace(line, line + tab + extlast)
             else:
                 res += line + tab + next + '(' + str(i) + '): ' + str(self.modules[i]).replace(line, line + tab + ext)
 

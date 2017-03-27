@@ -4,133 +4,133 @@ import torch._C
 from torch._C import _add_docstr as add_docstr
 
 add_docstr(torch._C.FloatTensorBase.abs,
-"""
+           """
 abs() -> Tensor
 
 See :func:`torch.abs`
 """)
 
 add_docstr(torch._C.FloatTensorBase.abs_,
-"""
+           """
 abs_() -> Tensor
 
 In-place version of :meth:`~Tensor.abs`
 """)
 
 add_docstr(torch._C.FloatTensorBase.acos,
-"""
+           """
 acos() -> Tensor
 
 See :func:`torch.acos`
 """)
 
 add_docstr(torch._C.FloatTensorBase.acos_,
-"""
+           """
 acos_() -> Tensor
 
 In-place version of :meth:`~Tensor.acos`
 """)
 
 add_docstr(torch._C.FloatTensorBase.add,
-"""
+           """
 add(value)
 
 See :func:`torch.add`
 """)
 
 add_docstr(torch._C.FloatTensorBase.add_,
-"""
+           """
 add_(value)
 
 In-place version of :meth:`~Tensor.add`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addbmm,
-"""
+           """
 addbmm(beta=1, mat, alpha=1, batch1, batch2) -> Tensor
 
 See :func:`torch.addbmm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addbmm_,
-"""
+           """
 addbmm_(beta=1, mat, alpha=1, batch1, batch2) -> Tensor
 
 In-place version of :meth:`~Tensor.addbmm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addcdiv,
-"""
+           """
 addcdiv(value=1, tensor1, tensor2) -> Tensor
 
 See :func:`torch.addcdiv`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addcdiv_,
-"""
+           """
 addcdiv_(value=1, tensor1, tensor2) -> Tensor
 
 In-place version of :meth:`~Tensor.addcdiv`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addcmul,
-"""
+           """
 addcmul(value=1, tensor1, tensor2) -> Tensor
 
 See :func:`torch.addcmul`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addcmul_,
-"""
+           """
 addcmul_(value=1, tensor1, tensor2) -> Tensor
 
 In-place version of :meth:`~Tensor.addcmul`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addmm,
-"""
+           """
 addmm(beta=1, mat, alpha=1, mat1, mat2) -> Tensor
 
 See :func:`torch.addmm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addmm_,
-"""
+           """
 addmm_(beta=1, mat, alpha=1, mat1, mat2) -> Tensor
 
 In-place version of :meth:`~Tensor.addmm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addmv,
-"""
+           """
 addmv(beta=1, tensor, alpha=1, mat, vec) -> Tensor
 
 See :func:`torch.addmv`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addmv_,
-"""
+           """
 addmv_(beta=1, tensor, alpha=1, mat, vec) -> Tensor
 
 In-place version of :meth:`~Tensor.addmv`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addr,
-"""
+           """
 addr(beta=1, alpha=1, vec1, vec2) -> Tensor
 
 See :func:`torch.addr`
 """)
 
 add_docstr(torch._C.FloatTensorBase.addr_,
-"""
+           """
 addr_(beta=1, alpha=1, vec1, vec2) -> Tensor
 
 In-place version of :meth:`~Tensor.addr`
 """)
 
 add_docstr(torch._C.FloatTensorBase.apply_,
-"""
+           """
 apply_(callable) -> Tensor
 
 Applies the function :attr:`callable` to each element in the tensor, replacing
@@ -143,85 +143,85 @@ each element with the value returned by :attr:`callable`.
 """)
 
 add_docstr(torch._C.FloatTensorBase.asin,
-"""
+           """
 asin() -> Tensor
 
 See :func:`torch.asin`
 """)
 
 add_docstr(torch._C.FloatTensorBase.asin_,
-"""
+           """
 asin_() -> Tensor
 
 In-place version of :meth:`~Tensor.asin`
 """)
 
 add_docstr(torch._C.FloatTensorBase.atan,
-"""
+           """
 atan() -> Tensor
 
 See :func:`torch.atan`
 """)
 
 add_docstr(torch._C.FloatTensorBase.atan2,
-"""
+           """
 atan2(other) -> Tensor
 
 See :func:`torch.atan2`
 """)
 
 add_docstr(torch._C.FloatTensorBase.atan2_,
-"""
+           """
 atan2_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.atan2`
 """)
 
 add_docstr(torch._C.FloatTensorBase.atan_,
-"""
+           """
 atan_() -> Tensor
 
 In-place version of :meth:`~Tensor.atan`
 """)
 
 add_docstr(torch._C.FloatTensorBase.baddbmm,
-"""
+           """
 baddbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 See :func:`torch.baddbmm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.baddbmm_,
-"""
+           """
 baddbmm_(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 In-place version of :meth:`~Tensor.baddbmm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.bernoulli,
-"""
+           """
 bernoulli() -> Tensor
 
 See :func:`torch.bernoulli`
 """)
 
 add_docstr(torch._C.FloatTensorBase.bernoulli_,
-"""
+           """
 bernoulli_() -> Tensor
 
 In-place version of :meth:`~Tensor.bernoulli`
 """)
 
 add_docstr(torch._C.FloatTensorBase.bmm,
-"""
+           """
 bmm(batch2) -> Tensor
 
 See :func:`torch.bmm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.cauchy_,
-"""
-cauchy_(generator=None, median=0, sigma=1) -> Tensor
+           """
+cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
 
 Fills the tensor with numbers drawn from the Cauchy distribution:
 
@@ -231,35 +231,35 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 """)
 
 add_docstr(torch._C.FloatTensorBase.ceil,
-"""
+           """
 ceil() -> Tensor
 
 See :func:`torch.ceil`
 """)
 
 add_docstr(torch._C.FloatTensorBase.ceil_,
-"""
+           """
 ceil_() -> Tensor
 
 In-place version of :meth:`~Tensor.ceil`
 """)
 
 add_docstr(torch._C.FloatTensorBase.clamp,
-"""
+           """
 clamp(min, max) -> Tensor
 
 See :func:`torch.clamp`
 """)
 
 add_docstr(torch._C.FloatTensorBase.clamp_,
-"""
+           """
 clamp_(min, max) -> Tensor
 
 In-place version of :meth:`~Tensor.clamp`
 """)
 
 add_docstr(torch._C.FloatTensorBase.clone,
-"""
+           """
 clone() -> Tensor
 
 Returns a copy of the tensor. The copy has the same size and data type as the
@@ -267,7 +267,7 @@ original tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.contiguous,
-"""
+           """
 contiguous() -> Tensor
 
 Returns a contiguous Tensor containing the same data as this tensor. If this
@@ -275,7 +275,7 @@ tensor is contiguous, this function returns the original tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.copy_,
-"""
+           """
 copy_(src, async=False) -> Tensor
 
 Copies the elements from :attr:`src` into this tensor and returns this tensor.
@@ -291,112 +291,112 @@ Args:
 """)
 
 add_docstr(torch._C.FloatTensorBase.cos,
-"""
+           """
 cos() -> Tensor
 
 See :func:`torch.cos`
 """)
 
 add_docstr(torch._C.FloatTensorBase.cos_,
-"""
+           """
 cos_() -> Tensor
 
 In-place version of :meth:`~Tensor.cos`
 """)
 
 add_docstr(torch._C.FloatTensorBase.cosh,
-"""
+           """
 cosh() -> Tensor
 
 See :func:`torch.cosh`
 """)
 
 add_docstr(torch._C.FloatTensorBase.cosh_,
-"""
+           """
 cosh_() -> Tensor
 
 In-place version of :meth:`~Tensor.cosh`
 """)
 
 add_docstr(torch._C.FloatTensorBase.cross,
-"""
+           """
 cross(other, dim=-1) -> Tensor
 
 See :func:`torch.cross`
 """)
 
 add_docstr(torch._C.FloatTensorBase.cumprod,
-"""
+           """
 cumprod(dim) -> Tensor
 
 See :func:`torch.cumprod`
 """)
 
 add_docstr(torch._C.FloatTensorBase.cumsum,
-"""
+           """
 cumsum(dim) -> Tensor
 
 See :func:`torch.cumsum`
 """)
 
 add_docstr(torch._C.FloatTensorBase.data_ptr,
-"""
+           """
 data_ptr() -> int
 
 Returns the address of the first element of this tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.diag,
-"""
+           """
 diag(diagonal=0) -> Tensor
 
 See :func:`torch.diag`
 """)
 
 add_docstr(torch._C.FloatTensorBase.dim,
-"""
+           """
 dim() -> int
 
 Returns the number of dimensions of this tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.dist,
-"""
+           """
 dist(other, p=2) -> Tensor
 
 See :func:`torch.dist`
 """)
 
 add_docstr(torch._C.FloatTensorBase.div,
-"""
+           """
 div(value)
 
 See :func:`torch.div`
 """)
 
 add_docstr(torch._C.FloatTensorBase.div_,
-"""
+           """
 div_(value)
 
 In-place version of :meth:`~Tensor.div`
 """)
 
 add_docstr(torch._C.FloatTensorBase.dot,
-"""
+           """
 dot(tensor2) -> float
 
 See :func:`torch.dot`
 """)
 
 add_docstr(torch._C.FloatTensorBase.eig,
-"""
+           """
 eig(eigenvectors=False) -> (Tensor, Tensor)
 
 See :func:`torch.eig`
 """)
 
 add_docstr(torch._C.FloatTensorBase.element_size,
-"""
+           """
 element_size() -> int
 
 Returns the size in bytes of an individual element.
@@ -409,43 +409,43 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.eq,
-"""
+           """
 eq(other) -> Tensor
 
 See :func:`torch.eq`
 """)
 
 add_docstr(torch._C.FloatTensorBase.eq_,
-"""
+           """
 eq_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.eq`
 """)
 
 add_docstr(torch._C.FloatTensorBase.equal,
-"""
+           """
 equal(other) -> bool
 
 See :func:`torch.equal`
 """)
 
 add_docstr(torch._C.FloatTensorBase.exp,
-"""
+           """
 exp() -> Tensor
 
 See :func:`torch.exp`
 """)
 
 add_docstr(torch._C.FloatTensorBase.exp_,
-"""
+           """
 exp_() -> Tensor
 
 In-place version of :meth:`~Tensor.exp`
 """)
 
 add_docstr(torch._C.FloatTensorBase.exponential_,
-"""
-exponential_(generator=None, lambd=1) -> Tensor
+           """
+exponential_(lambd=1, *, generator=None) -> Tensor
 
 Fills this tensor with elements drawn from the exponential distribution:
 
@@ -455,85 +455,85 @@ Fills this tensor with elements drawn from the exponential distribution:
 """)
 
 add_docstr(torch._C.FloatTensorBase.fill_,
-"""
+           """
 fill_(value) -> Tensor
 
 Fills this tensor with the specified value.
 """)
 
 add_docstr(torch._C.FloatTensorBase.floor,
-"""
+           """
 floor() -> Tensor
 
 See :func:`torch.floor`
 """)
 
 add_docstr(torch._C.FloatTensorBase.floor_,
-"""
+           """
 floor_() -> Tensor
 
 In-place version of :meth:`~Tensor.floor`
 """)
 
 add_docstr(torch._C.FloatTensorBase.fmod,
-"""
+           """
 fmod(divisor) -> Tensor
 
 See :func:`torch.fmod`
 """)
 
 add_docstr(torch._C.FloatTensorBase.fmod_,
-"""
+           """
 fmod_(divisor) -> Tensor
 
 In-place version of :meth:`~Tensor.fmod`
 """)
 
 add_docstr(torch._C.FloatTensorBase.frac,
-"""
+           """
 frac() -> Tensor
 
 See :func:`torch.frac`
 """)
 
 add_docstr(torch._C.FloatTensorBase.frac_,
-"""
+           """
 frac_() -> Tensor
 
 In-place version of :meth:`~Tensor.frac`
 """)
 
 add_docstr(torch._C.FloatTensorBase.gather,
-"""
+           """
 gather(dim, index) -> Tensor
 
 See :func:`torch.gather`
 """)
 
 add_docstr(torch._C.FloatTensorBase.ge,
-"""
+           """
 ge(other) -> Tensor
 
 See :func:`torch.ge`
 """)
 
 add_docstr(torch._C.FloatTensorBase.ge_,
-"""
+           """
 ge_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.ge`
 """)
 
 add_docstr(torch._C.FloatTensorBase.gels,
-"""
+           """
 gels(A) -> Tensor
 
 See :func:`torch.gels`
 """)
 
 add_docstr(torch._C.FloatTensorBase.geometric_,
-"""
-geometric_(generator=None, p) -> Tensor
+           """
+geometric_(p, *, generator=None) -> Tensor
 
 Fills this tensor with elements drawn from the geometric distribution:
 
@@ -544,49 +544,49 @@ Fills this tensor with elements drawn from the geometric distribution:
 """)
 
 add_docstr(torch._C.FloatTensorBase.geqrf,
-"""
+           """
 geqrf() -> (Tensor, Tensor)
 
 See :func:`torch.geqrf`
 """)
 
 add_docstr(torch._C.FloatTensorBase.ger,
-"""
+           """
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
 """)
 
 add_docstr(torch._C.FloatTensorBase.gesv,
-"""
+           """
 gesv(A) -> Tensor, Tensor
 
 See :func:`torch.gesv`
 """)
 
 add_docstr(torch._C.FloatTensorBase.gt,
-"""
+           """
 gt(other) -> Tensor
 
 See :func:`torch.gt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.gt_,
-"""
+           """
 gt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.histc,
-"""
+           """
 histc(bins=100, min=0, max=0) -> Tensor
 
 See :func:`torch.histc`
 """)
 
 add_docstr(torch._C.FloatTensorBase.index,
-"""
+           """
 index(m) -> Tensor
 
 Selects elements from this tensor using a binary mask or along a given
@@ -597,7 +597,7 @@ Args:
 """)
 
 add_docstr(torch._C.FloatTensorBase.index_add_,
-"""
+           """
 index_add_(dim, index, tensor) -> Tensor
 
 Accumulate the elements of tensor into the original tensor by adding to the
@@ -622,7 +622,7 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.index_copy_,
-"""
+           """
 index_copy_(dim, index, tensor) -> Tensor
 
 Copies the elements of tensor into the original tensor by selecting the
@@ -647,8 +647,8 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.index_fill_,
-"""
-index_fill_(dim, index, tensor) -> Tensor
+           """
+index_fill_(dim, index, val) -> Tensor
 
 Fills the elements of the original tensor with value :attr:`val` by selecting
 the indices in the order given in index.
@@ -670,28 +670,28 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.index_select,
-"""
+           """
 index_select(dim, index) -> Tensor
 
 See :func:`torch.index_select`
 """)
 
 add_docstr(torch._C.FloatTensorBase.inverse,
-"""
+           """
 inverse() -> Tensor
 
 See :func:`torch.inverse`
 """)
 
 add_docstr(torch._C.FloatTensorBase.is_contiguous,
-"""
+           """
 is_contiguous() -> bool
 
 Returns True if this tensor is contiguous in memory in C order.
 """)
 
 add_docstr(torch._C.FloatTensorBase.is_set_to,
-"""
+           """
 is_set_to(tensor) -> bool
 
 Returns True if this object refers to the same ``THTensor`` object from the
@@ -699,56 +699,56 @@ Torch C API as the given tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.kthvalue,
-"""
+           """
 kthvalue(k, dim=None) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
 """)
 
 add_docstr(torch._C.FloatTensorBase.le,
-"""
+           """
 le(other) -> Tensor
 
 See :func:`torch.le`
 """)
 
 add_docstr(torch._C.FloatTensorBase.le_,
-"""
+           """
 le_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.le`
 """)
 
 add_docstr(torch._C.FloatTensorBase.lerp,
-"""
+           """
 lerp(start, end, weight)
 
 See :func:`torch.lerp`
 """)
 
 add_docstr(torch._C.FloatTensorBase.lerp_,
-"""
+           """
 lerp_(start, end, weight)
 
 In-place version of :meth:`~Tensor.lerp`
 """)
 
 add_docstr(torch._C.FloatTensorBase.log,
-"""
+           """
 log() -> Tensor
 
 See :func:`torch.log`
 """)
 
 add_docstr(torch._C.FloatTensorBase.log1p,
-"""
+           """
 log1p() -> Tensor
 
 See :func:`torch.log1p`
 """)
 
 add_docstr(torch._C.FloatTensorBase.log1p_,
-"""
+           """
 log1p_() -> Tensor
 
 In-place version of :meth:`~Tensor.log1p`
@@ -761,7 +761,7 @@ In-place version of :meth:`~Tensor.log`
 """)
 
 add_docstr(torch._C.FloatTensorBase.log_normal_, u"""
-log_normal_(generator=None, mean=1, stdv=2)
+log_normal_(mean=1, std=2, *, generator=None)
 
 Fills this tensor with numbers samples from the log-normal distribution
 parameterized by the given mean (\u00B5) and standard deviation (\u03C3). Note that
@@ -774,21 +774,21 @@ underlying normal distribution, and not of the returned distribution:
 """)
 
 add_docstr(torch._C.FloatTensorBase.lt,
-"""
+           """
 lt(other) -> Tensor
 
 See :func:`torch.lt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.lt_,
-"""
+           """
 lt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.lt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.map_,
-"""
+           """
 map_(tensor, callable)
 
 Applies :attr:`callable` for each element in this tensor and the given tensor
@@ -799,7 +799,7 @@ signature::
 """)
 
 add_docstr(torch._C.FloatTensorBase.masked_copy_,
-"""
+           """
 masked_copy_(mask, source)
 
 Copies elements from :attr:`source` into this tensor at positions where the
@@ -818,7 +818,7 @@ Args:
 """)
 
 add_docstr(torch._C.FloatTensorBase.masked_fill_,
-"""
+           """
 masked_fill_(mask, value)
 
 Fills elements of this tensor with :attr:`value` where :attr:`mask` is one.
@@ -831,84 +831,84 @@ Args:
 """)
 
 add_docstr(torch._C.FloatTensorBase.masked_select,
-"""
+           """
 masked_select(mask) -> Tensor
 
 See :func:`torch.masked_select`
 """)
 
 add_docstr(torch._C.FloatTensorBase.max,
-"""
+           """
 max(dim=None) -> float or (Tensor, Tensor)
 
 See :func:`torch.max`
 """)
 
 add_docstr(torch._C.FloatTensorBase.mean,
-"""
+           """
 mean(dim=None) -> float or (Tensor, Tensor)
 
 See :func:`torch.mean`
 """)
 
 add_docstr(torch._C.FloatTensorBase.median,
-"""
+           """
 median(dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
 
 See :func:`torch.median`
 """)
 
 add_docstr(torch._C.FloatTensorBase.min,
-"""
+           """
 min(dim=None) -> float or (Tensor, Tensor)
 
 See :func:`torch.min`
 """)
 
 add_docstr(torch._C.FloatTensorBase.mm,
-"""
+           """
 mm(mat2) -> Tensor
 
 See :func:`torch.mm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.mode,
-"""
+           """
 mode(dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
 
 See :func:`torch.mode`
 """)
 
 add_docstr(torch._C.FloatTensorBase.mul,
-"""
+           """
 mul(value) -> Tensor
 
 See :func:`torch.mul`
 """)
 
 add_docstr(torch._C.FloatTensorBase.mul_,
-"""
+           """
 mul_(value)
 
 In-place version of :meth:`~Tensor.mul`
 """)
 
 add_docstr(torch._C.FloatTensorBase.multinomial,
-"""
-multinomial(generator=None, num_samples, replacement=False)
+           """
+multinomial(num_samples, replacement=False, *, generator=None)
 
 See :func:`torch.multinomial`
 """)
 
 add_docstr(torch._C.FloatTensorBase.mv,
-"""
+           """
 mv(vec) -> Tensor
 
 See :func:`torch.mv`
 """)
 
 add_docstr(torch._C.FloatTensorBase.narrow,
-"""
+           """
 narrow(dimension, start, length) -> Tensor
 
 Returns a new tensor that is a narrowed version of this tensor. The dimension
@@ -934,78 +934,78 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.ndimension,
-"""
+           """
 ndimension() -> int
 
 Alias for :meth:`~Tensor.dim()`
 """)
 
 add_docstr(torch._C.FloatTensorBase.ne,
-"""
+           """
 ne(other) -> Tensor
 
 See :func:`torch.ne`
 """)
 
 add_docstr(torch._C.FloatTensorBase.ne_,
-"""
+           """
 ne_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.ne`
 """)
 
 add_docstr(torch._C.FloatTensorBase.neg,
-"""
+           """
 neg() -> Tensor
 
 See :func:`torch.neg`
 """)
 
 add_docstr(torch._C.FloatTensorBase.neg_,
-"""
+           """
 neg_() -> Tensor
 
 In-place version of :meth:`~Tensor.neg`
 """)
 
 add_docstr(torch._C.FloatTensorBase.nelement,
-"""
+           """
 nelement() -> int
 
 Alias for :meth:`~Tensor.numel`
 """)
 
 add_docstr(torch._C.FloatTensorBase.nonzero,
-"""
+           """
 nonzero() -> LongTensor
 
 See :func:`torch.nonzero`
 """)
 
 add_docstr(torch._C.FloatTensorBase.norm,
-"""
+           """
 norm(p=2) -> float
 
 See :func:`torch.norm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.normal_,
-"""
-normal_(generator=None, mean=0, var=1)
+           """
+normal_(mean=0, std=1, *, generator=None)
 
 Fills this tensor with elements samples from the normal distribution
-parameterized by :attr:`mean` and :attr:`var`.
+parameterized by :attr:`mean` and :attr:`std`.
 """)
 
 add_docstr(torch._C.FloatTensorBase.numel,
-"""
+           """
 numel() -> int
 
 See :func:`torch.numel`
 """)
 
 add_docstr(torch._C.FloatTensorBase.numpy,
-"""
+           """
 numpy() -> ndarray
 
 Returns this tensor as a NumPy :class:`ndarray`. This tensor and the returned
@@ -1014,128 +1014,128 @@ be reflected in the :class:`ndarray` and vice versa.
 """)
 
 add_docstr(torch._C.FloatTensorBase.orgqr,
-"""
+           """
 orgqr(input2) -> Tensor
 
 See :func:`torch.orgqr`
 """)
 
 add_docstr(torch._C.FloatTensorBase.ormqr,
-"""
+           """
 ormqr(input2, input3, left=True, transpose=False) -> Tensor
 
 See :func:`torch.ormqr`
 """)
 
 add_docstr(torch._C.FloatTensorBase.potrf,
-"""
+           """
 potrf(upper=True) -> Tensor
 
 See :func:`torch.potrf`
 """)
 
 add_docstr(torch._C.FloatTensorBase.potri,
-"""
+           """
 potri(upper=True) -> Tensor
 
 See :func:`torch.potri`
 """)
 
 add_docstr(torch._C.FloatTensorBase.potrs,
-"""
+           """
 potrs(input2, upper=True) -> Tensor
 
 See :func:`torch.potrs`
 """)
 
 add_docstr(torch._C.FloatTensorBase.pow,
-"""
+           """
 pow(exponent)
 
 See :func:`torch.pow`
 """)
 
 add_docstr(torch._C.FloatTensorBase.pow_,
-"""
+           """
 pow_(exponent)
 
 In-place version of :meth:`~Tensor.pow`
 """)
 
 add_docstr(torch._C.FloatTensorBase.prod,
-"""
+           """
 prod() -> float
 
 See :func:`torch.prod`
 """)
 
 add_docstr(torch._C.FloatTensorBase.pstrf,
-"""
+           """
 pstrf(upper=True, tol=-1) -> (Tensor, IntTensor)
 
 See :func:`torch.pstrf`
 """)
 
 add_docstr(torch._C.FloatTensorBase.qr,
-"""
+           """
 qr() -> (Tensor, Tensor)
 
 See :func:`torch.qr`
 """)
 
 add_docstr(torch._C.FloatTensorBase.random_,
-"""
-random_(generator=None, from=0, to=None)
+           """
+random_(from=0, to=None, *, generator=None)
 
 Fills this tensor with numbers sampled from the uniform distribution or
-discrete uniform distribution over [from, to]. If not specified, :attr:`to`
-defaults to the largest value representable by this tensor's data type.
+discrete uniform distribution over [from, to - 1]. If not specified, the
+values are only bounded by this tensor's data type.
 """)
 
 add_docstr(torch._C.FloatTensorBase.reciprocal,
-"""
+           """
 reciprocal() -> Tensor
 
 See :func:`torch.reciprocal`
 """)
 
 add_docstr(torch._C.FloatTensorBase.reciprocal_,
-"""
+           """
 reciprocal_() -> Tensor
 
 In-place version of :meth:`~Tensor.reciprocal`
 """)
 
 add_docstr(torch._C.FloatTensorBase.remainder,
-"""
+           """
 remainder(divisor) -> Tensor
 
 See :func:`torch.remainder`
 """)
 
 add_docstr(torch._C.FloatTensorBase.remainder_,
-"""
+           """
 remainder_(divisor) -> Tensor
 
 In-place version of :meth:`~Tensor.remainder`
 """)
 
 add_docstr(torch._C.FloatTensorBase.renorm,
-"""
+           """
 renorm(p, dim, maxnorm) -> Tensor
 
 See :func:`torch.renorm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.renorm_,
-"""
+           """
 renorm_(p, dim, maxnorm) -> Tensor
 
 In-place version of :meth:`~Tensor.renorm`
 """)
 
 add_docstr(torch._C.FloatTensorBase.resize_,
-"""
+           """
 resize_(*sizes)
 
 Resizes this tensor to the specified size. If the number of elements is
@@ -1157,7 +1157,7 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.resize_as_,
-"""
+           """
 resize_as_(tensor)
 
 Resizes the current tensor to be the same size as the specified tensor. This is
@@ -1167,35 +1167,35 @@ equivalent to::
 """)
 
 add_docstr(torch._C.FloatTensorBase.round,
-"""
+           """
 round() -> Tensor
 
 See :func:`torch.round`
 """)
 
 add_docstr(torch._C.FloatTensorBase.round_,
-"""
+           """
 round_() -> Tensor
 
 In-place version of :meth:`~Tensor.round`
 """)
 
 add_docstr(torch._C.FloatTensorBase.rsqrt,
-"""
+           """
 rsqrt() -> Tensor
 
 See :func:`torch.rsqrt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.rsqrt_,
-"""
+           """
 rsqrt_() -> Tensor
 
 In-place version of :meth:`~Tensor.rsqrt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.scatter_,
-"""
+           """
 scatter_(input, dim, index, src) -> Tensor
 
 Writes all values from the Tensor :attr:`src` into self at the indices specified
@@ -1237,7 +1237,7 @@ Example::
 """)
 
 add_docstr(torch._C.FloatTensorBase.select,
-"""
+           """
 select(dim, index) -> Tensor or number
 
 Slices the tensor along the selected dimension at the given index. If this
@@ -1256,7 +1256,7 @@ Args:
 """)
 
 add_docstr(torch._C.FloatTensorBase.set_,
-"""
+           """
 set_(source=None, storage_offset=0, size=None, stride=None)
 
 Sets the underlying storage, size, and strides. If :attr:`source` is a tensor,
@@ -1274,71 +1274,64 @@ Args:
     stride (tuple): The desired stride. Defaults to C-contiguous strides.
 """)
 
-add_docstr(torch._C.FloatTensorBase.set_index,
-"""
-set_index(index, value)
-
-Alias for ``self[index] = value``
-""")
-
 add_docstr(torch._C.FloatTensorBase.sigmoid,
-"""
+           """
 sigmoid() -> Tensor
 
 See :func:`torch.sigmoid`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sigmoid_,
-"""
+           """
 sigmoid_() -> Tensor
 
 In-place version of :meth:`~Tensor.sigmoid`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sign,
-"""
+           """
 sign() -> Tensor
 
 See :func:`torch.sign`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sign_,
-"""
+           """
 sign_() -> Tensor
 
 In-place version of :meth:`~Tensor.sign`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sin,
-"""
+           """
 sin() -> Tensor
 
 See :func:`torch.sin`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sin_,
-"""
+           """
 sin_() -> Tensor
 
 In-place version of :meth:`~Tensor.sin`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sinh,
-"""
+           """
 sinh() -> Tensor
 
 See :func:`torch.sinh`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sinh_,
-"""
+           """
 sinh_() -> Tensor
 
 In-place version of :meth:`~Tensor.sinh`
 """)
 
 add_docstr(torch._C.FloatTensorBase.size,
-"""
+           """
 size() -> torch.Size
 
 Returns the size of the tensor. The returned value is a subclass of
@@ -1350,56 +1343,56 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.sort,
-"""
+           """
 sort(dim=None, descending=False) -> (Tensor, LongTensor)
 
 See :func:`torch.sort`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sqrt,
-"""
+           """
 sqrt() -> Tensor
 
 See :func:`torch.sqrt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sqrt_,
-"""
+           """
 sqrt_() -> Tensor
 
 In-place version of :meth:`~Tensor.sqrt`
 """)
 
 add_docstr(torch._C.FloatTensorBase.squeeze,
-"""
+           """
 squeeze(dim=None)
 
 See :func:`torch.squeeze`
 """)
 
 add_docstr(torch._C.FloatTensorBase.squeeze_,
-"""
+           """
 squeeze_(dim=None)
 
 In-place version of :meth:`~Tensor.squeeze`
 """)
 
 add_docstr(torch._C.FloatTensorBase.std,
-"""
+           """
 std() -> float
 
 See :func:`torch.std`
 """)
 
 add_docstr(torch._C.FloatTensorBase.storage,
-"""
+           """
 storage() -> torch.Storage
 
 Returns the underlying storage
 """)
 
 add_docstr(torch._C.FloatTensorBase.storage_offset,
-"""
+           """
 storage_offset() -> int
 
 Returns this tensor's offset in the underlying storage in terms of number of
@@ -1414,14 +1407,14 @@ Example:
 """)
 
 add_docstr(torch._C.FloatTensorBase.stride,
-"""
+           """
 stride() -> tuple
 
 Returns the stride of the tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.sub,
-"""
+           """
 sub(value, other) -> Tensor
 
 Subtracts a scalar or tensor from this tensor. If both :attr:`value` and
@@ -1430,154 +1423,154 @@ Subtracts a scalar or tensor from this tensor. If both :attr:`value` and
 """)
 
 add_docstr(torch._C.FloatTensorBase.sub_,
-"""
+           """
 sub_(x) -> Tensor
 
 In-place version of :meth:`~Tensor.sub`
 """)
 
 add_docstr(torch._C.FloatTensorBase.sum,
-"""
+           """
 sum(dim=None) -> float
 
 See :func:`torch.sum`
 """)
 
 add_docstr(torch._C.FloatTensorBase.svd,
-"""
+           """
 svd(some=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.svd`
 """)
 
 add_docstr(torch._C.FloatTensorBase.symeig,
-"""
+           """
 symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
 
 See :func:`torch.symeig`
 """)
 
 add_docstr(torch._C.FloatTensorBase.t,
-"""
+           """
 t() -> Tensor
 
 See :func:`torch.t`
 """)
 
 add_docstr(torch._C.FloatTensorBase.t_,
-"""
+           """
 t_() -> Tensor
 
 In-place version of :meth:`~Tensor.t`
 """)
 
 add_docstr(torch._C.FloatTensorBase.tan,
-"""
+           """
 tan() -> Tensor
 
 See :func:`torch.tan`
 """)
 
 add_docstr(torch._C.FloatTensorBase.tan_,
-"""
+           """
 tan_() -> Tensor
 
 In-place version of :meth:`~Tensor.tan`
 """)
 
 add_docstr(torch._C.FloatTensorBase.tanh,
-"""
+           """
 tanh() -> Tensor
 
 See :func:`torch.tanh`
 """)
 
 add_docstr(torch._C.FloatTensorBase.tanh_,
-"""
+           """
 tanh_() -> Tensor
 
 In-place version of :meth:`~Tensor.tanh`
 """)
 
 add_docstr(torch._C.FloatTensorBase.topk,
-"""
+           """
 topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
 
 See :func:`torch.topk`
 """)
 
 add_docstr(torch._C.FloatTensorBase.trace,
-"""
+           """
 trace() -> float
 
 See :func:`torch.trace`
 """)
 
 add_docstr(torch._C.FloatTensorBase.transpose,
-"""
+           """
 transpose(dim0, dim1) -> Tensor
 
 See :func:`torch.transpose`
 """)
 
 add_docstr(torch._C.FloatTensorBase.transpose_,
-"""
+           """
 transpose_(dim0, dim1) -> Tensor
 
 In-place version of :meth:`~Tensor.transpose`
 """)
 
 add_docstr(torch._C.FloatTensorBase.tril,
-"""
+           """
 tril(k=0) -> Tensor
 
 See :func:`torch.tril`
 """)
 
 add_docstr(torch._C.FloatTensorBase.tril_,
-"""
+           """
 tril_(k=0) -> Tensor
 
 In-place version of :meth:`~Tensor.tril`
 """)
 
 add_docstr(torch._C.FloatTensorBase.triu,
-"""
+           """
 triu(k=0) -> Tensor
 
 See :func:`torch.triu`
 """)
 
 add_docstr(torch._C.FloatTensorBase.triu_,
-"""
+           """
 triu_(k=0) -> Tensor
 
 In-place version of :meth:`~Tensor.triu`
 """)
 
 add_docstr(torch._C.FloatTensorBase.trtrs,
-"""
+           """
 trtrs(A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 See :func:`torch.trtrs`
 """)
 
 add_docstr(torch._C.FloatTensorBase.trunc,
-"""
+           """
 trunc() -> Tensor
 
 See :func:`torch.trunc`
 """)
 
 add_docstr(torch._C.FloatTensorBase.trunc_,
-"""
+           """
 trunc_() -> Tensor
 
 In-place version of :meth:`~Tensor.trunc`
 """)
 
 add_docstr(torch._C.FloatTensorBase.unfold,
-"""
+           """
 unfold(dim, size, step) -> Tensor
 
 Returns a tensor which contains all slices of size :attr:`size` in
@@ -1629,7 +1622,7 @@ Example::
 """)
 
 add_docstr(torch._C.FloatTensorBase.uniform_,
-"""
+           """
 uniform_(from=0, to=1) -> Tensor
 
 Fills this tensor with numbers sampled from the uniform distribution:
@@ -1639,15 +1632,54 @@ Fills this tensor with numbers sampled from the uniform distribution:
     P(x) = \dfrac{1}{to - from}
 """)
 
+add_docstr(torch._C.FloatTensorBase.unsqueeze,
+           """
+unsqueeze(dim)
+
+See :func:`torch.unsqueeze`
+""")
+
+add_docstr(torch._C.FloatTensorBase.unsqueeze_,
+           """
+unsqueeze_(dim)
+
+In-place version of :meth:`~Tensor.unsqueeze`
+""")
+
 add_docstr(torch._C.FloatTensorBase.var,
-"""
+           """
 var() -> float
 
 See :func:`torch.var`
 """)
 
+add_docstr(torch._C.FloatTensorBase.view,
+           """
+view(*args) -> Tensor
+
+Returns a new tensor with the same data but different size.
+
+The returned tensor shares the same data and must have the same number
+of elements, but may have a different size. A tensor must be
+:func:`contiguous` to be viewed.
+
+Args:
+    args (torch.Size or int...): Desired size
+
+Example:
+    >>> x = torch.randn(4, 4)
+    >>> x.size()
+    torch.Size([4, 4])
+    >>> y = x.view(16)
+    >>> y.size()
+    torch.Size([16])
+    >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
+    >>> z.size()
+    torch.Size([2, 8])
+""")
+
 add_docstr(torch._C.FloatTensorBase.zero_,
-"""
+           """
 zero_()
 
 Fills this tensor with zeros.

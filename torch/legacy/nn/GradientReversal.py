@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class GradientReversal(Module):
 
     def __init__(self, lambd=1):
@@ -19,4 +20,3 @@ class GradientReversal(Module):
         self.gradInput.copy_(gradOutput)
         self.gradInput.mul_(-self.lambd)
         return self.gradInput
-

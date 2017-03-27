@@ -14,31 +14,48 @@ We are in an early-release Beta. Expect some adventures and rough edges.
 - [Installation](#installation)
   - [Binaries](#binaries)
   - [From source](#from-source)
+  - [Docker image](#docker-image)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 
-| Python |  **`Linux CPU`**   |  **`Linux GPU`** |
-|--------|--------------------|------------------|
-| 2.7.8  | [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | |
-| 2.7    | [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2)](https://build.pytorch.org/job/pytorch-master-py2)  |
-| 3.5    | [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3)](https://build.pytorch.org/job/pytorch-master-py3)  |
-| Nightly| [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) | |
+| System | Python | Status |
+| --- | --- | --- |
+| Linux CPU | 2.7.8, 2.7, 3.5, nightly | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) |
+| Linux GPU | 2.7 | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2)](https://build.pytorch.org/job/pytorch-master-py2) |
+| Linux GPU | 3.5 | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3)](https://build.pytorch.org/job/pytorch-master-py3) |
 
 ## More about PyTorch
 
 At a granular level, PyTorch is a library that consists of the following components:
 
-| \_                       | \_ |
-| ------------------------ | --- |
-| torch                    | a Tensor library like NumPy, with strong GPU support |
-| torch.autograd           | a tape based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| torch.nn                 | a neural networks library deeply integrated with autograd designed for maximum flexibility |
-| torch.optim              | an optimization package to be used with torch.nn with standard optimization methods such as SGD, RMSProp, LBFGS, Adam etc. |
-| torch.multiprocessing    | python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and hogwild training. |
-| torch.utils              | DataLoader, Trainer and other utility functions for convenience |
-| torch.legacy(.nn/.optim) | legacy code that has been ported over from torch for backward compatibility reasons |
+<table>
+<tr>
+    <td><b> torch </b></td>
+    <td> a Tensor library like NumPy, with strong GPU support </td>
+</tr>
+<tr>
+    <td><b> torch.autograd </b></td>
+    <td> a tape based automatic differentiation library that supports all differentiable Tensor operations in torch </td>
+</tr>
+<tr>
+    <td><b> torch.nn </b></td>
+    <td> a neural networks library deeply integrated with autograd designed for maximum flexibility </td>
+</tr>
+<tr>
+    <td><b> torch.multiprocessing  </b></td>
+    <td> python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and hogwild training. </td>
+</tr>
+<tr>
+    <td><b> torch.utils </b></td>
+    <td> DataLoader, Trainer and other utility functions for convenience </td>
+</tr>
+<tr>
+    <td><b> torch.legacy(.nn/.optim) </b></td>
+    <td> legacy code that has been ported over from torch for backward compatibility reasons </td>
+</tr>
+</table>
 
 Usually one uses PyTorch either as:
 
@@ -101,7 +118,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries 
 such as Intel MKL and NVIDIA (CuDNN, NCCL) to maximize speed. 
-At the core, it's CPU and GPU Tensor and Neural Network backends 
+At the core, its CPU and GPU Tensor and Neural Network backends 
 (TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.  
 They are mature and have been tested for years.
 
@@ -128,29 +145,40 @@ There is no wrapper code that needs to be written. [You can see an example here]
 ## Installation
 
 ### Binaries
-- Anaconda
-```bash
-conda install pytorch torchvision -c soumith
-```
+Commands to install from binaries via Conda or pip wheels are on our website:
+
+[http://pytorch.org](http://pytorch.org)
 
 ### From source
 
-Instructions for an Anaconda environment.
+If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
+You will get a high-quality BLAS library (MKL) and you get a controlled compiler version regardless of your Linux distro.
+
+Once you have [anaconda](https://www.continuum.io/downloads) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
 - [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x
 
+If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
+
 #### Install optional dependencies
 
+On Linux
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 
 # Install basic dependencies
 conda install numpy mkl setuptools cmake gcc cffi
 
-# On Linux, add LAPACK support for the GPU
+# Add LAPACK support for the GPU
 conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
+```
+
+On OSX
+```bash
+export CMAKE_PREFIX_PATH=[anaconda root directory]
+conda install numpy setuptools cmake cffi
 ```
 
 #### Install PyTorch
@@ -159,6 +187,25 @@ export MACOSX_DEPLOYMENT_TARGET=10.9 # if OSX
 pip install -r requirements.txt
 python setup.py install
 ```
+
+### Docker image
+
+Dockerfiles are supplied to build images with cuda support and cudnn v5 and cudnn v6 RC. Build them as usual
+```
+docker build -t pytorch-cudnnv5 .
+```
+or 
+```
+docker build -t pytorch-cudnnv6 -f tools/docker/Dockerfile-v6 .
+```
+and run them with nvidia-docker:
+```
+nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv5
+```
+Please note that pytorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
+for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
+should increase shared memory size either with --ipc=host or --shm-size command line options to nvidia-docker run. 
+
 
 ## Getting Started
 

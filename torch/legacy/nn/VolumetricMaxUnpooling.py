@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .VolumetricMaxPooling import VolumetricMaxPooling
 
+
 class VolumetricMaxUnpooling(Module):
 
     def __init__(self, poolingModule):
@@ -53,4 +54,3 @@ class VolumetricMaxUnpooling(Module):
 
     def __repr__(self):
         return 'nn.VolumetricMaxUnpooling associated to ' + self.pooling.__repr__()
-

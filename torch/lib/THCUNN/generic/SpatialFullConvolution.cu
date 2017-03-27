@@ -15,6 +15,10 @@ static inline void THNN_(SpatialFullConvolution_shapeCheck)(
   THArgCheck(adjW < dW && adjH < dH, 15,
              "output adjustment must be smaller than stride, but got adjH: %d adjW: %d dH: %d dW: %d",
              adjH, adjW, dH, dW);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
+             "bias tensor has to be contiguous");
   THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
                   "2D or 4D weight tensor expected, but got: %s");
 
@@ -178,7 +182,6 @@ void THNN_(SpatialFullConvolution_updateOutput)(
           THCTensor_(data)(state, output_n), n_
       );
     }
-
   }
 
   // Free
@@ -311,8 +314,9 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
            int dW, int dH,
            int padW, int padH,
            int adjW, int adjH,
-           real scale)
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
   int nOutputPlane = THCTensor_(size)(state, gradWeight, 1);
 

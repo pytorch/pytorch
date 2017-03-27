@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class HardTanh(Module):
 
     def __init__(self, min_value=-1, max_value=1, inplace=False):
@@ -32,4 +33,3 @@ class HardTanh(Module):
             self.inplace
         )
         return self.gradInput
-

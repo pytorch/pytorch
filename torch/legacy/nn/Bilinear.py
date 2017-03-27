@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Bilinear(Module):
 
     def _assertInput(self, input):
@@ -23,14 +24,13 @@ class Bilinear(Module):
         if gradOutput.size(1) != self.weight.size(0):
             raise RuntimeError('number of columns in gradOutput does not match layer\'s output size')
 
-
     def __init__(self, inputSize1, inputSize2, outputSize, bias=True):
         # set up model:
         super(Bilinear, self).__init__()
-        self.weight     = torch.Tensor(outputSize, inputSize1, inputSize2)
+        self.weight = torch.Tensor(outputSize, inputSize1, inputSize2)
         self.gradWeight = torch.Tensor(outputSize, inputSize1, inputSize2)
         if bias:
-            self.bias     = torch.Tensor(outputSize)
+            self.bias = torch.Tensor(outputSize)
             self.gradBias = torch.Tensor(outputSize)
         else:
             self.bias = None
@@ -53,13 +53,12 @@ class Bilinear(Module):
             self.bias.uniform_(-stdv, stdv)
         return self
 
-
     def updateOutput(self, input):
         self._assertInput(input)
 
         # set up buffer:
         if self.buff2 is None:
-              self.buff2 = input[0].new()
+            self.buff2 = input[0].new()
         self.buff2.resize_as_(input[1])
 
         # compute output scores:
@@ -74,7 +73,6 @@ class Bilinear(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
             return
@@ -87,38 +85,36 @@ class Bilinear(Module):
         #: first slice of weight tensor (k = 1)
         self.gradInput[0].addmm_(input[1], self.weight[0].t())
         self.gradInput[0].mul_(gradOutput.narrow(1, 0, 1).expand(self.gradInput[0].size(0),
-            self.gradInput[0].size(1)))
+                                                                 self.gradInput[0].size(1)))
         self.gradInput[1].addmm_(input[0], self.weight[0])
         self.gradInput[1].mul_(gradOutput.narrow(1, 0, 1).expand(self.gradInput[1].size(0),
-            self.gradInput[1].size(1)))
+                                                                 self.gradInput[1].size(1)))
 
         #: remaining slices of weight tensor
         if self.weight.size(0) > 1:
             if self.buff1 is None:
-                  self.buff1 = input[0].new()
+                self.buff1 = input[0].new()
             self.buff1.resize_as_(input[0])
 
             for k in range(1, self.weight.size(0)):
                 torch.mm(input[1], self.weight[k].t(), out=self.buff1)
                 self.buff1.mul_(gradOutput.narrow(1, k, 1).expand(self.gradInput[0].size(0),
-                    self.gradInput[0].size(1)))
+                                                                  self.gradInput[0].size(1)))
                 self.gradInput[0].add_(self.buff1)
 
                 torch.mm(input[0], self.weight[k], out=self.buff2)
                 self.buff2.mul_(gradOutput.narrow(1, k, 1).expand(self.gradInput[1].size(0),
-                    self.gradInput[1].size(1)))
+                                                                  self.gradInput[1].size(1)))
                 self.gradInput[1].add_(self.buff2)
 
         return self.gradInput
-
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         self._assertInputGradOutput(input, gradOutput)
 
         # make sure we have buffer:
         if self.buff1 is None:
-              self.buff1 = input[0].new()
+            self.buff1 = input[0].new()
         self.buff1.resize_as_(input[0])
 
         # accumulate parameter gradients:
@@ -129,15 +125,13 @@ class Bilinear(Module):
         if self.bias is not None:
             self.gradBias.add_(scale, gradOutput.sum(0))
 
-
     def __repr__(self):
         return str(type(self)) + \
-                '({}x{} -> {}) {}'.format(
-                    self.weight.size(1), self.weight.size(2), self.weight.size(0),
-                    (' without bias' if self.bias is None else '')
-                )
+            '({}x{} -> {}) {}'.format(
+            self.weight.size(1), self.weight.size(2), self.weight.size(0),
+            (' without bias' if self.bias is None else '')
+        )
 
     def clearState(self):
         clear(self, 'buff1', 'buff2')
         return super(Bilinear, self).clearState()
-

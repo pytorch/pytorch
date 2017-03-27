@@ -1,61 +1,88 @@
-#ifndef THP_FUNCTION_H
-#define THP_FUNCTION_H
+#pragma once
 
-struct THPFunction;
+// Function is an abstract class that represents a single operation from one or
+// more variables to one more or varaibles.
+//
+// Subclasses may represent "forward" or "backward" operations (i.e functions
+// and their derivatives). Some functions may be used as both.
 
-struct THPFunctionPtr: public THPObjectPtr {
-    THPFunctionPtr(): THPObjectPtr(nullptr), output_nr(-1) {};
+#include <memory>
+#include <THPP/THPP.h>
+#include <vector>
 
-    THPFunctionPtr(PyObject *fn, int output_nr):
-        THPObjectPtr(fn), output_nr(output_nr) {};
+#include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/function_hook.h"
 
-    THPFunctionPtr(THPFunction *fn, int output_nr):
-        THPObjectPtr((PyObject*)fn), output_nr(output_nr) {};
+namespace torch { namespace autograd {
 
-    THPFunctionPtr(THPFunctionPtr &&other):
-        THPObjectPtr(std::move(other)), output_nr(other.output_nr) {}
+struct Function;
+struct Variable;
 
-    THPPointer& operator =(THPFunctionPtr &&other) {
-        output_nr = other.output_nr;
-        THPObjectPtr::operator=(std::move(other));
-        return *this;
-    }
+using tensor_list = std::vector<std::unique_ptr<thpp::Tensor>>;
+using variable_list = std::vector<std::shared_ptr<Variable>>;
+using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
-    int output_nr;
+// State used to create "backward" functions
+struct FunctionFlags {
+  bool requires_grad = false;
+  bool is_volatile = false;
+  function_list previous_functions;
 };
 
-// (class, gpu id, sizes)
-using output_info_type = std::tuple<PyObject *, int, std::vector<long>>;
-// (tensor, version when saved, version counter)
-// or
-// (None, 0, nullptr)
-using saved_var_info_type = std::tuple<THPObjectPtr, int, std::unique_ptr<THPVariableVersion>>;
+struct Function {
+  Function()
+    : num_outputs(0)
+    , previous_functions()
+    , requires_grad(false)
+    , is_volatile(false)
+    , is_stochastic(false)
+    , pre_hooks()
+    , post_hooks()
+    {}
 
-struct THPFunction {
-    PyObject_HEAD
+  Function(FunctionFlags&& flags)
+    : num_outputs(0)
+    , previous_functions(std::move(flags.previous_functions))
+    , requires_grad(flags.requires_grad)
+    , is_volatile(flags.is_volatile)
+    , is_stochastic(false)
+    , pre_hooks()
+    , post_hooks()
+    {}
 
-    PyObject *needs_input_grad;
-    PyObject *backward_hooks;
-    THPObjectPtr *output_backward_hooks;
+  Function(const Function& other) = delete;
+  Function(Function&& other) = delete;
+  virtual ~Function() {}
 
-    PyObject *to_save;
-    PyObject *shared_pairs;
-    PyObject *non_differentiable;
-    PyObject *dirty_tensors;
+  // Implements the operation
+  virtual variable_list apply(const variable_list& inputs) = 0;
 
-    THPFunctionPtr *previous_functions;
-    std::vector<output_info_type> *output_info;
-    std::vector<saved_var_info_type> *saved_variables;
-    int num_inputs;
-    int num_outputs;
-    char requires_grad;
-    char has_freed_buffers;
+  // Computes requires_grad, is_volatile, and previous_functions from a list
+  // of input variables
+  static FunctionFlags flags(const variable_list& inputs);
+
+  // Releases saved variables if the operation won't be reused
+  virtual inline void releaseVariables() {}
+
+  // Function name for debugging
+  virtual std::string name();
+
+  inline bool needs_input_grad(int i) const {
+    auto& fn = previous_functions[i].first;
+    return fn && fn->requires_grad;
+  }
+
+  // These variables are usually only meaningful for "backward" functions.
+  // num_outputs is the number of outputs of corresponding "forward" function;
+  // it's actually the number of inputs of this function.
+  int num_outputs;
+  function_list previous_functions;
+  bool requires_grad;
+  bool is_volatile;
+  bool is_stochastic;
+  std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
+  std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 };
 
-bool THPFunction_initModule(PyObject *module);
-extern PyObject *THPFunctionClass;
-extern PyObject *THPStochasticFunctionClass;
 
-#define THPFunction_Check(obj) PyObject_IsInstance(obj, THPFunctionClass)
-
-#endif
+}} // namespace torch::autograd

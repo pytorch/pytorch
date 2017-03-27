@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SoftShrink(Module):
 
     def __init__(self, lambd=0.5):
@@ -25,4 +26,3 @@ class SoftShrink(Module):
             self.lambd
         )
         return self.gradInput
-

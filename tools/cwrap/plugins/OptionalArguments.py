@@ -2,6 +2,7 @@ from copy import deepcopy
 from . import CWrapPlugin
 from itertools import product
 
+
 class OptionalArguments(CWrapPlugin):
 
     def process_declarations(self, declarations):
@@ -32,20 +33,20 @@ class OptionalArguments(CWrapPlugin):
             else:
                 kwarg_only_count = -kwarg_only_count
             arg_signature = '#'.join(
-                    arg['type']
-                    for arg in option['arguments'][:kwarg_only_count]
-                    if not arg.get('ignore_check'))
+                arg['type']
+                for arg in option['arguments'][:kwarg_only_count]
+                if not arg.get('ignore_check'))
             if kwarg_only_count is None:
                 return arg_signature
             kwarg_only_signature = '#'.join(
-                    arg['name'] + '#' + arg['type']
-                    for arg in option['arguments'][kwarg_only_count:]
-                    if not arg.get('ignore_check'))
+                arg['name'] + '#' + arg['type']
+                for arg in option['arguments'][kwarg_only_count:]
+                if not arg.get('ignore_check'))
             return arg_signature + "#-#" + kwarg_only_signature
         seen_signatures = set()
         unique = []
         for option in options:
-            for num_kwarg_only in range(0, len(option['arguments'])+1):
+            for num_kwarg_only in range(0, len(option['arguments']) + 1):
                 sig = signature(option, num_kwarg_only)
                 if sig not in seen_signatures:
                     if num_kwarg_only > 0:
@@ -55,4 +56,3 @@ class OptionalArguments(CWrapPlugin):
                     seen_signatures.add(sig)
                     break
         return unique
-

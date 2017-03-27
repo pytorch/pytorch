@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class LookupTable(Module):
 
     def __init__(self, nIndex, nOutput, paddingValue=-1, maxNorm=None, normType=None):
@@ -47,7 +48,7 @@ class LookupTable(Module):
 
     def _makeInputContiguous(self, input):
         # make sure input is a contiguous torch.LongTensor
-        if not input.is_contiguous() or type(input) != type(self._input):
+        if not input.is_contiguous() or not type(input) is type(self._input):
             self.copiedInput = True
             self._input.resize_(input.size()).copy_(input)
             return self._input
@@ -59,15 +60,14 @@ class LookupTable(Module):
         self.renorm(input)
         input = self._makeInputContiguous(input)
         if input.dim() == 1:
-           torch.index_select(self.weight, 0, input, out=self.output)
+            torch.index_select(self.weight, 0, input, out=self.output)
         elif input.dim() == 2:
-           torch.index_select(self.weight, 0, input.view(-1), out=self.output)
-           self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
+            torch.index_select(self.weight, 0, input.view(-1), out=self.output)
+            self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
         else:
-           raise RuntimeError("input must be a vector or matrix")
+            raise RuntimeError("input must be a vector or matrix")
 
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         # the input can be of any type (as in the forward it's
@@ -80,7 +80,6 @@ class LookupTable(Module):
             self.gradInput.resize_as_(input).zero_()
 
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         input = self._input if self.copiedInput else input
@@ -110,16 +109,16 @@ class LookupTable(Module):
 
     def renorm(self, input):
         if self.maxNorm is None:
-           return
+            return
 
         # copy input into _input, so _input is continous.
         # The copied _input will be modified in the C code.
         self._input.resize_(input.size()).copy_(input)
         row_idx = self._input
         if row_idx.dim() == 2:
-           row_idx = row_idx.view(-1)
+            row_idx = row_idx.view(-1)
         elif row_idx.dim() != 1:
-           raise RuntimeError("input must be a vector or matrix")
+            raise RuntimeError("input must be a vector or matrix")
 
         # "row_idx" and "weight" will be modified in the C code
         self._backend.LookupTable_renorm(
@@ -151,4 +150,3 @@ class LookupTable(Module):
     def clearState(self):
         clear(self, '_count', '_input', '_sorted', '_indices', '_gradOutput')
         return super(LookupTable, self).clearState()
-

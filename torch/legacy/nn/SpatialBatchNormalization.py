@@ -1,6 +1,7 @@
 import torch
 from .BatchNormalization import BatchNormalization
 
+
 class SpatialBatchNormalization(BatchNormalization):
     """
        This class implements Batch Normalization as described in the paper:

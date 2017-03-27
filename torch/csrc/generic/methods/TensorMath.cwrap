@@ -906,10 +906,10 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* mat1
+        - THTensor* self
         - arg: real value
           default: AS_REAL(1)
-        - THSTensor* mat2
+        - THSTensor* other
 ]]
 
 [[
@@ -1402,7 +1402,9 @@
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
     THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+    #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+    #endif
   arguments:
     - arg: THTensor* result
       output: True
@@ -1421,7 +1423,9 @@
   before_call: |
     long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     THTensor_(resize1d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s);
+    #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+    #endif
   arguments:
     - arg: THTensor* result
       output: True
@@ -1442,7 +1446,9 @@
         long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
         long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
         THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+        #if !IS_CUDA
         THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+        #endif
       arguments:
         - arg: THTensor* result
           output: True
@@ -1478,7 +1484,9 @@
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 1);
     long s3 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 2);
     THTensor_(resize3d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2, s3);
+    #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+    #endif
   arguments:
     - arg: THTensor* result
       output: True
@@ -1567,15 +1575,25 @@
 
 [[
   name: addcmul_
-  cname: addcmul
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: real value
-      default: AS_REAL(1)
-    - THTensor* tensor1
-    - THTensor* tensor2
+  options:
+    - cname: addcmul
+      return: argument 0
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THTensor* tensor1
+        - THTensor* tensor2
+    - cname: spaddcmul
+      return: argument 0
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - arg: real value
+          default: AS_REAL(1)
+        - THSTensor* tensor1
+        - THSTensor* tensor2
 ]]
 
 [[
@@ -1880,4 +1898,35 @@ static const char *R = &__R;
       if_true: T
       if_false: N
       default: N
+]]
+
+[[
+  name: btrifact
+  cname: btrifact
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  with_stateless: true
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - arg: THIntegerTensor* pivots
+      output: True
+    - arg: THIntegerTensor* info
+      kwarg_only: True
+      default: NULL
+    - THTensor* self
+]]
+
+[[
+  name: btrisolve
+  cname: btrisolve
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  only_stateless: true
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* LU
+    - THTensor* x
+    - THIntegerTensor* pivots
 ]]

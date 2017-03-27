@@ -2,6 +2,7 @@ from .module import Module
 
 
 class CrossMapLRN2d(Module):
+
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
         super(CrossMapLRN2d, self).__init__()
         self.size = size

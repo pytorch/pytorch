@@ -8,3 +8,4 @@ from .nag import nag
 from .rmsprop import rmsprop
 from .rprop import rprop
 from .sgd import sgd
+from .lbfgs import lbfgs

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SplitTable(Module):
 
     def __init__(self, dimension):
@@ -10,7 +11,7 @@ class SplitTable(Module):
     def _getPositiveDimension(self, input):
         dimension = self.dimension
         if dimension < 0:
-           dimension = input.dim() + dimension
+            dimension = input.dim() + dimension
 
         return dimension
 
@@ -36,4 +37,3 @@ class SplitTable(Module):
             self.gradInput.select(dimension, i).copy_(gradOutput[i])
 
         return self.gradInput
-

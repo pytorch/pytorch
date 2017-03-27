@@ -1,6 +1,7 @@
 from . import CWrapPlugin
 from string import Template
 
+
 class KwargsPlugin(CWrapPlugin):
 
     ACCESSOR_TEMPLATE = Template('(__tuplecount > $idx ? PyTuple_GET_ITEM(args, $idx) : __kw_$name)')
@@ -23,6 +24,16 @@ class KwargsPlugin(CWrapPlugin):
                 for option in declaration['options']:
                     for arg in option['arguments']:
                         arg['no_kwargs'] = True
+        # we need to use offsets for arg position in *arg if kwarg_only args
+        # are not at the end
+        for declaration in declarations:
+            for option in declaration['options']:
+                offset = 0
+                for arg in option['arguments']:
+                    if arg.get('kwarg_only') and not arg.get('ignore_check', False):
+                        offset += 1
+                    else:
+                        arg['kwarg_offset'] = offset
         return declarations
 
     def get_arg_accessor(self, arg, option):
@@ -30,14 +41,14 @@ class KwargsPlugin(CWrapPlugin):
             return
         if arg.get('kwarg_only'):
             return self.KWARG_ONLY_ACCESSOR_TEMPLATE.substitute(name=arg['name'])
-        return self.ACCESSOR_TEMPLATE.substitute(idx=arg['idx'], name=arg['name'])
+        return self.ACCESSOR_TEMPLATE.substitute(idx=arg['idx'] - arg['kwarg_offset'], name=arg['name'])
 
     def process_single_check(self, code, arg, arg_accessor):
         if arg.get('no_kwargs'):
             return code
         if arg.get('kwarg_only'):
             return self.KWARG_ONLY_CHECK_TEMPLATE.substitute(name=arg['name'], code=code)
-        return self.CHECK_TEMPLATE.substitute(idx=arg['idx'], name=arg['name'], code=code)
+        return self.CHECK_TEMPLATE.substitute(idx=arg['idx'] - arg['kwarg_offset'], name=arg['name'], code=code)
 
     def process_wrapper(self, code, declaration):
         if declaration.get('no_kwargs'):
@@ -52,8 +63,9 @@ class KwargsPlugin(CWrapPlugin):
                         name not in seen_args):
                     seen_args.add(name)
                     args.append(name)
-        declarations = '\n    '.join(['PyObject *__kw_{} = NULL;'.format(name) for name in args])
-        lookups = '\n      '.join(['__kw_{name} = PyDict_GetItemString(kwargs, "{name}");'.format(name=name) for name in args])
+        declarations = '\n    '.join(['PyObject *__kw_{} = NULL;'.format(a) for a in args])
+        lookups = '\n      '.join(
+            ['__kw_{name} = PyDict_GetItemString(kwargs, "{name}");'.format(name=a) for a in args])
         start_idx = code.find('{') + 1
         new_code = self.WRAPPER_TEMPLATE.substitute(declarations=declarations, lookups=lookups)
         return code[:start_idx] + new_code + code[start_idx:]

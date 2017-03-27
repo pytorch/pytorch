@@ -1,6 +1,7 @@
 #include "THCUNN.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include <THC/THCApply.cuh>
 
 template <typename T>
 struct LeakyReLUUpdateOutput

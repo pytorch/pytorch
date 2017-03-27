@@ -139,7 +139,9 @@ THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* sta
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
 THC_API THAllocator* THCState_getCudaUVAAllocator(THCState* state);
+THC_API THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state);
 THC_API void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator);
+THC_API int THCState_isCachingAllocatorEnabled(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);
 
@@ -172,6 +174,7 @@ THC_API void* THCState_getDeviceScratchSpace(THCState* state, int device, int st
 THC_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 THC_API size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device);
 
+#define THCAssertSameGPU(expr) if (!expr) THError("arguments are located on different GPUs")
 #define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
 #define THCudaCheckWarn(err)  __THCudaCheckWarn(err, __FILE__, __LINE__)
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)

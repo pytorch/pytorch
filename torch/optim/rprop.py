@@ -1,6 +1,7 @@
 import math
 from .optimizer import Optimizer
 
+
 class Rprop(Optimizer):
     """Implements the resilient backpropagation algorithm.
 
@@ -31,8 +32,10 @@ class Rprop(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
+                if p.grad is None:
+                    continue
                 grad = p.grad.data
-                state = self.state[id(p)]
+                state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:
@@ -65,4 +68,3 @@ class Rprop(Optimizer):
                 state['prev'].copy_(grad)
 
         return loss
-

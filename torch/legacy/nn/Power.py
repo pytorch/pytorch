@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Power(Module):
 
     def __init__(self, p):
@@ -17,4 +18,3 @@ class Power(Module):
         self.gradInput.pow_(self.pow - 1)
         self.gradInput.mul_(gradOutput).mul_(self.pow)
         return self.gradInput
-

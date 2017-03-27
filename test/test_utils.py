@@ -6,7 +6,6 @@ import shutil
 import random
 import tempfile
 import unittest
-import sys
 import traceback
 import torch
 import torch.cuda
@@ -19,7 +18,7 @@ from torch.utils.serialization import load_lua
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase
+from common import TestCase, run_tests, download_file
 
 try:
     import cffi
@@ -28,7 +27,9 @@ try:
 except ImportError:
     HAS_CFFI = False
 
+
 class SimplePlugin(Plugin):
+
     def __init__(self, interval):
         super(SimplePlugin, self).__init__(interval)
         self.trainer = None
@@ -58,6 +59,7 @@ class SimplePlugin(Plugin):
 
 
 class ModelMock(object):
+
     def __init__(self):
         self.num_calls = 0
         self.output = Variable(torch.ones(1, 1), requires_grad=True)
@@ -68,6 +70,7 @@ class ModelMock(object):
 
 
 class CriterionMock(object):
+
     def __init__(self):
         self.num_calls = 0
 
@@ -95,6 +98,7 @@ class OptimizerMock(object):
 
 
 class DatasetMock(object):
+
     def __iter__(self):
         for i in range(10):
             yield torch.randn(2, 10), torch.randperm(10)[:2]
@@ -183,6 +187,7 @@ class TestTrainer(TestCase):
 
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
+
 class TestFFI(TestCase):
 
     def setUp(self):
@@ -196,13 +201,13 @@ class TestFFI(TestCase):
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
     def test_cpu(self):
         compile_extension(
-                name='test_extensions.cpulib',
-                header=test_dir + '/ffi/src/cpu/lib.h',
-                sources=[
-                    test_dir + '/ffi/src/cpu/lib1.c',
-                    test_dir + '/ffi/src/cpu/lib2.c',
-                ],
-                verbose=False,
+            name='test_extensions.cpulib',
+            header=test_dir + '/ffi/src/cpu/lib.h',
+            sources=[
+                test_dir + '/ffi/src/cpu/lib1.c',
+                test_dir + '/ffi/src/cpu/lib2.c',
+            ],
+            verbose=False,
         )
         from test_extensions import cpulib
         tensor = torch.ones(2, 2).float()
@@ -217,20 +222,20 @@ class TestFFI(TestCase):
         self.assertIs(type(f), float)
 
         self.assertRaises(TypeError,
-                lambda: cpulib.good_func(tensor.double(), 2, 1.5))
+                          lambda: cpulib.good_func(tensor.double(), 2, 1.5))
         self.assertRaises(torch.FatalError,
-                lambda: cpulib.bad_func(tensor, 2, 1.5))
+                          lambda: cpulib.bad_func(tensor, 2, 1.5))
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
     def test_gpu(self):
         compile_extension(
-                name='gpulib',
-                header=test_dir + '/ffi/src/cuda/cudalib.h',
-                sources=[
-                    test_dir + '/ffi/src/cuda/cudalib.c',
-                ],
-                with_cuda=True,
-                verbose=False,
+            name='gpulib',
+            header=test_dir + '/ffi/src/cuda/cudalib.h',
+            sources=[
+                test_dir + '/ffi/src/cuda/cudalib.c',
+            ],
+            with_cuda=True,
+            verbose=False,
         )
         import gpulib
         tensor = torch.ones(2, 2).float()
@@ -243,9 +248,9 @@ class TestFFI(TestCase):
         self.assertEqual(ctensor, torch.ones(2, 2) * 2 + 1.5)
 
         self.assertRaises(TypeError,
-                lambda: gpulib.cuda_func(tensor, 2, 1.5))
+                          lambda: gpulib.cuda_func(tensor, 2, 1.5))
         self.assertRaises(TypeError,
-                lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
+                          lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
 
 
 class TestLuaReader(TestCase):
@@ -291,36 +296,14 @@ class TestLuaReader(TestCase):
         return do_test
 
     @classmethod
-    def _download_data(cls, test_file_path):
-        if os.path.exists(test_file_path):
-            return
-        print('Downloading test file for TestLuaReader.')
-        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_modules.t7'
-        urllib = cls._get_urllib('request')
-        data = urllib.urlopen(DATA_URL, timeout=15).read()
-        with open(test_file_path, 'wb') as f:
-            f.write(data)
-
-    @staticmethod
-    def _get_urllib(submodule):
-        if sys.version_info < (3,):
-            import urllib2
-            return urllib2
-        else:
-            import urllib.error
-            import urllib.request
-            return getattr(urllib, submodule)
-
-    @classmethod
     def init(cls):
+        DATA_URL = 'https://download.pytorch.org/test_data/legacy_modules.t7'
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
         test_file_path = os.path.join(data_dir, 'legacy_modules.t7')
-        urllib = cls._get_urllib('error')
-        try:
-            cls._download_data(test_file_path)
-        except urllib.URLError as e:
+        succ = download_file(DATA_URL, test_file_path)
+        if not succ:
             warnings.warn(("Couldn't download the test file for TestLuaReader! "
-                    "Tests will be incomplete!"), RuntimeWarning)
+                           "Tests will be incomplete!"), RuntimeWarning)
             return
 
         tests = load_lua(test_file_path)
@@ -364,4 +347,4 @@ class TestLuaReader(TestCase):
 
 TestLuaReader.init()
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

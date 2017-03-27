@@ -25,7 +25,7 @@ class Addmm(_BlasBase):
         self.save_for_backward(matrix1, matrix2)
         output = self._get_output(add_matrix)
         return torch.addmm(self.alpha, add_matrix, self.beta,
-                matrix1, matrix2, out=output)
+                           matrix1, matrix2, out=output)
 
     def backward(self, grad_output):
         matrix1, matrix2 = self.saved_tensors
@@ -55,7 +55,7 @@ class Addbmm(_BlasBase):
         self.save_for_backward(batch1, batch2)
         output = self._get_output(add_matrix)
         return torch.addbmm(self.alpha, add_matrix, self.beta,
-                batch1, batch2, out=output)
+                            batch1, batch2, out=output)
 
     def backward(self, grad_output):
         batch1, batch2 = self.saved_tensors
@@ -68,8 +68,8 @@ class Addbmm(_BlasBase):
 
         if any(self.needs_input_grad[1:]):
             batch_grad_output = (grad_output
-                    .unsqueeze(0)
-                    .expand(batch1.size(0), batch1.size(1), batch2.size(2)))
+                                 .unsqueeze(0)
+                                 .expand(batch1.size(0), batch1.size(1), batch2.size(2)))
 
         if self.needs_input_grad[1]:
             grad_batch1 = torch.bmm(batch_grad_output, batch2.transpose(1, 2))
@@ -90,7 +90,7 @@ class Baddbmm(_BlasBase):
         self.save_for_backward(batch1, batch2)
         output = self._get_output(add_batch)
         return torch.baddbmm(self.alpha, add_batch, self.beta,
-                batch1, batch2, out=output)
+                             batch1, batch2, out=output)
 
     def backward(self, grad_output):
         batch1, batch2 = self.saved_tensors
@@ -120,7 +120,7 @@ class Addmv(_BlasBase):
         self.save_for_backward(matrix, vector)
         output = self._get_output(add_vector)
         return torch.addmv(self.alpha, add_vector, self.beta,
-                matrix, vector, out=output)
+                           matrix, vector, out=output)
 
     def backward(self, grad_output):
         matrix, vector = self.saved_tensors
@@ -150,7 +150,7 @@ class Addr(_BlasBase):
         self.save_for_backward(vector1, vector2)
         output = self._get_output(add_matrix)
         return torch.addr(self.alpha, add_matrix, self.beta,
-                vector1, vector2, out=output)
+                          vector1, vector2, out=output)
 
     def backward(self, grad_output):
         vector1, vector2 = self.saved_tensors
@@ -168,7 +168,7 @@ class Addr(_BlasBase):
 
         if self.needs_input_grad[2]:
             # TODO: maybe it's better to do transpose + mv + transpose
-            grad_vector2 = torch.mm(vector1.unsqueeze(0), grad_output)
+            grad_vector2 = torch.mm(vector1.unsqueeze(0), grad_output).squeeze(0)
             if self.beta != 1:
                 grad_vector2 *= self.beta
 
@@ -199,4 +199,3 @@ class Dot(Function):
 # TODO: trace
 # TODO: tril
 # TODO: triu
-

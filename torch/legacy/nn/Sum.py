@@ -37,7 +37,7 @@ class Sum(Module):
         size[dimension] = 1
         if not gradOutput.is_contiguous():
             if self._gradOutput is None:
-                  self._gradOutput = gradOutput.new()
+                self._gradOutput = gradOutput.new()
             self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
             gradOutput = self._gradOutput
 

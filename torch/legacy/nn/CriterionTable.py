@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class CriterionTable(Module):
 
     def __init__(self, criterion):
@@ -15,4 +16,3 @@ class CriterionTable(Module):
     def updateGradInput(self, input, grad_output):
         self.criterion.updateGradInput(*input)
         return self.gradInput
-

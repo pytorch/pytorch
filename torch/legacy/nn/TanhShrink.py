@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .Tanh import Tanh
 
+
 class TanhShrink(Module):
 
     def __init__(self):
@@ -19,4 +20,3 @@ class TanhShrink(Module):
         self.gradInput.resize_as_(input).copy_(gradOutput)
         self.gradInput.add_(-1, dth)
         return self.gradInput
-

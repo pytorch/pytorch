@@ -3,9 +3,10 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialConvolutionLocal(Module):
 
-    def __init__(self, nInputPlane, nOutputPlane, iW, iH ,kW, kH, dW=1, dH=1, padW=0, padH=None):
+    def __init__(self, nInputPlane, nOutputPlane, iW, iH, kW, kH, dW=1, dH=1, padW=0, padH=None):
         super(SpatialConvolutionLocal, self).__init__()
 
         self.nInputPlane = nInputPlane
@@ -31,22 +32,23 @@ class SpatialConvolutionLocal(Module):
         self.reset()
         self.finput = None
         self.fgradInput = None
+        self._gradOutput = None
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kW*self.kH*self.nInputPlane)
+            stdv = 1. / math.sqrt(self.kW * self.kH * self.nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
-           if self._input is None:
-               self._input = input.new()
-           self._input.resize_as_(input).copy_(input)
-           input = self._input
+            if self._input is None:
+                self._input = input.new()
+            self._input.resize_as_(input).copy_(input)
+            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.is_contiguous():
@@ -61,22 +63,26 @@ class SpatialConvolutionLocal(Module):
     def _viewWeight(self):
         self.weight = self.weight.view(self.oH * self.oW, self.nOutputPlane, self.nInputPlane * self.kH * self.kW)
         if self.gradWeight is not None and self.gradWeight.dim() > 0:
-           self.gradWeight = self.gradWeight.view(self.oH * self.oW, self.nOutputPlane, self.nInputPlane * self.kH * self.kW)
+            self.gradWeight = self.gradWeight.view(
+                self.oH * self.oW, self.nOutputPlane, self.nInputPlane * self.kH * self.kW)
 
     def _unviewWeight(self):
         self.weight = self.weight.view(self.oH, self.oW, self.nOutputPlane, self.nInputPlane, self.kH, self.kW)
         if self.gradWeight is not None and self.gradWeight.dim() > 0:
-           self.gradWeight = self.gradWeight.view(self.oH, self.oW, self.nOutputPlane, self.nInputPlane, self.kH, self.kW)
+            self.gradWeight = self.gradWeight.view(
+                self.oH, self.oW, self.nOutputPlane, self.nInputPlane, self.kH, self.kW)
 
     def _checkInputSize(self, input):
         if input.ndimension() == 3:
             if input.size(0) != self.nInputPlane or input.size(1) != self.iH or input.size(1) != self.iW:
-                raise RuntimeError('Given input size: ({}x{}x{}) inconsistent with expected input size: ({}x{}x{}).'.format(
-                                  input.size(0), input.size(1), input.size(2), self.nInputPlane, self.iH, self.iW))
+                raise RuntimeError(
+                    'Given input size: ({}x{}x{}) inconsistent with expected input size: ({}x{}x{}).'.format(
+                        input.size(0), input.size(1), input.size(2), self.nInputPlane, self.iH, self.iW))
         elif input.ndimension() == 4:
             if input.size(1) != self.nInputPlane or input.size(2) != self.iH or input.size(3) != self.iW:
-                raise RuntimeError('Given input size: ({}x{}x{}x{}) inconsistent with expected input size: (*x{}x{}x{}).'.format(
-                                    input.size(0), input.size(1), input.size(2), input.size(3), self.nInputPlane, self.iH, self.iW))
+                raise RuntimeError(
+                    'Given input size: ({}x{}x{}x{}) inconsistent with expected input size: (*x{}x{}x{}).'.format(
+                        input.size(0), input.size(1), input.size(2), input.size(3), self.nInputPlane, self.iH, self.iW))
         else:
             raise RuntimeError('3D or 4D (batch mode) tensor expected')
 
@@ -86,20 +92,23 @@ class SpatialConvolutionLocal(Module):
 
         if output.ndimension() == 3:
             if output.size(0) != self.nOutputPlane or output.size(1) != self.oH or output.size(2) != self.oW:
-                raise RuntimeError('Given output size: ({}x{}x{}) inconsistent with expected output size: ({}x{}x{}).'.format(
-                                    output.size(0), output.size(1), output.size(2), self.nOutputPlane, self.oH, self.oW))
+                raise RuntimeError(
+                    'Given output size: ({}x{}x{}) inconsistent with expected output size: ({}x{}x{}).'.format(
+                        output.size(0), output.size(1), output.size(2), self.nOutputPlane, self.oH, self.oW))
         elif output.ndimension() == 4:
             if output.size(1) != self.nOutputPlane or output.size(2) != self.oH or output.size(3) != self.oW:
-                raise RuntimeError('Given output size: ({}x{}x{}x{}) inconsistent with expected output size: (batchsize x{}x{}x{}).'.format(
-                                    output.size(0), output.size(1), output.size(2), output.size(3), self.nOutputPlane, self.oH, self.oW))
+                raise RuntimeError('Given output size: ({}x{}x{}x{}) inconsistent with expected output size: '
+                                   '(batchsize x{}x{}x{}).'.format(
+                                       output.size(0), output.size(1), output.size(2),
+                                       output.size(3), self.nOutputPlane, self.oH, self.oW))
         else:
             raise RuntimeError('3D or 4D(batch mode) tensor expected')
 
     def updateOutput(self, input):
         if self.finput is None:
-              self.finput = input.new()
+            self.finput = input.new()
         if self.fgradInput is None:
-              self.fgradInput = input.new()
+            self.fgradInput = input.new()
         self._checkInputSize(input)
         self._viewWeight()
         input = self._makeContiguous(input)
@@ -190,4 +199,3 @@ class SpatialConvolutionLocal(Module):
     def clearState(self):
         clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialConvolutionLocal, self).clearState()
-

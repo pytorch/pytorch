@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Exp(Module):
 
     def updateOutput(self, input):
@@ -8,4 +9,3 @@ class Exp(Module):
 
     def updateGradInput(self, input, gradOutput):
         return torch.mul(self.output, gradOutput, out=self.gradInput)
-

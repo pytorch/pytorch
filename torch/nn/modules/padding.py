@@ -2,6 +2,8 @@ from .module import Module
 from .utils import _quadruple, _ntuple
 
 # TODO: grad_output size asserts in THNN
+
+
 class ReflectionPad2d(Module):
 
     def __init__(self, padding):
@@ -14,6 +16,7 @@ class ReflectionPad2d(Module):
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
 
+
 class ReplicationPad2d(Module):
 
     def __init__(self, padding):
@@ -25,6 +28,7 @@ class ReplicationPad2d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
+
 
 class ReplicationPad3d(Module):
 
@@ -39,4 +43,3 @@ class ReplicationPad3d(Module):
         return self.__class__.__name__ + ' ' + str(self.padding)
 
 # TODO: ZeroPad2d
-

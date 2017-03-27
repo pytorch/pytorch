@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Replicate(Module):
 
     def __init__(self, nf, dim=0):

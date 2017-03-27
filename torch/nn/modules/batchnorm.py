@@ -61,7 +61,7 @@ class BatchNorm1d(_BatchNorm):
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
-    
+
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -71,8 +71,8 @@ class BatchNorm1d(_BatchNorm):
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
 
     Shape:
-        - Input: :math:`(N, L)` or :math:`(N, C, L)`
-        - Output: :math:`(N, L)` or :math:`(N, C, L)` (same shape as input)
+        - Input: :math:`(N, C)` or :math:`(N, C, L)`
+        - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
     Examples:
         >>> # With Learnable Parameters
@@ -82,6 +82,7 @@ class BatchNorm1d(_BatchNorm):
         >>> input = autograd.Variable(torch.randn(20, 100))
         >>> output = m(input)
     """
+
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
@@ -102,7 +103,7 @@ class BatchNorm2d(_BatchNorm):
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
-    
+
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -123,6 +124,7 @@ class BatchNorm2d(_BatchNorm):
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
         >>> output = m(input)
     """
+
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
@@ -143,7 +145,7 @@ class BatchNorm3d(_BatchNorm):
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
-    
+
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -164,6 +166,7 @@ class BatchNorm3d(_BatchNorm):
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
         >>> output = m(input)
     """
+
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'

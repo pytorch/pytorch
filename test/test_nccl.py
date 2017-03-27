@@ -4,14 +4,12 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from common import TestCase
-
-if not torch.cuda.is_available():
-    print('CUDA not available, skipping tests')
-    import sys
-    sys.exit()
+from common import TestCase, run_tests
 
 nGPUs = torch.cuda.device_count()
+if nGPUs == 0:
+    print('CUDA not available, skipping tests')
+    TestCase = object  # noqa: F811
 
 
 class TestNCCL(TestCase):
@@ -87,4 +85,4 @@ class TestNCCL(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

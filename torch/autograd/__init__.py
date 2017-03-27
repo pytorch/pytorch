@@ -9,8 +9,10 @@ import torch
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .stochastic_function import StochasticFunction
+from .gradcheck import gradcheck
 
 __all__ = ['Variable', 'Function', 'StochasticFunction', 'backward']
+
 
 def backward(variables, grad_variables, retain_variables=False):
     """Computes the sum of gradients of given variables w.r.t. graph leaves.
@@ -28,7 +30,7 @@ def backward(variables, grad_variables, retain_variables=False):
     Arguments:
         variables (sequence of Variable): Variables of which the derivative will be
             computed.
-        grad_variables (sequence of Variable): Gradients w.r.t. each element of
+        grad_variables (sequence of Tensor): Gradients w.r.t. each element of
             corresponding variables. Required only for non-scalar variables that
             require gradient.
         retain_variables (bool): If ``True``, buffers necessary for computing
@@ -37,6 +39,6 @@ def backward(variables, grad_variables, retain_variables=False):
             times.
     """
     Variable._execution_engine.run_backward(
-            tuple(variables), tuple(grad_variables), retain_variables)
+        tuple(variables), tuple(grad_variables), retain_variables)
 
 assert torch._C._autograd_init()

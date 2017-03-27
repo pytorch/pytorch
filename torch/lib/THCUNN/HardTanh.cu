@@ -1,6 +1,7 @@
 #include "THCUNN.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include <THC/THCApply.cuh>
 
 template <typename T>
 struct hardtanhupdateOutput_functor
@@ -45,7 +46,7 @@ struct hardtanhupdateGradInput_functor
 
   __device__ void operator()(T *gradInput, const T *input, const T *gradOutput) const
   {
-    if (*input < min_val_ || *input > max_val_)
+    if (*input <= min_val_ || *input >= max_val_)
       *gradInput = ScalarConvert<int, T>::to(0);
     else
       *gradInput = *gradOutput;

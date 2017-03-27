@@ -8,8 +8,10 @@ import traceback
 import threading
 if sys.version_info[0] == 2:
     import Queue as queue
+    string_classes = basestring
 else:
     import queue
+    string_classes = (str, bytes)
 
 
 class ExceptionWrapper(object):
@@ -61,12 +63,14 @@ def _pin_memory_loop(in_queue, out_queue, done_event):
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
     if torch.is_tensor(batch[0]):
-        return torch.cat([t.unsqueeze(0) for t in batch], 0)
+        return torch.stack(batch, 0)
+    elif type(batch[0]).__module__ == 'numpy' and type(batch[0]).__name__ == 'ndarray':
+        return torch.stack([torch.from_numpy(b) for b in batch], 0)
     elif isinstance(batch[0], int):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
         return torch.DoubleTensor(batch)
-    elif isinstance(batch[0], str):
+    elif isinstance(batch[0], string_classes):
         return batch
     elif isinstance(batch[0], collections.Iterable):
         # if each batch element is not a tensor, then it should be a tuple
@@ -81,6 +85,8 @@ def default_collate(batch):
 def pin_memory_batch(batch):
     if torch.is_tensor(batch):
         return batch.pin_memory()
+    elif isinstance(batch, string_classes):
+        return batch
     elif isinstance(batch, collections.Iterable):
         return [pin_memory_batch(sample) for sample in batch]
     else:

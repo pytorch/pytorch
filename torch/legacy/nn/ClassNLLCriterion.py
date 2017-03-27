@@ -1,7 +1,9 @@
 import torch
 from .Criterion import Criterion
 
+
 class ClassNLLCriterion(Criterion):
+
     def __init__(self, weights=None, sizeAverage=True):
         super(ClassNLLCriterion, self).__init__()
         self.sizeAverage = sizeAverage
@@ -26,7 +28,6 @@ class ClassNLLCriterion(Criterion):
         )
         self.output = self.output_tensor[0]
         return self.output
-
 
     def updateGradInput(self, input, target):
         self.gradInput.resize_as_(input).zero_()

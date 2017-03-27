@@ -24,18 +24,17 @@ PyObject * THPSize_New(int dim, long *sizes)
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-  PyObject *self = PyTuple_Type.tp_new(type, args, kwargs);
+  THPObjectPtr self = PyTuple_Type.tp_new(type, args, kwargs);
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
-      PyObject *item = PyTuple_GET_ITEM(self, i);
+      PyObject *item = PyTuple_GET_ITEM(self.get(), i);
       if (!THPUtils_checkLong(item)) {
-        Py_DECREF(self);
         return PyErr_Format(PyExc_TypeError, "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
             i, Py_TYPE(item)->tp_name);
       }
     }
   }
-  return self;
+  return self.release();
 }
 
 static PyObject * THPSize_repr(THPSize *self)
@@ -55,6 +54,50 @@ static PyObject * THPSize_repr(THPSize *self)
 #endif
 }
 
+extern PyTypeObject THPSizeType;
+
+template<typename FnType, FnType fn, typename ...Args>
+static PyObject* wrap_tuple_fn(Args ... args)
+{
+  PyObject *result = (*fn)(std::forward<Args>(args)...);
+  if (!result) return NULL;
+  if (PyTuple_Check(result)) {
+    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result, NULL);
+  }
+  Py_INCREF(result);
+  return result;
+}
+
+static auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+static auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
+#if PY_MAJOR_VERSION == 2
+static auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
+#endif
+static auto mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
+
+
+static PySequenceMethods THPSize_as_sequence = {
+  PyTuple_Type.tp_as_sequence->sq_length,
+  wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
+  wrap_tuple_fn<decltype(&sq_repeat), &sq_repeat>,
+  PyTuple_Type.tp_as_sequence->sq_item,
+#if PY_MAJOR_VERSION == 2
+  wrap_tuple_fn<decltype(&sq_slice), &sq_slice>,
+#else
+  0,                                          /* sq_slice */
+#endif
+  0,                                          /* sq_ass_item */
+  0,                                          /* sq_ass_slice */
+  PyTuple_Type.tp_as_sequence->sq_contains
+};
+
+static PyMappingMethods THPSize_as_mapping = {
+    PyTuple_Type.tp_as_mapping->mp_length,
+    wrap_tuple_fn<decltype(&mp_subscript), &mp_subscript>,
+    0
+};
+
+
 PyTypeObject THPSizeType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch.Size",                          /* tp_name */
@@ -67,8 +110,8 @@ PyTypeObject THPSizeType = {
   0,                                     /* tp_reserved */
   (reprfunc)THPSize_repr,                /* tp_repr */
   0,                                     /* tp_as_number */
-  0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
+  &THPSize_as_sequence,                  /* tp_as_sequence */
+  &THPSize_as_mapping,                   /* tp_as_mapping */
   0,                                     /* tp_hash  */
   0,                                     /* tp_call */
   0,                                     /* tp_str */

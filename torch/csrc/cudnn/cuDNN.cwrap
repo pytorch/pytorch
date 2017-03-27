@@ -4,7 +4,7 @@
 #include "BatchNorm.h"
 #include "Conv.h"
 #include "torch/csrc/cuda/THCP.h"
-#include "CppWrapper.h"
+#include "../PtrWrapper.h"
 
 
 using namespace torch::cudnn;
@@ -50,6 +50,7 @@ extern THCState* state;
     - THTensor* output
     - std::vector<int> pad
     - std::vector<int> stride
+    - std::vector<int> dilation 
     - int groups
     - bool benchmark
 ]]
@@ -68,6 +69,7 @@ extern THCState* state;
     - THTensor* output
     - std::vector<int> pad
     - std::vector<int> stride
+    - std::vector<int> dilation 
     - int groups
     - bool benchmark
 ]]

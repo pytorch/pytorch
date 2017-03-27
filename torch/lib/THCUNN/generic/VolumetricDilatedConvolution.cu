@@ -21,6 +21,10 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
+             "bias tensor has to be contiguous");
   THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 15,
              "dilation should be greater than zero, but got dilationT: %d, dilationH: %d, dilationW: %d",
              dilationT, dilationH, dilationW);
@@ -332,8 +336,9 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
            int dT, int dW, int dH,
            int padT, int padW, int padH,
            int dilationT, int dilationW, int dilationH,
-           real scale) {
+           accreal scale_) {
 
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, columns, ones);
   if (gradBias) {
    THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);

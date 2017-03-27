@@ -1,9 +1,10 @@
 from . import CWrapPlugin
 from string import Template
 
+
 class ReturnArguments(CWrapPlugin):
-    ARGUMENT_RETURN_TEMPLATE =  Template("Py_INCREF($arg);\nreturn (PyObject*)($arg);")
-    TUPLE_RETURN_TEMPLATE =     Template("return PyTuple_Pack($num_args, $args);")
+    ARGUMENT_RETURN_TEMPLATE = Template("Py_INCREF($arg);\nreturn (PyObject*)($arg);")
+    TUPLE_RETURN_TEMPLATE = Template("return PyTuple_Pack($num_args, $args);")
 
     def initialize(self, cwrap):
         self.cwrap = cwrap
@@ -16,4 +17,5 @@ class ReturnArguments(CWrapPlugin):
             if len(args) == 1:
                 return Template(self.ARGUMENT_RETURN_TEMPLATE.safe_substitute(arg=accessors[0]))
             else:
-                return Template(self.TUPLE_RETURN_TEMPLATE.safe_substitute(num_args=len(args), args=', '.join(accessors)))
+                return Template(self.TUPLE_RETURN_TEMPLATE.safe_substitute(num_args=len(args),
+                                                                           args=', '.join(accessors)))

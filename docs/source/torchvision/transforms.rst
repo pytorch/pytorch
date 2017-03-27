@@ -33,7 +33,7 @@ Conversion Transforms
 
 .. autoclass:: ToPILImage
 
-Generic Transofrms
+Generic Transforms
 ------------------
 
 .. autoclass:: Lambda

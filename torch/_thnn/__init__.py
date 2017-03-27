@@ -2,7 +2,9 @@ import threading
 import torch.cuda
 from .utils import THNN_H_PATH, THCUNN_H_PATH, parse_header, load_backend
 
+
 class Backends(object):
+
     def __init__(self):
         self.backends = {}
 
@@ -14,6 +16,7 @@ class Backends(object):
 
 
 class Backend(object):
+
     def __init__(self, lib_prefix, lib_name, functions, mixins=tuple()):
         self.lib_prefix = lib_prefix
         self.lib_name = lib_name
@@ -32,11 +35,12 @@ class Backend(object):
             with self.loading_lock:
                 if self.backend is None:
                     self.backend = load_backend(self.lib_prefix, self.lib_name,
-                            self.functions, self.mixins)
+                                                self.functions, self.mixins)
         return self.backend
 
 
 class THNNCudaBackendStateMixin(object):
+
     @property
     def library_state(self):
         return torch.cuda._state_cdata
@@ -54,7 +58,10 @@ for t in ['Float', 'Double']:
     type2backend.backends['torch.{}Tensor'.format(t)] = backend
     type2backend.backends[getattr(torch, '{}Tensor'.format(t))] = backend
 
-backend = Backend('Cuda', 'torch._thnn._THCUNN', _thcunn_headers, (THNNCudaBackendStateMixin,))
-type2backend.backends['THNNCudaBackend'] = backend
-type2backend.backends['torch.cuda.FloatTensor'] = backend
-type2backend.backends[torch.cuda.FloatTensor] = backend
+
+for t in ['Half', '', 'Double']:
+    backend = Backend('Cuda' + t, 'torch._thnn._THCUNN', _thcunn_headers, (THNNCudaBackendStateMixin,))
+    type2backend.backends['THNNCuda{}Backend'.format(t)] = backend
+    py_name = 'Float' if t == '' else t
+    type2backend.backends['torch.cuda.{}Tensor'.format(py_name)] = backend
+    type2backend.backends[getattr(torch.cuda, '{}Tensor'.format(py_name))] = backend

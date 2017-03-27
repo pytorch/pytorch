@@ -130,6 +130,7 @@ def get_python_class(typename):
 
 def make_tensor_reader(typename):
     python_class = get_python_class(typename)
+
     def read_tensor(reader, version):
         # source:
         # https://github.com/torch/torch7/blob/master/generic/Tensor.c#L1243
@@ -156,6 +157,7 @@ def make_storage_reader(typename):
     python_class = get_python_class(typename)
     # TODO: be smarter about this
     element_size = python_class().element_size()
+
     def read_storage(reader, version):
         # source:
         # https://github.com/torch/torch7/blob/master/generic/Storage.c#L244
@@ -185,6 +187,7 @@ register_torch_class('Tensor', make_tensor_reader)
 # Reader function for tds.Vector and tds.Hash
 ################################################################################
 
+
 def tds_Vec_reader(reader, version):
     length = reader.read_long()
     return [reader.read() for i in range(length)]
@@ -207,6 +210,7 @@ reader_registry['tds.Hash'] = tds_Hash_reader
 # Reader function for nn modules
 ################################################################################
 
+
 def _load_backend(obj):
     if hasattr(obj, '_type'):
         obj._backend = type2backend[obj._type]
@@ -221,6 +225,7 @@ def _load_backend(obj):
                 pass
     # Monkey patch the forward to capture the type of input
     updateOutput_orig = obj.updateOutput
+
     def updateOutput_patch(*args):
         input = args[0]
         while not torch.is_tensor(input):
@@ -242,13 +247,14 @@ def nn_reader(cls):
 
 
 reader_registry.update({('nn.' + name): nn_reader(module)
-    for name, module in nn.__dict__.items()
-    if name[0] != '_' and name[0].upper() == name[0]})
+                        for name, module in nn.__dict__.items()
+                        if name[0] != '_' and name[0].upper() == name[0]})
 
 
 def custom_reader(cls):
     def reader_factory(fn):
         base = nn_reader(cls)
+
         def wrapper(reader, version):
             obj = base(reader, version)
             fn(reader, version, obj)
@@ -271,7 +277,7 @@ for prefix in ['', 'Spatial', 'Volumetric']:
 @custom_reader(nn.Transpose)
 def Transpose_reader(reader, version, obj):
     obj.permutations = list(
-            map(lambda swap: [swap[0]-1, swap[1]-1], obj.permutations))
+        map(lambda swap: [swap[0] - 1, swap[1] - 1], obj.permutations))
 
 
 @custom_reader(nn.SpatialDivisiveNormalization)
@@ -299,12 +305,14 @@ def registry_addon(fn):
     def wrapper_factory(module_name, *args, **kwargs):
         module_name = 'nn.' + module_name
         build_fn = reader_registry[module_name]
+
         def wrapper(reader, version):
             obj = build_fn(reader, version)
             fn(obj, *args, **kwargs)
             return obj
         reader_registry[module_name] = wrapper
     return wrapper_factory
+
 
 @registry_addon
 def attr_map(obj, attribute_map):
@@ -318,6 +326,12 @@ def ensure_attr(obj, *attrs):
     for attr in attrs:
         if not hasattr(obj, attr):
             setattr(obj, attr, None)
+
+
+@registry_addon
+def make_none_attr(obj, *attrs):
+    for attr in attrs:
+        setattr(obj, attr, None)
 
 
 @registry_addon
@@ -351,11 +365,13 @@ def ensure_type(obj, type_map):
         setattr(obj, attr, getattr(value, converter)())
 
 
-ensure_attr('Linear', 'bias', 'gradWeight', 'gradBias')
+ensure_attr('Linear', 'bias', 'gradWeight', 'gradBias', 'addBuffer')
 ensure_attr('CAddTable', 'inplace')
 ensure_attr('SpatialFractionalMaxPooling', 'outW', 'outH', 'ratioW', 'ratioH')
-ensure_attr('BatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias')
-ensure_attr('SpatialBatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias')
+ensure_attr('BatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias',
+            'save_mean', 'save_std')
+ensure_attr('SpatialBatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias',
+            'save_mean', 'save_std')
 ensure_attr('VolumetricBatchNormalization', 'weight', 'bias', 'gradWeight', 'gradBias')
 ensure_attr('LookupTable', 'maxNorm', 'normType', '_gradOutput', '_sorted', '_indices')
 ensure_attr('MixtureTable', 'table')
@@ -366,7 +382,10 @@ ensure_attr('SpatialClassNLLCriterion', 'weights')
 ensure_attr('ClassNLLCriterion', 'weights')
 ensure_attr('ParallelCriterion', 'repeatTarget')
 ensure_attr('MultiMarginCriterion', 'weights')
-ensure_attr('SpatialConvolution', 'bias', 'finput', 'fgradInput', 'gradWeight', 'gradBias')
+ensure_attr('SpatialConvolution', 'bias', 'gradWeight', 'gradBias', '_gradOutput')
+ensure_attr('SpatialCrossMapLRN', 'scale')
+ensure_attr('Dropout', 'inplace')
+make_none_attr('SpatialConvolution', 'finput', 'fgradInput', '_input')
 attr_map('ReLU', {'val': 'value'})
 attr_map('Threshold', {'val': 'value'})
 attr_map('Unsqueeze', {'pos': 'dim'})
@@ -377,6 +396,7 @@ attr_map('SpatialAdaptiveMaxPooling', {'H': 'h', 'W': 'w'})
 decrement('Index', 'dimension')
 decrement('SelectTable', 'index')
 decrement('SplitTable', 'dimension')
+decrement_positive('JoinTable', 'dimension')
 decrement('Parallel', 'inputDimension', 'outputDimension')
 decrement('Concat', 'dimension')
 decrement('DepthConcat', 'dimension')
@@ -518,15 +538,15 @@ class T7Reader:
         if self.unknown_classes:
             return TorchObject(cls_name, self.read())
         raise T7ReaderException(("don't know how to deserialize Lua class "
-                "{}. If you want to ignore this error and load this object "
-                "as a dict, specify unknown_classes=True in reader's "
-                "constructor").format(cls_name))
+                                 "{}. If you want to ignore this error and load this object "
+                                 "as a dict, specify unknown_classes=True in reader's "
+                                 "constructor").format(cls_name))
 
     def _can_be_list(self, table):
         def is_natural(key):
             return (isinstance(key, int) or
-                    (isinstance(key, float) and key.is_integer())
-                    and k > 0)
+                    (isinstance(key, float) and key.is_integer()) and
+                    k > 0)
         natural_keys = all(map(is_natural, table.keys()))
         if not natural_keys:
             return False
@@ -543,7 +563,7 @@ class T7Reader:
             v = self.read()
             table[k] = v
         if self.list_heuristic and self._can_be_list(table):
-            return [table[i] for i in range(1, len(table)+1)]
+            return [table[i] for i in range(1, len(table) + 1)]
         return table
 
     def read(self):
@@ -557,8 +577,8 @@ class T7Reader:
             return self.read_boolean()
         elif typeidx == TYPE_STRING:
             return self.read_string()
-        elif (typeidx == TYPE_FUNCTION or typeidx == TYPE_RECUR_FUNCTION
-                or typeidx == LEGACY_TYPE_RECUR_FUNCTION):
+        elif (typeidx == TYPE_FUNCTION or typeidx == TYPE_RECUR_FUNCTION or
+              typeidx == LEGACY_TYPE_RECUR_FUNCTION):
             return self.read_function()
         elif typeidx == TYPE_TORCH:
             return self.read_object()
@@ -566,7 +586,7 @@ class T7Reader:
             return self.read_table()
         else:
             raise T7ReaderException("unknown type id {}. The file may be "
-                    "corrupted.".format(typeidx))
+                                    "corrupted.".format(typeidx))
 
 
 def load_lua(filename, **kwargs):
@@ -577,4 +597,3 @@ def load_lua(filename, **kwargs):
     with open(filename, 'rb') as f:
         reader = T7Reader(f, **kwargs)
         return reader.read()
-

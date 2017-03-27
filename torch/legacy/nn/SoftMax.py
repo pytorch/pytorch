@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SoftMax(Module):
 
     def updateOutput(self, input):
@@ -20,4 +21,3 @@ class SoftMax(Module):
             self.output
         )
         return self.gradInput
-

@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class SpatialSubSampling(Module):
 
     def __init__(self, nInputPlane, kW, kH, dW=1, dH=1):
@@ -20,12 +21,11 @@ class SpatialSubSampling(Module):
 
         self.reset()
 
-
     def reset(self, stdv=None):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1. / math.sqrt(self.kW*self.kH)
+            stdv = 1. / math.sqrt(self.kW * self.kH)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)
@@ -42,7 +42,6 @@ class SpatialSubSampling(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
             return
@@ -58,8 +57,6 @@ class SpatialSubSampling(Module):
         )
         return self.gradInput
 
-
-
     def accGradParameters(self, input, gradOutput, scale=1):
         self._backend.SpatialSubSampling_accGradParameters(
             self._backend.library_state,
@@ -71,4 +68,3 @@ class SpatialSubSampling(Module):
             self.dW, self.dH,
             scale
         )
-

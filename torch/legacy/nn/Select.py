@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Select(Module):
 
     def __init__(self, dimension, index):
@@ -20,4 +21,3 @@ class Select(Module):
         self.gradInput.zero_()
         self.gradInput.select(self.dimension, index).copy_(gradOutput)
         return self.gradInput
-

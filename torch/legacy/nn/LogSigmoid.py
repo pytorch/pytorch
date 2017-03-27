@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class LogSigmoid(Module):
 
     def __init__(self):
@@ -10,7 +11,7 @@ class LogSigmoid(Module):
 
     def updateOutput(self, input):
         if self.buffer is None:
-              self.buffer = input.new()
+            self.buffer = input.new()
         self._backend.LogSigmoid_updateOutput(
             self._backend.library_state,
             input,
@@ -32,5 +33,3 @@ class LogSigmoid(Module):
     def clearState(self):
         clear(self, 'buffer')
         return super(LogSigmoid, self).clearState()
-
-

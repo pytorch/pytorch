@@ -1,5 +1,6 @@
 from . import CWrapPlugin
 
+
 class ArgcountSortPlugin(CWrapPlugin):
 
     def __init__(self, descending=True):
@@ -11,4 +12,3 @@ class ArgcountSortPlugin(CWrapPlugin):
         for declaration in declarations:
             declaration['options'].sort(key=num_checked_args, reverse=self.descending)
         return declarations
-

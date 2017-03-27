@@ -22,4 +22,3 @@ class TimeMonitor(Monitor):
         else:
             self.last_time = time.time()
             return 0
-

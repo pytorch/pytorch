@@ -16,6 +16,9 @@ class CWrapPlugin(object):
     def get_wrapper_template(self, declaration):
         pass
 
+    def get_assign_args(self, arguments):
+        pass
+
     def get_arg_accessor(self, arg, option):
         pass
 
@@ -31,7 +34,7 @@ class CWrapPlugin(object):
     def process_single_unpack(self, code, arg, arg_accessor):
         return code
 
-    def process_all_unpacks(self, code, option):
+    def process_all_call_arg(self, code, option):
         return code
 
     def process_option_code(self, code, option):
@@ -46,6 +49,9 @@ class CWrapPlugin(object):
     def process_option_code_template(self, template, option):
         return template
 
+    def process_pre_arg_assign(self, template, option):
+        return template
+
 
 from .StandaloneExtension import StandaloneExtension
 from .NullableArguments import NullableArguments
@@ -58,3 +64,4 @@ from .ReturnArguments import ReturnArguments
 from .GILRelease import GILRelease
 from .AutoGPU import AutoGPU
 from .CuDNNPlugin import CuDNNPlugin
+from .GenericNN import GenericNN

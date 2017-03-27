@@ -4,6 +4,7 @@ from ..function import Function
 
 
 class _DimReduceFunction(Function):
+
     def __init__(self, dim=None):
         super(_DimReduceFunction, self).__init__()
         self.dim = dim
@@ -45,13 +46,45 @@ class Prod(_DimReduceFunction):
     def backward(self, grad_output):
         if self.dim is None:
             input, = self.saved_tensors
-            grad_input = grad_output.new(self.input_size).fill_(self.result)
-            return grad_input.div(input)
+            zero_idx = (input == 0).nonzero()
+            if zero_idx.dim() == 0:
+                return grad_output.mul(self.result).expand_as(input).div(input)
+            elif zero_idx.size(0) > 1:
+                return grad_output.new(self.input_size).zero_()
+            else:
+                grad_input = grad_output.new(self.input_size).zero_()
+                zero_idx = tuple(zero_idx[0].cpu())
+                input_copy = input.clone()
+                input_copy[zero_idx] = 1.
+                grad_input[zero_idx] = grad_output[0] * input_copy.prod()
+                return grad_input
         else:
             input, output = self.saved_tensors
-            repeats = [1 for _ in self.input_size]
-            repeats[self.dim] = self.input_size[self.dim]
-            return output.mul(grad_output).repeat(*repeats).div_(input)
+            zero_mask = input == 0
+            slice_zero_count = zero_mask.sum(self.dim)
+            total_zeros = slice_zero_count.sum()
+            grad_input = grad_output.mul(output).expand_as(input).div(input)
+            if total_zeros == 0:
+                return grad_input
+
+            some_zeros = slice_zero_count.gt(0).expand_as(grad_input)
+            grad_input[some_zeros] = 0
+
+            single_zero_idx = slice_zero_count.eq(1).nonzero()
+            for idx in single_zero_idx:
+                idx_tuple = tuple(idx.cpu())
+                input_idx_tuple = idx_tuple[:self.dim] + (slice(0, None),) + idx_tuple[self.dim + 1:]
+
+                # slice_mask and input_copy are 1D
+                slice_mask = zero_mask[input_idx_tuple]
+                input_copy = input[input_idx_tuple].clone()
+                zero_idx = slice_mask.nonzero()[0, 0]
+                input_copy[zero_idx] = 1.
+
+                grad_idx_tuple = idx_tuple[:self.dim] + (zero_idx,) + idx_tuple[self.dim + 1:]
+                grad_input[grad_idx_tuple] = grad_output[idx_tuple] * input_copy.prod()
+
+            return grad_input
 
 
 class Mean(_DimReduceFunction):
@@ -139,6 +172,7 @@ class Kthvalue(_SelectionFunction):
 
 
 class Norm(Function):
+
     def __init__(self, norm_type=2, dim=None):
         super(Norm, self).__init__()
         self.norm_type = norm_type

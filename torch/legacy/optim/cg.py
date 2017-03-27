@@ -2,8 +2,10 @@ import math
 
 INFINITY = float('inf')
 
+
 def sqrt_nothrow(x):
     return math.sqrt(x) if x >= 0 else float('nan')
+
 
 def cg(opfunc, x, config, state=None):
     """
@@ -45,11 +47,11 @@ def cg(opfunc, x, config, state=None):
     if config is None and state is None:
         raise ValueError("cg requires a dictionary to retain state between iterations")
     state = state if state is not None else config
-    rho  = config.get('rho', 0.01)
-    sig  = config.get('sig', 0.5)
-    _int  = config.get('int', 0.1)
-    ext  = config.get('ext', 3.0)
-    maxIter  = config.get('maxIter', 20)
+    rho = config.get('rho', 0.01)
+    sig = config.get('sig', 0.5)
+    _int = config.get('int', 0.1)
+    ext = config.get('ext', 3.0)
+    maxIter = config.get('maxIter', 20)
     ratio = config.get('ratio', 100)
     maxEval = config.get('maxEval', maxIter * 1.25)
     red = 1
@@ -86,13 +88,13 @@ def cg(opfunc, x, config, state=None):
     f1, tdf = opfunc(x)
     fx.append(f1)
     df1.copy_(tdf)
-    i = i+1
+    i = i + 1
 
     # initial search direction
     s.copy_(df1).mul_(-1)
 
-    d1 = -s.dot(s )         # slope
-    z1 = red/(1-d1)         # initial step
+    d1 = -s.dot(s)         # slope
+    z1 = red / (1 - d1)         # initial step
 
     while i < abs(maxEval):
         x0.copy_(x)
@@ -113,16 +115,16 @@ def cg(opfunc, x, config, state=None):
             while (f2 > f1 + z1 * rho * d1 or d2 > -sig * d1) and m > 0:
                 limit = z1
                 if f2 > f1:
-                    z2 = z3 - (0.5*d3*z3*z3)/(d3*z3+f2-f3)
+                    z2 = z3 - (0.5 * d3 * z3 * z3) / (d3 * z3 + f2 - f3)
                 else:
-                    A = 6*(f2-f3)/z3+3*(d2+d3)
-                    B = 3*(f3-f2)-z3*(d3+2*d2)
-                    z2 = (sqrt_nothrow(B*B-A*d2*z3*z3)-B)/A
+                    A = 6 * (f2 - f3) / z3 + 3 * (d2 + d3)
+                    B = 3 * (f3 - f2) - z3 * (d3 + 2 * d2)
+                    z2 = (sqrt_nothrow(B * B - A * d2 * z3 * z3) - B) / A
 
                 if z2 != z2 or z2 == INFINITY or z2 == -INFINITY:
-                    z2 = z3/2
+                    z2 = z3 / 2
 
-                z2 = max(min(z2, _int*z3), (1-_int)*z3)
+                z2 = max(min(z2, _int * z3), (1 - _int) * z3)
                 z1 = z1 + z2
                 x.add_(z2, s)
                 f2, tdf = opfunc(x)
@@ -134,40 +136,40 @@ def cg(opfunc, x, config, state=None):
 
             if f2 > f1 + z1 * rho * d1 or d2 > -sig * d1:
                 break
-            elif d2 > sig*d1:
+            elif d2 > sig * d1:
                 success = 1
                 break
             elif m == 0:
                 break
 
-            A = 6*(f2-f3)/z3+3*(d2+d3)
-            B = 3*(f3-f2)-z3*(d3+2*d2)
-            _denom = (B+sqrt_nothrow(B*B-A*d2*z3*z3))
-            z2 = -d2*z3*z3/_denom if _denom != 0 else float('nan')
+            A = 6 * (f2 - f3) / z3 + 3 * (d2 + d3)
+            B = 3 * (f3 - f2) - z3 * (d3 + 2 * d2)
+            _denom = (B + sqrt_nothrow(B * B - A * d2 * z3 * z3))
+            z2 = -d2 * z3 * z3 / _denom if _denom != 0 else float('nan')
 
             if z2 != z2 or z2 == INFINITY or z2 == -INFINITY or z2 < 0:
                 if limit < -0.5:
-                    z2 = z1 * (ext -1)
+                    z2 = z1 * (ext - 1)
                 else:
-                    z2 = (limit-z1)/2
-            elif (limit > -0.5) and (z2+z1) > limit:
-                z2 = (limit-z1)/2
-            elif limit < -0.5 and (z2+z1) > z1*ext:
-                z2 = z1*(ext-1)
-            elif z2 < -z3*_int:
-                z2 = -z3*_int
-            elif limit > -0.5 and z2 < (limit-z1)*(1-_int):
-                z2 = (limit-z1)*(1-_int)
+                    z2 = (limit - z1) / 2
+            elif (limit > -0.5) and (z2 + z1) > limit:
+                z2 = (limit - z1) / 2
+            elif limit < -0.5 and (z2 + z1) > z1 * ext:
+                z2 = z1 * (ext - 1)
+            elif z2 < -z3 * _int:
+                z2 = -z3 * _int
+            elif limit > -0.5 and z2 < (limit - z1) * (1 - _int):
+                z2 = (limit - z1) * (1 - _int)
 
             f3 = f2
             d3 = d2
             z3 = -z2
-            z1 = z1+z2
+            z1 = z1 + z2
             x.add_(z2, s)
 
             f2, tdf = opfunc(x)
             df2.copy_(tdf)
-            i = i+1
+            i = i + 1
             m = m - 1
             d2 = df2.dot(s)
 
@@ -212,4 +214,3 @@ def cg(opfunc, x, config, state=None):
     state['x0'] = x0
     state['s'] = s
     return x, fx, i
-

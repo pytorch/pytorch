@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .SpatialMaxPooling import SpatialMaxPooling
 
+
 class SpatialMaxUnpooling(Module):
 
     def __init__(self, poolingModule):
@@ -41,4 +42,3 @@ class SpatialMaxUnpooling(Module):
 
     def __repr__(self):
         return 'nn.SpatialMaxUnpooling associated to ' + self.pooling.__repr__()
-

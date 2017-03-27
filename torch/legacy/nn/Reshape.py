@@ -23,7 +23,7 @@ class Reshape(Module):
     def updateOutput(self, input):
         if not input.is_contiguous():
             if self._input is None:
-                  self._input = input.new()
+                self._input = input.new()
             self._input.resize_as_(input)
             self._input.copy_(input)
             input = self._input
@@ -36,7 +36,7 @@ class Reshape(Module):
     def updateGradInput(self, input, gradOutput):
         if not gradOutput.is_contiguous():
             if self._gradOutput is None:
-                  self._gradOutput = gradOutput.new()
+                self._gradOutput = gradOutput.new()
             self._gradOutput.resize_as_(gradOutput)
             self._gradOutput.copy_(gradOutput)
             gradOutput = self._gradOutput
@@ -46,7 +46,7 @@ class Reshape(Module):
 
     def __repr__(self):
         return super(Reshape, self).__repr__() + \
-                '({})'.format('x'.join(map(lambda x: str(x), self.size)))
+            '({})'.format('x'.join(map(lambda x: str(x), self.size)))
 
     def clearState(self):
         clear(self, '_input', '_gradOutput')

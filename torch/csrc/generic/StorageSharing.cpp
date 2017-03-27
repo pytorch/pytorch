@@ -209,7 +209,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset = PyLong_FromSsize_t((Py_ssize_t)offset);
-    size = PyLong_FromSize_t(base_size);
+    size = PyLong_FromSize_t(base_size / sizeof(real));
   }
   if (!tuple || !device || !_handle || !size || !_offset || !view_size) {
     return NULL;
@@ -244,7 +244,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   ptrdiff_t offset = (ptrdiff_t)THPUtils_unpackLong(_offset);
   size_t view_size =  (size_t)THPUtils_unpackLong(_view_size);
 
-  THCPAutoGPU((int)THPUtils_unpackLong(_device));
+  THCPAutoGPU __autogpu((int)THPUtils_unpackLong(_device));
 
   char *buffer;
   Py_ssize_t handle_size;

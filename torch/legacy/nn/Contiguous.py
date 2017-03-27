@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Contiguous(Module):
 
     def updateOutput(self, input):
@@ -11,7 +12,6 @@ class Contiguous(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if not gradOutput.is_contiguous():
             self.gradInput.resize_as_(gradOutput).copy_(gradOutput)
@@ -19,4 +19,3 @@ class Contiguous(Module):
             self.gradInput.set_(gradOutput)
 
         return self.gradInput
-

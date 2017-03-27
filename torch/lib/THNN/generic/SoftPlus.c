@@ -6,9 +6,11 @@ void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          real beta,
-          real threshold)
+          accreal beta_,
+          accreal threshold_)
 {
+  real beta = TH_CONVERT_ACCREAL_TO_REAL(beta_);
+  real threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
   THTensor_(resizeAs)(output, input);
 
   // f(x) = 1/beta * log(1 + exp(beta * x))
@@ -23,12 +25,14 @@ void THNN_(SoftPlus_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *output,
-          real beta,
-          real threshold)
+          accreal beta_,
+          accreal threshold_)
 {
+  real beta = TH_CONVERT_ACCREAL_TO_REAL(beta_);
+  real threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, output);
-  
+
   // d/dx[log(1+exp(k*x))/k] = exp(kx) / (exp(kx) + 1)
   // SINCE
   // y = (1/k)*log(1+exp(k*x)) --> x = (1/k)*log(exp(k*y)-1)

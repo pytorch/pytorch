@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class SpatialClassNLLCriterion(Criterion):
 
     def __init__(self, weights=None, sizeAverage=True):

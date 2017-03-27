@@ -20,7 +20,7 @@ class Embedding(Function):
 
     def _renorm(self, indices, weight):
         if indices.dim() == 2:
-            indices = indices.view(-1)
+            indices = indices.clone().view(-1)
 
         self._backend.LookupTable_renorm(
             self._backend.library_state,
@@ -30,12 +30,13 @@ class Embedding(Function):
             self.norm_type
         )
 
-    def _make_sparse(self, indices):
+    def _make_sparse(self, indices, tensor_type):
         i = torch.LongTensor(2, indices.numel())
         v = torch.ones(indices.numel())
-        i[1].copy_(torch.range(0, indices.numel()-1))
+        i[1].copy_(torch.range(0, indices.numel() - 1))
         i[0].copy_(indices)
-        return sparse.FloatTensor(i, v, torch.Size(
+        SparseTensor = getattr(sparse, tensor_type.__name__)
+        return SparseTensor(i, v, torch.Size(
             [self._weight_size[0], indices.numel()])).contiguous()
 
     def forward(self, indices, weight):
@@ -70,22 +71,22 @@ class Embedding(Function):
         else:
             indices, = self.saved_tensors
 
+        grad_output = grad_output.contiguous()
         if not self.sparse:
             if indices.dim() == 2:
                 indices = indices.view(-1)
 
-            grad_output = grad_output.contiguous()
-
-            if torch.typename(grad_output) == 'torch.cuda.FloatTensor':
-                _sorted = torch.cuda.LongTensor()
-                _indices = torch.cuda.LongTensor()
-                _count = torch.cuda.LongTensor()
-            else:
-                _count = torch.IntTensor()
-                _sorted = _indices = None
+            with torch.cuda.device_of(grad_output):
+                if grad_output.is_cuda:
+                    _sorted = torch.cuda.LongTensor()
+                    _indices = torch.cuda.LongTensor()
+                    _count = torch.cuda.LongTensor()
+                else:
+                    _count = torch.IntTensor()
+                    _sorted = _indices = None
 
             # TODO: sparse updates...
-            grad_weight = type(grad_output)(self._weight_size).zero_()
+            grad_weight = grad_output.new(self._weight_size).zero_()
             self._backend.LookupTable_accGradParameters(
                 self._backend.library_state,
                 indices,
@@ -99,7 +100,7 @@ class Embedding(Function):
                 1
             )
         else:
-            sp = self._make_sparse(indices)
+            sp = self._make_sparse(indices, type(grad_output))
             go = grad_output.view(-1, grad_output.size()[-1])
             grad_weight = torch.smm(sp, go)
         return None, grad_weight

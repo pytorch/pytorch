@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class ConcatTable(Container):
 
     def __init__(self, ):
@@ -23,7 +24,7 @@ class ConcatTable(Container):
                     l1[i] = res
             else:
                 f(l1, i, v)
-        for i in range(len(l1)-1, len(l2)-1, -1):
+        for i in range(len(l1) - 1, len(l2) - 1, -1):
             del l1[i]
         return l1
 
@@ -44,6 +45,7 @@ class ConcatTable(Container):
 
                 if i == 0:
                     self.gradInput = self.gradInput if wasTable else []
+
                     def fn(l, i, v):
                         if i >= len(l):
                             assert len(l) == i
@@ -82,11 +84,11 @@ class ConcatTable(Container):
 
     def accGradParameters(self, input, gradOutput, scale=1):
         for i, module in ipairs(self.modules):
-           self.rethrowErrors(module, i, 'accGradParameters', input, gradOutput[i], scale)
+            self.rethrowErrors(module, i, 'accGradParameters', input, gradOutput[i], scale)
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
         for i, module in ipairs(self.modules):
-           self.rethrowErrors(module, i, 'accUpdateGradParameters', input, gradOutput[i], lr)
+            self.rethrowErrors(module, i, 'accUpdateGradParameters', input, gradOutput[i], lr)
 
     def __repr__(self):
         tab = '  '
@@ -98,14 +100,13 @@ class ConcatTable(Container):
         res = torch.typename(self)
         res = res + ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-           if i == len(self.modules)-1:
-              res = res + line + tab + next + '(' + str(i) + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
-           else:
-              res = res + line + tab + next + '(' + str(i) + '): ' + str(self.modules[i]).replace(line, line + tab + ext)
-
+            if i == len(self.modules) - 1:
+                res = res + line + tab + next + '(' + str(i) + '): ' + \
+                    str(self.modules[i]).replace(line, line + tab + extlast)
+            else:
+                res = res + line + tab + next + '(' + str(i) + '): ' + \
+                    str(self.modules[i]).replace(line, line + tab + ext)
 
         res = res + line + tab + last + 'output'
         res = res + line + '}'
         return res
-
-

@@ -26,41 +26,41 @@ $METHODS
 class StandaloneExtension(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*':   Template('THPFloatTensor_CData((THPFloatTensor*)$arg)'),
-        'THDoubleTensor*':  Template('THPDoubleTensor_CData((THPDoubleTensor*)$arg)'),
-        'THLongTensor*':    Template('THPLongTensor_CData((THPLongTensor*)$arg)'),
-        'THIntTensor*':     Template('THPIntTensor_CData((THPIntTensor*)$arg)'),
+        'THFloatTensor*': Template('THPFloatTensor_CData((THPFloatTensor*)$arg)'),
+        'THDoubleTensor*': Template('THPDoubleTensor_CData((THPDoubleTensor*)$arg)'),
+        'THLongTensor*': Template('THPLongTensor_CData((THPLongTensor*)$arg)'),
+        'THIntTensor*': Template('THPIntTensor_CData((THPIntTensor*)$arg)'),
         'THCudaHalfTensor*': Template('THCPHalfTensor_CData((THCPHalfTensor*)$arg)'),
-        'THCudaTensor*':    Template('THCPFloatTensor_CData((THCPFloatTensor*)$arg)'),
+        'THCudaTensor*': Template('THCPFloatTensor_CData((THCPFloatTensor*)$arg)'),
         'THCudaDoubleTensor*': Template('THCPDoubleTensor_CData((THCPDoubleTensor*)$arg)'),
         'THCudaLongTensor*': Template('THCPLongTensor_CData((THCPLongTensor*)$arg)'),
-        'half':             Template('THPHalfUtils_unpackReal($arg)'),
-        'float':            Template('THPFloatUtils_unpackReal($arg)'),
-        'double':           Template('THPDoubleUtils_unpackReal($arg)'),
-        'bool':             Template('($arg == Py_True ? true : false)'),
-        'int':              Template('THPUtils_unpackLong($arg)'),
-        'long':             Template('THPUtils_unpackLong($arg)'),
-        'void*':            Template('(void*)THPUtils_unpackLong($arg)'),
-        'THGenerator*':     Template('THPGenerator_CData((THPGenerator*)$arg)'),
+        'half': Template('THPHalfUtils_unpackReal($arg)'),
+        'float': Template('THPFloatUtils_unpackReal($arg)'),
+        'double': Template('THPDoubleUtils_unpackReal($arg)'),
+        'bool': Template('($arg == Py_True ? true : false)'),
+        'int': Template('THPUtils_unpackLong($arg)'),
+        'long': Template('THPUtils_unpackLong($arg)'),
+        'void*': Template('(void*)THPUtils_unpackLong($arg)'),
+        'THGenerator*': Template('THPGenerator_CData((THPGenerator*)$arg)'),
     }
 
     TYPE_CHECK = {
-        'THDoubleTensor*':  Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
-        'THFloatTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
-        'THLongTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
-        'THIntTensor*':     Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
+        'THDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
+        'THFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
+        'THLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
+        'THIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
         'THCudaHalfTensor*': Template('THCPHalfTensor_Check($arg)'),
-        'THCudaTensor*':    Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
+        'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaDoubleTensor*': Template('THCPDoubleTensor_Check($arg)'),
         'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
-        'half':             Template('THPHalfUtils_checkReal($arg)'),
-        'float':            Template('THPFloatUtils_checkReal($arg)'),
-        'double':           Template('THPDoubleUtils_checkReal($arg)'),
-        'bool':             Template('PyBool_Check($arg)'),
-        'int':              Template('THPUtils_checkLong($arg)'),
-        'long':             Template('THPUtils_checkLong($arg)'),
-        'void*':            Template('THPUtils_checkLong($arg)'),
-        'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
+        'half': Template('THPHalfUtils_checkReal($arg)'),
+        'float': Template('THPFloatUtils_checkReal($arg)'),
+        'double': Template('THPDoubleUtils_checkReal($arg)'),
+        'bool': Template('PyBool_Check($arg)'),
+        'int': Template('THPUtils_checkLong($arg)'),
+        'long': Template('THPUtils_checkLong($arg)'),
+        'void*': Template('THPUtils_checkLong($arg)'),
+        'THGenerator*': Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
     }
 
     WRAPPER_TEMPLATE = Template("""
@@ -131,6 +131,7 @@ PyObject * $name(PyObject *_unused, PyObject *args)
 
     def get_wrapper_template(self, declaration):
         arg_desc = []
+
         def describe_arg(arg):
             desc = self.TYPE_NAMES[arg['type']] + ' ' + arg['name']
             if arg.get('nullable'):
@@ -138,8 +139,8 @@ PyObject * $name(PyObject *_unused, PyObject *args)
             return desc
         for option in declaration['options']:
             option_desc = [describe_arg(arg)
-                    for arg in option['arguments']
-                    if not arg.get('ignore_check', False)]
+                           for arg in option['arguments']
+                           if not arg.get('ignore_check', False)]
             if option_desc:
                 arg_desc.append('({})'.format(', '.join(option_desc)))
             else:

@@ -5,6 +5,7 @@ from .Module import Module
 # [gradOutput] to the gradient of the L1 loss. The [input] is copied to
 # the [output].
 
+
 class L1Penalty(Module):
 
     def __init__(self, l1weight, sizeAverage=False, provideOutput=True):
@@ -34,4 +35,3 @@ class L1Penalty(Module):
             self.gradInput.add_(gradOutput)
 
         return self.gradInput
-

@@ -10,7 +10,7 @@ class Linear(Function):
         output.addmm_(0, 1, input, weight.t())
         if bias is not None:
             # cuBLAS doesn't support 0 strides in sger, so we can't use expand
-            self.add_buffer = input.new(1).resize_(input.size(0)).fill_(1)
+            self.add_buffer = input.new(input.size(0)).fill_(1)
             output.addr_(self.add_buffer, bias)
         return output
 
@@ -29,4 +29,3 @@ class Linear(Function):
             return grad_input, grad_weight, grad_bias
         else:
             return grad_input, grad_weight
-

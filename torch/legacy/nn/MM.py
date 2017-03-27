@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class MM(Module):
 
     def __init__(self, transA=False, transB=False):
@@ -35,9 +36,9 @@ class MM(Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput[0] is None:
-              self.gradInput[0] = input[0].new()
+            self.gradInput[0] = input[0].new()
         if self.gradInput[1] is None:
-              self.gradInput[1] = input[1].new()
+            self.gradInput[1] = input[1].new()
 
         assert len(input) == 2
         a, b = input
@@ -69,4 +70,3 @@ class MM(Module):
             getattr(torch, f)(a, gradOutput, out=self.gradInput[1])
 
         return self.gradInput
-

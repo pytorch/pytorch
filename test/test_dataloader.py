@@ -4,7 +4,7 @@ import torch
 import traceback
 import unittest
 from torch.utils.data import Dataset, TensorDataset, DataLoader
-from common import TestCase
+from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
 
@@ -27,11 +27,12 @@ class TestTensorDataset(TestCase):
         l = torch.randn(15)
         source = TensorDataset(t, l)
         for i in range(15):
-            self.assertEqual(t[i:i+1], source[i][0])
-            self.assertEqual(l[i:i+1], source[i][1])
+            self.assertEqual(t[i], source[i][0])
+            self.assertEqual(l[i], source[i][1])
 
 
 class ErrorDataset(Dataset):
+
     def __init__(self, size):
         self.size = size
 
@@ -50,9 +51,9 @@ class TestDataLoader(TestCase):
         batch_size = loader.batch_size
         for i, (sample, target) in enumerate(loader):
             idx = i * batch_size
-            self.assertEqual(sample, self.data[idx:idx+batch_size])
-            self.assertEqual(target, self.labels[idx:idx+batch_size].view(-1, 1))
-        self.assertEqual(i, math.floor((len(self.dataset)-1) / batch_size))
+            self.assertEqual(sample, self.data[idx:idx + batch_size])
+            self.assertEqual(target, self.labels[idx:idx + batch_size])
+        self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_shuffle(self, loader):
         found_data = {i: 0 for i in range(self.data.size(0))}
@@ -65,11 +66,11 @@ class TestDataLoader(TestCase):
                         self.assertFalse(found_data[data_point_idx])
                         found_data[data_point_idx] += 1
                         break
-                self.assertEqual(target, self.labels.narrow(0, data_point_idx, 1))
+                self.assertEqual(target, self.labels[data_point_idx])
                 found_labels[data_point_idx] += 1
-            self.assertEqual(sum(found_data.values()), (i+1) * batch_size)
-            self.assertEqual(sum(found_labels.values()), (i+1) * batch_size)
-        self.assertEqual(i, math.floor((len(self.dataset)-1) / batch_size))
+            self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
+            self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
+        self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_error(self, loader):
         it = iter(loader)
@@ -81,9 +82,8 @@ class TestDataLoader(TestCase):
                 errors += 1
             except StopIteration:
                 self.assertEqual(errors,
-                    math.ceil(float(len(loader.dataset))/loader.batch_size))
+                                 math.ceil(float(len(loader.dataset)) / loader.batch_size))
                 return
-
 
     def test_sequential(self):
         self._test_sequential(DataLoader(self.dataset))
@@ -123,6 +123,22 @@ class TestDataLoader(TestCase):
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_numpy(self):
+        import numpy as np
+
+        class TestDataset(torch.utils.data.Dataset):
+            def __getitem__(self, i):
+                return np.ones((2, 3, 4)) * i
+
+            def __len__(self):
+                return 1000
+
+        loader = DataLoader(TestDataset(), batch_size=12)
+        batch = next(iter(loader))
+        self.assertIsInstance(batch, torch.DoubleTensor)
+        self.assertEqual(batch.size(), torch.Size([12, 2, 3, 4]))
+
     def test_error(self):
         self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))
 
@@ -158,5 +174,28 @@ class TestDataLoader(TestCase):
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
 
+class StringDataset(Dataset):
+    def __init__(self):
+        self.s = '12345'
+
+    def __len__(self):
+        return len(self.s)
+
+    def __getitem__(self, ndx):
+        return (self.s[ndx], ndx)
+
+
+class TestStringDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = StringDataset()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_shuffle_pin_memory(self):
+        loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
+        for batch_ndx, (s, n) in enumerate(loader):
+            self.assertIsInstance(s[0], str)
+            self.assertTrue(n.is_pinned())
+
+
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class VolumetricReplicationPadding(Module):
 
     def __init__(self, pleft, pright=None, ptop=None, pbottom=None, pfront=None, pback=None):
@@ -48,8 +49,7 @@ class VolumetricReplicationPadding(Module):
     def __repr__(self):
         s = super(VolumetricReplicationPadding, self).__repr__()
         s += '({}, {}, {}, {}, {}, {})'.format(self.pleft, self.pright,
-            self.ptop, self.pbottom,
-            self.pfront, self.pback
-        )
+                                               self.ptop, self.pbottom,
+                                               self.pfront, self.pback
+                                               )
         return s
-

@@ -2,6 +2,7 @@ import torch
 from .Criterion import Criterion
 from .utils import recursiveResizeAs, recursiveFill, recursiveAdd
 
+
 class MultiCriterion(Criterion):
 
     def __init__(self, ):
@@ -14,7 +15,7 @@ class MultiCriterion(Criterion):
         new_weights = torch.DoubleStorage(len(self.criterions))
         for i, v in enumerate(self.weights):
             new_weights[i] = v
-        new_weights[len(self.criterions)-1] = weight
+        new_weights[len(self.criterions) - 1] = weight
         self.weights = new_weights
         return self
 
@@ -29,13 +30,12 @@ class MultiCriterion(Criterion):
         self.gradInput = recursiveResizeAs(self.gradInput, input)[0]
         recursiveFill(self.gradInput, 0)
         for i in range(len(self.criterions)):
-           recursiveAdd(self.gradInput, self.weights[i], self.criterions[i].updateGradInput(input, target))
+            recursiveAdd(self.gradInput, self.weights[i], self.criterions[i].updateGradInput(input, target))
 
         return self.gradInput
 
     def type(self, type):
         for criterion in self.criterions:
-           criterion.type(type)
+            criterion.type(type)
 
         return super(MultiCriterion, self).type(type)
-

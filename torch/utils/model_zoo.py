@@ -92,6 +92,7 @@ def _download_url_to_file(url, dst, hash_prefix):
 if tqdm is None:
     # fake tqdm if it's not installed
     class tqdm(object):
+
         def __init__(self, total):
             self.total = total
             self.n = 0

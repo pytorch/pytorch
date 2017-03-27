@@ -1,3 +1,5 @@
+.. _cuda-semantics:
+
 CUDA semantics
 ==============
 
@@ -29,12 +31,15 @@ Below you can find a small example showcasing this::
         b = torch.FloatTensor(1).cuda()
         # a.get_device() == b.get_device() == 1
 
+        c = a + b
+        # c.get_device() == 1
+
         z = x + y
-        # z.get_device() == 1
+        # z.get_device() == 0
 
         # even within a context, you can give a GPU id to the .cuda call
-        c = torch.randn(2).cuda(2)
-        # c.get_device() == 2
+        d = torch.randn(2).cuda(2)
+        # d.get_device() == 2
 
 Best practices
 --------------
@@ -57,4 +62,22 @@ Just pass an additional ``async=True`` argument to a :meth:`~torch.Tensor.cuda`
 call. This can be used to overlap data transfers with computation.
 
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
-pinned memory by passing ``pinned=True`` to its constructor.
+pinned memory by passing ``pin_memory=True`` to its constructor.
+
+.. _cuda-nn-dataparallel-instead:
+
+Use nn.DataParallel instead of multiprocessing
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Most use cases involving batched input and multiple GPUs should default to using
+:class:`~torch.nn.DataParallel` to utilize more than one GPU. Even with the GIL,
+a single python process can saturate multiple GPUs.
+
+As of version 0.1.9, large numbers of GPUs (8+) might not be fully utilized.
+However, this is a known issue that is under active development. As always,
+test your use case.
+
+There are significant caveats to using CUDA models with
+:mod:`~torch.multiprocessing`; unless care is taken to meet the data handling
+requirements exactly, it is likely that your program will have incorrect or
+undefined behavior.

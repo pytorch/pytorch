@@ -2,6 +2,8 @@
 [[
   name: THPTensor_(elementSize)
   python_name: element_size
+  cpu_half: True
+  auto_gpu: False
   only_register: True
 ]]
 static PyObject * THPTensor_(elementSize)(THPTensor *self, PyObject *args)
@@ -13,6 +15,8 @@ static PyObject * THPTensor_(elementSize)(THPTensor *self, PyObject *args)
 [[
   name: THPTensor_(storage)
   python_name: storage
+  cpu_half: True
+  auto_gpu: False
   only_register: True
 ]]
 static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
@@ -31,6 +35,8 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 [[
   name: storageOffset
   python_name: storage_offset
+  cpu_half: True
+  auto_gpu: False
   return: long
   arguments:
     - THTensor* self
@@ -39,6 +45,8 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 [[
   name: nDimension
   python_name: ndimension
+  cpu_half: True
+  auto_gpu: False
   return: long
   arguments:
     - THTensor* self
@@ -46,6 +54,8 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 [[
   name: THPTensor_(nDimension)
   python_name: dim
+  cpu_half: True
+  auto_gpu: False
   only_register: True
   method_flags: METH_KEYWORDS
 ]]
@@ -58,7 +68,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 ]]
 
 [[
-  python_name: set_index
+  python_name: _set_index
   name: THPTensor_(setIndex)
   only_register: True
 ]]
@@ -75,6 +85,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   name: resize_
   return: self
   cname: resize
+  cpu_half: True
   arguments:
     - THTensor* self
     - arg: THSize* size
@@ -85,6 +96,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: zeros
   only_stateless: True
+  auto_gpu: False
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -96,6 +108,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: ones
   only_stateless: True
+  auto_gpu: False
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -107,6 +120,9 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: numel
   return: long
+  cname: nElement
+  cpu_half: True
+  auto_gpu: False
   with_stateless: True
   arguments:
     - THTensor* self
@@ -114,6 +130,8 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: THPTensor_(numel)
   python_name: nelement
+  cpu_half: True
+  auto_gpu: False
   only_register: True
   method_flags: METH_KEYWORDS
 ]]
@@ -121,6 +139,8 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: set_
   cname: set
+  cpu_half: True
+  auto_gpu: False
   return: argument 0
   options:
     - cname: set
@@ -132,7 +152,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
         - THTensor* self
         - CONSTANT NULL, 0, NULL, NULL
     - cname: setStorage
-      before_call: THLongStoragePtr __storage_size = THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE ((THPStorage*)$arg1)->cdata));
+      before_call: THLongStoragePtr __storage_size = THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE arg_storage));
       arguments:
         - THTensor* self
         - THStorage* storage
@@ -159,6 +179,8 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: THPTensor_(select)
   python_name: select
+  cpu_half: True
+  auto_gpu: False
   only_register: True
 ]]
 static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
@@ -213,6 +235,8 @@ PyObject * THPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: THPTensor_(size)
   python_name: size
+  cpu_half: True
+  auto_gpu: False
   method_flags: METH_KEYWORDS
   only_register: True
 ]]
@@ -253,6 +277,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: THPTensor_(stride)
   python_name: stride
+  cpu_half: True
+  auto_gpu: False
   method_flags: METH_KEYWORDS
   only_register: True
 ]]
@@ -269,6 +295,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: isSameSizeAs
   python_name: is_same_size
+  cpu_half: True
+  auto_gpu: False
   return: bool
   arguments:
     - THTensor* self
@@ -278,6 +306,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: isContiguous
   python_name: is_contiguous
+  cpu_half: True
+  auto_gpu: False
   return: bool
   arguments:
     - THTensor* self
@@ -286,6 +316,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: isSetTo
   python_name: is_set_to
+  cpu_half: True
+  auto_gpu: False
   return: bool
   arguments:
     - THTensor* self
@@ -326,20 +358,44 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - THBoolTensor* mask
 ]]
 
+#if IS_CUDA
+THTensor* THTensor_(transpose_neg)(THCState* state, THTensor *self, THTensor *src, int dim0, int dim1)
+#else
+THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int dim1)
+#endif
+{
+  int ndim = self->nDimension;
+  if (dim0 < 0)
+    dim0 += ndim;
+  if (dim1 < 0)
+    dim1 += ndim;
+  if (src != NULL) {
+    THTensor_(transpose)(LIBRARY_STATE self, src, dim0, dim1);
+    return NULL;
+  } else {
+    return THTensor_(newTranspose)(LIBRARY_STATE self, dim0, dim1);
+  }
+}
+
 [[
   name: transpose
   with_stateless: True
-  cname: newTranspose
+  cname: transpose_neg
+  cpu_half: True
+  auto_gpu: False
   return: THTensor*
   arguments:
     - THTensor* self
+    - CONSTANT NULL
     - long dim0
     - long dim1
 ]]
 
 [[
   name: transpose_
-  cname: transpose
+  cname: transpose_neg
+  cpu_half: True
+  auto_gpu: False
   return: self
   arguments:
     - THTensor* self
@@ -351,10 +407,11 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: t
   with_stateless: True
+  auto_gpu: False
   cname: newTranspose
   return: THTensor*
   before_call: |
-    long ndim = ((THPTensor*)${arg0})->cdata->nDimension;
+    long ndim = arg_self->nDimension;
     THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
@@ -365,9 +422,10 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: t_
   cname: transpose
+  auto_gpu: False
   return: self
   before_call: |
-    long ndim = ((THPTensor*)${arg0})->cdata->nDimension;
+    long ndim = arg_self->nDimension;
     THPUtils_assert(ndim == 2, "t_() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
@@ -378,6 +436,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: squeeze
+  cpu_half: True
   with_stateless: True
   return: argument 0
   options:
@@ -395,6 +454,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: squeeze_
+  cpu_half: True
   return: self
   options:
     - cname: squeeze
@@ -406,6 +466,32 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
         - THTensor* self
         - THTensor* self
         - long dim
+]]
+
+[[
+  name: unsqueeze
+  with_stateless: True
+  cpu_half: True
+  auto_gpu: False
+  return: argument 0
+  cname: unsqueeze1d
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - long dim
+]]
+
+[[
+  name: unsqueeze_
+  cpu_half: True
+  auto_gpu: False
+  return: self
+  cname: unsqueeze1d
+  arguments:
+    - THTensor* self
+    - THTensor* self
+    - long dim
 ]]
 
 [[
@@ -432,6 +518,17 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: THTensor*
   arguments:
     - THTensor* self
+]]
+
+[[
+  name: view
+  cname: newView
+  auto_gpu: False
+  return: THTensor*
+  arguments:
+    - THTensor* self
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
@@ -495,6 +592,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: narrow
+  cpu_half: True
+  auto_gpu: False
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -507,6 +606,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: unfold
+  cpu_half: True
+  auto_gpu: False
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -554,8 +655,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   with_stateless: True
   return: argument 0
   before_call: |
-    THLongStoragePtr _size = THIndexTensor_(newSizeOf)(LIBRARY_STATE ((THPIndexTensor*)$arg3)->cdata);
-    THTensor_(resize)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, _size, NULL);
+    THLongStoragePtr _size = THIndexTensor_(newSizeOf)(LIBRARY_STATE arg_index);
+    THTensor_(resize)(LIBRARY_STATE arg_result, _size, NULL);
   arguments:
     - arg: THTensor* result
       output: True
@@ -570,12 +671,13 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   only_register: True
   only_stateless: True
 ]]
+#ifndef TH_REAL_IS_HALF
 static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 {
-#if IS_CUDA && THCP_AUTO_GPU
-  THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);
-#endif
   HANDLE_TH_ERRORS
+#if IS_CUDA
+  THCPAutoGPU __autogpu_guard(-1);
+#endif
   Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
   std::vector<THPObjectPtr> items;
   std::vector<THTensor *> item_tensors;
@@ -588,8 +690,8 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
     goto invalid_arguments;
   sequence = PyTuple_GET_ITEM(args, 0);
   seq_length = PySequence_Length(sequence);
-  if (seq_length <= 0)
-    goto invalid_arguments;
+  THPUtils_assert(seq_length > 0, "sequence length has to be positive, but is %lld",
+                  (long long)seq_length);
 
   items.reserve(seq_length);
   item_tensors.reserve(seq_length);
@@ -608,6 +710,21 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
     dimension = 0;
   }
 
+  for (THTensor *t : item_tensors) {
+    auto ndim = THTensor_(nDimension)(LIBRARY_STATE t);
+    if (ndim > 0) {
+      THPUtils_assert(dimension > 0 ? dimension < ndim : ndim + dimension >= 0,
+                      "dimension out of range - got %d but the tensor is only %dD",
+                      dimension, ndim);
+      if (dimension < 0) dimension += ndim;
+      break;
+    }
+  }
+
+#if IS_CUDA
+  __autogpu_guard.setDevice(THTensor_(getDevice)(LIBRARY_STATE item_tensors[0]));
+#endif
+
   result = (THPTensor *)THPTensor_(NewEmpty)();
   if (!result) return NULL;
 
@@ -622,10 +739,12 @@ invalid_arguments:
   return NULL;
   END_HANDLE_TH_ERRORS
 }
+#endif
 
 [[
   name: data_ptr
   return: void*
+  cpu_half: True
   cname: data
   arguments:
     - THTensor* self
@@ -643,6 +762,7 @@ invalid_arguments:
 [[
   python_name: copy_
   name: THPTensor_(copy_)
+  cpu_half: True
   method_flags: METH_KEYWORDS
   only_register: True
 ]]

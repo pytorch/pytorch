@@ -26,8 +26,8 @@ const int SHUTDOWN_TIMEOUT = 2000; // 2s
 struct ClientSession {
   ClientSession(ManagerSocket s): socket(std::move(s)), pid(0) {}
 
-  pid_t pid;
   ManagerSocket socket;
+  pid_t pid;
 };
 
 
@@ -128,7 +128,7 @@ int main(int argc, char *argv[]) {
           // someone wants to register a segment
           DEBUG("got alloc info");
           auto &session = client_sessions.at(pfd.fd);
-          AllocInfo info = session.socket.recieve();
+          AllocInfo info = session.socket.receive();
           session.pid = info.pid;
           DEBUG("got alloc info: %d %d %s", (int)info.free, info.pid, info.filename);
           if (info.free) {

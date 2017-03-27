@@ -80,7 +80,7 @@ from .PairwiseDistance import PairwiseDistance
 from .ParallelCriterion import ParallelCriterion
 from .PartialLinear import PartialLinear
 from .Power import Power
-from .RReLU import RReLU # TODO implement
+from .RReLU import RReLU  # TODO implement
 from .ReLU6 import ReLU6
 from .Replicate import Replicate
 from .Reshape import Reshape

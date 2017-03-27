@@ -1,6 +1,7 @@
 from collections import defaultdict
 from .plugin import Plugin
 
+
 class Logger(Plugin):
     alignment = 4
     separator = '#' * 80
@@ -58,7 +59,7 @@ class Logger(Plugin):
             for f in field:
                 parent, stat = stat, stat[f]
             name, output = self._gather_outputs(field, log_fields,
-                    parent, stat, require_dict)
+                                                parent, stat, require_dict)
             if not output:
                 continue
             self._align_output(field_idx, output)
@@ -77,7 +78,6 @@ class Logger(Plugin):
 
     def epoch(self, epoch_idx):
         self._log_all('log_epoch_fields',
-                prefix=self.separator + '\nEpoch summary:',
-                suffix=self.separator,
-                require_dict=True)
-
+                      prefix=self.separator + '\nEpoch summary:',
+                      suffix=self.separator,
+                      require_dict=True)

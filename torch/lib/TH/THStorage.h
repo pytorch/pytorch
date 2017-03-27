@@ -7,6 +7,11 @@
 #define THStorage        TH_CONCAT_3(TH,Real,Storage)
 #define THStorage_(NAME) TH_CONCAT_4(TH,Real,Storage_,NAME)
 
+#define TH_DESC_BUFF_LEN 64
+typedef struct {
+    char str[TH_DESC_BUFF_LEN];
+} THDescBuff;
+
 /* fast access methods */
 #define TH_STORAGE_GET(storage, idx) ((storage)->data[(idx)])
 #define TH_STORAGE_SET(storage, idx, value) ((storage)->data[(idx)] = (value))
@@ -22,5 +27,8 @@
 
 #include "generic/THStorageCopy.h"
 #include "THGenerateHalfType.h"
+
+TH_API THDescBuff THLongStorage_sizeDesc(const THLongStorage *size);
+TH_API THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement);
 
 #endif

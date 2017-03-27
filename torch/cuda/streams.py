@@ -8,6 +8,7 @@ ERROR_NOT_READY = 34
 
 
 class CudaError(RuntimeError):
+
     def __init__(self, code):
         msg = cudart().cudaGetErrorString(code).decode('utf-8')
         super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
@@ -23,11 +24,13 @@ class Stream(torch._C._CudaStreamBase):
 
     Arguments:
         device(int, optional): a device on which to allocate the Stream.
+        priority(int, optional): priority of the stream. Lower numbers
+                                 represent higher priorities.
     """
 
-    def __new__(cls, device=-1, **kwargs):
+    def __new__(cls, device=-1, priority=0, **kwargs):
         with torch.cuda.device(device):
-            return super(Stream, cls).__new__(cls, **kwargs)
+            return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
 
     def wait_event(self, event):
         """Makes all future work submitted to the stream wait for an event.
@@ -78,6 +81,20 @@ class Stream(torch._C._CudaStreamBase):
     def synchronize(self):
         """Wait for all the kernels in this stream to complete."""
         check_error(cudart().cudaStreamSynchronize(self))
+
+    @staticmethod
+    def priority_range():
+        least_priority = ctypes.c_int()
+        greatest_priority = ctypes.c_int()
+        check_error(cudart().cudaDeviceGetStreamPriorityRange(
+            ctypes.byref(least_priority), ctypes.byref(greatest_priority)))
+        return (least_priority.value, greatest_priority.value)
+
+    @property
+    def priority(self):
+        priority = ctypes.c_int()
+        check_error(cudart().cudaStreamGetPriority(self, ctypes.byref(priority)))
+        return priority.value
 
     @property
     def _as_parameter_(self):

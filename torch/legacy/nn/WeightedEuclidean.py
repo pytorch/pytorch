@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class WeightedEuclidean(Module):
 
     def __init__(self, inputSize, outputSize):
@@ -36,40 +37,40 @@ class WeightedEuclidean(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.weight.size(1))
+            stdv = 1. / math.sqrt(self.weight.size(1))
 
         self.weight.uniform_(-stdv, stdv)
         self.diagCov.fill_(1)
 
     def _view(self, res, src, *args):
         if src.is_contiguous():
-           res.set_(src.view(*args))
+            res.set_(src.view(*args))
         else:
-           res.set_(src.contiguous().view(*args))
+            res.set_(src.contiguous().view(*args))
 
     def updateOutput(self, input):
         # lazy-initialize
         if self._diagCov is None:
-              self._diagCov = self.output.new()
+            self._diagCov = self.output.new()
 
         if self._input is None:
-              self._input = input.new()
+            self._input = input.new()
         if self._weight is None:
-              self._weight = self.weight.new()
+            self._weight = self.weight.new()
         if self._expand is None:
-              self._expand = self.output.new()
+            self._expand = self.output.new()
         if self._expand2 is None:
-              self._expand2 = self.output.new()
+            self._expand2 = self.output.new()
         if self._expand3 is None:
-              self._expand3 = self.output.new()
+            self._expand3 = self.output.new()
         if self._repeat is None:
-              self._repeat = self.output.new()
+            self._repeat = self.output.new()
         if self._repeat2 is None:
-              self._repeat2 = self.output.new()
+            self._repeat2 = self.output.new()
         if self._repeat3 is None:
-              self._repeat3 = self.output.new()
+            self._repeat3 = self.output.new()
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -106,29 +107,28 @@ class WeightedEuclidean(Module):
                 self._repeat.add_(-1, self._expand2)
                 self._repeat.mul_(self._expand3)
 
-
             torch.norm(self._repeat, 2, 1, out=self.output)
             self.output.resize_(batchSize, outputSize)
         else:
-           raise RuntimeError("1D or 2D input expected")
+            raise RuntimeError("1D or 2D input expected")
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
-           return
+            return
 
         if self._div is None:
-              self._div = input.new()
+            self._div = input.new()
         if self._output is None:
-              self._output = self.output.new()
+            self._output = self.output.new()
         if self._expand4 is None:
-              self._expand4 = input.new()
+            self._expand4 = input.new()
         if self._gradOutput is None:
-              self._gradOutput = input.new()
+            self._gradOutput = input.new()
 
         if not self.fastBackward:
-           self.updateOutput(input)
+            self.updateOutput(input)
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -169,7 +169,6 @@ class WeightedEuclidean(Module):
                 torch.mul(self._repeat, self._expand4, out=self._repeat2)
                 self._repeat2.mul_(self._expand3)
 
-
             torch.sum(self._repeat2, 2, out=self.gradInput)
             self.gradInput.resize_as_(input)
         else:
@@ -203,11 +202,10 @@ class WeightedEuclidean(Module):
             else:
                 torch.mul(self._repeat, self._expand4, out=self._repeat2)
 
-
             self.gradDiagCov.add_(self._repeat2)
         elif input.dim() == 2:
             if self._sum is None:
-                  self._sum = input.new()
+                self._sum = input.new()
             torch.sum(self._repeat2, 0, out=self._sum)
             self._sum.resize_(inputSize, outputSize)
             self.gradWeight.add_(-scale, self._sum)
@@ -224,7 +222,6 @@ class WeightedEuclidean(Module):
                 self._repeat.mul_(self._repeat)
                 self._repeat.mul_(self._expand3)
                 self._repeat.mul_(self._expand4)
-
 
             torch.sum(self._repeat, 0, out=self._sum)
             self._sum.resize_(inputSize, outputSize)
@@ -261,4 +258,3 @@ class WeightedEuclidean(Module):
         self.accGradParameters(input, gradOutput, -lr)
         self.gradWeight = gradWeight
         self.gradDiagCov = gradDiagCov
-

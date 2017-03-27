@@ -9,8 +9,8 @@ Please use instead "nn.Sum(dimension, nInputDims, sizeAverage)"
 
 """
 
+
 class Mean(Sum):
 
     def __init__(self, dimension):
         super(Mean, self).__init__(dimension, True)
-

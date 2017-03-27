@@ -29,22 +29,36 @@ THTensor * THPTensor_(newWithMetadataFileRaw)(int fd, THStorage *storage)
 void THPStorage_(writeFileRaw)(THStorage *self, int fd)
 {
   real *data;
+  int64_t size = self->size;
 #ifndef THC_GENERIC_FILE
   data = self->data;
 #else
-  std::unique_ptr<char[]> cpu_data(new char[self->size * sizeof(real)]);
+  std::unique_ptr<char[]> cpu_data(new char[size * sizeof(real)]);
   data = (real*)cpu_data.get();
-  THCudaCheck(cudaMemcpy(data, self->data, self->size * sizeof(real), cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(data, self->data, size * sizeof(real), cudaMemcpyDeviceToHost));
 #endif
-  SYSCHECK(write(fd, &self->size, sizeof(long)));
+  ssize_t result = write(fd, &size, sizeof(int64_t));
+  if (result != sizeof(int64_t))
+    throw std::system_error(result, std::system_category());
   // fast track for bytes and little endian
   if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
-    SYSCHECK(write(fd, data, sizeof(real) * self->size));
+    char *bytes = (char *) data;
+    int64_t remaining = sizeof(real) * size;
+    while (remaining > 0) {
+      // we write and read in 1GB blocks to avoid bugs on some OSes
+      ssize_t result = write(fd, bytes, THMin(remaining, 1073741824));
+      if (result < 0)
+        throw std::system_error(result, std::system_category());
+      bytes += result;
+      remaining -= result;
+    }
+    if (remaining != 0)
+      throw std::system_error(result, std::system_category());
   } else {
-    long buffer_size = std::min(self->size, (long)5000);
+    int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
-    for (long i = 0; i < self->size; i += buffer_size) {
-      size_t to_convert = std::min(self->size - i, buffer_size);
+    for (int64_t i = 0; i < size; i += buffer_size) {
+      size_t to_convert = std::min(size - i, buffer_size);
       if (sizeof(real) == 2) {
         THP_encodeInt16Buffer((uint8_t*)le_buffer.get(),
             (const int16_t*)data + i,
@@ -61,17 +75,27 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
             THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
-      SYSCHECK(write(fd, data, to_convert * sizeof(real)));
+      SYSCHECK(write(fd, le_buffer.get(), to_convert * sizeof(real)));
     }
   }
 }
 
-THStorage * THPStorage_(readFileRaw)(int fd)
+THStorage * THPStorage_(readFileRaw)(int fd, THStorage *_storage)
 {
   real *data;
-  long size;
-  SYSCHECK(read(fd, &size, sizeof(long)));
-  THStoragePtr storage = THStorage_(newWithSize)(LIBRARY_STATE size);
+  int64_t size;
+  ssize_t result = read(fd, &size, sizeof(int64_t));
+  if (result != sizeof(int64_t))
+    throw std::system_error(result, std::system_category());
+  THStoragePtr storage;
+  if (_storage == nullptr) {
+    storage = THStorage_(newWithSize)(LIBRARY_STATE size);
+  } else {
+    THPUtils_assert(_storage->size == size,
+        "storage has wrong size: expected %ld got %ld",
+        size, _storage->size);
+    storage = _storage;
+  }
 
 #ifndef THC_GENERIC_FILE
   data = storage->data;
@@ -82,11 +106,22 @@ THStorage * THPStorage_(readFileRaw)(int fd)
 
   // fast track for bytes and little endian
   if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
-    SYSCHECK(read(fd, data, sizeof(real) * storage->size));
+    char *bytes = (char *) data;
+    int64_t remaining = sizeof(real) * storage->size;
+    while (remaining > 0) {
+      // we write and read in 1GB blocks to avoid bugs on some OSes
+      ssize_t result = read(fd, bytes, THMin(remaining, 1073741824));
+      if (result <= 0) // 0 means EOF, which is also an error
+        throw std::system_error(result, std::system_category());
+      bytes += result;
+      remaining -= result;
+    }
+    if (remaining != 0)
+      throw std::system_error(result, std::system_category());
   } else {
-    long buffer_size = std::min(size, (long)5000);
+    int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
-    for (long i = 0; i < size; i += buffer_size) {
+    for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
       SYSCHECK(read(fd, le_buffer.get(), sizeof(real) * to_convert));
       if (sizeof(real) == 2) {

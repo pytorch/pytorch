@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class DistKLDivCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
@@ -11,7 +12,7 @@ class DistKLDivCriterion(Criterion):
     def updateOutput(self, input, target):
         assert input.is_same_size(target)
         if self.output_tensor is None:
-              self.output_tensor = input.new(1)
+            self.output_tensor = input.new(1)
         self._backend.DistKLDivCriterion_updateOutput(
             self._backend.library_state,
             input,
@@ -32,4 +33,3 @@ class DistKLDivCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

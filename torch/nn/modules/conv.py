@@ -7,6 +7,7 @@ from .utils import _single, _pair, _triple
 
 
 class _ConvNd(Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias):
         super(_ConvNd, self).__init__()
@@ -199,7 +200,8 @@ class Conv2d(_ConvNd):
           :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (out_channels, in_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (out_channels, in_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -266,7 +268,7 @@ class Conv3d(_ConvNd):
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
-          the second `int` for the width dimension and the third `int` for the width dimension
+          the second `int` for the height dimension and the third `int` for the width dimension
 
     .. note::
 
@@ -293,7 +295,8 @@ class Conv3d(_ConvNd):
           :math:`W_{out} = floor((W_{in}  + 2 * padding[2] - dilation[2] * (kernel\_size[2] - 1) - 1) / stride[2] + 1)`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+        weight (Tensor): the learnable weights of the module of shape
+                         (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -328,6 +331,7 @@ class Conv3d(_ConvNd):
 
 
 class _ConvTransposeMixin(object):
+
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
         func = self._backend.ConvNd(
@@ -372,7 +376,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     .. note::
 
@@ -387,19 +391,21 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution
         padding (int or tuple, optional): Zero-padding added to both sides of the input
-        dilation (int or tuple, optional): Spacing between kernel elements
+        output_padding (int or tuple, optional): Zero-padding added to one side of the output
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
         - Output: :math:`(N, C_{out}, L_{out})` where
-          :math:`L_{out} = (L_{in} - 1) * stride - 2 * padding + kernel_size + output_padding`
+          :math:`L_{out} = (L_{in} - 1) * stride - 2 * padding + kernel\_size + output\_padding`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
     """
+
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, groups=1, bias=True):
         kernel_size = _single(kernel_size)
@@ -422,14 +428,14 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
 
-    This module can be seen as the gradient of Conv2d with respect to its input. 
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    This module can be seen as the gradient of Conv2d with respect to its input.
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
       for :attr:`padding` number of points
-    | If :attr:`padding` is non-zero, then the output is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
+    | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
+      for :attr:`output_padding` number of points
     | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
       but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs.
@@ -438,8 +444,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
                  side by side, each seeing half the input channels,
                  and producing half the output channels, and both subsequently concatenated.
 
-    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`,
-    :attr:`dilation` can either be:
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
+    can either be:
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
@@ -458,18 +464,19 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution
         padding (int or tuple, optional): Zero-padding added to both sides of the input
-        dilation (int or tuple, optional): Spacing between kernel elements
+        output_padding (int or tuple, optional): Zero-padding added to one side of the output
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
-          :math:`H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel_size[0] + output_padding[0]`
-          :math:`W_{out} = (W_{in} - 1) * stride[1] - 2 * padding[1] + kernel_size[1] + output_padding[1]`
+          :math:`H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0] + output\_padding[0]`
+          :math:`W_{out} = (W_{in} - 1) * stride[1] - 2 * padding[1] + kernel\_size[1] + output\_padding[1]`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::
@@ -522,24 +529,22 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
 
-    **This module can be seen as the exact reverse of Conv3d**. 
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation. 
+    **This module can be seen as the exact reverse of Conv3d**.
+    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
       for :attr:`padding` number of points
-    | If :attr:`padding` is non-zero, then the output is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
+      for :attr:`output_padding` number of points
     | :attr:`groups` controls the connections between inputs and outputs.
     |       At groups=1, all inputs are convolved to all outputs.
     |       At groups=2, the operation becomes equivalent to having two conv layers
                  side by side, each seeing half the input channels,
                  and producing half the output channels, and both subsequently concatenated.
 
-    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`,
-    :attr:`dilation` can either be:
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
+    can either be:
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
@@ -558,19 +563,20 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution
         padding (int or tuple, optional): Zero-padding added to both sides of the input
-        dilation (int or tuple, optional): Spacing between kernel elements
+        output_padding (int or tuple, optional): Zero-padding added to one side of the output
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = (D_{in} - 1) * stride[0] - 2 * padding[0] + kernel_size[0] + output_padding[0]`
-          :math:`H_{out} = (H_{in} - 1) * stride[1] - 2 * padding[1] + kernel_size[1] + output_padding[1]`
-          :math:`W_{out} = (W_{in} - 1) * stride[2] - 2 * padding[2] + kernel_size[2] + output_padding[2]`
+          :math:`D_{out} = (D_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0] + output\_padding[0]`
+          :math:`H_{out} = (H_{in} - 1) * stride[1] - 2 * padding[1] + kernel\_size[1] + output\_padding[1]`
+          :math:`W_{out} = (W_{in} - 1) * stride[2] - 2 * padding[2] + kernel\_size[2] + output\_padding[2]`
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+        weight (Tensor): the learnable weights of the module of shape
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
 
     Examples::

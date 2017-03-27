@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Cosine(Module):
 
     def __init__(self, inputSize, outputSize):
@@ -22,7 +23,7 @@ class Cosine(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1. / math.sqrt(self.weight.size(0))
         self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
@@ -32,9 +33,9 @@ class Cosine(Module):
         outputSize = self.weight.size(0)
 
         if self._weightNorm is None:
-              self._weightNorm = self.weight.new()
+            self._weightNorm = self.weight.new()
         if self._inputNorm is None:
-              self._inputNorm = self.weight.new()
+            self._inputNorm = self.weight.new()
 
         # y_j = (w_j * x) / ( || w_j || * || x || )
 
@@ -53,12 +54,11 @@ class Cosine(Module):
         self.output.div_(self._inputNorm.expand_as(self.output))
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 2
 
         if self.gradInput is None:
-           return
+            return
 
         inputSize = self.weight.size(1)
         outputSize = self.weight.size(0)
@@ -72,15 +72,15 @@ class Cosine(Module):
         nelement = self.gradInput.nelement()
         self.gradInput.resize_as_(input)
         if self.gradInput.nelement() != nelement:
-           self.gradInput.zero_()
+            self.gradInput.zero_()
 
         inputNorm = self._inputNorm.expand_as(input)
         weightNorm = self._weightNorm.view(1, outputSize).expand_as(gradOutput)
 
         if self._gradOutput is None:
-              self._gradOutput = gradOutput.new()
+            self._gradOutput = gradOutput.new()
         if self._sum is None:
-              self._sum = input.new()
+            self._sum = input.new()
 
         self.gradInput.copy_(input).div_(inputNorm)
         self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
@@ -107,13 +107,13 @@ class Cosine(Module):
         """
 
         if self._weight is None:
-              self._weight = self.weight.new()
+            self._weight = self.weight.new()
         if self._sum is None:
-              self._sum = input.new()
+            self._sum = input.new()
 
         self._weight.resize_as_(self.weight).copy_(self.weight)
         if self._gradOutput is None:
-              self._gradOutput = gradOutput.new()
+            self._gradOutput = gradOutput.new()
         self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
         self._gradOutput.mul_(self.output)
         torch.sum(self._gradOutput, 0, out=self._sum)
@@ -131,25 +131,23 @@ class Cosine(Module):
 
     def type(self, type=None, tensorCache=None):
         if type is not None:
-           # prevent premature memory allocations
-           self._input = None
-           self._weight = None
-           self._inputNorm = None
-           self._weightNorm = None
-           self._gradOutput = None
-           self._sum = None
+            # prevent premature memory allocations
+            self._input = None
+            self._weight = None
+            self._inputNorm = None
+            self._weightNorm = None
+            self._gradOutput = None
+            self._sum = None
 
         return super(Cosine, self).type(type, tensorCache)
 
-
     def clearState(self):
         clear(self, [
-           '_input',
-           '_weight',
-           '_gradOutput',
-           '_sum',
-           '_inputNorm',
-           '_weightNorm',
+            '_input',
+            '_weight',
+            '_gradOutput',
+            '_sum',
+            '_inputNorm',
+            '_weightNorm',
         ])
         return super(Cosine, self).clearState()
-

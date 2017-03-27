@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class MulConstant(Module):
 
     def __init__(self, constant_scalar, inplace=False):
@@ -19,7 +20,6 @@ class MulConstant(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
             return
@@ -35,4 +35,3 @@ class MulConstant(Module):
             self.gradInput.mul_(self.constant_scalar)
 
         return self.gradInput
-

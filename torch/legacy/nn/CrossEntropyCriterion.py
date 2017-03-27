@@ -3,6 +3,7 @@ from .Criterion import Criterion
 from .LogSoftMax import LogSoftMax
 from .ClassNLLCriterion import ClassNLLCriterion
 
+
 class CrossEntropyCriterion(Criterion):
 
     def __init__(self, weights=None):
@@ -26,4 +27,3 @@ class CrossEntropyCriterion(Criterion):
         self.lsm.updateGradInput(input, self.nll.gradInput)
         self.gradInput = self.lsm.gradInput.view(size)
         return self.gradInput
-

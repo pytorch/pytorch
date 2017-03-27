@@ -5,6 +5,7 @@
 #include "THCAsmUtils.cuh"
 #include "THCScanUtils.cuh"
 #include "THCTensorTypeUtils.cuh"
+#include "THCTensorMathReduce.cuh"
 #include <algorithm> // for std::min
 
 #if CUDA_VERSION >= 7000
@@ -322,7 +323,7 @@ __global__ void gatherTopK(TensorInfo<float, IndexType> input,
 
     int index;
     int carry;
-    exclusiveBinaryPrefixSum<int, true>(smem, hasTopK, &index, &carry);
+    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
@@ -354,7 +355,7 @@ __global__ void gatherTopK(TensorInfo<float, IndexType> input,
 
     int index;
     int carry;
-    exclusiveBinaryPrefixSum<int, true>(smem, hasTopK, &index, &carry);
+    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;
@@ -386,7 +387,7 @@ THC_API void THCudaTensor_topk(THCState* state,
                                THCudaTensor *input,
                                long k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input != NULL);
-  THAssert(THCudaTensor_checkGPU(state, 3, topK, indices, input));
+  THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, topK, indices, input));
   THCCheckTensorDims(state, topK, 2);
   long dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);

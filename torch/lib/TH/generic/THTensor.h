@@ -11,7 +11,7 @@ typedef struct THTensor
     long *size;
     long *stride;
     int nDimension;
-    
+
     THStorage *storage;
     ptrdiff_t storageOffset;
     int refcount;
@@ -68,9 +68,11 @@ TH_API THTensor *THTensor_(newSelect)(THTensor *tensor, int dimension_, long sli
 TH_API THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, long firstIndex_, long size_);
 TH_API THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_);
 TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, long size_, long step_);
-  
+TH_API THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size);
+
 TH_API void THTensor_(resize)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);
+TH_API void THTensor_(resizeNd)(THTensor *tensor, int nDimension, long *size, long *stride);
 TH_API void THTensor_(resize1d)(THTensor *tensor, long size0_);
 TH_API void THTensor_(resize2d)(THTensor *tensor, long size0_, long size1_);
 TH_API void THTensor_(resize3d)(THTensor *tensor, long size0_, long size1_, long size2_);
@@ -79,6 +81,7 @@ TH_API void THTensor_(resize5d)(THTensor *tensor, long size0_, long size1_, long
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
 TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
+TH_API void THTensor_(setStorageNd)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, int nDimension, long *size, long *stride);
 TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     long size0_, long stride0_);
 TH_API void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
@@ -101,6 +104,7 @@ TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, lon
 
 TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);
 TH_API void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension_);
+TH_API void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension_);
 
 TH_API int THTensor_(isContiguous)(const THTensor *self);
 TH_API int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor *src);

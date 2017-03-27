@@ -2,6 +2,7 @@ import torch
 import torch._thnn
 from .utils import clear, recursiveType
 
+
 class Module(object):
 
     def __init__(self):
@@ -36,12 +37,10 @@ class Module(object):
         self.accGradParameters(input, gradOutput, scale)
         return self.gradInput
 
-
     def backwardUpdate(self, input, gradOutput, lr):
         self.updateGradInput(input, gradOutput)
         self.accUpdateGradParameters(input, gradOutput, lr)
         return self.gradInput
-
 
     def updateGradInput(self, input, gradOutput):
         return self.gradInput
@@ -50,14 +49,19 @@ class Module(object):
         pass
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
-        gradWeight = self.gradWeight
-        gradBias = self.gradBias
-        self.gradWeight = self.weight
-        self.gradBias = self.bias
+        has_weight = hasattr(self, 'weight') and self.weight is not None
+        has_bias = hasattr(self, 'bias') and self.bias is not None
+        if has_weight:
+            gradWeight = self.gradWeight
+            self.gradWeight = self.weight
+        if has_bias:
+            gradBias = self.gradBias
+            self.gradBias = self.bias
         self.accGradParameters(input, gradOutput, -lr)
-        self.gradWeight = gradWeight
-        self.gradBias = gradBias
-
+        if has_weight:
+            self.gradWeight = gradWeight
+        if has_bias:
+            self.gradBias = gradBias
 
     def sharedAccUpdateGradParameters(self, input, gradOutput, lr):
         if self.parameters():
@@ -92,7 +96,7 @@ class Module(object):
 
     def type(self, type=None, tensorCache=None):
         if type is None:
-           return self._type
+            return self._type
 
         tensorCache = tensorCache or {}
 
@@ -146,6 +150,7 @@ class Module(object):
     #
     # TODO: This logically belongs to torch.Tensor, not nn.
     _flattenTensorBuffer = {}
+
     def _flatten(self, parameters=[]):
 
         # returns True if tensor occupies a contiguous region of memory (no holes)
@@ -155,14 +160,14 @@ class Module(object):
             sortedSize = torch.LongTensor(list(tensor.size())).index_select(0, perm)
             nRealDim = int(torch.clamp(sortedStride, 0, 1).sum())
             sortedStride = sortedStride.narrow(0, 0, nRealDim).clone()
-            sortedSize   = sortedSize.narrow(0, 0, nRealDim).clone()
+            sortedSize = sortedSize.narrow(0, 0, nRealDim).clone()
             t = tensor.new().set_(tensor.storage(), 0,
-                                 tuple(sortedSize),
-                                 tuple(sortedStride))
+                                  tuple(sortedSize),
+                                  tuple(sortedStride))
             return t.is_contiguous()
 
         if not parameters:
-           return torch.Tensor()
+            return torch.Tensor()
 
         Tensor = parameters[0].new
         BufferTensor = Module._flattenTensorBuffer.get(type(parameters[0]), Tensor)
@@ -179,13 +184,11 @@ class Module(object):
                 storages[key] = (storage, num_parameters)
                 num_parameters = num_parameters + storage.size()
 
-
             parameterMeta.append({
-                    'storage_offset':  param.storage_offset() + storages[key][1],
-                    'size'         :  param.size(),
-                    'stride'       :  param.stride()
+                'storage_offset': param.storage_offset() + storages[key][1],
+                'size': param.size(),
+                'stride': param.stride()
             })
-
 
         # 2. construct a single tensor that will hold all the parameters
         flatParameters = BufferTensor(num_parameters).zero_()
@@ -198,14 +201,14 @@ class Module(object):
             tmp.fill_(1)
             tensorsCompact = tensorsCompact and isCompact(tmp)
 
-        maskParameters  = flatParameters.byte().clone()
-        compactOffsets  = flatParameters.long().cumsum(0)
+        maskParameters = flatParameters.byte().clone()
+        compactOffsets = flatParameters.long().cumsum(0)
         used_parameters = compactOffsets[-1]
 
         # 4. copy storages into the flattened parameter tensor
         for storageAndOffset in storages.values():
             storage, offset = storageAndOffset
-            flatParameters[slice(offset, offset+storage.size())].copy_(Tensor().set_(storage))
+            flatParameters[slice(offset, offset + storage.size())].copy_(Tensor().set_(storage))
 
         # 5. allow garbage collection
         storages = None
@@ -214,22 +217,22 @@ class Module(object):
 
         # 6. compact the flattened parameters if there were holes
         if used_parameters != num_parameters:
-           assert tensorsCompact
+            assert tensorsCompact
 
-           flatParameters = BufferTensor(used_parameters).copy_(
-                 flatParameters.masked_select(maskParameters))
-           for meta in parameterMeta:
-               meta['storage_offset'] = compactOffsets[meta['storage_offset']]
+            flatParameters = BufferTensor(used_parameters).copy_(
+                flatParameters.masked_select(maskParameters))
+            for meta in parameterMeta:
+                meta['storage_offset'] = compactOffsets[meta['storage_offset']]
 
         if BufferTensor != Tensor:
-           flatParameters = Tensor(flatParameters.nelement()).copy_(flatParameters)
+            flatParameters = Tensor(flatParameters.nelement()).copy_(flatParameters)
 
         # 7. fix up the parameter tensors to point at the flattened parameters
         for param, meta in zip(parameters, parameterMeta):
-           param.set_(flatParameters.storage(),
-                     meta['storage_offset'],
-                     meta['size'],
-                     meta['stride'])
+            param.set_(flatParameters.storage(),
+                       meta['storage_offset'],
+                       meta['size'],
+                       meta['stride'])
 
         return flatParameters
 
@@ -290,4 +293,3 @@ class Module(object):
             for i, module in enumerate(self.modules):
                 self.modules[i] = module.replace(callback)
         return out
-

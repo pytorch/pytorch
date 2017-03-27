@@ -1,5 +1,6 @@
 
 class FunctionBackend(object):
+
     def __init__(self):
         self.function_classes = {}
 
@@ -13,4 +14,3 @@ class FunctionBackend(object):
         if self.function_classes.get(name):
             raise RuntimeError("Trying to register second function under name " + name + " in " + type(self).__name__)
         self.function_classes[name] = function_class
-

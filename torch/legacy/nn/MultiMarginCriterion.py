@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MultiMarginCriterion(Criterion):
 
     def __init__(self, p=1, weights=None, margin=1, sizeAverage=True):
@@ -17,7 +18,7 @@ class MultiMarginCriterion(Criterion):
 
     def updateOutput(self, input, target):
         if self.output_tensor is None:
-              self.output_tensor = input.new(1)
+            self.output_tensor = input.new(1)
         target = target.long()
         self._backend.MultiMarginCriterion_updateOutput(
             self._backend.library_state,
@@ -32,7 +33,6 @@ class MultiMarginCriterion(Criterion):
         self.output = self.output_tensor[0]
         return self.output
 
-
     def updateGradInput(self, input, target):
         target = target.long()
         self._backend.MultiMarginCriterion_updateGradInput(
@@ -46,4 +46,3 @@ class MultiMarginCriterion(Criterion):
             self.margin
         )
         return self.gradInput
-

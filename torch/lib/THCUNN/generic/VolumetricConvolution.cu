@@ -17,6 +17,12 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
                          int padH) {
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck(!weight || THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
+             "bias tensor has to be contiguous");
+  THArgCheck(!gradWeight || THCTensor_(isContiguous)(state, gradWeight), 5,
+             "gradWeight tensor has to be contiguous");
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 10,
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
 
@@ -172,22 +178,26 @@ void THNN_(VolumetricConvolution_updateOutput)(
     long k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sgemm(
-    #elif defined(THC_REAL_IS_HALF)
-    THCudaBlas_Hgemm(
-    #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dgemm(
-    #endif
-      state,
-      't', 'n',
-      n_, m_, k_,
-      ScalarConvert<int, real>::to(1),
-      THCTensor_(data)(state, ones), k_,
-      THCTensor_(data)(state, bias), k_,
-      ScalarConvert<int, real>::to(0),
-      THCTensor_(data)(state, output_n), n_
-    );
+    if (bias) {
+      #ifdef THC_REAL_IS_FLOAT
+      THCudaBlas_Sgemm(
+      #elif defined(THC_REAL_IS_HALF)
+      THCudaBlas_Hgemm(
+      #elif defined(THC_REAL_IS_DOUBLE)
+      THCudaBlas_Dgemm(
+      #endif
+        state,
+        't', 'n',
+        n_, m_, k_,
+        ScalarConvert<int, real>::to(1),
+        THCTensor_(data)(state, ones), k_,
+        THCTensor_(data)(state, bias), k_,
+        ScalarConvert<int, real>::to(0),
+        THCTensor_(data)(state, output_n), n_
+      );
+    } else {
+      THCTensor_(zero)(state, output_n);
+    }
 
     // Extract columns:
     im3d2col(
@@ -356,8 +366,9 @@ void THNN_(VolumetricConvolution_accGradParameters)(
            THCTensor *fgradInput,
            int dT, int dW, int dH,
            int padT, int padW, int padH,
-           real scale)
+           accreal scale_)
 {
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones);
@@ -454,36 +465,38 @@ void THNN_(VolumetricConvolution_accGradParameters)(
     long k_ = outputDepth * outputHeight * outputWidth;
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
-    #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-    #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sgemv(
-    #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dgemv(
-    #endif
-      state,
-      't',
-      k_, m_,
-      scale,
-      THCTensor_(data)(state, gradOutput_n), k_,
-      THCTensor_(data)(state, ones), 1,
-      ScalarConvert<int, real>::to(1),
-      THCTensor_(data)(state, gradBias), 1
-    );
-    #endif
-    #ifdef THC_REAL_IS_HALF
-    THCudaBlas_Hgemm(
-      state,
-      't', 'n',
-      m_, 1, k_,
-      scale,
-      THCTensor_(data)(state, gradOutput_n), k_,
-      THCTensor_(data)(state, ones), k_,
-      ScalarConvert<int, real>::to(1),
-      THCTensor_(data)(state, gradBias), m_
-    );
-    #endif
+    if (gradBias) {
+      #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+      #ifdef THC_REAL_IS_FLOAT
+      THCudaBlas_Sgemv(
+      #elif defined(THC_REAL_IS_DOUBLE)
+      THCudaBlas_Dgemv(
+      #endif
+        state,
+        't',
+        k_, m_,
+        scale,
+        THCTensor_(data)(state, gradOutput_n), k_,
+        THCTensor_(data)(state, ones), 1,
+        ScalarConvert<int, real>::to(1),
+        THCTensor_(data)(state, gradBias), 1
+      );
+      #endif
+      #ifdef THC_REAL_IS_HALF
+      THCudaBlas_Hgemm(
+        state,
+        't', 'n',
+        m_, 1, k_,
+        scale,
+        THCTensor_(data)(state, gradOutput_n), k_,
+        THCTensor_(data)(state, ones), k_,
+        ScalarConvert<int, real>::to(1),
+        THCTensor_(data)(state, gradBias), m_
+      );
+      #endif
+    }
   }
-
+  
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradOutput_n);

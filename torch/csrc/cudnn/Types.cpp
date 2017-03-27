@@ -20,6 +20,20 @@ cudnnDataType_t getCudnnDataType(PyObject *tensorClass)
   throw std::runtime_error(msg);
 }
 
+cudnnDataType_t getCudnnDataType(const thpp::Tensor& tensor)
+{
+  if (tensor.type() == thpp::Type::FLOAT) {
+    return CUDNN_DATA_FLOAT;
+  } else if (tensor.type() == thpp::Type::DOUBLE) {
+    return CUDNN_DATA_DOUBLE;
+  } else if (tensor.type() == thpp::Type::HALF) {
+    return CUDNN_DATA_HALF;
+  }
+  std::string msg("getCudnnDataType() not supported for ");
+  msg += (int)tensor.type();
+  throw std::runtime_error(msg);
+}
+
 PyObject * getTensorClass(PyObject *args)
 {
   for (int i = 0; i < PyTuple_Size(args); i++) {
@@ -29,6 +43,18 @@ PyObject * getTensorClass(PyObject *args)
     }
   }
   return NULL;
+}
+
+void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& name)
+{
+  static const std::string error_str = "cuDNN requires contiguous ";
+  // Contiguity check
+  long long expectedStride = 1;
+  for (int i = tensor->nDimension-1; i >= 0; --i) {
+    if (tensor->stride[i] != expectedStride)
+      throw std::invalid_argument(error_str + name);
+    expectedStride *= tensor->size[i];
+  }
 }
 
 }}  // namespace torch::cudnn

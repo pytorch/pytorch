@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MSECriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
@@ -10,7 +11,7 @@ class MSECriterion(Criterion):
 
     def updateOutput(self, input, target):
         if self.output_tensor is None:
-              self.output_tensor = input.new(1)
+            self.output_tensor = input.new(1)
         self._backend.MSECriterion_updateOutput(
             self._backend.library_state,
             input,
@@ -30,4 +31,3 @@ class MSECriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class MaskedSelect(Module):
 
     def __init__(self):
@@ -20,10 +21,10 @@ class MaskedSelect(Module):
     def updateGradInput(self, input, gradOutput):
         input, mask = input
         if input.type() == 'torch.cuda.FloatTensor':
-            torch.range(0, mask.nelement()-1, out=self._maskIndexBufferCPU).resize_(mask.size())
+            torch.range(0, mask.nelement() - 1, out=self._maskIndexBufferCPU).resize_(mask.size())
             self._maskIndexBuffer.resize_(self._maskIndexBufferCPU.size()).copy_(self._maskIndexBufferCPU)
         else:
-            torch.range(0, mask.nelement()-1, out=self._maskIndexBuffer).resize_(mask.size())
+            torch.range(0, mask.nelement() - 1, out=self._maskIndexBuffer).resize_(mask.size())
 
         torch.masked_select(self._maskIndexBuffer, mask, out=self._maskIndices)
         self._gradBuffer.resize_(input.nelement()).zero_()
@@ -42,13 +43,13 @@ class MaskedSelect(Module):
 
         # These casts apply when switching between cuda/non-cuda types
         if type != 'torch.cuda.FloatTensor':
-                self._maskIndexBuffer = self._maskIndexBuffer.long()
-                self._maskIndices = self._maskIndices.long()
-                self._gradMask = self._gradMask.byte()
+            self._maskIndexBuffer = self._maskIndexBuffer.long()
+            self._maskIndices = self._maskIndices.long()
+            self._gradMask = self._gradMask.byte()
         else:
-                self._maskIndexBuffer = self._maskIndexBuffer.cuda()
-                self._maskIndices = self._maskIndices.cuda()
-                self._gradMask = self._gradMask.cuda()
+            self._maskIndexBuffer = self._maskIndexBuffer.cuda()
+            self._maskIndices = self._maskIndices.cuda()
+            self._gradMask = self._gradMask.cuda()
 
         self._type = type
         return self
@@ -61,4 +62,3 @@ class MaskedSelect(Module):
                             '_maskIndices',
                             '_gradBuffer',
                             '_gradMask'])
-

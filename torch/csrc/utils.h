@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 
+#include "torch/csrc/utils/object_ptr.h"
+
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
 
 #define THPUtils_typename(obj) (Py_TYPE(obj)->tp_name)
@@ -68,7 +70,6 @@
 #endif
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
-#define THPUtils_newReal_HALF(value) PyFloat_FromDouble(THC_half2float(value))
 // TODO: handle int overflows for py2
 #define THPUtils_newReal_INT(value) PyInt_FromLong(value)
 
@@ -85,8 +86,13 @@
 #define THPFloatUtils_unpackAccreal(object)   (double)THPUtils_unpackReal_FLOAT(object)
 #define THPFloatUtils_newAccreal(value)       THPUtils_newReal_FLOAT(value)
 #define THPHalfUtils_checkReal(object)        THPUtils_checkReal_FLOAT(object)
+#ifndef THP_HOST_HALF
 #define THPHalfUtils_unpackReal(object)       (half)THC_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           THPUtils_newReal_HALF(value)
+#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(THC_half2float(value))
+#else
+#define THPHalfUtils_unpackReal(object)       TH_float2half(THPUtils_unpackReal_FLOAT(object))
+#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(TH_half2float(value))
+#endif
 #define THPHalfUtils_checkAccreal(object)     THPUtils_checkReal_FLOAT(object)
 #define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
@@ -137,10 +143,15 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
 
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
 
-#define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
-bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart,
-        Py_ssize_t *ostop, Py_ssize_t *oslicelength);
+// https://bugsfiles.kde.org/attachment.cgi?id=61186
+#if PY_VERSION_HEX >= 0x03020000
+#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
+  (PySlice_GetIndicesEx(SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
+#else
+#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
+  (PySlice_GetIndicesEx((PySliceObject*)SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
+#endif
 
 #define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
@@ -149,28 +160,6 @@ bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart,
 #define THSTensorPtr  TH_CONCAT_3(THS,Real,TensorPtr)
 #define THSPTensorPtr  TH_CONCAT_3(THSP,Real,TensorPtr)
 
-template<class T>
-class THPPointer {
-public:
-  THPPointer(): ptr(nullptr) {};
-  THPPointer(T *ptr): ptr(ptr) {};
-  THPPointer(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; };
-
-  ~THPPointer() { free(); };
-  T * get() { return ptr; }
-  T * release() { T *tmp = ptr; ptr = NULL; return tmp; }
-  operator T*() { return ptr; }
-  THPPointer& operator =(T *new_ptr) { free(); ptr = new_ptr; return *this; }
-  THPPointer& operator =(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; return *this; }
-  T * operator ->() { return ptr; }
-  operator bool() { return ptr != nullptr; }
-
-private:
-  void free();
-  T *ptr = nullptr;
-};
-
-typedef THPPointer<PyObject> THPObjectPtr;
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
 
 template <typename T>
@@ -179,9 +168,13 @@ struct THPUtils_typeTraits {};
 #include "generic/utils.h"
 #include <TH/THGenerateAllTypes.h>
 
+#include "generic/utils.h"
+#include <TH/THGenerateHalfType.h>
+
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
+PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
 
 #endif /* _THP_CORE */
 

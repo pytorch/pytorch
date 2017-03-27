@@ -7,9 +7,11 @@ import torch
 import torch.legacy.nn as nn
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
     module_tests, criterion_tests, TEST_CUDA, PRECISION
-from common import to_gpu, freeze_rng_state
+from common import to_gpu, freeze_rng_state, run_tests
+
 
 class OldModuleTest(ModuleTest):
+
     def __init__(self, *args, **kwargs):
         super(OldModuleTest, self).__init__(*args, **kwargs)
         self.check_inplace = kwargs.get('check_inplace', False)
@@ -45,18 +47,18 @@ class OldModuleTest(ModuleTest):
 # TODO: hessian tests
 tests = [
     OldModuleTest(nn.Add,
-                    (torch.Size([5, 4]),),
-                    input_size=(3, 5, 4),
-                    desc='3D'),
+                  (torch.Size([5, 4]),),
+                  input_size=(3, 5, 4),
+                  desc='3D'),
     OldModuleTest(nn.Add,
-                    (1, True),
-                    input_size=(3, 1, 4),
-                    desc='scalar'),
+                  (1, True),
+                  input_size=(3, 1, 4),
+                  desc='scalar'),
     OldModuleTest(nn.AddConstant,
-                    (3.5,),
-                    input_size=(3, 5, 4),
-                    reference_fn=lambda i,_: i + 3.5,
-                    check_inplace=True),
+                  (3.5,),
+                  input_size=(3, 5, 4),
+                  reference_fn=lambda i, _: i + 3.5,
+                  check_inplace=True),
     OldModuleTest(nn.BatchNormalization,
                   (10,),
                   input_size=(4, 10),
@@ -88,435 +90,435 @@ tests = [
                   input_size=(2, 3, 4, 4, 4),
                   desc='no_affine'),
     OldModuleTest(nn.CMul,
-                    (5, 6),
-                    input_size=(10, 5, 6),
-                    desc='3D'),
+                  (5, 6),
+                  input_size=(10, 5, 6),
+                  desc='3D'),
     OldModuleTest(nn.CMul,
-                    (50, 4),
-                    input_size=(1, 50, 4),
-                    desc='3D_single_example'),
+                  (50, 4),
+                  input_size=(1, 50, 4),
+                  desc='3D_single_example'),
     OldModuleTest(nn.CMul,
-                    (1, 5),
-                    input=torch.randn(10, 3, 5)[:,1],
-                    desc='3D_noncontiguous'),
+                  (1, 5),
+                  input=torch.randn(10, 3, 5)[:, 1],
+                  desc='3D_noncontiguous'),
     OldModuleTest(nn.Exp,
-                    input_size=(2, 3, 4),
-                    reference_fn=lambda i,_: i.exp()),
+                  input_size=(2, 3, 4),
+                  reference_fn=lambda i, _: i.exp()),
     OldModuleTest(nn.Log,
-                    input=torch.rand(2, 3, 2) + 0.1,
-                    reference_fn=lambda i,_: i.log()),
+                  input=torch.rand(2, 3, 2) + 0.1,
+                  reference_fn=lambda i, _: i.log()),
     OldModuleTest(nn.Clamp,
-                    (-2., 5.),
-                    input=torch.randn(3, 2, 50) * 6,
-                    reference_fn=lambda i,_: i.clamp(-2, 5)),
+                  (-2., 5.),
+                  input=torch.randn(3, 2, 50) * 6,
+                  reference_fn=lambda i, _: i.clamp(-2, 5)),
     OldModuleTest(nn.Abs,
-                    input_size=(3, 20, 5),
-                    reference_fn=lambda i,_: i.abs()),
+                  input_size=(3, 20, 5),
+                  reference_fn=lambda i, _: i.abs()),
     OldModuleTest(nn.Bilinear,
-                    (2, 3, 10),
-                    input_size=[(4, 2), (4, 3)]),
+                  (2, 3, 10),
+                  input_size=[(4, 2), (4, 3)]),
     OldModuleTest(nn.Bilinear,
-                    (5, 4, 2),
-                    input_size=[(2, 5), (2, 4)],
-                    desc='small_output'),
+                  (5, 4, 2),
+                  input_size=[(2, 5), (2, 4)],
+                  desc='small_output'),
     OldModuleTest(nn.Euclidean,
-                    (5, 7),
-                    input_size=(10, 5)),
+                  (5, 7),
+                  input_size=(10, 5)),
     OldModuleTest(nn.WeightedEuclidean,
-                    (5, 7),
-                    input_size=(10, 5)),
+                  (5, 7),
+                  input_size=(10, 5)),
     OldModuleTest(nn.Cosine,
-                    (5, 7),
-                    input_size=(10, 5)),
+                  (5, 7),
+                  input_size=(10, 5)),
     OldModuleTest(nn.CAddTable,
-                    input_size=[(5, 7), (5, 7)]),
+                  input_size=[(5, 7), (5, 7)]),
     OldModuleTest(nn.CSubTable,
-                    input_size=[(5, 7), (5, 7)]),
+                  input_size=[(5, 7), (5, 7)]),
     OldModuleTest(nn.CDivTable,
-                    input=[torch.randn(1, 7), torch.rand(1, 7) + 0.1]),
+                  input=[torch.randn(1, 7), torch.rand(1, 7) + 0.1]),
     OldModuleTest(nn.CMulTable,
-                    input_size=[(5, 7), (5, 7)]),
+                  input_size=[(5, 7), (5, 7)]),
     OldModuleTest(nn.Square,
-                    input_size=(10, 2, 4),
-                    reference_fn=lambda i,_: i.mul(i)),
+                  input_size=(10, 2, 4),
+                  reference_fn=lambda i, _: i.mul(i)),
     OldModuleTest(nn.Sqrt,
-                    input=torch.rand(10, 2, 4)+0.01,
-                    reference_fn=lambda i,_: i.sqrt()),
+                  input=torch.rand(10, 2, 4) + 0.01,
+                  reference_fn=lambda i, _: i.sqrt()),
     OldModuleTest(nn.Squeeze,
-                    input_size=(2, 1, 1, 4, 5),
-                    reference_fn=lambda i,_: i.squeeze()),
+                  input_size=(2, 1, 1, 4, 5),
+                  reference_fn=lambda i, _: i.squeeze()),
     OldModuleTest(nn.Squeeze,
-                    (1,),
-                    input_size=(2, 1, 1, 4, 5),
-                    reference_fn=lambda i,_: i.squeeze(1),
-                    desc='dim'),
+                  (1,),
+                  input_size=(2, 1, 1, 4, 5),
+                  reference_fn=lambda i, _: i.squeeze(1),
+                  desc='dim'),
     OldModuleTest(nn.Unsqueeze,
-                    (1,),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: i.view(2, 1, 4, 5)),
+                  (1,),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: i.view(2, 1, 4, 5)),
     OldModuleTest(nn.Unsqueeze,
-                    (0,),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: i.view(1, 2, 4, 5),
-                    desc='fist_dim'),
+                  (0,),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: i.view(1, 2, 4, 5),
+                  desc='fist_dim'),
     OldModuleTest(nn.Unsqueeze,
-                    (3,),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: i.view(2, 4, 5, 1),
-                    desc='last_dim'),
+                  (3,),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: i.view(2, 4, 5, 1),
+                  desc='last_dim'),
     OldModuleTest(nn.View,
-                    (-1, 2, 20),
-                    input_size=(2, 2, 4, 5),
-                    reference_fn=lambda i,_: i.view(-1, 2, 20),
-                    desc='infer_batch'),
+                  (-1, 2, 20),
+                  input_size=(2, 2, 4, 5),
+                  reference_fn=lambda i, _: i.view(-1, 2, 20),
+                  desc='infer_batch'),
     OldModuleTest(nn.View,
-                    (2, 2, 2, 5),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: i.view(2, 2, 2, 5),
-                    desc='split_dim'),
+                  (2, 2, 2, 5),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: i.view(2, 2, 2, 5),
+                  desc='split_dim'),
     OldModuleTest(nn.View,
-                    (2, -1, 2, 5),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: i.view(2, -1, 2, 5),
-                    desc='infer_middle'),
+                  (2, -1, 2, 5),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: i.view(2, -1, 2, 5),
+                  desc='infer_middle'),
     OldModuleTest(nn.Sum,
-                    (1,),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: i.sum(1).squeeze(1)),
+                  (1,),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: i.sum(1).squeeze(1)),
     OldModuleTest(nn.Sum,
-                    (1, True),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: i.sum(1).div(i.size(1)).squeeze(1),
-                    desc='sizeAverage'),
+                  (1, True),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: i.sum(1).div(i.size(1)).squeeze(1),
+                  desc='sizeAverage'),
     OldModuleTest(nn.Mean,
-                    (1,),
-                    input_size=(2, 4, 5),
-                    reference_fn=lambda i,_: torch.mean(i, 1).squeeze(1)),
+                  (1,),
+                  input_size=(2, 4, 5),
+                  reference_fn=lambda i, _: torch.mean(i, 1).squeeze(1)),
     OldModuleTest(lambda: nn.Sequential().add(nn.GradientReversal()).add(nn.GradientReversal()),
-                    input_size=(4, 3, 2, 2),
-                    fullname='GradientReversal'),
+                  input_size=(4, 3, 2, 2),
+                  fullname='GradientReversal'),
     OldModuleTest(nn.Identity,
-                    input_size=(4, 3, 2, 4),
-                    reference_fn=lambda i,_: i),
+                  input_size=(4, 3, 2, 4),
+                  reference_fn=lambda i, _: i),
     OldModuleTest(nn.DotProduct,
-                    input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda i,_: torch.Tensor(list(
-                        a.dot(b) for a, b in zip(i[0], i[1])))
-                    ),
+                  input_size=[(10, 4), (10, 4)],
+                  reference_fn=lambda i, _: torch.Tensor(list(
+                      a.dot(b) for a, b in zip(i[0], i[1])))
+                  ),
     OldModuleTest(nn.CosineDistance,
-                    input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda i,_: torch.Tensor(list(
-                        a.dot(b) / (a.norm(2) * b.norm(2)) for a, b in zip(i[0], i[1])))
-                    ),
+                  input_size=[(10, 4), (10, 4)],
+                  reference_fn=lambda i, _: torch.Tensor(list(
+                      a.dot(b) / (a.norm(2) * b.norm(2)) for a, b in zip(i[0], i[1])))
+                  ),
     OldModuleTest(nn.JoinTable,
-                    (0,),
-                    input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda i,_: torch.cat(i, 0),
-                    desc='first_dim'),
+                  (0,),
+                  input_size=[(10, 4), (10, 4)],
+                  reference_fn=lambda i, _: torch.cat(i, 0),
+                  desc='first_dim'),
     OldModuleTest(nn.JoinTable,
-                    (2,),
-                    input_size=[(2, 4, 2), (2, 4, 2)],
-                    reference_fn=lambda i,_: torch.cat(i, 2),
-                    desc='positive_dim_index'),
+                  (2,),
+                  input_size=[(2, 4, 2), (2, 4, 2)],
+                  reference_fn=lambda i, _: torch.cat(i, 2),
+                  desc='positive_dim_index'),
     OldModuleTest(nn.JoinTable,
-                    (-1,),
-                    input_size=[(2, 4, 2, 4), (2, 4, 2, 4)],
-                    reference_fn=lambda i,_: torch.cat(i, 3),
-                    desc='negative_dim_index'),
+                  (-1,),
+                  input_size=[(2, 4, 2, 4), (2, 4, 2, 4)],
+                  reference_fn=lambda i, _: torch.cat(i, 3),
+                  desc='negative_dim_index'),
     OldModuleTest(nn.MM,
-                    input_size=[(4, 5, 3), (4, 3, 2)],
-                    reference_fn=lambda i,_: torch.bmm(*i)),
+                  input_size=[(4, 5, 3), (4, 3, 2)],
+                  reference_fn=lambda i, _: torch.bmm(*i)),
     OldModuleTest(nn.MV,
-                    input_size=[(4, 5, 3), (4, 3)],
-                    reference_fn=lambda i,_: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
+                  input_size=[(4, 5, 3), (4, 3)],
+                  reference_fn=lambda i, _: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
     OldModuleTest(nn.Max,
-                    input_size=(4, 5, 3),
-                    reference_fn=lambda i,_: torch.max(i, 0)[0].squeeze()),
+                  input_size=(4, 5, 3),
+                  reference_fn=lambda i, _: torch.max(i, 0)[0].squeeze()),
     OldModuleTest(nn.Max,
-                    (1,),
-                    input_size=(4, 5, 3),
-                    reference_fn=lambda i,_: torch.max(i, 1)[0].squeeze(),
-                    desc='with_dimension'),
+                  (1,),
+                  input_size=(4, 5, 3),
+                  reference_fn=lambda i, _: torch.max(i, 1)[0].squeeze(),
+                  desc='with_dimension'),
     OldModuleTest(nn.Min,
-                    input_size=(4, 5, 3),
-                    reference_fn=lambda i,_: torch.min(i, 0)[0].squeeze()),
+                  input_size=(4, 5, 3),
+                  reference_fn=lambda i, _: torch.min(i, 0)[0].squeeze()),
     OldModuleTest(nn.Min,
-                    (1,),
-                    input_size=(4, 5, 3),
-                    reference_fn=lambda i,_: torch.min(i, 1)[0].squeeze(),
-                    desc='with_dimension'),
+                  (1,),
+                  input_size=(4, 5, 3),
+                  reference_fn=lambda i, _: torch.min(i, 1)[0].squeeze(),
+                  desc='with_dimension'),
     OldModuleTest(nn.MixtureTable,
-                    tuple(),
-                    input_size=[(5, 3), (5, 3, 6)]),
+                  tuple(),
+                  input_size=[(5, 3), (5, 3, 6)]),
     OldModuleTest(nn.LookupTable,
-                    (4, 3),
-                    input=torch.randperm(2).repeat(1, 2),
-                    jacobian_input=False),
+                  (4, 3),
+                  input=torch.randperm(2).repeat(1, 2),
+                  jacobian_input=False),
     OldModuleTest(nn.Mul,
-                    input_size=(2, 3, 4, 2),
-                    reference_fn=lambda i,p: i * p[0][0]),
+                  input_size=(2, 3, 4, 2),
+                  reference_fn=lambda i, p: i * p[0][0]),
     OldModuleTest(nn.MulConstant,
-                    (4,),
-                    input_size=(2, 3, 4, 2),
-                    reference_fn=lambda i,_: i * 4,
-                    check_inplace=True),
+                  (4,),
+                  input_size=(2, 3, 4, 2),
+                  reference_fn=lambda i, _: i * 4,
+                  check_inplace=True),
     OldModuleTest(nn.Narrow,
-                    (0, 0),
-                    input_size=(2, 3, 4, 2),
-                    reference_fn=lambda i,_: i.narrow(0, 0, 1)),
+                  (0, 0),
+                  input_size=(2, 3, 4, 2),
+                  reference_fn=lambda i, _: i.narrow(0, 0, 1)),
     OldModuleTest(nn.Narrow,
-                    (1, 1, 2),
-                    input_size=(2, 3, 4, 2),
-                    reference_fn=lambda i,_: i.narrow(1, 1, 2),
-                    desc='length'),
+                  (1, 1, 2),
+                  input_size=(2, 3, 4, 2),
+                  reference_fn=lambda i, _: i.narrow(1, 1, 2),
+                  desc='length'),
     OldModuleTest(nn.Transpose,
-                    ((1, 2), (1, 3)),
-                    input_size=(2, 3, 4, 5),
-                    reference_fn=lambda i,_: i.transpose(1, 2).transpose(1, 3)),
+                  ((1, 2), (1, 3)),
+                  input_size=(2, 3, 4, 5),
+                  reference_fn=lambda i, _: i.transpose(1, 2).transpose(1, 3)),
     OldModuleTest(nn.Transpose,
-                    ((1, 2),),
-                    input_size=(2, 3, 4, 5),
-                    reference_fn=lambda i,_: i.transpose(1, 2),
-                    desc='single_arg'),
+                  ((1, 2),),
+                  input_size=(2, 3, 4, 5),
+                  reference_fn=lambda i, _: i.transpose(1, 2),
+                  desc='single_arg'),
     # TODO: this seems to be very slow
     OldModuleTest(nn.Replicate,
-                    (2, 1),
-                    input_size=(10, 3, 4, 5),
-                    reference_fn=lambda i,_: i.view(10, 1, 3, 4, 5).expand(10, 2, 3, 4, 5)),
+                  (2, 1),
+                  input_size=(10, 3, 4, 5),
+                  reference_fn=lambda i, _: i.view(10, 1, 3, 4, 5).expand(10, 2, 3, 4, 5)),
     OldModuleTest(nn.Padding,
-                    (0, 2, -10),
-                    input_size=(2, 3, 4, 5)),
+                  (0, 2, -10),
+                  input_size=(2, 3, 4, 5)),
     OldModuleTest(nn.Padding,
-                    (0, 2, -10, 1),
-                    input_size=(2, 3, 4, 5),
-                    desc='index'),
+                  (0, 2, -10, 1),
+                  input_size=(2, 3, 4, 5),
+                  desc='index'),
     OldModuleTest(nn.Padding,
-                    (0, -2, -10, 1),
-                    input_size=(2, 3, 4, 5),
-                    desc='negative_pad'),
+                  (0, -2, -10, 1),
+                  input_size=(2, 3, 4, 5),
+                  desc='negative_pad'),
     OldModuleTest(nn.PartialLinear,
-                    (5, 6),
-                    input_size=(4, 5)),
+                  (5, 6),
+                  input_size=(4, 5)),
     OldModuleTest(lambda: nn.PartialLinear(5, 6).setPartition(torch.Tensor((2, 4))),
-                    input_size=(4, 5),
-                    fullname='PartialLinear_setPartition'),
+                  input_size=(4, 5),
+                  fullname='PartialLinear_setPartition'),
     OldModuleTest(nn.Power,
-                    (2,),
-                    input_size=(2, 3, 4, 5)),
+                  (2,),
+                  input_size=(2, 3, 4, 5)),
     OldModuleTest(nn.Power,
-                    (1.5,),
-                    input=torch.rand(3, 4, 5),
-                    desc='fractional'),
+                  (1.5,),
+                  input=torch.rand(3, 4, 5),
+                  desc='fractional'),
     OldModuleTest(nn.Reshape,
-                    (4, 5),
-                    input_size=(3, 4*5),
-                    desc='add_dim'),
+                  (4, 5),
+                  input_size=(3, 4 * 5),
+                  desc='add_dim'),
     OldModuleTest(nn.Reshape,
-                    (4*5,),
-                    input_size=(3, 4, 5),
-                    desc='squash_dim'),
+                  (4 * 5,),
+                  input_size=(3, 4, 5),
+                  desc='squash_dim'),
     OldModuleTest(nn.Select,
-                    (1, 2),
-                    input_size=(3, 4, 5),
-                    reference_fn=lambda i,_: i.select(1, 2)),
+                  (1, 2),
+                  input_size=(3, 4, 5),
+                  reference_fn=lambda i, _: i.select(1, 2)),
     OldModuleTest(nn.SelectTable,
-                    (1,),
-                    input_size=[(1,), (2,), (3,), (4,)],
-                    reference_fn=lambda i,_: i[1]),
+                  (1,),
+                  input_size=[(1,), (2,), (3,), (4,)],
+                  reference_fn=lambda i, _: i[1]),
     OldModuleTest(nn.SpatialAveragePooling,
-                    (2, 2),
-                    input_size=(2, 3, 6, 6)),
+                  (2, 2),
+                  input_size=(2, 3, 6, 6)),
     OldModuleTest(nn.SpatialAveragePooling,
-                    (2, 2, 2, 2),
-                    input_size=(2, 3, 6, 6),
-                    desc='stride'),
+                  (2, 2, 2, 2),
+                  input_size=(2, 3, 6, 6),
+                  desc='stride'),
     OldModuleTest(nn.SpatialAveragePooling,
-                    (2, 2, 2, 2, 1, 1),
-                    input_size=(2, 3, 6, 6),
-                    desc='stride_pad'),
+                  (2, 2, 2, 2, 1, 1),
+                  input_size=(2, 3, 6, 6),
+                  desc='stride_pad'),
     OldModuleTest(nn.SpatialAdaptiveMaxPooling,
-                    (4, 4),
-                    input_size=(2, 3, 8, 8),
-                    reference_fn=lambda i,_: nn.SpatialMaxPooling(2, 2).forward(i)),
+                  (4, 4),
+                  input_size=(2, 3, 8, 8),
+                  reference_fn=lambda i, _: nn.SpatialMaxPooling(2, 2).forward(i)),
     OldModuleTest(nn.SpatialAdaptiveMaxPooling,
-                    (4, 4),
-                    input_size=(2, 3, 7, 11),
-                    desc='irregular'),
+                  (4, 4),
+                  input_size=(2, 3, 7, 11),
+                  desc='irregular'),
     OldModuleTest(nn.SpatialConvolution,
-                    (3, 4, 3, 3),
-                    input_size=(2, 3, 6, 6)),
+                  (3, 4, 3, 3),
+                  input_size=(2, 3, 6, 6)),
     OldModuleTest(nn.SpatialConvolution,
-                    (3, 4, 3, 3, 2, 2),
-                    input_size=(2, 3, 6, 6),
-                    desc='strided'),
+                  (3, 4, 3, 3, 2, 2),
+                  input_size=(2, 3, 6, 6),
+                  desc='strided'),
     OldModuleTest(nn.SpatialConvolution,
-                    (3, 4, 3, 3, 2, 2, 1, 1),
-                    input_size=(2, 3, 6, 6),
-                    desc='padding'),
+                  (3, 4, 3, 3, 2, 2, 1, 1),
+                  input_size=(2, 3, 6, 6),
+                  desc='padding'),
     OldModuleTest(nn.SpatialConvolutionLocal,
-                    (3, 2, 4, 4, 2, 2),
-                    input_size=(1, 3, 4, 4)),
+                  (3, 2, 4, 4, 2, 2),
+                  input_size=(1, 3, 4, 4)),
     OldModuleTest(nn.SpatialConvolutionLocal,
-                    (3, 2, 6, 6, 2, 2, 2, 2),
-                    input_size=(2, 3, 6, 6),
-                    desc='stride'),
+                  (3, 2, 6, 6, 2, 2, 2, 2),
+                  input_size=(2, 3, 6, 6),
+                  desc='stride'),
     OldModuleTest(nn.SpatialConvolutionLocal,
-                    (3, 2, 6, 6, 2, 2, 2, 2, 1, 1),
-                    input_size=(2, 3, 6, 6),
-                    desc='stride_pad'),
+                  (3, 2, 6, 6, 2, 2, 2, 2, 1, 1),
+                  input_size=(2, 3, 6, 6),
+                  desc='stride_pad'),
     OldModuleTest(nn.SpatialDivisiveNormalization,
-                    (3,),
-                    input_size=(2, 3, 8, 8)),
+                  (3,),
+                  input_size=(2, 3, 8, 8)),
     OldModuleTest(nn.SpatialContrastiveNormalization,
-                    (3,),
-                    input_size=(2, 3, 8, 8)),
+                  (3,),
+                  input_size=(2, 3, 8, 8)),
     OldModuleTest(nn.SpatialDilatedConvolution,
-                    (3, 2, 3, 3, 2, 2, 1, 1, 2, 2),
-                    input_size=(2, 3, 8, 8)),
+                  (3, 2, 3, 3, 2, 2, 1, 1, 2, 2),
+                  input_size=(2, 3, 8, 8)),
     OldModuleTest(nn.SpatialDilatedConvolution,
-                    (3, 2, 3, 3, 2, 2, 1, 1, 2, 2),
-                    input_size=(2, 3, 8, 8),
-                    desc='stride_pad'),
+                  (3, 2, 3, 3, 2, 2, 1, 1, 2, 2),
+                  input_size=(2, 3, 8, 8),
+                  desc='stride_pad'),
     OldModuleTest(nn.SpatialMaxPooling,
-                    (3, 3, 2, 2, 1, 1),
-                    input_size=(1, 3, 7, 7)),
+                  (3, 3, 2, 2, 1, 1),
+                  input_size=(1, 3, 7, 7)),
     OldModuleTest(nn.SpatialReflectionPadding,
-                    (1, 2, 3, 4),
-                    input_size=(2, 3, 8, 8)),
+                  (1, 2, 3, 4),
+                  input_size=(2, 3, 8, 8)),
     OldModuleTest(nn.SpatialReplicationPadding,
-                    (1, 2, 3, 4),
-                    input_size=(2, 3, 4, 4)),
+                  (1, 2, 3, 4),
+                  input_size=(2, 3, 4, 4)),
     OldModuleTest(nn.SpatialZeroPadding,
-                    (1, 2, 3, 4),
-                    input_size=(2, 3, 4, 4)),
+                  (1, 2, 3, 4),
+                  input_size=(2, 3, 4, 4)),
     OldModuleTest(nn.SpatialConvolutionMap,
-                    (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3),
-                    input_size=(3, 5, 5),
-                    desc='oneToOne'),
+                  (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3),
+                  input_size=(3, 5, 5),
+                  desc='oneToOne'),
     OldModuleTest(nn.SpatialConvolutionMap,
-                    (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3, 2, 2),
-                    input_size=(3, 5, 5),
-                    desc='oneToOne_stride'),
+                  (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3, 2, 2),
+                  input_size=(3, 5, 5),
+                  desc='oneToOne_stride'),
     OldModuleTest(nn.SpatialConvolutionMap,
-                    (nn.SpatialConvolutionMap.maps.full(3, 4), 3, 3),
-                    input_size=(3, 5, 5),
-                    desc='full'),
+                  (nn.SpatialConvolutionMap.maps.full(3, 4), 3, 3),
+                  input_size=(3, 5, 5),
+                  desc='full'),
     OldModuleTest(nn.SpatialFullConvolutionMap,
-                    (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3),
-                    input_size=(3, 5, 5),
-                    desc='oneToOne'),
+                  (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3),
+                  input_size=(3, 5, 5),
+                  desc='oneToOne'),
     OldModuleTest(nn.SpatialFullConvolutionMap,
-                    (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3, 2, 2),
-                    input_size=(3, 5, 5),
-                    desc='oneToOne_stride'),
+                  (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3, 2, 2),
+                  input_size=(3, 5, 5),
+                  desc='oneToOne_stride'),
     OldModuleTest(nn.SpatialFullConvolutionMap,
-                    (nn.SpatialConvolutionMap.maps.full(3, 4), 3, 3),
-                    input_size=(3, 5, 5),
-                    desc='full'),
+                  (nn.SpatialConvolutionMap.maps.full(3, 4), 3, 3),
+                  input_size=(3, 5, 5),
+                  desc='full'),
     # TODO: test CUDA
     OldModuleTest(lambda: nn.SpatialFractionalMaxPooling(2, 2, 0.5, 0.5).fixPoolingRegions(),
-                    input_size=(1, 3, 5, 5),
-                    fullname='SpatialFractionalMaxPooling_ratio',
-                    test_cuda=False),
+                  input_size=(1, 3, 5, 5),
+                  fullname='SpatialFractionalMaxPooling_ratio',
+                  test_cuda=False),
     OldModuleTest(lambda: nn.SpatialFractionalMaxPooling(2, 2, 4, 4).fixPoolingRegions(),
-                    input_size=(1, 3, 7, 7),
-                    fullname='SpatialFractionalMaxPooling_size',
-                    test_cuda=False),
+                  input_size=(1, 3, 7, 7),
+                  fullname='SpatialFractionalMaxPooling_size',
+                  test_cuda=False),
     OldModuleTest(nn.SpatialFullConvolution,
-                    (3, 4, 3, 3, 2, 2, 1, 1, 1, 1),
-                    input_size=(1, 3, 7, 7)),
+                  (3, 4, 3, 3, 2, 2, 1, 1, 1, 1),
+                  input_size=(1, 3, 7, 7)),
     OldModuleTest(nn.SpatialLPPooling,
-                    (3, 2, 2, 2, 2, 2),
-                    input_size=(1, 3, 7, 7)),
+                  (3, 2, 2, 2, 2, 2),
+                  input_size=(1, 3, 7, 7)),
     OldModuleTest(nn.SpatialSubSampling,
-                    (3, 3, 3, 2, 2),
-                    input_size=(1, 3, 7, 7)),
+                  (3, 3, 3, 2, 2),
+                  input_size=(1, 3, 7, 7)),
     OldModuleTest(nn.SpatialSubtractiveNormalization,
-                    (3,),
-                    input_size=(1, 3, 7, 7)),
+                  (3,),
+                  input_size=(1, 3, 7, 7)),
     OldModuleTest(nn.SpatialSubtractiveNormalization,
-                    (3, torch.rand(3)),
-                    input_size=(1, 3, 7, 7),
-                    desc='kernel'),
+                  (3, torch.rand(3)),
+                  input_size=(1, 3, 7, 7),
+                  desc='kernel'),
     OldModuleTest(nn.SpatialUpSamplingNearest,
-                    (2,),
-                    input_size=(1, 3, 4, 4)),
+                  (2,),
+                  input_size=(1, 3, 4, 4)),
 
     OldModuleTest(nn.TemporalConvolution,
-                    (4, 5, 3),
-                    input_size=(2, 10, 4)),
+                  (4, 5, 3),
+                  input_size=(2, 10, 4)),
     OldModuleTest(nn.TemporalConvolution,
-                    (4, 5, 3, 2),
-                    input_size=(2, 10, 4),
-                    desc='stride'),
+                  (4, 5, 3, 2),
+                  input_size=(2, 10, 4),
+                  desc='stride'),
     # TODO: this runs in non-batch mode only
     OldModuleTest(nn.TemporalSubSampling,
-                    (4, 3),
-                    input_size=(10, 4)),
+                  (4, 3),
+                  input_size=(10, 4)),
     OldModuleTest(nn.TemporalSubSampling,
-                    (4, 3, 2),
-                    input_size=(10, 4),
-                    desc='stride'),
+                  (4, 3, 2),
+                  input_size=(10, 4),
+                  desc='stride'),
 
     OldModuleTest(nn.VolumetricAveragePooling,
-                    (2, 2, 2),
-                    input_size=(2, 3, 4, 4, 4)),
+                  (2, 2, 2),
+                  input_size=(2, 3, 4, 4, 4)),
     OldModuleTest(nn.VolumetricAveragePooling,
-                    (2, 2, 2, 2, 2, 2),
-                    input_size=(2, 3, 5, 5, 5),
-                    desc='stride'),
+                  (2, 2, 2, 2, 2, 2),
+                  input_size=(2, 3, 5, 5, 5),
+                  desc='stride'),
     OldModuleTest(nn.VolumetricConvolution,
-                    (3, 4, 2, 2, 2),
-                    input_size=(2, 3, 3, 3, 3)),
+                  (3, 4, 2, 2, 2),
+                  input_size=(2, 3, 3, 3, 3)),
     OldModuleTest(nn.VolumetricConvolution,
-                    (3, 4, 2, 2, 2, 2, 2, 2),
-                    input_size=(2, 3, 5, 5, 5),
-                    desc='stride'),
+                  (3, 4, 2, 2, 2, 2, 2, 2),
+                  input_size=(2, 3, 5, 5, 5),
+                  desc='stride'),
     OldModuleTest(nn.VolumetricConvolution,
-                    (3, 4, 2, 2, 2, 2, 2, 2, 1, 1, 1),
-                    input_size=(2, 3, 5, 5, 5),
-                    desc='stride_padding'),
+                  (3, 4, 2, 2, 2, 2, 2, 2, 1, 1, 1),
+                  input_size=(2, 3, 5, 5, 5),
+                  desc='stride_padding'),
     OldModuleTest(nn.VolumetricFullConvolution,
-                    (2, 3, 2, 2, 2),
-                    input_size=(1, 2, 4, 4, 4)),
+                  (2, 3, 2, 2, 2),
+                  input_size=(1, 2, 4, 4, 4)),
     OldModuleTest(nn.VolumetricMaxPooling,
-                    (2, 2, 2),
-                    input_size=(2, 3, 5, 5, 5)),
+                  (2, 2, 2),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000)),
     OldModuleTest(nn.VolumetricMaxPooling,
-                    (2, 2, 2, 2, 2, 2),
-                    input_size=(2, 3, 5, 5, 5),
-                    desc='stride'),
+                  (2, 2, 2, 2, 2, 2),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
+                  desc='stride'),
     OldModuleTest(nn.VolumetricMaxPooling,
-                    (2, 2, 2, 2, 2, 2, 1, 1, 1),
-                    input_size=(2, 3, 5, 5, 5),
-                    desc='stride_padding'),
+                  (2, 2, 2, 2, 2, 2, 1, 1, 1),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
+                  desc='stride_padding'),
     OldModuleTest(nn.VolumetricReplicationPadding,
-                    (1, 2, 3, 4, 5, 6),
-                    input_size=(2, 3, 5, 5, 5)),
+                  (1, 2, 3, 4, 5, 6),
+                  input_size=(2, 3, 5, 5, 5)),
 
     CriterionTest(nn.L1Cost,
-                        input=torch.randn(2, 3, 4, 5),
-                        target=None),
+                  input=torch.randn(2, 3, 4, 5),
+                  target=None),
     CriterionTest(nn.L1HingeEmbeddingCriterion,
-                        input=[torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)],
-                        target=1),
+                  input=[torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)],
+                  target=1),
     CriterionTest(nn.L1HingeEmbeddingCriterion,
-                        (2,),
-                        input=[torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)],
-                        target=1,
-                        desc='margin'),
+                  (2,),
+                  input=[torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)],
+                  target=1,
+                  desc='margin'),
     CriterionTest(nn.WeightedMSECriterion,
-                        (torch.rand(3, 4, 5),),
-                        input=torch.randn(2, 3, 4, 5),
-                        target=torch.randn(2, 3, 4, 5)),
+                  (torch.rand(3, 4, 5),),
+                  input=torch.randn(2, 3, 4, 5),
+                  target=torch.randn(2, 3, 4, 5)),
     CriterionTest(nn.MarginCriterion,
-                        input_size=(5, 10),
-                        target=torch.randn(5, 10).sign()),
+                  input_size=(5, 10),
+                  target=torch.randn(5, 10).sign()),
     CriterionTest(nn.ClassSimplexCriterion,
-                        (30,),
-                        input=torch.randn(5, 30).mul(10).renorm(2, 0, 1),
-                        target=torch.rand(5).mul(30).floor().long(),
-                        desc='margin'),
+                  (30,),
+                  input=torch.randn(5, 30).mul(10).renorm(2, 0, 1),
+                  target=torch.rand(5).mul(30).floor().long(),
+                  desc='margin'),
 ]
 # TODO: FlattenTable gradient
 # TODO: NarrowTable gradient
@@ -527,19 +529,20 @@ tests = [
 for p in (1, 2, 1.5):
     tests.append(
         OldModuleTest(nn.Normalize,
-                        (p,),
-                        input_size=(4, 5),
-                        # Eh, we need to use p as a default, so it's passed by value
-                        reference_fn=lambda i,_,p=p: i.div(i.norm(p, 1).expand_as(i)),
-                        desc=str(p)),
+                      (p,),
+                      input_size=(4, 5),
+                      # Eh, we need to use p as a default, so it's passed by value
+                      reference_fn=lambda i, _, p=p: i.div(i.norm(p, 1).expand_as(i)),
+                      desc=str(p)),
     )
-for p in range(1, 4+1):
+for p in range(1, 4 + 1):
     tests.append(
         OldModuleTest(nn.PairwiseDistance,
-                        (p,),
-                        input_size=[(4, 10), (4, 10)],
-                        desc=str(p))
+                      (p,),
+                      input_size=[(4, 10), (4, 10)],
+                      desc=str(p))
     )
+
 
 def build_spatial_unpooling_net():
     pool = nn.SpatialMaxPooling(2, 2, 2, 2)
@@ -547,10 +550,11 @@ def build_spatial_unpooling_net():
     return nn.Sequential().add(pool).add(unpool)
 
 tests.append(
-        OldModuleTest(build_spatial_unpooling_net,
-            input_size=(1, 3, 10, 10),
-            desc='SpatialMaxUnpooling')
-        )
+    OldModuleTest(build_spatial_unpooling_net,
+                  input_size=(1, 3, 10, 10),
+                  desc='SpatialMaxUnpooling')
+)
+
 
 def build_volumetric_unpooling_net():
     pool = nn.VolumetricMaxPooling(2, 2, 2, 2)
@@ -558,10 +562,11 @@ def build_volumetric_unpooling_net():
     return nn.Sequential().add(pool).add(unpool)
 
 tests.append(
-        OldModuleTest(build_volumetric_unpooling_net,
-            input_size=(1, 3, 10, 10),
-            desc='VolumetricMaxUnpooling')
-        )
+    OldModuleTest(build_volumetric_unpooling_net,
+                  input_size=(1, 3, 10, 10),
+                  desc='VolumetricMaxUnpooling')
+)
+
 
 def prepare_tests():
     def add_test(test):
@@ -571,8 +576,8 @@ def prepare_tests():
             raise RuntimeError('Found two tests with the same name: ' + test_name)
         if hasattr(TestNN, cuda_test_name):
             raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
-        setattr(TestNN, test_name, lambda self,test=test: test(self))
-        setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
+        setattr(TestNN, test_name, lambda self, test=test: test(self))
+        setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
     name_remap = {
         'Conv2d': 'SpatialConvolution',
         'MaxPool2d': 'SpatialMaxPooling',
@@ -613,6 +618,7 @@ def prepare_tests():
         test = CriterionTest(**test_params)
         add_test(test)
 
+
 class TestNN(NNTestCase):
 
     def _forward(self, module, input):
@@ -636,19 +642,19 @@ class TestNN(NNTestCase):
 
     def test_Dropout(self):
         p = 0.2
-        input = torch.Tensor(1000).fill_(1-p)
+        input = torch.Tensor(1000).fill_(1 - p)
 
         module = nn.Dropout(p)
         output = module.forward(input)
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 - p)), 0.05)
         gradInput = module.backward(input, input)
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 - p)), 0.05)
 
         module = nn.Dropout(p, True)
         output = module.forward(input.clone())
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 - p)), 0.05)
         gradInput = module.backward(input.clone(), input.clone())
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 - p)), 0.05)
 
         # Check that these don't raise errors
         module.__repr__()
@@ -664,9 +670,9 @@ class TestNN(NNTestCase):
         module = nn.SpatialDropout(p)
         module.training()
         output = module.forward(input)
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 - p)), 0.05)
         gradInput = module.backward(input, input)
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 - p)), 0.05)
 
         # Check that these don't raise errors
         module.__repr__()
@@ -674,18 +680,18 @@ class TestNN(NNTestCase):
 
     def test_VolumetricDropout(self):
         p = 0.2
-        bsz = random.randint(1,5)
-        t = random.randint(1,5)
-        w = random.randint(1,5)
-        h = random.randint(1,5)
+        bsz = random.randint(1, 5)
+        t = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
         nfeats = 1000
         input = torch.Tensor(bsz, nfeats, t, w, h).fill_(1)
         module = nn.VolumetricDropout(p)
         module.training()
         output = module.forward(input)
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 - p)), 0.05)
         gradInput = module.backward(input, input)
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 - p)), 0.05)
 
         # Check that these don't raise errors
         module.__repr__()
@@ -706,7 +712,7 @@ class TestNN(NNTestCase):
         self.assertTrue(output[input.lt(0)].eq(0).all())
 
     def test_Copy(self):
-        input = torch.randn(3,4).double()
+        input = torch.randn(3, 4).double()
         c = nn.Copy(torch.DoubleTensor, torch.FloatTensor)
         output = c.forward(input)
         self.assertEqual(torch.typename(output), 'torch.FloatTensor')
@@ -833,9 +839,9 @@ class TestNN(NNTestCase):
     def test_ParallelTable(self):
         input = torch.randn(3, 4, 5)
         p = nn.ParallelTable()
-        p.add(nn.View(4,5,1))
-        p.add(nn.View(4,5,1))
-        p.add(nn.View(4,5,1))
+        p.add(nn.View(4, 5, 1))
+        p.add(nn.View(4, 5, 1))
+        p.add(nn.View(4, 5, 1))
         m = nn.Sequential()
         m.add(nn.SplitTable(0))
         m.add(p)
@@ -846,7 +852,7 @@ class TestNN(NNTestCase):
         str(p)
 
         output = m.forward(input)
-        output2 = input.transpose(0,2).transpose(0,1)
+        output2 = input.transpose(0, 2).transpose(0, 1)
         self.assertEqual(output2, output)
 
         gradInput = m.backward(input, output2)
@@ -854,15 +860,15 @@ class TestNN(NNTestCase):
 
     def test_ConcatTable(self):
         input = [
-                torch.randn(3, 4).float(), torch.randn(3, 4).float(), [torch.randn(3, 4).float()]
+            torch.randn(3, 4).float(), torch.randn(3, 4).float(), [torch.randn(3, 4).float()]
         ]
         _gradOutput = [
-                torch.randn(3, 3,4).float(), torch.randn(3, 3,4).float(), torch.randn(3, 3,4).float()
+            torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float()
         ]
         gradOutput = [
-                [_gradOutput[0][0], _gradOutput[1][0], [_gradOutput[2][0]]],
-                [_gradOutput[0][1], _gradOutput[1][1], [_gradOutput[2][1]]],
-                [_gradOutput[0][2], _gradOutput[1][2], [_gradOutput[2][2]]]
+            [_gradOutput[0][0], _gradOutput[1][0], [_gradOutput[2][0]]],
+            [_gradOutput[0][1], _gradOutput[1][1], [_gradOutput[2][1]]],
+            [_gradOutput[0][2], _gradOutput[1][2], [_gradOutput[2][2]]]
         ]
         module = nn.ConcatTable()
         module.add(nn.Identity())
@@ -878,7 +884,8 @@ class TestNN(NNTestCase):
         output2 = [input, input, input]
         self.assertEqual(output2, output)
         gradInput = module.backward(input, gradOutput)
-        gradInput2 = [_gradOutput[0].sum(0).squeeze(0), _gradOutput[1].sum(0).squeeze(0), [_gradOutput[2].sum(0).squeeze(0)]]
+        gradInput2 = [_gradOutput[0].sum(0).squeeze(0), _gradOutput[1].sum(
+            0).squeeze(0), [_gradOutput[2].sum(0).squeeze(0)]]
         self.assertTrue(isinstance(gradInput, list))
         self.assertFalse(isinstance(gradInput[0], list))
         self.assertFalse(isinstance(gradInput[1], list))
@@ -910,25 +917,28 @@ class TestNN(NNTestCase):
         input = torch.randn(2, 3, 12, 12)
         gradOutput = torch.randn(2, int(outputSize.sum()), 12, 12)
         concat = nn.DepthConcat(1)
-        concat.add(nn.SpatialConvolution(3, outputSize[0], 1, 1, 1, 1)) #> 2, 5, 12, 12
-        concat.add(nn.SpatialConvolution(3, outputSize[1], 3, 3, 1, 1)) #> 2, 6, 10, 10
-        concat.add(nn.SpatialConvolution(3, outputSize[2], 4, 4, 1, 1)) #> 2, 7, 9, 9
-        concat.add(nn.SpatialConvolution(3, outputSize[3], 5, 5, 1, 1)) #> 2, 8, 8, 8
+        concat.add(nn.SpatialConvolution(3, outputSize[0], 1, 1, 1, 1))  # > 2, 5, 12, 12
+        concat.add(nn.SpatialConvolution(3, outputSize[1], 3, 3, 1, 1))  # > 2, 6, 10, 10
+        concat.add(nn.SpatialConvolution(3, outputSize[2], 4, 4, 1, 1))  # > 2, 7, 9, 9
+        concat.add(nn.SpatialConvolution(3, outputSize[3], 5, 5, 1, 1))  # > 2, 8, 8, 8
         concat.zeroGradParameters()
         # forward/backward
         outputConcat = concat.forward(input)
         gradInputConcat = concat.backward(input, gradOutput)
         # the spatial dims are the largest, the nFilters is the sum
-        output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_() # zero for padding
-        narrows = ( (slice(None), slice(0, 5), slice(None), slice(None)), (slice(None), slice(5, 11), slice(1, 11), slice(1, 11)), (slice(None), slice(11, 18), slice(1, 10), slice(1, 10)), (slice(None), slice(18, 26), slice(2, 10), slice(2, 10)) )
+        output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_()  # zero for padding
+        narrows = ((slice(None), slice(0, 5), slice(None), slice(None)),
+                   (slice(None), slice(5, 11), slice(1, 11), slice(1, 11)),
+                   (slice(None), slice(11, 18), slice(1, 10), slice(1, 10)),
+                   (slice(None), slice(18, 26), slice(2, 10), slice(2, 10)))
         gradInput = input.clone().zero_()
         for i in range(4):
-           conv = concat.get(i)
-           gradWeight = conv.gradWeight.clone()
-           conv.zeroGradParameters()
-           output[narrows[i]].copy_(conv.forward(input))
-           gradInput.add_(conv.backward(input, gradOutput[narrows[i]]))
-           self.assertEqual(gradWeight, conv.gradWeight)
+            conv = concat.get(i)
+            gradWeight = conv.gradWeight.clone()
+            conv.zeroGradParameters()
+            output[narrows[i]].copy_(conv.forward(input))
+            gradInput.add_(conv.backward(input, gradOutput[narrows[i]]))
+            self.assertEqual(gradWeight, conv.gradWeight)
 
         self.assertEqual(output, outputConcat)
         self.assertEqual(gradInput, gradInputConcat)
@@ -979,7 +989,7 @@ class TestNN(NNTestCase):
         weight = 1
         m = nn.L1Penalty(weight, False, False)
 
-        input = torch.rand(2,10).add_(-0.5)
+        input = torch.rand(2, 10).add_(-0.5)
         input[0][0] = 0
 
         m.forward(input)
@@ -988,7 +998,7 @@ class TestNN(NNTestCase):
         self.assertEqual(input.abs().sum() * weight, m.loss)
 
         true_grad = (input.gt(0).type_as(grad) +
-            input.lt(0).type_as(grad).mul_(-1)).mul_(weight)
+                     input.lt(0).type_as(grad).mul_(-1)).mul_(weight)
         self.assertEqual(true_grad, grad)
 
         # Check that these don't raise errors
@@ -1023,7 +1033,7 @@ class TestNN(NNTestCase):
         mc = nn.MultiCriterion().add(nll, 0.5).add(nll2)
 
         output = mc.forward(input, target)
-        output2 = nll.forward(input, target)/2 + nll2.forward(input, target)
+        output2 = nll.forward(input, target) / 2 + nll2.forward(input, target)
 
         self.assertEqual(output, output2)
         gradInput = mc.backward(input, target)
@@ -1072,7 +1082,7 @@ class TestNN(NNTestCase):
         mse = nn.MSECriterion()
         pc = nn.ParallelCriterion().add(nll, 0.5).add(mse)
         output = pc.forward(input, target)
-        output2 = nll.forward(input[0], target[0])/2 + mse.forward(input[1], target[1])
+        output2 = nll.forward(input[0], target[0]) / 2 + mse.forward(input[1], target[1])
         self.assertEqual(output, output2)
         gradInput2 = [nll.backward(input[0], target[0]).clone().div(2), mse.backward(input[1], target[1])]
         gradInput = pc.backward(input, target)
@@ -1096,7 +1106,7 @@ class TestNN(NNTestCase):
         mse = nn.MSECriterion()
         pc = nn.ParallelCriterion(True).add(mse, 0.5).add(nn.MSECriterion())
         output = pc.forward(input, target)
-        output2 = mse.forward(input[0], target)/2 + mse.forward(input[1], target)
+        output2 = mse.forward(input[0], target) / 2 + mse.forward(input[1], target)
         self.assertEqual(output, output2)
         gradInput = pc.backward(input, target)
         gradInput2 = [mse.backward(input[0], target).clone().div(2), mse.backward(input[1], target)]
@@ -1112,11 +1122,13 @@ class TestNN(NNTestCase):
         pc = nn.ParallelCriterion().add(nll, 0.5).add(mse)
         pc2 = nn.ParallelCriterion().add(nll2, 0.4).add(pc)
         output = pc2.forward(input, target)
-        output2 = nll2.forward(input[0], target[0])*0.4 + nll.forward(input[1][0], target[1][0])/2 + mse.forward(input[1][1], target[1][1])
+        output2 = (nll2.forward(input[0], target[0]) * 0.4 +
+                   nll.forward(input[1][0], target[1][0]) / 2 +
+                   mse.forward(input[1][1], target[1][1]))
         self.assertEqual(output, output2)
         gradInput2 = [
-                nll2.backward(input[0], target[0]).clone().mul(0.4),
-                [nll.backward(input[1][1], target[1][0]).clone().div(2), mse.backward(input[1][1], target[1][1])]
+            nll2.backward(input[0], target[0]).clone().mul(0.4),
+            [nll.backward(input[1][1], target[1][0]).clone().div(2), mse.backward(input[1][1], target[1][1])]
         ]
         gradInput = pc2.backward(input, target)
         self.assertEqual(gradInput[0], gradInput2[0])
@@ -1142,13 +1154,22 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
+    def test_accUpdateGradParameters(self):
+        module = nn.LookupTable(5, 3)
+        module.weight.fill_(2)
+        input = torch.LongTensor([1, 3])
+        output = module.updateOutput(input)
+        module.backwardUpdate(input, output, 0.1)
+        self.assertEqual(module.weight[0, 0], 2)
+        self.assertEqual(module.weight[3, 0], 1.8)
+
     def _build_net(self):
         return (nn.Sequential()
-                    .add(nn.Concat(0)
-                            .add(nn.Linear(2, 5))
-                            .add(nn.Linear(2, 5)))
-                    .add(nn.ReLU())
-                    .add(nn.Linear(10, 20)))
+                .add(nn.Concat(0)
+                     .add(nn.Linear(2, 5))
+                     .add(nn.Linear(2, 5)))
+                .add(nn.ReLU())
+                .add(nn.Linear(10, 20)))
 
     def test_parameters(self):
         net = self._build_net()
@@ -1197,6 +1218,7 @@ class TestNN(NNTestCase):
     def test_apply(self):
         net = self._build_net()
         seen_modules = set()
+
         def callback(module):
             self.assertNotIn(module, seen_modules)
             seen_modules.add(module)
@@ -1206,6 +1228,7 @@ class TestNN(NNTestCase):
     def test_listModules(self):
         net = self._build_net()
         module_list = list()
+
         def callback(module):
             module_list.append(module)
         net.apply(callback)
@@ -1214,6 +1237,7 @@ class TestNN(NNTestCase):
     def test_replace(self):
         ref_net = self._build_net()
         net = self._build_net()
+
         def callback(module):
             if isinstance(module, nn.ReLU):
                 return nn.Tanh()
@@ -1227,6 +1251,8 @@ class TestNN(NNTestCase):
                 self.assertIsInstance(module, type(reference))
 
 
+prepare_tests()
+
+
 if __name__ == '__main__':
-    prepare_tests()
-    unittest.main()
+    run_tests()

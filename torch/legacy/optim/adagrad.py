@@ -32,12 +32,11 @@ def adagrad(opfunc, x, config, state=None):
     if wd != 0:
         dfdx.add_(wd, x)
 
-
     # (3) learning rate decay (annealing)
     clr = lr / (1 + state['evalCounter'] * lrd)
 
     # (4) parameter update with single or individual learning rates
-    if not 'paramVariance' in state:
+    if 'paramVariance' not in state:
         state['paramVariance'] = x.new().resize_as_(dfdx).zero_()
         state['paramStd'] = x.new().resize_as_(dfdx)
 
@@ -50,4 +49,3 @@ def adagrad(opfunc, x, config, state=None):
 
     # return x*, f(x) before optimization
     return x, fx
-

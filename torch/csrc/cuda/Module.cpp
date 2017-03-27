@@ -4,6 +4,9 @@
 #include <unordered_map>
 #include <TH/TH.h>
 #include <THC/THCCachingAllocator.h>
+#ifdef WITH_NCCL
+#include <nccl.h>
+#endif
 
 #include "THCP.h"
 
@@ -15,26 +18,26 @@ THCState *state;
 // Class pointer cache
 ////////////////////////////////////////////////////////////////////////////////
 
-static bool THCPModule_loadClasses(PyObject *module_dict)
+static bool THCPModule_loadClasses(PyObject *torch_module)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  ASSERT_NOT_NULL(THCPDoubleStorageClass = PyMapping_GetItemString(module_dict, (char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THCPFloatStorageClass  = PyMapping_GetItemString(module_dict, (char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THCPHalfStorageClass   = PyMapping_GetItemString(module_dict, (char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THCPLongStorageClass   = PyMapping_GetItemString(module_dict, (char*)"LongStorage"));
-  ASSERT_NOT_NULL(THCPIntStorageClass    = PyMapping_GetItemString(module_dict, (char*)"IntStorage"));
-  ASSERT_NOT_NULL(THCPShortStorageClass  = PyMapping_GetItemString(module_dict, (char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THCPCharStorageClass   = PyMapping_GetItemString(module_dict, (char*)"CharStorage"));
-  ASSERT_NOT_NULL(THCPByteStorageClass   = PyMapping_GetItemString(module_dict, (char*)"ByteStorage"));
+  ASSERT_NOT_NULL(THCPDoubleStorageClass = PyObject_GetAttrString(torch_module, (char*)"DoubleStorage"));
+  ASSERT_NOT_NULL(THCPFloatStorageClass  = PyObject_GetAttrString(torch_module, (char*)"FloatStorage"));
+  ASSERT_NOT_NULL(THCPHalfStorageClass   = PyObject_GetAttrString(torch_module, (char*)"HalfStorage"));
+  ASSERT_NOT_NULL(THCPLongStorageClass   = PyObject_GetAttrString(torch_module, (char*)"LongStorage"));
+  ASSERT_NOT_NULL(THCPIntStorageClass    = PyObject_GetAttrString(torch_module, (char*)"IntStorage"));
+  ASSERT_NOT_NULL(THCPShortStorageClass  = PyObject_GetAttrString(torch_module, (char*)"ShortStorage"));
+  ASSERT_NOT_NULL(THCPCharStorageClass   = PyObject_GetAttrString(torch_module, (char*)"CharStorage"));
+  ASSERT_NOT_NULL(THCPByteStorageClass   = PyObject_GetAttrString(torch_module, (char*)"ByteStorage"));
 
-  ASSERT_NOT_NULL(THCPDoubleTensorClass  = PyMapping_GetItemString(module_dict, (char*)"DoubleTensor"));
-  ASSERT_NOT_NULL(THCPHalfTensorClass    = PyMapping_GetItemString(module_dict, (char*)"HalfTensor"));
-  ASSERT_NOT_NULL(THCPFloatTensorClass   = PyMapping_GetItemString(module_dict, (char*)"FloatTensor"));
-  ASSERT_NOT_NULL(THCPLongTensorClass    = PyMapping_GetItemString(module_dict, (char*)"LongTensor"));
-  ASSERT_NOT_NULL(THCPIntTensorClass     = PyMapping_GetItemString(module_dict, (char*)"IntTensor"));
-  ASSERT_NOT_NULL(THCPShortTensorClass   = PyMapping_GetItemString(module_dict, (char*)"ShortTensor"));
-  ASSERT_NOT_NULL(THCPCharTensorClass    = PyMapping_GetItemString(module_dict, (char*)"CharTensor"));
-  ASSERT_NOT_NULL(THCPByteTensorClass    = PyMapping_GetItemString(module_dict, (char*)"ByteTensor"));
+  if (!THCPDoubleTensor_postInit(torch_module)) return false;
+  if (!THCPFloatTensor_postInit(torch_module)) return false;
+  if (!THCPHalfTensor_postInit(torch_module)) return false;
+  if (!THCPLongTensor_postInit(torch_module)) return false;
+  if (!THCPIntTensor_postInit(torch_module)) return false;
+  if (!THCPShortTensor_postInit(torch_module)) return false;
+  if (!THCPCharTensor_postInit(torch_module)) return false;
+  if (!THCPByteTensor_postInit(torch_module)) return false;
 
   return true;
 #undef ASSERT_NOT_NULL
@@ -60,6 +63,7 @@ static bool THCPModule_assignStateless()
   PyObject *stateless;
   INIT_STATELESS(Double);
   INIT_STATELESS_DETAIL(Float, Cuda);
+  INIT_STATELESS(Half);
   INIT_STATELESS(Long);
   INIT_STATELESS(Int);
   INIT_STATELESS(Short);
@@ -238,6 +242,20 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaLockMutex(PyObject *module)
+{
+  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  mutex->lock();
+  Py_RETURN_NONE;
+}
+
+PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
+{
+  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  mutex->unlock();
+  Py_RETURN_NONE;
+}
+
 PyObject * THCPModule_getLibPath(PyObject *_unused)
 {
 #define _STR(x) #x
@@ -255,7 +273,8 @@ PyObject * THCPModule_getLibPath(PyObject *_unused)
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
-bool THCPModule_initCuda(PyObject *module_dict) {
+bool THCPModule_initCuda(PyObject *torch_module) {
+  HANDLE_TH_ERRORS
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
   state = THCState_alloc();
   THCState_setDeviceAllocator(state, THCCachingAllocator_get());
@@ -264,25 +283,26 @@ bool THCPModule_initCuda(PyObject *module_dict) {
 
 #ifdef USE_MAGMA
   THCMagma_init(state);
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_magma", PyBool_FromLong(true)) != -1);
+  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_magma", PyBool_FromLong(true)) != -1);
 #else
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_magma", PyBool_FromLong(false)) != -1);
+  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_magma", PyBool_FromLong(false)) != -1);
 #endif
 
 #ifdef CUDA_HALF_TENSOR
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_half", PyBool_FromLong(true)) != -1);
+  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_half", PyBool_FromLong(true)) != -1);
 #else
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "has_half", PyBool_FromLong(false)) != -1);
+  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_half", PyBool_FromLong(false)) != -1);
 #endif
 
-  ASSERT_TRUE(THCPModule_loadClasses(module_dict));
+  ASSERT_TRUE(THCPModule_loadClasses(torch_module));
   ASSERT_TRUE(THCPModule_assignStateless());
 
-  ASSERT_TRUE(PyDict_SetItemString(module_dict, "_state_cdata", PyLong_FromVoidPtr(state)) != -1);
+  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "_state_cdata", PyLong_FromVoidPtr(state)) != -1);
 
   // TODO: register THCudaShutdown handler at exit
   return true;
 #undef ASSERT_TRUE
+  END_HANDLE_TH_ERRORS
 }
 
 // Callback for python part. Used for additional initialization of python classes
@@ -293,6 +313,22 @@ PyObject * THCPModule_initExtension(PyObject *self)
     THPUtils_setError("class loader couldn't access torch module");
     return NULL;
   }
-  PyObject* module_dict = PyModule_GetDict(torch_module);
-  return PyBool_FromLong(THCPModule_initCuda(module_dict));
+  return PyBool_FromLong(THCPModule_initCuda(torch_module));
+}
+
+#ifdef WITH_NCCL
+void THCPModule_useNccl()
+{
+  // Use NCCL to ensure that the symbols are loaded
+  ncclUniqueId uniqueId;
+  ncclGetUniqueId(&uniqueId);
+}
+#endif
+
+PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self)
+{
+  HANDLE_TH_ERRORS
+  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  return PyLong_FromVoidPtr(handle);
+  END_HANDLE_TH_ERRORS
 }

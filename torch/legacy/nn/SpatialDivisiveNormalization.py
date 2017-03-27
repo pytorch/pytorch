@@ -35,10 +35,10 @@ class SpatialDivisiveNormalization(Module):
             raise ValueError('SpatialDivisiveNormalization averaging kernel must have ODD dimensions')
 
         # padding values
-        padH = int(math.floor(self.kernel.size(0)/2))
+        padH = int(math.floor(self.kernel.size(0) / 2))
         padW = padH
         if kdim == 2:
-            padW = int(math.floor(self.kernel.size(1)/2))
+            padW = int(math.floor(self.kernel.size(1) / 2))
 
         # create convolutional mean estimator
         self.meanestimator = Sequential()
@@ -46,7 +46,8 @@ class SpatialDivisiveNormalization(Module):
         if kdim == 2:
             self.meanestimator.add(SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
         else:
-            self.meanestimator.add(SpatialConvolutionMap(SpatialConvolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
+            self.meanestimator.add(SpatialConvolutionMap(
+                SpatialConvolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
             self.meanestimator.add(SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
 
         self.meanestimator.add(Replicate(self.nInputPlane, 1))
@@ -58,7 +59,8 @@ class SpatialDivisiveNormalization(Module):
         if kdim == 2:
             self.stdestimator.add(SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
         else:
-            self.stdestimator.add(SpatialConvolutionMap(SpatialContolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
+            self.stdestimator.add(SpatialConvolutionMap(
+                SpatialContolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
             self.stdestimator.add(SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
 
         self.stdestimator.add(Replicate(self.nInputPlane, 1))
@@ -102,14 +104,16 @@ class SpatialDivisiveNormalization(Module):
 
         # compute side coefficients
         dim = input.dim()
-        if self.localstds.dim() != self.coef.dim() or (input.size(dim-1) != self.coef.size(dim-1)) or (input.size(dim-2) != self.coef.size(dim-2)):
+        if (self.localstds.dim() != self.coef.dim() or
+                (input.size(dim - 1) != self.coef.size(dim - 1)) or
+                (input.size(dim - 2) != self.coef.size(dim - 2))):
             if self.ones is None:
-                  self.ones = input.new()
+                self.ones = input.new()
             self.ones.resize_as_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
             if self._coef is None:
-              self._coef = input.new()
-            self._coef.resize_as_(coef).copy_(coef) # make contiguous for view
+                self._coef = input.new()
+            self._coef.resize_as_(coef).copy_(coef)  # make contiguous for view
             self.coef = self._coef.view(1, *self._coef.size()).expand_as(self.localstds)
 
         # normalize std dev

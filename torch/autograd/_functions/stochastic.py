@@ -65,7 +65,7 @@ class Normal(StochasticFunction):
             output.mul_(stddevs)
         else:
             raise RuntimeError("Normal function requires specifying a common "
-                "stddev, or per-sample stddev")
+                               "stddev, or per-sample stddev")
         output.add_(means)
         self.save_for_backward(output, means, stddevs)
         self.mark_non_differentiable(output)
@@ -74,7 +74,7 @@ class Normal(StochasticFunction):
     def backward(self, reward):
         output, means, stddevs = self.saved_tensors
         grad_stddevs = None
-        grad_means = means - output # == -(output - means)
+        grad_means = means - output  # == -(output - means)
         assert self.stddev is not None or stddevs is not None
         if self.stddev is not None:
             grad_means /= 1e-6 + self.stddev ** 2
@@ -83,9 +83,9 @@ class Normal(StochasticFunction):
             stddevs_cb = stddevs_sq * stddevs
             stddevs_sq += 1e-6
             stddevs_cb += 1e-6
-            grad_stddevs = (grad_means * grad_means) / stddevs_cb
-            grad_stddevs = (stddevs - grad_stddevs) * reward
+            grad_stddevs = (stddevs_sq - (grad_means * grad_means))
+            grad_stddevs /= stddevs_cb
+            grad_stddevs *= reward
             grad_means /= stddevs_sq
         grad_means *= reward
         return grad_means, grad_stddevs
-

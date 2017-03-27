@@ -21,6 +21,7 @@
 
 #define THP_API extern "C"
 
+#include "PtrWrapper.h"
 #include "Exceptions.h"
 #include "Generator.h"
 #include "Storage.h"

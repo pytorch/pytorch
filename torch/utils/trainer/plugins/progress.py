@@ -19,11 +19,10 @@ class ProgressMonitor(Plugin):
 
     def iteration(self, iteration, input, *args):
         stats = self.trainer.stats.setdefault(self.stat_name, {})
-        stats['samples_used'] += input.size(0)
+        stats['samples_used'] += 1
         stats['percent'] = 100. * stats['samples_used'] / stats['epoch_size']
 
     def epoch(self, *args):
         stats = self.trainer.stats.setdefault(self.stat_name, {})
         stats['samples_used'] = 0
         stats['percent'] = 0
-

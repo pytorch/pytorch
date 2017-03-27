@@ -3,6 +3,7 @@ from .Module import Module
 from .utils import recursiveType
 import torch._thnn
 
+
 class Criterion(object):
 
     def __init__(self):

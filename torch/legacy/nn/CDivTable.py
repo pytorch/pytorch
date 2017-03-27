@@ -1,7 +1,9 @@
 import torch
 from .Module import Module
 
+
 class CDivTable(Module):
+
     def __init__(self, ):
         super(CDivTable, self).__init__()
         self.gradInput = []
@@ -20,4 +22,3 @@ class CDivTable(Module):
         del self.gradInput[len(input):]
 
         return self.gradInput
-

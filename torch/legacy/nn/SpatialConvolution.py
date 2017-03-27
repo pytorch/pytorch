@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, kW, kH, dW=1, dH=1, padW=0, padH=None):
@@ -36,9 +37,9 @@ class SpatialConvolution(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kW*self.kH*self.nInputPlane)
+            stdv = 1. / math.sqrt(self.kW * self.kH * self.nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         if self.bias is not None:
@@ -46,15 +47,15 @@ class SpatialConvolution(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
-           if self._input is None:
-                  self._input = input.new()
-           self._input.resize_as_(input).copy_(input)
-           input = self._input
+            if self._input is None:
+                self._input = input.new()
+            self._input.resize_as_(input).copy_(input)
+            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.is_contiguous():
                 if self._gradOutput is None:
-                      self._gradOutput = gradOutput.new()
+                    self._gradOutput = gradOutput.new()
                 self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
@@ -96,7 +97,6 @@ class SpatialConvolution(Module):
         )
         self._unviewWeight()
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
@@ -157,10 +157,9 @@ class SpatialConvolution(Module):
 
         s += ')'
         if self.bias is None:
-           s += ' without bias'
+            s += ' without bias'
         return s
 
     def clearState(self):
         clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialConvolution, self).clearState()
-

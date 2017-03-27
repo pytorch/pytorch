@@ -6,15 +6,17 @@ void THNN_(HardTanh_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          real min_val,
-          real max_val,
+          accreal min_val_,
+          accreal max_val_,
           bool inplace)
 {
+  real min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
+  real max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
   if (inplace)
     THTensor_(set)(output, input);
   else
     THTensor_(resizeAs)(output, input);
-  
+
   if (input->nDimension == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
     if (inplace)
@@ -68,10 +70,13 @@ void THNN_(HardTanh_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          real min_val,
-          real max_val,
+          accreal min_val_,
+          accreal max_val_,
           bool inplace)
 {
+  real min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
+  real max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
+
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (inplace)
     THTensor_(set)(gradInput, gradOutput);
@@ -92,7 +97,7 @@ void THNN_(HardTanh_updateGradInput)(
     }
     else
       TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-        if (*input_data < min_val || *input_data > max_val)
+        if (*input_data <= min_val || *input_data >= max_val)
           *gradInput_data = 0;
         else
           *gradInput_data = *gradOutput_data;
@@ -117,7 +122,7 @@ void THNN_(HardTanh_updateGradInput)(
 #pragma omp parallel for private(i)
       for (i = 0; i < n; i++)
       {
-        if (ptr_input[i] < min_val || ptr_input[i] > max_val)
+        if (ptr_input[i] <= min_val || ptr_input[i] >= max_val)
           ptr_gradInput[i] = 0;
         else
           ptr_gradInput[i] = ptr_gradOutput[i];

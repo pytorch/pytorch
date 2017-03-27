@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SpatialUpSamplingNearest(Module):
     """
     Applies a 2D up-sampling over an input image composed of several input planes.
@@ -40,7 +41,6 @@ class SpatialUpSamplingNearest(Module):
             self.scale_factor
         )
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resize_as_(input)

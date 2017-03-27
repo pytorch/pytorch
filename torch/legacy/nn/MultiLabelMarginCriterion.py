@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MultiLabelMarginCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
@@ -11,7 +12,7 @@ class MultiLabelMarginCriterion(Criterion):
 
     def updateOutput(self, input, target):
         if self.output_tensor is None:
-              self.output_tensor = input.new(1)
+            self.output_tensor = input.new(1)
         target = target.long()
         self._backend.MultiLabelMarginCriterion_updateOutput(
             self._backend.library_state,
@@ -35,4 +36,3 @@ class MultiLabelMarginCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

@@ -2,11 +2,13 @@ import sys
 import tempfile
 import unittest
 from copy import deepcopy
+from itertools import product
 
 import torch
 import torch.cuda
 from torch.autograd import Variable
-from common import TestCase, to_gpu, get_numerical_jacobian, iter_tensors, contiguous
+from common import TestCase, to_gpu, freeze_rng_state
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
 
 # tarfile module tries to obtain a file object name in python 3.3
@@ -18,6 +20,7 @@ else:
 TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
+TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 PRECISION = 1e-5
 
 module_tests = [
@@ -25,14 +28,14 @@ module_tests = [
         module_name='Linear',
         constructor_args=(10, 8),
         input_size=(4, 10),
-        reference_fn=lambda i,p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
+        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
     ),
     dict(
         module_name='Linear',
         constructor_args=(10, 8, False),
         input_size=(4, 10),
         desc='no_bias',
-        reference_fn=lambda i,p: torch.mm(i, p[0].t())
+        reference_fn=lambda i, p: torch.mm(i, p[0].t())
     ),
     dict(
         module_name='Threshold',
@@ -72,7 +75,7 @@ module_tests = [
     dict(
         module_name='Hardtanh',
         input_size=(3, 2, 5),
-        reference_fn=lambda i,_: i.clamp(-1, 1)
+        reference_fn=lambda i, _: i.clamp(-1, 1)
     ),
     dict(
         module_name='Sigmoid',
@@ -85,17 +88,23 @@ module_tests = [
     dict(
         module_name='Softmax',
         input_size=(10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))
     ),
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand_as(i))
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1).expand_as(i))
     ),
     dict(
         module_name='LogSoftmax',
         input_size=(10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
+        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
+    ),
+    dict(
+        module_name='LogSoftmax',
+        input_size=(1, 3, 10, 20),
+        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1).expand_as(i)).log_(),
+        desc='multiparam'
     ),
     dict(
         module_name='ELU',
@@ -124,18 +133,18 @@ module_tests = [
     dict(
         module_name='LogSigmoid',
         input_size=(2, 3, 4),
-        reference_fn=lambda i,_: i.sigmoid().log()
+        reference_fn=lambda i, _: i.sigmoid().log()
     ),
     dict(
         module_name='Softplus',
         input_size=(10, 20),
-        reference_fn=lambda i,_: torch.log(1 + torch.exp(i))
+        reference_fn=lambda i, _: torch.log(1 + torch.exp(i))
     ),
     dict(
         module_name='Softplus',
         constructor_args=(2,),
         input_size=(10, 20),
-        reference_fn=lambda i,_: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
+        reference_fn=lambda i, _: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
         desc='beta'
     ),
     dict(
@@ -155,18 +164,47 @@ module_tests = [
     ),
     dict(
         module_name='PReLU',
-        input_size=(2, 3, 4, 5)
+        input_size=(2, 3, 4),
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        desc='1d',
+    ),
+    dict(
+        module_name='PReLU',
+        constructor_args=(3,),
+        input_size=(2, 3, 4),
+        desc='1d_multiparam',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+    ),
+    dict(
+        module_name='PReLU',
+        input_size=(2, 3, 4, 5),
+        desc='2d',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
     ),
     dict(
         module_name='PReLU',
         constructor_args=(3,),
         input_size=(2, 3, 4, 5),
-        desc='multiparam'
+        desc='2d_multiparam',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+    ),
+    dict(
+        module_name='PReLU',
+        input_size=(2, 3, 4, 5, 6),
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        desc='3d',
+    ),
+    dict(
+        module_name='PReLU',
+        constructor_args=(3,),
+        input_size=(2, 3, 4, 5, 6),
+        desc='3d_multiparam',
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
     ),
     dict(
         module_name='Softsign',
         input_size=(3, 2, 5),
-        reference_fn=lambda i,_: i.div(1 + torch.abs(i))
+        reference_fn=lambda i, _: i.div(1 + torch.abs(i))
     ),
     dict(
         module_name='Softmin',
@@ -181,11 +219,11 @@ module_tests = [
 
 criterion_tests = [
     dict(module_name='L1Loss',
-        input_size=(2, 3, 4),
-        target=torch.randn(2, 3, 4),
-        reference_fn=lambda i,t,_: 1./i.numel() * \
-            sum((a-b).abs().sum() for a,b in zip(i, t))
-    ),
+         input_size=(2, 3, 4),
+         target=torch.randn(2, 3, 4),
+         reference_fn=lambda i, t, _: 1. / i.numel() *
+         sum((a - b).abs().sum() for a, b in zip(i, t))
+         ),
     dict(
         module_name='NLLLoss',
         input=torch.rand(15, 10).log(),
@@ -207,7 +245,7 @@ criterion_tests = [
         module_name='MSELoss',
         input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5),
-        reference_fn=lambda i,t,_: (i-t).abs().pow(2).sum() / i.numel()
+        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel()
     ),
     dict(
         module_name='BCELoss',
@@ -237,6 +275,13 @@ criterion_tests = [
         module_name='NLLLoss2d',
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long()
+    ),
+    dict(
+        module_name='NLLLoss2d',
+        constructor_args=(torch.rand(3),),
+        input_size=(2, 3, 5, 5),
+        target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        desc='weights'
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -321,15 +366,19 @@ class NNTestCase(TestCase):
 
     def _flatten_tensors(self, x):
         if torch.is_tensor(x):
-            return x.view(-1)
+            if x.is_sparse:
+                return x.to_dense().view(-1)
+            else:
+                return x.view(-1)
         elif isinstance(x, Variable):
-            return x.data.view(-1)
+            return self._flatten_tensors(x.data)
         else:
             return tuple(self._flatten_tensors(a) for a in x)
 
     def _zero_grad_input(self, input):
         if isinstance(input, Variable):
-            input.grad.data.zero_()
+            if input.requires_grad and input.grad is not None:
+                input.grad.data.zero_()
         elif torch.is_tensor(input):
             return
         else:
@@ -364,9 +413,9 @@ class NNTestCase(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, iter_tensors(d_input)):
-                    jacobian_x[:,i] = d_x
+                    jacobian_x[:, i] = d_x
             if jacobian_parameters:
-                jacobian_param[:,i] = torch.cat(self._flatten_tensors(d_param), 0)
+                jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
         res = tuple()
         if jacobian_input:
@@ -393,9 +442,9 @@ class NNTestCase(TestCase):
         # TODO: enable non-contig tests
         input = contiguous(input)
         if jacobian_input:
-            res += get_numerical_jacobian(fw, input, input),
+            res += get_numerical_jacobian(fw, input, input, eps=1e-6),
         if jacobian_parameters:
-            res += torch.cat(list(get_numerical_jacobian(fw, input, p) for p in param), 0),
+            res += torch.cat(list(get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param), 0),
         return res
 
     def check_jacobian(self, module, input, jacobian_input=True):
@@ -427,7 +476,7 @@ class NNTestCase(TestCase):
                 fx1 = self._forward_criterion(criterion, input, target)
                 x[i] = original - eps
                 fx2 = self._forward_criterion(criterion, input, target)
-                deriv = (fx1 - fx2) / (2.*eps)
+                deriv = (fx1 - fx2) / (2. * eps)
                 d_x[i] = deriv
                 x[i] = original
 
@@ -441,8 +490,9 @@ class NNTestCase(TestCase):
 
 
 class TestBase(object):
+
     def __init__(self, constructor, constructor_args=tuple(), input_size=None,
-            input=None, desc='', reference_fn=None, fullname=None, **kwargs):
+                 input=None, desc='', reference_fn=None, fullname=None, **kwargs):
         if input_size is None and input is None:
             raise RuntimeError("Specify either an input tensor, or it's size!")
         self.constructor = constructor
@@ -490,6 +540,7 @@ class TestBase(object):
 
 
 class ModuleTest(TestBase):
+
     def __init__(self, *args, **kwargs):
         super(ModuleTest, self).__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
@@ -507,6 +558,8 @@ class ModuleTest(TestBase):
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
             test_case.assertEqual(out, expected_out)
 
+        self.test_noncontig(test_case, module, input)
+
         # TODO: do this with in-memory files as soon as torch.save will support it
         with TemporaryFile() as f:
             test_case._forward(module, input)
@@ -516,6 +569,51 @@ class ModuleTest(TestBase):
             test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
         self._do_test(test_case, module, input)
+
+    def noncontiguize(self, obj):
+        if isinstance(obj, list):
+            return [self.noncontiguize(o) for o in obj]
+        tensor = obj.data if isinstance(obj, Variable) else obj
+        ndim = tensor.dim()
+        noncontig = torch.stack([tensor.clone().zero_(), tensor], ndim).select(ndim, 1)
+        assert noncontig.numel() == 1 or not noncontig.is_contiguous()
+        if isinstance(obj, Variable):
+            return Variable(noncontig, requires_grad=obj.requires_grad)
+        return noncontig
+
+    def test_noncontig(self, test_case, module, input):
+        test_case._zero_grad_parameters(module)
+        test_case._zero_grad_input(input)
+        with freeze_rng_state():
+            output = test_case._forward(module, input)
+            grad_output = output
+            if isinstance(grad_output, Variable):
+                grad_output = grad_output.data.clone()
+            else:
+                grad_output = grad_output.clone()
+                output = output.clone()
+            grad_output.normal_()
+            d_input = deepcopy(test_case._backward(module, input, output, grad_output))
+            d_param = deepcopy(test_case._get_parameters(module)[1])
+
+        nc_input = self.noncontiguize(input)
+        nc_grad_output = self.noncontiguize(grad_output)
+        for contig_i, contig_g in product((True, False), repeat=2):
+            i = input if contig_i else nc_input
+            go = grad_output if contig_g else nc_grad_output
+            test_case._zero_grad_parameters(module)
+            test_case._zero_grad_input(i)
+            with freeze_rng_state():
+                try:
+                    out = test_case._forward(module, i)
+                except Exception:
+                    # Some modules will fail because of non contiguous inputs and we're ok with that
+                    continue
+                grad = test_case._backward(module, i, out, go)
+
+                test_case.assertEqual(out, output)
+                test_case.assertEqual(grad, d_input, 1e-4)
+                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
 
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
@@ -527,8 +625,6 @@ class ModuleTest(TestBase):
 
             cpu_module = self.constructor(*self.constructor_args)
             gpu_module = self.constructor(*self.constructor_args).float().cuda()
-            test_case._zero_grad_parameters(cpu_module)
-            test_case._zero_grad_parameters(gpu_module)
             cpu_param = test_case._get_parameters(cpu_module)
             gpu_param = test_case._get_parameters(gpu_module)
             for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
@@ -538,6 +634,10 @@ class ModuleTest(TestBase):
                     gpu_p = gpu_p.data
                 gpu_p.copy_(cpu_p)
 
+            test_case._zero_grad_input(cpu_input)
+            test_case._zero_grad_input(gpu_input)
+            test_case._zero_grad_parameters(cpu_module)
+            test_case._zero_grad_parameters(gpu_module)
             cpu_output = test_case._forward(cpu_module, cpu_input)
             gpu_output = test_case._forward(gpu_module, gpu_input)
             test_case.assertEqual(cpu_output, gpu_output, 2e-4)
@@ -551,6 +651,8 @@ class ModuleTest(TestBase):
                 test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
                 for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
                     test_case.assertEqual(cpu_d_p, gpu_d_p, 2e-4)
+
+            self.test_noncontig(test_case, gpu_module, gpu_input)
         except NotImplementedError:
             pass
         # TODO: remove this after CUDA scatter_ is implemented
@@ -562,6 +664,7 @@ class ModuleTest(TestBase):
 
 
 class CriterionTest(TestBase):
+
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
         self.target = self._get_target(kwargs['target'])
@@ -584,7 +687,7 @@ class CriterionTest(TestBase):
             if isinstance(target, Variable):
                 target = target.data
             expected_out = self.reference_fn(deepcopy(self._unpack_input(input)),
-                    deepcopy(target), module)
+                                             deepcopy(target), module)
             test_case.assertEqual(out, expected_out)
 
         test_case.check_criterion_jacobian(module, input, self.target)
@@ -607,10 +710,10 @@ class CriterionTest(TestBase):
 
             cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
-            test_case.assertEqual(cpu_output, gpu_output, 2e-4)
+            test_case.assertEqual(cpu_output, gpu_output, 4e-4)
 
             cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target)
             gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target)
-            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 4e-4)
         except NotImplementedError:
             pass

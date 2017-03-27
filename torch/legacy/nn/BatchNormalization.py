@@ -32,6 +32,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class BatchNormalization(Module):
     # expected dimension of input
     nDim = 2
@@ -49,46 +50,48 @@ class BatchNormalization(Module):
 
         self.save_mean = None
         self.save_std = None
+        self._gradOutput = None
 
         if self.affine:
-           self.weight = torch.Tensor(nOutput)
-           self.bias = torch.Tensor(nOutput)
-           self.gradWeight = torch.Tensor(nOutput)
-           self.gradBias = torch.Tensor(nOutput)
-           self.reset()
+            self.weight = torch.Tensor(nOutput)
+            self.bias = torch.Tensor(nOutput)
+            self.gradWeight = torch.Tensor(nOutput)
+            self.gradBias = torch.Tensor(nOutput)
+            self.reset()
         else:
-           self.weight = None
-           self.bias = None
-           self.gradWeight = None
-           self.gradBias = None
+            self.weight = None
+            self.bias = None
+            self.gradWeight = None
+            self.gradBias = None
 
     def reset(self):
         if self.weight is not None:
-           self.weight.uniform_()
+            self.weight.uniform_()
 
         if self.bias is not None:
-           self.bias.zero_()
+            self.bias.zero_()
 
         self.running_mean.zero_()
         self.running_var.fill_(1)
 
     def _checkInputDim(self, input):
         if input.dim() != self.nDim:
-            raise RuntimeError('only mini-batch supported ({}D tensor), got {}D tensor instead'.format(self.nDim, input.dim()))
+            raise RuntimeError(
+                'only mini-batch supported ({}D tensor), got {}D tensor instead'.format(self.nDim, input.dim()))
         if input.size(1) != self.running_mean.nelement():
             raise RuntimeError('got {}-feature tensor, expected {}'.format(input.size(1), self.running_mean.nelement()))
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.is_contiguous():
             if self._input is None:
-                  self._input = input.new()
+                self._input = input.new()
             self._input.resize_as_(input).copy_(input)
             input = self._input
 
         if gradOutput is not None:
             if not gradOutput.is_contiguous():
                 if self._gradOutput is None:
-                      self._gradOutput = gradOutput.new()
+                    self._gradOutput = gradOutput.new()
                 self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
 
@@ -101,10 +104,10 @@ class BatchNormalization(Module):
 
         self.output.resize_as_(input)
         if self.save_mean is None:
-              self.save_mean = input.new()
+            self.save_mean = input.new()
         self.save_mean.resize_as_(self.running_mean)
         if self.save_std is None:
-              self.save_std = input.new()
+            self.save_std = input.new()
         self.save_std.resize_as_(self.running_var)
 
         self._backend.BatchNormalization_updateOutput(
@@ -124,7 +127,6 @@ class BatchNormalization(Module):
 
         return self.output
 
-
     def _backward(self, input, gradOutput, scale, gradInput=None, gradWeight=None, gradBias=None):
         self._checkInputDim(input)
         self._checkInputDim(gradOutput)
@@ -135,8 +137,7 @@ class BatchNormalization(Module):
 
         scale = scale or 1.
         if gradInput is not None:
-           gradInput.resize_as_(gradOutput)
-
+            gradInput.resize_as_(gradOutput)
 
         self._backend.BatchNormalization_backward(
             self._backend.library_state,
@@ -177,15 +178,14 @@ class BatchNormalization(Module):
         # first 5 buffers are not present in the current implementation,
         # but we keep them for cleaning old saved models
         clear(self, [
-           'buffer',
-           'buffer2',
-           'centered',
-           'std',
-           'normalized',
-           '_input',
-           '_gradOutput',
-           'save_mean',
-           'save_std',
+            'buffer',
+            'buffer2',
+            'centered',
+            'std',
+            'normalized',
+            '_input',
+            '_gradOutput',
+            'save_mean',
+            'save_std',
         ])
         return super(BatchNormalization, self).clearState()
-

@@ -255,15 +255,17 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
     const long k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THBlas_(gemm)(
-      't', 'n',
-      n_, m_, k_,
-      1,
-      THTensor_(data)(ones), k_,
-      THTensor_(data)(bias), k_,
-      1,
-      THTensor_(data)(output_n), n_
-    );
+	if (bias) {
+      THBlas_(gemm)(
+        't', 'n',
+        n_, m_, k_,
+        1,
+        THTensor_(data)(ones), k_,
+        THTensor_(data)(bias), k_,
+        1,
+        THTensor_(data)(output_n), n_
+      );
+    }
   }
 
   // Free
@@ -402,8 +404,9 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
   int dT, int dW, int dH,   // stride
   int pT, int pW, int pH,   // padding
   int aT, int aW, int aH,   // extra output adjustment
-  real scale)
+  accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   // number of input & output planes and kernel size is indirectly defined by the gradWeight tensor
   THNN_(VolumetricFullConvolution_shapeCheck)(
         input, gradOutput, gradWeight, gradBias,
@@ -498,15 +501,17 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
     const long k_ = outputDepth * outputHeight * outputWidth;
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
-    THBlas_(gemv)(
-      't',
-      k_, m_,
-      scale,
-      THTensor_(data)(gradOutput_n), k_,
-      THTensor_(data)(ones), 1,
-      1,
-      THTensor_(data)(gradBias), 1
-    );
+    if (gradBias) {
+      THBlas_(gemv)(
+        't',
+        k_, m_,
+        scale,
+        THTensor_(data)(gradOutput_n), k_,
+        THTensor_(data)(ones), 1,
+        1,
+        THTensor_(data)(gradBias), 1
+      );
+    }
   }
 
   // Free

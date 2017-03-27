@@ -11,6 +11,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
+             "bias tensor has to be contiguous");
   THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
                   "2D or 4D weight tensor expected, but got: %s");
 
@@ -69,6 +71,9 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   if (bias) {
     THCUNN_assertSameGPU(state, 2, weight, bias);
   }
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
+
   int freeWeight = 0;
 
   // Params:
@@ -217,6 +222,8 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
 
   // Params
   int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
@@ -328,12 +335,15 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
-           real scale) {
+           accreal scale_) {
 
+  real scale = ScalarConvert<accreal, real>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, columns, ones);
   if (gradBias) {
    THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
   }
+  THArgCheck(THCTensor_(isContiguous)(state, gradWeight), 4,
+             "weight tensor has to be contiguous");
 
   // Params
   int nInputPlane = gradWeight->nDimension == 2 ? gradWeight->size[1]/(kW*kH) : gradWeight->size[1];

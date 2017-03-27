@@ -1,6 +1,4 @@
 import torch
-from torch.autograd import Variable
-from torch.nn import Parameter
 import os
 import weakref
 import multiprocessing
@@ -20,6 +18,7 @@ except ImportError:
 class StorageRef(object):
     # An object with a cdata field which may be set to None. We subclass object
     # instead of using a dict() to support weak references.
+
     def __init__(self, ptr):
         self.cdata = ptr
 
@@ -89,10 +88,10 @@ def rebuild_storage_filename(cls, manager, handle, size):
     return storage._shared_decref()
 
 
-def reubild_storage_cuda(cls, device, handle, size, offset, view_size):
+def rebuild_storage_cuda(cls, device, handle, size, offset, view_size):
     storage = storage_from_cache(cls, handle)
     if storage is not None:
-        return storage._new_view(offset, size)
+        return storage._new_view(offset, view_size)
     torch.cuda._lazy_init()
     storage = cls._new_shared_cuda(device, handle, size, offset, view_size)
     shared_cache[handle] = storage._weak_ref(StorageRef)
@@ -104,7 +103,7 @@ def reduce_storage(storage):
     if storage.is_cuda:
         metadata = storage._share_cuda_()
         cache_key = metadata[1]
-        rebuild = reubild_storage_cuda
+        rebuild = rebuild_storage_cuda
     elif get_sharing_strategy() == 'file_system':
         metadata = storage._share_filename_()
         cache_key = metadata[1]
@@ -124,33 +123,6 @@ def reduce_storage(storage):
     return (rebuild, (type(storage),) + metadata)
 
 
-def reduce_variable(variable):
-    if variable.creator is not None:
-        raise RuntimeError("only leaf Variables can be sent to other processes")
-    rebuild = rebuild_variable
-    if isinstance(variable, Parameter):
-        rebuild = rebuid_parameter
-    variable.grad  # make sure the grad is allocated
-    return rebuild, variable.__getstate__()
-
-
-def rebuild_variable(data, grad, backward_hooks, requires_grad, volatile):
-    var = Variable(data, requires_grad=requires_grad, volatile=volatile)
-    var._grad = grad
-    if backward_hooks is not None:
-        var._backward_hooks = backward_hooks
-    return var
-
-
-def rebuid_parameter(data, grad, backward_hooks, requires_grad, volatile):
-    assert volatile == False
-    param = Parameter(data, requires_grad=requires_grad)
-    param._grad = grad
-    if backward_hooks is not None:
-        param._backward_hooks = backward_hooks
-    return param
-
-
 def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
@@ -159,6 +131,3 @@ def init_reductions():
 
     for t in torch._tensor_classes:
         ForkingPickler.register(t, reduce_tensor)
-
-    ForkingPickler.register(Variable, reduce_variable)
-    ForkingPickler.register(Parameter, reduce_variable)

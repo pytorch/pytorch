@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class TemporalSubSampling(Module):
 
     def __init__(self, inputFrameSize, kW, dW=1):
@@ -20,9 +21,9 @@ class TemporalSubSampling(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kW)
+            stdv = 1. / math.sqrt(self.kW)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)
@@ -39,7 +40,6 @@ class TemporalSubSampling(Module):
             self.inputFrameSize
         )
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput is None:
@@ -66,4 +66,3 @@ class TemporalSubSampling(Module):
             self.dW,
             scale
         )
-
