@@ -44,12 +44,13 @@ class LoadOp final : public Operator<Context> {
         ws_(ws),
         absolute_path_(
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
-        add_prefix_(
-            OperatorBase::GetSingleArgument<string>("add_prefix", "")),
+        add_prefix_(OperatorBase::GetSingleArgument<string>("add_prefix", "")),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
         keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
-        load_all_(OperatorBase::GetSingleArgument<int>("load_all", 0)) {
+        load_all_(OperatorBase::GetSingleArgument<int>("load_all", 0)),
+        allow_incomplete_(
+            OperatorBase::GetSingleArgument<bool>("allow_incomplete", false)) {
     if (InputSize() == 0) {
       CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
       CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
@@ -151,6 +152,11 @@ class LoadOp final : public Operator<Context> {
     VLOG(1) << "Fully loaded " << blob_states.size() << " blobs";
 
     if (loaded_blobs != OutputSize()) {
+      if (allow_incomplete_ && loaded_blobs < OutputSize()) {
+        VLOG(1) << "Loaded " << loaded_blobs << " blobs out of " << OutputSize()
+                << " blobs from db.";
+        return;
+      }
       for (const string& output_name : this->def().output()) {
         if (blob_states.count(output_name) == 0) {
           LOG(ERROR) << "Failed to load blob: " << output_name;
@@ -249,6 +255,7 @@ class LoadOp final : public Operator<Context> {
   string db_type_;
   bool keep_device_;
   bool load_all_;
+  bool allow_incomplete_;
   std::map<string, int> output_indices_;
 };
 
