@@ -370,11 +370,32 @@ class Tensor {
    */
   template <typename T>
   void ShareExternalPointer(T* src, size_t capacity = 0) {
-    ShareExternalPointer(src, TypeMeta::Make<T>(), capacity);
+    ShareExternalPointer(src, capacity, [](void*) -> void {});
+  }
+
+  /**
+   * @brief Shares the data with an externally managed pointer.
+   *
+   * This overload takes a Deleter functor to be called when this tensor is
+   * reallocated or freed.
+   */
+  template <typename T, typename Deleter>
+  void ShareExternalPointer(T* src, size_t capacity, Deleter&& d) {
+    ShareExternalPointer(
+        src, TypeMeta::Make<T>(), capacity, std::forward<Deleter>(d));
   }
 
   void
   ShareExternalPointer(void* src, const TypeMeta& meta, size_t capacity = 0) {
+    ShareExternalPointer(src, meta, capacity, [](void*) -> void {});
+  }
+
+  template <class Deleter>
+  void ShareExternalPointer(
+      void* src,
+      const TypeMeta& meta,
+      size_t capacity,
+      Deleter&& d) {
     meta_ = meta;
     CAFFE_ENFORCE(
         meta_.id(),
@@ -383,7 +404,7 @@ class Tensor {
     CAFFE_ENFORCE(
         size_ > 0,
         "To share data with a raw pointer, you need to set shape first.");
-    data_.reset(src, [](void*)->void {});
+    data_.reset(src, std::forward<Deleter>(d));
     // Sets capacity. If not specified, we will implicitly assume that
     // the capacity is the current size.
     if (capacity) {
