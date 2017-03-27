@@ -80,6 +80,9 @@ class ModelHelperBase(object):
         self.allow_not_known_ops = allow_not_known_ops
         self.skip_sparse_optim = skip_sparse_optim
 
+    def get_name(self):
+        return self.name
+
     def _infer_param_shape(self, param):
         for op in self.param_init_net.Proto().op:
             if str(param) in op.output:

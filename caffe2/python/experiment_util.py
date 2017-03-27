@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import datetime
 import time
 import logging
+import socket
 import abc
 import six
 
@@ -63,6 +64,7 @@ class ModelTrainerLog():
             self.external_loggers = external_loggers
             runtime_args = dict(vars(runtime_args))
             runtime_args['experiment_id'] = self.experiment_id
+            runtime_args['hostname'] = socket.gethostname()
             for logger in self.external_loggers:
                 logger.set_runtime_args(runtime_args)
         else:
