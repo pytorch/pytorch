@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, recurrent
+from caffe2.python import recurrent
 from caffe2.python.cnn import CNNModelHelper
 
 
@@ -64,17 +64,16 @@ def rnn_unidirectional_encoder(
 ):
     """ Unidirectional (forward pass) LSTM encoder."""
 
-    with core.NameScope('', reset=True):
-        outputs, final_hidden_state, _, final_cell_state = recurrent.LSTM(
-            model=model,
-            input_blob=embedded_inputs,
-            seq_lengths=input_lengths,
-            initial_states=(initial_hidden_state, initial_cell_state),
-            dim_in=embedding_size,
-            dim_out=encoder_num_units,
-            scope='encoder',
-            outputs_with_grads=([0] if use_attention else [1, 3]),
-        )
+    outputs, final_hidden_state, _, final_cell_state = recurrent.LSTM(
+        model=model,
+        input_blob=embedded_inputs,
+        seq_lengths=input_lengths,
+        initial_states=(initial_hidden_state, initial_cell_state),
+        dim_in=embedding_size,
+        dim_out=encoder_num_units,
+        scope='encoder',
+        outputs_with_grads=([0] if use_attention else [1, 3]),
+    )
     return outputs, final_hidden_state, final_cell_state
 
 
@@ -90,67 +89,66 @@ def rnn_bidirectional_encoder(
 ):
     """ Bidirectional (forward pass and backward pass) LSTM encoder."""
 
-    with core.NameScope('', reset=True):
-        # Forward pass
-        (
-            outputs_fw,
-            final_hidden_state_fw,
-            _,
-            final_cell_state_fw,
-        ) = recurrent.LSTM(
-            model=model,
-            input_blob=embedded_inputs,
-            seq_lengths=input_lengths,
-            initial_states=(initial_hidden_state, initial_cell_state),
-            dim_in=embedding_size,
-            dim_out=encoder_num_units,
-            scope='forward_encoder',
-            outputs_with_grads=([0] if use_attention else [1, 3]),
-        )
+    # Forward pass
+    (
+        outputs_fw,
+        final_hidden_state_fw,
+        _,
+        final_cell_state_fw,
+    ) = recurrent.LSTM(
+        model=model,
+        input_blob=embedded_inputs,
+        seq_lengths=input_lengths,
+        initial_states=(initial_hidden_state, initial_cell_state),
+        dim_in=embedding_size,
+        dim_out=encoder_num_units,
+        scope='forward_encoder',
+        outputs_with_grads=([0] if use_attention else [1, 3]),
+    )
 
-        # Backward pass
-        reversed_embedded_inputs = model.net.ReversePackedSegs(
-            [embedded_inputs, input_lengths],
-            ['reversed_embedded_inputs'],
-        )
+    # Backward pass
+    reversed_embedded_inputs = model.net.ReversePackedSegs(
+        [embedded_inputs, input_lengths],
+        ['reversed_embedded_inputs'],
+    )
 
-        (
-            outputs_bw,
-            final_hidden_state_bw,
-            _,
-            final_cell_state_bw,
-        ) = recurrent.LSTM(
-            model=model,
-            input_blob=reversed_embedded_inputs,
-            seq_lengths=input_lengths,
-            initial_states=(initial_hidden_state, initial_cell_state),
-            dim_in=embedding_size,
-            dim_out=encoder_num_units,
-            scope='backward_encoder',
-            outputs_with_grads=([0] if use_attention else [1, 3]),
-        )
+    (
+        outputs_bw,
+        final_hidden_state_bw,
+        _,
+        final_cell_state_bw,
+    ) = recurrent.LSTM(
+        model=model,
+        input_blob=reversed_embedded_inputs,
+        seq_lengths=input_lengths,
+        initial_states=(initial_hidden_state, initial_cell_state),
+        dim_in=embedding_size,
+        dim_out=encoder_num_units,
+        scope='backward_encoder',
+        outputs_with_grads=([0] if use_attention else [1, 3]),
+    )
 
-        outputs_bw = model.net.ReversePackedSegs(
-            [outputs_bw, input_lengths],
-            ['outputs_bw'],
-        )
+    outputs_bw = model.net.ReversePackedSegs(
+        [outputs_bw, input_lengths],
+        ['outputs_bw'],
+    )
 
-        # Concatenate forward and backward results
-        outputs, _ = model.net.Concat(
-            [outputs_fw, outputs_bw],
-            ['outputs', 'outputs_dim'],
-            axis=2,
-        )
+    # Concatenate forward and backward results
+    outputs, _ = model.net.Concat(
+        [outputs_fw, outputs_bw],
+        ['outputs', 'outputs_dim'],
+        axis=2,
+    )
 
-        final_hidden_state, _ = model.net.Concat(
-            [final_hidden_state_fw, final_hidden_state_bw],
-            ['final_hidden_state', 'final_hidden_state_dim'],
-            axis=2,
-        )
+    final_hidden_state, _ = model.net.Concat(
+        [final_hidden_state_fw, final_hidden_state_bw],
+        ['final_hidden_state', 'final_hidden_state_dim'],
+        axis=2,
+    )
 
-        final_cell_state, _ = model.net.Concat(
-            [final_cell_state_fw, final_cell_state_bw],
-            ['final_cell_state', 'final_cell_state_dim'],
-            axis=2,
-        )
+    final_cell_state, _ = model.net.Concat(
+        [final_cell_state_fw, final_cell_state_bw],
+        ['final_cell_state', 'final_cell_state_dim'],
+        axis=2,
+    )
     return outputs, final_hidden_state, final_cell_state

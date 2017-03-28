@@ -3,19 +3,24 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import argparse
 import collections
 import logging
 import math
 import numpy as np
+import random
 import time
-import argparse
+import sys
 
 from itertools import izip
 
-from caffe2.python import core, workspace, recurrent
+import caffe2.proto.caffe2_pb2 as caffe2_pb2
+from caffe2.python import core, workspace, recurrent, data_parallel_model
 from caffe2.python.examples import seq2seq_util
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(logging.StreamHandler(sys.stderr))
 
 Batch = collections.namedtuple('Batch', [
     'encoder_inputs',
@@ -97,58 +102,113 @@ def prepare_batch(batch):
 
 
 class Seq2SeqModelCaffe2:
-    def _embedding_encoder(
+
+    def _build_model(
+        self,
+        init_params,
+    ):
+        model = seq2seq_util.ModelHelper(init_params=init_params)
+        self._build_shared(model)
+        self._build_embeddings(model)
+
+        forward_model = seq2seq_util.ModelHelper(init_params=init_params)
+        self._build_shared(forward_model)
+        self._build_embeddings(forward_model)
+
+        if self.num_gpus == 0:
+            loss_blobs = self.model_build_fun(model)
+            model.AddGradientOperators(loss_blobs)
+            self.norm_clipped_grad_update(
+                model,
+                scope='norm_clipped_grad_update'
+            )
+            self.forward_model_build_fun(forward_model)
+
+        else:
+            assert (self.batch_size % self.num_gpus) == 0
+
+            data_parallel_model.Parallelize_GPU(
+                forward_model,
+                input_builder_fun=lambda m: None,
+                forward_pass_builder_fun=self.forward_model_build_fun,
+                param_update_builder_fun=None,
+                devices=range(self.num_gpus),
+            )
+
+            def clipped_grad_update_bound(model):
+                self.norm_clipped_grad_update(
+                    model,
+                    scope='norm_clipped_grad_update',
+                )
+
+            data_parallel_model.Parallelize_GPU(
+                model,
+                input_builder_fun=lambda m: None,
+                forward_pass_builder_fun=self.model_build_fun,
+                param_update_builder_fun=clipped_grad_update_bound,
+                devices=range(self.num_gpus),
+            )
+        self.norm_clipped_sparse_grad_update(
+            model,
+            scope='norm_clipped_sparse_grad_update',
+        )
+        self.model = model
+        self.forward_net = forward_model.net
+
+    def _build_embedding_encoder(
         self,
         model,
-        encoder_type,
-        encoder_params,
         inputs,
         input_lengths,
         vocab_size,
+        embeddings,
         embedding_size,
         use_attention,
+        num_gpus,
+        forward_only=False,
     ):
-        # Initialize the word embeddings that will be learned during training.
-        sqrt3 = math.sqrt(3)
-        encoder_embeddings = model.param_init_net.UniformFill(
-            [],
-            'encoder_embeddings',
-            shape=[vocab_size, embedding_size],
-            min=-sqrt3,
-            max=sqrt3,
-        )
-        model.params.append(encoder_embeddings)
-
-        # Convert inputs to embedded inputs by the embeddings above.
-        embedded_encoder_inputs = model.net.Gather(
-            [encoder_embeddings, inputs],
-            ['embedded_encoder_inputs'],
-        )
-
-        if encoder_type == 'rnn':
-            encoder_num_units = (
-                encoder_params['encoder_layer_configs'][0]['num_units']
+        if num_gpus == 0:
+            embedded_encoder_inputs = model.net.Gather(
+                [embeddings, inputs],
+                ['embedded_encoder_inputs'],
+            )
+        else:
+            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+                embedded_encoder_inputs_cpu = model.net.Gather(
+                    [embeddings, inputs],
+                    ['embedded_encoder_inputs_cpu'],
+                )
+            embedded_encoder_inputs = model.CopyCPUToGPU(
+                embedded_encoder_inputs_cpu,
+                'embedded_encoder_inputs',
             )
 
+        if self.encoder_type == 'rnn':
+            assert len(self.encoder_params['encoder_layer_configs']) == 1
+            encoder_num_units = (
+                self.encoder_params['encoder_layer_configs'][0]['num_units']
+            )
             encoder_initial_cell_state = model.param_init_net.ConstantFill(
                 [],
                 ['encoder_initial_cell_state'],
                 shape=[encoder_num_units],
                 value=0.0,
             )
-
-            encoder_initial_hidden_state = model.param_init_net.ConstantFill(
-                [],
-                'encoder_initial_hidden_state',
-                shape=[encoder_num_units],
-                value=0.0,
+            encoder_initial_hidden_state = (
+                model.param_init_net.ConstantFill(
+                    [],
+                    'encoder_initial_hidden_state',
+                    shape=[encoder_num_units],
+                    value=0.0,
+                )
             )
-
             # Choose corresponding rnn encoder function
-            if encoder_params['use_bidirectional_encoder']:
+            if self.encoder_params['use_bidirectional_encoder']:
                 rnn_encoder_func = seq2seq_util.rnn_bidirectional_encoder
+                encoder_output_dim = 2 * encoder_num_units
             else:
                 rnn_encoder_func = seq2seq_util.rnn_unidirectional_encoder
+                encoder_output_dim = encoder_num_units
 
             (
                 encoder_outputs,
@@ -162,16 +222,19 @@ class Seq2SeqModelCaffe2:
                 encoder_initial_cell_state,
                 embedding_size,
                 encoder_num_units,
-                use_attention
+                use_attention,
             )
-
+            weighted_encoder_outputs = None
         else:
-            raise ValueError('Unsupported encoder type {}'.format(encoder_type))
+            raise ValueError('Unsupported encoder type {}'.format(
+                self.encoder_type))
 
         return (
             encoder_outputs,
+            weighted_encoder_outputs,
             final_encoder_hidden_state,
             final_encoder_cell_state,
+            encoder_output_dim,
         )
 
     def output_projection(
@@ -216,86 +279,108 @@ class Seq2SeqModelCaffe2:
         )
         return output_logits
 
-    def _build_model(
-        self,
-        init_params,
-    ):
-        model = seq2seq_util.ModelHelper(
-            init_params=init_params,
-        )
-
-        self.encoder_inputs = model.net.AddExternalInput('encoder_inputs')
-        self.encoder_lengths = model.net.AddExternalInput('encoder_lengths')
-        self.decoder_inputs = model.net.AddExternalInput('decoder_inputs')
-        self.decoder_lengths = model.net.AddExternalInput('decoder_lengths')
-        self.targets = model.net.AddExternalInput('targets')
-        self.target_weights = model.net.AddExternalInput('target_weights')
-
+    def _build_shared(self, model):
         optimizer_params = self.model_params['optimizer_params']
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+            self.learning_rate = model.AddParam(
+                name='learning_rate',
+                init_value=float(optimizer_params['learning_rate']),
+                trainable=False,
+            )
+            self.global_step = model.AddParam(
+                name='global_step',
+                init_value=0,
+                trainable=False,
+            )
+            self.start_time = model.AddParam(
+                name='start_time',
+                init_value=time.time(),
+                trainable=False,
+            )
+
+    def _build_embeddings(self, model):
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+            sqrt3 = math.sqrt(3)
+            self.encoder_embeddings = model.param_init_net.UniformFill(
+                [],
+                'encoder_embeddings',
+                shape=[
+                    self.source_vocab_size,
+                    self.model_params['encoder_embedding_size'],
+                ],
+                min=-sqrt3,
+                max=sqrt3,
+            )
+            model.params.append(self.encoder_embeddings)
+            self.decoder_embeddings = model.param_init_net.UniformFill(
+                [],
+                'decoder_embeddings',
+                shape=[
+                    self.target_vocab_size,
+                    self.model_params['decoder_embedding_size'],
+                ],
+                min=-sqrt3,
+                max=sqrt3,
+            )
+            model.params.append(self.decoder_embeddings)
+
+    def model_build_fun(self, model, forward_only=False, loss_scale=None):
+        encoder_inputs = model.net.AddExternalInput(
+            workspace.GetNameScope() + 'encoder_inputs',
+        )
+        encoder_lengths = model.net.AddExternalInput(
+            workspace.GetNameScope() + 'encoder_lengths',
+        )
+        decoder_inputs = model.net.AddExternalInput(
+            workspace.GetNameScope() + 'decoder_inputs',
+        )
+        decoder_lengths = model.net.AddExternalInput(
+            workspace.GetNameScope() + 'decoder_lengths',
+        )
+        targets = model.net.AddExternalInput(
+            workspace.GetNameScope() + 'targets',
+        )
+        target_weights = model.net.AddExternalInput(
+            workspace.GetNameScope() + 'target_weights',
+        )
         attention_type = self.model_params['attention']
         assert attention_type in ['none', 'regular']
 
-        self.learning_rate = model.AddParam(
-            name='learning_rate',
-            init_value=float(optimizer_params['learning_rate']),
-            trainable=False,
-        )
-        self.global_step = model.AddParam(
-            name='global_step',
-            init_value=0,
-            trainable=False,
-        )
-        self.start_time = model.AddParam(
-            name='start_time',
-            init_value=time.time(),
-            trainable=False,
+        (
+            encoder_outputs,
+            weighted_encoder_outputs,
+            final_encoder_hidden_state,
+            final_encoder_cell_state,
+            encoder_output_dim,
+        ) = self._build_embedding_encoder(
+            model=model,
+            inputs=encoder_inputs,
+            input_lengths=encoder_lengths,
+            vocab_size=self.source_vocab_size,
+            embeddings=self.encoder_embeddings,
+            embedding_size=self.model_params['encoder_embedding_size'],
+            use_attention=(attention_type != 'none'),
+            num_gpus=self.num_gpus,
+            forward_only=forward_only,
         )
 
-        assert self.num_gpus < 2
-        assert len(self.encoder_params['encoder_layer_configs']) == 1
         assert len(self.model_params['decoder_layer_configs']) == 1
-
-        encoder_num_units = (
-            self.encoder_params['encoder_layer_configs'][0]['num_units']
-        )
         decoder_num_units = (
             self.model_params['decoder_layer_configs'][0]['num_units']
         )
-
-        (
-            encoder_outputs,
-            final_encoder_hidden_state,
-            final_encoder_cell_state,
-        ) = self._embedding_encoder(
-            model=model,
-            encoder_type=self.encoder_type,
-            encoder_params=self.encoder_params,
-            inputs=self.encoder_inputs,
-            input_lengths=self.encoder_lengths,
-            vocab_size=self.source_vocab_size,
-            embedding_size=self.model_params['encoder_embedding_size'],
-            use_attention=(attention_type != 'none'),
-        )
-
-        # For bidirectional RNN, the num of units doubles after encodeing
-        if (
-            self.encoder_type == 'rnn' and
-            self.encoder_params['use_bidirectional_encoder']
-        ):
-            encoder_num_units *= 2
 
         if attention_type == 'none':
             decoder_initial_hidden_state = model.FC(
                 final_encoder_hidden_state,
                 'decoder_initial_hidden_state',
-                encoder_num_units,
+                encoder_output_dim,
                 decoder_num_units,
                 axis=2,
             )
             decoder_initial_cell_state = model.FC(
                 final_encoder_cell_state,
                 'decoder_initial_cell_state',
-                encoder_num_units,
+                encoder_output_dim,
                 decoder_num_units,
                 axis=2,
             )
@@ -316,74 +401,72 @@ class Seq2SeqModelCaffe2:
                 model.param_init_net.ConstantFill(
                     [],
                     'initial_attention_weighted_encoder_context',
-                    shape=[encoder_num_units],
+                    shape=[encoder_output_dim],
                     value=0.0,
                 )
             )
 
-        sqrt3 = math.sqrt(3)
-        decoder_embeddings = model.AddParam(
-            name='decoder_embeddings',
-            init=('UniformFill', dict(
-                shape=[
-                    self.target_vocab_size,
-                    self.model_params['decoder_embedding_size'],
-                ],
-                min=-sqrt3,
-                max=sqrt3,
-            )),
-        )
+        if self.num_gpus == 0:
+            embedded_decoder_inputs = model.net.Gather(
+                [self.decoder_embeddings, decoder_inputs],
+                ['embedded_decoder_inputs'],
+            )
+        else:
+            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+                embedded_decoder_inputs_cpu = model.net.Gather(
+                    [self.decoder_embeddings, decoder_inputs],
+                    ['embedded_decoder_inputs_cpu'],
+                )
+            embedded_decoder_inputs = model.CopyCPUToGPU(
+                embedded_decoder_inputs_cpu,
+                'embedded_decoder_inputs',
+            )
 
-        embedded_decoder_inputs = model.net.Gather(
-            [decoder_embeddings, self.decoder_inputs],
-            ['embedded_decoder_inputs'],
-        )
         # seq_len x batch_size x decoder_embedding_size
-        with core.NameScope('', reset=True):
-            if attention_type == 'none':
-                decoder_outputs, _, _, _ = recurrent.LSTM(
-                    model=model,
-                    input_blob=embedded_decoder_inputs,
-                    seq_lengths=self.decoder_lengths,
-                    initial_states=(
-                        decoder_initial_hidden_state,
-                        decoder_initial_cell_state,
-                    ),
-                    dim_in=self.model_params['decoder_embedding_size'],
-                    dim_out=decoder_num_units,
-                    scope='decoder',
-                    outputs_with_grads=[0],
-                )
-                decoder_output_size = decoder_num_units
-            else:
-                (
-                    decoder_outputs, _, _, _,
-                    attention_weighted_encoder_contexts, _
-                ) = recurrent.LSTMWithAttention(
-                    model=model,
-                    decoder_inputs=embedded_decoder_inputs,
-                    decoder_input_lengths=self.decoder_lengths,
-                    initial_decoder_hidden_state=decoder_initial_hidden_state,
-                    initial_decoder_cell_state=decoder_initial_cell_state,
-                    initial_attention_weighted_encoder_context=(
-                        initial_attention_weighted_encoder_context
-                    ),
-                    encoder_output_dim=encoder_num_units,
-                    encoder_outputs=encoder_outputs,
-                    decoder_input_dim=self.model_params['decoder_embedding_size'],
-                    decoder_state_dim=decoder_num_units,
-                    scope='decoder',
-                    outputs_with_grads=[0, 4],
-                )
-                decoder_outputs, _ = model.net.Concat(
-                    [decoder_outputs, attention_weighted_encoder_contexts],
-                    [
-                        'states_and_context_combination',
-                        '_states_and_context_combination_concat_dims',
-                    ],
-                    axis=2,
-                )
-                decoder_output_size = decoder_num_units + encoder_num_units
+        if attention_type == 'none':
+            decoder_outputs, _, _, _ = recurrent.LSTM(
+                model=model,
+                input_blob=embedded_decoder_inputs,
+                seq_lengths=decoder_lengths,
+                initial_states=(
+                    decoder_initial_hidden_state,
+                    decoder_initial_cell_state,
+                ),
+                dim_in=self.model_params['decoder_embedding_size'],
+                dim_out=decoder_num_units,
+                scope='decoder',
+                outputs_with_grads=[0],
+            )
+            decoder_output_size = decoder_num_units
+        else:
+            (
+                decoder_outputs, _, _, _,
+                attention_weighted_encoder_contexts, _
+            ) = recurrent.LSTMWithAttention(
+                model=model,
+                decoder_inputs=embedded_decoder_inputs,
+                decoder_input_lengths=decoder_lengths,
+                initial_decoder_hidden_state=decoder_initial_hidden_state,
+                initial_decoder_cell_state=decoder_initial_cell_state,
+                initial_attention_weighted_encoder_context=(
+                    initial_attention_weighted_encoder_context
+                ),
+                encoder_output_dim=encoder_output_dim,
+                encoder_outputs=encoder_outputs,
+                decoder_input_dim=self.model_params['decoder_embedding_size'],
+                decoder_state_dim=decoder_num_units,
+                scope='decoder',
+                outputs_with_grads=[0, 4],
+            )
+            decoder_outputs, _ = model.net.Concat(
+                [decoder_outputs, attention_weighted_encoder_contexts],
+                [
+                    'states_and_context_combination',
+                    '_states_and_context_combination_concat_dims',
+                ],
+                axis=2,
+            )
+            decoder_output_size = decoder_num_units + encoder_output_dim
 
         # we do softmax over the whole sequence
         # (max_length in the batch * batch_size) x decoder embedding size
@@ -404,116 +487,194 @@ class Seq2SeqModelCaffe2:
             decoder_softmax_size=self.model_params['decoder_softmax_size'],
         )
         targets, _ = model.net.Reshape(
-            [self.targets],
+            [targets],
             ['targets', 'targets_old_shape'],
             shape=[-1],
         )
         target_weights, _ = model.net.Reshape(
-            [self.target_weights],
+            [target_weights],
             ['target_weights', 'target_weights_old_shape'],
             shape=[-1],
         )
-
-        output_probs, loss_per_word = model.net.SoftmaxWithLoss(
-            [output_logits, targets, target_weights],
-            ['OutputProbs', 'loss_per_word'],
+        output_probs = model.net.Softmax(
+            [output_logits],
+            ['output_probs'],
+            engine=('CUDNN' if self.num_gpus > 0 else None),
         )
-
-        num_words = model.net.ReduceFrontSum(
-            target_weights,
-            'num_words',
+        label_cross_entropy = model.net.LabelCrossEntropy(
+            [output_probs, targets],
+            ['label_cross_entropy'],
         )
-        self.total_loss_scalar = model.net.Mul(
-            [loss_per_word, num_words],
+        weighted_label_cross_entropy = model.net.Mul(
+            [label_cross_entropy, target_weights],
+            'weighted_label_cross_entropy',
+        )
+        total_loss_scalar = model.net.SumElements(
+            [weighted_label_cross_entropy],
             'total_loss_scalar',
         )
-        self.forward_net = model.net.Clone(
-            name=model.net.Name() + '_forward_only',
+        total_loss_scalar_weighted = model.net.Scale(
+            [total_loss_scalar],
+            'total_loss_scalar_weighted',
+            scale=1.0 / self.batch_size,
         )
-        # print loss only in the forward net which evaluates loss after every
-        # epoch
-        self.forward_net.Print([self.total_loss_scalar], [])
+        return [total_loss_scalar_weighted]
 
-        # Note: average over batch.
-        # It is tricky because of two problems:
-        # 1. ReduceFrontSum from 1-D tensor returns 0-D tensor
-        # 2. If you want to multiply 0-D by 1-D tensor
-        # (by scalar batch_size_inverse_tensor),
-        # you need to use broadcasting. But gradient propogation
-        # is broken for op with broadcasting.
-        # total_loss_scalar, _ = model.net.Reshape(
-        #     [total_loss_scalar],
-        #     [total_loss_scalar, 'total_loss_scalar_old_shape'],
-        #     shape=[1],
-        # )
-        batch_size_inverse_tensor = (
-            model.param_init_net.ConstantFill(
-                [],
-                'batch_size_tensor',
-                shape=[],
-                value=1.0 / self.batch_size,
+    def forward_model_build_fun(self, model, loss_scale=None):
+        return self.model_build_fun(
+            model=model,
+            forward_only=True,
+            loss_scale=loss_scale
+        )
+
+    def _calc_norm_ratio(self, model, params, scope, ONE):
+        with core.NameScope(scope):
+            grad_squared_sums = []
+            for i, param in enumerate(params):
+                logger.info(param)
+                grad = (
+                    model.param_to_grad[param]
+                    if not isinstance(
+                        model.param_to_grad[param],
+                        core.GradientSlice,
+                    ) else model.param_to_grad[param].values
+                )
+                grad_squared = model.net.Sqr(
+                    [grad],
+                    'grad_{}_squared'.format(i),
+                )
+                grad_squared_sum = model.net.SumElements(
+                    grad_squared,
+                    'grad_{}_squared_sum'.format(i),
+                )
+                grad_squared_sums.append(grad_squared_sum)
+
+            grad_squared_full_sum = model.net.Sum(
+                grad_squared_sums,
+                'grad_squared_full_sum',
             )
-        )
-        total_loss_scalar_average = model.net.Mul(
-            [self.total_loss_scalar, batch_size_inverse_tensor],
-            ['total_loss_scalar_average'],
-        )
+            global_norm = model.net.Pow(
+                grad_squared_full_sum,
+                'global_norm',
+                exponent=0.5,
+            )
+            clip_norm = model.param_init_net.ConstantFill(
+                [],
+                'clip_norm',
+                shape=[],
+                value=float(self.model_params['max_gradient_norm']),
+            )
+            max_norm = model.net.Max(
+                [global_norm, clip_norm],
+                'max_norm',
+            )
+            norm_ratio = model.net.Div(
+                [clip_norm, max_norm],
+                'norm_ratio',
+            )
+            return norm_ratio
 
-        model.AddGradientOperators([
-            total_loss_scalar_average,
-        ])
+    def _apply_norm_ratio(
+        self, norm_ratio, model, params, learning_rate, scope, ONE
+    ):
+        for param in params:
+            param_grad = model.param_to_grad[param]
+            nlr = model.net.Negative(
+                [learning_rate],
+                'negative_learning_rate',
+            )
+            with core.NameScope(scope):
+                update_coeff = model.net.Mul(
+                    [nlr, norm_ratio],
+                    'update_coeff',
+                    broadcast=1,
+                )
+            if isinstance(param_grad, core.GradientSlice):
+                param_grad_values = param_grad.values
+
+                model.net.ScatterWeightedSum(
+                    [
+                        param,
+                        ONE,
+                        param_grad.indices,
+                        param_grad_values,
+                        update_coeff,
+                    ],
+                    param,
+                )
+            else:
+                model.net.WeightedSum(
+                    [
+                        param,
+                        ONE,
+                        param_grad,
+                        update_coeff,
+                    ],
+                    param,
+                )
+
+    def norm_clipped_grad_update(self, model, scope):
+
+        if self.num_gpus == 0:
+            learning_rate = self.learning_rate
+        else:
+            learning_rate = model.CopyCPUToGPU(self.learning_rate, 'LR')
+
+        params = []
+        for param in model.GetParams(top_scope=True):
+            if param in model.param_to_grad:
+                if not isinstance(
+                    model.param_to_grad[param],
+                    core.GradientSlice,
+                ):
+                    params.append(param)
+
         ONE = model.param_init_net.ConstantFill(
             [],
             'ONE',
             shape=[1],
             value=1.0,
         )
-        logger.info('All trainable variables: ')
+        logger.info('Dense trainable variables: ')
+        norm_ratio = self._calc_norm_ratio(model, params, scope, ONE)
+        self._apply_norm_ratio(
+            norm_ratio, model, params, learning_rate, scope, ONE
+        )
 
-        for param in model.params:
-            param_grad = model.param_to_grad[param]
+    def norm_clipped_sparse_grad_update(self, model, scope):
+        learning_rate = self.learning_rate
+
+        params = []
+        for param in model.GetParams(top_scope=True):
             if param in model.param_to_grad:
-                if isinstance(param_grad, core.GradientSlice):
-                    param_grad_values = param_grad.values
-                    param_grad_values = model.net.Clip(
-                        [param_grad_values],
-                        [param_grad_values],
-                        min=0.0,
-                        max=float(self.model_params['max_grad_value']),
-                    )
-                    model.net.ScatterWeightedSum(
-                        [
-                            param,
-                            ONE,
-                            param_grad.indices,
-                            param_grad_values,
-                            model.net.Negative(
-                                [self.learning_rate],
-                                'negative_learning_rate',
-                            ),
-                        ],
-                        param,
-                    )
-                else:
-                    param_grad = model.net.Clip(
-                        [param_grad],
-                        [param_grad],
-                        min=0.0,
-                        max=float(self.model_params['max_grad_value']),
-                    )
-                    model.net.WeightedSum(
-                        [
-                            param,
-                            ONE,
-                            param_grad,
-                            model.net.Negative(
-                                [self.learning_rate],
-                                'negative_learning_rate',
-                            ),
-                        ],
-                        param,
-                    )
-        self.model = model
+                if isinstance(
+                    model.param_to_grad[param],
+                    core.GradientSlice,
+                ):
+                    params.append(param)
+
+        ONE = model.param_init_net.ConstantFill(
+            [],
+            'ONE',
+            shape=[1],
+            value=1.0,
+        )
+        logger.info('Sparse trainable variables: ')
+        norm_ratio = self._calc_norm_ratio(model, params, scope, ONE)
+        self._apply_norm_ratio(
+            norm_ratio, model, params, learning_rate, scope, ONE
+        )
+
+    def total_loss_scalar(self):
+        if self.num_gpus == 0:
+            return workspace.FetchBlob('total_loss_scalar')
+        else:
+            total_loss = 0
+            for i in range(self.num_gpus):
+                name = 'gpu_{}/total_loss_scalar'.format(i)
+                gpu_loss = workspace.FetchBlob(name)
+                total_loss += gpu_loss
+            return total_loss
 
     def _init_model(self):
         workspace.RunNetOnce(self.model.param_init_net)
@@ -581,9 +742,27 @@ class Seq2SeqModelCaffe2:
         batch,
         forward_only
     ):
-        batch_obj = prepare_batch(batch)
-        for batch_obj_name, batch_obj_value in izip(Batch._fields, batch_obj):
-            workspace.FeedBlob(batch_obj_name, batch_obj_value)
+        if self.num_gpus < 1:
+            batch_obj = prepare_batch(batch)
+            for batch_obj_name, batch_obj_value in izip(
+                Batch._fields,
+                batch_obj,
+            ):
+                workspace.FeedBlob(batch_obj_name, batch_obj_value)
+        else:
+            for i in range(self.num_gpus):
+                gpu_batch = batch[i::self.num_gpus]
+                batch_obj = prepare_batch(gpu_batch)
+                for batch_obj_name, batch_obj_value in izip(
+                    Batch._fields,
+                    batch_obj,
+                ):
+                    name = 'gpu_{}/{}'.format(i, batch_obj_name)
+                    if batch_obj_name in ['encoder_inputs', 'decoder_inputs']:
+                        dev = core.DeviceOption(caffe2_pb2.CPU)
+                    else:
+                        dev = core.DeviceOption(caffe2_pb2.CUDA, i)
+                    workspace.FeedBlob(name, batch_obj_value, device_option=dev)
 
         if forward_only:
             workspace.RunNet(self.forward_net)
@@ -591,7 +770,7 @@ class Seq2SeqModelCaffe2:
             workspace.RunNet(self.model.net)
             self.inc_current_step()
 
-        return workspace.FetchBlob(self.total_loss_scalar)
+        return self.total_loss_scalar()
 
 
 def gen_vocab(corpus, unk_threshold):
@@ -616,79 +795,105 @@ def gen_vocab(corpus, unk_threshold):
     return vocab
 
 
+def get_numberized_sentence(sentence, vocab):
+    numerized_sentence = []
+    for token in sentence.strip().split():
+        if token in vocab:
+            numerized_sentence.append(vocab[token])
+        else:
+            numerized_sentence.append(vocab[UNK])
+    return numerized_sentence
+
+
 def gen_batches(source_corpus, target_corpus, source_vocab, target_vocab,
-                batch_size):
-    batches = []
+                batch_size, max_length):
     with open(source_corpus) as source, open(target_corpus) as target:
-        elems = 0
-        batch = []
+        parallel_sentences = []
         for source_sentence, target_sentence in zip(source, target):
+            numerized_source_sentence = get_numberized_sentence(
+                source_sentence,
+                source_vocab,
+            )
+            numerized_target_sentence = get_numberized_sentence(
+                target_sentence,
+                target_vocab,
+            )
+            if (
+                len(numerized_source_sentence) > 0 and
+                len(numerized_target_sentence) > 0 and
+                (
+                    max_length is None or (
+                        len(numerized_source_sentence) <= max_length and
+                        len(numerized_target_sentence) <= max_length
+                    )
+                )
+            ):
+                parallel_sentences.append((
+                    numerized_source_sentence,
+                    numerized_target_sentence,
+                ))
+    parallel_sentences.sort(key=lambda s_t: (len(s_t[0]), len(s_t[1])))
 
-            # Convert sentence into list of vocabulary indices
-            def get_numberized_sentence(sentence, vocab):
-                sentence_with_id = []
-                for token in sentence.strip().split():
-                    if token in vocab:
-                        sentence_with_id.append(vocab[token])
-                    else:
-                        sentence_with_id.append(vocab[UNK])
-                sentence_with_id.append(vocab[EOS])
-                return sentence_with_id
-
-            batch.append(tuple([get_numberized_sentence(sentence, vocab)
-                                 for vocab, sentence in
-                                 zip([source_vocab, target_vocab],
-                                     [source_sentence, target_sentence])
-                                ]))
-            elems += 1
-            if elems >= batch_size:
-                batches.append(batch)
-                batch = []
-                elems = 0
+    batches, batch = [], []
+    for sentence_pair in parallel_sentences:
+        batch.append(sentence_pair)
+        if len(batch) >= batch_size:
+            batches.append(batch)
+            batch = []
     if len(batch) > 0:
         while len(batch) < batch_size:
             batch.append(batch[-1])
         assert len(batch) == batch_size
         batches.append(batch)
+    random.shuffle(batches)
     return batches
 
 
 def run_seq2seq_model(args, model_params=None):
     source_vocab = gen_vocab(args.source_corpus, args.unk_threshold)
     target_vocab = gen_vocab(args.target_corpus, args.unk_threshold)
-    batches = gen_batches(args.source_corpus, args.target_corpus, source_vocab,
-                          target_vocab, model_params['batch_size'])
+    logger.info('Source vocab size {}'.format(len(source_vocab)))
+    logger.info('Target vocab size {}'.format(len(target_vocab)))
 
-    logger.info('Source vocab size', len(source_vocab))
-    logger.info('Target vocab size', len(target_vocab))
+    batches = gen_batches(args.source_corpus, args.target_corpus, source_vocab,
+                          target_vocab, model_params['batch_size'],
+                          args.max_length)
+    logger.info('Number of training batches {}'.format(len(batches)))
 
     batches_eval = gen_batches(args.source_corpus_eval, args.target_corpus_eval,
                                source_vocab, target_vocab,
-                               model_params['batch_size'])
+                               model_params['batch_size'], args.max_length)
+    logger.info('Number of eval batches {}'.format(len(batches_eval)))
 
     with Seq2SeqModelCaffe2(
         model_params=model_params,
         source_vocab_size=len(source_vocab),
         target_vocab_size=len(target_vocab),
-        num_gpus=0,
+        num_gpus=args.num_gpus,
+        num_cpus=20,
     ) as model_obj:
         model_obj.initialize_from_scratch()
-        for _ in range(args.epochs):
+        for i in range(args.epochs):
+            logger.info('Epoch {}'.format(i))
+            total_loss = 0
             for batch in batches:
-                model_obj.step(
+                total_loss += model_obj.step(
                     batch=batch,
                     forward_only=False,
                 )
-            model_obj.step(
-                # merge all eval batches for scalar loss computation
-                batch=[entry for batch in batches_eval for entry in batch],
-                forward_only=True,
-            )
+            logger.info('\ttraining loss {}'.format(total_loss))
+            total_loss = 0
+            for batch in batches_eval:
+                total_loss += model_obj.step(
+                    batch=batch,
+                    forward_only=False,
+                )
+            logger.info('\teval loss {}'.format(total_loss))
 
 
 def run_seq2seq_rnn_unidirection_with_no_attention(args):
     run_seq2seq_model(args, model_params=dict(
-        attention='none',
+        attention=('regular' if args.use_attention else 'none'),
         decoder_layer_configs=[
             dict(
                 num_units=args.decoder_cell_num_units,
@@ -709,11 +914,12 @@ def run_seq2seq_rnn_unidirection_with_no_attention(args):
         encoder_embedding_size=args.encoder_embedding_size,
         decoder_embedding_size=args.decoder_embedding_size,
         decoder_softmax_size=args.decoder_softmax_size,
-        max_grad_value=args.max_grad_value,
+        max_gradient_norm=args.max_gradient_norm,
     ))
 
 
 def main():
+    random.seed(31415)
     parser = argparse.ArgumentParser(
         description='Caffe2: Seq2Seq Training'
     )
@@ -724,37 +930,43 @@ def main():
     parser.add_argument('--target-corpus', type=str, default=None,
                         help='Path to target corpus in a text file format',
                         required=True)
-    parser.add_argument('--batch-size', type=int, default=500,
+    parser.add_argument('--max-length', type=int, default=None,
+                        help='Maximal lengths of train and eval sentences')
+    parser.add_argument('--batch-size', type=int, default=32,
                         help='Training batch size')
     parser.add_argument('--epochs', type=int, default=10,
                         help='Number of iterations over training data')
-    parser.add_argument('--learning-rate', type=float, default=0.01,
+    parser.add_argument('--learning-rate', type=float, default=0.5,
                         help='Learning rate')
     parser.add_argument('--unk-threshold', type=int, default=50,
                         help='Threshold frequency under which token becomes '
-                        'labelled unknown token')
-    parser.add_argument('--max-grad-value', type=float, default=0.1,
-                        help='Max clip value of gradients at the end of each '
-                        'backward pass')
+                        'labeled unknown token')
+    parser.add_argument('--max-gradient-norm', type=float, default=1.0,
+                        help='Max global norm of gradients at the end of each '
+                        'backward pass. We do clipping to match the number.')
     parser.add_argument('--use-bidirectional-encoder', action='store_true',
                         help='Set flag to use bidirectional recurrent network '
                         'in encoder')
+    parser.add_argument('--use-attention', action='store_true',
+                        help='Set flag to use seq2seq with attention model')
     parser.add_argument('--source-corpus-eval', type=str, default=None,
                         help='Path to source corpus for evaluation in a text '
                         'file format', required=True)
     parser.add_argument('--target-corpus-eval', type=str, default=None,
                         help='Path to target corpus for evaluation in a text '
                         'file format', required=True)
-    parser.add_argument('--encoder-cell-num-units', type=int, default=25,
+    parser.add_argument('--encoder-cell-num-units', type=int, default=256,
                         help='Number of cell units in the encoder layer')
-    parser.add_argument('--decoder-cell-num-units', type=int, default=50,
+    parser.add_argument('--decoder-cell-num-units', type=int, default=512,
                         help='Number of cell units in the decoder layer')
-    parser.add_argument('--encoder-embedding-size', type=int, default=25,
+    parser.add_argument('--encoder-embedding-size', type=int, default=256,
                         help='Size of embedding in the encoder layer')
-    parser.add_argument('--decoder-embedding-size', type=int, default=25,
+    parser.add_argument('--decoder-embedding-size', type=int, default=512,
                         help='Size of embedding in the decoder layer')
-    parser.add_argument('--decoder-softmax-size', type=int, default=25,
+    parser.add_argument('--decoder-softmax-size', type=int, default=128,
                         help='Size of softmax layer in the decoder')
+    parser.add_argument('--num-gpus', type=int, default=0,
+                        help='Number of GPUs for data parallel model')
 
     args = parser.parse_args()
 
