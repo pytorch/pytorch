@@ -275,14 +275,26 @@ bool Pair::write(Op& op) {
   nbytes += iov[ioc].iov_len;
   ioc++;
 
-  int rv = writev(fd_, iov.data(), ioc);
-  if (rv == -1 && errno == EAGAIN) {
-    return false;
+  int rv = 0;
+  for (;;) {
+    rv = writev(fd_, iov.data(), ioc);
+    if (rv == -1) {
+      // EAGAIN happens when there are no more bytes left to read
+      if (errno == EAGAIN) {
+        return false;
+      }
+
+      // Retry on EINTR
+      if (errno == EINTR) {
+        continue;
+      }
+
+      // Unexpected error
+      signalIoFailure(GLOO_ERROR_MSG("writev: ", strerror(errno)));
+    }
+    break;
   }
 
-  if (rv == -1) {
-    signalIoFailure(GLOO_ERROR_MSG("writev: ", strerror(errno)));
-  }
   op.nwritten_ += rv;
   if (rv < nbytes) {
     return false;
