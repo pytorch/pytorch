@@ -8,7 +8,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import numpy as np
 from caffe2.python import \
-    core, device_checker, gradient_checker, test_util, workspace
+    core, device_checker, gradient_checker, test_util, workspace, cnn
 import caffe2.python.hypothesis_test_util as hu
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
@@ -290,6 +290,24 @@ class TestMakeTwoClass(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
                 self.assertTrue(res)
 
+
+class TestNetGradientChecker(test_util.TestCase):
+    def test_net_gradient_checker(self):
+        model = cnn.CNNModelHelper(name="test")
+        const = model.net.AddExternalInputs("const1", "const2")
+        fc = model.FC(dim_in=3, dim_out=4, blob_in="X", blob_out="Y", axis=0)
+        dist = [model.net.SquaredL2Distance([fc, c]) for c in const]
+        losses = [model.net.AveragedLoss(d) for d in dist]  # using two losses here
+
+        workspace.RunNetOnce(model.param_init_net)
+        gradient_checker.NetGradientChecker.Check(
+            model.net,
+            outputs_with_grad=losses,
+            input_values={"X": np.array([1, 2, 3], dtype="float32"),
+                          const[0]: np.array([1, 1, 1, 1], dtype="float32"),
+                          const[1]: np.array([2, 2, 2, 2], dtype="float32")},
+            input_to_check="X",
+        )
 
 if __name__ == '__main__':
     workspace.GlobalInit(["python"])

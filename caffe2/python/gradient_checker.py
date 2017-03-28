@@ -3,6 +3,50 @@ from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
 
 
+class NetGradientChecker(object):
+    @staticmethod
+    def Check(net, outputs_with_grad, input_values,
+              input_to_check, step_size=0.0001, threshold=0.05):
+        assert input_to_check in input_values.keys()
+
+        net_copy = net.Clone(net.Name() + "_copy")
+
+        grad_map = net_copy.AddGradientOperators(outputs_with_grad)
+        for name, value in input_values.items():
+            workspace.blobs[name] = value
+
+        def GetLoss(new_value):
+            workspace.blobs[input_to_check] = new_value
+            workspace.RunNetOnce(net_copy)
+            return sum([
+                workspace.blobs[output]
+                for output in outputs_with_grad
+            ])
+
+        def GetValue(dim, delta):
+            input_value = input_values[input_to_check].copy()
+            input_value.flat[dim] += delta
+            return input_value
+
+        workspace.RunNetOnce(net_copy)
+        analitic_grad = workspace.blobs[grad_map[input_to_check]]
+
+        grad_estimate = np.zeros_like(input_values[input_to_check])
+        for dim in range(input_values[input_to_check].size):
+            pos_loss = GetLoss(GetValue(dim, step_size))
+            neg_loss = GetLoss(GetValue(dim, -step_size))
+            grad_estimate.flat[dim] = (pos_loss - neg_loss) / step_size / 2
+
+        err_msg = "Error in gradient check for net_copy {}: {}".format(
+            net.Name(), net.Proto())
+
+        np.testing.assert_allclose(
+            analitic_grad, grad_estimate,
+            atol=threshold, rtol=threshold,
+            err_msg=err_msg,
+        )
+
+
 class GradientChecker:
     """A gradient checker in Python.
 
