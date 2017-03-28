@@ -47,6 +47,7 @@ class TestMatMul(hu.HypothesisTestCase):
         # Gradient check wrt Y
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
+
 class TestBatchMatMul(hu.HypothesisTestCase):
     @given(C=st.integers(min_value=1, max_value=10),
            M=st.integers(min_value=1, max_value=10),
@@ -55,7 +56,7 @@ class TestBatchMatMul(hu.HypothesisTestCase):
            trans_a=st.booleans(),
            trans_b=st.booleans(),
            **hu.gcs)
-    def test_matmul(self, C, M, K, N, trans_a, trans_b, gc, dc):
+    def test_batch_matmul(self, C, M, K, N, trans_a, trans_b, gc, dc):
         X = np.random.rand(C, M, K).astype(np.float32) - 0.5
         if trans_a:
             X = X.swapaxes(1, 2)
