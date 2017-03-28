@@ -44,7 +44,7 @@ static void THDTensor_(_resize)(THDTensor *self, int nDimension, long *size, lon
     }
 
     totalSize = 1;
-    for (std::ptrdiff_t = self->nDimension - 1; d >= 0; d--) {
+    for (std::ptrdiff_t d = self->nDimension - 1; d >= 0; d--) {
       self->size[d] = size[d];
       if (stride && (stride[d] >= 0)) {
         self->stride[d] = stride[d];

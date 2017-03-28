@@ -228,7 +228,6 @@ public:
   virtual THCTensor& maskedFill(const Tensor& mask, scalar_type value) override;
   virtual THCTensor& maskedCopy(const Tensor& mask, const Tensor& src) override;
   virtual THCTensor& maskedSelect(const Tensor& mask, const Tensor& src) override;
-  virtual ptrdiff_t nonzeroElems() const override;
   // NOTE like in byte comparison operations, the order in nonzero
   // is reversed compared to THC, i.e. tensor->nonzero(subscript) is equivalent
   // to THCTensor_(nonzero)(subscript, tensor)
