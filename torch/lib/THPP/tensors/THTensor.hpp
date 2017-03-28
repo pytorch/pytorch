@@ -236,7 +236,6 @@ public:
   virtual THTensor& maskedFill(const Tensor& mask, scalar_type value) override;
   virtual THTensor& maskedCopy(const Tensor& mask, const Tensor& src) override;
   virtual THTensor& maskedSelect(const Tensor& mask, const Tensor& src) override;
-  virtual ptrdiff_t nonzeroElems() const override;
   // NOTE like in byte comparison operations, the order in nonzero
   // is reversed compared to TH, i.e. tensor->nonzero(subscript) is equivalent
   // to THTensor_(nonzero)(subscript, tensor)

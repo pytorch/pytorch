@@ -401,11 +401,6 @@ auto THCTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THC
 }
 
 template<>
-ptrdiff_t THCTensor<real>::nonzeroElems() const {
-  throw std::runtime_error("THCTensor::nonzeroElems() is not supported yet");
-}
-
-template<>
 auto THCTensor<real>::nonzero(const Tensor& subscript) -> THCTensor& {
   THCTensor_(nonzero)(state, const_long_cast(subscript).tensor, tensor);
   return *this;

@@ -327,11 +327,6 @@ auto THSTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THS
 }
 
 template<>
-ptrdiff_t THSTensor<real>::nonzeroElems() const {
-  throw std::runtime_error("THSTensor::nonzeroElems() not supported");
-}
-
-template<>
 auto THSTensor<real>::nonzero(const Tensor& subscript) -> THSTensor& {
   throw std::runtime_error("THSTensor::nonzero() not supported");
 }

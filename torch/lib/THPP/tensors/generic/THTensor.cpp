@@ -492,21 +492,6 @@ auto THTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THTe
 }
 
 template<>
-ptrdiff_t THTensor<real>::nonzeroElems() const {
-  ptrdiff_t result = 0;
-#ifdef TH_REAL_IS_HALF
-#define IS_NONZERO(val) ((val.x & 0x7fff) != 0)
-#else
-#define IS_NONZERO(val) ((val)!=0)
-#endif
-  TH_TENSOR_APPLY(real, tensor,
-                  if IS_NONZERO(*tensor_data) {
-                    ++result;
-                  });
-  return result;
-}
-
-template<>
 auto THTensor<real>::nonzero(const Tensor& subscript) -> THTensor& {
   THTensor_(nonzero)(const_long_cast(subscript).tensor, tensor);
   return *this;
