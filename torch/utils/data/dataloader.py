@@ -145,7 +145,7 @@ class DataLoaderIter(object):
         return int(math.ceil(len(self.sampler) / float(self.batch_size)))
 
     def __next__(self):
-        if self.num_workers == 0: # same-process loading
+        if self.num_workers == 0:  # same-process loading
             if self.drop and self.samples_remaining < self.batch_size:
                 raise StopIteration
             if self.samples_remaining == 0:
@@ -229,7 +229,7 @@ class DataLoader(object):
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
             (default: 1).
-        drop (bool, optional): set to ``True`` to drop remaining samples 
+        drop (bool, optional): set to ``True`` to drop remaining samples
             that is not enough of a batch size. If False and the size of dataset
             is not divisible by batch size, then the last batch with remaining data
             still to be returned. (default: False)
@@ -244,8 +244,8 @@ class DataLoader(object):
         pin_memory (bool, optional)
     """
 
-    def __init__(self, dataset, batch_size=1, drop=False, shuffle=False, 
-                 sampler=None, num_workers=0, collate_fn=default_collate, 
+    def __init__(self, dataset, batch_size=1, drop=False, shuffle=False,
+                 sampler=None, num_workers=0, collate_fn=default_collate,
                  pin_memory=False):
         self.dataset = dataset
         self.batch_size = batch_size
