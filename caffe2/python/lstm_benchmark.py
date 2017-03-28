@@ -30,10 +30,17 @@ def generate_data(T, shape):
 
     workspace.RunNetOnce(generate_input_init_net)
     generate_input_net = core.Net('generate_input')
-    scratch = generate_input_net.UniformFill([], ["input_scratch"], shape=shape)
-    generate_input_net.EnqueueBlobs([queue, scratch], [scratch])
-    workspace.CreateNet(generate_input_net)
-    workspace.RunNet(generate_input_net.Proto().name, T)
+    generate_input_net.EnqueueBlobs([queue, "scratch"], ["scratch"])
+    np.random.seed(2603)
+
+    for t in range(T):
+        if (t % 50 == 0):
+            print("Generating data {}/{}".format(t, T))
+        # Randomize the seqlength
+        random_shape = [np.random.randint(1, shape[0])] + shape[1:]
+        X = np.random.rand(*random_shape).astype(np.float32)
+        workspace.FeedBlob("scratch", X)
+        workspace.RunNetOnce(generate_input_net.Proto())
     log.info("Finished data generation")
     return queue
 
@@ -140,7 +147,7 @@ def GetArgumentParser():
         "--seq_length",
         type=int,
         default=20,
-        help="Sequence length"
+        help="Max sequence length"
     )
     parser.add_argument(
         "--data_size",
