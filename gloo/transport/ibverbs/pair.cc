@@ -59,8 +59,8 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
     memset(&attr, 0, sizeof(struct ibv_qp_init_attr));
     attr.send_cq = cq_;
     attr.recv_cq = cq_;
-    attr.cap.max_send_wr = Pair::kMaxBuffers;
-    attr.cap.max_recv_wr = Pair::kMaxBuffers;
+    attr.cap.max_send_wr = Pair::kSendCompletionQueueCapacity;
+    attr.cap.max_recv_wr = Pair::kRecvCompletionQueueCapacity;
     attr.cap.max_send_sge = 1;
     attr.cap.max_recv_sge = 1;
     attr.qp_type = IBV_QPT_RC;
@@ -214,7 +214,7 @@ void Pair::receiveMemoryRegion() {
 
   // The work request is serialized and sent to the driver so it
   // doesn't need to be valid after the ibv_post_recv call.
-  struct ibv_recv_wr* bad_wr;
+  struct ibv_recv_wr* bad_wr = nullptr;
   int rv = ibv_post_recv(qp_, &wr, &bad_wr);
   if (rv != 0) {
     signalIoFailure(GLOO_ERROR_MSG("ibv_post_recv: ", rv));
@@ -243,7 +243,7 @@ void Pair::sendMemoryRegion(struct ibv_mr* src, int slot) {
 
   // The work request is serialized and sent to the driver so it
   // doesn't need to be valid after the ibv_post_send call.
-  struct ibv_send_wr* bad_wr;
+  struct ibv_send_wr* bad_wr = nullptr;
   int rv = ibv_post_send(qp_, &wr, &bad_wr);
   if (rv != 0) {
     signalIoFailure(GLOO_ERROR_MSG("ibv_post_send: ", rv));
@@ -279,7 +279,7 @@ void Pair::postReceive() {
 
   struct ibv_recv_wr wr;
   memset(&wr, 0, sizeof(wr));
-  struct ibv_recv_wr* bad_wr;
+  struct ibv_recv_wr* bad_wr = nullptr;
   rv = ibv_post_recv(qp_, &wr, &bad_wr);
   if (rv != 0) {
     signalIoFailure(GLOO_ERROR_MSG("ibv_post_recv: ", rv));

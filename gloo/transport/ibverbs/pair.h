@@ -37,16 +37,30 @@ class Pair : public ::gloo::transport::Pair {
   // Use 3x the maximum number of buffers as the capacity
   // for entries in this pair's completion queue.
   //
-  // There are a maximum of:
+  // For receive completions, there are a maximum of:
   //   - MAX_BUFFERS posted receive work requests to receive memory
-  //     regions from the other side of the pair.
-  //   - MAX_BUFFERS posted send work requests to send memory
-  //     regions to the other side of the pair.
+  //     regions from the other side of the pair (for send buffers).
   //   - MAX_BUFFERS posted receive work requests for RDMA writes
-  //     from the other side of the pair. These requests are posted
-  //     at the same time a buffer's local memory region is sent to
-  //     the other side of the pair.
-  static constexpr auto kCompletionQueueCapacity = 3 * kMaxBuffers;
+  //     from the other side of the pair.
+  //
+  // For send completions, there are a maximum of:
+  //   - MAX_BUFFERS posted send work requests to send memory
+  //     regions to the other side of the pair (for receive buffers).
+  //   - MAX_BUFFERS posted send work requests for RDMA writes
+  //     to the other side of the pair.
+  //
+  // While this sums up to 4x kMaxBuffers work requests, send work
+  // requests can only be posted after receiving the corresponding
+  // memory region from the other side of the pair. This leads to a
+  // maximum of of 3x kMaxBuffers posted work requests at any given
+  // time. However, since the majority can be made up by either
+  // receive work requests or send work requests, we keep the capacity
+  // at 4x kMaxBuffers and allocate half to each type.
+  //
+  static constexpr auto kRecvCompletionQueueCapacity = 2 * kMaxBuffers;
+  static constexpr auto kSendCompletionQueueCapacity = 2 * kMaxBuffers;
+  static constexpr auto kCompletionQueueCapacity =
+    kRecvCompletionQueueCapacity + kSendCompletionQueueCapacity;
 
   // The ibv_req_notify(3) function takes an argument called
   // 'solicited_only' which makes it only trigger a notification for
