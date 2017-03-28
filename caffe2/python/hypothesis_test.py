@@ -1936,6 +1936,45 @@ class TestOperators(hu.HypothesisTestCase):
                                    rtol=1e-4, atol=1e-4)
         check_grad(cos_op)
 
+    @given(pad=st.integers(0, 3),
+           size=st.integers(1, 10),
+           input_channels=st.integers(1, 5),
+           batch_size=st.integers(1, 5),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           mode=st.sampled_from(["constant", "reflect", "edge"]),
+           **hu.gcs)
+    def test_same_pad_image(self, pad, size, input_channels, batch_size, order,
+                            mode, gc, dc):
+        assume(size > pad)
+
+        op = core.CreateOperator(
+            "PadImage",
+            ["X"],
+            ["Y"],
+            pad=pad,
+            mode=mode,
+            order=order,
+        )
+        if order == "NHWC":
+            X = np.random.rand(
+                batch_size, size, size, input_channels).astype(np.float32) - 0.5
+
+            def numpy_pad_ref(x):
+                return (np.pad(
+                    x, ((0, 0), (pad, pad), (pad, pad), (0, 0)), mode),)
+
+        else:
+            X = np.random.rand(
+                batch_size, input_channels, size, size).astype(np.float32) - 0.5
+
+            def numpy_pad_ref(x):
+                return (np.pad(
+                    x, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode),)
+
+        self.assertReferenceChecks(gc, op, [X], numpy_pad_ref)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
     @given(pad_t=st.integers(0, 3),
            pad_l=st.integers(0, 3),
            pad_b=st.integers(0, 3),

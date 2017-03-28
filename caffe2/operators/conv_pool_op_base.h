@@ -90,8 +90,7 @@ class ConvPoolOpBase : public Operator<Context> {
               legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
-      pads_.resize(
-          kernel_.size() * 2, OperatorBase::GetSingleArgument<int>("pad", 0));
+      pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
     } else if (
         OperatorBase::HasArgument("pad_t") &&
         OperatorBase::HasArgument("pad_l") &&
@@ -140,7 +139,7 @@ class ConvPoolOpBase : public Operator<Context> {
             "If global_pooling is set dilation and stride shouldn't be set.");
       }
     }
-    
+
     AllocateAndCopy(kernel_, kernel_device_);
     AllocateAndCopy(stride_, stride_device_);
     AllocateAndCopy(dilation_, dilation_device_);
@@ -611,7 +610,7 @@ protected:
       context_.template Copy<int, CPUContext, Context>(
           vec.size(), vec.data(), tensor.template mutable_data<int>());
  }
- 
+
 #define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
   USE_OPERATOR_FUNCTIONS(Context);                 \
   using ConvPoolOpBase<Context>::pads_;            \
