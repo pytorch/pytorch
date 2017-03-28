@@ -4,10 +4,9 @@ from __future__ import print_function
 
 import numpy as np
 import copy
-from functools import reduce
+from functools import partial, reduce
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
-from functools import partial
 import unittest
 
 from caffe2.python import core, workspace, tt_core, dyndep

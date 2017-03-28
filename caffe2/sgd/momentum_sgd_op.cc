@@ -53,7 +53,7 @@ OPERATOR_SCHEMA(MomentumSGDUpdate)
     .SetDoc(R"DOC(
 
 Performs a momentum SGD update for an input gradient and momentum
-parameters. Concretely, given inputs (grad, m, lr, param) and parameters
+parameters. Concretely, given inputs (grad, m, lr, param) and arguments
 (momentum, nesterov), computes:
 
     if not nesterov:
@@ -72,5 +72,45 @@ but does not perform the parameter update.
 
 )DOC");
 SHOULD_NOT_DO_GRADIENT(MomentumSGDUpdate);
+
+REGISTER_CPU_OPERATOR(
+    SparseMomentumSGDUpdate,
+    SparseMomentumSGDUpdateOp<float, CPUContext>);
+OPERATOR_SCHEMA(SparseMomentumSGDUpdate)
+    .NumInputs(5)
+    .NumOutputs(3)
+    .AllowInplace({{0, 0}, {1, 1}, {3, 2}})
+    .TensorInferenceFunction(
+        [](const OperatorDef& /* unused */, const vector<TensorShape>& in) {
+          vector<TensorShape> out(3);
+          out[0] = in[0];
+          out[1] = in[1];
+          out[2] = in[3];
+          return out;
+        })
+    .SetDoc(R"DOC(
+
+Performs a momentum SGD update analogous to MomentumSGDUpdate, but using a
+GradientSlice and indices into the full param and momentum tables. Both param
+and momentum should be in-place (corresponding inputs and outputs should be the
+same blobs).
+
+
+
+)DOC")
+    .Input(0, "grad", "GradientSlice with gradients for updated indices.")
+    .Input(1, "moment", "Momentum blob, same shape as param.")
+    .Input(2, "lr", "Learning rate.")
+    .Input(3, "param", "Full parameter blob.")
+    .Input(
+        4,
+        "indices",
+        "Indices (in first dimension of param) where updates are performed.")
+    .Output(0, "output_grad", "Adjusted gradient.")
+    .Output(1, "output_moment", "Updated momentum.")
+    .Output(2, "output_param", "Updated parameter")
+    .Arg("momentum", "Momentum hyperparameter.")
+    .Arg("nesterov", "(boolean) Whether to use Nesterov Accelerated Gradient.");
+SHOULD_NOT_DO_GRADIENT(SparseMomentumSGDUpdate);
 }
 }
