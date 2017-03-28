@@ -1034,6 +1034,7 @@ function_tests = [
     (Dot, (), ((L,), (L,)),),
     (Max, (), ((S, S, S),),),
     (Repeat, (torch.Size([2, 3, 1, 2]),), ((S, S, S, S),)),
+    (Cumsum, (0,), ((S, S, S),)),
     (Min, (), ((S, S, S),),),
     (Max, (0,), ((S, S, S),), 'dim'),
     (Min, (0,), ((S, S, S),), 'dim'),
