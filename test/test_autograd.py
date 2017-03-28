@@ -1148,6 +1148,7 @@ method_tests = [
     ('renorm', (S, S, S), (2, 1, 0.5)),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
+    ('cumsum', (S, S, S), (0,)),
     ('addmm', (S, M), ((S, S), (S, M)),),
     ('addmm', (S, M), (0.2, 0.6, (S, S), (S, M)), 'coef'),
     ('addbmm', (S, M), ((S, S, S), (S, S, M)),),

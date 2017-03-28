@@ -480,6 +480,9 @@ class Variable(_C._VariableBase):
             repeats = torch.Size(repeats)
         return Repeat(repeats)(self)
 
+    def cumsum(self, dim):
+        return Cumsum(dim)(self)
+
     def var(self, dim=None, unbiased=True):
         mean = self.mean(dim)
         if dim is None:
