@@ -29,7 +29,7 @@
 
 #include <iostream>
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 #include "caffe2/core/flags.h"
 #include "caffe2/core/init.h"
 

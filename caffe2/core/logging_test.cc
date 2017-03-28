@@ -1,7 +1,7 @@
 #include <algorithm>
 
 #include "caffe2/core/logging.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 

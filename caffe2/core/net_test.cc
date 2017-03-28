@@ -2,7 +2,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 #include "google/protobuf/text_format.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 CAFFE2_DECLARE_bool(caffe2_disable_chaining);
 

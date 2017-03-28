@@ -2,7 +2,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/proto_utils.h"
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 

@@ -3,7 +3,7 @@
 #include <thread>
 
 #include "caffe2/core/timer.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 namespace {

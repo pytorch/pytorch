@@ -1,7 +1,7 @@
 #include <iostream> // NOLINT
 
 #include "caffe2/core/stats.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 namespace {

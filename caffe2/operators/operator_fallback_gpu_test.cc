@@ -2,7 +2,7 @@
 
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 

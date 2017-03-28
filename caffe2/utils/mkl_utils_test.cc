@@ -4,7 +4,7 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/mkl_utils.h"
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #ifdef CAFFE2_HAS_MKL_DNN
 

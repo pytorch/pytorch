@@ -4,7 +4,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 namespace {

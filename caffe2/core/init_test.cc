@@ -2,7 +2,7 @@
 #include <memory>
 
 #include "caffe2/core/init.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 namespace {
