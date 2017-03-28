@@ -940,6 +940,20 @@ def gather_variable(shape, index_dim, max_indices):
     return Variable(index, requires_grad=False)
 
 
+def prod_zeros(dim_size):
+    result = torch.randn(dim_size, dim_size, dim_size)
+    result[0, 1] = 0
+    result[2, 3] = 0
+    result[4, 3] = 0
+    return Variable(result, requires_grad=True)
+
+
+def prod_single_zero(dim_size):
+    result = torch.randn(dim_size, dim_size)
+    result[0, 1] = 0
+    return Variable(result, requires_grad=True)
+
+
 L = 20
 M = 10
 S = 5
@@ -1003,7 +1017,10 @@ function_tests = [
     (Sum, (), ((S, S, S),)),
     (Sum, (1,), ((S, S, S),), 'dim'),
     (Prod, (), ((S, S, S),)),
+    (Prod, (), (prod_zeros(S),), 'zeros'),
+    (Prod, (), (prod_single_zero(S),), 'single_zero'),
     (Prod, (1,), ((S, S, S),), 'dim'),
+    (Prod, (1,), (prod_zeros(S),), 'zeros_dim'),
     (Addmm, (), ((S, M), (S, S), (S, M)),),
     (Addmm, (0.1, 1), ((S, M), (S, S), (S, M)), 'coef'),
     (Addbmm, (), ((S, M), (S, S, S), (S, S, M)),),
@@ -1049,6 +1066,7 @@ function_tests = [
     (Tril, (2,), ((S, S),), 'idx'),
     (Triu, (), ((S, S),)),
     (Triu, (2,), ((S, S),), 'idx'),
+    (Trace, (), ((S, S),)),
     (Clone, (), ((S, M, S),)),
     (Squeeze, (), ((S, 1, M, 1),)),
     (Squeeze, (1,), ((S, 1, M, 1),), 'dim'),
@@ -1153,6 +1171,7 @@ method_tests = [
     ('diag', (M,), (), '1d'),
     ('tril', (M, M), ()),
     ('triu', (M, M), ()),
+    ('trace', (M, M), ()),
     ('clone', (S, M, S), ()),
     ('eq', (S, S, S), ((S, S, S),)),
     ('ne', (S, S, S), ((S, S, S),)),

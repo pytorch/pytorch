@@ -45,7 +45,8 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
     char *bytes = (char *) data;
     int64_t remaining = sizeof(real) * size;
     while (remaining > 0) {
-      ssize_t result = write(fd, bytes, remaining);
+      // we write and read in 1GB blocks to avoid bugs on some OSes
+      ssize_t result = write(fd, bytes, THMin(remaining, 1073741824));
       if (result < 0)
         throw std::system_error(result, std::system_category());
       bytes += result;
@@ -108,7 +109,8 @@ THStorage * THPStorage_(readFileRaw)(int fd, THStorage *_storage)
     char *bytes = (char *) data;
     int64_t remaining = sizeof(real) * storage->size;
     while (remaining > 0) {
-      ssize_t result = read(fd, bytes, remaining);
+      // we write and read in 1GB blocks to avoid bugs on some OSes
+      ssize_t result = read(fd, bytes, THMin(remaining, 1073741824));
       if (result <= 0) // 0 means EOF, which is also an error
         throw std::system_error(result, std::system_category());
       bytes += result;

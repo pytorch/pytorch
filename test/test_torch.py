@@ -419,6 +419,64 @@ class TestTorch(TestCase):
         res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
+    @staticmethod
+    def _test_btrifact(self, cast):
+        a = torch.FloatTensor((((1.3722, -0.9020),
+                                (1.8849, 1.9169)),
+                               ((0.7187, -1.1695),
+                                (-0.0139, 1.3572)),
+                               ((-1.6181, 0.7148),
+                                (1.3728, 0.1319))))
+        a = cast(a)
+        info = cast(torch.IntTensor())
+        LU_data, pivots = a.btrifact(info=info)
+        self.assertEqual(info.abs().sum(), 0)
+        I_U = torch.triu(torch.ones(2, 2)).unsqueeze(0).expand(3, 2, 2).type_as(a).byte()
+        I_L = 1 - I_U
+        a_L = torch.zeros(a.size()).type_as(a)
+        a_U = a_L.clone()
+        a_L[torch.eye(2).unsqueeze(0).expand(3, 2, 2).type_as(a).byte()] = 1.0
+        a_L[I_L] = LU_data[I_L]
+        a_U[I_U] = LU_data[I_U]
+
+        P = torch.eye(2).unsqueeze(0).expand(3, 2, 2).type_as(a)
+        for i in range(3):
+            for j in range(2):
+                k = pivots[i, j] - 1
+                t = P[i, j, :].clone()
+                P[i, j, :] = P[i, k, :]
+                P[i, k, :] = t
+
+        a_ = torch.bmm(P, torch.bmm(a_L, a_U))
+        self.assertEqual(a_, a)
+
+    @skipIfNoLapack
+    def test_btrifact(self):
+        self._test_btrifact(self, lambda t: t)
+
+    @staticmethod
+    def _test_btrisolve(self, cast):
+        a = torch.FloatTensor((((1.3722, -0.9020),
+                                (1.8849, 1.9169)),
+                               ((0.7187, -1.1695),
+                                (-0.0139, 1.3572)),
+                               ((-1.6181, 0.7148),
+                                (1.3728, 0.1319))))
+        b = torch.FloatTensor(((4.02, 6.19),
+                               (-1.56, 4.00),
+                               (9.81, -4.09)))
+        a, b = cast(a), cast(b)
+        info = cast(torch.IntTensor())
+        LU_data, pivots = a.btrifact(info=info)
+        self.assertEqual(info.abs().sum(), 0)
+        x = torch.btrisolve(b, LU_data, pivots)
+        b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
+        self.assertEqual(b_, b)
+
+    @skipIfNoLapack
+    def test_btrisolve(self):
+        self._test_btrisolve(self, lambda t: t)
+
     def test_bmm(self):
         num_batches = 10
         M, N, O = 23, 8, 12
@@ -1030,15 +1088,16 @@ class TestTorch(TestCase):
 
     def test_cat(self):
         SIZE = 10
-        for dim in range(3):
-            x = torch.rand(13, SIZE, SIZE).transpose(0, dim)
-            y = torch.rand(17, SIZE, SIZE).transpose(0, dim)
-            z = torch.rand(19, SIZE, SIZE).transpose(0, dim)
+        for dim in range(-3, 3):
+            pos_dim = dim if dim >= 0 else 3 + dim
+            x = torch.rand(13, SIZE, SIZE).transpose(0, pos_dim)
+            y = torch.rand(17, SIZE, SIZE).transpose(0, pos_dim)
+            z = torch.rand(19, SIZE, SIZE).transpose(0, pos_dim)
 
             res1 = torch.cat((x, y, z), dim)
-            self.assertEqual(res1.narrow(dim, 0, 13), x, 0)
-            self.assertEqual(res1.narrow(dim, 13, 17), y, 0)
-            self.assertEqual(res1.narrow(dim, 30, 19), z, 0)
+            self.assertEqual(res1.narrow(pos_dim, 0, 13), x, 0)
+            self.assertEqual(res1.narrow(pos_dim, 13, 17), y, 0)
+            self.assertEqual(res1.narrow(pos_dim, 30, 19), z, 0)
 
         x = torch.randn(20, SIZE, SIZE)
         self.assertEqual(torch.cat(torch.split(x, 7)), x)
@@ -1048,7 +1107,7 @@ class TestTorch(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-        self.assertRaises(TypeError, lambda: torch.cat([]))
+        self.assertRaises(RuntimeError, lambda: torch.cat([]))
 
     def test_stack(self):
         x = torch.rand(2, 3, 4)

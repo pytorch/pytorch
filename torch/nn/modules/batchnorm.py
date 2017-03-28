@@ -71,8 +71,8 @@ class BatchNorm1d(_BatchNorm):
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
 
     Shape:
-        - Input: :math:`(N, L)` or :math:`(N, C, L)`
-        - Output: :math:`(N, L)` or :math:`(N, C, L)` (same shape as input)
+        - Input: :math:`(N, C)` or :math:`(N, C, L)`
+        - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
     Examples:
         >>> # With Learnable Parameters

@@ -64,6 +64,7 @@ void $name($args)
         'THTensor*': 'thpp::Tensor*',
         'THCTensor*': 'thpp::Tensor*',
         'THIndexTensor*': 'thpp::Tensor*',
+        'THCIndexTensor*': 'thpp::Tensor*',
         'THIndex_t': 'long',
         'accreal': 'double',
     }
@@ -89,8 +90,8 @@ void $name($args)
             base_args = declaration['options'][0]['arguments']
             for option in declaration['options']:
                 for idx, arg in enumerate(option['arguments']):
-                    arg['formal_name'] = base_args[idx]['name']
-                    arg['formal_type'] = base_args[idx]['type']
+                    arg['assign_name'] = base_args[idx]['name']
+                    arg['assign_type'] = base_args[idx]['type']
                     if idx != 1:
                         arg['ignore_check'] = True
         return declarations
@@ -98,11 +99,19 @@ void $name($args)
     def get_arg_accessor(self, arg, option):
         return self.get_type_unpack(arg, option)
 
+    def process_pre_arg_assign(self, pre_arg_assign, option):
+        if option['backend'] == 'cunn':
+            # Enclose arg_assign with CUDA guard
+            pre_arg_assign.append('#ifdef WITH_CUDA')
+        return pre_arg_assign
+
     def process_option_code_template(self, template, option):
-        code = '// fill me in'
+        template = []
+        if option['backend'] == 'cunn':
+            template.append('#endif')
 
         def base_cast(arg, CReal, real):
-            name = arg['formal_name']
+            name = 'arg_' + arg['assign_name']
             type = arg['type']
             if type in self.REAL_TENSOR_TYPES:
                 return ('(TH{CReal}Tensor*){name}->cdata()'
@@ -120,7 +129,7 @@ void $name($args)
         def cast(arg, CReal, real):
             expr = base_cast(arg, CReal, real)
             if arg.get('optional', False):
-                name = arg['formal_name']
+                name = 'arg_' + arg['assign_name']
                 return '{name} ? {expr} : NULL'.format(name=name, expr=expr)
             return expr
 
@@ -135,6 +144,7 @@ void $name($args)
                 name=option['cname'],
                 float_args=',\n'.join(float_args),
                 double_args=',\n'.join(double_args))
+            template.append(code)
 
         elif option['backend'] == 'cunn':
             float_args = []
@@ -150,11 +160,13 @@ void $name($args)
                 float_args=',\n'.join(float_args),
                 double_args=',\n'.join(double_args),
                 half_args=',\n'.join(half_args))
+            template.append(code)
 
-        return [code, '']
+        template.append('')
+        return template
 
     def get_type_unpack(self, arg, option):
-        return Template(arg['name'])
+        return Template(arg.get('assign_name', arg['name']))
 
     def get_type_check(self, arg, option):
         if option['backend'] == 'cunn':
@@ -162,20 +174,20 @@ void $name($args)
         else:
             return Template('!is_cuda')
 
-    def get_formal_args(self, arguments):
-        formal_args = []
+    def get_assign_args(self, arguments):
+        assign_args = []
         for arg in arguments:
             arg = copy.copy(arg)
             new_type = self.INPUT_ARGUMENT_MAP.get(arg['type'])
             if new_type is not None:
                 arg['type'] = new_type
-            formal_args.append(arg)
-        return formal_args
+            assign_args.append(arg)
+        return assign_args
 
     def get_wrapper_template(self, declaration):
-        # get formal arguments string
+        # get assign arguments string
         base_arguments = declaration['options'][0]['arguments']
-        args = self.get_formal_args(base_arguments)
+        args = self.get_assign_args(base_arguments)
         arg_str = ', '.join([arg['type'] + ' ' + arg['name'] for arg in args])
 
         if self.header:
@@ -185,7 +197,7 @@ void $name($args)
             checked_args = []
             for arg in base_arguments:
                 if arg['type'] in tensor_types:
-                    name = arg.get('formal_name', arg['name'])
+                    name = arg.get('assign_name', arg['name'])
                     name_str = name
                     if arg.get('optional', False):
                         name_str = '?' + name_str

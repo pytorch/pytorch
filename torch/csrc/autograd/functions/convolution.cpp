@@ -27,6 +27,23 @@ auto ConvParams::is_dilated() const -> bool {
   return is_dilated;
 }
 
+auto ConvParams::is_output_padding_neg() const -> bool {
+  bool is_non_neg = false;
+  for (int p : output_padding) {
+    is_non_neg |= (p < 0);
+  }
+  return is_non_neg;
+}
+
+auto ConvParams::is_padding_neg() const -> bool {
+  bool is_non_neg = false;
+  for (int p : padding) {
+    is_non_neg |= (p < 0);
+  }
+  return is_non_neg;
+}
+
+
 auto ConvParams::view1d_as_2d() -> void {
   if (stride.size() == 1) {
     stride.insert(stride.begin(), 1);
@@ -88,6 +105,8 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
+  if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
+  if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
   AutoGPU guard(inputs[0]->data->getDevice());
   auto input = inputs[0]->data->contiguous();
@@ -106,7 +125,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000));
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
 #endif
 
   std::unique_ptr<Tensor> output;
@@ -171,6 +190,8 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
 auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
+  if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
+  if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
   AutoGPU guard(input_.data->getDevice());
 
@@ -191,7 +212,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000));
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
 #endif
 
   std::unique_ptr<Tensor> grad_input;

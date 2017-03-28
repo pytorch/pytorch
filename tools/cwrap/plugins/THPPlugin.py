@@ -15,6 +15,7 @@ class THPPlugin(CWrapPlugin):
         'THTensor*': Template('((THPTensor*)$arg)->cdata'),
         'THBoolTensor*': Template('((THPBoolTensor*)$arg)->cdata'),
         'THIndexTensor*': Template('((THPIndexTensor*)$arg)->cdata'),
+        'THIntegerTensor*': Template('((THPIntegerTensor*)$arg)->cdata'),
 
         'THCudaTensor*': Template('((THCPFloatTensor*)$arg)->cdata'),
         'THCudaDoubleTensor*': Template('((THCPDoubleTensor*)$arg)->cdata'),
@@ -51,6 +52,7 @@ class THPPlugin(CWrapPlugin):
         'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
         'THBoolTensor*': Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
         'THIndexTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
+        'THIntegerTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntegerTensorClass'),
 
         'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPDoubleTensorClass'),
@@ -152,6 +154,7 @@ ${cpu}
         'THIntTensor*': _allocate('Int', ALLOCATE_TMPL),
         'THBoolTensor*': _allocate('Byte', ALLOCATE_TMPL, ALLOCATE_CUDA),
         'THIndexTensor*': _allocate('Long', ALLOCATE_TMPL, ALLOCATE_CUDA),
+        'THIntegerTensor*': _allocate('Int', ALLOCATE_TMPL, ALLOCATE_CUDA),
 
         'THSTensor*': _allocate('', ALLOCATE_TMPL, sparse=True),
     }
@@ -166,6 +169,7 @@ ${cpu}
         'THIntTensor*': '" THPModuleStr "IntTensor',
         'THBoolTensor*': '" THPModuleStr "ByteTensor',
         'THIndexTensor*': '" THPModuleStr "LongTensor',
+        'THIntegerTensor*': '" THPModuleStr "IntTensor',
         'THFloatTensor*': '" THPModuleStr "FloatTensor',
         'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
         'THCudaTensor*': 'torch.cuda.FloatTensor',
@@ -178,6 +182,7 @@ ${cpu}
         'double': 'float',
         'accreal': '" RealStr "',
         'bool': 'bool',
+        'const char*': 'bool',  # Can come only from bool option.
     }
 
     OUT_INIT = """
@@ -381,6 +386,7 @@ ${cpu}
         for option in declaration['options']:
             for arg in option['arguments']:
                 if arg['name'] == 'self':
+                    arg['assign_name'] = 'self'
                     arg['name'] = 'source'
         return declaration
 
@@ -430,7 +436,7 @@ ${cpu}
             return self.preprocessor_guard(code, declaration['defined_if'])
         return code
 
-    def process_all_unpacks(self, code, option):
+    def process_all_call_arg(self, code, option):
         return 'LIBRARY_STATE ' + code
 
     def process_all_checks(self, code, option):
@@ -454,7 +460,7 @@ ${cpu}
 
         return code
 
-    def process_option_code_template(self, template, option):
+    def process_pre_arg_assign(self, template, option):
         new_args = []
         for arg in option['arguments']:
             if not option.get('output_provided', True) and arg.get('output'):

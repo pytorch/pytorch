@@ -109,8 +109,6 @@ class NLLLoss(_WeightedLoss):
 class NLLLoss2d(_WeightedLoss):
     r"""This is negative log likehood loss, but for image inputs. It computes NLL loss per-pixel.
 
-    This loss does not support per-class weights
-
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
             If given, has to be a 1D Tensor having as many elements, as there are classes.
@@ -184,11 +182,11 @@ class BCELoss(_WeightedLoss):
     r"""Creates a criterion that measures the Binary Cross Entropy
     between the target and the output:
 
-    ..math:: loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
+    .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
     or in the case of the weights argument being specified:
 
-    ..math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
+    .. math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
     This is used for measuring the error of a reconstruction in for example
     an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.

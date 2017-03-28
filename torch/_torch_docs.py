@@ -4362,3 +4362,50 @@ Example::
     [torch.FloatTensor of size 5]
 
 """)
+
+add_docstr(torch._C.btrifact,
+           """
+btrifact(A, info=None) -> Tensor, IntTensor
+
+Batch LU factorization.
+
+Returns a tuple containing the LU factorization and pivots.
+The optional argument `info` provides information if the
+factorization succeeded for each minibatch example.
+The info values are from dgetrf and a non-zero value indicates an error occurred.
+The specific values are from cublas if cuda is being used, otherwise LAPACK.
+
+Arguments:
+    A (Tensor): tensor to factor.
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A_LU = A.btrifact()
+
+""")
+
+
+add_docstr(torch._C.btrisolve,
+           """
+btrisolve(b, LU_data, LU_pivots) -> Tensor
+
+Batch LU solve.
+
+Returns the LU solve of the linear system Ax = b.
+
+Arguments:
+    b (Tensor): RHS tensor.
+    LU_data (Tensor): Pivoted LU factorization of A from btrifact.
+    LU_pivots (IntTensor): Pivots of the LU factorization.
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(2, 3)
+    >>> A_LU_data, A_LU_pivots, info = torch.btrifact(A)
+    >>> x = b.trisolve(A_LU_data, A_LU_pivots)
+    >>> torch.norm(A.bmm(x.unsqueeze(2)) - b)
+    6.664001874625056e-08
+
+""")

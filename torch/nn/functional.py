@@ -35,7 +35,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv2d(inputs, filters, padding=1)
     """
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
-               _pair(0), groups, torch.backends.cudnn.benchmark)
+               _pair(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -58,7 +58,7 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv1d(inputs, filters)
     """
     f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
-               _single(0), groups, torch.backends.cudnn.benchmark)
+               _single(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -84,14 +84,14 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> F.conv3d(inputs, filters)
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
-               _triple(0), groups, torch.backends.cudnn.benchmark)
+               _triple(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1):
     f = ConvNd(_single(stride), _single(padding), _single(1), True,
-               _single(output_padding), groups, torch.backends.cudnn.benchmark)
+               _single(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -116,7 +116,7 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           added to the output. Can be a single number or a tuple. Default: 0
     """
     f = ConvNd(_pair(stride), _pair(padding), _pair(1), True,
-               _pair(output_padding), groups, torch.backends.cudnn.benchmark)
+               _pair(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -137,7 +137,7 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           tuple (padh x padw). Default: 0
     """
     f = ConvNd(_triple(stride), _triple(padding), _triple(1), True,
-               _triple(output_padding), groups, torch.backends.cudnn.benchmark)
+               _triple(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -294,6 +294,56 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
+def adaptive_max_pool1d(input, output_size, return_indices=False):
+    r"""Applies a 1D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+        return_indices: whether to return pooling indices
+    """
+    return _functions.thnn.AdaptiveMaxPool1d(output_size, return_indices)(input)
+
+
+def adaptive_max_pool2d(input, output_size, return_indices=False):
+    r"""Applies a 2D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+        return_indices: whether to return pooling indices
+    """
+    return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
+
+
+def adaptive_avg_pool1d(input, output_size):
+    r"""Applies a 1D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+    """
+    return _functions.thnn.AdaptiveAvgPool1d(output_size)(input)
+
+
+def adaptive_avg_pool2d(input, output_size):
+    r"""Applies a 2D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+    """
+    return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
+
+
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
@@ -385,7 +435,7 @@ def linear(input, weight, bias=None):
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps)
+    f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -572,3 +622,32 @@ def pad(input, pad, mode='constant', value=0):
             return _functions.thnn.ReplicationPad3d(*pad)(input)
     else:
         raise NotImplementedError("Only 4D and 5D padding is supported for now")
+
+
+# distance
+
+def pairwise_distance(x1, x2, p=2, eps=1e-6):
+    r"""
+    Computes the batchwise pairwise distance between vectors v1,v2:
+
+        .. math ::
+            \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
+
+        Args:
+            x (Tensor): input tensor containing the two input batches
+            p (real): the norm degree. Default: 2
+
+        Shape:
+            - Input: :math:`(N, D)` where `D = vector dimension`
+            - Output: :math:`(N, 1)
+
+        >>> input1 = autograd.Variable(torch.randn(100, 128))
+        >>> input2 = autograd.Variable(torch.randn(100, 128))
+        >>> output = F.pairwise_distance(input1, input2, p=2)
+        >>> output.backward()
+    """
+    assert x1.size() == x2.size(), "Input sizes must be equal."
+    assert x1.dim() == 2, "Input must be a 2D matrix."
+    diff = torch.abs(x1 - x2)
+    out = torch.pow(diff + eps, p).sum(dim=1)
+    return torch.pow(out, 1. / p)

@@ -97,7 +97,7 @@ void THNN_(HardTanh_updateGradInput)(
     }
     else
       TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-        if (*input_data < min_val || *input_data > max_val)
+        if (*input_data <= min_val || *input_data >= max_val)
           *gradInput_data = 0;
         else
           *gradInput_data = *gradOutput_data;
@@ -122,7 +122,7 @@ void THNN_(HardTanh_updateGradInput)(
 #pragma omp parallel for private(i)
       for (i = 0; i < n; i++)
       {
-        if (ptr_input[i] < min_val || ptr_input[i] > max_val)
+        if (ptr_input[i] <= min_val || ptr_input[i] >= max_val)
           ptr_gradInput[i] = 0;
         else
           ptr_gradInput[i] = ptr_gradOutput[i];

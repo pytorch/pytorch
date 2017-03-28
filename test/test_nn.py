@@ -84,9 +84,10 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             test_case.assertNotEqual(input_ip_clone._version, input_version)
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
+            input.grad.data.zero_()
             output.backward(grad)
             output_ip.backward(grad)
-            test_case.assertEqual(output.grad, output_ip.grad)
+            test_case.assertEqual(input.grad, input_ip.grad)
 
         if type(input.data) == torch.LongTensor and TEST_CUDA:
             input = input.cuda()
@@ -457,6 +458,29 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 3)
         self.assertEqual(num_params(s), 3)
 
+    def test_children(self):
+        l1 = nn.Linear(2, 2)
+        l2 = nn.Linear(2, 2)
+        l3 = nn.Linear(2, 2)
+        l4 = nn.Linear(2, 2)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential(l1, l2, l1, l2, subnet)
+        self.assertEqual(list(s.children()), [l1, l2, subnet])
+
+    def test_named_children(self):
+        l1 = nn.Linear(2, 2)
+        l2 = nn.Linear(2, 2)
+        l3 = nn.Linear(2, 2)
+        l4 = nn.Linear(2, 2)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential()
+        s.add_module('layer1', l1)
+        s.add_module('layer2', l2)
+        s.add_module('layer3', l1)
+        s.add_module('layer4', l2)
+        s.add_module('subnet', subnet)
+        self.assertEqual(list(s.named_children()), [('layer1', l1), ('layer2', l2), ('subnet', subnet)])
+
     def test_modules(self):
         class Net(nn.Module):
             def __init__(self):
@@ -469,6 +493,26 @@ class TestNN(NNTestCase):
         n = Net()
         s = nn.Sequential(n, n, n, n)
         self.assertEqual(list(s.modules()), [s, n, l])
+
+    def test_named_modules(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = l
+                self.l2 = l
+                self.param = Variable(torch.Tensor(3, 5))
+                self.block = block
+        l = nn.Linear(10, 20)
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(10, 20)
+        block = nn.Sequential()
+        block.add_module('linear1', l1)
+        block.add_module('linear2', l2)
+        n = Net()
+        s = nn.Sequential(n, n, n, n)
+        self.assertEqual(list(s.named_modules()), [('', s), ('0', n), ('0.l1', l),
+                                                   ('0.block', block), ('0.block.linear1', l1),
+                                                   ('0.block.linear2', l2)])
 
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
@@ -622,8 +666,9 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone())
             norm_before = compute_norm(norm_type)
-            clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
+            self.assertEqual(norm, norm_before)
             self.assertEqual(norm_after, max_norm)
             self.assertLessEqual(norm_after, norm_before)
             compare_scaling(grads)
@@ -634,8 +679,9 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p.grad.data.copy_(g)
             norm_before = compute_norm(norm_type)
-            clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
+            self.assertEqual(norm, norm_before)
             self.assertEqual(norm_before, norm_after)
             self.assertLessEqual(norm_after, max_norm)
             scale = compare_scaling(grads)
@@ -671,14 +717,14 @@ class TestNN(NNTestCase):
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,))
-        gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
 
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
-        gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
     def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
@@ -748,6 +794,20 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_MaxPool3d_indices_cuda(self):
         self._test_maxpool_indices(3, torch.cuda.FloatTensor)
+
+    def test_AdaptiveMaxPool1d_indices(self):
+        self._test_maxpool_indices(1)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_AdaptiveMaxPool1d_indices_cuda(self):
+        self._test_maxpool_indices(1, torch.cuda.FloatTensor)
+
+    def test_AdaptiveMaxPool2d_indices(self):
+        self._test_maxpool_indices(2)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_AdaptiveMaxPool2d_indices_cuda(self):
+        self._test_maxpool_indices(2, torch.cuda.FloatTensor)
 
     def _test_scatter(self, tensor):
         x = Variable(tensor, requires_grad=True)
@@ -1763,6 +1823,11 @@ class TestNN(NNTestCase):
             self.assertEqual(res1, res2)
             self.assertEqual(grad1, grad2)
 
+    def test_pairwise_distance(self):
+        input1 = Variable(torch.randn(4, 4), requires_grad=True)
+        input2 = Variable(torch.randn(4, 4), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
+
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -2422,6 +2487,40 @@ new_module_tests = [
         constructor_args=(None, 4),
         input_size=(1, 2, 4, 4),
         desc='scale'
+    ),
+    dict(
+        module_name='AdaptiveMaxPool1d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5)
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5, 6),
+        desc='single'
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
+        constructor_args=((3, 4),),
+        input=torch.rand(1, 3, 5, 6),
+        desc='tuple'
+    ),
+    dict(
+        module_name='AdaptiveAvgPool1d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5)
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=(3,),
+        input=torch.rand(1, 3, 5, 6),
+        desc='single'
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=((3, 4),),
+        input=torch.rand(1, 3, 5, 6),
+        desc='tuple'
     ),
 ]
 

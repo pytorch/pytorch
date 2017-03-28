@@ -179,10 +179,6 @@ def lbfgs(opfunc, x, config, state=None):
         # directional derivative
         gtd = g.dot(d)  # g * d
 
-        # check that progress can be made along that direction
-        if gtd > -tolX:
-            break
-
         # reset initial guess for step size
         if state['nIter'] == 1:
             tmp1.copy_(g).abs_()
@@ -228,6 +224,10 @@ def lbfgs(opfunc, x, config, state=None):
         if tmp1.sum() <= tolFun:
             # check optimality
             verbose('optimality condition below tolFun')
+            break
+
+        # check that progress can be made along that direction
+        if gtd > -tolX:
             break
 
         tmp1.copy_(d).mul_(t).abs_()

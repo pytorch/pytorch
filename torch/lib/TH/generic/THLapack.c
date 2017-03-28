@@ -17,6 +17,8 @@ TH_EXTERNC void dgesvd_(char *jobu, char *jobvt, int *m, int *n, double *a, int 
 TH_EXTERNC void sgesvd_(char *jobu, char *jobvt, int *m, int *n, float *a, int *lda, float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *info);
 TH_EXTERNC void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info);
 TH_EXTERNC void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
+TH_EXTERNC void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
+TH_EXTERNC void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 TH_EXTERNC void dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, int *lwork, int *info);
 TH_EXTERNC void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int *lwork, int *info);
 TH_EXTERNC void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
@@ -138,6 +140,20 @@ void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info)
   THError("getrf : Lapack library not found in compile time\n");
 #endif
 }
+
+void THLapack_(getrs)(char trans, int n, int nrhs, real *a, int lda, int *ipiv, real *b, int ldb, int *info)
+{
+#ifdef  USE_LAPACK
+#if defined(TH_REAL_IS_DOUBLE)
+  dgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+#else
+  sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+#endif
+#else
+  THError("getrs : Lapack library not found in compile time\n");
+#endif
+}
+
 /* Matrix Inverse */
 void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int lwork, int* info)
 {
