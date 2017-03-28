@@ -375,9 +375,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         )
         inputs = [workspace.FetchBlob(name) for name in op.input]
 
-        print(op.input)
-        print(inputs)
-
         self.assertReferenceChecks(
             hu.cpu_do,
             op,
