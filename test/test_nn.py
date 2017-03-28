@@ -1385,6 +1385,7 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_rnn_fused(self):
 
         def copy_rnn(rnn1, rnn2):
