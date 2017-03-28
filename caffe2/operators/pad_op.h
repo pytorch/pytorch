@@ -39,7 +39,7 @@ class PadImageOp final : public ConvPoolOpBase<Context> {
         "Pooling op does not support stride right now.");
     // Pad op does not use kernel sizes, so we set it to 1 for computing the
     // output size.
-    kernel_[0] = kernel_[1] = 1;
+    kernel_.assign(pads_.size() / 2, 1);
   }
   ~PadImageOp() {}
 
@@ -74,7 +74,7 @@ class PadImageGradientOp final : public ConvPoolOpBase<Context> {
         "Pooling op does not support dilation right now.");
     // Pad op does not use kernel sizes, so we set it to 1 for computing the
     // output size.
-    kernel_[0] = kernel_[1] = 1;
+    kernel_.assign(pads_.size() / 2, 1);
   }
   ~PadImageGradientOp() {}
 
