@@ -544,7 +544,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
 
     CAFFE_ENFORCE_EQ(recurrentInputIds_.size(), recurrentGradients_.size());
-    // See GetRecurrentNetworkGradient to understand offseting here
     for (int i = 0; i < recurrentInputIds_.size(); ++i) {
       // See GetRecurrentNetworkGradient to understand offseting here
       // Outputs of the gradient are inputs of the forward pass.
@@ -562,11 +561,15 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       auto* p = pBlob->template GetMutable<Tensor<Context>>();
 
       if (Input(inputId).ndim() >= 2) {
-        context_.template Copy<T, Context, Context>(
-            Output(outputIdx)->size(),
-            p->template data<T>(),
-            output_data);
+        // Gradient states blob should live. And if it gets changed by the
+        // backward pass, then output should be changed as well. Thus it should
+        // be okay to share data here
+        Output(outputIdx)->template ShareExternalPointer<T>(
+            p->template mutable_data<T>());
       } else {
+        // We need to do a bunch of Adds any way. So lets not worry about
+        // copy / share data here. One way to speed this up could be a kernel
+        // which sums up several tensors together instead of going 1 by 1
         const auto recurrentStateSize = Input(inputId).dim32(0);
         context_.template Copy<T, Context, Context>(
             recurrentStateSize,
