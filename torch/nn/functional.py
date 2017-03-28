@@ -327,8 +327,10 @@ def leaky_relu(input, negative_slope=1e-2, inplace=False):
 def prelu(input, weight):
     return _functions.thnn.PReLU()(input, weight)
 
+
 def grufused(input_gate, hidden_gate, ibias, hbias, hidden):
         return _functions.thnn.GRUFused()(input_gate, hidden_gate, ibias, hbias, hidden)
+
 
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     return _functions.thnn.RReLU(lower, upper, training, inplace)(input)

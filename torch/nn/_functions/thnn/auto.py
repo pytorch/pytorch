@@ -246,7 +246,7 @@ def _generate_function_classes(scope_dict):
         'SmoothL1Criterion': 'SmoothL1Loss',
         'SoftMarginCriterion': 'SoftMarginLoss',
     }
-    
+
     classes_to_generate -= exceptions
     for fn in classes_to_generate:
         update_output = function_by_name[fn + '_updateOutput']

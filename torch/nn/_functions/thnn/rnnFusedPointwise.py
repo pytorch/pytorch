@@ -4,6 +4,7 @@ from torch._thnn import type2backend
 
 from . import _all_functions
 
+
 class GRUFused(Function):
     def forward(self, input_gate, hidden_gate, ibias, hbias, hidden):
         output = input_gate.new()

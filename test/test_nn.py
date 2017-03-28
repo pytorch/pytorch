@@ -1392,6 +1392,7 @@ class TestNN(NNTestCase):
             for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
                 for x, y in zip(x_layer, y_layer):
                     x.data.copy_(y.data)
+
         def check_rnn_grads(rnn1, rnn2):
             for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
                 for x, y in zip(x_layer, y_layer):
@@ -1416,7 +1417,7 @@ class TestNN(NNTestCase):
                 hx = (Variable(hx_val.clone(), requires_grad=True),
                       Variable(hx_val.clone().add(1), requires_grad=True))
                 hx_cuda = (Variable(hx_val.clone().cuda(), requires_grad=True),
-                           Variable(hx_val.clone().cuda().add(1), requires_grad=True) )
+                           Variable(hx_val.clone().cuda().add(1), requires_grad=True))
             else:
                 hx = Variable(hx_val.clone(), requires_grad=True)
                 hx_cuda = Variable(hx_val.clone().cuda(), requires_grad=True)
@@ -1427,8 +1428,13 @@ class TestNN(NNTestCase):
             output2, hy2 = rnn_cuda(inp_cu, hx_cuda)
 
             if is_lstm:
-                torch.autograd.backward([output1, hy1[0], hy1[1]], [grad_output, grad_hy, grad_hy + 1])
-                torch.autograd.backward([output2, hy2[0], hy2[1]], [grad_output.clone().cuda(), grad_hy.clone().cuda(), (grad_hy + 1).cuda()])
+                torch.autograd.backward(
+                    [output1, hy1[0], hy1[1]], [grad_output, grad_hy, grad_hy + 1]
+                )
+                torch.autograd.backward(
+                    [output2, hy2[0], hy2[1]],
+                    [grad_output.clone().cuda(), grad_hy.clone().cuda(), (grad_hy + 1).cuda()]
+                )
             else:
                 torch.autograd.backward([output1, hy1], [grad_output, grad_hy])
                 torch.autograd.backward([output2, hy2], [grad_output.clone().cuda(), grad_hy.clone().cuda()])
@@ -1449,6 +1455,7 @@ class TestNN(NNTestCase):
             rnn = getattr(nn, mode)(30, 20, 2)
             input = Variable(torch.randn(10, 32, 30))
             hidden = Variable(torch.Tensor(2, 32, 20).zero_())
+
             if mode is 'LSTM':
                 hidden = (hidden, hidden)
             output1, hidden1 = rnn(input, hidden)
