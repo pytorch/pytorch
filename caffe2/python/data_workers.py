@@ -30,6 +30,10 @@ To do the actual data loading, one defines a "fetcher function"
 that has call signature
    my_fetch_fun(worker_id, batch_size)
 
+Optionally, one can define a "init function" that is called once before
+threads start, and has call signature:
+   my_init_fun(data_coordinator, global_coordinator)
+
 This function returns a list of numpy arrays corresponding to the different
 input blobs. In the example above, it would return two arrays, one for the
 data blob and another for the labels. These arrays can have arbitrary number
@@ -52,13 +56,18 @@ import threading
 import atexit
 import numpy as np
 import time
+import collections
 
 from caffe2.python import workspace, core, scope
 from caffe2.proto import caffe2_pb2
 
 log = logging.getLogger("data_workers")
 log.setLevel(logging.INFO)
-LOG_INT_SECS = 1200
+LOG_INT_SECS = 60
+
+
+def get_worker_ids(num_workers):
+    return range(0, num_workers)
 
 
 def init_data_input_workers(
@@ -69,6 +78,8 @@ def init_data_input_workers(
     num_worker_threads=2,
     input_source_name="train",
     max_buffered_batches=800,
+    init_fun=None,
+    external_loggers=None,
 ):
     global global_coordinator
     device_option = scope.CurrentDeviceScope()
@@ -83,18 +94,23 @@ def init_data_input_workers(
         device_option,
         scope.CurrentNameScope(),
         input_source_name,
-        global_coordinator.get_queue(input_source_name, max_buffered_batches)
+        global_coordinator.get_queue(input_source_name, max_buffered_batches),
+        init_fun=init_fun,
+        external_loggers=external_loggers,
     )
 
     # Launch fetch worker threads
+    worker_ids = [
+        global_coordinator.get_new_worker_id()
+        for i in range(num_worker_threads)
+    ]
     workers = [
         threading.Thread(
             target=fetcher,
-            name="data_workers fetcher id {}".format(global_coordinator._fetcher_id_seq + i),
-            args=[coordinator, global_coordinator._fetcher_id_seq + i, fetch_fun, batch_size, input_blob_names],
-        ) for i in range(num_worker_threads)
+            name="data_workers fetcher id {}".format(worker_id),
+            args=[coordinator, worker_id, fetch_fun, batch_size, input_blob_names],
+        ) for worker_id in worker_ids
     ]
-    global_coordinator._fetcher_id_seq += num_worker_threads
 
     workers.append(threading.Thread(
         target=enqueuer,
@@ -108,7 +124,8 @@ def init_data_input_workers(
 
 class DataInputCoordinator(object):
     def __init__(self, net, input_blob_names, batch_size,
-                 device_option, namescope, input_source_name, queue):
+                 device_option, namescope, input_source_name, queue,
+                 init_fun=None, external_loggers=None):
         self._net = net
         self._counter = 0
         self._input_blob_names = input_blob_names
@@ -125,9 +142,16 @@ class DataInputCoordinator(object):
         self._inputs = 0
         self._prev_seconds = 0
         self._last_warning = time.time()
+        self._init_fun = init_fun
+        self._metrics = collections.defaultdict(lambda: 0)
+        self._external_loggers = external_loggers
 
     def is_active(self):
         return self._active
+
+    def init(self, global_coordinator):
+        if self._init_fun:
+            self._init_fun(self, global_coordinator)
 
     def _start(self):
         if self._started:
@@ -142,15 +166,18 @@ class DataInputCoordinator(object):
             w.start()
 
     def _stop(self, reason=None):
-        self._active = False
-        if reason is not None:
-            log.error("Data input failed due to an error: {}".format(reason))
+        try:
+            self._active = False
+            if reason is not None:
+                log.error("Data input failed due to an error: {}".format(reason))
 
-        for q in self._queues:
-            workspace.RunOperatorOnce(
-                core.CreateOperator("CloseBlobsQueue", [q], [])
-            )
-        self._started = False
+            for q in self._queues:
+                workspace.RunOperatorOnce(
+                    core.CreateOperator("CloseBlobsQueue", [q], [])
+                )
+            self._started = False
+        finally:
+            self._log_inputs_per_interval(0, force=True)
 
     def _wait_finish(self):
         print("Wait for workers to die")
@@ -212,20 +239,24 @@ class DataInputCoordinator(object):
                 else:
                     cur_batch[j] = np.append(cur_batch[j], chunk_elem, axis=0)
 
-        # Return data over the batch size back to queue
-        if cur_batch[0].shape[0] > self._batch_size:
-            leftover = [c[self._batch_size:] for c in cur_batch]
-            cur_batch = [c[:self._batch_size] for c in cur_batch]
-            try:
-                self._internal_queue.put(leftover, block=False)
-            except Queue.Full:
-                pass
+        start_time = time.time()
+        try:
+            # Return data over the batch size back to queue
+            if cur_batch[0].shape[0] > self._batch_size:
+                leftover = [c[self._batch_size:] for c in cur_batch]
+                cur_batch = [c[:self._batch_size] for c in cur_batch]
+                try:
+                    self._internal_queue.put(leftover, block=False)
+                except Queue.Full:
+                    pass
 
-            assert cur_batch[0].shape[0] == self._batch_size
+                assert cur_batch[0].shape[0] == self._batch_size
 
-        if self.is_active():
-            for b, q, c in zip(self._input_blob_names, self._queues, cur_batch):
-                self._enqueue(b, q, c)
+            if self.is_active():
+                for b, q, c in zip(self._input_blob_names, self._queues, cur_batch):
+                    self._enqueue(b, q, c)
+        finally:
+            self.put_metric('enqueue_time', time.time() - start_time)
 
     def _enqueue(self, blob_name, queue, data_arr):
         '''
@@ -272,30 +303,66 @@ class DataInputCoordinator(object):
             # Add operator to the Caffe2 network to dequeue
             self._net.DequeueBlobs(q, blob_name)
 
-    def _log_inputs_per_interval(self, inputs):
+    def _log_inputs_per_interval(self, inputs, force=False):
         self._inputs += inputs
         current_seconds = time.time()
         delta_seconds = current_seconds - self._prev_seconds
-        if delta_seconds >= LOG_INT_SECS:
+        if delta_seconds >= LOG_INT_SECS or force:
+            inputs_per_sec = int(self._inputs / delta_seconds)
+            qsize = self._internal_queue.qsize()
             print("{}/{}: {} inputs/sec".format(
                 self._input_source_name,
                 self._namescope,
-                int(self._inputs / delta_seconds),
+                inputs_per_sec,
             ))
-            print("-- queue: {} batches".format(self._internal_queue.qsize()))
+            print("-- queue: {} batches".format(qsize))
+            # log and reset perf metrics
+            self.put_metric('inputs_per_sec', inputs_per_sec, False)
+            self.put_metric('queue_size', qsize, False)
+            self.put_metric('time_elapsed', delta_seconds, False)
+            self._log(self._metrics)
+            self._reset_metrics()
             self._inputs = 0
             self._prev_seconds = current_seconds
+
+    def _log(self, metrics):
+        if not self._external_loggers:
+            return
+        for logger in self._external_loggers:
+            try:
+                logger.log(metrics)
+            except Exception as e:
+                print("Failed to call ExternalLogger: {}".format(e))
+
+    def put_metric(self, key, value, count=True):
+        self._metrics[key] += value
+        if count:
+            count_key = '{}_count'.format(key)
+            self._metrics[count_key] += 1
+
+    def _reset_metrics(self):
+        self._metrics = collections.defaultdict(lambda: 0)
 
 
 class GlobalCoordinator(object):
     def __init__(self):
         self._coordinators = []
         self._fetcher_id_seq = 0
+        self._worker_ids = []
         self._queues = {}
         self.register_shutdown_handler()
 
     def add(self, coordinator):
         self._coordinators.append(coordinator)
+
+    def get_new_worker_id(self):
+        worker_id = self._fetcher_id_seq
+        self._worker_ids.append(worker_id)
+        self._fetcher_id_seq += 1
+        return worker_id
+
+    def get_worker_ids(self):
+        return self._worker_ids
 
     def get_queue(self, queue_name, max_buffered_batches):
         assert isinstance(max_buffered_batches, int)
@@ -305,6 +372,7 @@ class GlobalCoordinator(object):
 
     def start(self):
         for c in self._coordinators:
+            c.init(self)
             c._start()
 
     def stop(self):
@@ -329,6 +397,7 @@ global_coordinator = GlobalCoordinator()
 
 def fetcher(coordinator, worker_id, fetch_fun, batch_size, input_blob_names):
     while coordinator.is_active():
+        start_time = time.time()
         try:
             input_data = fetch_fun(worker_id, batch_size)
             if input_data is None:
@@ -350,6 +419,8 @@ def fetcher(coordinator, worker_id, fetch_fun, batch_size, input_blob_names):
             coordinator._stop("Exception in fetcher {}: {}".format(
                 worker_id, e
             ))
+        finally:
+            coordinator.put_metric('fetcher_time', time.time() - start_time)
 
 
 def enqueuer(coordinator):
