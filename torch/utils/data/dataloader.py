@@ -99,6 +99,7 @@ class DataLoaderIter(object):
     def __init__(self, loader):
         self.dataset = loader.dataset
         self.batch_size = loader.batch_size
+        self.drop = loader.drop
         self.collate_fn = loader.collate_fn
         self.sampler = loader.sampler
         self.num_workers = loader.num_workers
@@ -144,8 +145,9 @@ class DataLoaderIter(object):
         return int(math.ceil(len(self.sampler) / float(self.batch_size)))
 
     def __next__(self):
-        if self.num_workers == 0:
-            # same-process loading
+        if self.num_workers == 0: # same-process loading
+            if self.drop and self.samples_remaining < self.batch_size:
+                raise StopIteration
             if self.samples_remaining == 0:
                 raise StopIteration
             indices = self._next_indices()
@@ -227,6 +229,10 @@ class DataLoader(object):
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
             (default: 1).
+        drop (bool, optional): set to ``True`` to drop remaining samples 
+            that is not enough of a batch size. If False and the size of dataset
+            is not divisible by batch size, the last batch with smaller number of 
+            data still to be returned. (default: False)
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: False).
         sampler (Sampler, optional): defines the strategy to draw samples from
@@ -238,10 +244,12 @@ class DataLoader(object):
         pin_memory (bool, optional)
     """
 
-    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
-                 num_workers=0, collate_fn=default_collate, pin_memory=False):
+    def __init__(self, dataset, batch_size=1, drop=False, shuffle=False, 
+                 sampler=None, num_workers=0, collate_fn=default_collate, 
+                 pin_memory=False):
         self.dataset = dataset
         self.batch_size = batch_size
+        self.drop = drop
         self.num_workers = num_workers
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
