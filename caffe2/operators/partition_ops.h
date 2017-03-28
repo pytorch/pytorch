@@ -61,10 +61,6 @@ class PartitionOpBase : public Operator<CPUContext> {
               ", dim ",
               j);
         }
-        CAFFE_ENFORCE(
-            input.meta().copy() == nullptr,
-            "Only primitive types are supported, input ",
-            i);
       }
       raw_datas_[i] = input.raw_data();
       block_sizes_[i] = input.size_from_dim(main_input.ndim());
