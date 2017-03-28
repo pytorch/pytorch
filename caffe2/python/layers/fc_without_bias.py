@@ -5,11 +5,13 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import (ModelLayer, LayerParameter)
+from caffe2.python.layers.sampling_trainable_mixin import SamplingTrainableMixin
+
 import math
 import numpy as np
 
 
-class FCWithoutBias(ModelLayer):
+class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
     def __init__(
         self,
         model,
@@ -57,8 +59,12 @@ class FCWithoutBias(ModelLayer):
             )
         )
 
-    def add_ops(self, net):
+    def _add_ops(self, net, params):
         net.MatMul(
-            self.input_record.field_blobs() + [self.w],
+            self.input_record.field_blobs() + params,
             self.output_schema.field_blobs(), trans_b=1, **self.kwargs
         )
+
+    @property
+    def param_blobs(self):
+        return [self.w]

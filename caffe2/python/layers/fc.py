@@ -8,11 +8,12 @@ from caffe2.python.layers.layers import (
     ModelLayer,
     LayerParameter
 )
+from caffe2.python.layers.sampling_trainable_mixin import SamplingTrainableMixin
 import math
 import numpy as np
 
 
-class FC(ModelLayer):
+class FC(SamplingTrainableMixin, ModelLayer):
 
     def __init__(self, model, input_record, output_dims, weight_init=None,
                  bias_init=None, weight_optim=None, bias_optim=None, name='fc',
@@ -61,6 +62,10 @@ class FC(ModelLayer):
                                                 ),
                 optimizer=bias_optim))
 
-    def add_ops(self, net):
-        net.FC(self.input_record.field_blobs() + [self.w, self.b],
+    def _add_ops(self, net, params):
+        net.FC(self.input_record.field_blobs() + params,
                self.output_schema.field_blobs(), **self.kwargs)
+
+    @property
+    def param_blobs(self):
+        return [self.w, self.b]

@@ -34,6 +34,10 @@ def layer_exists(name):
     return name in _LAYER_REGISTRY
 
 
+def get_layer_class(name):
+    return _LAYER_REGISTRY[name]
+
+
 def create_layer(layer_name, *args, **kwargs):
     return _LAYER_REGISTRY[layer_name](*args, **kwargs)
 
@@ -56,7 +60,7 @@ def _is_request_only_scalar(scalar):
 
 class ModelLayer(object):
 
-    def __init__(self, model, prefix, input_record, tags=set(), **kwargs):
+    def __init__(self, model, prefix, input_record, tags=None, **kwargs):
         self.name = model.next_layer_name(prefix)
         self.model = model
         self.kwargs = kwargs
@@ -69,7 +73,7 @@ class ModelLayer(object):
                 self.request_only = False
                 break
         self.output_schema = None
-        self.tags = set(tags)
+        self.tags = set(tags or set())
         self.tags.update(TagContext.current().tags)
         self.params = []
 
