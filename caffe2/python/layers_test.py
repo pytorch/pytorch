@@ -110,6 +110,87 @@ class TestLayers(test_util.TestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
+    def testSamplingTrain(self):
+        output_dims = 1000
+
+        indices = self.new_record(schema.Scalar((np.int32, (10,))))
+
+        sampled_fc = self.model.SamplingTrain(
+            schema.Struct(
+                ('input', self.model.input_feature_schema.float_features),
+                ('indices', indices),
+            ),
+            "FC",
+            output_dims
+        )
+
+        # Check that we don't add prediction layer into the model
+        self.assertEqual(1, len(self.model.layers))
+
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dims, ))),
+            sampled_fc
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("UniformFill", None, None),
+                OpSpec("UniformFill", None, None),
+            ]
+        )
+
+        sampled_fc_layer = self.model.layers[0]
+
+        gather_w_spec = OpSpec(
+            "Gather",
+            [
+                init_ops[0].output[0],
+                indices(),
+            ],
+            [
+                sampled_fc_layer._prediction_layer.train_param_blobs[0]
+            ]
+        )
+        gather_b_spec = OpSpec(
+            "Gather",
+            [
+                init_ops[1].output[0],
+                indices(),
+            ],
+            [
+                sampled_fc_layer._prediction_layer.train_param_blobs[1]
+            ]
+        )
+        train_fc_spec = OpSpec(
+            "FC",
+            [
+                self.model.input_feature_schema.float_features(),
+            ] + sampled_fc_layer._prediction_layer.train_param_blobs,
+            sampled_fc.field_blobs()
+        )
+
+        self.assertNetContainOps(
+            train_net, [gather_w_spec, gather_b_spec, train_fc_spec])
+
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(
+            predict_net,
+            [
+                OpSpec(
+                    "FC",
+                    [
+                        self.model.input_feature_schema.float_features(),
+                        init_ops[0].output[0],
+                        init_ops[1].output[0],
+                    ],
+                    sampled_fc.field_blobs()
+                )
+            ]
+        )
+
     def testBatchSigmoidCrossEntropyLoss(self):
         input_record = self.new_record(schema.Struct(
             ('label', schema.Scalar((np.float32, (32,)))),
