@@ -231,8 +231,8 @@ class DataLoader(object):
             (default: 1).
         drop (bool, optional): set to ``True`` to drop remaining samples 
             that is not enough of a batch size. If False and the size of dataset
-            is not divisible by batch size, the last batch with smaller number of 
-            data still to be returned. (default: False)
+            is not divisible by batch size, then the last batch with remaining data
+            still to be returned. (default: False)
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: False).
         sampler (Sampler, optional): defines the strategy to draw samples from
