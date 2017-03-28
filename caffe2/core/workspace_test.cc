@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "caffe2/core/operator.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 
 namespace caffe2 {

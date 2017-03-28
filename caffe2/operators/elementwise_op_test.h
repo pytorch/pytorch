@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "caffe2/operators/elementwise_op.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 template <typename Context, typename T>
 void CopyVector(const int N, const T* x, T* y);

@@ -1,7 +1,7 @@
 #include <thread>  // NOLINT
 
 #include "caffe2/utils/simple_queue.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 

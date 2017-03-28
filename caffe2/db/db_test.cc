@@ -7,7 +7,7 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 namespace db {

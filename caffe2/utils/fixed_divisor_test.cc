@@ -1,5 +1,5 @@
 #include "caffe2/utils/fixed_divisor.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #include <random>
 

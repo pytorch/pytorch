@@ -3,7 +3,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/utils/mkl_utils.h"
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #ifdef CAFFE2_HAS_MKL_DNN
 

@@ -14,7 +14,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 CAFFE2_DEFINE_int64(caffe2_test_big_tensor_size, 100000000, "");
 CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);

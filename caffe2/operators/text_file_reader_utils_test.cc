@@ -4,7 +4,7 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/math.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #include "caffe2/operators/text_file_reader_utils.h"
 #include "caffe2/utils/string_utils.h"

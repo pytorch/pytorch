@@ -9,7 +9,7 @@
 #include "caffe2/utils/math.h"
 #include "common/gtest/gtest_extensions.h"
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 CAFFE2_DECLARE_string(caffe_test_root);
 

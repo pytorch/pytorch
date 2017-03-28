@@ -2,7 +2,7 @@
 #include <memory>
 
 #include "caffe2/core/registry.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {

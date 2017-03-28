@@ -1,5 +1,5 @@
 #include "caffe2/utils/proto_utils.h"
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 namespace caffe2 {
 
