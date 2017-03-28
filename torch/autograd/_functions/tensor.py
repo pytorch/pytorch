@@ -601,10 +601,12 @@ class Cumsum(Function):
         return torch.cumsum(input, dim=self.dim)
 
     def backward(self, grad_output):
-        grad_sum = torch.sum(grad_output, dim=self.dim)
-
         grad_input = torch.cumsum(-grad_output, dim=self.dim)
-        grad_input += grad_sum.expand_as(grad_input)
+
+        end_idx = grad_input.size(self.dim) - 1
+        grad_sum = grad_input.select(self.dim, end_idx).clone()
+
+        grad_input -= grad_sum.expand_as(grad_input)
         grad_input += grad_output
         return grad_input
 
