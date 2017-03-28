@@ -135,11 +135,11 @@ Writing new neural network modules, or interfacing with PyTorch's Tensor API was
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
-[or your favorite numpy based libraries such as SciPy](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb).
+[or your favorite numpy based libraries such as SciPy](http://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
 If you want to write your layers in C/C++, we provide an extension API based on
-[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.  
-There is no wrapper code that needs to be written. [You can see an example here](https://github.com/pytorch/extension-ffi).
+[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.
+There is no wrapper code that needs to be written. You can see [a tutorial here](http://pytorch.org/tutorials/advanced/c_extension.html) and [an example here](https://github.com/pytorch/extension-ffi).
 
 
 ## Installation
@@ -210,7 +210,7 @@ should increase shared memory size either with --ipc=host or --shm-size command 
 ## Getting Started
 
 Three pointers to get you started:
-- [Tutorials: notebooks to get you started with understanding and using PyTorch](https://github.com/pytorch/tutorials)
+- [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - The API Reference: [http://pytorch.org/docs/](http://pytorch.org/docs/)
 
