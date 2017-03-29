@@ -137,7 +137,7 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         # operators right away, i.e. if error happens it'll be detected
         # immediately. Other then this - create_x_net should be called.
         layer.add_operators(self.net, self.param_init_net)
-        return layer.get_output_schema()
+        return layer.output_schema
 
     def get_parameter_blobs(self):
         param_blobs = []

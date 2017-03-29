@@ -23,7 +23,7 @@ def generate_eval_net(model):
 
     for layer in model.layers:
         layer.add_operators(
-            eval_net, context=InstantiationContext.PREDICTION)
+            eval_net, context=InstantiationContext.EVAL)
 
     input_schema = model.input_feature_schema + model.trainer_extra_schema
     output_schema = model.output_schema + model.metrics_schema
