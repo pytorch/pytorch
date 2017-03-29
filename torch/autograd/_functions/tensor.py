@@ -604,8 +604,7 @@ class Cumsum(Function):
         grad_input = torch.cumsum(-grad_output, dim=self.dim)
 
         end_idx = grad_input.size(self.dim) - 1
-        index = (slice(None, None),) * self.dim + (slice(end_idx, end_idx + 1),)
-        grad_sum = grad_input.index(index)
+        grad_sum = grad_input.narrow(self.dim, end_idx, 1)
         grad_input -= grad_sum.expand_as(grad_input)
         grad_input += grad_output
         return grad_input
