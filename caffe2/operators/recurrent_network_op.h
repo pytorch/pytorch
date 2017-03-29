@@ -516,20 +516,34 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
         OperatorBase::Input<std::vector<std::shared_ptr<Workspace>>>(
             InputSize() - 1);
+    CAFFE_ENFORCE_GE(stepWorkspaces.size(), seqLen);
 
     accumulateFinalInputGradients();
     for (int32_t t = seqLen - 1; t >= 0; --t) {
+      // We use local workspace for all the blobs which are not a part
+      // of backward links. This way we reuse memory for all the internal
+      // gradient blobs of the backward step net across all the timesteps
+      localWs_.AddParentWorkspace(stepWorkspaces[t].get());
       accumulateInputGradients(t);
       for (const auto& link : links_) {
-        detail::applyLink<T, Context>(link, t, stepWorkspaces[t].get());
+        detail::applyLink<T, Context>(link, t, &localWs_);
       }
-      auto* stepNet_ = stepWorkspaces[t]->GetNet(stepNetDef_.name());
-      if (stepNet_ == nullptr) {
-        stepNet_ = stepWorkspaces[t]->CreateNet(stepNetDef_);
+      // We create different nets in the localWs_.
+      // There is no name clash here as localWs_ is a private
+      // workspace of this operator. The reason for this is that
+      // otherwise if we use the same net at each timestep,
+      // its inputs / outputs won't peak up new blobs after
+      // attaching a new parent using AddParentWorkspace
+      auto old_net_name = stepNetDef_.name();
+      auto net_name = MakeString(old_net_name, "_", t);
+      auto* stepNet = localWs_.GetNet(net_name);
+      if (stepNet == nullptr) {
+        stepNetDef_.set_name(net_name);
+        stepNet = localWs_.CreateNet(stepNetDef_);
+        stepNetDef_.set_name(old_net_name);
       }
-
-      CAFFE_ENFORCE(stepNet_);
-      stepNet_->RunAsync();
+      CAFFE_ENFORCE(stepNet);
+      stepNet->RunAsync();
       accumulateParameterGradients();
     }
 
