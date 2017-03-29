@@ -160,6 +160,8 @@ BLAS and LAPACK Operations
 .. autofunction:: addr
 .. autofunction:: baddbmm
 .. autofunction:: bmm
+.. autofunction:: btrifact
+.. autofunction:: btrisolve                  
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels

@@ -639,7 +639,7 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
 
         Shape:
             - Input: :math:`(N, D)` where `D = vector dimension`
-            - Output: :math:`(N, 1)
+            - Output: :math:`(N, 1)`
 
         >>> input1 = autograd.Variable(torch.randn(100, 128))
         >>> input2 = autograd.Variable(torch.randn(100, 128))

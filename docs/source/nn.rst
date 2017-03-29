@@ -383,6 +383,15 @@ Sparse layers
 .. autoclass:: Embedding
     :members:
 
+Distance functions
+----------------------------------
+
+:hidden:`PairwiseDistance`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: PairwiseDistance
+    :members:
+
 
 Loss functions
 ----------------------------------
@@ -773,6 +782,15 @@ Dropout functions
 ~~~~~~~~~~~~~~~~~
 
 .. autofunction:: dropout
+
+Distance functions
+----------------------------------
+
+:hidden:`pairwise_distance`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pairwise_distance
+
 
 Loss functions
 --------------
