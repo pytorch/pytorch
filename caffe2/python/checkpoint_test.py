@@ -10,6 +10,7 @@ from caffe2.python.dataset import Dataset
 from caffe2.python.pipeline import pipe
 from caffe2.python.checkpoint import (
     CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner)
+from caffe2.python.net_builder import ops
 from caffe2.python.task import Task, Node
 from caffe2.python.test_util import TestCase
 from caffe2.python.dataio import ReaderWithLimit
@@ -18,38 +19,32 @@ import numpy as np
 import shutil
 
 
-def build_job(node_id):
-    all_outputs = []
-    with Job() as job:
-        with Node('reader' + str(node_id)):
-            with job.init_group:
-                init_net = core.Net('init_net' + str(node_id))
-                data_arr = Struct(('val', np.array(range(10))))
-                data = ConstRecord(init_net, data_arr)
-                ds = Dataset(data, name='dataset' + str(node_id))
-                full_reader = ds.reader(init_net)
-                total = init_net.Const([100])
-                Task(step=init_net)
+def build_pipeline(node_id):
+    with Node('reader:%d' % node_id):
+        with Job.current().init_group, Task():
+            data_arr = Struct(('val', np.array(range(10))))
+            data = ConstRecord(ops, data_arr)
+            ds = Dataset(data, name='dataset:%d' % node_id)
+            full_reader = ds.reader(ops)
+            total = ops.Const([100])
 
-            def inc_total(rec):
-                net = core.Net('inc_total' + str(node_id))
-                net.Add([total, rec.val()], [total])
-                return [net]
+        def inc_total(rec):
+            ops.Add([total, rec.val()], [total])
 
-            epoch_reader = ReaderWithLimit(full_reader, num_iter=3)
-            pipe(epoch_reader, processor=inc_total)
-            job.add_stop_signal(epoch_reader.data_finished())
-            all_outputs.append(total)
+        epoch_reader = ReaderWithLimit(full_reader, num_iter=3)
+        pipe(epoch_reader, processor=inc_total)
+        Job.current().add_stop_signal(epoch_reader.data_finished())
+    return [total]
 
-    total_fetcher = Task(step=core.Net('empty'), outputs=all_outputs)
-    return job, total_fetcher
 
 EXPECTED_TOTALS = [103, 115, 136, 145]
 
 
 class TestCheckpoint(TestCase):
     def run_with(self, builder):
-        job, output_fetcher = build_job(node_id=0)
+        with Job() as job:
+            outputs = build_pipeline(node_id=0)
+        output_fetcher = Task(step=core.Net('empty'), outputs=outputs)
 
         def fetch_total(session):
             session.run(output_fetcher)
@@ -101,25 +96,32 @@ class TestCheckpoint(TestCase):
     def test_load_model_from_checkpoints(self):
         try:
             tmpdir = tempfile.mkdtemp()
-            ws = workspace.C.Workspace()
-            session = LocalSession(ws)
-            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
 
             for node_id in range(3):
-                job, output_fetcher = build_job(node_id)
+                ws = workspace.C.Workspace()
+                session = LocalSession(ws)
+                checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+                with Job() as job:
+                    build_pipeline(node_id)
                 compiled_job = job.compile(LocalSession)
                 job_runner = JobRunner(compiled_job, checkpoint)
                 num_epochs = job_runner(session)
                 self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
-            # There are 44 blobs after finishing up the job runner.
-            self.assertEquals(len(ws.blobs), 44)
+                # There are 16 blobs after finishing up the job runner.
+                self.assertEquals(len(ws.blobs), 16)
 
             ws = workspace.C.Workspace()
             session = LocalSession(ws)
             self.assertEquals(len(ws.blobs), 0)
-            model_blob_names = ['init_net0/GivenTensorInt64Fill:0',
-                                'init_net1/GivenTensorInt64Fill:0']
+            model_blob_names = ['reader:1/task/GivenTensorInt64Fill:0',
+                                'reader:2/task/GivenTensorInt64Fill:0']
+            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+            with Job() as job:
+                for node_id in range(3):
+                    build_pipeline(node_id)
+            compiled_job = job.compile(LocalSession)
+            job_runner = JobRunner(compiled_job, checkpoint)
             job_runner.load_blobs_from_checkpoints(blob_names=model_blob_names,
                                                    epoch=1, session=session)
             # In addition to the two model blobs, we also have 3 output blobs
