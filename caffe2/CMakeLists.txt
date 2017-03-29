@@ -34,6 +34,13 @@ add_subdirectory(sgd)
 # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
 add_subdirectory(utils)
 
+# Advanced: if we have white list specified, we will do intersections for all
+# main lib srcs.
+if (CAFFE2_WHITELISTED_FILES)
+  caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
+  caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
+endif()
+
 # Debug messages - if you want to get a list of source files, enable the
 # following.
 if (FALSE)

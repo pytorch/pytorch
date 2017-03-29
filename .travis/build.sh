@@ -25,8 +25,7 @@ elif [[ $TRAVIS_OS_NAME == 'osx' ]]; then
   cmake .. \
       -DCMAKE_VERBOSE_MAKEFILE=ON \
       -DUSE_OPENCV=OFF \
-      -DUSE_NNPACK=ON \
-      && make
+  && make
 else
 #*************#
 # Linux build #
@@ -35,11 +34,11 @@ else
     cmake .. \
         -DCMAKE_VERBOSE_MAKEFILE=ON \
         -DBLAS=MKL \
-        -DUSE_NNPACK=ON \
-        && make
+        -DUSE_CUDA=OFF \
+    && make
   else
     cmake .. \
         -DCMAKE_VERBOSE_MAKEFILE=ON \
-        -DUSE_NNPACK=ON && make
+    && make
   fi
 fi
