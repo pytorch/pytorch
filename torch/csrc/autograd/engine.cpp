@@ -67,6 +67,7 @@ struct BackwardTask {
 };
 
 auto ReadyQueue::push_front(FunctionTask item) -> void {
+  fprintf(stderr, "pushed task for %s\n", item.fn->name().c_str());
   {
     std::lock_guard<std::mutex> lock(mutex);
     ++item.base->outstanding_tasks;
@@ -76,7 +77,9 @@ auto ReadyQueue::push_front(FunctionTask item) -> void {
 }
 
 auto ReadyQueue::pop_back() -> FunctionTask {
+  fprintf(stderr, "acquiring pop_back mutex\n");
   std::unique_lock<std::mutex> lock(mutex);
+  fprintf(stderr, "waiting for tasks\n");
   not_empty.wait(lock, [this]{ return !queue.empty(); });
   auto task = std::move(queue.back()); queue.pop_back();
   return task;
@@ -98,7 +101,13 @@ auto Engine::thread_main(ReadyQueue& queue) -> void {
       }
     }
     if (--task.base->outstanding_tasks == 0) {
-      std::lock_guard<std::mutex> lock(task.base->mutex);
+      fprintf(stderr, "notifying main thread\n");
+      if (bool locked = task.base->mutex.try_lock()) {
+        fprintf(stderr, "mutex wasn't locked\n");
+        task.base->mutex.unlock();
+      } else {
+        fprintf(stderr, "mutex was locked\n");
+      }
       task.base->not_done.notify_all();
     }
   }
@@ -140,6 +149,8 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     fn.releaseVariables();
   }
 
+  fprintf(stderr, "evaluating %s\n", fn.name().c_str());
+
   if (grad_inputs.size() != fn.previous_functions.size()) {
     std::stringstream ss;
     ss << "Function '" << fn.name() << "' returned an invalid number of gradients - expected ";
@@ -165,6 +176,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     }
 
     std::lock_guard<std::mutex> lock(task.base->mutex);
+    fprintf(stderr, "acquired base lock\n");
     if (auto var = dynamic_cast<Variable*>(prev_fn.get())) {
       if (!grad_input) {
         // NOTE: grad_input can be NULL if the function returns None for a
@@ -212,7 +224,9 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
         not_ready.erase(not_ready_it);
       }
     }
+    fprintf(stderr, "freeing base lock\n");
   }
+  fprintf(stderr, "done.freeing base lock\n");
 }
 
 /** Finds all stochastic functions and appends them to the queue */
@@ -308,17 +322,21 @@ auto Engine::find_creators(const variable_list& variables,
 auto Engine::backward(const variable_list& variables,
                       tensor_list& grad_variables,
                       bool retain_variables) -> void {
+  fprintf(stderr, "backward starts\n===========================\n");
   static std::once_flag once_flag;
   std::call_once(once_flag, &Engine::start_threads, this);
 
   BackwardTask backward_task(retain_variables);
   std::unique_lock<std::mutex> lock(backward_task.mutex);
+  fprintf(stderr, "mutex acquired\n");
 
   // Find the unique creators and backprop into variables which don't have creators.
   auto creators = find_creators(variables, grad_variables, backward_task);
+  fprintf(stderr, "creators found\n");
 
   // Search the graph and find all stochastic functions. Append them to the queue.
   find_stochastic_functions(creators, backward_task);
+  fprintf(stderr, "stochasic functions found\n");
 
   if (!backward_task.node_requires_grad) {
     throw std::runtime_error(
@@ -327,11 +345,15 @@ auto Engine::backward(const variable_list& variables,
 
   // Now compute the dependencies for each function which requires grad
   compute_dependencies(std::move(creators), backward_task);
+  fprintf(stderr, "dependencies computed\n");
 
   // wait for all tasks to complete
   backward_task.not_done.wait(lock, [&backward_task]{
-    return backward_task.outstanding_tasks.load() == 0;
+    bool x = backward_task.outstanding_tasks.load() == 0;
+    fprintf(stderr, "main thread awoken with outstanding %d\n", x);
+    return x;
   });
+  fprintf(stderr, "all tasks done\n=======================\n");
 
   // check for an exception while running backwards
   if (backward_task.has_error.load()) {
