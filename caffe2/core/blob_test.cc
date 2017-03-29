@@ -85,6 +85,19 @@ TEST(BlobTest, BlobReset) {
   blob.Reset();
 }
 
+TEST(BlobTest, BlobMove) {
+  Blob blob1;
+  std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
+  auto* fooPtr = foo.get();
+  EXPECT_TRUE(blob1.Reset(foo.release()) != nullptr);
+  Blob blob2;
+  blob2 = std::move(blob1);
+  ASSERT_THROW(blob1.Get<BlobTestFoo>(), EnforceNotMet);
+  EXPECT_EQ(&blob2.Get<BlobTestFoo>(), fooPtr);
+  Blob blob3{std::move(blob2)};
+  EXPECT_EQ(&blob3.Get<BlobTestFoo>(), fooPtr);
+}
+
 TEST(BlobTest, BlobShareExternalPointer) {
   Blob blob;
   std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
