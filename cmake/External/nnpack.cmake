@@ -48,28 +48,37 @@ endif()
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   message(STATUS "Will try to build NNPACK from source. If anything fails, "
                  "follow the NNPACK prerequisite installation steps.")
-  # Note: per Marat, there is no support for fPIC right now so we will need to
-  # manually change it in build.ninja
-  ExternalProject_Add(nnpack_external
-      SOURCE_DIR ${NNPACK_PREFIX}
-      BUILD_IN_SOURCE 1
-      CONFIGURE_COMMAND ""
-      BUILD_COMMAND confu setup
-      COMMAND python ./configure.py
-      COMMAND sed -ibuild.ninja.bak "s/cflags = /cflags = -fPIC /" build.ninja
-      COMMAND sed -ibuild.ninja.bak "s/cxxflags = /cxxflags = -fPIC /" build.ninja
-      COMMAND ninja nnpack
-      INSTALL_COMMAND ""
-      )
+  find_program(CAFFE2_CONFU_COMMAND confu)
+  find_program(CAFFE2_NINJA_COMMAND ninja)
+  if (CAFFE2_CONFU_COMMAND AND CAFFE2_NINJA_COMMAND)
+    # Note: per Marat, there is no support for fPIC right now so we will need to
+    # manually change it in build.ninja
+    ExternalProject_Add(nnpack_external
+        SOURCE_DIR ${NNPACK_PREFIX}
+        BUILD_IN_SOURCE 1
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND confu setup
+        COMMAND python ./configure.py
+        COMMAND sed -ibuild.ninja.bak "s/cflags = /cflags = -fPIC /" build.ninja
+        COMMAND sed -ibuild.ninja.bak "s/cxxflags = /cxxflags = -fPIC /" build.ninja
+        COMMAND ninja nnpack
+        INSTALL_COMMAND ""
+        )
 
-  set(NNPACK_FOUND TRUE)
-  set(NNPACK_INCLUDE_DIRS
-      ${NNPACK_PREFIX}/include
-      ${NNPACK_PREFIX}/deps/pthreadpool/include)
-  set(NNPACK_LIBRARIES ${NNPACK_PREFIX}/lib/libnnpack.a ${NNPACK_PREFIX}/lib/libpthreadpool.a)
-  set(NNPACK_LIBRARY_DIRS ${NNPACK_PREFIX}/lib)
-
-  list(APPEND external_project_dependencies nnpack_external)
+    set(NNPACK_FOUND TRUE)
+    set(NNPACK_INCLUDE_DIRS
+        ${NNPACK_PREFIX}/include
+        ${NNPACK_PREFIX}/deps/pthreadpool/include)
+    set(NNPACK_LIBRARIES ${NNPACK_PREFIX}/lib/libnnpack.a ${NNPACK_PREFIX}/lib/libpthreadpool.a)
+    set(NNPACK_LIBRARY_DIRS ${NNPACK_PREFIX}/lib)
+  
+    list(APPEND external_project_dependencies nnpack_external)
+  else()
+    message(WARNING "NNPACK is chosen to be installed, but confu and ninja "
+                    "that are needed by it are not installed. As a result "
+                    "we won't build with NNPACK.")
+    set(USE_NNPACK OFF)
+  endif()
   return()
 endif()
 
