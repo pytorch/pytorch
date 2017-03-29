@@ -155,6 +155,7 @@ class CheckpointManager(object):
         resumed from a given epoch. This task will run a Load op that will
         load and deserialize all relevant blobs from a persistent storage.
         """
+        logger.info('Load from %s' % self._dbname(epoch))
         with Task() as task:
             ops.Load(
                 [],
@@ -179,6 +180,7 @@ class CheckpointManager(object):
             A Task which loads the specified blobs from the checkpoint of the
             given epoch.
         """
+        logger.info('Load from %s' % self._dbname(epoch))
         with Task() as task:
             ops.Load(
                 [],
@@ -195,6 +197,7 @@ class CheckpointManager(object):
         epoch is run. This will execute a Save ops to serialize and persist
         blobs present in the global workspaace.
         """
+        logger.info('Save to %s' % self._dbname(epoch))
         with Task() as task:
             ops.Save(
                 self.blob_list(), [], db=self._dbname(epoch),
