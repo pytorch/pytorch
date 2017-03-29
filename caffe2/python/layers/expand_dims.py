@@ -1,3 +1,5 @@
+## @package expand_dims
+# Module caffe2.python.layers.expand_dims
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

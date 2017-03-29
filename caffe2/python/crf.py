@@ -1,3 +1,5 @@
+## @package crf
+# Module caffe2.python.crf
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

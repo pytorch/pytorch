@@ -1,3 +1,5 @@
+## @package hsm_util
+# Module caffe2.python.hsm_util
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

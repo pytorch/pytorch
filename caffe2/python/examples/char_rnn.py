@@ -1,3 +1,5 @@
+## @package char_rnn
+# Module caffe2.python.examples.char_rnn
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

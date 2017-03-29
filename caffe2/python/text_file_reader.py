@@ -1,3 +1,5 @@
+## @package text_file_reader
+# Module caffe2.python.text_file_reader
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

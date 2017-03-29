@@ -1,3 +1,5 @@
+## @package utils
+# Module caffe2.python.utils
 from caffe2.proto import caffe2_pb2
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format

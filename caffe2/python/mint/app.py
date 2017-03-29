@@ -1,3 +1,5 @@
+## @package app
+# Module caffe2.python.mint.app
 import argparse
 import flask
 import glob

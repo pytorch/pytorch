@@ -1,3 +1,5 @@
+## @package record_queue
+# Module caffe2.python.record_queue
 """
 Implementation of an queue wrapper.
 """

@@ -1,3 +1,5 @@
+## @package muji
+# Module caffe2.python.muji
 """muji.py does multi-gpu training for caffe2 with no need to change the c++
 side code. Everything is defined on the computation graph level.
 

@@ -1,3 +1,5 @@
+## @package fc
+# Module caffe2.python.layers.fc
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

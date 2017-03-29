@@ -1,3 +1,5 @@
+## @package get_python_cmake_flags
+# Module scripts.get_python_cmake_flags
 ##############################################################################
 # Use this script to find your preferred python installation.
 ##############################################################################

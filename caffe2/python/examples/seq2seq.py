@@ -1,3 +1,5 @@
+## @package seq2seq
+# Module caffe2.python.examples.seq2seq
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

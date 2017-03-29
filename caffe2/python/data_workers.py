@@ -1,3 +1,5 @@
+## @package data_workers
+# Module caffe2.python.data_workers
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

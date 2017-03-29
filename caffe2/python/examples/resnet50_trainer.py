@@ -1,3 +1,5 @@
+## @package resnet50_trainer
+# Module caffe2.python.examples.resnet50_trainer
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

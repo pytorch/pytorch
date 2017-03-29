@@ -1,3 +1,5 @@
+## @package train
+# Module caffe2.experiments.python.train
 """
 Benchmark for ads based model.
 

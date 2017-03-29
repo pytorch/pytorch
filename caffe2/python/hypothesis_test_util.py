@@ -1,3 +1,5 @@
+## @package hypothesis_test_util
+# Module caffe2.python.hypothesis_test_util
 """
 The Hypothesis library uses *property-based testing* to check
 invariants about the code under test under a variety of random inputs.

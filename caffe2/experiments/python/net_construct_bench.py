@@ -1,3 +1,5 @@
+## @package net_construct_bench
+# Module caffe2.experiments.python.net_construct_bench
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
