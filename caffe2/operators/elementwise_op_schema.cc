@@ -114,17 +114,29 @@ class GetSubGradient : public GradientMakerBase {
           "Negative", "", vector<string>{GO(0)}, vector<string>{GI(1)});
     } else {
       SetDense(0, GO(0));
-      return vector<OperatorDef>{
-          CreateOperatorDef(
-              "Negative",
-              "",
-              vector<string>{GO(0)},
-              vector<string>{GI(1) + "_autogen_pre_red"}),
-          CreateOperatorDef(
-              "SumReduceLike",
-              "",
-              vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-              vector<string>{GI(1)})};
+      vector<OperatorDef> grad_ops;
+      grad_ops.push_back(CreateOperatorDef(
+          "Negative",
+          "",
+          vector<string>{GO(0)},
+          vector<string>{GI(1) + "_autogen_pre_red"}));
+
+      if (HasArgument(Def(), "use_grad_hack")) {
+        // TODO: remove this hack when SumReduceLike is implemented.
+        // This only works if the broadcasting is along the first dimension
+        grad_ops.push_back(CreateOperatorDef(
+            "ReduceFrontSum",
+            "sub_grad",
+            vector<string>{GI(1) + "_autogen_pre_red"},
+            vector<string>{GI(1)}));
+      } else {
+        grad_ops.push_back(CreateOperatorDef(
+            "SumReduceLike",
+            "",
+            vector<string>{GI(1) + "_autogen_pre_red", I(1)},
+            vector<string>{GI(1)}));
+      }
+      return grad_ops;
     }
   }
   // Make sure the broadcast argument is not copied over.
