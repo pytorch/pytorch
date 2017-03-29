@@ -84,6 +84,14 @@ class Workspace {
   ~Workspace() {}
 
   /**
+   * Allows to add a parent workspace post factum after the object
+   * was already constructed.
+   */
+  void AddParentWorkspace(Workspace* shared) {
+    shared_ = shared;
+  }
+
+  /**
    * Return list of blobs owned by this Workspace, not including blobs
    * shared from parent workspace.
    */
