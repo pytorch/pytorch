@@ -19,7 +19,7 @@ class TestGivenTensorFillOps(hu.HypothesisTestCase):
                (core.DataType.INT32, np.int32, "GivenTensorIntFill"),
                (core.DataType.BOOL, np.bool_, "GivenTensorBoolFill"),
            ]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_given_tensor_fill(self, X, t, gc, dc):
         X = X.astype(t[1])
         print('X: ', str(X))
