@@ -7,6 +7,8 @@ import socket
 import tempfile
 import logging
 
+from six import string_types
+
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils
@@ -109,7 +111,7 @@ def StringifyProto(obj):
   Raises:
     AttributeError: if the passed in object does not have the right attribute.
   """
-    if type(obj) is str:
+    if isinstance(obj, string_types):
         return obj
     else:
         if isinstance(obj, Message):
