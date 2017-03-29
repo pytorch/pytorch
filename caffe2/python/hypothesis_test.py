@@ -2146,7 +2146,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
         self.assertDeviceChecks(dc, op, [I, X, D], [0])
 
-    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs)
+    @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)
     def test_dot_product(self, inputs, gc, dc):
         X, Y = inputs
         op = core.CreateOperator("DotProduct", ["X", "Y"], 'out')
@@ -2163,8 +2163,8 @@ class TestOperators(hu.HypothesisTestCase):
            M=st.integers(min_value=2, max_value=10),
            K=st.integers(min_value=2, max_value=10),
            pad_value=st.floats(min_value=0.1, max_value=1.0),
-           **hu.gcs)
-    def test_dot_product_with_paddding(self, N, M, K, pad_value, gc, dc):
+           **hu.gcs_cpu_only)
+    def test_dot_product_with_padding(self, N, M, K, pad_value, gc, dc):
         X = np.random.rand(N, M).astype(np.float32) - 0.5
         Y = np.random.rand(N, K).astype(np.float32) - 0.5
         op = core.CreateOperator("DotProductWithPadding", ["X", "Y"], 'out',
@@ -2187,8 +2187,8 @@ class TestOperators(hu.HypothesisTestCase):
     @given(N=st.integers(min_value=2, max_value=10),
            M=st.integers(min_value=2, max_value=10),
            pad_value=st.floats(min_value=0.1, max_value=1.0),
-           **hu.gcs)
-    def test_dot_product_with_rep_paddding(self, N, M, pad_value, gc, dc):
+           **hu.gcs_cpu_only)
+    def test_dot_product_with_rep_padding(self, N, M, pad_value, gc, dc):
         K = 2 * M
         X = np.random.rand(N, M).astype(np.float32) - 0.5
         Y = np.random.rand(N, K).astype(np.float32) - 0.5
@@ -2211,7 +2211,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
     @given(N=st.integers(min_value=2, max_value=10),
-           M=st.integers(min_value=2, max_value=10), **hu.gcs)
+           M=st.integers(min_value=2, max_value=10), **hu.gcs_cpu_only)
     def test_ensure_dense(self, N, M, gc, dc):
         # in place
         X = np.random.rand(N, M).astype(np.float32) - 0.5
@@ -2227,7 +2227,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(N=st.integers(min_value=10, max_value=100),
            M=st.integers(min_value=2, max_value=10),
            num_buckets=st.integers(min_value=1, max_value=5),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_accumulate_histogram_op(self, N, M, num_buckets, gc, dc):
         X = np.random.rand(N, M).astype(np.float32)
         lower_bound, upper_bound = 0.1, 0.9
