@@ -1,3 +1,5 @@
+## @package sparse_to_dense
+# Module caffe2.python.layers.sparse_to_dense
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

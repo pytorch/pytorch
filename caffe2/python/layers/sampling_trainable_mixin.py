@@ -1,3 +1,5 @@
+## @package sampling_trainable_mixin
+# Module caffe2.python.layers.sampling_trainable_mixin
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

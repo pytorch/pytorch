@@ -1,3 +1,5 @@
+## @package _import_c_extension
+# Module caffe2.python._import_c_extension
 import atexit
 import logging
 import sys

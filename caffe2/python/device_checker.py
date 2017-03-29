@@ -1,3 +1,5 @@
+## @package device_checker
+# Module caffe2.python.device_checker
 import numpy as np
 import copy
 from caffe2.python import workspace

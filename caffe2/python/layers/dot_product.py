@@ -1,3 +1,5 @@
+## @package dot_product
+# Module caffe2.python.layers.dot_product
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

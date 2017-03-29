@@ -1,3 +1,5 @@
+## @package dataio
+# Module caffe2.python.dataio
 """
 Defines the base interface for reading and writing operations.
 

@@ -1,3 +1,5 @@
+## @package control
+# Module caffe2.python.control
 """
 Implement functions for controlling execution of nets and steps, including
   Do

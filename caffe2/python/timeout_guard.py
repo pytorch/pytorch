@@ -1,3 +1,5 @@
+## @package timeout_guard
+# Module caffe2.python.timeout_guard
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

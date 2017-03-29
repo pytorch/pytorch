@@ -1,3 +1,5 @@
+## @package cifar10_training
+# Module caffe2.experiments.python.cifar10_training
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

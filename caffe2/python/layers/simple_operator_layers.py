@@ -1,3 +1,5 @@
+## @package simple_operator_layers
+# Module caffe2.python.layers.simple_operator_layers
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

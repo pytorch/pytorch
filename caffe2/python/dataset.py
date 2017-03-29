@@ -1,3 +1,5 @@
+## @package dataset
+# Module caffe2.python.dataset
 """
 Implementation of an in-memory dataset with structured schema.
 

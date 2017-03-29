@@ -1,3 +1,5 @@
+## @package workspace
+# Module caffe2.python.workspace
 import contextlib
 from google.protobuf.message import Message
 from multiprocessing import Process

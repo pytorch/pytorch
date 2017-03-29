@@ -1,3 +1,5 @@
+## @package sampling_train
+# Module caffe2.python.layers.sampling_train
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

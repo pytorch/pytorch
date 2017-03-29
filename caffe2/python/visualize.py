@@ -1,3 +1,5 @@
+## @package visualize
+# Module caffe2.python.visualize
 """Functions that could be used to visualize Tensors.
 
 This is adapted from the old-time iceberk package that Yangqing wrote... Oh gold

@@ -1,3 +1,5 @@
+## @package htrace_to_chrome
+# Module caffe2.contrib.prof.htrace_to_chrome
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

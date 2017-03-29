@@ -1,3 +1,5 @@
+## @package split
+# Module caffe2.python.layers.split
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

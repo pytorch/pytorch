@@ -1,3 +1,5 @@
+## @package mkl_test_util
+# Module caffe2.python.mkl_test_util
 """
 The MKL test utils is a small addition on top of the hypothesis test utils
 under caffe2/python, which allows one to more easily test MKL related

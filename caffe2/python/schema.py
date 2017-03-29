@@ -1,3 +1,5 @@
+## @package schema
+# Module caffe2.python.schema
 """
 Defines a minimal set of data types that allow to represent datasets with
 arbitrary nested structure, including objects of variable length, such as
