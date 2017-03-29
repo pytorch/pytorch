@@ -19,7 +19,7 @@ template <typename T>
 CudaAllreduceRing<T>::CudaAllreduceRing(
   const std::shared_ptr<Context>& context,
   const std::vector<T*>& ptrs,
-  int count,
+  const int count,
   const std::vector<cudaStream_t>& streams)
     : Allreduce<T>(context, nullptr),
       count_(count),

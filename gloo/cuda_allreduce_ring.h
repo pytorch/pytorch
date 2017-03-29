@@ -18,10 +18,10 @@ template <typename T>
 class CudaAllreduceRing : public Allreduce<T> {
  public:
   CudaAllreduceRing(
-    const std::shared_ptr<Context>& context,
-    const std::vector<T*>& ptrs,
-    int count,
-    const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
+      const std::shared_ptr<Context>& context,
+      const std::vector<T*>& ptrs,
+      const int count,
+      const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
 
   virtual ~CudaAllreduceRing();
 

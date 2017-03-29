@@ -28,6 +28,37 @@ using Func = void(
 // Test parameterization.
 using Param = std::tuple<int, int, std::function<Func>>;
 
+template <typename Algorithm>
+class AllreduceConstructorTest : public BaseTest {
+};
+
+typedef ::testing::Types<
+  AllreduceRing<float>,
+  AllreduceRingChunked<float> > AllreduceTypes;
+TYPED_TEST_CASE(AllreduceConstructorTest, AllreduceTypes);
+
+TYPED_TEST(AllreduceConstructorTest, InlinePointers) {
+  this->spawn(2, [&](std::shared_ptr<Context> context) {
+      float f = 1.0f;
+      TypeParam algorithm(
+        context,
+        {&f},
+        1);
+    });
+}
+
+TYPED_TEST(AllreduceConstructorTest, SpecifyReductionFunction) {
+  this->spawn(2, [&](std::shared_ptr<Context> context) {
+      float f = 1.0f;
+      std::vector<float*> ptrs = {&f};
+      TypeParam algorithm(
+        context,
+        ptrs,
+        ptrs.size(),
+        ReductionFunction<float>::product);
+    });
+}
+
 // Test fixture.
 class AllreduceTest : public BaseTest,
                       public ::testing::WithParamInterface<Param> {};

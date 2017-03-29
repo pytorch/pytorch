@@ -22,9 +22,9 @@ class AllreduceRingChunked : public Allreduce<T> {
  public:
   AllreduceRingChunked(
       const std::shared_ptr<Context>& context,
-      std::vector<T*> ptrs,
-      int count,
-      ReductionFunction<T>* fn = nullptr)
+      const std::vector<T*>& ptrs,
+      const int count,
+      const ReductionFunction<T>* fn = nullptr)
       : Allreduce<T>(context, fn),
         ptrs_(ptrs),
         count_(count),

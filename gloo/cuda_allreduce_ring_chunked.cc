@@ -52,10 +52,10 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
 
 template <typename T>
 CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
-    const std::shared_ptr<Context>& context,
-    const std::vector<T*>& ptrs,
-    int count,
-    const std::vector<cudaStream_t>& streams)
+  const std::shared_ptr<Context>& context,
+  const std::vector<T*>& ptrs,
+  const int count,
+  const std::vector<cudaStream_t>& streams)
     : Allreduce<T>(context, nullptr),
       count_(count),
       bytes_(count * sizeof(T)),
