@@ -37,7 +37,7 @@ REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
 class StringFetcher : public BlobFetcherBase {
  public:
   py::object Fetch(const Blob& blob) override {
-    return py::str(blob.Get<string>());
+    return py::bytes(blob.Get<string>());
   }
 };
 REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
