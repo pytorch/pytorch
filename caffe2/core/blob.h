@@ -30,6 +30,25 @@ class Blob {
   Blob() : meta_(), pointer_(nullptr) {}
   ~Blob() { Reset(); }
 
+  Blob(Blob&& other) noexcept
+      : meta_(std::move(other.meta_)),
+        pointer_(std::move(other.pointer_)),
+        destroy_(std::move(other.destroy_)) {
+    other.meta_ = {};
+    other.pointer_ = nullptr;
+    other.destroy_ = nullptr;
+  }
+
+  Blob& operator=(Blob&& other) noexcept {
+    meta_ = std::move(other.meta_);
+    pointer_ = std::move(other.pointer_);
+    destroy_ = std::move(other.destroy_);
+    other.meta_ = {};
+    other.pointer_ = nullptr;
+    other.destroy_ = nullptr;
+    return *this;
+  }
+
   /**
    * Checks if the content stored in the blob is of type T.
    */
