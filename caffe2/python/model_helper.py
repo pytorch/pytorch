@@ -394,6 +394,17 @@ def ExtractPredictorNet(
     except ValueError:
         raise Exception("No ops with output={}".format(output_blobs))
 
+    def validate_op(op):
+        # Check that the op does not have is_test = 0 set. This is a common
+        # pitfall with SpatialBN op, at lest.
+        for arg in op.arg:
+            if arg.name == "is_test" and arg.i == 0:
+                raise Exception(
+                    "A operator had is_test=0, did you try to extract a " +
+                    "predictor from a train model (instead of test model)?" +
+                    " Op was: {}".format(str(op))
+                )
+
     # Iterate through the ops and only include those whose inputs
     # we can satisfy.
     for op in ops[first_op_with_input:(last_op_with_output + 1)]:
@@ -401,6 +412,7 @@ def ExtractPredictorNet(
             if device is not None:
                 op.device_option.device_type = device.device_type
                 op.device_option.cuda_gpu_id = device.cuda_gpu_id
+            validate_op(op)
             predict_proto.op.extend([op])
             known_blobs.update(op.output)
             external_inputs.update(
