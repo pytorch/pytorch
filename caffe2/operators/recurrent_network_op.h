@@ -159,8 +159,6 @@ class RecurrentNetworkOp final : public Operator<Context> {
     CAFFE_ENFORCE(
         google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef_),
         "Invalid netdef");
-    CAFFE_ENFORCE(
-        stepNetDef_.type() == "simple", "Step Net must be `simple`", stepNet);
 
     recurrentInputs_ = constructRecurrentInputs(sharedWs_);
     links_ = constructLinks();
