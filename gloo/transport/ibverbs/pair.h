@@ -82,6 +82,8 @@ class Pair : public ::gloo::transport::Pair {
 
   virtual void setSync(bool enable, bool busyPoll) override;
 
+  virtual void setTimeout(int timeoutInMs) override;
+
   virtual std::unique_ptr<::gloo::transport::Buffer>
   createSendBuffer(int slot, void* ptr, size_t size) override;
 

@@ -33,10 +33,14 @@ namespace gloo {
 namespace transport {
 namespace tcp {
 
+const std::chrono::milliseconds Pair::kNoTimeout =
+    std::chrono::milliseconds::zero();
+
 Pair::Pair(const std::shared_ptr<Device>& dev)
     : dev_(dev),
       state_(INITIALIZING),
       sync_(false),
+      timeout_(kNoTimeout),
       busyPoll_(false),
       fd_(FD_INVALID),
       sendBufferSize_(0),
@@ -82,11 +86,9 @@ void Pair::setSync(bool sync, bool busyPoll) {
     GLOO_THROW_INVALID_OPERATION_EXCEPTION("Can only switch to sync mode");
   }
 
-  // Wait for pair to be connected
-  while (state_ < CONNECTED) {
-    cv_.wait(lock);
-    checkErrorState();
-  }
+  // Wait for pair to be connected. No need to wait for timeout here. If
+  // necessary, the connect path will timeout and signal this thread.
+  waitUntilConnected(lock, false);
 
   // Unregister from loop and switch socket to blocking mode
   dev_->unregisterDescriptor(fd_);
@@ -102,6 +104,32 @@ void Pair::setSync(bool sync, bool busyPoll) {
 
   sync_ = true;
   busyPoll_ = busyPoll;
+}
+
+void Pair::setTimeout(int timeoutInMs) {
+  std::unique_lock<std::mutex> lock(m_);
+  int rv;
+  checkErrorState();
+
+  if (timeoutInMs < 0) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("Invalid timeout", timeoutInMs);
+  }
+
+  // Wait for pair to be connected. No need to wait for timeout here. If
+  // necessary, the connect path will timeout and signal this thread.
+  waitUntilConnected(lock, false);
+
+  struct timeval tv = {};
+  if (timeoutInMs > 0) {
+    tv.tv_sec = timeoutInMs / 1000;
+    tv.tv_usec = (timeoutInMs % 1000) * 1000;
+  }
+  rv = setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  GLOO_ENFORCE_NE(rv, -1);
+  rv = setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  GLOO_ENFORCE_NE(rv, -1);
+
+  timeout_ = std::chrono::milliseconds(timeoutInMs);
 }
 
 void Pair::listen() {
@@ -204,10 +232,7 @@ void Pair::connect(const Address& peer) {
 
   // self_ < peer_; we are listening side.
   if (rv < 0) {
-    while (state_ < CONNECTED) {
-      cv_.wait(lock);
-      checkErrorState();
-    }
+    waitUntilConnected(lock, true);
     return;
   }
 
@@ -235,10 +260,7 @@ void Pair::connect(const Address& peer) {
   dev_->registerDescriptor(fd_, EPOLLIN | EPOLLOUT, this);
 
   // Wait for connection to complete
-  while (state_ < CONNECTED) {
-    cv_.wait(lock);
-    checkErrorState();
-  }
+  waitUntilConnected(lock, true);
 }
 
 // write is called from:
@@ -279,9 +301,14 @@ bool Pair::write(Op& op) {
   for (;;) {
     rv = writev(fd_, iov.data(), ioc);
     if (rv == -1) {
-      // EAGAIN happens when there are no more bytes left to read
       if (errno == EAGAIN) {
-        return false;
+        if (sync_) {
+          // Blocking call returning with EAGAIN indicates timeout
+          signalIoFailure(GLOO_ERROR_MSG("Write timeout"));
+        } else {
+          // Async. This write is done.
+          return false;
+        }
       }
 
       // Retry on EINTR
@@ -313,6 +340,8 @@ bool Pair::write(Op& op) {
 //
 bool Pair::read(Op& op) {
   GLOO_ENFORCE_EQ(state_, CONNECTED);
+
+  auto start = std::chrono::steady_clock::now();
 
   for (;;) {
     struct iovec iov;
@@ -348,13 +377,27 @@ bool Pair::read(Op& op) {
       // Alas, readv does not support flags, so we need to use recv
       rv = ::recv(fd_, iov.iov_base, iov.iov_len, busyPoll_ ? MSG_DONTWAIT : 0);
       if (rv == -1) {
-        // EAGAIN happens when there are no more bytes left to read
+        // EAGAIN happens when (1) non-blocking and there are no more bytes left
+        // to read or (2) blocking and timeout occurs.
         if (errno == EAGAIN) {
-          if (!sync_) {
+          if (sync_) {
+            auto hasTimedOut = [&]{
+              return (timeout_ != kNoTimeout) &&
+                ((std::chrono::steady_clock::now() - start) >= timeout_);
+            };
+            if (busyPoll_ && !hasTimedOut()) {
+              // Keep looping on EAGAIN if busy-poll flag has been set and the
+              // timeout (if set) hasn't been reached
+              continue;
+            } else {
+              // Either timeout on poll or blocking call returning with EAGAIN
+              // indicates timeout
+              signalIoFailure(GLOO_ERROR_MSG("Read timeout"));
+            }
+          } else {
+            // Async. This read is done.
             return false;
           }
-          // Keep looping on EAGAIN if busy-poll flag has been set
-          continue;
         }
 
         // Retry on EINTR
@@ -576,6 +619,24 @@ void Pair::changeState(state nextState) {
   cv_.notify_all();
 }
 
+void Pair::waitUntilConnected(
+    std::unique_lock<std::mutex>& lock,
+    bool useTimeout) {
+  auto pred = [&] {
+    checkErrorState();
+    return state_ >= CONNECTED;
+  };
+  auto timeoutSet = timeout_ != kNoTimeout;
+  if (useTimeout && timeoutSet) {
+    auto done = cv_.wait_for(lock, timeout_, pred);
+    if (!done) {
+      signalIoFailure("Connect timeout");
+    }
+  } else {
+    cv_.wait(lock, pred);
+  }
+}
+
 void Pair::send(Op& op) {
   std::unique_lock<std::mutex> lock(m_);
   checkErrorState();
@@ -606,12 +667,14 @@ void Pair::send(Op& op) {
     sendBufferSize_ = optval;
   }
 
-  // Wait until event loop has finished current write.
-  if (!sync_) {
-    while (tx_.buf_ != nullptr) {
-      cv_.wait(lock);
+  // Wait until event loop has finished current write. No need to wait for
+  // timeout here. If necessary, the ongoing write op will timeout and signal
+  // this thread.
+  if (!sync_ && tx_.buf_ != nullptr) {
+    cv_.wait(lock, [&]{
       checkErrorState();
-    }
+      return tx_.buf_ == nullptr;
+    });
   }
 
   // Write to socket
@@ -655,6 +718,11 @@ Pair::createRecvBuffer(int slot, void* ptr, size_t size) {
   return std::unique_ptr<::gloo::transport::Buffer>(buffer);
 }
 
+void Pair::signalIoFailureExternal(const std::string& msg) {
+  std::unique_lock<std::mutex> lock(m_);
+  signalIoFailure(msg);
+};
+
 void Pair::signalIoFailure(const std::string& msg) {
   auto ex = ::gloo::IoException(msg);
   if (ex_ == nullptr) {
@@ -665,6 +733,8 @@ void Pair::signalIoFailure(const std::string& msg) {
     for (auto it = buffers_.begin(); it != buffers_.end(); it++) {
       it->second->signalError(ex_);
     }
+    // Signal any threads in the async path
+    cv_.notify_all();
   }
   // Finally, throw the exception on this thread.
   throw ex;

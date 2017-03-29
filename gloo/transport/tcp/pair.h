@@ -10,6 +10,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <exception>
 #include <list>
@@ -70,6 +71,8 @@ class Pair : public ::gloo::transport::Pair {
 
   virtual void setSync(bool sync, bool busyPoll) override;
 
+  virtual void setTimeout(int timeoutInMs) override;
+
   virtual std::unique_ptr<::gloo::transport::Buffer>
   createSendBuffer(int slot, void* ptr, size_t size) override;
 
@@ -81,7 +84,9 @@ class Pair : public ::gloo::transport::Pair {
  protected:
   std::shared_ptr<Device> dev_;
   state state_;
-  bool sync_;
+  std::atomic<bool> sync_;
+  std::chrono::milliseconds timeout_;
+  static const std::chrono::milliseconds kNoTimeout;
   // When set, instructs pair to use busy-polling on receive.
   // Can only be used with sync receive mode.
   bool busyPoll_;
@@ -105,6 +110,17 @@ class Pair : public ::gloo::transport::Pair {
   void send(Op& op);
   void recv();
 
+  bool isSync() {
+    return sync_;
+  }
+
+  std::chrono::milliseconds getTimeout() {
+    std::unique_lock<std::mutex> lock(m_);
+    return timeout_;
+  }
+
+  void signalIoFailureExternal(const std::string& msg);
+
   friend class Buffer;
 
  private:
@@ -121,6 +137,7 @@ class Pair : public ::gloo::transport::Pair {
   void handleConnected();
 
   void changeState(state nextState);
+  void waitUntilConnected(std::unique_lock<std::mutex>& lock, bool useTimeout);
 
   // Used to signal IO exceptions from one thread and propagate onto others.
   void signalIoFailure(const std::string& msg);
