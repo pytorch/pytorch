@@ -62,6 +62,9 @@ option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 
 # options that takes in strings instead of on and off statemens.
 option(CAFFE2_CPU_FLAGS "Flags to specify CPU features." "")
+option(CAFFE2_WHITELIST
+       "A whitelist file of files that one should build."
+       "")
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -75,6 +78,9 @@ include(cmake/Dependencies.cmake)
 # ---[ Misc checks to cope with various compiler modes
 include(cmake/MiscCheck.cmake)
 
+# ---[ Whitelist file if whitelist is specified
+include(cmake/Whitelist.cmake)
+
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0 AND NOT ANDROID)
   message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
@@ -85,6 +91,7 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "binaries")
 
 # ---[ Build flags
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
 if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
