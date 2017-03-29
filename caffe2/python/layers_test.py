@@ -3,15 +3,17 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import numpy as np
+
 from caffe2.python import (
     layer_model_instantiator,
     schema,
+    workspace,
 )
 from caffe2.python.layer_test_util import (
     LayersTestCase,
     OpSpec,
 )
-import numpy as np
 
 
 class TestLayers(LayersTestCase):
@@ -148,6 +150,27 @@ class TestLayers(LayersTestCase):
             ('softmax', schema.Scalar((np.float32, (32,)))),
             ('loss', schema.Scalar(np.float32)),
         ), loss)
+
+    def testUniformSampling(self):
+        input_record = self.new_record(schema.Scalar(np.int32))
+        input_array = np.array([3, 10, 11, 15, 20, 99], dtype=np.int32)
+        schema.FeedRecord(input_record, [input_array])
+        num_samples = 20
+        num_elements = 100
+        uniform_sampling_output = self.model.UniformSampling(
+            input_record, num_samples, num_elements)
+        self.model.loss = uniform_sampling_output
+        self.run_train_net()
+        samples = workspace.FetchBlob(uniform_sampling_output.samples())
+        sampling_prob = workspace.FetchBlob(
+            uniform_sampling_output.sampling_prob())
+        self.assertEqual(num_samples, len(samples))
+        np.testing.assert_array_equal(input_array, samples[:len(input_array)])
+        np.testing.assert_almost_equal(
+            np.array([float(num_samples) / num_elements] * num_samples,
+                     dtype=np.float32),
+            sampling_prob
+        )
 
     def testFunctionalLayer(self):
         def normalize(net, in_record, out_record):
