@@ -191,7 +191,7 @@ def VariableRecurrentReverse(batch_sizes, inner):
 
 def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
                 dropout=0, train=True, bidirectional=False, batch_sizes=None,
-                dropout_state=None):
+                dropout_state=None, persistent=False):
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -238,7 +238,7 @@ class CudnnRNN(NestedIOFunction):
 
     def __init__(self, mode, input_size, hidden_size, num_layers=1,
                  batch_first=False, dropout=0, train=True, bidirectional=False,
-                 batch_sizes=None, dropout_state=None):
+                 batch_sizes=None, dropout_state=None, persistent=False):
         super(CudnnRNN, self).__init__()
         if dropout_state is None:
             dropout_state = {}
@@ -255,6 +255,7 @@ class CudnnRNN(NestedIOFunction):
         self.batch_sizes = batch_sizes
         self.dropout_seed = torch.IntTensor(1).random_()[0]
         self.dropout_state = dropout_state
+        self.persistent = persistent
 
     def forward_extended(self, input, weight, hx):
         assert cudnn.is_acceptable(input)

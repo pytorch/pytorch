@@ -10,7 +10,7 @@ class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0, bidirectional=False, persistent = False):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -21,6 +21,7 @@ class RNNBase(Module):
         self.dropout = dropout
         self.dropout_state = {}
         self.bidirectional = bidirectional
+        self.persistent = persistent
         num_directions = 2 if bidirectional else 1
 
         self._all_weights = []
@@ -86,7 +87,8 @@ class RNNBase(Module):
             train=self.training,
             bidirectional=self.bidirectional,
             batch_sizes=batch_sizes,
-            dropout_state=self.dropout_state
+            dropout_state=self.dropout_state,
+            persistent=self.persistent
         )
         output, hidden = func(input, self.all_weights, hx)
         if is_packed:
@@ -156,6 +158,7 @@ class RNN(RNNBase):
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        persistent: If True and cudnn is used, tries to run persistent algorithm, switching to standard algorithm if persistent cannot be used. Ignored in all other cases. Default: False. Persistent algorithm is supported on the devices with compute capability >=6.0 and for relatively small hidden sizes. Persistent algorithm is expected to provide performance benefits for long sequences and small batch sizes(less than 32). 
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
@@ -233,6 +236,7 @@ class LSTM(RNNBase):
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        persistent: If True and cudnn is used, tries to run persistent algorithm, switching to standard algorithm if persistent cannot be used. Ignored in all other cases. Default: False. Persistent algorithm is supported on the devices with compute capability >=6.0 and for relatively small hidden sizes. Persistent algorithm is expected to provide performance benefits for long sequences and small batch sizes(less than 32). 
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
@@ -303,6 +307,7 @@ class GRU(RNNBase):
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        persistent: If True and cudnn is used, tries to run persistent algorithm, switching to standard algorithm if persistent cannot be used. Ignored in all other cases. Default: False. Persistent algorithm is supported on the devices with compute capability >=6.0 and for relatively small hidden sizes. Persistent algorithm is expected to provide performance benefits for long sequences and small batch sizes(less than 32). 
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
