@@ -649,31 +649,32 @@ void RandUniform<int, CPUContext>(
   }
 }
 
-#define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                   \
-  template <>                                                       \
-  void RandUniformUnique<T, CPUContext>(                            \
-      const size_t n,                                               \
-      const T a,                                                    \
-      const T b,                                                    \
-      T* r,                                                         \
-      const size_t m,                                               \
-      const T* avoid,                                               \
-      CPUContext* context) {                                        \
-    CAFFE_ENFORCE_LE(                                               \
-        n, b - a - m + 1, "Cannot satisfy the unique requirement"); \
-    std::unordered_set<T> avoid_set(n);                             \
-    if (m) {                                                        \
-      avoid_set.insert(avoid, avoid + m);                           \
-    }                                                               \
-    std::uniform_int_distribution<T> distribution(a, b);            \
-    T v = 0;                                                        \
-    for (size_t i = 0; i < n; ++i) {                                \
-      do {                                                          \
-        v = distribution(context->RandGenerator());                 \
-      } while (avoid_set.count(v));                                 \
-      r[i] = v;                                                     \
-      avoid_set.insert(v);                                          \
-    }                                                               \
+#define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                      \
+  template <>                                                          \
+  void RandUniformUnique<T, CPUContext>(                               \
+      const size_t n,                                                  \
+      const T a,                                                       \
+      const T b,                                                       \
+      T* r,                                                            \
+      const size_t m,                                                  \
+      const T* avoid,                                                  \
+      CPUContext* context) {                                           \
+    CAFFE_ENFORCE_LE(                                                  \
+        n, b - a - m + 1, "Cannot satisfy the unique requirement");    \
+    std::unordered_set<T> avoid_set(n);                                \
+    if (m) {                                                           \
+      avoid_set.insert(avoid, avoid + m);                              \
+      CAFFE_ENFORCE_EQ(m, avoid_set.size(), "Avoid should be unique"); \
+    }                                                                  \
+    std::uniform_int_distribution<T> distribution(a, b);               \
+    T v = 0;                                                           \
+    for (size_t i = 0; i < n; ++i) {                                   \
+      do {                                                             \
+        v = distribution(context->RandGenerator());                    \
+      } while (avoid_set.count(v));                                    \
+      r[i] = v;                                                        \
+      avoid_set.insert(v);                                             \
+    }                                                                  \
   }
 
 CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(int32_t);

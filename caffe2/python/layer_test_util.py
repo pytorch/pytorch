@@ -11,6 +11,7 @@ from caffe2.python import (
     layer_model_helper,
     schema,
     test_util,
+    workspace,
 )
 import numpy as np
 
@@ -50,6 +51,13 @@ class LayersTestCase(test_util.TestCase):
 
     def get_predict_net(self):
         return layer_model_instantiator.generate_predict_net(self.model)
+
+    def run_train_net(self):
+        self.model.output_schema = schema.Struct()
+        train_init_net, train_net = \
+            layer_model_instantiator.generate_training_nets(self.model)
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
 
     def assertBlobsEqual(self, spec_blobs, op_blobs):
         """
