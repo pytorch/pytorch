@@ -137,6 +137,21 @@ REGISTER_CPU_OPERATOR(SparseToDenseMask, SparseToDenseMaskOp);
 OPERATOR_SCHEMA(SparseToDenseMask)
     .NumInputs(3, 4)
     .NumOutputs(1)
+    .TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          vector<TensorShape> out(1);
+          if (in.size() == 4) {
+            out[0].add_dims(in[3].dims(0));
+          }
+          ArgumentHelper helper(def);
+          auto mask = helper.template GetRepeatedArgument<int>("mask");
+          out[0].add_dims(mask.size());
+          for (const auto dim : in[2].dims()) {
+            out[0].add_dims(dim);
+          }
+          out[0].set_data_type(in[2].data_type());
+          return out;
+        })
     .SetDoc(R"DOC(
 Convert sparse representations to dense with given indices.
 
