@@ -42,9 +42,10 @@ void THNN_(Linear_updateOutput)(
       THTensor_(zero)(output);
     }
     THNN_(Linear_updateAddBuffer)(state,input,addBuffer);
-    THTensor_(transpose)(weight,weight,0,1);
-    THTensor_(addmm)(output,0,output,1,input,weight);
-    THTensor_(transpose)(weight,weight,0,1);
+    THTensor *tweight = THTensor_(new)();
+    THTensor_(transpose)(tweight,weight,0,1);
+    THTensor_(addmm)(output,0,output,1,input,tweight);
+    THTensor_(free)(tweight);
     if (bias) {
       THTensor_(addr)(output,1,output,1,addBuffer,bias);
     }
@@ -67,9 +68,10 @@ void THNN_(Linear_updateGradInput)(
 
     long dim = THTensor_(nDimension)(input);
     if (dim == 1) {
-      THTensor_(transpose)(weight,weight,0,1);
-      THTensor_(addmv)(gradInput,0,gradInput,1,weight,gradOutput);
-      THTensor_(transpose)(weight,weight,0,1);
+      THTensor *tweight = THTensor_(new)();
+      THTensor_(transpose)(tweight,weight,0,1);
+      THTensor_(addmv)(gradInput,0,gradInput,1,tweight,gradOutput);
+      THTensor_(free)(tweight);
     }
     else if (dim == 2) {
       THTensor_(addmm)(gradInput,0,gradInput,1,gradOutput,weight);
@@ -98,13 +100,14 @@ void THNN_(Linear_accGradParameters)(
     }
   }
   else if (dim == 2) {
-    THTensor_(transpose)(gradOutput,gradOutput,0,1);
-    THTensor_(addmm)(gradWeight,1,gradWeight,scale,gradOutput,input);
+    THTensor *tgradOutput = THTensor_(new)();
+    THTensor_(transpose)(tgradOutput,gradOutput,0,1);
+    THTensor_(addmm)(gradWeight,1,gradWeight,scale,tgradOutput,input);
     if (bias) {
       THNN_(Linear_updateAddBuffer)(state,input,addBuffer);
-      THTensor_(addmv)(gradBias,1,gradBias,scale,gradOutput,addBuffer);
+      THTensor_(addmv)(gradBias,1,gradBias,scale,tgradOutput,addBuffer);
     }
-    THTensor_(transpose)(gradOutput,gradOutput,0,1);
+    THTensor_(free)(tgradOutput);
   }
 }
 
