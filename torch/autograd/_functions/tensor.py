@@ -591,4 +591,23 @@ class Repeat(Function):
         return grad_input
 
 
+class Cumsum(Function):
+
+    def __init__(self, dim):
+        super(Cumsum, self).__init__()
+        self.dim = dim
+
+    def forward(self, input):
+        return torch.cumsum(input, dim=self.dim)
+
+    def backward(self, grad_output):
+        grad_input = torch.cumsum(-grad_output, dim=self.dim)
+
+        end_idx = grad_input.size(self.dim) - 1
+        grad_sum = grad_input.narrow(self.dim, end_idx, 1)
+        grad_input -= grad_sum.expand_as(grad_input)
+        grad_input += grad_output
+        return grad_input
+
+
 # TODO: unfold

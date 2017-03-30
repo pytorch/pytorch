@@ -80,7 +80,6 @@ struct GlobalIndexToPerSliceIndex {
   const long sliceSize;
 };
 
-unsigned long nextHighestPowerOf2(unsigned long n);
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,
                                          THCudaLongTensor* t,
                                          int dim);

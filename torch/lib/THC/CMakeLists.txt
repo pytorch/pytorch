@@ -188,6 +188,8 @@ SET(src-cuda
   THCTensorTopK.cu
   THCTensorSort.cu
   THCTensorTypeUtils.cu
+  THCSortUtils.cu
+  THCTensorMode.cu
   )
 
 # loop over all types
@@ -291,6 +293,7 @@ INSTALL(FILES
           THCTensorRandom.cuh
           THCTensorMathMagma.cuh
           THCThrustAllocator.cuh
+          THCTensorMode.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
@@ -335,4 +338,6 @@ INSTALL(FILES
           generic/THCDeviceTensorUtils.cu
           generic/THCTensorRandom.h
           generic/THCTensorRandom.cu
+          generic/THCTensorMode.h
+          generic/THCTensorMode.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

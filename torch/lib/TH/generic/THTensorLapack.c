@@ -1010,7 +1010,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
   }
 }
 
-void THTensor_(btrisolve)(THTensor *rb_, THTensor *atf, THTensor *b, THIntTensor *pivots)
+void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor *pivots)
 {
   THArgCheck(THTensor_(nDimension)(atf) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(atf));
 

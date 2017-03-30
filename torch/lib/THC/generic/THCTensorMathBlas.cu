@@ -705,8 +705,8 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
 }
 
 
-THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *atf,
-                              THCTensor *b, THCudaIntTensor *pivots)
+THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b,
+                              THCTensor *atf, THCudaIntTensor *pivots)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THAssert(THCTensor_(checkGPU)(state, 3, rb_, atf, b));
