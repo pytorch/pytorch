@@ -236,10 +236,6 @@ class DataLoader(object):
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
             (default: 1).
-        drop (bool, optional): set to ``True`` to drop remaining samples
-            that is not enough of a batch size. If False and the size of dataset
-            is not divisible by batch size, then the last batch with remaining data
-            still to be returned. (default: False)
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: False).
         sampler (Sampler, optional): defines the strategy to draw samples from
@@ -249,6 +245,10 @@ class DataLoader(object):
             (default: 0)
         collate_fn (callable, optional)
         pin_memory (bool, optional)
+        drop_last (bool, optional): set to ``True`` to drop remaining samples
+            that is not enough of a batch size. If False and the size of dataset
+            is not divisible by batch size, then the last batch will be smaller. 
+            (default: False)
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, num_workers=0,
