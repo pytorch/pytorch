@@ -99,13 +99,13 @@ class DataLoaderIter(object):
     def __init__(self, loader):
         self.dataset = loader.dataset
         self.batch_size = loader.batch_size
-        self.drop = loader.drop
         self.collate_fn = loader.collate_fn
         self.sampler = loader.sampler
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory
+        self.drop_last = loader.drop_last
         self.done_event = threading.Event()
-
+        
         self.samples_remaining = len(self.sampler)
         self.sample_iter = iter(self.sampler)
 
@@ -142,11 +142,14 @@ class DataLoaderIter(object):
                 self._put_indices()
 
     def __len__(self):
-        return int(math.ceil(len(self.sampler) / float(self.batch_size)))
+        if self.drop_last:
+            return int(math.ceil(len(self.sampler) / float(self.batch_size)))
+        else:
+            return int(math.floor(len(self.sampler) / float(self.batch_size)))
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
-            if self.drop and self.samples_remaining < self.batch_size:
+            if self.drop_last and self.samples_remaining < self.batch_size:
                 raise StopIteration
             if self.samples_remaining == 0:
                 raise StopIteration
@@ -160,7 +163,7 @@ class DataLoaderIter(object):
         if self.rcvd_idx in self.reorder_dict:
             batch = self.reorder_dict.pop(self.rcvd_idx)
             return self._process_next_batch(batch)
-
+        
         if self.batches_outstanding == 0:
             self._shutdown_workers()
             raise StopIteration
@@ -189,9 +192,13 @@ class DataLoaderIter(object):
     def _put_indices(self):
         assert self.batches_outstanding < 2 * self.num_workers
         if self.samples_remaining > 0:
-            self.index_queue.put((self.send_idx, self._next_indices()))
-            self.batches_outstanding += 1
-            self.send_idx += 1
+            if self.samples_remaining < self.batch_size and self.drop_last:
+                self._shutdown_workers()
+                raise StopIteration
+            else:
+                self.index_queue.put((self.send_idx, self._next_indices()))
+                self.batches_outstanding += 1
+                self.send_idx += 1
 
     def _process_next_batch(self, batch):
         self.rcvd_idx += 1
@@ -244,15 +251,14 @@ class DataLoader(object):
         pin_memory (bool, optional)
     """
 
-    def __init__(self, dataset, batch_size=1, drop=False, shuffle=False,
-                 sampler=None, num_workers=0, collate_fn=default_collate,
-                 pin_memory=False):
+    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, num_workers=0,
+                 collate_fn=default_collate, pin_memory=False, drop_last=False):
         self.dataset = dataset
         self.batch_size = batch_size
-        self.drop = drop
         self.num_workers = num_workers
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
+        self.drop_last = drop_last
 
         if sampler is not None:
             self.sampler = sampler
