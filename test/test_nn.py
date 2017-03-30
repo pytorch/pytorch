@@ -1552,7 +1552,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bias, bidirectional, batch_first, contig, variable_len, persistent in product((True, False), repeat=6):                
+            for bias, bidirectional, batch_first, contig, variable_len, persistent in product((True, False), repeat=6):
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
                     input_val = torch.randn(batch, seq_length, input_size)

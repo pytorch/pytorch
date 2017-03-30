@@ -216,16 +216,16 @@ class RNNDescriptor(object):
         check_error(lib.cudnnCreateRNNDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
         self.persistent = persistent
-        self._set(handle, hidden_size, num_layers, dropout_desc, input_mode, 
-             bidirectional, mode, datatype)
+        self._set(handle, hidden_size, num_layers, dropout_desc, input_mode,
+                  bidirectional, mode, datatype)
 
-    def _set(self, handle, hidden_size, num_layers, dropout_desc, input_mode, 
+    def _set(self, handle, hidden_size, num_layers, dropout_desc, input_mode,
              bidirectional, mode, datatype):
         if version() >= 6000:
-            if self.persistent is True: 
+            if self.persistent is True:
                 algo = CUDNN_RNN_ALGO_PERSIST_STATIC
             else:
-                algo = CUDNN_RNN_ALGO_STANDARD 
+                algo = CUDNN_RNN_ALGO_STANDARD
             status = lib.cudnnSetRNNDescriptor_v6(
                 handle,
                 self,
@@ -240,10 +240,10 @@ class RNNDescriptor(object):
             )
             if status is not 0:
                 if self.persistent is True:
-#try standard algo
+                    # try standard algo
                     self.persistent = False
-                    self._set(handle, hidden_size, num_layers, dropout_desc, input_mode, 
-                         bidirectional, mode, datatype)
+                    self._set(handle, hidden_size, num_layers, dropout_desc, input_mode,
+                              bidirectional, mode, datatype)
                 else:
                     raise CuDNNError(status)
         else:

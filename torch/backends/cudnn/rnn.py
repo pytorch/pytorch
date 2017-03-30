@@ -197,8 +197,10 @@ def forward(fn, input, hx, weight, output, hy):
         fn.datatype = cudnn._typemap[input.type()]
         is_input_packed = fn.batch_sizes is not None
         if is_input_packed:
-            warnings.warn("Warning: persistent algorithm not supported for variable length input. Switching to standard")
-            fn.persistent = False #persistent algo is not supported for variable length input
+            warnings.warn(
+                "Warning: persistent algorithm not supported for variable length input."
+                "Switching to standard")
+            fn.persistent = False  # persistent algo is not supported for variable length input
         if fn.mode == cudnn.CUDNN_LSTM:
             hx, cx = hx
             hy, cy = hy
