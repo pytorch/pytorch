@@ -1,12 +1,13 @@
 import torch
 from torch.autograd import Variable
+from collections import Iterable
 
 
 def iter_gradients(x):
     if isinstance(x, Variable):
         if x.requires_grad:
             yield x.grad.data if x.grad is not None else None
-    else:
+    elif isinstance(x, Iterable):
         for elem in x:
             for result in iter_gradients(elem):
                 yield result
@@ -17,7 +18,7 @@ def zero_gradients(x):
         if x.grad is not None:
             x.grad.detach_()
             x.grad.data.zero_()
-    else:
+    elif isinstance(x, Iterable):
         for elem in x:
             zero_gradients(elem)
 
@@ -25,11 +26,16 @@ def zero_gradients(x):
 def make_jacobian(input, num_out):
     if isinstance(input, Variable) and not input.requires_grad:
         return None
-    if torch.is_tensor(input) or isinstance(input, Variable):
+    elif torch.is_tensor(input) or isinstance(input, Variable):
         return torch.zeros(input.nelement(), num_out)
+    elif isinstance(input, Iterable):
+        jacobians = list(filter(
+            lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
+        if not jacobians:
+            return None
+        return type(input)(jacobians)
     else:
-        return type(input)(filter(lambda x: x is not None,
-                                  (make_jacobian(elem, num_out) for elem in input)))
+        return None
 
 
 def iter_tensors(x, only_requiring_grad=False):
@@ -38,7 +44,7 @@ def iter_tensors(x, only_requiring_grad=False):
     elif isinstance(x, Variable):
         if x.requires_grad or not only_requiring_grad:
             yield x.data
-    else:
+    elif isinstance(x, Iterable):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
@@ -49,8 +55,9 @@ def contiguous(input):
         return input.contiguous()
     elif isinstance(input, Variable):
         return input.contiguous()
-    else:
+    elif isinstance(input, Iterable):
         return type(input)(contiguous(e) for e in input)
+    return input
 
 
 def get_numerical_jacobian(fn, input, target, eps=1e-3):
@@ -155,7 +162,10 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     zero_gradients(inputs)
     output = _as_tuple(func(*inputs))
     torch.autograd.backward(output, [o.data.new(o.size()).zero_() for o in output])
-    for i in inputs:
+    var_inputs = list(filter(lambda i: isinstance(i, Variable), inputs))
+    if not var_inputs:
+        raise RuntimeError("no Variables found in input")
+    for i in var_inputs:
         if i.grad is None:
             continue
         if not i.grad.data.eq(0).all():
