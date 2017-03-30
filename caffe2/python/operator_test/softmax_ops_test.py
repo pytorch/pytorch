@@ -140,6 +140,49 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X, label], 0, [1], stepsize=1e-4, threshold=1e-2)
 
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @given(**hu.gcs_gpu_only)
+    def test_softmax_with_loss_large(self, gc, dc):
+        for n in [64, 128, 256, 512]:
+            for D in [1000, 5000, 10000, 50000]:
+                # n = number of examples, D = |labels|
+                # Initialize X and add 1e-2 for numerical stability
+                X = np.random.rand(n, D).astype(np.float32)
+                X = X + 1e-2
+
+                # Initialize label
+                label = (np.random.rand(n) * D).astype(np.int32)
+
+                # Reference implementation of cross entropy with soft labels
+                def label_softmax_crossent(X, label):
+                    probs = np.zeros((n, D))
+                    rowmax = np.zeros(n)
+                    for i in range(n):
+                        rowmax[i] = max(X[i, ])
+                        # We need to subtract the max to avoid numerical issues
+                        probs[i] = X[i] - rowmax[i]
+                        exps = np.exp(probs[i, ])
+                        norm = sum(exps)
+                        probs[i, ] = exps / norm
+
+                    label_xent = [-np.log(max(probs[i][label[i]], 1e-20))
+                                  for i in range(n)]
+                    avgloss = np.sum(label_xent) / float(n)
+                    return (probs, avgloss)
+
+                op = core.CreateOperator(
+                    "SoftmaxWithLoss",
+                    ["X", "label"],
+                    ["probs", "avgloss"]
+                )
+
+                self.assertReferenceChecks(
+                    device_option=gc,
+                    op=op,
+                    inputs=[X, label],
+                    reference=label_softmax_crossent,
+                )
+
     @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
     def test_softmax_with_loss_label_prob(self, n, D, gc, dc):
         # n = number of examples, D = |labels|
@@ -509,4 +552,6 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
 
 if __name__ == "__main__":
     import unittest
+    import random
+    random.seed(2603)
     unittest.main()
