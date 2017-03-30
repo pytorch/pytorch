@@ -21,6 +21,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
 
     SavedVariable(const Variable& variable, Function* saved_for)
       : data(variable.data->clone_shallow())
+      , grad_accumulator(variable.grad_accumulator)
       , version(std::move(variable.version_counter->new_saved_ref()))
       , requires_grad(variable.requires_grad)
       , is_volatile(false)
@@ -39,6 +40,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
     // would create a reference cycle. If this field is used, grad_fn is
     // guaranteed to hold a nullptr;
     std::weak_ptr<Function> weak_grad_fn;
+    std::weak_ptr<Function> grad_accumulator;
     std::unique_ptr<VariableVersion> version;
     bool requires_grad;
     bool is_volatile;

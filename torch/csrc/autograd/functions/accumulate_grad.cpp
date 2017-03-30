@@ -55,6 +55,11 @@ auto AccumulateGrad::apply(const variable_list& _grads) -> variable_list {
     }
   } else {
     auto add_fn = std::make_shared<Add>();
+    // Once the grad becomes not volatile, it should stay like that
+    if (!var.grad->is_volatile && new_grad->is_volatile) {
+      new_grad = std::make_shared<Variable>(
+              std::unique_ptr<thpp::Tensor>(new_grad->data->clone_shallow()), false, false);
+    }
     var.grad = add_fn->apply({var.grad, new_grad})[0];
   }
 

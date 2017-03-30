@@ -11,7 +11,7 @@ auto Identity::apply(const variable_list& inputs) -> variable_list {
 };
 
 auto Clone::apply(const variable_list& inputs) -> variable_list {
-  if (inputs.size() != 1) throw std::runtime_error("Add expects exactly 2 inputs");
+  if (inputs.size() != 1) throw std::runtime_error("Clone expects exactly 1 input");
   auto& input = inputs[0]->data;
   AutoGPU guard(input->getDevice());
 
