@@ -148,6 +148,7 @@ void Runner::run(BenchmarkFn& fn, int n) {
     if (options_.verify) {
       benchmark->run();
       benchmark->verify();
+      barrier_->run();
     }
 
     // Switch mode based on iteration count or time spent
