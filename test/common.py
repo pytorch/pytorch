@@ -142,6 +142,8 @@ class TestCase(unittest.TestCase):
                     self.assertLessEqual(max_err, prec, message)
             self.assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
+                x = x.clone().contiguous()
+                y = y.clone().contiguous()
                 assertTensorsEqual(x.indices(), y.indices())
                 assertTensorsEqual(x.values(), y.values())
             else:

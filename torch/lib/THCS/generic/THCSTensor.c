@@ -356,14 +356,6 @@ void THCSTensor_(markContiguous)(THCState *state, THCSTensor *self) {
   self->contiguous = 1;
 }
 
-void THCSTensor_(contiguousValues)(THCState *state, THCSTensor *self) {
-  if (!THCTensor_(isContiguous)(state, self->values)) {
-    THCTensor *newValues = THCTensor_(newContiguous)(state, self->values);
-    THCTensor_(free)(state, self->values);
-    self->values = newValues;
-  }
-}
-
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)
 {
   /* FIXME: remove this flag after any users stop using it since it is

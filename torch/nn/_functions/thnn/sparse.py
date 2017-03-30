@@ -1,5 +1,4 @@
 import torch
-from torch import sparse
 from torch.autograd.function import Function
 from torch._thnn import type2backend
 
@@ -29,15 +28,6 @@ class Embedding(Function):
             self.max_norm,
             self.norm_type
         )
-
-    def _make_sparse(self, indices, tensor_type):
-        i = torch.LongTensor(2, indices.numel())
-        v = torch.ones(indices.numel())
-        i[1].copy_(torch.arange(0, indices.numel()))
-        i[0].copy_(indices)
-        SparseTensor = getattr(sparse, tensor_type.__name__)
-        return SparseTensor(i, v, torch.Size(
-            [self._weight_size[0], indices.numel()])).contiguous()
 
     def forward(self, indices, weight):
         assert indices.dim() <= 2
@@ -100,9 +90,16 @@ class Embedding(Function):
                 1
             )
         else:
-            sp = self._make_sparse(indices, type(grad_output))
-            go = grad_output.view(-1, grad_output.size()[-1])
-            grad_weight = torch.smm(sp, go)
+            tensor_type = type(grad_output).__name__
+            if grad_output.is_cuda:
+                SparseTensor = getattr(torch.cuda.sparse, tensor_type)
+            else:
+                SparseTensor = getattr(torch.sparse, tensor_type)
+            grad_weight = SparseTensor(
+                indices.view(1, -1),
+                grad_output.view(-1, self._weight_size[1]),
+                self._weight_size,
+            )
         return None, grad_weight
 
 

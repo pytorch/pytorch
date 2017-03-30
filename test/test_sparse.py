@@ -256,16 +256,16 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            expected = torch.addmm(alpha, t, beta, x.to_dense(), y)
             res = torch.addmm(alpha, t, beta, x, y)
+            expected = torch.addmm(alpha, t, beta, x.to_dense(), y)
             self.assertEqual(res, expected)
 
-            expected = torch.addmm(t, x.to_dense(), y)
             res = torch.addmm(t, x, y)
+            expected = torch.addmm(t, x.to_dense(), y)
             self.assertEqual(res, expected)
 
-            expected = torch.mm(x.to_dense(), y)
             res = torch.mm(x, y)
+            expected = torch.mm(x.to_dense(), y)
             self.assertEqual(res, expected)
 
         test_shape(10, 100, 100)
@@ -280,16 +280,16 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            expected = torch.addmm(alpha, t.to_dense(), beta, x.to_dense(), y)
             res = torch.saddmm(alpha, t, beta, x, y)
+            expected = torch.addmm(alpha, t.to_dense(), beta, x.to_dense(), y)
             self.assertEqual(res.to_dense(), expected)
 
-            expected = torch.addmm(t.to_dense(), x.to_dense(), y)
             res = torch.saddmm(t, x, y)
+            expected = torch.addmm(t.to_dense(), x.to_dense(), y)
             self.assertEqual(res.to_dense(), expected)
 
-            expected = torch.mm(x.to_dense(), y)
             res = torch.smm(x, y)
+            expected = torch.mm(x.to_dense(), y)
             self.assertEqual(res.to_dense(), expected)
 
         test_shape(7, 5, 3)
@@ -304,8 +304,8 @@ class TestSparse(TestCase):
                 if is_cuda:
                     y = y.cuda()
 
-                expected = torch.mm(x.to_dense(), y)
                 res = torch.dsmm(x, y)
+                expected = torch.mm(x.to_dense(), y)
                 self.assertEqual(res, expected)
 
         test_shape(7, 5, 3)
@@ -320,8 +320,8 @@ class TestSparse(TestCase):
                 if is_cuda:
                     y = y.cuda()
 
-                expected = torch.mm(x.to_dense(), y)
                 res = torch.hsmm(x, y)
+                expected = torch.mm(x.to_dense(), y)
                 self.assertEqual(res.to_dense(), expected)
 
         test_shape(7, 5, 3)
@@ -337,8 +337,8 @@ class TestSparse(TestCase):
                 y = y.cuda()
             r = random.random()
 
-            expected = y + r * x.to_dense()
             res = torch.add(y, r, x)
+            expected = y + r * x.to_dense()
 
             self.assertEqual(res, expected)
 
@@ -352,8 +352,8 @@ class TestSparse(TestCase):
             y.transpose_(0, len(s) - 1)
             r = random.random()
 
-            expected = y + r * x.to_dense()
             res = torch.add(y, r, x)
+            expected = y + r * x.to_dense()
 
             self.assertEqual(res, expected)
 
@@ -456,8 +456,8 @@ class TestSparse(TestCase):
                 [17, 18, 19, 20],
             ])
             exp_v = ValueTensor([7, 14, 14, 3, 20])
-            expected = SparseTensor(i, exp_v, torch.Size([5, 4]))
             res = dense.sparse_mask(x)
+            expected = SparseTensor(i, exp_v, torch.Size([5, 4]))
             self.assertEqual(res, expected)
 
     def test_sparse_mask_hybrid(self):
@@ -475,9 +475,9 @@ class TestSparse(TestCase):
                 [[13, 5], [14, 1], [15, 1], [16, 6]],
                 [[17, 7], [18, 2], [19, 7], [20, 1]],
             ])
+            res = dense.sparse_mask(x)
             exp_v = ValueTensor([[7, 9], [14, 1], [14, 1], [3, 3], [20, 1]])
             expected = SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
-            res = dense.sparse_mask(x)
             self.assertEqual(res, expected)
 
 
