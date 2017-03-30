@@ -45,7 +45,9 @@ endif()
 
 # OpenCV-based binaries
 set(Caffe2_OPENCV_BINARY_SRCS
-    "convert_encoded_to_raw_leveldb.cc"
+    # Temporarily commented out because this depends on both opencv and
+    # leveldb, so we should test both USE_LEVELDB and USE_OPENCV
+    # "convert_encoded_to_raw_leveldb.cc"
     "make_image_db.cc"
 )
 if(USE_OPENCV AND OpenCV_FOUND)
