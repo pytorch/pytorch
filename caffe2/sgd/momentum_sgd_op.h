@@ -133,14 +133,13 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
     CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(MOMENTUM));
     CAFFE_ENFORCE(Input(LR).size() == 1);
     CAFFE_ENFORCE(Input(PARAM).size() == Input(MOMENTUM).size());
-    CAFFE_ENFORCE(Input(INDICES).size() == Input(GRAD).dim(0));
 
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     Output(OUTPUT_MOMENTUM)->ResizeLike(Input(MOMENTUM));
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
 
-    auto n = Input(GRAD).dim(0);
-    auto block_size = Input(GRAD).size() / n;
+    auto block_size = Input(PARAM).size() / Input(PARAM).dim(0);
+    auto n = Input(GRAD).size() / block_size;
 
     const auto* gradIn = Input(GRAD).template data<T>();
     const auto* momentumIn = Input(MOMENTUM).template data<T>();
@@ -156,6 +155,9 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
       auto idx = indices[i];
       auto offsetI = i * block_size;
       auto offsetIdx = idx * block_size;
+
+      CAFFE_ENFORCE(offsetIdx + block_size <= Input(PARAM).size());
+      CAFFE_ENFORCE(offsetI + block_size <= Input(GRAD).size());
 
       momentum_sgd_update<Context>(
           block_size,
