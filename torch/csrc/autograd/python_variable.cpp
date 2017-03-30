@@ -35,6 +35,8 @@ PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
     Py_INCREF(var->pyobj);
   } else {
     var->pyobj = THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var);
+    THPVariable* py_var = (THPVariable*)var->pyobj;
+    py_var->data = torch::createPyObject(*var->data);
   }
   return var->pyobj;
 }
@@ -60,6 +62,19 @@ PyObject * THPVariable_New(PyObject *data, PyObject *_grad_fn)
 PyObject * THPVariable_NewVolatile(PyObject *data)
 {
   auto v = std::make_shared<Variable>(torch::createTensor(data), false, true);
+  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
+  if (obj) {
+    v->pyobj = obj;
+    ((THPVariable*)obj)->data = data;
+    Py_INCREF(data);
+  }
+  return obj;
+}
+
+// This function DOES NOT steal a reference to data
+PyObject * THPVariable_NewLeaf(PyObject *data)
+{
+  auto v = std::make_shared<Variable>(torch::createTensor(data), false, false);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
@@ -116,9 +131,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   char is_volatile = 0;
   char requires_grad = 0;
 
-  const char *accepted_args[] = {"data", "grad_fn", "volatile", "requires_grad", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OObb", (char**)accepted_args,
-      &data, &grad_fn, &is_volatile, &requires_grad))
+  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbO", (char**)accepted_args,
+      &data, &requires_grad, &is_volatile, &grad_fn))
     return NULL;
 
   if (grad_fn == Py_None)
@@ -134,16 +149,20 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   THPUtils_assert(!(is_volatile && requires_grad),
           "Variable can't be volatile and require_grad at the same time!");
   THPUtils_assert(!grad_fn || THPFunction_Check(grad_fn),
-          "Variable grad_fn has to be a Function object or None, but got %s",
+          "Variable _grad_fn has to be a Function object or None, but got %s",
           THPUtils_typename(grad_fn));
   THPUtils_assert(THPModule_isTensor(data), "Variable data has to "
           "be a tensor, but got %s", THPUtils_typename(data));
 
-  auto var = std::make_shared<Variable>(torch::createTensor(data), requires_grad, is_volatile);
+  std::shared_ptr<Variable> var;
+  if (grad_fn) {
+    var = std::make_shared<Variable>(torch::createTensor(data), THPFunction_asFunction((THPFunction*)grad_fn));
+  } else {
+    var = std::make_shared<Variable>(torch::createTensor(data), requires_grad, is_volatile);
+  }
   PyObject* self = THPVariable_NewWithVar(type, var);
   if (self) {
     var->pyobj = self;
-    var->grad_fn = THPFunction_asFunction((THPFunction*)grad_fn);
     ((THPVariable*)self)->cdata = var;
     ((THPVariable*)self)->data = data;
     Py_INCREF(data);
@@ -162,9 +181,9 @@ int THPVariable_pyinit(PyObject *self, PyObject *args, PyObject *kwds)
   char is_volatile = 0;
   char requires_grad = 0;
 
-  const char *accepted_args[] = {"data", "grad_fn", "volatile", "requires_grad", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|Obb", (char**)accepted_args,
-      &data, &grad_fn, &is_volatile, &requires_grad))
+  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbO", (char**)accepted_args,
+      &data, &requires_grad, &is_volatile, &grad_fn))
     return -1;
 
   return 0;
