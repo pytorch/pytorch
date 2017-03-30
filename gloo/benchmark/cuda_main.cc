@@ -13,6 +13,7 @@
 #include "gloo/benchmark/runner.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
+#include "gloo/cuda_gpudirect_allreduce_ring.h"
 #include "gloo/cuda_private.h"
 #include "gloo/common/common.h"
 #include "gloo/common/logging.h"
@@ -99,6 +100,12 @@ int main(int argc, char** argv) {
       return gloo::make_unique<
         CudaAllreduceBenchmark<
           CudaAllreduceRingChunked<float>>>(context, x);
+    };
+  } else if (x.benchmark == "cuda_gpudirect_allreduce_ring") {
+    fn = [&](std::shared_ptr<Context>& context) {
+      return gloo::make_unique<
+        CudaAllreduceBenchmark<
+          CudaGPUDirectAllreduceRing<float>>>(context, x);
     };
   }
 

@@ -15,6 +15,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#include "gloo/common.h"
+
 namespace gloo {
 
 extern const cudaStream_t kStreamNotSet;
@@ -46,6 +48,12 @@ class CudaDevicePointer {
   CudaDevicePointer(CudaDevicePointer&&) noexcept;
   ~CudaDevicePointer();
 
+  // Default constructor creates invalid instance
+  CudaDevicePointer() : count_(0), deviceId_(-1) {}
+
+  // Move assignment operator
+  CudaDevicePointer& operator=(CudaDevicePointer&&);
+
   T* operator*() const {
     return device_;
   }
@@ -72,6 +80,12 @@ class CudaDevicePointer {
   // Copy contents of host pointer to device.
   void copyFromHostAsync(T* src);
 
+  // Copy contents of device pointer to other device pointer.
+  void copyToDeviceAsync(T* dst);
+
+  // Copy contents of device pointer to other device pointer.
+  void copyFromDeviceAsync(T* src);
+
   // Wait for copy to complete.
   void wait();
 
@@ -87,10 +101,10 @@ class CudaDevicePointer {
   T* device_;
 
   // Number of T elements in device pointer
-  const size_t count_;
+  size_t count_;
 
   // GPU that the device pointer lives on
-  const int deviceId_;
+  int deviceId_;
 
   // Operations on this pointer are run always run on a stream such
   // that they don't block other operations being executed on the GPU
@@ -106,5 +120,80 @@ class CudaDevicePointer {
   // it is destroyed when this instance is destructed.
   bool streamOwner_ = false;
 };
+
+template <typename T>
+void cudaSum(T* x, const T* y, size_t n, const cudaStream_t stream);
+
+template <typename T>
+void cudaProduct(T* x, const T* y, size_t n, const cudaStream_t stream);
+
+template <typename T>
+void cudaMax(T* x, const T* y, size_t n, const cudaStream_t stream);
+
+template <typename T>
+void cudaMin(T* x, const T* y, size_t n, const cudaStream_t stream);
+
+template <typename T>
+class CudaReductionFunction : public ReductionFunction<T> {
+  using Fn = void(T*, const T*, size_t n, const cudaStream_t stream);
+
+ public:
+  static const CudaReductionFunction<T>* sum;
+  static const CudaReductionFunction<T>* product;
+  static const CudaReductionFunction<T>* min;
+  static const CudaReductionFunction<T>* max;
+
+  static const CudaReductionFunction<T>* toCudaReductionFunction(
+      const ReductionFunction<T>* fn) {
+    switch (fn->type()) {
+      case SUM:
+        return sum;
+      case PRODUCT:
+        return product;
+      case MIN:
+        return min;
+      case MAX:
+        return max;
+      default:
+        return nullptr;
+    }
+  }
+
+  CudaReductionFunction(ReductionType type, Fn* fn)
+      : type_(type), fn_(fn) {}
+
+  virtual ReductionType type() const override {
+    return type_;
+  }
+
+  virtual void call(T* x, const T* y, size_t n) const override {
+    fn_(x, y, n, 0);
+  }
+
+  virtual void callAsync(
+      T* x,
+      const T* y,
+      size_t n,
+      const cudaStream_t stream) const {
+    fn_(x, y, n, stream);
+  }
+
+ protected:
+  ReductionType type_;
+  Fn* fn_;
+};
+
+template <typename T>
+const CudaReductionFunction<T>* CudaReductionFunction<T>::sum =
+  new CudaReductionFunction<T>(SUM, &::gloo::cudaSum<T>);
+template <typename T>
+const CudaReductionFunction<T>* CudaReductionFunction<T>::product =
+  new CudaReductionFunction<T>(PRODUCT, &::gloo::cudaProduct<T>);
+template <typename T>
+const CudaReductionFunction<T>* CudaReductionFunction<T>::min =
+  new CudaReductionFunction<T>(MIN, &::gloo::cudaMin<T>);
+template <typename T>
+const CudaReductionFunction<T>* CudaReductionFunction<T>::max =
+  new CudaReductionFunction<T>(MAX, &::gloo::cudaMax<T>);
 
 } // namespace gloo

@@ -64,6 +64,23 @@ CudaDevicePointer<T>::CudaDevicePointer(CudaDevicePointer<T>&& other) noexcept
 }
 
 template<typename T>
+CudaDevicePointer<T>& CudaDevicePointer<T>::operator=(
+    CudaDevicePointer<T>&& other) {
+  device_ = other.device_;
+  count_ = other.count_;
+  deviceId_ = other.deviceId_;
+  streamOwner_ = other.streamOwner_;
+  stream_ = other.stream_;
+  event_ = other.event_;
+
+  // Nullify fields that would otherwise be destructed
+  other.stream_ = nullptr;
+  other.event_ = nullptr;
+
+  return *this;
+}
+
+template<typename T>
 CudaDevicePointer<T>::~CudaDevicePointer() {
   CudaDeviceScope scope(deviceId_);
   if (event_ != nullptr) {
@@ -102,6 +119,30 @@ void CudaDevicePointer<T>::copyFromHostAsync(T* src) {
 }
 
 template<typename T>
+void CudaDevicePointer<T>::copyToDeviceAsync(T* dst) {
+  CudaDeviceScope scope(deviceId_);
+  CUDA_CHECK(cudaMemcpyAsync(
+               dst,
+               device_,
+               count_ * sizeof(T),
+               cudaMemcpyDeviceToDevice,
+               stream_));
+  CUDA_CHECK(cudaEventRecord(event_, stream_));
+}
+
+template<typename T>
+void CudaDevicePointer<T>::copyFromDeviceAsync(T* src) {
+  CudaDeviceScope scope(deviceId_);
+  CUDA_CHECK(cudaMemcpyAsync(
+               device_,
+               src,
+               count_ * sizeof(T),
+               cudaMemcpyDeviceToDevice,
+               stream_));
+  CUDA_CHECK(cudaEventRecord(event_, stream_));
+}
+
+template<typename T>
 void CudaDevicePointer<T>::wait() {
   CudaDeviceScope scope(deviceId_);
   CUDA_CHECK(cudaEventSynchronize(event_));
@@ -109,5 +150,68 @@ void CudaDevicePointer<T>::wait() {
 
 // Instantiate template
 template class CudaDevicePointer<float>;
+
+// Borrowed limits from Caffe2 code (see core/common_gpu.h)
+constexpr static int kCudaNumThreads = 512;
+constexpr static int kCudaMaximumNumBlocks = 4096;
+
+static inline int cudaGetBlocks(const int N) {
+  return std::min((N + kCudaNumThreads - 1) / kCudaNumThreads,
+                  kCudaMaximumNumBlocks);
+}
+
+#define DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(T, Funcname, op)           \
+  __global__                                                            \
+  void _Kernel_##T##_##Funcname(T* dst, const T* src, const int n) {    \
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x;                 \
+         i < (n);                                                       \
+         i += blockDim.x * gridDim.x) {                                 \
+      dst[i] = dst[i] op src[i];                                        \
+    }                                                                   \
+  }                                                                     \
+  template <>                                                           \
+  void Funcname<T>(                                                     \
+    T* dst,                                                             \
+    const T* src,                                                       \
+    size_t n,                                                           \
+    const cudaStream_t stream) {                                        \
+    _Kernel_##T##_##Funcname<<<                                         \
+      cudaGetBlocks(n),                                                 \
+      kCudaNumThreads,                                                  \
+      0,                                                                \
+      stream>>>(                                                        \
+        dst, src, n);                                                   \
+  }
+
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(float, cudaSum, +);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(float, cudaProduct, *);
+
+#define DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(T, Funcname, op)            \
+  __global__                                                            \
+  void _Kernel_##T##_##Funcname(T* dst, const T* src, const int n) {    \
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x;                 \
+         i < (n);                                                       \
+         i += blockDim.x * gridDim.x) {                                 \
+      if (src[i] op dst[i]) {                                           \
+        dst[i] = src[i];                                                \
+      }                                                                 \
+    }                                                                   \
+  }                                                                     \
+  template <>                                                           \
+  void Funcname<T>(                                                     \
+    T* dst,                                                             \
+    const T* src,                                                       \
+    size_t n,                                                           \
+    const cudaStream_t stream) {                                        \
+    _Kernel_##T##_##Funcname<<<                                         \
+      cudaGetBlocks(n),                                                 \
+      kCudaNumThreads,                                                  \
+      0,                                                                \
+      stream>>>(                                                        \
+        dst, src, n);                                                   \
+  }
+
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(float, cudaMin, <);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(float, cudaMax, >);
 
 } // namespace gloo
