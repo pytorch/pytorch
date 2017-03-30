@@ -413,7 +413,7 @@ if WITH_CUDA:
                        )
     extensions.append(THCUNN)
 
-version = '0.1.10'
+version = '0.1.11'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     version = os.getenv('PYTORCH_BUILD_VERSION') \

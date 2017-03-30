@@ -98,6 +98,7 @@ auto Engine::thread_main(ReadyQueue& queue) -> void {
       }
     }
     if (--task.base->outstanding_tasks == 0) {
+      std::lock_guard<std::mutex> lock(task.base->mutex);
       task.base->not_done.notify_all();
     }
   }
