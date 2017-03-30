@@ -116,6 +116,17 @@ CAFFE2_DECLARE_BINARY_OP(Div);
 
 #undef CAFFE2_DECLARE_BINARY_OP
 
+// Adds batch sub-tensors elementwise to output. Stripe is the stripe length
+// and N is the number of elements to add (size of Y).
+template <typename T, class Context>
+void AddStripedBatch(
+    const int N,
+    const T* first,
+    T* y,
+    const int stripe,
+    const int batch,
+    Context* context);
+
 // Compute the row-wise max of a N*D matrix X, and write it to a N
 // dimensional vector y.
 template <typename T, class Context>

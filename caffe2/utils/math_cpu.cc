@@ -629,6 +629,24 @@ void Not<bool, CPUContext>(
 #undef CAFFE2_DEFINE_BINARY_OP
 #undef CAFFE2_INSTANTIATE_BINARY_OP
 
+#define CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(T)             \
+  template <>                                                   \
+  void AddStripedBatch(                                         \
+      const int N,                                              \
+      const T* first,                                           \
+      T* y,                                                     \
+      const int stripe,                                         \
+      const int batch,                                          \
+      CPUContext* context) {                                    \
+    for (int j = 0; j < batch; j++) {                           \
+      Add<T, CPUContext>(N, first + j * stripe, y, y, context); \
+    }                                                           \
+  }
+
+CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
+CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(double);
+#undef CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH
+
 template <>
 void RandUniform<float, CPUContext>(
     const int n, const float a, const float b, float* r,

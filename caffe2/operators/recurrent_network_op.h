@@ -586,18 +586,16 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         // copy / share data here. One way to speed this up could be a kernel
         // which sums up several tensors together instead of going 1 by 1
         const auto recurrentStateSize = Input(inputId).dim32(0);
-        context_.template Copy<T, Context, Context>(
+
+        math::Set<T, Context>(recurrentStateSize, 0.0, output_data, &context_);
+
+        math::AddStripedBatch<T, Context>(
             recurrentStateSize,
             p->template data<T>(),
-            output_data);
-        for (int j = 1; j < batchSize; ++j) {
-          math::Add<T, Context>(
-              recurrentStateSize,
-              p->template data<T>() + j * recurrentStateSize,
-              output_data,
-              output_data,
-              &context_);
-        }
+            output_data,
+            recurrentStateSize,
+            batchSize,
+            &context_);
       }
     }
 

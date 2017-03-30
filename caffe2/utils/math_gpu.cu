@@ -149,6 +149,44 @@ void Gemv<float, CUDAContext>(
       1));
 }
 
+// Batched Add variants
+namespace {
+
+template <typename T>
+__global__ void AddStripedBatchKernel(
+    const int N,
+    const T* first,
+    T* Y,
+    const int stripe,
+    const int batch) {
+  for (int j = 0; j < batch; j++) {
+    const T* x = first + j * stripe;
+    CUDA_1D_KERNEL_LOOP(i, N) {
+      Y[i] += x[i];
+    }
+  }
+}
+} // namespace
+
+#define CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(T)           \
+  template <>                                                  \
+  void AddStripedBatch<T, CUDAContext>(                        \
+      const int N,                                             \
+      const T* first,                                          \
+      T* Y,                                                    \
+      const int stripe,                                        \
+      const int batch,                                         \
+      CUDAContext* context) {                                  \
+    AddStripedBatchKernel<T><<<                                \
+        CAFFE_GET_BLOCKS(N),                                   \
+        CAFFE_CUDA_NUM_THREADS,                                \
+        0,                                                     \
+        context->cuda_stream()>>>(N, first, Y, stripe, batch); \
+  }
+
+CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(float);
+CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(double);
+#undef CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH
 
 namespace {
 template <typename T>
