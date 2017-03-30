@@ -143,9 +143,9 @@ class DataLoaderIter(object):
 
     def __len__(self):
         if self.drop_last:
-            return int(math.ceil(len(self.sampler) / float(self.batch_size)))
-        else:
             return int(math.floor(len(self.sampler) / float(self.batch_size)))
+        else:
+            return int(math.ceil(len(self.sampler) / float(self.batch_size)))
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
