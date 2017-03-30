@@ -65,12 +65,9 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
 
 #pragma unroll
     for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
-
-      // Single warp per slice is completely synchronous
-      if (Power2SortSize > 64) {
-        __syncthreads();
-      }
-
+    
+      __syncthreads();
+      
       unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
       bitonicSwap<Comparator, K, V>(
         keys[pos], values[pos], valid[pos],
@@ -81,11 +78,9 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
 
 #pragma unroll
   for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
-    // Single warp per slice is completely synchronous
-    if (Power2SortSize > 64) {
-      __syncthreads();
-    }
-
+    
+    __syncthreads();
+    
     unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
     bitonicSwap<Comparator, K, V>(
       keys[pos], values[pos], valid[pos],
@@ -93,10 +88,8 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
       false, comp);
   }
 
-  // Single warp per slice is completely synchronous
-  if (Power2SortSize > 64) {
-    __syncthreads();
-  }
+  __syncthreads();
+  
 }
 
 template <typename Comparator, typename K,
@@ -111,11 +104,8 @@ __device__ inline void bitonicSortKeys(K keys[Power2SortSize],
 #pragma unroll
     for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
 
-      // Single warp per slice is completely synchronous
-      if (Power2SortSize > 64) {
-        __syncthreads();
-      }
-
+      __syncthreads();
+      
       unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
       bitonicSwapKeys<Comparator, K>(
         keys[pos], valid[pos],
@@ -126,11 +116,8 @@ __device__ inline void bitonicSortKeys(K keys[Power2SortSize],
 
 #pragma unroll
   for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
-    // Single warp per slice is completely synchronous
-    if (Power2SortSize > 64) {
-      __syncthreads();
-    }
-
+    __syncthreads();
+    
     unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
     bitonicSwapKeys<Comparator, K>(
       keys[pos], valid[pos],
@@ -138,10 +125,8 @@ __device__ inline void bitonicSortKeys(K keys[Power2SortSize],
       false, comp);
   }
 
-  // Single warp per slice is completely synchronous
-  if (Power2SortSize > 64) {
-    __syncthreads();
-  }
+  __syncthreads();
+  
 }
 
 // Sorts (key, value) pairs (in different tensors) in-place; i.e.,
