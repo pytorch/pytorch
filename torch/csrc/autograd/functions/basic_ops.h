@@ -13,6 +13,9 @@ struct Error : public Function {
     : Function(std::move(flags))
     , msg(std::move(msg)) {}
 
+  Error(std::string msg)
+    : msg(std::move(msg)) {}
+
   virtual variable_list apply(const variable_list& inputs) override;
 
   std::string msg;

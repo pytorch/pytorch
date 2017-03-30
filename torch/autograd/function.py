@@ -2,6 +2,7 @@ import torch
 import torch._C as _C
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
+import functools
 from collections import OrderedDict
 
 
@@ -82,14 +83,8 @@ class _HookMixin(object):
         return backward_hooks, handle
 
 
-class CFunction(object):
+class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
     _is_legacy = False
-
-    def apply(self, *args, **kwargs):
-        raise NotImplementedError
-
-
-class BackwardCFunction(CFunction, _C._FunctionBase, _ContextMethodMixin, _HookMixin):
 
     def apply(self, *args):
         return self._forward_cls.backward(self, *args)
@@ -103,9 +98,10 @@ class FunctionMeta(type):
                 has_static_forward = isinstance(super_cls.__dict__['forward'], staticmethod)
                 break
 
+        setattr(cls, '_is_legacy', not has_static_forward)
+
         # old-style functions
         if not has_static_forward:
-            setattr(cls, '_is_legacy', True)
             return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
@@ -114,7 +110,7 @@ class FunctionMeta(type):
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
 
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, CFunction, _ContextMethodMixin, _HookMixin)):
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
     """Records operation history and defines formulas for differentiating ops.
 
     Every operation performed on :class:`Variable` s creates a new function
@@ -174,6 +170,28 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, CFunction, _Contex
         be the gradient w.r.t. the corresponding input.
         """
         raise NotImplementedError
+
+
+class Error(_C._FunctionBase):
+
+    def apply(self, *args, **kwargs):
+        raise RuntimeError("trying to differentiate twice a function that was marked"
+                           "with @once_differentiable")
+
+
+def once_differentiable(fn):
+    from .variable import Variable
+
+    @functools.wraps(fn)
+    def wrapper(ctx, *args):
+        tensor_args = [arg.data if isinstance(arg, Variable) else arg
+                       for arg in args]
+        outputs = fn(ctx, *tensor_args)
+        if not isinstance(outputs, tuple):
+            return Variable(outputs, _grad_fn=Error()) if outputs is not None else None
+        return tuple([Variable(o, _grad_fn=Error()) if o is not None else None
+                      for o in outputs])
+    return wrapper
 
 
 class InplaceFunction(Function):

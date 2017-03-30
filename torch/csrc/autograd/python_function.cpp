@@ -14,6 +14,7 @@
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"
 
 #ifdef WITH_CUDA
@@ -31,6 +32,33 @@ PyObject *THPStochasticFunctionClass = NULL;
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
+static bool _ensure_tuple(THPObjectPtr& obj)
+{
+  if (PyTuple_Check(obj.get()))
+    return false;
+
+  PyObject *tuple = PyTuple_New(1);
+  if (!tuple) throw python_error();
+  PyTuple_SET_ITEM(tuple, 0, obj.release());
+  obj = tuple;
+  return true;
+}
+
+static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guard)
+{
+  // TODO: no need to do this for non-differentiable outputs
+  PyObject *tensor_cls = std::get<0>(info);
+  gpu_guard.setDevice(std::get<1>(info));
+  std::vector<long> &sizes = std::get<2>(info);
+
+  THPObjectPtr grad_size = THPSize_New(sizes.size(), sizes.data());
+  if (!grad_size) throw python_error();
+  THPObjectPtr new_grad = PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL);
+  if (!new_grad) throw python_error();
+  THPObjectPtr result = PyObject_CallMethod(new_grad.get(), "zero_", "");
+  if (!result) throw python_error();
+  return new_grad.release();
+}
 
 namespace torch { namespace autograd {
 
@@ -76,8 +104,11 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   });
 }
 
+// NOTE: this function is written in a way that assumes it's only called for backward
 auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
+  AutoGPU _gpu_guard(-1);
+  THPFunction* py_fn = (THPFunction*)obj;
 
   THPObjectPtr _legacy = PyObject_GetAttrString(obj, "_is_legacy");
   if (_legacy == Py_True) {
@@ -87,15 +118,16 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   THPObjectPtr pyInputs = PyTuple_New(inputs.size());
   if (!pyInputs) throw python_error();
   auto num_inputs = inputs.size();
+  auto& output_info = *py_fn->output_info;
   for (size_t i = 0; i < num_inputs; ++i) {
     PyObject* input;
     if (inputs[i]) {
       input = THPVariable_Wrap(inputs[i]);
-      if (!input) throw python_error();
     } else {
-      input = Py_None;
-      Py_INCREF(input);
+      THPObjectPtr tensor = _allocate_grad_output(output_info[i], _gpu_guard);
+      input = THPVariable_NewLeaf(tensor);
     }
+    if (!input) throw python_error();
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
   }
 
@@ -104,19 +136,57 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   if (!apply_fn) throw python_error();
   THPObjectPtr r = PyObject_CallObject(apply_fn, pyInputs.get());
   if (!r) throw python_error();
+  _ensure_tuple(r);
 
-  auto num_outputs = PyTuple_GET_SIZE(r.get());
-  variable_list results(num_outputs);
+  auto& is_variable_input = *py_fn->is_variable_input;
+  int num_outputs = PyTuple_GET_SIZE(r.get());
+  int num_forward_inputs = is_variable_input.size();
+  // Returning too many results is ok, but only as long as they're all None
+  if (num_outputs > num_forward_inputs) {
+    bool all_none = true;
+    for (int i = num_outputs; i < num_forward_inputs; i++) {
+      all_none &= PyTuple_GET_ITEM(r.get(), i) == Py_None;
+    }
+    if (all_none) {
+      num_outputs = num_forward_inputs;
+      r = PyTuple_GetSlice(r.get(), 0, num_forward_inputs);
+      if (!r) throw python_error();
+    }
+  }
+
+  // Now the number of gradients should match
+  if (num_outputs != num_forward_inputs) {
+    std::string msg("function ");
+    msg += name() + " returned an incorrect number of gradients (expected ";
+    msg += std::to_string(num_forward_inputs) + ", got " ;
+    msg += std::to_string(num_outputs) + ")";
+    throw std::runtime_error(msg);
+  }
+
+  variable_list results;
+  results.reserve(num_outputs);
   for (int i = 0; i != num_outputs; ++i) {
-    PyObject* obj = PyTuple_GET_ITEM(r.get(), i);
-    if (obj != Py_None) {
-      if (!THPVariable_Check(obj)) {
-        std::string msg("expected Variable (got ");
-        msg += THPUtils_typename(obj);
+    PyObject* output = PyTuple_GET_ITEM(r.get(), i);
+    bool was_variable = is_variable_input[i];
+    if (!was_variable) {
+      if (output != Py_None) {
+        std::string msg("function ");
+        msg += name() + " returned a gradient different than None at position ";
+        msg += std::to_string(i + 1) + ", but the corresponding forward input was not a Variable";
+        throw std::runtime_error(msg);
+      }
+      continue;
+    }
+    if (output != Py_None) {
+      if (!THPVariable_Check(output)) {
+        std::string msg("expected Variable or None (got ");
+        msg += THPUtils_typename(output);
         msg += ")";
         throw std::runtime_error(msg);
       }
-      results[i] = ((THPVariable*)obj)->cdata;
+      results.emplace_back(((THPVariable*)output)->cdata);
+    } else {
+      results.emplace_back();
     }
   }
 
@@ -142,7 +212,6 @@ auto PyFunction::name() -> std::string {
 // Traverse and clear are required for supporting Python's GC cycle handling.
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
-  Py_VISIT(self->needs_input_grad);
   for (auto& hook : self->cdata.pre_hooks) {
     if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
@@ -162,7 +231,6 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  self->num_forward_inputs = 0;
   self->cdata.num_inputs = 0;
 
   Py_CLEAR(self->needs_input_grad);
@@ -179,6 +247,10 @@ static int THPFunction_clear(THPFunction *self)
   auto output_info = self->output_info;
   self->output_info = NULL;
   delete output_info;
+
+  auto is_variable_input = self->is_variable_input;
+  self->is_variable_input = NULL;
+  delete is_variable_input;
 
   // XXX: this will clear all hooks (not only Python ones)
   // I guess it's ok to leave it as is for now.
@@ -431,53 +503,60 @@ static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
   self->non_differentiable = NULL;
 }
 
-static bool _ensure_tuple(THPObjectPtr& obj)
-{
-  if (PyTuple_Check(obj.get()))
-    return false;
+struct UnpackedInput {
+  PyObject *raw_input;
+  THPObjectPtr tensor_input;
+  variable_list input_vars;
+};
 
-  PyObject *tuple = PyTuple_New(1);
-  if (!tuple) throw python_error();
-  PyTuple_SET_ITEM(tuple, 0, obj.release());
-  obj = tuple;
-  return true;
-}
+struct InputFlags {
+  FunctionFlags flags;
+  THPObjectPtr needs_input_grad;
+  std::vector<bool> is_variable_input;
+};
 
 template<bool enforce_variables>
-std::pair<FunctionFlags, THPObjectPtr> unpack_input(PyObject *args) {
-  variable_list input_vars;
+std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
+  UnpackedInput unpacked;
+  InputFlags flags;
 
   auto num_args = PyTuple_GET_SIZE(args);
-  THPObjectPtr tensor_args = PyTuple_New(num_args);
+  unpacked.tensor_input = PyTuple_New(num_args);
+  flags.needs_input_grad = PyTuple_New(num_args);
   for (int i = 0; i < num_args; i++) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
     PyObject *new_arg;
 
     bool is_variable = THPVariable_Check(arg);
+    flags.is_variable_input.push_back(is_variable);
     if (!is_variable) {
       if (enforce_variables) {
         THPUtils_setError("expected a Variable argument, but got %s",
                           THPUtils_typename(arg));
         throw python_error();
-      } else {
-        Py_INCREF(arg);
-        new_arg = arg;
       }
+      Py_INCREF(arg);
+      new_arg = arg;
+      Py_INCREF(Py_False);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
     } else {
       THPVariable* variable = (THPVariable*)arg;
-      input_vars.push_back(variable->cdata);
       new_arg = THPVariable_get_data(variable);
+      unpacked.input_vars.push_back(variable->cdata);
+      PyObject* needs_grad = variable->cdata->requires_grad ? Py_True : Py_False;
+      Py_INCREF(needs_grad);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
     }
-    PyTuple_SET_ITEM(tensor_args.get(), i, new_arg);
+    PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
   }
 
-  return std::make_pair(Function::flags(input_vars), std::move(tensor_args));
+  flags.flags = Function::flags(unpacked.input_vars);
+  return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, PyObject* inputs, PyObject* unpacked_inputs, THPObjectPtr raw_output) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr raw_output) {
   bool unpack_output = _ensure_tuple(raw_output);
 
-  auto num_inputs = PyTuple_GET_SIZE(inputs);
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
 
   THPObjectPtr outputs = PyTuple_New(num_outputs);
@@ -497,11 +576,9 @@ PyObject* process_outputs(THPFunction* grad_fn, PyObject* inputs, PyObject* unpa
 
     // Initialize t2var map
     t2var_type t2var;
-    for (int i = 0; i < num_inputs; i++) {
-      PyObject *input = PyTuple_GET_ITEM(inputs, i);
-      if (!THPVariable_Check(input)) continue;
-      PyObject *input_tensor = PyTuple_GET_ITEM(unpacked_inputs, i);
-      t2var.emplace(input_tensor, (THPVariable*)input);
+    for (auto& c_var : unpacked.input_vars) {
+      THPVariable* py_var = (THPVariable*)c_var->pyobj;
+      t2var.emplace(py_var->data, py_var);
     }
 
     std::unordered_set<PyObject *> dirty_inputs;
@@ -531,68 +608,62 @@ PyObject* process_outputs(THPFunction* grad_fn, PyObject* inputs, PyObject* unpa
   return outputs.release();
 }
 
-PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
+PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
-  FunctionFlags flags;
-  THPObjectPtr unpacked_inputs;
-  std::tie(flags, unpacked_inputs) = unpack_input<true>(inputs);
-  bool is_volatile = flags.is_volatile;
-  self->cdata.set_flags(std::move(flags));
-
-  // Compute needs_input_grad
-  auto num_inputs = PyTuple_GET_SIZE(inputs);
-  self->needs_input_grad = PyTuple_New(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    THPVariable *var = (THPVariable*)PyTuple_GET_ITEM(inputs, i);
-    PyTuple_SET_ITEM(self->needs_input_grad, i, PyBool_FromLong(var->cdata->requires_grad));
-  }
-  self->num_forward_inputs = num_inputs;
+  auto info_pair = unpack_input<true>(_inputs);
+  auto& unpacked_input = info_pair.first;
+  auto& input_info = info_pair.second;
+  bool is_volatile = input_info.flags.is_volatile;
+  self->cdata.set_flags(std::move(input_info.flags));
+  self->needs_input_grad = input_info.needs_input_grad.release();
 
   // Now we're ready to call a forward (implemented in Python)
   THPObjectPtr forward_fn = PyObject_GetAttrString((PyObject*)self, "forward");
   if (!forward_fn) return NULL;
-  THPObjectPtr raw_output = PyObject_CallObject(forward_fn, unpacked_inputs);
+  THPObjectPtr raw_output = PyObject_CallObject(forward_fn, unpacked_input.tensor_input);
   if (!raw_output) return NULL;
 
-  return process_outputs(is_volatile ? NULL : self, inputs, unpacked_inputs, std::move(raw_output));
+  return process_outputs(is_volatile ? NULL : self, unpacked_input, std::move(raw_output));
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPFunction_apply(PyObject *cls, PyObject *args)
+PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
+
   THPObjectPtr backward_cls = PyObject_GetAttrString(cls, "_backward_cls");
   if (!backward_cls) return NULL;
-
-  // Prepare inputs and allocate context (grad fn)
-  FunctionFlags flags;
-  THPObjectPtr tensor_args;
-  std::tie(flags, tensor_args) = unpack_input<false>(args);
-  bool is_volatile = flags.is_volatile;
-
   THPObjectPtr ctx_obj = PyObject_CallFunctionObjArgs(backward_cls, NULL);
   if (!ctx_obj) return NULL;
   THPFunction* ctx = (THPFunction*)ctx_obj.get();
-  ctx->cdata.set_flags(std::move(flags));
 
-  // Prepend ctx to tensor_args
-  auto num_args = PyTuple_GET_SIZE(args);
-  THPObjectPtr ctx_tensor_args = PyTuple_New(num_args + 1);
-  PyTuple_SET_ITEM(ctx_tensor_args.get(), 0, ctx_obj.release());
+  // Prepare inputs and allocate context (grad fn)
+  auto info_pair = unpack_input<false>(_inputs);
+  auto& unpacked_input = info_pair.first;
+  auto& input_info = info_pair.second;
+  bool is_volatile = input_info.flags.is_volatile;
+  ctx->cdata.set_flags(std::move(input_info.flags));
+  ctx->needs_input_grad = input_info.needs_input_grad.release();
+  ctx->is_variable_input = new std::vector<bool>(std::move(input_info.is_variable_input));
+
+  // Prepend ctx to tensor_input
+  auto num_args = PyTuple_GET_SIZE(_inputs);
+  THPObjectPtr ctx_tensor_input = PyTuple_New(num_args + 1);
+  PyTuple_SET_ITEM(ctx_tensor_input.get(), 0, ctx_obj.release());
   for (int i = 0; i < num_args; ++i) {
-    PyObject *arg = PyTuple_GET_ITEM(tensor_args.get(), i);
+    PyObject *arg = PyTuple_GET_ITEM(unpacked_input.tensor_input.get(), i);
     Py_INCREF(arg);
-    PyTuple_SET_ITEM(ctx_tensor_args.get(), i + 1, arg);
+    PyTuple_SET_ITEM(ctx_tensor_input.get(), i + 1, arg);
   }
 
   // Call forward
   THPObjectPtr forward_fn = PyObject_GetAttrString(cls, "forward");
   if (!forward_fn) return NULL;
-  THPObjectPtr tensor_outputs = PyObject_CallObject(forward_fn, ctx_tensor_args);
+  THPObjectPtr tensor_outputs = PyObject_CallObject(forward_fn, ctx_tensor_input);
   if (!tensor_outputs) return NULL;
 
-  return process_outputs(is_volatile ? NULL : ctx, args, tensor_args.get(), std::move(tensor_outputs));
+  return process_outputs(is_volatile ? NULL : ctx, unpacked_input, std::move(tensor_outputs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -603,18 +674,12 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *args)
 
 static void _prepare_grad_output(THPFunction *self, THPObjectPtr& raw_grad_output)
 {
-  // TODO: no need to do this for non-differentiable outputs
-#ifdef WITH_CUDA
-  THCPAutoGPU gpu_guard(-1);
-#endif
+  AutoGPU gpu_guard(-1);
   int num_grad_output = PyTuple_GET_SIZE(raw_grad_output.get());
   // First, check if any of grad_outputs is None. If not, there's nothing to do
   bool has_none = false;
   for (int i = 0; i < num_grad_output; i++) {
-    if (PyTuple_GET_ITEM(raw_grad_output.get(), i) == Py_None) {
-      has_none = true;
-      break;
-    }
+    has_none |= PyTuple_GET_ITEM(raw_grad_output.get(), i) == Py_None;
   }
   if (!has_none)
       return;
@@ -624,21 +689,11 @@ static void _prepare_grad_output(THPFunction *self, THPObjectPtr& raw_grad_outpu
   if (!grad_output) throw python_error();
 
   // Look for Nones and replace them with new buffers
+  auto& output_info = *self->output_info;
   for (int i = 0; i < num_grad_output; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grad_output.get(), i);
     if (grad == Py_None) {
-      auto &info = (*self->output_info)[i];
-      PyObject *tensor_cls = std::get<0>(info);
-#ifdef WITH_CUDA
-      gpu_guard.setDevice(std::get<1>(info));
-#endif
-      std::vector<long> &sizes = std::get<2>(info);
-      THPObjectPtr grad_size = THPSize_New(sizes.size(), sizes.data());
-      THPObjectPtr new_grad = PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL);
-      if (!new_grad) throw python_error();
-      THPObjectPtr result = PyObject_CallMethod(new_grad.get(), "zero_", "");
-      if (!result) throw python_error();
-      grad = new_grad.release();
+      grad = _allocate_grad_output(output_info[i], gpu_guard);
     } else {
       Py_INCREF(grad);
     }
@@ -650,17 +705,17 @@ static void _prepare_grad_output(THPFunction *self, THPObjectPtr& raw_grad_outpu
 static void _trim_grad_input(THPFunction *self, THPObjectPtr& grad_input)
 {
   int num_grads = PyTuple_GET_SIZE(grad_input.get());
-  int num_prev_fns = self->num_forward_inputs;
-  if (num_grads > num_prev_fns) {
+  int num_next_fns = self->cdata.next_functions.size();
+  if (num_grads > num_next_fns) {
     // Check that all extra grads are none
     bool all_none = true;
-    for (int i = num_prev_fns; i < num_grads; i++) {
+    for (int i = num_next_fns; i < num_grads; i++) {
       all_none = (PyTuple_GET_ITEM(grad_input.get(), i) == Py_None);
       if (!all_none) break;
     }
     // If yes, slice the tuple
     if (all_none) {
-      num_grads = num_prev_fns;
+      num_grads = num_next_fns;
       grad_input = PyTuple_GetSlice(grad_input.get(), 0, num_grads);
       if (!grad_input) throw python_error();
     }
@@ -701,10 +756,10 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     // if and only if the additional ones are all None
     _trim_grad_input(self, grad_input);
     int num_grads = PyTuple_GET_SIZE(grad_input.get());
-    int num_prev_fns = self->num_forward_inputs;
-    THPUtils_assert(num_grads == num_prev_fns, "%s returned an invalid number of "
+    int num_next_fns = self->cdata.next_functions.size();
+    THPUtils_assert(num_grads == num_next_fns, "%s returned an invalid number of "
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
-        num_prev_fns, num_grads);
+        num_next_fns, num_grads);
 
     return grad_input.release();
 
@@ -867,10 +922,8 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"shared_pairs", &getObject<&THPFunction::shared_pairs>, &setObject<&THPFunction::shared_pairs>, NULL, NULL},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, NULL, NULL},
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, NULL, NULL},
-  {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, &setObject<&THPFunction::needs_input_grad>, NULL, NULL},
+  {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, NULL, NULL, NULL},
   {"requires_grad", &getImplMember<bool, &Function::is_executable, PyBool_FromLong>, &setRequiresGrad, NULL, NULL},
-  {"num_inputs", &getMember<int, &THPFunction::num_forward_inputs, PyInt_FromLong>, NULL, NULL, NULL},
-  {"num_outputs", &getImplMember<int, &Function::num_inputs, PyInt_FromLong>, NULL, NULL, NULL},
   {NULL}
 };
 

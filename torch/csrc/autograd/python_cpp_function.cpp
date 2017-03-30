@@ -162,6 +162,10 @@ static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
 {
+  if (!cdata) {
+    Py_RETURN_NONE;
+  }
+
   if (auto pfw = dynamic_cast<PyFunction*>(cdata.get())) {
     PyObject* obj = pfw->obj;
     Py_INCREF(obj);
