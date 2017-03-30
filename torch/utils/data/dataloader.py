@@ -105,7 +105,7 @@ class DataLoaderIter(object):
         self.pin_memory = loader.pin_memory
         self.drop_last = loader.drop_last
         self.done_event = threading.Event()
-        
+
         self.samples_remaining = len(self.sampler)
         self.sample_iter = iter(self.sampler)
 
@@ -163,7 +163,7 @@ class DataLoaderIter(object):
         if self.rcvd_idx in self.reorder_dict:
             batch = self.reorder_dict.pop(self.rcvd_idx)
             return self._process_next_batch(batch)
-        
+
         if self.batches_outstanding == 0:
             self._shutdown_workers()
             raise StopIteration
@@ -247,7 +247,7 @@ class DataLoader(object):
         pin_memory (bool, optional)
         drop_last (bool, optional): set to ``True`` to drop remaining samples
             that is not enough of a batch size. If False and the size of dataset
-            is not divisible by batch size, then the last batch will be smaller. 
+            is not divisible by batch size, then the last batch will be smaller.
             (default: False)
     """
 
