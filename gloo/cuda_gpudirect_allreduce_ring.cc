@@ -9,9 +9,8 @@
 
 #include "gloo/cuda_gpudirect_allreduce_ring.h"
 
-#include <string.h>
-
 #include "gloo/cuda_private.h"
+#include "gloo/cuda_collectives.h"
 #include "gloo/nccl/nccl.h"
 
 namespace gloo {
@@ -26,7 +25,7 @@ CudaGPUDirectAllreduceRing<T>::CudaGPUDirectAllreduceRing(
       count_(count),
       bytes_(count_ * sizeof(T)),
       synchronizeDeviceOutputs_(streams.size() == 0),
-      fn_(CudaReductionFunction<T>::toCudaReductionFunction(Allreduce<T>::fn_)),
+      fn_(CudaReductionFunction<T>::toDeviceFunction(Allreduce<T>::fn_)),
       leftPair_(this->getLeftPair()),
       rightPair_(this->getRightPair()) {
   auto newStream = true;
@@ -47,26 +46,10 @@ CudaGPUDirectAllreduceRing<T>::CudaGPUDirectAllreduceRing(
 
   // Create NCCL elements for each device pointer if necessary
   if (devicePtrs_.size() > 1) {
-    std::vector<nccl::NCCLElement<T>> reduceElements;
-    std::vector<nccl::NCCLElement<T>> broadcastElements;
-    for (auto i = 0; i < devicePtrs_.size(); i++) {
-      const auto ptr = *devicePtrs_[i];
-      const auto stream = devicePtrs_[i].getStream();
-      reduceElements.push_back(nccl::NCCLElement<T>(
-          CudaDevicePointer<T>::create(ptr, count_, stream),
-          CudaDevicePointer<T>::create(ptr, count_, stream)));
-      broadcastElements.push_back(nccl::NCCLElement<T>(
-          CudaDevicePointer<T>::create(ptr, count_, stream),
-          CudaDevicePointer<T>::create(ptr, count_, stream)));
-    }
-
-    localReduceOp_ = std::make_unique<nccl::ReduceOp<T> >(
-      nccl::NCCLExecution<T>(std::move(reduceElements)),
-      ReductionFunction<T>::sum,
-      devicePtrs_[0].getDeviceID());
-    localBroadcastOp_ = std::make_unique<nccl::BroadcastOp<T> >(
-      nccl::NCCLExecution<T>(std::move(reduceElements)),
-      devicePtrs_[0].getDeviceID());
+    localReduceOp_ =
+      cudaDeviceReduce(devicePtrs_, CudaReductionFunction<T>::sum, 0);
+    localBroadcastOp_ =
+      cudaDeviceBroadcast(devicePtrs_, 0);
   }
 
   // Allocate inbox/outbox on device of first pointer

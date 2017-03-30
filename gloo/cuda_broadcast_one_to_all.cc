@@ -9,44 +9,11 @@
 
 #include "gloo/cuda_broadcast_one_to_all.h"
 
-#include "gloo/common/common.h"
 #include "gloo/common/logging.h"
 #include "gloo/cuda_private.h"
 #include "gloo/nccl/nccl.h"
 
 namespace gloo {
-
-template <typename T>
-struct CudaBroadcastOneToAll<T>::LocalBroadcast {
-  LocalBroadcast(
-      const std::vector<CudaDevicePointer<T> >& devicePtrs,
-      int count,
-      int rootPointerRank) {
-    std::vector<nccl::NCCLElement<T>> elements;
-    for (auto& devicePtr : devicePtrs) {
-      GLOO_ENFORCE_EQ(count, devicePtr.getCount());
-      const auto ptr = *devicePtr;
-      const auto stream = devicePtr.getStream();
-      nccl::NCCLElement<T> element(
-        CudaDevicePointer<T>::create(ptr, count, stream),
-        CudaDevicePointer<T>::create(ptr, count, stream));
-      elements.push_back(std::move(element));
-    }
-
-    int root = devicePtrs[rootPointerRank].getDeviceID();
-    broadcastOp.reset(new nccl::BroadcastOp<T>(std::move(elements), root));
-  }
-
-  void runAsync() {
-    broadcastOp->runAsync();
-  }
-
-  void wait() {
-    broadcastOp->wait();
-  }
-
-  std::unique_ptr<nccl::BroadcastOp<T> > broadcastOp;
-};
 
 template <typename T>
 CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
@@ -105,8 +72,7 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
 
   // Setup local broadcast if needed
   if (devicePtrs_.size() > 1) {
-    localBroadcast_ =
-      make_unique<LocalBroadcast>(devicePtrs_, count_, rootPointerRank);
+    localBroadcastOp_ = cudaDeviceBroadcast(devicePtrs_, rootPointerRank);
   }
 }
 
@@ -121,10 +87,10 @@ CudaBroadcastOneToAll<T>::~CudaBroadcastOneToAll() {
 template <typename T>
 void CudaBroadcastOneToAll<T>::run() {
   if (this->contextSize_ == 1) {
-    if (localBroadcast_) {
-      localBroadcast_->runAsync();
+    if (localBroadcastOp_) {
+      localBroadcastOp_->runAsync();
       if (synchronizeDeviceOutputs_) {
-        localBroadcast_->wait();
+        localBroadcastOp_->wait();
       }
     }
     return;
@@ -141,10 +107,10 @@ void CudaBroadcastOneToAll<T>::run() {
     }
 
     // Broadcast locally while sends are happening
-    if (localBroadcast_) {
-      localBroadcast_->runAsync();
+    if (localBroadcastOp_) {
+      localBroadcastOp_->runAsync();
       if (synchronizeDeviceOutputs_) {
-        localBroadcast_->wait();
+        localBroadcastOp_->wait();
       }
     }
 
@@ -159,12 +125,12 @@ void CudaBroadcastOneToAll<T>::run() {
     devicePtrs_[this->getRootPointerRank()].copyFromHostAsync(hostPtr_);
 
     // Broadcast locally after receiving from root
-    if (localBroadcast_) {
+    if (localBroadcastOp_) {
       // Since broadcast synchronizes on root pointer, there is no
       // need to explicity wait for the memcpy to complete.
-      localBroadcast_->runAsync();
+      localBroadcastOp_->runAsync();
       if (synchronizeDeviceOutputs_) {
-        localBroadcast_->wait();
+        localBroadcastOp_->wait();
       }
     } else {
       // Wait for memcpy to complete

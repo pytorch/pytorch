@@ -11,6 +11,7 @@
 
 #include <string.h>
 
+#include "gloo/cuda_collectives.h"
 #include "gloo/cuda_private.h"
 #include "gloo/nccl/nccl.h"
 
@@ -21,19 +22,13 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
   ChunkContext(
       CudaDevicePointer<T>&& rootDevicePtr,
       T* hostPtr,
-      const ReductionFunction<T>* fn,
-      std::vector<nccl::NCCLElement<T>>&& reduceElements,
-      std::vector<nccl::NCCLElement<T>>&& broadcastElements)
+      std::unique_ptr<LocalOp<T> >&& reduceOp,
+      std::unique_ptr<LocalOp<T> >&& broadcastOp)
       : rootDevicePtr(std::move(rootDevicePtr)),
         hostPtr(hostPtr),
         length(rootDevicePtr.getCount()),
-        reduceOp(
-          nccl::NCCLExecution<T>(std::move(reduceElements)),
-          fn,
-          this->rootDevicePtr.getDeviceID()),
-        broadcastOp(
-          nccl::NCCLExecution<T>(std::move(broadcastElements)),
-          this->rootDevicePtr.getDeviceID()) {}
+        reduceOp(std::move(reduceOp)),
+        broadcastOp(std::move(broadcastOp)) {}
   ChunkContext(ChunkContext&& other) = default;
 
   // Instances cannot be copied or copy-assigned
@@ -44,10 +39,10 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
   CudaDevicePointer<T> rootDevicePtr;
   T* hostPtr;
   const size_t length;
-  // The NCCL operations used for local device reduce before running the
+  // The operations used for local device reduce before running the
   // algorithm and local device broadcast after.
-  nccl::ReduceOp<T> reduceOp;
-  nccl::BroadcastOp<T> broadcastOp;
+  std::unique_ptr<LocalOp<T> > reduceOp;
+  std::unique_ptr<LocalOp<T> > broadcastOp;
 };
 
 template <typename T>
@@ -90,6 +85,10 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     std::lock_guard<std::mutex> lock(CudaShared::getMutex());
     CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
   }
+
+  // Reduction function needs to be convertible to CudaReductionFunction.
+  const auto fn = CudaReductionFunction<T>::toDeviceFunction(this->fn_);
+
   for (auto offset = 0; offset < count_; offset += chunkSize_) {
     auto length = chunkSize_;
     if (offset + length <= count_) {
@@ -99,19 +98,8 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
       length = count_ - offset;
     }
 
-    // Create NCCL elements for the chunk on each device
-    std::vector<nccl::NCCLElement<T>> reduceElements;
-    std::vector<nccl::NCCLElement<T>> broadcastElements;
-    for (auto i = 0; i < devicePtrs_.size(); i++) {
-      const auto chunkPtr = *devicePtrs_[i] + offset;
-      const auto stream = devicePtrs_[i].getStream();
-      reduceElements.push_back(nccl::NCCLElement<T>(
-          CudaDevicePointer<T>::create(chunkPtr, length, stream),
-          CudaDevicePointer<T>::create(chunkPtr, length, stream)));
-      broadcastElements.push_back(nccl::NCCLElement<T>(
-          CudaDevicePointer<T>::create(chunkPtr, length, stream),
-          CudaDevicePointer<T>::create(chunkPtr, length, stream)));
-    }
+    auto reduceOp = cudaDeviceReduce(devicePtrs_, fn, 0, offset, length);
+    auto broadcastOp = cudaDeviceBroadcast(devicePtrs_, 0, offset, length);
 
     // Create a device pointer for the chunk on device ptrs[0]. We will use the
     // associated stream to serialize NCCL operations and device-host memcpys.
@@ -122,9 +110,8 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     chunkContext_.push_back(ChunkContext(
         std::move(rootDevicePtr),
         hostPtr_ + offset,
-        this->fn_,
-        std::move(reduceElements),
-        std::move(broadcastElements)));
+        std::move(reduceOp),
+        std::move(broadcastOp)));
   }
 
   // Allocate inboxes
@@ -176,7 +163,7 @@ void CudaAllreduceRingChunked<T>::run() {
     const auto chunkOffset = getChunkOffset(i);
     if (chunkOffset < chunkContext_.size()) {
       auto& context = chunkContext_[chunkOffset];
-      context.reduceOp.runAsync();
+      context.reduceOp->runAsync();
       context.rootDevicePtr.copyToHostAsync(context.hostPtr);
     }
   }
@@ -245,7 +232,7 @@ void CudaAllreduceRingChunked<T>::run() {
 
       // Broadcast chunk to devices. Do this in all rounds with non-empty chunk.
       context.rootDevicePtr.copyFromHostAsync(context.hostPtr);
-      context.broadcastOp.runAsync();
+      context.broadcastOp->runAsync();
     } else {
       // Empty chunk but still need to wait on the inbox write to ensure the
       // algorithm progresses.
@@ -280,7 +267,7 @@ void CudaAllreduceRingChunked<T>::run() {
     for (auto i = 0; i < chunks_; i++) {
       const auto chunkOffset = getChunkOffset(i);
       if (chunkOffset < chunkContext_.size()) {
-        chunkContext_[chunkOffset].broadcastOp.wait();
+        chunkContext_[chunkOffset].broadcastOp->wait();
       }
     }
   }

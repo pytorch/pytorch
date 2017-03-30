@@ -11,6 +11,7 @@
 
 #include <string.h>
 
+#include "gloo/cuda_collectives.h"
 #include "gloo/cuda_private.h"
 
 namespace gloo {
@@ -43,6 +44,12 @@ CudaAllreduceRing<T>::CudaAllreduceRing(
           CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
     }
     CUDA_CHECK(cudaMallocHost(&hostPtrs_[i], bytes_));
+  }
+
+  // Setup local reduction and broadcast if needed
+  if (devicePtrs_.size() > 1) {
+    localReduceOp_ = cudaHostReduce(devicePtrs_, hostPtrs_, this->fn_, 0);
+    localBroadcastOp_ = cudaHostBroadcast(devicePtrs_, hostPtrs_, 0);
   }
 
   inbox_ = static_cast<T*>(malloc(bytes_));
@@ -84,19 +91,14 @@ template <typename T>
 void CudaAllreduceRing<T>::run() {
   CudaDeviceGuard guard;
 
-  // Asynchronously copy all device buffers to host
-  for (int i = 0; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].copyToHostAsync(hostPtrs_[i]);
+  if (localReduceOp_) {
+    localReduceOp_->run();
+  } else {
+    devicePtrs_[0].copyToHostAsync(hostPtrs_[0]);
+    devicePtrs_[0].wait();
   }
 
-  // Reduce specified pointers into hostPtrs_[0]
-  devicePtrs_[0].wait();
-  for (int i = 1; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].wait();
-    this->fn_->call(hostPtrs_[0], hostPtrs_[i], count_);
-  }
-
-  // Intialize outbox with locally reduced values
+  // Initialize outbox with locally reduced values
   memcpy(outbox_, hostPtrs_[0], bytes_);
 
   int numRounds = this->contextSize_ - 1;
@@ -127,14 +129,15 @@ void CudaAllreduceRing<T>::run() {
   }
 
   // Asynchronously copy result buffer to all device buffers
-  for (int i = 0; i < devicePtrs_.size(); i++) {
-    devicePtrs_[i].copyFromHostAsync(hostPtrs_[0]);
-  }
-
-  // If running synchronously, wait for memcpy's to complete
-  if (synchronizeDeviceOutputs_) {
-    for (int i = 0; i < devicePtrs_.size(); i++) {
-      devicePtrs_[i].wait();
+  if (localBroadcastOp_) {
+    localBroadcastOp_->runAsync();
+    if (synchronizeDeviceOutputs_) {
+      localBroadcastOp_->wait();
+    }
+  } else {
+    devicePtrs_[0].copyFromHostAsync(hostPtrs_[0]);
+    if (synchronizeDeviceOutputs_) {
+      devicePtrs_[0].wait();
     }
   }
 }

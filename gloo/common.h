@@ -82,4 +82,21 @@ template <typename T>
 const ReductionFunction<T>* ReductionFunction<T>::max =
   new BuiltInReductionFunction<T>(MAX, &::gloo::max<T>);
 
+// Local operation.
+// If an algorithm uses multiple local pointers, local operations
+// can be used for local reduction, broadcast, gathering, etc.
+template <typename T>
+class LocalOp {
+ public:
+  virtual ~LocalOp() {}
+  virtual void runAsync() = 0;
+  virtual void wait() = 0;
+
+  // Synchronous run is equal to asynchronous run and wait.
+  inline void run() {
+    runAsync();
+    wait();
+  }
+};
+
 } // namespace gloo

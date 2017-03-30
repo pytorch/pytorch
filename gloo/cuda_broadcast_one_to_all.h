@@ -11,6 +11,7 @@
 
 #include "gloo/broadcast.h"
 #include "gloo/cuda.h"
+#include "gloo/cuda_collectives.h"
 
 namespace gloo {
 
@@ -44,8 +45,7 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
   std::unique_ptr<transport::Buffer> recvDataBuffer_;
 
   // For local broadcast
-  struct LocalBroadcast;
-  std::unique_ptr<LocalBroadcast> localBroadcast_;
+  std::unique_ptr<LocalOp<T> > localBroadcastOp_;
 };
 
 } // namespace gloo

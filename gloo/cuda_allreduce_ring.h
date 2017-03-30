@@ -38,6 +38,9 @@ class CudaAllreduceRing : public Allreduce<T> {
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;
 
+  std::unique_ptr<LocalOp<T> > localReduceOp_;
+  std::unique_ptr<LocalOp<T> > localBroadcastOp_;
+
   T* inbox_;
   T* outbox_;
   std::unique_ptr<transport::Buffer> sendDataBuf_;

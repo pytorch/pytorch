@@ -46,8 +46,8 @@ class CudaGPUDirectAllreduceRing : public Allreduce<T> {
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;
 
-  std::unique_ptr<nccl::ReduceOp<T> > localReduceOp_;
-  std::unique_ptr<nccl::BroadcastOp<T> > localBroadcastOp_;
+  std::unique_ptr<LocalOp<T> > localReduceOp_;
+  std::unique_ptr<LocalOp<T> > localBroadcastOp_;
 
   CudaDevicePointer<T> inbox_;
   CudaDevicePointer<T> outbox_;

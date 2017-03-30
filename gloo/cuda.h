@@ -16,6 +16,7 @@
 #include <cuda_runtime.h>
 
 #include "gloo/common.h"
+#include "gloo/common/logging.h"
 
 namespace gloo {
 
@@ -143,7 +144,7 @@ class CudaReductionFunction : public ReductionFunction<T> {
   static const CudaReductionFunction<T>* min;
   static const CudaReductionFunction<T>* max;
 
-  static const CudaReductionFunction<T>* toCudaReductionFunction(
+  static const CudaReductionFunction<T>* toDeviceFunction(
       const ReductionFunction<T>* fn) {
     switch (fn->type()) {
       case SUM:
@@ -155,7 +156,23 @@ class CudaReductionFunction : public ReductionFunction<T> {
       case MAX:
         return max;
       default:
-        return nullptr;
+        GLOO_ENFORCE(false, "Invalid reduction operation type: ", fn->type());
+    }
+  }
+
+  static const ReductionFunction<T>* toHostFunction(
+    const ReductionFunction<T>* fn) {
+    switch (fn->type()) {
+      case SUM:
+        return ::gloo::ReductionFunction<T>::sum;
+      case PRODUCT:
+        return ::gloo::ReductionFunction<T>::product;
+      case MIN:
+        return ::gloo::ReductionFunction<T>::min;
+      case MAX:
+        return ::gloo::ReductionFunction<T>::max;
+      default:
+        GLOO_ENFORCE(false, "Invalid reduction operation type: ", fn->type());
     }
   }
 
