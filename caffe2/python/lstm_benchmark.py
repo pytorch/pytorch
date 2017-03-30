@@ -19,7 +19,7 @@ log = logging.getLogger("lstm_bench")
 log.setLevel(logging.DEBUG)
 
 
-def generate_data(T, shape):
+def generate_data(T, shape, num_labels):
     '''
     Fill a queue with input data
     '''
@@ -29,10 +29,14 @@ def generate_data(T, shape):
     queue = generate_input_init_net.CreateBlobsQueue(
         [], "inputqueue", num_blobs=1, capacity=T,
     )
+    label_queue = generate_input_init_net.CreateBlobsQueue(
+        [], "labelqueue", num_blobs=1, capacity=T,
+    )
 
     workspace.RunNetOnce(generate_input_init_net)
     generate_input_net = core.Net('generate_input')
     generate_input_net.EnqueueBlobs([queue, "scratch"], ["scratch"])
+    generate_input_net.EnqueueBlobs([label_queue, "label_scr"], ["label_scr"])
     np.random.seed(2603)
 
     for t in range(T):
@@ -41,13 +45,17 @@ def generate_data(T, shape):
         # Randomize the seqlength
         random_shape = [np.random.randint(1, shape[0])] + shape[1:]
         X = np.random.rand(*random_shape).astype(np.float32)
+        batch_size = random_shape[1]
+        L = num_labels * batch_size
+        labels = (np.random.rand(random_shape[0]) * L).astype(np.int32)
         workspace.FeedBlob("scratch", X)
+        workspace.FeedBlob("label_scr", labels)
         workspace.RunNetOnce(generate_input_net.Proto())
     log.info("Finished data generation")
-    return queue
+    return queue, label_queue
 
 
-def create_model(args, queue):
+def create_model(args, queue, label_queue):
     model = cnn.CNNModelHelper(name="LSTM_bench")
     seq_lengths, hidden_init, cell_init, target = \
         model.net.AddExternalInputs(
@@ -57,6 +65,7 @@ def create_model(args, queue):
             'target',
         )
     input_blob = model.DequeueBlobs(queue, "input_data")
+    labels = model.DequeueBlobs(label_queue, "label")
     all_hidden, last_hidden, _, last_state = recurrent.LSTM(
         model=model,
         input_blob=input_blob,
@@ -67,7 +76,12 @@ def create_model(args, queue):
         scope="lstm1",
     )
 
-    model.AddGradientOperators([all_hidden])
+    softmax, loss = model.SoftmaxWithLoss(
+        [model.Flatten(all_hidden), labels],
+        ['softmax', 'loss'],
+    )
+
+    model.AddGradientOperators([loss])
 
     # carry states over
     model.net.Copy(last_hidden, hidden_init)
@@ -85,14 +99,16 @@ def create_model(args, queue):
 def Caffe2LSTM(args):
     T = args.data_size // args.batch_size
     input_blob_shape = [args.seq_length, args.batch_size, args.input_dim]
-    queue = generate_data(T // args.seq_length, input_blob_shape)
+    queue, label_queue = generate_data(T // args.seq_length,
+                                       input_blob_shape,
+                                       args.hidden_dim)
 
     workspace.FeedBlob(
         "seq_lengths",
         np.array([args.seq_length] * args.batch_size, dtype=np.int32)
     )
 
-    model = create_model(args, queue)
+    model = create_model(args, queue, label_queue)
 
     workspace.RunNetOnce(model.param_init_net)
     workspace.CreateNet(model.net)
@@ -127,6 +143,7 @@ def Benchmark(args):
 
 def GetArgumentParser():
     parser = argparse.ArgumentParser(description="LSTM benchmark.")
+
     parser.add_argument(
         "--hidden_dim",
         type=int,
