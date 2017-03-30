@@ -5,6 +5,7 @@ import itertools
 import random
 import unittest
 from common import TestCase, run_tests
+from common_nn import TEST_CUDA
 from numbers import Number
 
 # triplet := (index type, value type, sparse type)
@@ -13,7 +14,7 @@ cpu_triplet = (
     torch.DoubleTensor,
     torch.sparse.DoubleTensor)
 type_triplets = [cpu_triplet]
-if torch.cuda.is_available():
+if TEST_CUDA:
     cuda_triplet = (
         torch.cuda.LongTensor,
         torch.cuda.DoubleTensor,
@@ -43,7 +44,7 @@ class TestSparse(TestCase):
             return x, i, v
 
     def test_basic(self):
-        for is_cuda in [False, True] if torch.cuda.is_available() else [False]:
+        for is_cuda in [False, True] if TEST_CUDA else [False]:
             x, i, v = self._gen_sparse(3, 10, 100, is_cuda)
 
             self.assertEqual(i, x.indices())
@@ -235,7 +236,7 @@ class TestSparse(TestCase):
             self.assertEqual(exp_v, x.values())
 
     def test_transpose(self):
-        for is_cuda in [False, True]:
+        for is_cuda in [False, True] if TEST_CUDA else [False]:
             x = self._gen_sparse(4, 20, 5, is_cuda=is_cuda)[0]
             y = x.to_dense()
 
@@ -298,7 +299,7 @@ class TestSparse(TestCase):
 
     def test_dsmm(self):
         def test_shape(di, dj, dk):
-            for is_cuda in [False, True]:
+            for is_cuda in [False, True] if TEST_CUDA else [False]:
                 x = self._gen_sparse(2, 20, [di, dj], is_cuda)[0]
                 y = torch.randn(dj, dk)
                 if is_cuda:
@@ -314,7 +315,7 @@ class TestSparse(TestCase):
 
     def test_hsmm(self):
         def test_shape(di, dj, dk):
-            for is_cuda in [False, True]:
+            for is_cuda in [False, True] if TEST_CUDA else [False]:
                 x = self._gen_sparse(2, 20, [di, dj], is_cuda)[0]
                 y = torch.randn(dj, dk)
                 if is_cuda:
@@ -329,7 +330,7 @@ class TestSparse(TestCase):
         test_shape(3000, 64, 300)
 
     def _test_spadd_shape(self, shape_i, shape_v=None):
-        for is_cuda in [False, True]:
+        for is_cuda in [False, True] if TEST_CUDA else [False]:
             shape = shape_i + (shape_v or [])
             x, _, _ = self._gen_sparse(len(shape_i), 10, shape, is_cuda)
             y = torch.randn(*shape)
@@ -370,7 +371,7 @@ class TestSparse(TestCase):
         self._test_spadd_shape([5, 5, 5, 5, 5, 5], [2])
 
     def _test_basic_ops_shape(self, shape_i, shape_v=None):
-        for is_cuda in [False, True]:
+        for is_cuda in [False, True] if TEST_CUDA else [False]:
             shape = shape_i + (shape_v or [])
             x1, _, _ = self._gen_sparse(len(shape_i), 9, shape, is_cuda)
             x2, _, _ = self._gen_sparse(len(shape_i), 12, shape, is_cuda)
@@ -428,7 +429,7 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape([5, 5, 5, 5, 5, 5], [2])
 
     def _test_sparse_mask_shape(self, shape_i, shape_v=None):
-        for is_cuda in [False, True]:
+        for is_cuda in [False, True] if TEST_CUDA else [False]:
             shape = shape_i + (shape_v or [])
             x1, _, _ = self._gen_sparse(len(shape_i), 9, shape, is_cuda)
             x2, _, _ = self._gen_sparse(len(shape_i), 12, shape, is_cuda)
