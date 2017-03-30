@@ -2,56 +2,51 @@ from functools import reduce
 import torch
 from torch._utils import _accumulate
 
-from ..function import Function, InplaceFunction
+from ..function import Function, InplaceFunction, once_differentiable
+from ..variable import Variable
 
 
 class Index(Function):
 
-    def __init__(self, index):
-        super(Index, self).__init__()
-        self.index = index
-
-    def forward(self, i):
-        self.input_size = i.size()
-        result = i.index(self.index)
-        self.mark_shared_storage((i, result))
+    @staticmethod
+    def forward(ctx, i, index):
+        ctx.input_size = i.size()
+        ctx.index = index
+        result = i.index(ctx.index)
+        ctx.mark_shared_storage((i, result))
         return result
 
-    def backward(self, grad_output):
-        grad_input = grad_output.new(self.input_size).zero_()
-        grad_input._set_index(self.index, grad_output)
-        return grad_input
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
+        grad_input[ctx.index] = grad_output
+        return grad_input, None
 
 
 class SetItem(InplaceFunction):
 
-    def __init__(self, index, value=None):
-        super(SetItem, self).__init__(True)
-        self.index = index
-        self.value = value
-
-    def forward(self, i, value=None):
-        self.mark_dirty(i)
-        if value is None:  # value is scalar
-            value = self.value
-        else:  # value is Tensor
-            self.value_size = value.size()
-        i._set_index(self.index, value)
+    @staticmethod
+    def forward(ctx, i, index, value):
+        assert not isinstance(index, Variable)
+        ctx.mark_dirty(i)
+        ctx.index = index
+        ctx.tensor_value = torch.is_tensor(value)
+        if ctx.tensor_value:
+            ctx.value_size = value.size()
+        i._set_index(ctx.index, value)
         return i
 
-    def backward(self, grad_output):
-        if self.value is None:  # value is Tensor
-            grad_input = grad_output.clone()
-            grad_input._set_index(self.index, 0)
-            grad_value = grad_output.index(self.index).clone()
-            grad_value = grad_value.view(self.value_size)
-            return grad_input, grad_value
-        else:
-            grad_input = grad_output.clone()
-            grad_input._set_index(self.index, 0)
-            return grad_input
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = grad_output.clone()
+        grad_input[ctx.index] = 0
+        grad_value = None
+        if ctx.tensor_value:
+            grad_value = grad_output[ctx.index].contiguous().view(ctx.value_size)
+        return grad_input, None, grad_value
 
 
+# TODO: how to do NoGrad in new style
 class NoGrad(Function):
 
     def forward(self, i):
@@ -73,522 +68,498 @@ class NoGrad(Function):
 
 class Transpose(Function):
 
-    def __init__(self, *dims):
-        super(Transpose, self).__init__()
-        assert len(dims) == 2
-        self.dims = dims
-
-    def forward(self, i):
-        result = i.transpose(*self.dims)
-        self.mark_shared_storage((i, result))
+    @staticmethod
+    def forward(ctx, i, dim1, dim2):
+        result = i.transpose(dim1, dim2)
+        ctx.dims = (dim1, dim2)
+        ctx.mark_shared_storage((i, result))
         return result
 
-    def backward(self, grad_output):
-        return grad_output.transpose(*self.dims)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.transpose(*ctx.dims), None, None
 
 
 class View(Function):
 
-    def __init__(self, *sizes):
-        super(View, self).__init__()
-        self.sizes = sizes
-
-    def forward(self, i):
-        self.input_size = i.size()
-        result = i.view(*self.sizes)
-        self.mark_shared_storage((i, result))
+    @staticmethod
+    def forward(ctx, i, sizes):
+        ctx.new_sizes = sizes
+        ctx.old_size = i.size()
+        result = i.view(*sizes)
+        ctx.mark_shared_storage((i, result))
         return result
 
-    def backward(self, grad_output):
-        # TODO: not sure if this clone is necessary
-        return grad_output.contiguous().view(self.input_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.contiguous().view(ctx.old_size), None
 
 
 class Expand(Function):
 
-    def __init__(self, sizes):
-        super(Expand, self).__init__()
-        self.sizes = sizes
-        self.expanded_dims = []
-
-    def forward(self, i):
-        result = i.expand(*self.sizes)
-        self.num_unsqueezed = len(self.sizes) - i.dim()
-        self.expanded_dims = [dim for dim, (expanded, original)
-                              in enumerate(zip(self.sizes[self.num_unsqueezed:], i.size()))
-                              if expanded != original]
-        self.mark_shared_storage((i, result))
+    @staticmethod
+    def forward(ctx, i, new_size):
+        ctx.num_unsqueezed = len(new_size) - i.dim()
+        ctx.expanded_dims = [dim for dim, (expanded, original)
+                             in enumerate(zip(new_size[ctx.num_unsqueezed:], i.size()))
+                             if expanded != original]
+        result = i.expand(*new_size)
+        ctx.mark_shared_storage((i, result))
         return result
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         grad_input = grad_output
-        for i in range(self.num_unsqueezed):
+        for i in range(ctx.num_unsqueezed):
             grad_input = grad_input.sum(0).squeeze(0)
-        for dim in self.expanded_dims:
+        for dim in ctx.expanded_dims:
             grad_input = grad_input.sum(dim)
-        return grad_input
+        return grad_input, None
 
 
 class Type(Function):
 
-    def __init__(self, dest_type):
-        super(Type, self).__init__()
-        self.dest_type = dest_type
+    @staticmethod
+    def forward(ctx, i, dest_type):
+        ctx.input_type = type(i)
+        return i.type(dest_type)
 
-    def forward(self, i):
-        assert self.dest_type != type(i)
-        self.input_type = type(i)
-        return i.type(self.dest_type)
-
-    def backward(self, grad_output):
-        return grad_output.type(self.input_type)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.type(ctx.input_type), None
 
 
 class CudaTransfer(Function):
 
-    def __init__(self, device_id=None, async=False):
-        super(CudaTransfer, self).__init__()
-        self.device_id = device_id
-        self.async = async
-
-    def forward(self, i):
-        self.source_device = -1 if not i.is_cuda else i.get_device()
-        self.source_was_cuda = i.is_cuda
-        if self.device_id:
-            return i.cuda(self.device_id, async=self.async)
+    @staticmethod
+    def forward(ctx, i, device_id=None, async=False):
+        ctx.source_device = -1 if not i.is_cuda else i.get_device()
+        ctx.source_was_cuda = i.is_cuda
+        if device_id:
+            return i.cuda(device_id, async=async)
         else:
-            return i.cuda(async=self.async)
+            return i.cuda(async=async)
 
-    def backward(self, grad_output):
-        if self.source_device != -1:
-            return grad_output.cuda(self.source_device)
-        elif self.source_was_cuda:
-            return grad_output
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.source_device != -1:
+            return grad_output.cuda(ctx.source_device), None, None
+        elif ctx.source_was_cuda:
+            return grad_output, None, None
         else:
-            return grad_output.cpu()
+            return grad_output.cpu(), None, None
 
 
 class Permute(Function):
 
-    def __init__(self, dim_indices):
-        super(Permute, self).__init__()
-        self.dim_indices = dim_indices
-        self.rev_dim_indices = [None for _ in range(len(dim_indices))]
-        for i, dim_idx in enumerate(self.dim_indices):
-            self.rev_dim_indices[dim_idx] = i
-
-    def forward(self, i):
-        result = i.permute(*self.dim_indices)
-        self.mark_shared_storage((i, result))
+    @staticmethod
+    def forward(ctx, input, dim_indices):
+        ctx.rev_dim_indices = [None for _ in range(len(dim_indices))]
+        for i, dim_idx in enumerate(dim_indices):
+            ctx.rev_dim_indices[dim_idx] = i
+        result = input.permute(*dim_indices)
+        ctx.mark_shared_storage((input, result))
         return result
 
-    def backward(self, grad_output):
-        return grad_output.permute(*self.rev_dim_indices)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.permute(*ctx.rev_dim_indices), None
 
 
 class IndexAdd(InplaceFunction):
 
-    def __init__(self, dim, inplace=False):
-        super(IndexAdd, self).__init__(inplace)
-        self.dim = dim
-
-    def forward(self, tensor1, index, tensor2):
-        assert not self.needs_input_grad[1]
-        if self.needs_input_grad[2]:
-            self.save_for_backward(index)
-        if not self.inplace:
+    @staticmethod
+    def forward(ctx, tensor1, dim, index, tensor2, inplace=False):
+        assert not ctx.needs_input_grad[2]
+        ctx.dim = dim
+        if ctx.needs_input_grad[3]:
+            ctx.save_for_backward(index)
+        if not inplace:
             tensor1 = tensor1.clone()
         else:
-            self.mark_dirty(tensor1)
-        return tensor1.index_add_(self.dim, index, tensor2)
+            ctx.mark_dirty(tensor1)
+        return tensor1.index_add_(ctx.dim, index, tensor2)
 
-    def backward(self, grad_output):
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
         grad_tensor1 = grad_tensor2 = None
 
-        if self.needs_input_grad[0]:
+        if ctx.needs_input_grad[0]:
             grad_tensor1 = grad_output
 
-        if self.needs_input_grad[2]:
-            index, = self.saved_tensors
-            grad_tensor2 = grad_output.index_select(self.dim, index)
+        if ctx.needs_input_grad[3]:
+            index, = ctx.saved_tensors
+            grad_tensor2 = grad_output.index_select(ctx.dim, index)
 
-        return grad_tensor1, None, grad_tensor2
+        return grad_tensor1, None, None, grad_tensor2, None
 
 
 class IndexCopy(InplaceFunction):
 
-    def __init__(self, dim, inplace=False):
-        super(IndexCopy, self).__init__(inplace)
-        self.dim = dim
-
-    def forward(self, tensor1, index, tensor2):
-        assert not self.needs_input_grad[1]
-        if any(self.needs_input_grad):
-            self.save_for_backward(index)
-        if not self.inplace:
+    @staticmethod
+    def forward(ctx, tensor1, dim, index, tensor2, inplace=False):
+        assert not ctx.needs_input_grad[2]
+        ctx.dim = dim
+        if any(ctx.needs_input_grad):
+            ctx.save_for_backward(index)
+        if not inplace:
             tensor1 = tensor1.clone()
         else:
-            self.mark_dirty(tensor1)
-        return tensor1.index_copy_(self.dim, index, tensor2)
+            ctx.mark_dirty(tensor1)
+        return tensor1.index_copy_(dim, index, tensor2)
 
-    def backward(self, grad_output):
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
         grad_tensor1 = grad_tensor2 = None
 
-        if any(self.needs_input_grad):
-            index, = self.saved_tensors
+        if any(ctx.needs_input_grad):
+            index, = ctx.saved_tensors
 
-        if self.needs_input_grad[0]:
-            grad_tensor1 = grad_output.clone().index_fill_(self.dim, index, 0)
+        if ctx.needs_input_grad[0]:
+            grad_tensor1 = grad_output.clone().index_fill_(ctx.dim, index, 0)
 
-        if self.needs_input_grad[2]:
-            grad_tensor2 = grad_output.index_select(self.dim, index)
+        if ctx.needs_input_grad[2]:
+            grad_tensor2 = grad_output.index_select(ctx.dim, index)
 
-        return grad_tensor1, None, grad_tensor2
+        return grad_tensor1, None, None, grad_tensor2, None
 
 
 class IndexFill(InplaceFunction):
 
-    def __init__(self, dim, value, inplace=False):
-        super(IndexFill, self).__init__(inplace)
-        self.dim = dim
-        self.value = value
-
-    def forward(self, tensor, index):
-        assert not self.needs_input_grad[1]
-        if self.needs_input_grad[0]:
-            self.save_for_backward(index)
-        if not self.inplace:
+    @staticmethod
+    def forward(ctx, tensor, dim, index, value, inplace=False):
+        ctx.dim = dim
+        assert not ctx.needs_input_grad[2]
+        if ctx.needs_input_grad[0]:
+            ctx.save_for_backward(index)
+        if not inplace:
             tensor = tensor.clone()
         else:
-            self.mark_dirty(tensor)
-        return tensor.index_fill_(self.dim, index, self.value)
+            ctx.mark_dirty(tensor)
+        return tensor.index_fill_(dim, index, value)
 
-    def backward(self, grad_output):
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
         grad_tensor = None
 
-        if self.needs_input_grad[0]:
-            index, = self.saved_tensors
-            grad_tensor = grad_output.clone().index_fill_(self.dim, index, 0)
+        if ctx.needs_input_grad[0]:
+            index, = ctx.saved_tensors
+            grad_tensor = grad_output.clone().index_fill_(ctx.dim, index, 0)
 
-        return grad_tensor, None
+        return grad_tensor, None, None, None, None
 
 
 class IndexSelect(Function):
 
-    def __init__(self, dim):
-        super(IndexSelect, self).__init__()
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, tensor, dim, index):
+        ctx.dim = dim
+        assert not ctx.needs_input_grad[2]
 
-    def forward(self, tensor, index):
-        assert not self.needs_input_grad[1]
+        if ctx.needs_input_grad[0]:
+            ctx.save_for_backward(index)
+            ctx.input_size = tensor.size()
 
-        if self.needs_input_grad[0]:
-            self.save_for_backward(index)
-            self.input_size = tensor.size()
+        return tensor.index_select(dim, index)
 
-        return tensor.index_select(self.dim, index)
-
-    def backward(self, grad_output):
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
         grad_tensor = None
 
-        if self.needs_input_grad[0]:
-            index, = self.saved_tensors
-            grad_tensor = grad_output.new(*self.input_size).zero_()
-            grad_tensor.index_add_(self.dim, index, grad_output)
+        if ctx.needs_input_grad[0]:
+            index, = ctx.saved_tensors
+            grad_tensor = grad_output.new(*ctx.input_size).zero_()
+            grad_tensor.index_add_(ctx.dim, index, grad_output)
 
-        return grad_tensor, None
+        return grad_tensor, None, None
 
 
 class Concat(Function):
 
-    def __init__(self, dim):
-        super(Concat, self).__init__()
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, dim, *inputs):
+        ctx.dim = dim
+        ctx.input_sizes = [i.size(dim) for i in inputs]
+        return torch.cat(inputs, dim)
 
-    def forward(self, *inputs):
-        self.input_sizes = [i.size(self.dim) for i in inputs]
-        return torch.cat(inputs, self.dim)
-
-    def backward(self, grad_output):
-        return tuple(grad_output.narrow(self.dim, end - size, size) for size, end
-                     in zip(self.input_sizes, _accumulate(self.input_sizes)))
+    @staticmethod
+    def backward(ctx, grad_output):
+        return (None,) + tuple(grad_output.narrow(ctx.dim, end - size, size) for size, end
+                               in zip(ctx.input_sizes, _accumulate(ctx.input_sizes)))
 
 
+# TODO: deprecate this
 class Resize(Function):
 
-    def __init__(self, *sizes):
-        super(Resize, self).__init__()
-        self.sizes = sizes
-        self.numel = reduce(lambda x, y: x * y, sizes, 1)
-
-    def forward(self, tensor):
-        if tensor.numel() != self.numel:
+    @staticmethod
+    def forward(ctx, tensor, sizes):
+        ctx.sizes = sizes
+        ctx.numel = reduce(lambda x, y: x * y, sizes, 1)
+        if tensor.numel() != ctx.numel:
             raise RuntimeError(("requested resize to {} ({} elements in total), "
                                 "but the given tensor has a size of {} ({} elements). "
                                 "autograd's resize can only change the shape of a given "
                                 "tensor, while preserving the number of elements. ").format(
-                'x'.join(map(str, self.sizes)), self.numel,
+                'x'.join(map(str, sizes)), ctx.numel,
                 'x'.join(map(str, tensor.size())), tensor.numel()))
-        self.input_sizes = tensor.size()
-        result = tensor.new(tensor).resize_(*self.sizes)
-        self.mark_shared_storage((tensor, result))
-        return result
+        ctx.input_sizes = tensor.size()
+        if tensor.is_contiguous():
+            result = tensor.new(tensor).contiguous().view(*sizes)
+            ctx.mark_shared_storage((tensor, result))
+            return result
+        else:
+            return tensor.contiguous().view(*sizes)
 
-    def backward(self, grad_output):
-        assert grad_output.numel() == self.numel
-        return grad_output.new(grad_output).resize_(self.input_sizes)
+    @staticmethod
+    def backward(ctx, grad_output):
+        assert grad_output.numel() == ctx.numel
+        return grad_output.contiguous().view(ctx.input_sizes), None
 
 
 class Clone(Function):
 
-    def forward(self, input):
+    @staticmethod
+    def forward(ctx, input):
         return input.clone()
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         return grad_output
 
 
 class Squeeze(Function):
 
-    def __init__(self, dim=None):
-        super(Squeeze, self).__init__()
-        self.dim = dim
-
-    def forward(self, input):
-        self.input_size = input.size()
-        self.numel = input.numel()
-        if self.dim is not None:
-            result = input.squeeze(self.dim)
+    @staticmethod
+    def forward(ctx, input, dim=None):
+        ctx.dim = dim
+        ctx.input_size = input.size()
+        if dim is not None:
+            result = input.squeeze(dim)
         else:
             result = input.squeeze()
-        self.mark_shared_storage((input, result))
+        ctx.mark_shared_storage((input, result))
         return result
 
-    def backward(self, grad_output):
-        assert grad_output.numel() == self.numel
-        return grad_output.contiguous().view(self.input_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.contiguous().view(ctx.input_size), None
 
 
 class Unsqueeze(Function):
 
-    def __init__(self, dim):
-        super(Unsqueeze, self).__init__()
-        self.dim = dim
-
-    def forward(self, input):
-        result = input.unsqueeze(self.dim)
-        self.mark_shared_storage((input, result))
+    @staticmethod
+    def forward(ctx, input, dim):
+        ctx.dim = dim
+        result = input.unsqueeze(dim)
+        ctx.mark_shared_storage((input, result))
         return result
 
-    def backward(self, grad_output):
-        return grad_output.squeeze(self.dim)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.squeeze(ctx.dim), None
 
 
 class MaskedCopy(InplaceFunction):
 
-    def forward(self, tensor1, mask, tensor2):
-        assert not self.needs_input_grad[1], "MaskedCopy can't differentiate " \
-            "the mask"
-        if not self.inplace:
+    @staticmethod
+    def forward(ctx, tensor1, mask, tensor2, inplace=False):
+        assert not ctx.needs_input_grad[1], "MaskedCopy can't differentiate the mask"
+        if not inplace:
             tensor1 = tensor1.clone()
         else:
-            self.mark_dirty(tensor1)
-        self.save_for_backward(mask)
+            ctx.mark_dirty(tensor1)
+        ctx.save_for_backward(mask)
         return tensor1.masked_copy_(mask, tensor2)
 
-    def backward(self, grad_output):
-        mask, = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        mask, = ctx.saved_tensors
         grad_tensor1 = grad_tensor2 = None
-        if self.needs_input_grad[0]:
+        if ctx.needs_input_grad[0]:
             grad_tensor1 = grad_output.clone().masked_fill_(mask, 0)
-        if self.needs_input_grad[2]:
+        if ctx.needs_input_grad[2]:
             grad_tensor2 = grad_output.masked_select(mask)
-        return grad_tensor1, None, grad_tensor2
+        return grad_tensor1, None, grad_tensor2, None
 
 
 class MaskedFill(InplaceFunction):
 
-    def __init__(self, value, inplace=False):
-        super(MaskedFill, self).__init__(inplace)
-        self.value = value
-
-    def forward(self, tensor, mask):
-        assert not self.needs_input_grad[1], "MaskedFill can't differentiate " \
-            "the mask"
-        if not self.inplace:
+    @staticmethod
+    def forward(ctx, tensor, mask, value, inplace=False):
+        assert not ctx.needs_input_grad[1], "MaskedFill can't differentiate the mask"
+        if not inplace:
             tensor = tensor.clone()
         else:
-            self.mark_dirty(tensor)
-        self.save_for_backward(mask)
-        return tensor.masked_fill_(mask, self.value)
+            ctx.mark_dirty(tensor)
+        ctx.save_for_backward(mask)
+        return tensor.masked_fill_(mask, value)
 
-    def backward(self, grad_output):
-        mask, = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        mask, = ctx.saved_tensors
         grad_tensor = None
-        if self.needs_input_grad[0]:
+        if ctx.needs_input_grad[0]:
             grad_tensor = grad_output.clone().masked_fill_(mask, 0)
-        return grad_tensor, None
+        return grad_tensor, None, None, None
 
 
 class MaskedSelect(Function):
 
-    def forward(self, tensor, mask):
-        assert not self.needs_input_grad[1], "MaskedSelect can't differentiate " \
-            "the mask"
-        self.input_size = tensor.size()
-        self.save_for_backward(mask)
+    @staticmethod
+    def forward(ctx, tensor, mask):
+        assert not ctx.needs_input_grad[1], "MaskedSelect can't differentiate the mask"
+        ctx.input_size = tensor.size()
+        ctx.save_for_backward(mask)
         return tensor.masked_select(mask)
 
-    def backward(self, grad_output):
-        mask, = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        mask, = ctx.saved_tensors
         grad_tensor = None
-        if self.needs_input_grad[0]:
-            # TODO: remove zero
-            grad_tensor = grad_output.new(self.input_size).zero_()
+        if ctx.needs_input_grad[0]:
+            grad_tensor = grad_output.new(ctx.input_size).zero_()
             grad_tensor.masked_copy_(mask, grad_output)
         return grad_tensor, None
 
 
 class _MultiSelectionFunction(Function):
 
-    def __init__(self, dim, return_indices):
-        super(_MultiSelectionFunction, self).__init__()
-        self.dim = dim
-        self.return_indices = return_indices
-
-    def forward(self, input):
-        fn = getattr(input, self.__class__.__name__.lower())
-        self.input_size = input.size()
-        output, indices = fn(*self.args)
-        if self.return_indices:
-            self.save_for_backward(indices)
-            self.mark_non_differentiable(indices)
+    @staticmethod
+    def forward(ctx, input, dim, return_indices, args):
+        fn = getattr(input, ctx._forward_cls.__name__.lower())
+        ctx.return_indices = return_indices
+        ctx.input_size = input.size()
+        ctx.dim = dim
+        output, indices = fn(*args)
+        if return_indices:
+            ctx.save_for_backward(indices)
+            ctx.mark_non_differentiable(indices)
             return output, indices
         else:
-            self.indices = indices
+            ctx.indices = indices
             return output
 
-    def backward(self, grad_output, grad_indices=None):
-        grad_input = grad_output.new(self.input_size).zero_()
-        if self.return_indices:
-            indices, = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output, grad_indices=None):
+        grad_input = grad_output.new(ctx.input_size).zero_()
+        if ctx.return_indices:
+            indices, = ctx.saved_tensors
         else:
-            indices = self.indices
-        dim = self.dim if self.dim is not None else grad_output.dim() - 1
-        return grad_input.scatter_(dim, indices, grad_output)
+            indices = ctx.indices
+        dim = ctx.dim if ctx.dim is not None else grad_output.dim() - 1
+        return (grad_input.scatter_(dim, indices, grad_output),) + (None,) * ctx.num_flags
 
 
 class Sort(_MultiSelectionFunction):
 
-    def __init__(self, dim=None, descending=False, return_indices=True):
-        super(Sort, self).__init__(dim, return_indices)
-        self.descending = descending
-
-    def forward(self, input):
-        dim = self.dim if self.dim is not None else input.dim() - 1
-        self.args = (dim, self.descending)
-        return super(Sort, self).forward(input)
+    @staticmethod
+    def forward(ctx, input, dim=None, descending=False, return_indices=True):
+        ctx.dim = dim if dim is not None else input.dim() - 1
+        args = (ctx.dim, descending)
+        ctx.num_flags = 3
+        return _MultiSelectionFunction.forward(ctx, input, dim, return_indices, args)
 
 
 class Topk(_MultiSelectionFunction):
 
-    def __init__(self, k, dim=None, largest=True, sort=True, return_indices=True):
-        super(Topk, self).__init__(dim, return_indices)
-        self.k = k
-        self.largest = largest
-        self.sort = sort
-
-    def forward(self, input):
-        dim = self.dim if self.dim is not None else input.dim() - 1
-        self.args = (self.k, dim, self.largest, self.sort)
-        return super(Topk, self).forward(input)
+    @staticmethod
+    def forward(ctx, input, k, dim=None, largest=True, sort=True, return_indices=True):
+        ctx.dim = dim if dim is not None else input.dim() - 1
+        args = (k, ctx.dim, largest, sort)
+        ctx.num_flags = 5
+        return _MultiSelectionFunction.forward(ctx, input, dim, return_indices, args)
 
 
 class Chunk(Function):
 
-    def __init__(self, num_chunks, dim=0):
-        super(Chunk, self).__init__()
-        self.num_chunks = num_chunks
-        self.dim = dim
-
-    def forward(self, i):
-        self.input_size = i.size()
-        result = i.chunk(self.num_chunks, self.dim)
-        self.mark_shared_storage(*((i, chunk) for chunk in result))
+    @staticmethod
+    def forward(ctx, i, num_chunks, dim=0):
+        ctx.input_size = i.size()
+        ctx.dim = dim
+        result = i.chunk(num_chunks, dim)
+        ctx.mark_shared_storage(*((i, chunk) for chunk in result))
         return result
 
-    def backward(self, *grad_output):
-        grad_input = grad_output[0].new(self.input_size)
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, *grad_output):
+        grad_input = grad_output[0].new(ctx.input_size)
         offset = 0
         for grad in grad_output:
-            grad_size = grad.size(self.dim)
-            grad_input.narrow(self.dim, offset, grad_size).copy_(grad)
+            grad_size = grad.size(ctx.dim)
+            grad_input.narrow(ctx.dim, offset, grad_size).copy_(grad)
             offset += grad_size
-        return grad_input
+        return grad_input, None, None
 
 
 class Gather(Function):
 
-    def __init__(self, dim):
-        super(Gather, self).__init__()
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, input, dim, index):
+        assert not ctx.needs_input_grad[2], "Gather can't differentiate the index"
+        ctx.input_size = input.size()
+        ctx.save_for_backward(index)
+        ctx.dim = dim
+        return input.gather(dim, index)
 
-    def forward(self, input, index):
-        assert not self.needs_input_grad[1], "Gather can't differentiate " \
-            "the index"
-        self.input_size = input.size()
-        self.save_for_backward(index)
-        return input.gather(self.dim, index)
-
-    def backward(self, grad_output):
-        index, = self.saved_tensors
-        grad_input = grad_output.new(self.input_size).zero_()
-        return grad_input.scatter_(self.dim, index, grad_output), None
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        index, = ctx.saved_tensors
+        grad_input = grad_output.new(ctx.input_size).zero_()
+        return grad_input.scatter_(ctx.dim, index, grad_output), None, None
 
 
 class Scatter(InplaceFunction):
 
-    def __init__(self, dim, inplace=False):
-        super(Scatter, self).__init__(inplace)
-        self.dim = dim
-
-    def forward(self, input, index, source):
-        assert not self.needs_input_grad[1], "Scatter can't differentiate " \
-            "the index"
-        if self.inplace:
-            self.mark_dirty(input)
+    @staticmethod
+    def forward(ctx, input, dim, index, source, inplace=False):
+        assert not ctx.needs_input_grad[2], "Scatter can't differentiate the index"
+        ctx.dim = dim
+        if inplace:
+            ctx.mark_dirty(input)
         else:
             input = input.clone()
-        self.save_for_backward(index)
-        return input.scatter_(self.dim, index, source)
+        ctx.save_for_backward(index)
+        return input.scatter_(ctx.dim, index, source)
 
-    def backward(self, grad_output):
-        index, = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        index, = ctx.saved_tensors
         grad_input = grad_source = None
-        if self.needs_input_grad[0]:
+        if ctx.needs_input_grad[0]:
             grad_input = grad_output.clone()
-            grad_input.scatter_(self.dim, index, 0)
-        if self.needs_input_grad[2]:
-            grad_source = grad_output.gather(self.dim, index)
-        return grad_input, None, grad_source
+            grad_input.scatter_(ctx.dim, index, 0)
+        if ctx.needs_input_grad[3]:
+            grad_source = grad_output.gather(ctx.dim, index)
+        return grad_input, None, None, grad_source, None
 
 
 class Repeat(Function):
 
-    def __init__(self, repeats):
-        super(Repeat, self).__init__()
-        self.repeats = repeats
+    @staticmethod
+    def forward(ctx, input, repeats):
+        ctx.repeats = repeats
+        return input.repeat(repeats)
 
-    def forward(self, input):
-        return input.repeat(self.repeats)
-
-    def backward(self, grad_output):
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
         grad_input = grad_output
-        for dim, repeat in enumerate(self.repeats):
+        for dim, repeat in enumerate(ctx.repeats):
             if repeat == 1:
                 continue
             grad_input = sum(grad_input.chunk(repeat, dim))
-        return grad_input
+        return grad_input, None
 
 
 class Cumsum(Function):

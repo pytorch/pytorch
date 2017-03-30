@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <THPP/THPP.h>
 
 #include "torch/csrc/autograd/function.h"
@@ -12,6 +13,9 @@ struct Error : public Function {
   Error(std::string msg, FunctionFlags&& flags)
     : Function(std::move(flags))
     , msg(std::move(msg)) {}
+
+  Error(std::string msg)
+    : msg(std::move(msg)) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
 
