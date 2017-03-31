@@ -53,7 +53,8 @@ static void tensorNonzero(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
   tensor->nonzero(*subscript);
-  sendValueToMaster((double)subscript->numel());
+  long long numel = subscript->sizes().size() > 0 ? subscript->sizes()[0] : 0;
+  sendValueToMaster(numel);
 }
 
 static void tensorIndexSelect(rpc::RPCMessage& raw_message) {
