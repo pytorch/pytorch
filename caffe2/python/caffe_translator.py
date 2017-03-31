@@ -86,7 +86,7 @@ class TranslatorRegistry(object):
         net = caffe2_pb2.NetDef()
         net.name = caffe_net.name
         net_params = caffe2_pb2.TensorProtos()
-        if len(caffe_net.layer) == 0:
+        if len(caffe_net.layers) >= 0:
             raise ValueError(
                 'I think something is wrong. This translation script '
                 'only accepts new style layers that are stored in the '
