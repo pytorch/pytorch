@@ -350,7 +350,14 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 auto Engine::start_threads() -> void {
   int num_devices = 0;
 #ifdef WITH_CUDA
-  THCudaCheck(cudaGetDeviceCount(&num_devices));
+  cudaError_t err = cudaGetDeviceCount(&num_devices);
+
+  // check for case of compiled with CUDA but no NVIDIA driver available
+  if (err == cudaErrorInsufficientDriver) {
+    num_devices = 0;
+  } else {
+    THCudaCheck(err);
+  }
 #endif
   ready_queues = std::vector<std::unique_ptr<ReadyQueue>>(num_devices + 1);
   for (auto& queue : ready_queues) {
