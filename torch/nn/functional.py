@@ -634,8 +634,9 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
             \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
 
         Args:
-            x (Tensor): input tensor containing the two input batches
-            p (real): the norm degree. Default: 2
+            x1: first input tensor
+            x2: second input tensor
+            p: the norm degree. Default: 2
 
         Shape:
             - Input: :math:`(N, D)` where `D = vector dimension`
