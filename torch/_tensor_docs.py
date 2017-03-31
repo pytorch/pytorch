@@ -1088,7 +1088,7 @@ add_docstr(torch._C.FloatTensorBase.random_,
 random_(from=0, to=None, *, generator=None)
 
 Fills this tensor with numbers sampled from the uniform distribution or
-discrete uniform distribution over [from, to]. If not specified, the
+discrete uniform distribution over [from, to - 1]. If not specified, the
 values are only bounded by this tensor's data type.
 """)
 
