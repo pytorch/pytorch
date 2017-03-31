@@ -28,10 +28,7 @@ class Bilinear(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input1, input2):
-        if self.bias is None:
-            return self._backend.Bilinear()(input1, input2, self.weight)
-        else:
-            return self._backend.Bilinear()(input1, input2, self.weight, self.bias)
+        return self._backend.Bilinear()(input1, input2, self.weight, self.bias)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
