@@ -18,25 +18,31 @@ __global__ void LabelCrossEntropyKernel(
 }
 
 __global__ void LabelCrossEntropyGradientKernel(
-    const int N, const int D, const float* Pdata, const int* labeldata,
-    float* dXdata, const float *weights) {
-      if (weights == NULL) {
-        CUDA_1D_KERNEL_LOOP(i, N) {
-         int idx = i * D + labeldata[i];
-         dXdata[idx] = Pdata[idx] - 1.;
-       }
-     } else {
-       CUDA_1D_KERNEL_LOOP(i, N) {
-        int idx = i * D + labeldata[i];
-        dXdata[idx] = Pdata[idx] - 1.;
+    const int N,
+    const int D,
+    const float* Pdata,
+    const int* labeldata,
+    float* dXdata) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    int idx = i * D + labeldata[i];
+    dXdata[idx] = Pdata[idx] - 1.;
+  }
+}
 
-        float weight = weights[i];
-        for(int d=0; d<D; d++) {
-            int idx = i * D + d;
-            dXdata[idx] *= weight;
-        }
-     }
-   }
+__global__ void LabelCrossEntropyGradientKernelWeighted(
+    const int N,
+    const int D,
+    const float* Pdata,
+    const int* labeldata,
+    float* dXdata,
+    const float* weights) {
+  CUDA_1D_KERNEL_LOOP(i, N * D) {
+    int row = i / D;
+    int d = i % D;
+    float val = Pdata[i] - 1.0 * (d == labeldata[row]);
+    float weight = weights[row];
+    dXdata[i] = val * weight;
+  }
 }
 
 __global__ void ProbCrossEntropyKernel(
@@ -447,22 +453,33 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
         (T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1) ||
         (T.ndim() == 2 && T.dim32(0) == N && T.dim32(1) == D));
     DCHECK_EQ(T.dim32(0), N);
-    // Copy softmax probabilities into dX
-    context_.Copy<float, CUDAContext, CUDAContext>(
-        P.size(), P.data<float>(), dX->mutable_data<float>());
+
     // Subtract 1 from labeled positions
     if (!label_prob_mode_) {
-      LabelCrossEntropyGradientKernel<<<
-          CAFFE_GET_BLOCKS(N),
-          CAFFE_CUDA_NUM_THREADS,
-          0,
-          context_.cuda_stream()>>>(
-          N,
-          D,
-          P.data<float>(),
-          T.data<int>(),
-          dX->mutable_data<float>(),
-          weights);
+      if (weights == nullptr) {
+        // Copy softmax probabilities into dX
+        context_.Copy<float, CUDAContext, CUDAContext>(
+            P.size(), P.data<float>(), dX->mutable_data<float>());
+        LabelCrossEntropyGradientKernel<<<
+            CAFFE_GET_BLOCKS(N),
+            CAFFE_CUDA_NUM_THREADS,
+            0,
+            context_.cuda_stream()>>>(
+            N, D, P.data<float>(), T.data<int>(), dX->mutable_data<float>());
+      } else {
+        // Weighted version gets the Pdata values internally
+        LabelCrossEntropyGradientKernelWeighted<<<
+            CAFFE_GET_BLOCKS(N * D),
+            CAFFE_CUDA_NUM_THREADS,
+            0,
+            context_.cuda_stream()>>>(
+            N,
+            D,
+            P.data<float>(),
+            T.data<int>(),
+            dX->mutable_data<float>(),
+            weights);
+      }
     } else {
       ProbCrossEntropyGradientKernel<<<
           CAFFE_GET_BLOCKS(N),
