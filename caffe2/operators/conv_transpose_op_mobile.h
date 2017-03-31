@@ -21,12 +21,9 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
   ConvTransposeMobileOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<Context>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(order_ == StorageOrder::NCHW,
-                           "Only NCHW order is supported right now.");
-    OPERATOR_NEEDS_FEATURE(pad_l_ == 0,
-                           "operator does not handle row width padding");
-    OPERATOR_NEEDS_FEATURE(pad_r_ == 0,
-                           "operator does not handle row width padding");
+    OPERATOR_NEEDS_FEATURE(order_ == StorageOrder::NCHW, "Only NCHW order is supported right now.");
+    OPERATOR_NEEDS_FEATURE(pad_l_ == 0, "operator does not handle row width padding");
+    OPERATOR_NEEDS_FEATURE(pad_r_ == 0, "operator does not handle row width padding");
     OPERATOR_NEEDS_FEATURE(stride_w_ <= 4, "stride width must be <= 4");
   }
 
@@ -34,15 +31,9 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  // For the multithreaded implementation, this stores a per-worker
-  // thread buffer for a tile of Y. There is one of these buffers for
-  // each worker thread that is not the main thread.
-  std::vector<Tensor<Context>> threadYBuffers_;
-
-  // For the multithreaded implementation, this stores a per-worker
-  // thread buffer for the gemm output. There is one of these buffers
-  // for all worker threads, including the main thread.
-  std::vector<Tensor<Context>> threadColBuffers_;
+  // We store a numThreasds per-worker  tiles of Y, and numThreads per-worker threadBuffer for the
+  // gemm output, laid out in that order.
+  TensorCPU threadBuffer_;
 
   // Input: X, W, b
   // Output: Y
