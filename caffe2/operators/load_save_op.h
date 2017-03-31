@@ -238,7 +238,7 @@ class LoadOp final : public Operator<Context> {
       if (blob_state.is_tensor) {
         CAFFE_ENFORCE(
             blob_state.current_size == blob_state.total_size,
-            "Data size mistmatch for blob ",
+            "Data size mismatch for blob ",
             iter.first,
             ". Expected: ",
             blob_state.total_size,
