@@ -192,10 +192,3 @@ class Dot(Function):
             grad_vector2 = vector1.mul(grad_output[0])
 
         return grad_vector1, grad_vector2
-
-
-# TODO: cross
-# TODO: diag
-# TODO: trace
-# TODO: tril
-# TODO: triu
