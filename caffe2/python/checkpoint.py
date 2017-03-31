@@ -245,7 +245,7 @@ class MultiNodeCheckpointManager(object):
     def load(self, epoch):
         return self._task_group(self._node_manager_class.load, epoch)
 
-    def load_blobs_locally(self, blob_names, epoch, session):
+    def load_blobs_locally(self, nodes, blob_names, epoch, session):
         """Loads the necessary blobs from the checkpoints to the current node.
 
         Args:
@@ -254,7 +254,17 @@ class MultiNodeCheckpointManager(object):
             epoch: An integer. The checkpoint epoch to load from.
             session: A Session object to execute the Load ops.
         """
-        assert self._node_managers is not None, 'init must be called first.'
+        if self._node_managers is not None:
+            assert [node for node, _ in self._node_managers] == nodes
+        else:
+            self._node_managers = []
+            for node in nodes:
+                with Node(node):
+                    manager = self._node_manager_class(
+                        db=os.path.join(self._db_prefix, node),
+                        db_type=self._db_type)
+                    self._node_managers.append((node, manager))
+        assert self._node_managers is not None, 'must initialize node managers'
         for _, manager in self._node_managers:
             with TaskGroup(WorkspaceType.GLOBAL) as task_group:
                 manager.load_blobs_from_checkpoint(blob_names, epoch)
@@ -345,12 +355,9 @@ class JobRunner(object):
         """
         if not self.checkpoint:
             raise ValueError('Checkpoint manager is None')
-        logger.info('Preparing checkpoint ...')
-        session.run(self.checkpoint.init(
-            self.job.nodes_to_checkpoint(),
-            retrieve_from_epoch=self.resume_from_epoch))
         logger.info('Loading checkpoint for epoch {} ...'.format(epoch))
-        self.checkpoint.load_blobs_locally(blob_names, epoch, session)
+        self.checkpoint.load_blobs_locally(self.job.nodes_to_checkpoint(),
+                                           blob_names, epoch, session)
         logger.info('Checkpoint loaded.')
 
 
