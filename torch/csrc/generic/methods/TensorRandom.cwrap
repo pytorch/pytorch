@@ -16,7 +16,7 @@
 static void THTensor_(random2__)(THTensor *self, THGenerator *gen, long a, long b)
 {
   THArgCheck(b > a, 2, "upper bound must be greater than lower bound");
-  TH_TENSOR_APPLY(real, self, *self_data = ((THRandom_random(gen) % (b+1-a)) + a);)
+  TH_TENSOR_APPLY(real, self, *self_data = ((THRandom_random(gen) % (b-a)) + a);)
 }
 
 static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
