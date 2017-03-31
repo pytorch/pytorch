@@ -145,7 +145,7 @@ class DataLoaderIter(object):
         if self.drop_last:
             return len(self.sampler) // self.batch_size
         else:
-            return len(self.sampler) // self.batch_size + 1
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
@@ -244,10 +244,10 @@ class DataLoader(object):
             (default: 0)
         collate_fn (callable, optional)
         pin_memory (bool, optional)
-        drop_last (bool, optional): set to ``True`` to drop remaining samples
-            that is not enough of a batch size. If False and the size of dataset
-            is not divisible by batch size, then the last batch will be smaller.
-            (default: False)
+        drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
+            if the dataset size is not divisible by the batch size. If False and
+            the size of dataset is not divisible by the batch size, then the last batch
+            will be smaller. (default: False)
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, num_workers=0,
