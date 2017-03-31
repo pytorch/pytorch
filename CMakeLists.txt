@@ -7,6 +7,13 @@ project(Caffe2 CXX C)
 # We want CMake to GLOB everything every time.
 execute_process(COMMAND find "${PROJECT_SOURCE_DIR}" -name "CMakeLists.txt" -exec touch {} \;)
 
+# We want to make sure that all submodules are being properly initialized, if
+# one is building from a git checkout.
+find_package(Git)
+if (GIT_FOUND)
+  execute_process(COMMAND git submodule update --init)
+endif()
+
 # Useful functions.
 function (exclude OUTPUT INPUT)
 set(EXCLUDES ${ARGN})
