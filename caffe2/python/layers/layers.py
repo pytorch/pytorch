@@ -45,10 +45,15 @@ def create_layer(layer_name, *args, **kwargs):
     return _LAYER_REGISTRY[layer_name](*args, **kwargs)
 
 
+LayerPsParam = namedtuple('LayerPsParam', ['sparse_key', 'average_length'])
+
+
 # TODO(amalevich): Modify this to some better struct, something closer to
 # ParameterInfo.
 LayerParameter = namedtuple(
-    'LayerParameter', ['parameter', 'optimizer', 'initializer'])
+    'LayerParameter',
+    ['parameter', 'optimizer', 'initializer', 'ps_param'])
+LayerParameter.__new__.__defaults__ = (None, None, None, None)
 
 
 def _is_request_only_scalar(scalar):
