@@ -840,6 +840,16 @@ class TestTorch(TestCase):
         torch.randperm(100, out=res2)
         self.assertEqual(res1, res2, 0)
 
+    def test_random(self):
+        t = torch.FloatTensor(100).zero_()
+        lb = 1
+        ub = 3
+        # This test is flaky with p=(1/(ub-lb+1))^100=2e-48
+
+        t.random_(lb, ub)
+        self.assertEqual(t.max(), ub)
+        self.assertEqual(t.min(), lb)
+
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = 4
         if order == 'descending':
