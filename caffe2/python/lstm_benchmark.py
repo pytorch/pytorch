@@ -75,9 +75,10 @@ def create_model(args, queue, label_queue):
         dim_out=args.hidden_dim,
         scope="lstm1",
     )
+    weights = model.UniformFill(labels, "weights")
 
     softmax, loss = model.SoftmaxWithLoss(
-        [model.Flatten(all_hidden), labels],
+        [model.Flatten(all_hidden), labels, weights],
         ['softmax', 'loss'],
     )
 
