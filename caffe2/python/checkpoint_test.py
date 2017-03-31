@@ -124,9 +124,6 @@ class TestCheckpoint(TestCase):
             job_runner = JobRunner(compiled_job, checkpoint)
             job_runner.load_blobs_from_checkpoints(blob_names=model_blob_names,
                                                    epoch=1, session=session)
-            # In addition to the two model blobs, we also have 3 output blobs
-            # and one runnable blob. So there are 6 blobs in total.
-            self.assertEquals(len(ws.blobs), 6)
             # Check that all the model blobs are loaded.
             for blob_name in model_blob_names:
                 self.assertTrue(ws.has_blob(blob_name))
