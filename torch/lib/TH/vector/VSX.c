@@ -103,7 +103,7 @@ static void THDoubleVector_fill_VSX(double *x, const double c, const ptrdiff_t n
 
 
 //--------------------------------------------------------------------------------------------------
-// THDoubleVector_add_VSX was tested on Power8:
+// THDoubleVector_adds_VSX was tested on Power8:
 //
 // Max speedup achieved when unrolling 24 elements.
 // When unrolling 32 elements, the performance was the same as for 24.
@@ -111,7 +111,7 @@ static void THDoubleVector_fill_VSX(double *x, const double c, const ptrdiff_t n
 // Unrolling 24 elements was 43% faster than unrolling 4 elements (2.8 sec vs 4.0 sec).
 // Unrolling 24 elements was about 8% faster than unrolling 16 elements (2.8 sec vs 3.0 sec).
 //--------------------------------------------------------------------------------------------------
-static void THDoubleVector_add_VSX(double *y, const double *x, const double c, const ptrdiff_t n)
+static void THDoubleVector_adds_VSX(double *y, const double *x, const double c, const ptrdiff_t n)
 {
     ptrdiff_t i;
     vector double c_fp64vec2;
@@ -399,7 +399,7 @@ static void THDoubleVector_scale_VSX(double *y, const double c, const ptrdiff_t 
 }
 
 
-static void THDoubleVector_mul_VSX(double *y, const double *x, const ptrdiff_t n)
+static void THDoubleVector_muls_VSX(double *y, const double *x, const ptrdiff_t n)
 {
     ptrdiff_t i;
 
@@ -594,7 +594,7 @@ static void THFloatVector_fill_VSX(float *x, const float c, const ptrdiff_t n)
 }
 
 
-static void THFloatVector_add_VSX(float *y, const float *x, const float c, const ptrdiff_t n)
+static void THFloatVector_adds_VSX(float *y, const float *x, const float c, const ptrdiff_t n)
 {
     ptrdiff_t i;
     vector float c_fp32vec4;
@@ -885,7 +885,7 @@ static void THFloatVector_scale_VSX(float *y, const float c, const ptrdiff_t n)
 
 
 
-static void THFloatVector_mul_VSX(float *y, const float *x, const ptrdiff_t n)
+static void THFloatVector_muls_VSX(float *y, const float *x, const ptrdiff_t n)
 {
     ptrdiff_t i;
 
@@ -1009,13 +1009,13 @@ static void THFloatVector_mul_VSX(float *y, const float *x, const ptrdiff_t n)
 //    THFloatVector_fill_VSX() test took 0.07830 seconds
 //    All assertions PASSED for THFloatVector_fill_VSX() test.
 //
-//    standardDouble_add() test took 0.51602 seconds
-//    THDoubleVector_add_VSX() test took 0.31384 seconds
-//    All assertions PASSED for THDoubleVector_add_VSX() test.
+//    standardDouble_adds() test took 0.51602 seconds
+//    THDoubleVector_adds_VSX() test took 0.31384 seconds
+//    All assertions PASSED for THDoubleVector_adds_VSX() test.
 //
-//    standardFloat_add() test took 0.39845 seconds
-//    THFloatVector_add_VSX() test took 0.14544 seconds
-//    All assertions PASSED for THFloatVector_add_VSX() test.
+//    standardFloat_adds() test took 0.39845 seconds
+//    THFloatVector_adds_VSX() test took 0.14544 seconds
+//    All assertions PASSED for THFloatVector_adds_VSX() test.
 //
 //    standardDouble_diff() test took 0.48219 seconds
 //    THDoubleVector_diff_VSX() test took 0.31708 seconds
@@ -1033,13 +1033,13 @@ static void THFloatVector_mul_VSX(float *y, const float *x, const ptrdiff_t n)
 //    THFloatVector_scale_VSX() test took 0.09741 seconds
 //    All assertions PASSED for THFloatVector_scale_VSX() test.
 //
-//    standardDouble_mul() test took 0.50986 seconds
-//    THDoubleVector_mul_VSX() test took 0.30939 seconds
-//    All assertions PASSED for THDoubleVector_mul_VSX() test.
+//    standardDouble_muls() test took 0.50986 seconds
+//    THDoubleVector_muls_VSX() test took 0.30939 seconds
+//    All assertions PASSED for THDoubleVector_muls_VSX() test.
 //
-//    standardFloat_mul() test took 0.40241 seconds
-//    THFloatVector_mul_VSX() test took 0.14346 seconds
-//    All assertions PASSED for THFloatVector_mul_VSX() test.
+//    standardFloat_muls() test took 0.40241 seconds
+//    THFloatVector_muls_VSX() test took 0.14346 seconds
+//    All assertions PASSED for THFloatVector_muls_VSX() test.
 //
 //    Finished runnning all tests. All tests PASSED.
 //
@@ -1069,13 +1069,13 @@ static void standardFloat_fill(float *x, const float c, const ptrdiff_t n)
         x[i] = c;
 }
 
-static void standardDouble_add(double *y, const double *x, const double c, const ptrdiff_t n)
+static void standardDouble_adds(double *y, const double *x, const double c, const ptrdiff_t n)
 {
   for (ptrdiff_t i = 0; i < n; i++)
     y[i] += c * x[i];
 }
 
-static void standardFloat_add(float *y, const float *x, const float c, const ptrdiff_t n)
+static void standardFloat_adds(float *y, const float *x, const float c, const ptrdiff_t n)
 {
   for (ptrdiff_t i = 0; i < n; i++)
     y[i] += c * x[i];
@@ -1279,7 +1279,7 @@ void test_THFloatVector_fill_VSX()
     free(x_optimized);
 }
 
-void test_THDoubleVector_add_VSX()
+void test_THDoubleVector_adds_VSX()
 {
     clock_t start, end;
     double elapsedSeconds_optimized, elapsedSeconds_standard;
@@ -1303,47 +1303,47 @@ void test_THDoubleVector_add_VSX()
     // Performance Test
     //-------------------------------------------------
     start = clock();
-    standardDouble_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
-    standardDouble_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    standardDouble_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    standardDouble_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    standardDouble_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
+    standardDouble_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    standardDouble_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    standardDouble_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_standard = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("standardDouble_add() test took %.5lf seconds\n", elapsedSeconds_standard);
+    printf("standardDouble_adds() test took %.5lf seconds\n", elapsedSeconds_standard);
 
     start = clock();
-    THDoubleVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
-    THDoubleVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    THDoubleVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    THDoubleVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    THDoubleVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
+    THDoubleVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    THDoubleVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    THDoubleVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_optimized = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("THDoubleVector_add_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
+    printf("THDoubleVector_adds_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
 
 
     //-------------------------------------------------
     // Correctness Test
     //-------------------------------------------------
-    standardDouble_add(    y_standard+1,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    THDoubleVector_add_VSX(y_optimized+1, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    standardDouble_add(    y_standard+2,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    THDoubleVector_add_VSX(y_optimized+2, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    standardDouble_add(    y_standard+3,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    THDoubleVector_add_VSX(y_optimized+3, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    standardDouble_add(    y_standard+517,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
-    THDoubleVector_add_VSX(y_optimized+517, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    standardDouble_adds(    y_standard+1,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    THDoubleVector_adds_VSX(y_optimized+1, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    standardDouble_adds(    y_standard+2,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    THDoubleVector_adds_VSX(y_optimized+2, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    standardDouble_adds(    y_standard+3,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    THDoubleVector_adds_VSX(y_optimized+3, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    standardDouble_adds(    y_standard+517,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    THDoubleVector_adds_VSX(y_optimized+517, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
     int r = rand() % 258;
-    standardDouble_add(    y_standard+517+r,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
-    THDoubleVector_add_VSX(y_optimized+517+r, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    standardDouble_adds(    y_standard+517+r,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    THDoubleVector_adds_VSX(y_optimized+517+r, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
     for(int i = 0; i < VSX_FUNC_NUM_TEST_ELEMENTS; i++)
     {
         if(!near(y_optimized[i], y_standard[i]))
             printf("%d %f %f\n", i, y_optimized[i], y_standard[i]);
         assert(near(y_optimized[i], y_standard[i]));
     }
-    printf("All assertions PASSED for THDoubleVector_add_VSX() test.\n\n");
+    printf("All assertions PASSED for THDoubleVector_adds_VSX() test.\n\n");
 
 
     free(y_standard);
@@ -1352,7 +1352,7 @@ void test_THDoubleVector_add_VSX()
 }
 
 
-void test_THFloatVector_add_VSX()
+void test_THFloatVector_adds_VSX()
 {
     clock_t start, end;
     double elapsedSeconds_optimized, elapsedSeconds_standard;
@@ -1376,47 +1376,47 @@ void test_THFloatVector_add_VSX()
     // Performance Test
     //-------------------------------------------------
     start = clock();
-    standardFloat_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
-    standardFloat_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    standardFloat_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    standardFloat_add(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    standardFloat_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
+    standardFloat_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    standardFloat_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    standardFloat_adds(y_standard, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_standard = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("standardFloat_add() test took %.5lf seconds\n", elapsedSeconds_standard);
+    printf("standardFloat_adds() test took %.5lf seconds\n", elapsedSeconds_standard);
 
     start = clock();
-    THFloatVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
-    THFloatVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    THFloatVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    THFloatVector_add_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    THFloatVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS  );
+    THFloatVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    THFloatVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    THFloatVector_adds_VSX(y_optimized, x, c, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_optimized = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("THFloatVector_add_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
+    printf("THFloatVector_adds_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
 
 
     //-------------------------------------------------
     // Correctness Test
     //-------------------------------------------------
-    standardFloat_add(    y_standard+1,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    THFloatVector_add_VSX(y_optimized+1, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    standardFloat_add(    y_standard+2,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    THFloatVector_add_VSX(y_optimized+2, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    standardFloat_add(    y_standard+3,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    THFloatVector_add_VSX(y_optimized+3, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    standardFloat_add(    y_standard+517,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
-    THFloatVector_add_VSX(y_optimized+517, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    standardFloat_adds(    y_standard+1,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    THFloatVector_adds_VSX(y_optimized+1, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    standardFloat_adds(    y_standard+2,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    THFloatVector_adds_VSX(y_optimized+2, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    standardFloat_adds(    y_standard+3,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    THFloatVector_adds_VSX(y_optimized+3, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    standardFloat_adds(    y_standard+517,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    THFloatVector_adds_VSX(y_optimized+517, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
     int r = rand() % 258;
-    standardFloat_add(    y_standard+517+r,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
-    THFloatVector_add_VSX(y_optimized+517+r, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    standardFloat_adds(    y_standard+517+r,  x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    THFloatVector_adds_VSX(y_optimized+517+r, x, c, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
     for(int i = 0; i < VSX_FUNC_NUM_TEST_ELEMENTS; i++)
     {
         if(!near(y_optimized[i], y_standard[i]))
             printf("%d %f %f\n", i, y_optimized[i], y_standard[i]);
         assert(near(y_optimized[i], y_standard[i]));
     }
-    printf("All assertions PASSED for THFloatVector_add_VSX() test.\n\n");
+    printf("All assertions PASSED for THFloatVector_adds_VSX() test.\n\n");
 
 
     free(y_standard);
@@ -1713,7 +1713,7 @@ void test_THFloatVector_scale_VSX()
     free(y_optimized);
 }
 
-void test_THDoubleVector_mul_VSX()
+void test_THDoubleVector_muls_VSX()
 {
     clock_t start, end;
     double elapsedSeconds_optimized, elapsedSeconds_standard;
@@ -1736,47 +1736,47 @@ void test_THDoubleVector_mul_VSX()
     // Performance Test
     //-------------------------------------------------
     start = clock();
-    standardDouble_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS  );
-    standardDouble_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    standardDouble_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    standardDouble_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    standardDouble_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS  );
+    standardDouble_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    standardDouble_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    standardDouble_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_standard = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("standardDouble_mul() test took %.5lf seconds\n", elapsedSeconds_standard);
+    printf("standardDouble_muls() test took %.5lf seconds\n", elapsedSeconds_standard);
 
     start = clock();
-    THDoubleVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS  );
-    THDoubleVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    THDoubleVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    THDoubleVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    THDoubleVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS  );
+    THDoubleVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    THDoubleVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    THDoubleVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_optimized = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("THDoubleVector_mul_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
+    printf("THDoubleVector_muls_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
 
 
     //-------------------------------------------------
     // Correctness Test
     //-------------------------------------------------
-    standardDouble_mul(    y_standard+1,  x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    THDoubleVector_mul_VSX(y_optimized+1, x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    standardDouble_mul(    y_standard+2,  x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    THDoubleVector_mul_VSX(y_optimized+2, x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    standardDouble_mul(    y_standard+3,  x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    THDoubleVector_mul_VSX(y_optimized+3, x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    standardDouble_mul(    y_standard+517,  x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
-    THDoubleVector_mul_VSX(y_optimized+517, x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    standardDouble_muls(    y_standard+1,  x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    THDoubleVector_muls_VSX(y_optimized+1, x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    standardDouble_muls(    y_standard+2,  x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    THDoubleVector_muls_VSX(y_optimized+2, x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    standardDouble_muls(    y_standard+3,  x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    THDoubleVector_muls_VSX(y_optimized+3, x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    standardDouble_muls(    y_standard+517,  x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    THDoubleVector_muls_VSX(y_optimized+517, x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
     int r = rand() % 258;
-    standardDouble_mul(    y_standard+517+r,  x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
-    THDoubleVector_mul_VSX(y_optimized+517+r, x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    standardDouble_muls(    y_standard+517+r,  x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    THDoubleVector_muls_VSX(y_optimized+517+r, x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
     for(int i = 0; i < VSX_FUNC_NUM_TEST_ELEMENTS; i++)
     {
         if(!near(y_optimized[i], y_standard[i]))
             printf("%d %f %f\n", i, y_optimized[i], y_standard[i]);
         assert(near(y_optimized[i], y_standard[i]));
     }
-    printf("All assertions PASSED for THDoubleVector_mul_VSX() test.\n\n");
+    printf("All assertions PASSED for THDoubleVector_muls_VSX() test.\n\n");
 
 
     free(y_standard);
@@ -1785,7 +1785,7 @@ void test_THDoubleVector_mul_VSX()
 }
 
 
-void test_THFloatVector_mul_VSX()
+void test_THFloatVector_muls_VSX()
 {
     clock_t start, end;
     double elapsedSeconds_optimized, elapsedSeconds_standard;
@@ -1808,47 +1808,47 @@ void test_THFloatVector_mul_VSX()
     // Performance Test
     //-------------------------------------------------
     start = clock();
-    standardFloat_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS  );
-    standardFloat_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    standardFloat_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    standardFloat_mul(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    standardFloat_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS  );
+    standardFloat_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    standardFloat_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    standardFloat_muls(y_standard, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_standard = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("standardFloat_mul() test took %.5lf seconds\n", elapsedSeconds_standard);
+    printf("standardFloat_muls() test took %.5lf seconds\n", elapsedSeconds_standard);
 
     start = clock();
-    THFloatVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS  );
-    THFloatVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
-    THFloatVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
-    THFloatVector_mul_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
+    THFloatVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS  );
+    THFloatVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-1);
+    THFloatVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-2);
+    THFloatVector_muls_VSX(y_optimized, x, VSX_PERF_NUM_TEST_ELEMENTS-3);
     end = clock();
 
     elapsedSeconds_optimized = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("THFloatVector_mul_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
+    printf("THFloatVector_muls_VSX() test took %.5lf seconds\n", elapsedSeconds_optimized);
 
 
     //-------------------------------------------------
     // Correctness Test
     //-------------------------------------------------
-    standardFloat_mul(    y_standard+1,  x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    THFloatVector_mul_VSX(y_optimized+1, x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
-    standardFloat_mul(    y_standard+2,  x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    THFloatVector_mul_VSX(y_optimized+2, x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
-    standardFloat_mul(    y_standard+3,  x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    THFloatVector_mul_VSX(y_optimized+3, x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
-    standardFloat_mul(    y_standard+517,  x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
-    THFloatVector_mul_VSX(y_optimized+517, x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    standardFloat_muls(    y_standard+1,  x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    THFloatVector_muls_VSX(y_optimized+1, x, VSX_FUNC_NUM_TEST_ELEMENTS-2);
+    standardFloat_muls(    y_standard+2,  x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    THFloatVector_muls_VSX(y_optimized+2, x, VSX_FUNC_NUM_TEST_ELEMENTS-4);
+    standardFloat_muls(    y_standard+3,  x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    THFloatVector_muls_VSX(y_optimized+3, x, VSX_FUNC_NUM_TEST_ELEMENTS-6);
+    standardFloat_muls(    y_standard+517,  x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
+    THFloatVector_muls_VSX(y_optimized+517, x, VSX_FUNC_NUM_TEST_ELEMENTS-1029);
     int r = rand() % 258;
-    standardFloat_mul(    y_standard+517+r,  x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
-    THFloatVector_mul_VSX(y_optimized+517+r, x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    standardFloat_muls(    y_standard+517+r,  x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
+    THFloatVector_muls_VSX(y_optimized+517+r, x, VSX_FUNC_NUM_TEST_ELEMENTS-(1029+r+100));
     for(int i = 0; i < VSX_FUNC_NUM_TEST_ELEMENTS; i++)
     {
         if(!near(y_optimized[i], y_standard[i]))
             printf("%d %f %f\n", i, y_optimized[i], y_standard[i]);
         assert(near(y_optimized[i], y_standard[i]));
     }
-    printf("All assertions PASSED for THFloatVector_mul_VSX() test.\n\n");
+    printf("All assertions PASSED for THFloatVector_muls_VSX() test.\n\n");
 
 
     free(y_standard);
@@ -1891,8 +1891,8 @@ int main()
     test_THDoubleVector_fill_VSX();
     test_THFloatVector_fill_VSX();
 
-    test_THDoubleVector_add_VSX();
-    test_THFloatVector_add_VSX();
+    test_THDoubleVector_adds_VSX();
+    test_THFloatVector_adds_VSX();
 
     test_THDoubleVector_diff_VSX();
     test_THFloatVector_diff_VSX();
@@ -1900,8 +1900,8 @@ int main()
     test_THDoubleVector_scale_VSX();
     test_THFloatVector_scale_VSX();
 
-    test_THDoubleVector_mul_VSX();
-    test_THFloatVector_mul_VSX();
+    test_THDoubleVector_muls_VSX();
+    test_THFloatVector_muls_VSX();
 
 
     printf("Finished runnning all tests. All tests PASSED.\n");
