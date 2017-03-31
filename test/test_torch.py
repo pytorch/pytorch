@@ -843,13 +843,13 @@ class TestTorch(TestCase):
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
         t = torch.FloatTensor(200)
-        lb = 0
-        ub = 3
+        lb = 1
+        ub = 4
 
         t.fill_(-1)
         t.random_(lb, ub)
-        self.assertEqual(t.max(), ub-1)
         self.assertEqual(t.min(), lb)
+        self.assertEqual(t.max(), ub-1)
 
         t.fill_(-1)
         t.random_(ub)
