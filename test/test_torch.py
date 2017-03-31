@@ -849,12 +849,12 @@ class TestTorch(TestCase):
         t.fill_(-1)
         t.random_(lb, ub)
         self.assertEqual(t.min(), lb)
-        self.assertEqual(t.max(), ub-1)
+        self.assertEqual(t.max(), ub - 1)
 
         t.fill_(-1)
         t.random_(ub)
         self.assertEqual(t.min(), 0)
-        self.assertEqual(t.max(), ub-1)
+        self.assertEqual(t.max(), ub - 1)
 
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = 4
