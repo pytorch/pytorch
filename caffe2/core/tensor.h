@@ -438,7 +438,7 @@ class Tensor {
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     CAFFE_ENFORCE(
         IsType<T>(),
-        "Tensor type mistmatch, caller expects elements to be ",
+        "Tensor type mismatch, caller expects elements to be ",
         TypeMeta::Name<T>(),
         " while tensor contains ",
         meta_.name());
