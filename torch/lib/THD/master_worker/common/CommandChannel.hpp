@@ -28,8 +28,10 @@ private:
   std::vector<int> _sockets;
   std::unique_ptr<struct pollfd[]> _poll_events;
 
+  bool _started; // indicates whether error handler thread has started
   std::atomic_bool _exiting; // informs error handler thread that we are exiting
   std::unique_ptr<std::string> _error;
+  std::thread _error_thread;
 
   port_type _port;
 };
