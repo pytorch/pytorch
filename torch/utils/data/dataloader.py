@@ -143,9 +143,9 @@ class DataLoaderIter(object):
 
     def __len__(self):
         if self.drop_last:
-            return int(math.floor(len(self.sampler) / float(self.batch_size)))
+            return len(self.sampler) // self.batch_size
         else:
-            return int(math.ceil(len(self.sampler) / float(self.batch_size)))
+            return len(self.sampler) // self.batch_size + 1
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
@@ -193,8 +193,7 @@ class DataLoaderIter(object):
         assert self.batches_outstanding < 2 * self.num_workers
         if self.samples_remaining > 0:
             if self.samples_remaining < self.batch_size and self.drop_last:
-                self._shutdown_workers()
-                raise StopIteration
+                self._next_indices()
             else:
                 self.index_queue.put((self.send_idx, self._next_indices()))
                 self.batches_outstanding += 1
