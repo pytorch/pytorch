@@ -691,6 +691,9 @@ class Variable(_C._VariableBase):
     def trace(self):
         return Trace()(self)
 
+    def cross(self, other, dim=-1):
+        return Cross(dim)(self, other)
+
     def multinomial(self, num_samples=1, with_replacement=False):
         return Multinomial(num_samples, with_replacement)(self)
 
