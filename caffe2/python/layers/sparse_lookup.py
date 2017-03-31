@@ -10,6 +10,7 @@ from caffe2.python.layers.layers import (
     IdList,
     IdScoreList,
     LayerParameter,
+    LayerPsParam,
     ModelLayer,
 )
 import functools
@@ -65,6 +66,10 @@ class SparseLookup(ModelLayer):
             'UniformFill', {'min': -scale, 'max': scale})
 
         self.w = model.net.NextScopedBlob(name + "_w")
+        if self.input_record.lengths.metadata:
+            avg_length = self.input_record.lengths.metadata.expected_value
+        else:
+            avg_length = None
         self.params.append(
             LayerParameter(
                 parameter=self.w,
@@ -74,7 +79,11 @@ class SparseLookup(ModelLayer):
                                                 shape=self.shape,
                                                 **self.weight_init[1]
                                                 ),
-                optimizer=weight_optim
+                optimizer=weight_optim,
+                ps_param=LayerPsParam(
+                    sparse_key=self.input_record.items(),
+                    average_length=avg_length
+                )
             ))
 
         if reducer == 'PositionWeighted':
