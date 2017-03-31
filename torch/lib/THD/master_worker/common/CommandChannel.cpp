@@ -45,6 +45,7 @@ MasterCommandChannel::MasterCommandChannel()
   : _rank(0)
   , _poll_events(nullptr)
   , _exiting(false)
+  , _started(false)
   , _error(nullptr)
 {
   rank_type world_size;
@@ -55,6 +56,9 @@ MasterCommandChannel::MasterCommandChannel()
 
 MasterCommandChannel::~MasterCommandChannel() {
   _exiting = true;
+
+  if (_started)
+    _error_thread.join();
 
   for (auto socket : _sockets) {
     if (socket != -1)
@@ -85,8 +89,8 @@ bool MasterCommandChannel::init() {
   ::close(_sockets[0]);
   _sockets[0] = -1;
 
-  std::thread error_thread(&MasterCommandChannel::errorHandler, this);
-  error_thread.detach();
+  _started = true;
+  _error_thread = std::thread(&MasterCommandChannel::errorHandler, this);
   return true;
 }
 
@@ -133,13 +137,16 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
   }
 
   try {
-    SYSCHECK(::poll(_poll_events.get(), _sockets.size(), -1)) // infinite timeout
+    int ret = 0;
+    while (ret == 0) { // loop until there is data to read
+      SYSCHECK(ret = ::poll(_poll_events.get(), _sockets.size(), 500))
+
+      if (_exiting) {
+        return std::make_tuple(0, "");
+      }
+    }
   } catch (const std::exception& e) {
     return std::make_tuple(0, "poll: " + std::string(e.what()));
-  }
-
-  if (_exiting) {
-    return std::make_tuple(0, "");
   }
 
   for (std::size_t rank = 0; rank < _sockets.size(); ++rank) {
