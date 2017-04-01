@@ -31,7 +31,7 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     if kwargs is None or len(kwargs) == 0:
         kwargs = tuple({} for _ in inputs)
     else:
-        kwargs = scatter(kwargs, target_gpus, dim)[:len(inputs)]
+        kwargs = scatter(kwargs, target_gpus, dim)[:len(target_gpus)]
     return inputs, kwargs
 
 

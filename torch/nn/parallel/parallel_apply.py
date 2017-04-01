@@ -1,10 +1,14 @@
+import collections
 import threading
 import torch
 from torch.autograd import Variable
 
 
 def parallel_apply(modules, inputs, kwargs_tup=None):
-    assert len(modules) == len(inputs)
+    if inputs:
+        assert len(modules) == len(inputs)
+    else:
+        inputs = ((),) * len(modules)
     if kwargs_tup:
         assert len(modules) == len(kwargs_tup)
     else:
@@ -16,12 +20,18 @@ def parallel_apply(modules, inputs, kwargs_tup=None):
     lock = threading.Lock()
     results = {}
 
+    def _get_device(obj):
+        if isinstance(obj, Variable):
+            return torch.cuda.device_of(obj)
+        if isinstance(obj, collections.Iterable):
+            vals = obj.values() if isinstance(obj, collections.Mapping) else obj
+            return next(dev for dev in map(_get_device, vals) if dev is not None)
+
     def _worker(i, module, input, kwargs, results, lock):
         var_input = input
-        while not isinstance(var_input, Variable):
-            var_input = var_input[0]
+        input_device = _get_device(input) if input else _get_device(kwargs)
         try:
-            with torch.cuda.device_of(var_input):
+            with input_device:
                 output = module(*input, **kwargs)
             with lock:
                 results[i] = output
@@ -40,7 +50,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None):
     for thread in threads:
         thread.join()
     outputs = []
-    for i in range(len(inputs)):
+    for i in range(len(modules)):
         output = results[i]
         if isinstance(output, Exception):
             raise output
