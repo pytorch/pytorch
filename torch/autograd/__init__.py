@@ -44,4 +44,40 @@ def backward(variables, grad_variables, retain_variables=False):
     Variable._execution_engine.run_backward(
         tuple(variables), grad_variables, retain_variables)
 
+
+def differentiate(outputs, grad_outputs, inputs, only_inputs=True, retain_variables=True):
+    """Computes and returns the sum of gradients of outputs w.r.t. the inputs.
+
+    ``grad_outputs`` should be a sequence of length matching ``output``
+    containing the pre-computed gradients w.r.t. each of the outputs. If an
+    output doesn't require_grad, then the gradient can be ``None``).
+    Gradients can be given as Tensors when one doesn't need the graph of the
+    derivative, or as Variables, in which case the graph will be created.
+
+    If ``only_inputs`` is True, the function will only return a list of gradients
+    w.r.t the specified inputs. If it's False, then gradient w.r.t. all remaining
+    leaves will still be computed, and will be accumulated into their ``.grad``
+    attribute.
+
+    Arguments:
+        variables (sequence of Variable): outputs of the differentiated function.
+        grad_variables (sequence of Tensor or Variable): Gradients w.r.t each output.
+            The jacobian will be multiplied by these vectors from the left.
+        inputs (sequence of Variable): Inputs w.r.t. which the gradient will be
+            returned (and not accumulated into ``.grad``).
+        only_inputs (bool, optional): If True, gradient w.r.t. leaves that are
+            part of the graph, but are not in ``inputs`` won't be computed and
+            accumulated.
+        retain_variables (bool, optional): If True, buffers necessary for
+            computing the gradients won't be freed after use. It is only
+            necessary to speicfy True if you want to differentiate any subgraph
+            again.
+    """
+    grad_outputs = tuple(var if isinstance(var, Variable) or var is None
+                         else Variable(var, volatile=True)
+                         for var in grad_outputs)
+    return Variable._execution_engine.run_backward(
+        tuple(outputs), tuple(grad_outputs), retain_variables,
+        tuple(inputs), only_inputs)
+
 assert torch._C._autograd_init()

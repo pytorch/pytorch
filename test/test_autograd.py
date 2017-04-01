@@ -123,18 +123,52 @@ class TestAutograd(TestCase):
     def test_hessian_vector(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         y = Variable(torch.randn(2, 2), requires_grad=True)
+
         z = x ** 2 + y * x + y ** 2
         z.backward(Variable(torch.ones(2, 2), requires_grad=True), retain_variables=True)
+
         x_grad = 2 * x.data + y.data
         y_grad = x.data + 2 * y.data
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
+
         grad_sum = 2 * x.grad + y.grad
         grad_sum.backward(torch.ones(2, 2))
         x_hv = torch.ones(2, 2) * 5
         y_hv = torch.ones(2, 2) * 4
         self.assertEqual(x.grad.data, x_grad + x_hv)
         self.assertEqual(y.grad.data, y_grad + y_hv)
+
+    def test_differentiate(self):
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+        y = Variable(torch.randn(2, 2), requires_grad=True)
+        z = x ** 2 + y * x + y ** 2
+        z.backward(Variable(torch.ones(2, 2)), retain_variables=True)
+
+        x_grad = 2 * x.data + y.data
+        y_grad = x.data + 2 * y.data
+        self.assertEqual(x.grad.data, x_grad)
+        self.assertEqual(y.grad.data, y_grad)
+
+        grad_sum = 2 * x.grad + y.grad
+        x_hv = torch.autograd.differentiate(
+            outputs=[grad_sum], grad_outputs=[torch.ones(2, 2)],
+            inputs=[x], only_inputs=True, retain_variables=True)
+        expected_x_hv = torch.ones(2, 2) * 5
+        expected_y_hv = torch.ones(2, 2) * 4
+
+        self.assertEqual(x_hv, expected_x_hv)
+        self.assertEqual(x.grad.data, x_grad)
+        self.assertEqual(y.grad.data, y_grad)
+
+        grad_sum = 2 * x.grad + y.grad
+        x_hv = torch.autograd.differentiate(
+            outputs=[grad_sum], grad_outputs=[torch.ones(2, 2)],
+            inputs=[x], only_inputs=False)
+
+        self.assertEqual(x_hv, expected_x_hv)
+        self.assertEqual(x.grad.data, x_grad)
+        self.assertEqual(y.grad.data, y_grad + expected_y_hv)
 
     def test_hooks(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
