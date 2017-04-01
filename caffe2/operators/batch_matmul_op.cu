@@ -4,6 +4,10 @@
 
 namespace caffe2 {
 
+#if __CUDACC_VER_MAJOR__ >= 8
+// CUDA 8 introduced a cublasSgemmStridedBatched function that allows us
+// to carry out batched sgemm more efficiently. This is the specialized
+// version that implements this.
 template <>
 bool BatchMatMulOp<float, CUDAContext, DefaultEngine>::RunOnDevice() {
   const auto& A = Input(0);
@@ -77,9 +81,7 @@ bool BatchMatMulOp<float, CUDAContext, DefaultEngine>::RunOnDevice() {
       ));
   return true;
 }
-
-namespace {
+#endif // __CUDACC_VER_MAJOR__ >= 8
 
 REGISTER_CUDA_OPERATOR(BatchMatMul, BatchMatMulOp<float, CUDAContext>);
-}
-}
+} // namespace caffe2
