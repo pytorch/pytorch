@@ -45,6 +45,8 @@ class LoadOp final : public Operator<Context> {
         absolute_path_(
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
         add_prefix_(OperatorBase::GetSingleArgument<string>("add_prefix", "")),
+        strip_prefix_(
+            OperatorBase::GetSingleArgument<string>("strip_prefix", "")),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
         keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
@@ -100,8 +102,7 @@ class LoadOp final : public Operator<Context> {
     std::unordered_map<string, BlobState> blob_states;
     int loaded_blobs = 0;
     for (; cursor->Valid(); cursor->Next()) {
-      const string& dbKey = cursor->key();
-      auto key = add_prefix_ + dbKey.substr(0, dbKey.find(kChunkIdSeparator));
+      const auto key = buildBlobNameFromDbKey(cursor->key());
       BlobProto proto;
       CAFFE_ENFORCE(
           proto.ParseFromString(cursor->value()), "Couldn't parse Proto");
@@ -124,8 +125,7 @@ class LoadOp final : public Operator<Context> {
     std::unordered_map<string, BlobState> blob_states;
     int loaded_blobs = 0;
     for (; cursor->Valid(); cursor->Next()) {
-      const string& dbKey = cursor->key();
-      auto key = add_prefix_ + dbKey.substr(0, dbKey.find(kChunkIdSeparator));
+      const auto key = buildBlobNameFromDbKey(cursor->key());
       if (!output_indices_.count(key)) {
         VLOG(1) << "Key " << key << " not used. Skipping.";
       } else {
@@ -169,6 +169,18 @@ class LoadOp final : public Operator<Context> {
           loaded_blobs,
           " only.\n");
     }
+  }
+
+  string buildBlobNameFromDbKey(const string& dbKey) {
+    string key = dbKey.substr(0, dbKey.find(kChunkIdSeparator));
+    if (!strip_prefix_.empty()) {
+      auto match_pos = key.find(strip_prefix_);
+      if (match_pos != string::npos) {
+        key = key.substr(match_pos + strip_prefix_.size());
+      }
+    }
+    key = add_prefix_ + key;
+    return key;
   }
 
  private:
@@ -251,6 +263,7 @@ class LoadOp final : public Operator<Context> {
   Workspace* ws_;
   bool absolute_path_;
   string add_prefix_;
+  string strip_prefix_;
   string db_name_;
   string db_type_;
   bool keep_device_;
@@ -289,13 +302,12 @@ class SaveOp final : public Operator<Context> {
       blob_names_.resize(OperatorBase::Inputs().size());
       for (int i = 0; i < blob_names_.size(); ++i) {
         std::string name;
-        if(strip_prefix_.empty()) {
-            name = def().input(i);
-        }
-        else {
-            auto match_pos = def().input(i).find(strip_prefix_);
-            name = def().input(i).substr(
-                match_pos + strip_prefix_.size(), string::npos);
+        if (strip_prefix_.empty()) {
+          name = def().input(i);
+        } else {
+          auto match_pos = def().input(i).find(strip_prefix_);
+          name = def().input(i).substr(
+              match_pos + strip_prefix_.size(), string::npos);
         }
         CAFFE_ENFORCE(
             input_names.insert(name).second, "Duplicated input: ", name);
