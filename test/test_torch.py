@@ -354,6 +354,7 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_remainder(self):
+        # Check the Floating point case
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
         res1 = m1.clone()
         q = 2.1
@@ -362,6 +363,16 @@ class TestTorch(TestCase):
         for i in range(m1.size(0)):
             res2[i, 3] = res2[i, 3] % q
         self.assertEqual(res1, res2)
+
+        # Check the LongTensor case
+        long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
+        long_res1 = long_m1.clone()
+        long_q = 2
+        long_res1[:, 3].remainder_(long_q)
+        long_res2 = long_m1.clone()
+        for i in range(long_m1.size(0)):
+            long_res2[i, 3] = long_res2[i, 3] % long_q
+        self.assertEqual(long_res1, long_res2)
 
     def test_mm(self):
         # helper function
