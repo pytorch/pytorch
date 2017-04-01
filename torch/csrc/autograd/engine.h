@@ -27,13 +27,17 @@ struct Engine {
   using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, InputBuffer>>;
   using function_queue = std::vector<Function*>;
   using dependencies_type = std::unordered_map<Function*, int>;
+  using callback_type = std::function<bool (Function*, variable_list&)>;
+  using callback_map = std::unordered_map<Function*, callback_type>;
+
 
   // Given a list of (Function, int) pairs computes the value of the graph
   // by following next_function references.
   void execute(
       const function_list& roots,
       variable_list& inputs,
-      bool keep_graph);
+      bool keep_graph,
+      const callback_map& callbacks = callback_map());
 
 protected:
   function_queue find_roots(
@@ -48,6 +52,7 @@ protected:
   virtual void thread_main(std::shared_ptr<ReadyQueue> queue);
   virtual void thread_on_exception(FunctionTask& task, std::exception& e);
 
+  std::once_flag start_threads_flag;
   std::vector<std::shared_ptr<ReadyQueue>> ready_queues;
 };
 
