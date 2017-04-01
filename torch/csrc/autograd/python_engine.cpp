@@ -5,6 +5,8 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
 
+#include <unordered_set>
+
 using namespace torch::autograd;
 
 struct THPEngine {
@@ -34,16 +36,79 @@ static PythonEngine engine;
 
 PyObject *THPEngineClass = NULL;
 
-// Main backward function
+struct CallbackContext {
+  std::mutex mutex;
+  std::string error;
+  THPObjectPtr outputs;
+};
+
+void compute_partial_exec_callbacks(const function_list& roots,
+                                    const std::vector<Function*> inputs,
+                                    Engine::callback_map& map) {
+  static Engine::callback_type abort_callback(
+      [](Function* fn, variable_list &vars) { return false; });
+
+  std::vector<Function*> queue;
+  std::unordered_set<Function*> seen;    // for the initial DFS
+  std::unordered_set<Function*> needed;  // functions to compute
+  std::unordered_map<Function*, std::vector<Function*>> rev_graph;
+
+  // Reverse the next_fn edges
+  queue.reserve(roots.size());
+  for (auto& root : roots) {
+    auto ptr = root.first.get();
+    queue.emplace_back(ptr);
+    seen.insert(ptr);
+  }
+  while (!queue.empty()) {
+    auto fn = queue.back(); queue.pop_back();
+    for (auto& next_fn_pair : fn->next_functions) {
+      auto next_fn = next_fn_pair.first.get();
+      if (!next_fn) continue;
+      rev_graph[next_fn].push_back(fn);
+      if (seen.insert(next_fn).second) {
+        queue.push_back(next_fn);
+      }
+    }
+  }
+  auto all_functions = std::move(seen); // this is cheap and improves readability
+
+  // Find all functions we need to compute
+  queue.clear();
+  for (auto input: inputs) {
+    auto& rev_edges = rev_graph[input];
+    if (rev_edges.size() == 0) throw std::runtime_error("unreachable input");
+    queue.emplace_back(input);
+    needed.insert(input);
+  }
+
+  while (!queue.empty()) {
+    auto fn = queue.back(); queue.pop_back();
+    for (auto rev_next_fn : rev_graph[fn]) {
+      if (needed.insert(rev_next_fn).second) {
+        queue.push_back(rev_next_fn);
+      }
+    }
+  }
+
+  // Prevent expantion for functions in {all_vertices} \ {needed}
+  for (auto fn : all_functions) {
+    if (needed.count(fn) > 0) continue;
+    map.emplace(fn, abort_callback);
+  }
+}
+
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   PyObject *variables = NULL;
   PyObject *grad_variables = NULL;
   unsigned char keep_graph = 0;
+  PyObject *inputs = NULL;
+  unsigned char only_inputs = 0;
   const char *accepted_kwargs[] = {"variables", "grad_variables",
-      "keep_graph", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb", (char**)accepted_kwargs,
-        &variables, &grad_variables, &keep_graph))
+      "keep_graph", "inputs", "only_inputs", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb|Ob", (char**)accepted_kwargs,
+        &variables, &grad_variables, &keep_graph, &inputs, &only_inputs))
     return NULL;
 
   THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
@@ -78,9 +143,42 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
   }
 
+  Engine::callback_map callbacks;
+  CallbackContext ctx;
+  if (inputs != NULL) {
+    THPUtils_assert(PyTuple_Check(inputs), "outputs argument has to be a tuple");
+    int num_inputs = PyTuple_GET_SIZE(inputs);
+    ctx.outputs = PyTuple_New(num_inputs);
+    std::vector<Function*> grad_accumulators;
+    for (int i = 0; i < num_inputs; ++i) {
+      PyObject *input = PyTuple_GET_ITEM(inputs, i);
+      THPUtils_assert(THPVariable_Check(input),
+          "all inputs have to be Variables, but got %s", THPUtils_typename(input));
+      THPVariable *input_var = (THPVariable*)input;
+      auto grad_acc = input_var->cdata->grad_accumulator.lock();
+      // TODO: maybe just return a zero tensor?
+      THPUtils_assert(grad_acc, "One of the differentiated Variables appears to not have "
+          "been used in any computation");
+      grad_accumulators.push_back(grad_acc.get());
+      callbacks.emplace(grad_acc.get(), [&ctx, i](Function* _unused, variable_list& grads) {
+        std::lock_guard<std::mutex> guard(ctx.mutex);
+        if (grads.size() != 1) {
+          ctx.error = "expected to get a single gradient, but got ";
+          ctx.error += std::to_string(grads.size());
+        }
+        PyTuple_SET_ITEM(ctx.outputs.get(), i, THPVariable_Wrap(grads[0]));
+        return false;
+      });
+    }
+    // Disable execution for all unneeded functions
+    if (only_inputs) {
+      compute_partial_exec_callbacks(roots, grad_accumulators, callbacks);
+    }
+  }
+
   try {
     AutoNoGIL no_gil;
-    engine.execute(roots, grads, keep_graph);
+    engine.execute(roots, grads, keep_graph, callbacks);
   } catch (python_error &e) {
     e.restore();
     return nullptr;
@@ -89,7 +187,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     return nullptr;
   }
 
-  Py_RETURN_NONE;
+  if (ctx.outputs) {
+    return ctx.outputs.release();
+  } else {
+    Py_RETURN_NONE;
+  }
 }
 
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
