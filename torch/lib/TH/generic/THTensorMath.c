@@ -715,7 +715,10 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
           rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
 #else
-          rp[i] = tp[i] - value * (tp[i] / value); // There is no NAN for integers
+          // There is no NAN for integers
+          rp[i] = tp[i] % value;
+          if (rp[i] * value < 0)
+            rp[i] += value;
 #endif
       }
   } else {
@@ -723,7 +726,8 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
 #else
        // There is no NAN for integers
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data - value * (*t_data / value););
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
+                                          if (*r__data * value < 0) *r__data += value;);
 #endif
   }
 }
