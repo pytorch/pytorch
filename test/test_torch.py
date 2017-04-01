@@ -356,14 +356,40 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_remainder(self):
+        # Check the Floating point case
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
         res1 = m1.clone()
-        q = 2.1
-        res1[:, 3].remainder_(q)
         res2 = m1.clone()
-        for i in range(m1.size(0)):
-            res2[i, 3] = res2[i, 3] % q
+        qs = torch.range(-5.1, 4.1)
+        # Check the case where the divisor is a simple float
+        for col_idx, q in enumerate(qs):
+            # Reference
+            for i in range(m1.size(0)):
+                res2[i, col_idx] = res2[i, col_idx] % q
+            # To test
+            res1[:, col_idx].remainder_(q)
         self.assertEqual(res1, res2)
+        # Check the case where the divisor is a tensor
+        res1 = m1.clone()
+        res1.remainder_(qs.unsqueeze(0).expand_as(res1))
+        self.assertEqual(res1, res2)
+
+        # Check the LongTensor case
+        long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
+        long_res1 = long_m1.clone()
+        long_res2 = long_m1.clone()
+        long_qs = torch.range(-5, 4).long()
+        long_qs[5] = 5  # Can't handle the divisor=0 case
+        for col_idx, long_q in enumerate(long_qs):
+            # Reference
+            for i in range(long_m1.size(0)):
+                long_res2[i, col_idx] = long_res2[i, col_idx] % long_q
+            # To test
+            long_res1[:, col_idx].remainder_(long_q)
+        self.assertEqual(long_res1, long_res2)
+        # Divisor is a tensor case
+        long_res1 = long_m1.clone()
+        long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
     def test_mm(self):
         # helper function
