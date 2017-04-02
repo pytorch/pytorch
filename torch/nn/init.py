@@ -179,7 +179,7 @@ def xavier_uniform(tensor, gain=1):
 
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-    a = math.sqrt(3.0) * std
+    a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     return tensor.uniform_(-a, a)
 
 
@@ -216,6 +216,7 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
+# TODO: Add gain option
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform
@@ -238,10 +239,11 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
     fan = _calculate_correct_fan(tensor, mode)
     std = math.sqrt(2.0 / ((1 + a ** 2) * fan))
-    bound = math.sqrt(3.0) * std
+    bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     return tensor.uniform_(-bound, bound)
 
 
+# TODO: Add gain option
 def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal
