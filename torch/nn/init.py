@@ -58,6 +58,14 @@ def constant(tensor, val):
     return tensor.fill_(val)
 
 
+def eye(tensor):
+    pass  # TODO: Apply eye function
+
+
+def dirac(tensor, scaled=True):
+    pass  # TODO: Diract delta function for conv filters, with optional scaling to preserve identity
+
+
 def _calculate_fan_in_and_fan_out(tensor):
     if tensor.ndimension() < 2:
         raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions ",
@@ -222,6 +230,10 @@ def orthogonal(tensor, gain=1):
 
     tensor.mul_(gain)
     return tensor
+
+
+def convolution_aware(tensor, gain=1):
+    pass  # TODO: Convolution aware (orthogonal) init: https://github.com/farizrahman4u/keras-contrib/pull/60
 
 
 def sparse(tensor, sparsity, std=0.01):
