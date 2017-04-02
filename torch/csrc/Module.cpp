@@ -269,6 +269,7 @@ IMPLEMENT_STATELESS(multinomial)
 IMPLEMENT_STATELESS(normal)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(range)
+IMPLEMENT_STATELESS(arange)
 IMPLEMENT_STATELESS(gather)
 IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
@@ -602,6 +603,7 @@ static PyMethodDef TorchMethods[] = {
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"arange",          (PyCFunction)THPModule_arange,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
