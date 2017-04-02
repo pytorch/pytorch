@@ -5,8 +5,34 @@ import torch
 from torch.autograd import Variable
 
 
+def calculate_gain(nonlinearity, param=None):
+    """Return the recommended gain value for the given nonlinearity function.
+
+    Args:
+        nonlinearity: the nonlinear function (`nn.functional` name)
+        param: optional parameter for the nonlinear function
+
+    Examples:
+        >>> gain = nn.init.gain('lrelu')
+    """
+    if gain == 'sigmoid':
+        return 1
+    elif gain == 'tanh':
+        return 5 / 3
+    elif gain == 'relu':
+        return math.sqrt(2)
+    elif gain == 'leaky_relu':
+        if param is None:
+            negative_slope = 0.01
+        elif isinstance(param, int) or isinstance(param, float):
+            negative_slope = param
+        else:
+            raise ValueError("negative_slope {} not a valid number".format(param))
+        return math.sqrt(2 / (1 + negative_slope ** 2))
+
+
 def uniform(tensor, a=0, b=1):
-    """Fills the input Tensor or Variable with values drawn from the uniform distribution :math:`U(a, b)`
+    """Fills the input Tensor or Variable with values drawn from the uniform distribution :math:`U(a, b)`.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -25,7 +51,7 @@ def uniform(tensor, a=0, b=1):
 
 
 def normal(tensor, mean=0, std=1):
-    """Fills the input Tensor or Variable with values drawn from the normal distribution :math:`N(mean, std)`
+    """Fills the input Tensor or Variable with values drawn from the normal distribution :math:`N(mean, std)`.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -44,7 +70,7 @@ def normal(tensor, mean=0, std=1):
 
 
 def constant(tensor, val):
-    """Fills the input Tensor or Variable with the value `val`
+    """Fills the input Tensor or Variable with the value `val`.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -109,7 +135,7 @@ def dirac(tensor, scaled=True):
         tensor[:, :, module.size(2) // 2].fill_(val)
     elif dimensions == 4:  # Spatial convolution
         tensor[:, :, module.size(2) // 2, module.size(3) // 2].fill_(val)
-    else:  # Volumetric convolutions
+    else:  # Volumetric convolution
         tensor[:, :, module.size(2) // 2, module.size(3) // 2, module.size(4) // 2].fill_(val)
     return tensor
 
