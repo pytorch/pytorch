@@ -218,7 +218,6 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-# TODO: Add gain option to show where slope derivation comes from
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform
@@ -227,7 +226,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
-        a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
+        a: the negative slope of the rectifier used after this layer (0 for ReLU by default)
         mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the
               weights in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
@@ -240,12 +239,12 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
         return tensor
 
     fan = _calculate_correct_fan(tensor, mode)
-    std = math.sqrt(2.0 / ((1 + a ** 2) * fan))
+    gain = calculate_gain('leaky_relu', a)
+    std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     return tensor.uniform_(-bound, bound)
 
 
-# TODO: Add gain option to show where slope derivation comes from
 def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal
@@ -254,7 +253,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
-        a: the coefficient of the slope of the rectifier used after this layer (0 for ReLU by default)
+        a: the negative slope of the rectifier used after this layer (0 for ReLU by default)
         mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in` preserves the magnitude of the variance of the
               weights in the forward pass. Choosing `fan_out` preserves the magnitudes in the backwards pass.
 
@@ -267,7 +266,8 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
         return tensor
 
     fan = _calculate_correct_fan(tensor, mode)
-    std = math.sqrt(2.0 / ((1 + a ** 2) * fan))
+    gain = calculate_gain('leaky_relu', a)
+    std = gain / math.sqrt(fan)
     return tensor.normal_(0, std)
 
 
