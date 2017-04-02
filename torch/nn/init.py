@@ -18,9 +18,9 @@ def calculate_gain(nonlinearity, param=None):
     if gain == 'sigmoid':
         return 1
     elif gain == 'tanh':
-        return 5 / 3
+        return 5.0 / 3
     elif gain == 'relu':
-        return math.sqrt(2)
+        return math.sqrt(2.0)
     elif gain == 'leaky_relu':
         if param is None:
             negative_slope = 0.01
@@ -28,7 +28,7 @@ def calculate_gain(nonlinearity, param=None):
             negative_slope = param
         else:
             raise ValueError("negative_slope {} not a valid number".format(param))
-        return math.sqrt(2 / (1 + negative_slope ** 2))
+        return math.sqrt(2.0 / (1 + negative_slope ** 2))
     else:
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
@@ -131,7 +131,7 @@ def dirac(tensor, scaled=True):
         return tensor
 
     tensor.zero_()
-    val = 1 / tensor.size(1) if scaled else 1
+    val = 1.0 / tensor.size(1) if scaled else 1
 
     if dimensions == 3:  # Temporal convolution
         tensor[:, :, module.size(2) // 2].fill_(val)
