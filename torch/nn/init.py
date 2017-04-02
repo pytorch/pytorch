@@ -29,6 +29,8 @@ def calculate_gain(nonlinearity, param=None):
         else:
             raise ValueError("negative_slope {} not a valid number".format(param))
         return math.sqrt(2 / (1 + negative_slope ** 2))
+    else:
+        raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 
 def uniform(tensor, a=0, b=1):
@@ -216,7 +218,7 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-# TODO: Add gain option
+# TODO: Add gain option to show where slope derivation comes from
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform
@@ -243,7 +245,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
     return tensor.uniform_(-bound, bound)
 
 
-# TODO: Add gain option
+# TODO: Add gain option to show where slope derivation comes from
 def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal
