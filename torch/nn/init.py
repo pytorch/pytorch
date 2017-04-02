@@ -313,37 +313,6 @@ def orthogonal(tensor, gain=1):
     return tensor
 
 
-def convolution_aware(tensor, gain=1):
-    """Fills the {3, 4, 5}-dimensional input Tensor or Variable with a "convolution aware" (semi) orthogonal matrix,
-    as described in "Convolution Aware Initialization" - Aghajanyan, A. (2017).
-
-    Args:
-        tensor: a {3, 4, 5}-dimensional torch.Tensor or autograd.Variable
-        gain: optional scaling factor
-
-
-    Examples:
-        >>> w = torch.Tensor(3, 16, 5, 5)
-        >>> nn.init.convolution_aware(w)
-    """
-    dimensions = tensor.ndimension()
-    if dimension not in [3, 4, 5]:
-        raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
-
-    if isinstance(tensor, Variable):
-        convolution_aware(tensor.data)
-        return tensor
-
-    # TODO: Convolution aware (orthogonal) init: https://github.com/farizrahman4u/keras-contrib/pull/60
-    if dimensions == 3:  # Temporal convolution
-        pass
-    elif dimensions == 4:  # Spatial convolution
-        pass
-    else:  # Volumetric convolution
-        pass
-    return tensor
-
-
 def sparse(tensor, sparsity, std=0.01):
     """Fills the 2D input Tensor or Variable as a sparse matrix, where the non-zero elements will be drawn from
     the normal distribution :math:`N(0, 0.01)`, as described in "Deep learning via
