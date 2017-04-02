@@ -228,7 +228,7 @@ def _calculate_correct_fan(tensor, mode):
 
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
-    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015) using a uniform
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015), using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-bound, bound)` where
     :math:`bound = \sqrt{2 / ((1 + a^2) \times fan_in)} \times \sqrt{3}`. Also known as He initialisation.
 
@@ -255,7 +255,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
 def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
-    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015) using a normal
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015), using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
     :math:`std = \sqrt{2 / ((1 + a^2) \times fan_in)}`. Also known as He initialisation.
 
@@ -314,7 +314,34 @@ def orthogonal(tensor, gain=1):
 
 
 def convolution_aware(tensor, gain=1):
-    pass  # TODO: Convolution aware (orthogonal) init: https://github.com/farizrahman4u/keras-contrib/pull/60
+    """Fills the {3, 4, 5}-dimensional input Tensor or Variable with a "convolution aware" (semi) orthogonal matrix,
+    as described in "Convolution Aware Initialization" - Aghajanyan, A. (2017).
+
+    Args:
+        tensor: a {3, 4, 5}-dimensional torch.Tensor or autograd.Variable
+        gain: optional scaling factor
+
+
+    Examples:
+        >>> w = torch.Tensor(3, 16, 5, 5)
+        >>> nn.init.convolution_aware(w)
+    """
+    dimensions = tensor.ndimension()
+    if dimension not in [3, 4, 5]:
+        raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
+
+    if isinstance(tensor, Variable):
+        convolution_aware(tensor.data)
+        return tensor
+
+    # TODO: Convolution aware (orthogonal) init: https://github.com/farizrahman4u/keras-contrib/pull/60
+    if dimensions == 3:  # Temporal convolution
+        pass
+    elif dimensions == 4:  # Spatial convolution
+        pass
+    else:  # Volumetric convolution
+        pass
+    return tensor
 
 
 def sparse(tensor, sparsity, std=0.01):
