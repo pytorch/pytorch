@@ -1,5 +1,6 @@
 import math
 import random
+import string
 import unittest
 import itertools
 import contextlib
@@ -1872,7 +1873,7 @@ class TestNNInit(TestCase):
 
     def test_calculate_gain_only_accepts_valid_nonlinearities(self):
         for n in [3, 5, 6]:
-            random_string = ''.join([random.choice(string.lowercase) for i in range(n)])
+            random_string = ''.join([random.choice(string.ascii_lowercase) for i in range(n)])
             with self.assertRaises(ValueError):
                 init.calculate_gain(random_string)
 
