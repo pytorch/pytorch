@@ -499,10 +499,10 @@ class Variable(_C._VariableBase):
     def std(self, dim=None, unbiased=True):
         return self.var(dim, unbiased).sqrt()
 
-    def renorm(self, norm_type, dim, maxnorm):
+    def renorm(self, p, dim, maxnorm):
         t = self.transpose(dim, 0)
         flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(norm_type, 1)
+        norms = flat.norm(p, 1)
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
@@ -592,11 +592,11 @@ class Variable(_C._VariableBase):
     def addcdiv(self, *args):
         return self._addcop(Addcdiv, args)
 
-    def norm(self, norm_type=2, dim=None):
-        return Norm(norm_type, dim)(self)
+    def norm(self, p=2, dim=None):
+        return Norm(p, dim)(self)
 
-    def dist(self, tensor, norm_type=2):
-        return Norm(norm_type)(self - tensor)
+    def dist(self, tensor, p=2):
+        return Norm(p)(self - tensor)
 
     def index_add(self, dim, index, tensor):
         return IndexAdd(dim)(self, index, tensor)
