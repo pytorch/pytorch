@@ -1858,6 +1858,24 @@ class TestNNInit(TestCase):
     def _random_float(self, a, b):
         return (b - a) * random.random() + a
 
+    # TODO: test_calculate_gain
+
+    def test_calculate_gain_leaky_relu(self):
+        for param in [None, 0, 0.01, 10]:
+            gain = init.calculate_gain('leaky_relu', param)
+            # TODO: assert test
+
+    def test_calculate_gain_leaky_relu_only_accepts_numbers(self):
+        for param in [True, [1], {'a': 'b'}]:
+            with self.assertRaises(ValueError):
+                init.calculate_gain('leaky_relu', param)
+
+    def test_calculate_gain_only_accepts_valid_nonlinearities(self):
+        for n in [3, 5, 6]:
+            random_string = ''.join([random.choice(string.lowercase) for i in range(n)])
+            with self.assertRaises(ValueError):
+                init.calculate_gain(random_string)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_uniform(self):
         for as_variable in [True, False]:
@@ -1889,6 +1907,46 @@ class TestNNInit(TestCase):
                     input_tensor = input_tensor.data
 
                 self.assertEqual(input_tensor, input_tensor.clone().fill_(val))
+
+    def test_eye(self):
+        for as_variable in [True, False]:
+            input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5, as_variable=as_variable)
+            init.eye(input_tensor)
+            if as_variable:
+                input_tensor = input_tensor.data
+
+            # Check every single element
+            for i in range(input_tensor.size(0)):
+                for j in range(input_tensor.size(1)):
+                    if i == j:
+                        assert input_tensor[i][j] == 1
+                    else:
+                        assert input_tensor[i][j] == 0
+
+    def test_eye_only_works_on_2d_inputs(self):
+        for as_variable in [True, False]:
+            for dims in [1, 3]:
+                with self.assertRaises(ValueError):
+                    tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
+                    init.eye(tensor)
+
+    def test_dirac(self):
+        for as_variable in [True, False]:
+            for dims in [3, 4, 5]:
+                for scaled in [True, False]:
+                    input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5, as_variable=as_variable)
+                    init.dirac(input_tensor, scaled)
+                    if as_variable:
+                        input_tensor = input_tensor.data
+                    # TODO: Add tests - can add a bit oddly if filters aren't odd and symmetric though
+
+    def test_dirac_only_works_on_3_4_5d_inputs(self):
+        for as_variable in [True, False]:
+            for dims in [1, 2, 6]:
+                for scaled in [True, False]:
+                    with self.assertRaises(ValueError):
+                        tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
+                        init.dirac(tensor, scaled)
 
     def test_xavier_uniform_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
