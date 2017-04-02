@@ -20,6 +20,7 @@ def uniform(tensor, a=0, b=1):
     if isinstance(tensor, Variable):
         uniform(tensor.data, a=a, b=b)
         return tensor
+
     return tensor.uniform_(a, b)
 
 
@@ -38,6 +39,7 @@ def normal(tensor, mean=0, std=1):
     if isinstance(tensor, Variable):
         normal(tensor.data, mean=mean, std=std)
         return tensor
+
     return tensor.normal_(mean, std)
 
 
@@ -55,21 +57,66 @@ def constant(tensor, val):
     if isinstance(tensor, Variable):
         constant(tensor.data, val)
         return tensor
+
     return tensor.fill_(val)
 
 
 def eye(tensor):
-    pass  # TODO: Apply eye function
+    """Fills the 2-dimensional input Tensor or Variable with the identity matrix. Preserves the identity of the inputs in
+    Linear layers.
+
+    Args:
+        tensor: a 2-dimensional torch.Tensor or autograd.Variable
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.eye(w)
+    """
+    if tensor.ndimension() != 2:
+        raise ValueError("Only tensors with 2 dimensions are supported")
+
+    if isinstance(tensor, Variable):
+        eye(tensor.data)
+        return tensor
+
+    return tensor.copy_(torch.eye(tensor.size(0), tensor.size(1)))
 
 
 def dirac(tensor, scaled=True):
-    pass  # TODO: Diract delta function for conv filters, with optional scaling to preserve identity
+    """Fills the {3, 4, 5}-dimensional input Tensor or Variable with the Dirac delta function. Preserves the identity of
+    the inputs in Convolutional layers.
+
+    Args:
+        tensor: a {3, 4, 5}-dimensional torch.Tensor or autograd.Variable
+        scaled: a boolean indicating that the output of the sum of the filters will be the identity
+
+    Examples:
+        >>> w = torch.Tensor(3, 16, 5, 5)
+        >>> nn.init.dirac(w)
+    """
+    dimensions = tensor.ndimension()
+    if dimension not in [3, 4, 5]:
+        raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
+
+    if isinstance(tensor, Variable):
+        dirac(tensor.data)
+        return tensor
+
+    tensor.zero_()
+    val = 1 / tensor.size(1) if scaled else 1
+
+    if dimensions == 3:  # Temporal convolution
+        tensor[:, :, module.size(2) // 2].fill_(val)
+    elif dimensions == 4:  # Spatial convolution
+        tensor[:, :, module.size(2) // 2, module.size(3) // 2].fill_(val)
+    else:  # Volumetric convolutions
+        tensor[:, :, module.size(2) // 2, module.size(3) // 2, module.size(4) // 2].fill_(val)
+    return tensor
 
 
 def _calculate_fan_in_and_fan_out(tensor):
     if tensor.ndimension() < 2:
-        raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions ",
-                         tensor.ndimension())
+        raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions")
 
     if tensor.ndimension() == 2:  # Linear
         fan_in = tensor.size(1)
@@ -90,7 +137,7 @@ def xavier_uniform(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-a, a)` where
-    `a = gain * sqrt(2/(fan_in + fan_out)) * sqrt(3)`
+    `a = gain * sqrt(2/(fan_in + fan_out)) * sqrt(3)`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -114,7 +161,7 @@ def xavier_normal(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    `std = gain * sqrt(2/(fan_in + fan_out))`
+    `std = gain * sqrt(2/(fan_in + fan_out))`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -140,17 +187,14 @@ def _calculate_correct_fan(tensor, mode):
         raise ValueError("Mode {} not supported, please use one of {}".format(mode, valid_modes))
 
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-    if mode == 'fan_in':
-        return fan_in
-    else:
-        return fan_out
+    return fan_in if mode == 'fan_in' else fan_out
 
 
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-bound, bound)` where
-    `bound = sqrt(2/((1 + a^2) * fan_in)) * sqrt(3)`
+    `bound = sqrt(2/((1 + a^2) * fan_in)) * sqrt(3)`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -176,7 +220,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    `std = sqrt(2/((1 + a^2) * fan_in))`
+    `std = sqrt(2/((1 + a^2) * fan_in))`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -218,6 +262,7 @@ def orthogonal(tensor, gain=1):
 
     if tensor.ndimension() < 2:
         raise ValueError("Only tensors with 2 or more dimensions are supported")
+
     rows = tensor.size(0)
     cols = tensor[0].numel()
     flattened = torch.Tensor(rows, cols).normal_(0, 1)
@@ -254,7 +299,8 @@ def sparse(tensor, sparsity, std=0.01):
         return tensor
 
     if tensor.ndimension() != 2:
-        raise ValueError("Sparse initialization only supported for 2D inputs")
+        raise ValueError("Only tensors with 2 dimensions are supported")
+
     tensor.normal_(0, std)
     rows, cols = tensor.size(0), tensor.size(1)
     num_zeros = int(math.ceil(cols * sparsity))
