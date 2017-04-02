@@ -21,6 +21,7 @@ Creation Ops
 .. autofunction:: rand
 .. autofunction:: randn
 .. autofunction:: randperm
+.. autofunction:: arange
 .. autofunction:: range
 .. autofunction:: zeros
 
@@ -161,7 +162,7 @@ BLAS and LAPACK Operations
 .. autofunction:: baddbmm
 .. autofunction:: bmm
 .. autofunction:: btrifact
-.. autofunction:: btrisolve                  
+.. autofunction:: btrisolve
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels

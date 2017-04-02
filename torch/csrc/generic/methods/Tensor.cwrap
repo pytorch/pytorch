@@ -623,6 +623,10 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   only_stateless: True
   defined_if: "!IS_CUDA"
   return: argument 0
+  before_arg_assign: |
+    PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
+        "and will be removed in 0.3. Note that arange generates values in [start; end), "
+        "not [start; end].", 1);
   arguments:
     - arg: THTensor* result
       output: True
@@ -630,6 +634,35 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
     - accreal end
     - arg: accreal step
       default: 1
+]]
+
+[[
+  name: arange
+  cname: range
+  only_stateless: True
+  defined_if: "!IS_CUDA"
+  return: argument 0
+  options:
+    - before_call: |
+        if (mod_traits<accreal>::mod(arg_end - arg_start, arg_step) == 0) {
+          arg_end -= arg_step;
+        }
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - accreal start
+        - accreal end
+        - accreal step
+    - before_call: |
+        if (mod_traits<accreal>::mod(arg_end - arg_start, 1) == 0) {
+          arg_end -= 1;
+        }
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - accreal start
+        - accreal end
+        - CONSTANT 1
 ]]
 
 [[

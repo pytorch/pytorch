@@ -8,7 +8,8 @@ import tempfile
 import unittest
 import warnings
 from itertools import product, combinations
-from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack
+from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack, \
+    suppress_warnings
 
 if TEST_NUMPY:
     import numpy as np
@@ -779,6 +780,7 @@ class TestTorch(TestCase):
         self.assertEqual(prob_dist.dim(), 1, "wrong number of prob_dist dimensions")
         self.assertEqual(sample_indices.size(0), n_sample, "wrong number of samples")
 
+    @suppress_warnings
     def test_range(self):
         res1 = torch.range(0, 1)
         res2 = torch.Tensor()
@@ -816,6 +818,67 @@ class TestTorch(TestCase):
         self.assertEqual(res1.size(0), 4)
         res1 = torch.range(1, 10, 0.3, out=torch.DoubleTensor())
         self.assertEqual(res1.size(0), 31)
+
+    def test_arange(self):
+        res1 = torch.arange(0, 1)
+        res2 = torch.Tensor()
+        torch.arange(0, 1, out=res2)
+        self.assertEqual(res1, res2, 0)
+
+        # Check arange for non-contiguous tensors.
+        x = torch.zeros(2, 3)
+        torch.arange(0, 4, out=x.narrow(1, 1, 2))
+        res2 = torch.Tensor(((0, 0, 1), (0, 2, 3)))
+        self.assertEqual(x, res2, 1e-16)
+
+        # Check negative
+        res1 = torch.Tensor((1, 0))
+        res2 = torch.Tensor()
+        torch.arange(1, -1, -1, out=res2)
+        self.assertEqual(res1, res2, 0)
+
+        # Equal bounds
+        res1 = torch.ones(1)
+        res2 = torch.Tensor()
+        torch.arange(1, 0, -1, out=res2)
+        self.assertEqual(res1, res2, 0)
+        torch.arange(1, 2, 1, out=res2)
+        self.assertEqual(res1, res2, 0)
+
+        # FloatTensor
+        res1 = torch.arange(0.6, 0.89, 0.1, out=torch.FloatTensor())
+        self.assertEqual(res1.size(0), 3)
+        res1 = torch.arange(1, 10, 0.3, out=torch.FloatTensor())
+        self.assertEqual(res1.size(0), 31)
+
+        # DoubleTensor
+        res1 = torch.arange(0.6, 0.89, 0.1, out=torch.DoubleTensor())
+        self.assertEqual(res1.size(0), 3)
+        res1 = torch.arange(1, 10, 0.3, out=torch.DoubleTensor())
+        self.assertEqual(res1.size(0), 31)
+
+        # Check that it's exclusive
+        r = torch.arange(0, 5)
+        self.assertEqual(r.min(), 0)
+        self.assertEqual(r.max(), 4)
+        self.assertEqual(r.numel(), 5)
+
+        r = torch.arange(0, 5, 2)
+        self.assertEqual(r.min(), 0)
+        self.assertEqual(r.max(), 4)
+        self.assertEqual(r.numel(), 3)
+
+        r1 = torch.arange(0, 5 + 1e-6)
+        r2 = torch.arange(0, 5)
+        r3 = torch.arange(0, 5 - 1e-6)
+        self.assertEqual(r1[:-1], r2, 0)
+        self.assertEqual(r2, r3, 0)
+
+        r1 = torch.arange(10, -1 + 1e-6, -1)
+        r2 = torch.arange(10, -1, -1)
+        r3 = torch.arange(10, -1 - 1e-6, -1)
+        self.assertEqual(r1, r2, 0)
+        self.assertEqual(r2, r3[:-1], 0)
 
     def test_randperm(self):
         _RNGState = torch.get_rng_state()
@@ -1041,7 +1104,7 @@ class TestTorch(TestCase):
             self.assertEqual(x, x0, 0)
 
     def test_mode(self):
-        x = torch.range(1, SIZE * SIZE).clone().resize_(SIZE, SIZE)
+        x = torch.arange(1, SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
         x[:2] = 1
         x[:, :2] = 1
         x0 = x.clone()
@@ -2611,7 +2674,7 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
-        b += [torch.range(1, 10).int()]
+        b += [torch.arange(1, 11).int()]
         t1 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
         t2 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
         b += [(t1.storage(), t1.storage(), t2.storage())]
@@ -2692,7 +2755,7 @@ class TestTorch(TestCase):
             self.assertEqual(un.get_device(), device_count - 1)
 
     def test_serialization_backwards_compat(self):
-        a = [torch.range(1 + i, 25 + i).view(5, 5).float() for i in range(2)]
+        a = [torch.arange(1 + i, 26 + i).view(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
@@ -2961,20 +3024,20 @@ class TestTorch(TestCase):
         x = np.linspace(1, 125, 125)
         x.shape = (5, 5, 5)
         x = x[1]
-        expected = torch.range(1, 125).view(5, 5, 5)[1]
+        expected = torch.arange(1, 126).view(5, 5, 5)[1]
         self.assertEqual(torch.from_numpy(x), expected)
 
         # check noncontiguous
         x = np.linspace(1, 25, 25)
         x.shape = (5, 5)
-        expected = torch.range(1, 25).view(5, 5).t()
+        expected = torch.arange(1, 26).view(5, 5).t()
         self.assertEqual(torch.from_numpy(x.T), expected)
 
         # check noncontiguous with holes
         x = np.linspace(1, 125, 125)
         x.shape = (5, 5, 5)
         x = x[:, 1]
-        expected = torch.range(1, 125).view(5, 5, 5)[:, 1]
+        expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -3051,7 +3114,7 @@ class TestTorch(TestCase):
         self.assertEqual(x_clone, xor_result)
 
     def test_apply(self):
-        x = torch.range(1, 5)
+        x = torch.arange(1, 6)
         res = x.clone().apply_(lambda k: k + k)
         self.assertEqual(res, x * 2)
         self.assertRaises(RuntimeError, lambda: x.apply_(lambda k: "str"))

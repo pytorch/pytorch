@@ -280,7 +280,7 @@ class TestAutograd(TestCase):
         self.assertIsNone(w.creator)
 
     def test_indexing(self):
-        x = torch.range(1, 16).resize_(4, 4)
+        x = torch.arange(1, 17).resize_(4, 4)
         y = Variable(x, requires_grad=True)
 
         def check_index(idx):
@@ -597,6 +597,10 @@ class TestAutograd(TestCase):
                 x2 = x2.cuda(1)
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
+
+        for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
+            y = Variable(torch.randn(5, 5).type(t))
+            self.assertIs(type(x.type_as(y).data), t)
 
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)

@@ -661,7 +661,7 @@ class TestNN(NNTestCase):
             self.assertEqual(scale.std(), 0)
             return scale[0]
 
-        grads = torch.range(1, 100), torch.ones(10).div(1000)
+        grads = torch.arange(1, 101), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone())
@@ -742,15 +742,15 @@ class TestNN(NNTestCase):
 
         def expected_output(dim):
             if dim == 1:
-                return torch.range(2, 16, 2).view(2, 2, 2)
+                return torch.arange(2, 17, 2).view(2, 2, 2)
             if dim == 2:
-                col = torch.range(6, 62, 8)
+                col = torch.arange(6, 63, 8)
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         module_cls = getattr(nn, 'MaxPool{}d'.format(num_dim))
         module = module_cls(2, return_indices=True).type(type)
         numel = 4 ** (num_dim + 1)
-        input = torch.range(1, numel).view(2, 2, *repeat(4, num_dim)).type(type)
+        input = torch.arange(1, numel + 1).view(2, 2, *repeat(4, num_dim)).type(type)
         input_var = Variable(input, requires_grad=True)
 
         # Check forward
@@ -1083,7 +1083,7 @@ class TestNN(NNTestCase):
         state_dict = net.state_dict()
         state_dict.update({
             'linear1.weight': torch.ones(5, 5),
-            'block.conv1.bias': torch.range(1, 3),
+            'block.conv1.bias': torch.arange(1, 4),
             'bn.running_mean': torch.randn(2),
         })
         net.load_state_dict(state_dict)
@@ -1339,10 +1339,10 @@ class TestNN(NNTestCase):
         max_length = lengths[0]
         batch_sizes = [sum(map(bool, filter(lambda x: x >= i, lengths))) for i in range(1, max_length + 1)]
         offset = 0
-        padded = torch.cat([pad(i * 100 + torch.range(1, 5 * l).view(l, 1, 5), max_length)
+        padded = torch.cat([pad(i * 100 + torch.arange(1, 5 * l + 1).view(l, 1, 5), max_length)
                             for i, l in enumerate(lengths, 1)], 1)
         padded = Variable(padded, requires_grad=True)
-        expected_data = [[torch.range(1, 5) + i * 100 for i in range(batch_size)] for batch_size in batch_sizes]
+        expected_data = [[torch.arange(1, 6) + i * 100 for i in range(batch_size)] for batch_size in batch_sizes]
         expected_data = list(itertools.chain.from_iterable(expected_data))
         expected_data = torch.cat(expected_data)
 
