@@ -232,6 +232,9 @@ class Variable(_C._VariableBase):
             return Type(t)(self)
         return self
 
+    def type_as(self, t):
+        return self.type(type(t.data))
+
     def _get_type(self, name):
         module = torch._import_dotted_name(self.data.__module__)
         return getattr(module, name)
