@@ -6,7 +6,15 @@ from torch.autograd import Variable
 
 
 def calculate_gain(nonlinearity, param=None):
-    """Return the recommended gain value for the given nonlinearity function.
+    """Return the recommended gain value for the given nonlinearity function. The values are as follows:
+    ============ =========================================
+    nonlinearity gain
+    ============ =========================================
+    sigmoid      :math:`1`
+    tanh         :math:`5 / 3`
+    relu         :math:`\sqrt{2}`
+    lreaky_relu  :math:`\sqrt{2 / (1 + negative_slope^2)}`
+    =========== ==========================================
 
     Args:
         nonlinearity: the nonlinear function (`nn.functional` name)
@@ -163,9 +171,9 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 def xavier_uniform(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
-    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a uniform
+    difficulty of training deep feedforward neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-a, a)` where
-    `a = gain * sqrt(2/(fan_in + fan_out)) * sqrt(3)`. Also known as Glorot initialisation.
+    :math:`a = gain \times \sqrt{2 / (fan_in + fan_out)} \times \sqrt{3}`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -187,9 +195,9 @@ def xavier_uniform(tensor, gain=1):
 
 def xavier_normal(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
-    difficulty of training deep feedforward neural networks" - Glorot, X. and Bengio, Y., using a normal
+    difficulty of training deep feedforward neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    `std = gain * sqrt(2/(fan_in + fan_out))`. Also known as Glorot initialisation.
+    :math:`std = gain \times \sqrt{2 / (fan_in + fan_out)}`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -220,9 +228,9 @@ def _calculate_correct_fan(tensor, mode):
 
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
-    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a uniform
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015) using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-bound, bound)` where
-    `bound = sqrt(2/((1 + a^2) * fan_in)) * sqrt(3)`. Also known as He initialisation.
+    :math:`bound = \sqrt{2 / ((1 + a^2) \times fan_in)} \times \sqrt{3}`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -247,9 +255,9 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
 def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
-    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al using a normal
+    rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015) using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    `std = sqrt(2/((1 + a^2) * fan_in))`. Also known as He initialisation.
+    :math:`std = \sqrt{2 / ((1 + a^2) \times fan_in)}`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -272,11 +280,9 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
 
 
 def orthogonal(tensor, gain=1):
-    """Fills the input Tensor or Variable with a (semi) orthogonal matrix. The input tensor must have at least 2
-    dimensions, and for tensors with more than 2 dimensions the trailing dimensions are flattened. viewed as 2D
-    representation with rows equal to the first dimension and columns equal to the product of as a sparse matrix???,
-    where the non-zero elements will be drawn from the normal distribution :math:`N(0, 1)`. Reference: "Exact
-    solutions to the nonlinear dynamics of learning in deep linear neural networks"-Saxe, A. et al.
+    """Fills the input Tensor or Variable with a (semi) orthogonal matrix, as described in "Exact solutions to the
+    nonlinear dynamics of learning in deep linear neural networks" - Saxe, A. et al. (2013). The input tensor must have
+    at least 2 dimensions, and for tensors with more than 2 dimensions the trailing dimensions are flattened.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable, where n >= 2
@@ -313,7 +319,8 @@ def convolution_aware(tensor, gain=1):
 
 def sparse(tensor, sparsity, std=0.01):
     """Fills the 2D input Tensor or Variable as a sparse matrix, where the non-zero elements will be drawn from
-    the normal distribution :math:`N(0, 0.01)`.
+    the normal distribution :math:`N(0, 0.01)`, as described in "Deep learning via
+    Hessian-free optimization" - Martens, J. (2010).
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
