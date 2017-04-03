@@ -1868,29 +1868,6 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @given(X=_dtypes().flatmap(lambda dtype: hu.tensor(dtype=dtype)),
-           seed=st.integers(min_value=0, max_value=65536),
-           null_axes=st.booleans(),
-           **hu.gcs)
-    @settings(max_examples=2, timeout=100)
-    def test_transpose(self, X, seed, null_axes, gc, dc):
-        if null_axes:
-            axes = None
-            op = core.CreateOperator("Transpose", "input", "output")
-        else:
-            np.random.seed(int(seed))
-            axes = [int(v) for v in list(np.random.permutation(X.ndim))]
-            op = core.CreateOperator(
-                "Transpose", "input", "output", axes=axes)
-
-        def transpose_ref(x, axes):
-            return (np.transpose(x, axes),)
-
-        self.assertReferenceChecks(gc, op, [X, axes],
-                                   transpose_ref)
-        if X.dtype != np.int32 and X.dtype != np.int64:
-            self.assertGradientChecks(gc, op, [X], 0, [0])
-
     @given(s=st.text())
     def test_string_serde(self, s):
         s = s.encode('ascii', 'ignore')

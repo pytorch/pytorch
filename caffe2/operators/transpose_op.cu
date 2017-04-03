@@ -41,10 +41,13 @@ bool TransposeOp<CUDAContext>::DoRunWithType() {
   auto* output = Output(0);
   int count = input.size();
   int ndim = input.ndim();
-  CAFFE_ENFORCE(count < std::numeric_limits<int>::max(),
-                "Transpose op on GPU only supports int32"); 
-  CAFFE_ENFORCE(ndim < COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS,
-                "Input ndim exceeds compile time max."); 
+  CAFFE_ENFORCE(
+      count < std::numeric_limits<int>::max(),
+      "Transpose op on GPU only supports int32");
+  CAFFE_ENFORCE(
+      ndim <= COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS,
+      "Input ndim exceeds compile time max.");
+
   // Buffer contains the following data:
   // (1) the dimenions of the inputs
   // (2) the dimension of the outputs
