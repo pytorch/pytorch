@@ -98,7 +98,7 @@ void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nD
 }
 
 // directly assign without cloning or retaining (internal method)
-THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
+THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
   int empty = THCTensor_(nDimension)(state, values) == 0;
   if (!empty) {
     THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 2,
@@ -109,6 +109,9 @@ THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor 
         "indices has incorrect first dimension, expected %d, got %d", self->nDimensionI, THCIndexTensor_(size)(state, indices, 0));
     THArgCheck(THCTensor_(nDimension)(state, values) == self->nDimensionV + 1, 3,
         "values has incorrect number of dimensions, expected %d, got %d", self->nDimensionV + 1, THCTensor_(nDimension)(state, values));
+  } else {
+    THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 0, 2,
+        "if values is empty, indices must be empty too");
   }
   THCIndexTensor_(free)(state, self->indices);
   THCTensor_(free)(state, self->values);
@@ -122,7 +125,7 @@ THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor 
 
 THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
   // Note: Not like torch.set, this is an internal method
-  return THCSTensor_(move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
+  return THCSTensor_(_move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
 }
 
 /*** end helper methods ***/
@@ -352,10 +355,6 @@ void THCSTensor_(contiguous)(THCState *state, THCSTensor *self) {
   self->contiguous = 1;
 }
 
-void THCSTensor_(markContiguous)(THCState *state, THCSTensor *self) {
-  self->contiguous = 1;
-}
-
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)
 {
   /* FIXME: remove this flag after any users stop using it since it is
@@ -430,7 +429,7 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCTensor *maskValues = THCSTensor_(values)(state, mask);
   THCTensor *rValues = THCTensor_(new)(state);
   THCTensor_(resizeAs)(state, rValues, maskValues);
-  THCSTensor_(move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
+  THCSTensor_(_move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
   r_->contiguous = mask->contiguous;
   r_->nnz = mask->nnz;
 

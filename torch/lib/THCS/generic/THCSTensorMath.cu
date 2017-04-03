@@ -67,9 +67,9 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
 
   THCSTensor_(contiguous)(state, sparse);
 
-  long nnz     = THCSTensor_(nnz)(state, sparse);
+  long nnz = THCSTensor_(nnz)(state, sparse);
   indices = THCSTensor_(indices)(state, sparse);
-  values  = THCSTensor_(values)(state, sparse);
+  values = THCSTensor_(values)(state, sparse);
 
   THCIndexTensor *rowIndices = THCIndexTensor_(new)(state);
   THCIndexTensor *colIndices = THCIndexTensor_(new)(state);
@@ -78,7 +78,6 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   csr = THCSTensor_(toCSR)(state, rowIndices, m, nnz);
   THCudaIntTensor *colIndicesInt = THCudaIntTensor_newWithSize1d(state, colIndices->size[0]);
   THCudaIntTensor_copyCudaLong(state, colIndicesInt, colIndices);
-
 
   char transpose_dense;
 
@@ -202,7 +201,7 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
   THRUST_EXEC(thrust::sequence, indicesIter, indicesIter + nnz);
   newSparse->size[0] = nnz;
   THCSTensor_(spaddmm)(state, values, ScalarConvert<int, real>::to(0), values, alpha, newSparse, dense);
-  THCSTensor_(move)(state, r_, indices, values);
+  THCSTensor_(_move)(state, r_, indices, values);
 
   THCSTensor_(free)(state, newSparse);
   THCIndexTensor_(free)(state, spIndices);
@@ -238,7 +237,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
   if (sparse->nDimensionV == 0) {
     THArgCheck(getApplyGrid(state, sparse->nnz, grid), 1, CUTORCH_DIM_WARNING);
 
-    THCSTensor_spcKernelScalar<TensorCAddOp<real>, unsigned long, real>
+    THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, unsigned long, real>
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
         TensorCAddOp<real>(value),
         V_INFO(r_), I_INFO(indices), V_INFO(values),
@@ -246,7 +245,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
   } else {
     THArgCheck(getApplyGrid(state, sparse->nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
 
-    THCSTensor_spcKernel<TensorCAddOp<real>, unsigned long, real>
+    THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, unsigned long, real>
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
         TensorCAddOp<real>(value),
         V_INFO(r_), I_INFO(indices), V_INFO(values),
@@ -347,7 +346,7 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   THCIndexTensor_(cat)(state, r_indices_, t_indices_, s_indices_, 1);
   THCTensor_(cat)(state, r_values_, t_values_, s_values_, 0);
   THCSTensor_(resizeAs)(state, r_, src);
-  THCSTensor_(move)(state, r_, r_indices_, r_values_);
+  THCSTensor_(_move)(state, r_, r_indices_, r_values_);
 
   // // saving those because they can be overwritten when doing in-place operations
   // ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
@@ -360,7 +359,7 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   // THCTensor *r_values_ = THCSTensor_(newValuesWithSizeOf)(state, s_values_, max_nnz);
   // THCTensor_(zero)(state, r_values_);
   // THCSTensor_(resizeAs)(state, r_, src);
-  // THCSTensor_(move)(state, r_, r_indices_, r_values_);
+  // THCSTensor_(_move)(state, r_, r_indices_, r_values_);
   //
   // const dim3 block = getApplyBlock();
   // dim3 grid;
@@ -432,7 +431,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t, THCSTenso
   THCTensor *r_values_ = THCSTensor_(newValuesWithSizeOf)(state, s_values_, max_nnz);
   THCTensor_(zero)(state, r_values_);
   THCSTensor_(resizeAs)(state, r_, src);
-  THCSTensor_(move)(state, r_, r_indices_, r_values_);
+  THCSTensor_(_move)(state, r_, r_indices_, r_values_);
 
   const dim3 block = getApplyBlock();
   dim3 grid;

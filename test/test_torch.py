@@ -2312,7 +2312,8 @@ class TestTorch(TestCase):
             data = original.type(t)
             switch = switch.type(t)
             res = torch.mul(data, switch)
-            self.assertEqual(res.abs(), data, 1e-16)
+            # abs is used in assertEqual so we use the slow version instead
+            self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1

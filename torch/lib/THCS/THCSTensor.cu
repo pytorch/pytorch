@@ -31,7 +31,7 @@ __device__ void applyOp3(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_spcKernel(
+__global__ void THCSTensor_sparseElementwiseKernel(
     Op op,
     TensorInfo<Real, IndexType> dense,
     TensorInfo<integer, IndexType> indices,
@@ -55,7 +55,7 @@ __global__ void THCSTensor_spcKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_spcKernelScalar(
+__global__ void THCSTensor_sparseElementwiseKernelScalar(
     Op op,
     TensorInfo<Real, IndexType> dense,
     TensorInfo<integer, IndexType> indices,

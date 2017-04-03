@@ -97,13 +97,20 @@ static void THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, long *s
 }
 
 // directly assign without cloning or retaining (internal method)
-THSTensor* THSTensor_(move)(THSTensor *self, THLongTensor *indices, THTensor *values) {
+THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *values) {
   int empty = THTensor_(nDimension)(values) == 0;
   if (!empty) {
     THArgCheck(THLongTensor_nDimension(indices) == 2, 1,
         "indices must be nDim x nnz");
     THArgCheck(THLongTensor_size(indices, 1) == THTensor_(size)(values, 0), 1,
         "indices and values must have same nnz");
+    THArgCheck(THLongTensor_size(indices, 0) == self->nDimensionI, 2,
+        "indices has incorrect first dimension, expected %d, got %d", self->nDimensionI, THLongTensor_size(indices, 0));
+    THArgCheck(THTensor_(nDimension)(values) == self->nDimensionV + 1, 3,
+        "values has incorrect number of dimensions, expected %d, got %d", self->nDimensionV + 1, THTensor_(nDimension)(values));
+  } else {
+    THArgCheck(THLongTensor_nDimension(indices) == 0, 2,
+        "if values is empty, indices must be empty too");
   }
   THLongTensor_free(self->indices);
   THTensor_(free)(self->values);
@@ -117,7 +124,7 @@ THSTensor* THSTensor_(move)(THSTensor *self, THLongTensor *indices, THTensor *va
 
 THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values) {
   // Note: Not like torch.set, this is an internal method
-  return THSTensor_(move)(
+  return THSTensor_(_move)(
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
 }
 
@@ -145,7 +152,6 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
 
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
-  THSTensor_(_set)(self, indices, values);
 
   nDimI = THLongTensor_size(indices, 0);
   nDimV = THTensor_(nDimension)(values) - 1;
@@ -171,6 +177,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
         "number of dimensions must be nDimI + nDimV");
     THSTensor_(rawResize)(self, nDimI, nDimV, THLongStorage_data(sizes));
   }
+  THSTensor_(_set)(self, indices, values);
 
   return self;
 }
@@ -350,6 +357,9 @@ void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
 
 // In place transpose
 void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
+  long nDimI = THSTensor_(nDimensionI)(self);
+  long nDimV = THSTensor_(nDimensionV)(self);
+  THArgCheck(d1 < nDimI && d2 < nDimI, 0, "Transposed dimensions should be sparse. Got nDimI: %ld, d1: %ld, d2: %ld", nDimI, d1, d2);
   THLongTensor *indices = THSTensor_(indices)(self);
   ptrdiff_t i;
   for (i = 0; i < THSTensor_(nnz)(self); i++) {
@@ -439,7 +449,7 @@ void THSTensor_(reorder)(THSTensor *self) {
   THTensor *newValues = THTensor_(new)();
   THLongTensor_resizeAs(newIndices, indices_);
   THTensor_(resizeAs)(newValues, values_);
-  THSTensor_(move)(self, newIndices, newValues);
+  THSTensor_(_move)(self, newIndices, newValues);
 
   THLongTensor_sort(indicesBuffer, indicesPermutation, indicesScalar, 0, 0);
 
@@ -481,10 +491,6 @@ void THSTensor_(contiguous)(THSTensor *self) {
   self->contiguous = 1;
 }
 
-void THSTensor_(markContiguous)(THSTensor *self) {
-  self->contiguous = 1;
-}
-
 void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THSTensor_(resizeAs)(r_, mask);
   if (mask->nnz == 0) {
@@ -498,7 +504,7 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THTensor *mask_values_ = THSTensor_(values)(mask);
   THTensor *r_values_ = THTensor_(new)();
   THTensor_(resizeAs)(r_values_, mask_values_);
-  THSTensor_(move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
+  THSTensor_(_move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
   r_->contiguous = mask->contiguous;
   r_->nnz = mask->nnz;
 

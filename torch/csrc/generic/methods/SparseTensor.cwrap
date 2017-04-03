@@ -95,15 +95,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: markContiguous
-  python_name: mark_contiguous
-  sparse: yes
-  return: argument 0
-  arguments:
-  - THSTensor* self
-]]
-
-[[
   name: clone
   sparse: yes
   cname: newClone

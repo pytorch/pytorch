@@ -60,7 +60,6 @@ TH_API void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src
 TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimension1_, int dimension2_);
 TH_API int THCSTensor_(isContiguous)(THCState *state, const THCSTensor *self);
 TH_API void THCSTensor_(contiguous)(THCState *state, THCSTensor *self);
-TH_API void THCSTensor_(markContiguous)(THCState *state, THCSTensor *self);
 
 TH_API void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask);
 
@@ -75,7 +74,7 @@ TH_API int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, u
 TH_API void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, long *size);
 TH_API void THCSTensor_(reorder)(THCState *state, THCSTensor *self);
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, long nnz);
-TH_API THCSTensor* THCSTensor_(move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
+TH_API THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 
 #endif

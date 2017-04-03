@@ -95,7 +95,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   THTensor *r_values_ = THSTensor_(newValuesWithSizeOf)(s_values_, max_nnz);
   THTensor_(zero)(r_values_);
   THSTensor_(resizeAs)(r_, src);
-  THSTensor_(move)(r_, r_indices_, r_values_);
+  THSTensor_(_move)(r_, r_indices_, r_values_);
 
   long blockSize = r_values_->stride[0];
   long cmp, d;
@@ -177,7 +177,7 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t, THSTensor *src) {
   THTensor *r_values_ = THSTensor_(newValuesWithSizeOf)(s_values_, max_nnz);
   THTensor_(zero)(r_values_);
   THSTensor_(resizeAs)(r_, src);
-  THSTensor_(move)(r_, r_indices_, r_values_);
+  THSTensor_(_move)(r_, r_indices_, r_values_);
 
   THTensor *src1Buffer = THTensor_(new)();
   THTensor *src2Buffer = THTensor_(new)();
@@ -452,7 +452,7 @@ void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse, THTensor *d
 
   // Compute output values tensor with sparse * dense multiplication
   THSTensor_(spaddmm)(values, 0, values, alpha, newSparse, dense);
-  THSTensor_(move)(r_, indices, values);
+  THSTensor_(_move)(r_, indices, values);
 
   THSTensor_(free)(newSparse);
   THLongTensor_free(spIndices);
