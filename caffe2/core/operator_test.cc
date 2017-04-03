@@ -177,6 +177,12 @@ TEST(OperatorTest, TestParameterAccess) {
   EXPECT_EQ(i[0], 1);
   EXPECT_EQ(i[1], 2);
   EXPECT_EQ(op.GetSingleArgument<string>("arg2", "default"), "argstring");
+  auto default1 = op.GetRepeatedArgument<int>("arg3", {2, 3});
+  EXPECT_EQ(default1.size(), 2);
+  EXPECT_EQ(default1[0], 2);
+  EXPECT_EQ(default1[1], 3);
+  auto default2 = op.GetRepeatedArgument<int>("arg4");
+  EXPECT_EQ(default2.size(), 0);
 }
 
 TEST(OperatorTest, CannotAccessParameterWithWrongType) {

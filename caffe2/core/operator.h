@@ -42,8 +42,10 @@ class OperatorBase {
     return arg_helper_.template HasSingleArgumentOfType<T>(name);
   }
   template <typename T>
-  inline vector<T> GetRepeatedArgument(const string& name) const {
-    return arg_helper_.template GetRepeatedArgument<T>(name);
+  inline vector<T> GetRepeatedArgument(
+      const string& name,
+      const vector<T>& default_value = {}) const {
+    return arg_helper_.template GetRepeatedArgument<T>(name, default_value);
   }
 
   // Get the inputs and outputs as specific types.
