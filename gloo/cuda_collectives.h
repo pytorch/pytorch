@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include "gloo/common/common.h"
 #include "gloo/cuda.h"
 #include "gloo/nccl/nccl.h"
 
@@ -78,7 +79,7 @@ std::unique_ptr<LocalOp<T> > cudaDeviceReduce(
   if (count == 0) {
     count = devicePtrs[root].getCount();
   }
-  auto op = std::make_unique<CudaLocalDeviceOp<T, nccl::ReduceOp<T> > >(
+  auto op = make_unique<CudaLocalDeviceOp<T, nccl::ReduceOp<T> > >(
     nccl::ReduceOp<T>(
       toDeviceElements(devicePtrs, offset, count),
       fn,
@@ -95,7 +96,7 @@ std::unique_ptr<LocalOp<T> > cudaDeviceBroadcast(
   if (count == 0) {
     count = devicePtrs[root].getCount();
   }
-  auto op = std::make_unique<CudaLocalDeviceOp<T, nccl::BroadcastOp<T> > >(
+  auto op = make_unique<CudaLocalDeviceOp<T, nccl::BroadcastOp<T> > >(
     nccl::BroadcastOp<T>(
       toDeviceElements(devicePtrs, offset, count),
       devicePtrs[root].getDeviceID()));
@@ -155,13 +156,13 @@ std::unique_ptr<LocalOp<T> > cudaHostReduce(
     const CudaReductionFunction<T>* fn) {
   // Simple copy operation if there is only a single device pointer.
   if (devicePtrs.size() == 1) {
-    return std::make_unique<
+    return make_unique<
       CudaLocalMemcpy<T, CudaDevicePointer<T>, CudaHostPointer<T> > >(
         devicePtrs[0],
         hostPtr);
   }
 
-  return std::make_unique<CudaLocalHostReduce<T> >(
+  return make_unique<CudaLocalHostReduce<T> >(
     devicePtrs,
     hostPtr,
     fn);
@@ -200,12 +201,12 @@ std::unique_ptr<LocalOp<T> > cudaHostBroadcast(
     CudaHostPointer<T>& hostPtr) {
   // Simple copy operation if there is only a single device pointer.
   if (devicePtrs.size() == 1) {
-    return std::make_unique<
+    return make_unique<
       CudaLocalMemcpy<T, CudaHostPointer<T>, CudaDevicePointer<T> > >(
         hostPtr,
         devicePtrs[0]);
   }
-  return std::make_unique<CudaLocalHostBroadcast<T> >(
+  return make_unique<CudaLocalHostBroadcast<T> >(
     devicePtrs,
     hostPtr);
 }
