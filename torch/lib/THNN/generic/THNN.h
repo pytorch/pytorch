@@ -172,9 +172,9 @@ TH_API void THNN_(GRUFused_updateOutput)(
           THNNState *state,
           THTensor *input,
 	  THTensor *hidden,
-	  THTensor *bias1,
-	  THTensor *bias2,
-	  THTensor *prevHidden,
+	  THTensor *bias1, // [OPTIONAL]
+	  THTensor *bias2, // [OPTIONAL]
+	  THTensor *hx,
 	  THTensor *output);
 TH_API void THNN_(GRUFused_updateGradInput)(
           THNNState *state,
@@ -182,6 +182,25 @@ TH_API void THNN_(GRUFused_updateGradInput)(
           THTensor *hidden,
           THTensor *gradOutput,
           THTensor *gradInput);
+
+TH_API void THNN_(LSTMFused_updateOutput)(
+	  THNNState *state,
+	  THTensor *input,
+	  THTensor *hidden,
+	  THTensor *bias1, // [OPTIONAL]
+	  THTensor *bias2, // [OPTIONAL]
+	  THTensor *cell,
+	  THTensor *output,
+	  THTensor *outputCell);
+TH_API void THNN_(LSTMFused_updateGradInput)(
+          THNNState *state,
+	  THTensor *input,
+	  THTensor *hidden,
+	  THTensor *cx,
+	  THTensor *cy,
+	  THTensor *gradOutput,
+	  THTensor *gradOutputCell,
+	  THTensor *gradInput);
 
 TH_API void THNN_(LogSigmoid_updateOutput)(
           THNNState *state,            // library's state

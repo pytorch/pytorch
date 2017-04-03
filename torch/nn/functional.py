@@ -328,8 +328,14 @@ def prelu(input, weight):
     return _functions.thnn.PReLU()(input, weight)
 
 
-def grufused(input_gate, hidden_gate, ibias, hbias, hidden):
-        return _functions.thnn.GRUFused()(input_gate, hidden_gate, ibias, hbias, hidden)
+def grufused(input_gate, hidden_gate, ibias, hbias, hx):
+    f = _functions.thnn.GRUFused()
+    return ibias and f(input_gate, hidden_gate, hx, ibias, hbias) or f(input_gate, hidden_gate, hx)
+
+
+def lstmfused(input_gate, hidden_gate, ibias, hbias, cx):
+    f = _functions.thnn.LSTMFused()
+    return ibias and f(input_gate, hidden_gate, cx, ibias, hbias) or f(input_gate, hidden_gate, cx)
 
 
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):

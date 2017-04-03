@@ -4,7 +4,6 @@
 #include "THCNumerics.cuh"
 #include <THC/THCApply.cuh>
 
-
 template <typename T>
 struct TensorSigmoidOp {
   __device__ __forceinline__ void operator()(T* out, T* in) const {

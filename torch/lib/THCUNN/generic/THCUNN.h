@@ -170,10 +170,10 @@ TH_API void THNN_(GRUFused_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *hidden,
-		  THCTensor *bias1,
-		  THCTensor *bias2,
-                  THCTensor *prevHidden,
-                  THCTensor *output);
+		  THCTensor *bias1, // [OPTIONAL]
+		  THCTensor *bias2, // [OPTIONAL]
+                  THCTensor *hx,
+                  THCTensor *hy);
 
 TH_API void THNN_(GRUFused_updateGradInput)(
                   THCState *state,
@@ -181,7 +181,27 @@ TH_API void THNN_(GRUFused_updateGradInput)(
                   THCTensor *hidden,
                   THCTensor *gradOutput,
                   THCTensor *gradInput);
-					    
+
+TH_API void THNN_(LSTMFused_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *hidden,
+		  THCTensor *bias1, // [OPTIONAL]
+		  THCTensor *bias2, // [OPTIONAL]
+		  THCTensor *cx,
+                  THCTensor *hy,
+                  THCTensor *cy);
+
+TH_API void THNN_(LSTMFused_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+		  THCTensor *hidden,
+		  THCTensor *prevC,
+		  THCTensor *cy,
+                  THCTensor *gradOutput,
+                  THCTensor *gradOutputCell,
+                  THCTensor *gradInput);
+
 TH_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,

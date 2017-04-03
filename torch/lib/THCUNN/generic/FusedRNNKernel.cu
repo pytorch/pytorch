@@ -17,7 +17,7 @@ void THNN_(FusedRNNAssertSizes)(THCState *state, int factor, int count ...)
   THArgCheck(THCTensor_(nElement)(state, input) ==
 	     THCTensor_(nElement)(state, hidden),
 	     3, "Input and Hidden tensor sizes should be the same.");
-  
+
   THAssertMsg(TensorUtils<THCTensor>::getDims(state, input) <= MAX_CUTORCH_DIMS,
 		 "Tensor dimension is too large.");
 
@@ -32,7 +32,7 @@ void THNN_(FusedRNNAssertSizes)(THCState *state, int factor, int count ...)
     THAssertMsg(TensorUtils<THCTensor>::getDims(state, tens) <= MAX_CUTORCH_DIMS,
 		 "Tensor dimension is too large.");
   }
-  
+
   va_end(list);
 }
 
@@ -40,7 +40,7 @@ int THNN_(minIndexType)(THCState *state, int count, ...)
 {
   va_list list;
   va_start(list, count);
-  
+
   int maxDim = -2;
   for (int arg=0; arg < count; ++arg){
     THCTensor* tens = va_arg(list, THCTensor*);
@@ -48,7 +48,7 @@ int THNN_(minIndexType)(THCState *state, int count, ...)
     int tensdims = TensorUtils<THCTensor>::getDims(state, tens);
     maxDim = (( tensdims> maxDim) ? tensdims : maxDim);
   }
-  
+
   va_end(list);
   return maxDim;
 }
@@ -69,7 +69,6 @@ bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
   return true;
 }
 
-
 #define DEVICE_LINEAR_GET(D_TENSOR, INDEX)				\
   D_TENSOR.data[IndexToOffset<T, IndexType, Dims>::get(INDEX, D_TENSOR)]
 
@@ -87,8 +86,8 @@ __global__ void
 		    TensorInfo<T, IndexType> Hidden,
 		    TensorInfo<T, IndexType> Bias1,
 		    TensorInfo<T, IndexType> Bias2,
-		    TensorInfo<T, IndexType> Hx,
-		    TensorInfo<T, IndexType> Output,
+		    TensorInfo<T, IndexType> _hx,
+		    TensorInfo<T, IndexType> _hy,
 		    IndexType hsz,
 		    IndexType totalElements)
 {
@@ -107,30 +106,45 @@ __global__ void
       T* hi = &DEVICE_LINEAR_GET(Hidden,offset+1*hsz);
       T hn = DEVICE_LINEAR_GET(Hidden,  offset+2*hsz);
 
-      T hx = DEVICE_LINEAR_GET(Hx, linearIndex);
+      T hx = DEVICE_LINEAR_GET(_hx, linearIndex);
 
-      T b1r = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+0*hsz);
-      T b1i = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+1*hsz);
-      T b1n = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+2*hsz);
+      T* hy = &DEVICE_LINEAR_GET(_hy, linearIndex);
 
-      T b2r = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+0*hsz);
-      T b2i = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+1*hsz);
-      T b2n = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+2*hsz);
+      bool has_bias = (Bias1.data != NULL);
 
-      T* out = &DEVICE_LINEAR_GET(Output, linearIndex);
+      T b1r, b1i, b1n, b2r, b2i, b2n;
+
+      if(has_bias){
+	b1r = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+0*hsz);
+	b1i = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+1*hsz);
+	b1n = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+2*hsz);
+
+	b2r = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+0*hsz);
+	b2i = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+1*hsz);
+	b2n = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+2*hsz);
+      }else{
+#ifndef THC_REAL_IS_HALF
+	b1r = 0.0; b1i = 0.0; b1n = 0.0;
+	b2r = 0.0; b2i = 0.0; b2n = 0.0;
+#else
+	b1r = F2H(0.0); b1i = F2H(0.0); b1n = F2H(0.0);
+	b2r = F2H(0.0); b2i = F2H(0.0); b2n = F2H(0.0);
+#endif
+      }
+
 
 #ifndef THC_REAL_IS_HALF
-      
+
       T rg, ig, ng;
 
       rg = *ir + *hr + b1r + b2r;
       ig = *ii + *hi + b1i + b2i;
-      
+
       TensorSigmoidOp<real>()(&rg, &rg);
       TensorSigmoidOp<real>()(&ig, &ig);
       ng = *in + b1n + rg * (hn + b2n);
       ng = THCNumerics<T>::tanh(ng);
-      *out = ng + ig * (hx - ng);
+      *hy = ng + ig * (hx - ng);
 
       //SAVE FOR BACKWARDS
       *ir = rg;
@@ -139,17 +153,17 @@ __global__ void
       *hr = hx;
       *hi = hn + b2n;
 #else
-      
+
       float rg, ig, ng;
 
       rg = H2F(*ir) + H2F(*hr) + H2F(b1r) + H2F(b2r);
       ig = H2F(*ii) + H2F(*hi) + H2F(b1i) + H2F(b2i);
-      
+
       TensorSigmoidOp<float>()(&rg, &rg);
       TensorSigmoidOp<float>()(&ig, &ig);
       ng = H2F(*in) + H2F(b1n) + rg*( H2F(hn)+H2F(b2n) );
       ng = THCNumerics<float>::tanh(ng);
-      *out = F2H( ng + ig * ( H2F(hx)-ng ) );
+      *hy = F2H( ng + ig * ( H2F(hx)-ng ) );
 
       //SAVE FOR BACKWARDS
       *ir = F2H(rg);
@@ -189,13 +203,12 @@ __global__ void
     T* hx = &DEVICE_LINEAR_GET(hidden, offset+0*hsz);
     T* hn = &DEVICE_LINEAR_GET(hidden, offset+1*hsz);
     T* oghn=&DEVICE_LINEAR_GET(hidden, offset+2*hsz);
-    
+
     T* gi = &DEVICE_LINEAR_GET(gradinput, linearIndex);
-    
+
     T* go = &DEVICE_LINEAR_GET(gradoutput, linearIndex);
-    
+
 #ifndef THC_REAL_IS_HALF
-    
     T gig = (*go)*(*hx-*ng)*( 1-(*ig) )*(*ig);
     T ghx = (*go)*(*ig);
     T gin = (*go)*(1-*ig)*( 1-(*ng)*(*ng) );
@@ -203,15 +216,14 @@ __global__ void
     T grg = (gin)*(*hn)*( 1-(*rg) )*(*rg);
 
     *gi = ghx;
-    
+
     *rg = grg;
     *ig = gig;
     *ng = gin;
-    
+
     *hx = grg;
     *hn = gig;
     *oghn = ghn;
-    
 #else
     float gig = H2F(*go)*( H2F(*hx)-H2F(*ng) )*( 1-H2F(*ig) )*H2F(*ig);
     float ghx = H2F(*go)*H2F(*ig);
@@ -220,20 +232,220 @@ __global__ void
     float grg = H2F(gin)*H2F(*hn)*( 1-H2F(*rg) )*H2F(*rg);
 
     *gi = F2H(ghx);
-    
+
     *rg = F2H(grg);
     *ig = F2H(gig);
     *ng = F2H(gin);
-    
+
     *hx = F2H(grg);
     *hn = F2H(gig);
     *oghn = F2H(ghn);
-
 #endif
-      
   }
 }
 
+template <typename T,
+	  typename IndexType,
+	  int Dims>
+#if __CUDA_ARCH__ >= 350
+__launch_bounds__(32 * 16, 4)
+#endif
+__global__ void
+  THNN_(LSTMForward)(TensorInfo<T, IndexType> input,
+		    TensorInfo<T, IndexType> hidden,
+		    TensorInfo<T, IndexType> bias1,
+		    TensorInfo<T, IndexType> bias2,
+		    TensorInfo<T, IndexType> _cx,
+		    TensorInfo<T, IndexType> _hy,
+		    TensorInfo<T, IndexType> _cy,
+		    IndexType hsz,
+		    IndexType totalElements)
+{
+
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x)
+    {
+
+      IndexType offset = (linearIndex/hsz)*4*hsz+linearIndex%hsz;
+
+      T* iig = &DEVICE_LINEAR_GET(input, offset+0*hsz);
+      T* ifg = &DEVICE_LINEAR_GET(input, offset+1*hsz);
+      T* icg = &DEVICE_LINEAR_GET(input, offset+2*hsz);
+      T* iog = &DEVICE_LINEAR_GET(input, offset+3*hsz);
+
+      T hig = DEVICE_LINEAR_GET(hidden, offset+0*hsz);
+      T hfg = DEVICE_LINEAR_GET(hidden, offset+1*hsz);
+      T hcg = DEVICE_LINEAR_GET(hidden,  offset+2*hsz);
+      T hog = DEVICE_LINEAR_GET(hidden,  offset+3*hsz);
+
+      T cx = DEVICE_LINEAR_GET(_cx, linearIndex);
+
+      T* hy = &DEVICE_LINEAR_GET(_hy, linearIndex);
+      T* cy = &DEVICE_LINEAR_GET(_cy, linearIndex);
+
+      bool has_bias = (bias1.data != NULL);
+
+      T b1i, b1f, b1c, b1o;
+      T b2i, b2f, b2c, b2o;
+
+      if(has_bias){
+	b1i = DEVICE_LINEAR_GET(bias1, linearIndex%hsz+0*hsz);
+	b1f = DEVICE_LINEAR_GET(bias1, linearIndex%hsz+1*hsz);
+	b1c = DEVICE_LINEAR_GET(bias1, linearIndex%hsz+2*hsz);
+	b1o = DEVICE_LINEAR_GET(bias1, linearIndex%hsz+3*hsz);
+
+	b2i = DEVICE_LINEAR_GET(bias2, linearIndex%hsz+0*hsz);
+	b2f = DEVICE_LINEAR_GET(bias2, linearIndex%hsz+1*hsz);
+	b2c = DEVICE_LINEAR_GET(bias2, linearIndex%hsz+2*hsz);
+	b2o = DEVICE_LINEAR_GET(bias2, linearIndex%hsz+3*hsz);
+
+      }else{
+#ifndef THC_REAL_IS_HALF
+	b1i = 0.0; b1f = 0.0; b1c = 0.0; b1o = 0.0;
+	b2i = 0.0; b2f = 0.0; b2c = 0.0; b2o = 0.0;
+#else
+	b1i = F2H(0.0); b1f = F2H(0.0); b1c = F2H(0.0); b1o = F2H(0.0);
+	b2i = F2H(0.0); b2f = F2H(0.0); b2c = F2H(0.0); b2o = F2H(0.0);
+#endif
+      }
+
+#ifndef THC_REAL_IS_HALF
+      T ig, fg, cg, og;
+
+      ig = *iig + hig + b1i + b2i;
+      fg = *ifg + hfg + b1f + b2f;
+      cg = *icg + hcg + b1c + b2c;
+      og = *iog + hog + b1o + b2o;
+
+      TensorSigmoidOp<real>()(&ig, &ig);
+      TensorSigmoidOp<real>()(&fg, &fg);
+      cg = THCNumerics<T>::tanh(cg);
+      TensorSigmoidOp<real>()(&og, &og);
+
+      *cy = (fg * cx) + (ig * cg);
+      *hy = og * THCNumerics<T>::tanh(*cy);
+
+      *iig = ig;
+      *ifg = fg;
+      *icg = cg;
+      *iog = og;
+#else
+      float ig, fg, cg, og;
+      float f_hy, f_cy;
+
+      ig = H2F(*iig) + H2F(hig) + H2F(b1i) + H2F(b2i);
+      fg = H2F(*ifg) + H2F(hfg) + H2F(b1f) + H2F(b2f);
+      cg = H2F(*icg) + H2F(hcg) + H2F(b1c) + H2F(b2c);
+      og = H2F(*iog) + H2F(hog) + H2F(b1o) + H2F(b2o);
+
+      TensorSigmoidOp<float>()(&ig, &ig);
+      TensorSigmoidOp<float>()(&fg, &fg);
+      cg = THCNumerics<float>::tanh(cg);
+      TensorSigmoidOp<float>()(&og, &og);
+
+      f_cy = (fg * H2F(cx) ) + (ig * cg);
+      f_hy = og * THCNumerics<float>::tanh(f_cy);
+
+      *hy = F2H(f_hy);
+      *cy = F2H(f_cy);
+
+      //SAVE FOR BACKWARDS
+      //Also need cy and cx but can be saved easily in python
+      *iig = F2H(ig);
+      *ifg = F2H(fg);
+      *icg = F2H(cg);
+      *iog = F2H(og);
+#endif
+    }
+}
+
+template <typename T,
+	  typename IndexType,
+	  int Dims>
+#if __CUDA_ARCH__ >= 350
+__launch_bounds__(32 * 16, 4)
+#endif
+__global__ void
+  THNN_(LSTMBackward)(TensorInfo<T, IndexType> input,
+		      TensorInfo<T, IndexType> hidden,
+		      TensorInfo<T, IndexType> _cx,
+		      TensorInfo<T, IndexType> _cy,
+		      TensorInfo<T, IndexType> gradoutput,
+		      TensorInfo<T, IndexType> gradoutputcell,
+		      TensorInfo<T, IndexType> gradinput,
+		      IndexType hsz,
+		      IndexType totalElements)
+{
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+    IndexType offset = (linearIndex/hsz)*4*hsz+linearIndex%hsz;
+
+    T ig = DEVICE_LINEAR_GET(input, offset+0*hsz);
+    T fg = DEVICE_LINEAR_GET(input, offset+1*hsz);
+    T cg = DEVICE_LINEAR_GET(input, offset+2*hsz);
+    T og = DEVICE_LINEAR_GET(input, offset+3*hsz);
+
+    T* ih = &DEVICE_LINEAR_GET(hidden, offset+0*hsz);
+    T* fh = &DEVICE_LINEAR_GET(hidden, offset+1*hsz);
+    T* ch = &DEVICE_LINEAR_GET(hidden, offset+2*hsz);
+    T* oh = &DEVICE_LINEAR_GET(hidden, offset+3*hsz);
+
+    //will return hidden grads here
+    T cx = DEVICE_LINEAR_GET(_cx, linearIndex);
+    T cy = DEVICE_LINEAR_GET(_cy, linearIndex);
+
+    T* gi = &DEVICE_LINEAR_GET(gradinput, linearIndex);
+
+    T go = DEVICE_LINEAR_GET(gradoutput, linearIndex);
+    T goc= DEVICE_LINEAR_GET(gradoutputcell, linearIndex);
+#ifndef THC_REAL_IS_HALF
+    T gcx = THCNumerics<T>::tanh(cy);
+
+    T gog = go * gcx;
+    gcx = go * og * ( 1 - gcx*gcx) + goc;
+
+    T gig = gcx * cg;
+    T gfg = gcx * cx;
+    T gcg = gcx * ig;
+
+    gcx = gcx * fg;
+
+    gig = gig * (1-ig) * ig;
+    gfg = gfg * (1-fg) * fg;
+    gcg = gcg * (1-cg*cg);
+    gog = gog * (1-og) * og;
+
+    *ih = gig;
+    *fh = gfg;
+    *ch = gcg;
+    *oh = gog;
+
+    *gi = gcx;
+#else
+    float gcx = THCNumerics<float>::tanh(H2F(cy));
+    float gog = H2F(go) * gcx;
+    gcx = H2F(go) * H2F(og) * ( 1 - gcx*gcx) + H2F(goc);
+
+    float gcg = gcx * H2F(fg);
+    float gfg = gcx * H2F(cg);
+    float gig = gcx * H2F(cx);
+
+    gog = gog * ( (1-H2F(og))*H2F(og) );
+    gcg = gcg * (1-H2F(cg)*H2F(cg));
+    gfg = gfg * ( (1-H2F(fg))*H2F(fg) );
+    gig = gig * ( (1-H2F(ig))*H2F(ig) );
+
+    *ih = F2H(gig);
+    *fh = F2H(gfg);
+    *ch = F2H(gcg);
+    *oh = F2H(gog);
+
+    *gi = F2H(gcx);
+#endif
+  }
+}
 
 // *********** START Generate specializations *************** //
 #define EXPAND_FUNCTION(ITYPE, DIM)					\
@@ -242,104 +454,150 @@ __global__ void
      TensorInfo<DATATYPE, ITYPE> hiddenI,				\
      TensorInfo<DATATYPE, ITYPE> bias1I,				\
      TensorInfo<DATATYPE, ITYPE> bias2I,				\
-     TensorInfo<DATATYPE, ITYPE> prevHI,				\
-     TensorInfo<DATATYPE, ITYPE> outputI,				\
+     TensorInfo<DATATYPE, ITYPE> hxI,					\
+     TensorInfo<DATATYPE, ITYPE> hyI,					\
      ITYPE hsz,								\
      ITYPE totalElements);						\
 									\
   template void __global__ THNN_(GRUBackward)<DATATYPE, ITYPE, DIM>	\
-    (TensorInfo<DATATYPE, ITYPE> input,					\
-     TensorInfo<DATATYPE, ITYPE> hidden,				\
-     TensorInfo<DATATYPE, ITYPE> gradoutput,				\
-     TensorInfo<DATATYPE, ITYPE> gradinput,				\
+    (TensorInfo<DATATYPE, ITYPE> inputI,				\
+     TensorInfo<DATATYPE, ITYPE> hiddenI,				\
+     TensorInfo<DATATYPE, ITYPE> gradoutputI,				\
+     TensorInfo<DATATYPE, ITYPE> gradinputI,				\
      ITYPE hsz,								\
      ITYPE totalElements);						\
-  
+									\
+  template void __global__ THNN_(LSTMForward)<DATATYPE, ITYPE, DIM>	\
+    (TensorInfo<DATATYPE, ITYPE> inputI,				\
+     TensorInfo<DATATYPE, ITYPE> hiddenI,				\
+     TensorInfo<DATATYPE, ITYPE> bias1I,				\
+     TensorInfo<DATATYPE, ITYPE> bias2I,				\
+     TensorInfo<DATATYPE, ITYPE> cxI,					\
+     TensorInfo<DATATYPE, ITYPE> hyI,					\
+     TensorInfo<DATATYPE, ITYPE> cyI,					\
+     ITYPE hsz,								\
+     ITYPE totalElements);						\
+									\
+  template void __global__ THNN_(LSTMBackward)<DATATYPE, ITYPE, DIM>	\
+    (TensorInfo<DATATYPE, ITYPE> inputI,				\
+     TensorInfo<DATATYPE, ITYPE> hiddenI,				\
+     TensorInfo<DATATYPE, ITYPE> cxI,					\
+     TensorInfo<DATATYPE, ITYPE> cyI,					\
+     TensorInfo<DATATYPE, ITYPE> gradoutputI,				\
+     TensorInfo<DATATYPE, ITYPE> gradoutputcellI,			\
+     TensorInfo<DATATYPE, ITYPE> gradinputI,				\
+     ITYPE hsz,								\
+     ITYPE totalElements);						\
+
+
 #define EXPAND_DIM(ITYPE)				\
   EXPAND_FUNCTION(ITYPE, -2)				\
   EXPAND_FUNCTION(ITYPE, -1)                     	\
   EXPAND_FUNCTION(ITYPE, 1)                      	\
   EXPAND_FUNCTION(ITYPE, 2)                      	\
 
+
 #define EXPAND_TYPE                                     \
   EXPAND_DIM(unsigned int)				\
   EXPAND_DIM(unsigned long)				\
+
 
 EXPAND_TYPE
 
 // ************ END generating specializations ************** //
 
 // ************ START Create actual function calls ********** //
-#define FILL_TYPES_FORWARD(ITYPE, DIM)  THNN_(GRUForward)<DATATYPE, ITYPE, DIM> \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>		\
-  (inputI, hiddenI, bias1I, bias2I, prevHI, outputI, hid_size, totalElements); \
-  
-#define FILL_FORWARD(ITYPE, DIM)		\
+#define FILL_FUNCTION(ITYPE, DIM, FUNCTION) FUNCTION(ITYPE, DIM)
+
+#define FILL_DIM(ITYPE, DIM, FUNCTION)		\
   switch (DIM) {				\
   case -2:					\
-    FILL_TYPES_FORWARD(ITYPE, -2);		\
+    FILL_FUNCTION(ITYPE, -2, FUNCTION);		\
     break;					\
   case 1:					\
-    FILL_TYPES_FORWARD(ITYPE, 1);		\
+    FILL_FUNCTION(ITYPE, 1, FUNCTION);		\
     break;					\
   case 2:					\
-    FILL_TYPES_FORWARD(ITYPE, 2);		\
+    FILL_FUNCTION(ITYPE, 2, FUNCTION);		\
     break;					\
   default:					\
-    FILL_TYPES_FORWARD(ITYPE, -1);		\
+    FILL_FUNCTION(ITYPE, -1, FUNCTION);		\
     break;					\
   }
 
-#define FILL_TYPES_BACKWARD(ITYPE, DIM)  THNN_(GRUBackward)<DATATYPE, ITYPE, DIM> \
+#define LSTM_FORWARD(ITYPE, DIM) THNN_(LSTMForward)			\
+  <DATATYPE, ITYPE, DIM>						\
+  <<<grid, block, 0, THCState_getCurrentStream(state)>>>		\
+  (inputI, hiddenI,							\
+   bias1I, bias2I, cxI, hyI, cyI,					\
+   hid_size, totalElements);
+  
+#define LSTM_BACKWARD(ITYPE, DIM) THNN_(LSTMBackward)			\
+  <DATATYPE, ITYPE, DIM>						\
+  <<<grid, block, 0, THCState_getCurrentStream(state)>>>		\
+  (inputI, hiddenI, cxI, cyI,						\
+   gradoutI, gradoutcI, gradinI,					\
+   hid_size, totalElements);
+
+#define GRU_FORWARD(ITYPE, DIM) THNN_(GRUForward)<DATATYPE, ITYPE, DIM>	\
+  <<<grid, block, 0, THCState_getCurrentStream(state)>>>		\
+  (inputI, hiddenI, bias1I, bias2I, hxI, hyI,				\
+   hid_size, totalElements);
+
+#define GRU_BACKWARD(ITYPE, DIM) THNN_(GRUBackward)			\
+  <DATATYPE, ITYPE, DIM>						\
   <<<grid, block, 0, THCState_getCurrentStream(state)>>>		\
   (inputI, hiddenI, gradoutI, gradinI, hid_size, totalElements);	
-  
-#define FILL_BACKWARD(ITYPE, DIM)		\
-  switch (DIM) {				\
-  case -2:					\
-    FILL_TYPES_BACKWARD(ITYPE, -2);		\
-    break;					\
-  case 1:					\
-    FILL_TYPES_BACKWARD(ITYPE, 1);		\
-    break;					\
-  case 2:					\
-    FILL_TYPES_BACKWARD(ITYPE, 2);		\
-    break;					\
-  default:					\
-    FILL_TYPES_BACKWARD(ITYPE, -1);		\
-    break;					\
-  }
 
 // ************ END Create actual function calls ************ //
 
-void THNN_(GRUFused_updateOutput)(
+void THNN_(LSTMFused_updateOutput)(
           THCState *state,
           THCTensor *input,
 	  THCTensor *hidden,
 	  THCTensor *bias1,
 	  THCTensor *bias2,
-	  THCTensor *prevH,
-	  THCTensor *output)
+	  THCTensor *cx,
+	  THCTensor *hy,
+	  THCTensor *cy)
 {
-  THCTensor_(resizeAs)(state, output, prevH);
-  THNN_(FusedRNNAssertSizes)(state, 3, 4, input, hidden, prevH, output);
-  THCUNN_assertSameGPU(state, 6, input, hidden, prevH, output, bias1, bias2);
-  bool canUse32bi = THNN_(canUse32BitIndexMath)(state, 6, input, hidden, prevH, output, bias1, bias2);
-  int maxDim = THNN_(minIndexType)(state, 6, input, hidden, prevH, output, bias1, bias2);
+  THCTensor_(resizeAs)(state, hy, cx);
+  THCTensor_(resizeAs)(state, cy, cx);
+  THNN_(FusedRNNAssertSizes)(state, 4, 5, input, hidden, hy, cy, cx);
+
+  bool has_bias = (bias1!=NULL);
+  bool canUse32bi;
+  int maxDim;
+
+  if(has_bias){
+    THCUNN_assertSameGPU(state, 7, input, hidden, bias1, bias2, hy, cy, cx);
+    canUse32bi = THNN_(canUse32BitIndexMath)
+      (state, 7, input, hidden, bias1, bias2, hy, cy, cx);
+    maxDim = THNN_(minIndexType)
+      (state, 7, input, hidden, bias1, bias2, hy, cy, cx);
+
+    TensorInfo<DATATYPE, unsigned long> tmphi =
+      getTensorInfo<THCTensor, unsigned long>(state, cx);
+
+    unsigned long tmp_hid = tmphi.sizes[tmphi.dims-1];
+
+    THAssertMsg( tmp_hid*4 == THCTensor_(nElement)(state, bias1) &&
+		 tmp_hid*4 == THCTensor_(nElement)(state, bias2),
+		 "Bias in pointwise operation is an incorrect size, must be 4 x feature size.");
+  }else{
+    THCUNN_assertSameGPU(state, 5, input, hidden, hy, cy, cx);
+    canUse32bi = THNN_(canUse32BitIndexMath)
+      (state, 5, input, hidden, hy, cy, cx);
+    maxDim = THNN_(minIndexType)
+      (state, 5, input, hidden, hy, cy, cx);
+  }
 
   const dim3 block = getApplyBlock();
   //const dim3 block(32, 32);
-  ptrdiff_t totalElements = TensorUtils<THCTensor>::getNumElements(state, prevH);
+  ptrdiff_t totalElements = TensorUtils<THCTensor>::getNumElements(state, cx);
 
   dim3 grid;
-  TensorInfo<DATATYPE, unsigned long> tmphi =
-    getTensorInfo<THCTensor, unsigned long>(state, prevH);
-  unsigned long tmp_hid = tmphi.sizes[tmphi.dims-1];
-
-  THAssertMsg( tmp_hid*3 == THCTensor_(nElement)(state, bias1) &&
-	       tmp_hid*3 == THCTensor_(nElement)(state, bias2),
-	       "Bias in pointwise operation is an incorrect size, must be 3 x feature size.");
-  
+ 
   THAssertMsg(getApplyGrid(state, totalElements, grid),
 	      "Could not get grid size for pointwise apply");
   if(canUse32bi){
@@ -347,26 +605,247 @@ void THNN_(GRUFused_updateOutput)(
       getTensorInfo<THCTensor, unsigned int>(state, input);
     TensorInfo<DATATYPE, unsigned int> hiddenI =
       getTensorInfo<THCTensor, unsigned int>(state, hidden);
-    TensorInfo<DATATYPE, unsigned int> outputI =
-      getTensorInfo<THCTensor, unsigned int>(state, output);
-    TensorInfo<DATATYPE, unsigned int> prevHI =
-      getTensorInfo<THCTensor, unsigned int>(state, prevH);
-    TensorInfo<DATATYPE, unsigned int> bias1I =
-      getTensorInfo<THCTensor, unsigned int>(state, bias1);
-    TensorInfo<DATATYPE, unsigned int> bias2I =
-      getTensorInfo<THCTensor, unsigned int>(state, bias2);
+    TensorInfo<DATATYPE, unsigned int> cxI =
+      getTensorInfo<THCTensor, unsigned int>(state, cx);
+    TensorInfo<DATATYPE, unsigned int> hyI =
+      getTensorInfo<THCTensor, unsigned int>(state, hy);
+    TensorInfo<DATATYPE, unsigned int> cyI =
+      getTensorInfo<THCTensor, unsigned int>(state, cy);
 
-
-    unsigned int hid_size = prevHI.sizes[prevHI.dims-1];
+    unsigned int hid_size = cxI.sizes[cxI.dims-1];
 
     inputI.collapseDims();
     hiddenI.collapseDims();
-    outputI.collapseDims();
-    prevHI.collapseDims();
-    bias1I.collapseDims();
-    bias2I.collapseDims();
+    cxI.collapseDims();
+    hyI.collapseDims();
+    cyI.collapseDims();
+
+    unsigned int zero[1] = {0};
+    TensorInfo<DATATYPE, unsigned int> nullinfo =
+      TensorInfo<DATATYPE, unsigned int>(NULL, 1, zero, zero);
+    TensorInfo<DATATYPE, unsigned int> bias1I = nullinfo;
+    TensorInfo<DATATYPE, unsigned int> bias2I = nullinfo;
+
+    if(has_bias){
+      bias1I = getTensorInfo<THCTensor, unsigned int>(state, bias1);
+      bias2I = getTensorInfo<THCTensor, unsigned int>(state, bias2);
+      bias1I.collapseDims();
+      bias2I.collapseDims();
+    }
+
+    FILL_DIM(unsigned int, maxDim, LSTM_FORWARD);
+
+  }else{
+
+    TensorInfo<DATATYPE, unsigned long> inputI =
+      getTensorInfo<THCTensor, unsigned long>(state, input);
+    TensorInfo<DATATYPE, unsigned long> hiddenI =
+      getTensorInfo<THCTensor, unsigned long>(state, hidden);
+    TensorInfo<DATATYPE, unsigned long> cxI =
+      getTensorInfo<THCTensor, unsigned long>(state, cx);
+    TensorInfo<DATATYPE, unsigned long> hyI =
+      getTensorInfo<THCTensor, unsigned long>(state, hy);
+    TensorInfo<DATATYPE, unsigned long> cyI =
+      getTensorInfo<THCTensor, unsigned long>(state, cy);
+
+    unsigned long hid_size = cxI.sizes[cxI.dims-1];
+
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    cxI.collapseDims();
+    hyI.collapseDims();
+    cyI.collapseDims();
+
+    unsigned long zero[1] = {0};
+    TensorInfo<DATATYPE, unsigned long> nullinfo =
+      TensorInfo<DATATYPE, unsigned long>(NULL, 1, zero, zero);
+    TensorInfo<DATATYPE, unsigned long> bias1I = nullinfo;
+    TensorInfo<DATATYPE, unsigned long> bias2I = nullinfo;
+
+    if(has_bias){
+      bias1I = getTensorInfo<THCTensor, unsigned long>(state, bias1);
+      bias2I = getTensorInfo<THCTensor, unsigned long>(state, bias2);
+      bias1I.collapseDims();
+      bias2I.collapseDims();
+    }
+
+    FILL_DIM(unsigned long, maxDim, LSTM_FORWARD);
+  }
+  THCudaCheck(cudaGetLastError());
+}
+
+void THNN_(LSTMFused_updateGradInput)(
+          THCState *state,
+          THCTensor *input,
+          THCTensor *hidden,
+	  THCTensor *cx,
+	  THCTensor *cy,
+          THCTensor *gradOutput,
+          THCTensor *gradOutputCell,
+          THCTensor *gradInput)
+{
+  THCTensor_(resizeAs)(state, gradInput, gradOutput);
+  THCUNN_assertSameGPU(state, 7, input, hidden, cx, cy,
+		       gradOutput, gradOutputCell, gradInput);
+  THNN_(FusedRNNAssertSizes)
+    (state, 4, 7, input, hidden, cx, cy,
+     gradOutput, gradOutputCell, gradInput);
+  bool canUse32bi = THNN_(canUse32BitIndexMath)
+    (state, 7, input, hidden, cx, cy,
+     gradOutput, gradOutputCell, gradInput);
+  int maxDim = THNN_(minIndexType)
+    (state, 7, input, hidden, cx, cy,
+     gradOutput, gradOutputCell, gradInput);
+
+  const dim3 block = getApplyBlock();
+
+  ptrdiff_t totalElements = TensorUtils<THCTensor>::getNumElements(state, gradOutput);
+
+  dim3 grid;
+
+  THAssertMsg(getApplyGrid(state, totalElements, grid),
+	      "Could not get grid size for pointwise apply");
+
+  if(canUse32bi){
+    TensorInfo<DATATYPE, unsigned int> inputI =
+      getTensorInfo<THCTensor, unsigned int>(state, input);
+    TensorInfo<DATATYPE, unsigned int> hiddenI =
+      getTensorInfo<THCTensor, unsigned int>(state, hidden);
+    TensorInfo<DATATYPE, unsigned int> cxI =
+      getTensorInfo<THCTensor, unsigned int>(state, cx);
+    TensorInfo<DATATYPE, unsigned int> cyI =
+      getTensorInfo<THCTensor, unsigned int>(state, cy);
+    TensorInfo<DATATYPE, unsigned int> gradoutI =
+      getTensorInfo<THCTensor, unsigned int>(state, gradOutput);
+    TensorInfo<DATATYPE, unsigned int> gradoutcI =
+      getTensorInfo<THCTensor, unsigned int>(state, gradOutputCell);
+    TensorInfo<DATATYPE, unsigned int> gradinI =
+      getTensorInfo<THCTensor, unsigned int>(state, gradInput);
+
+    unsigned int hid_size = gradoutI.sizes[gradoutI.dims-1];
+
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    cxI.collapseDims();
+    cyI.collapseDims();
+    gradoutI.collapseDims();
+    gradoutcI.collapseDims();
+    gradinI.collapseDims();
+
+    FILL_DIM(unsigned int, maxDim, LSTM_BACKWARD);
+
+  }else{
+    TensorInfo<DATATYPE, unsigned long> inputI =
+      getTensorInfo<THCTensor, unsigned long>(state, input);
+    TensorInfo<DATATYPE, unsigned long> hiddenI =
+      getTensorInfo<THCTensor, unsigned long>(state, hidden);
+    TensorInfo<DATATYPE, unsigned long> cxI =
+      getTensorInfo<THCTensor, unsigned long>(state, cx);
+    TensorInfo<DATATYPE, unsigned long> cyI =
+      getTensorInfo<THCTensor, unsigned long>(state, cy);
+    TensorInfo<DATATYPE, unsigned long> gradoutI =
+      getTensorInfo<THCTensor, unsigned long>(state, gradOutput);
+    TensorInfo<DATATYPE, unsigned long> gradoutcI =
+      getTensorInfo<THCTensor, unsigned long>(state, gradOutputCell);
+    TensorInfo<DATATYPE, unsigned long> gradinI =
+      getTensorInfo<THCTensor, unsigned long>(state, gradInput);
+
+    unsigned long hid_size = gradoutI.sizes[gradoutI.dims-1];
+
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    cxI.collapseDims();
+    cyI.collapseDims();
+    gradoutI.collapseDims();
+    gradoutcI.collapseDims();
+    gradinI.collapseDims();
+
+    FILL_DIM(unsigned long, maxDim, LSTM_BACKWARD);
+
+  }
+  THCudaCheck(cudaGetLastError());
+}
+
+void THNN_(GRUFused_updateOutput)(
+          THCState *state,
+          THCTensor *input,
+	  THCTensor *hidden,
+	  THCTensor *bias1,
+	  THCTensor *bias2,
+	  THCTensor *hx,
+	  THCTensor *hy)
+{
+  THCTensor_(resizeAs)(state, hy, hx);
+  THNN_(FusedRNNAssertSizes)(state, 3, 4, input, hidden, hx, hy);
+
+  bool has_bias = (bias1!=NULL);
+  bool canUse32bi;
+  int maxDim;
+
+  if(has_bias){
+
+    THCUNN_assertSameGPU
+      (state, 6, input, hidden, hx, hy, bias1, bias2);
+    canUse32bi = THNN_(canUse32BitIndexMath)
+      (state, 6, input, hidden, hx, hy, bias1, bias2);
+    maxDim = THNN_(minIndexType)
+      (state, 6, input, hidden, hx, hy, bias1, bias2);
+
+    TensorInfo<DATATYPE, unsigned long> tmphi =
+      getTensorInfo<THCTensor, unsigned long>(state, hx);
+    unsigned long tmp_hid = tmphi.sizes[tmphi.dims-1];
     
-    FILL_FORWARD(unsigned int, maxDim);
+    THAssertMsg( tmp_hid*3 == THCTensor_(nElement)(state, bias1) &&
+		 tmp_hid*3 == THCTensor_(nElement)(state, bias2),
+		 "Bias in pointwise operation is an incorrect size, must be 3 x feature size.");
+  }else{
+    THCUNN_assertSameGPU
+      (state, 4, input, hidden, hx, hy);
+    canUse32bi = THNN_(canUse32BitIndexMath)
+      (state, 4, input, hidden, hx, hy);
+    maxDim = THNN_(minIndexType)
+      (state, 4, input, hidden, hx, hy);
+  }
+
+  const dim3 block = getApplyBlock();
+  //const dim3 block(32, 32);
+  ptrdiff_t totalElements = TensorUtils<THCTensor>::getNumElements(state, hx);
+
+  dim3 grid;
+
+  THAssertMsg(getApplyGrid(state, totalElements, grid),
+	      "Could not get grid size for pointwise apply");
+  if(canUse32bi){
+    TensorInfo<DATATYPE, unsigned int> inputI =
+      getTensorInfo<THCTensor, unsigned int>(state, input);
+    TensorInfo<DATATYPE, unsigned int> hiddenI =
+      getTensorInfo<THCTensor, unsigned int>(state, hidden);
+    TensorInfo<DATATYPE, unsigned int> hxI =
+      getTensorInfo<THCTensor, unsigned int>(state, hx);
+    TensorInfo<DATATYPE, unsigned int> hyI =
+      getTensorInfo<THCTensor, unsigned int>(state, hy);
+
+    unsigned int hid_size = hxI.sizes[hxI.dims-1];
+
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    hyI.collapseDims();
+    hxI.collapseDims();
+
+    unsigned int zero[1] = {0};
+    TensorInfo<DATATYPE, unsigned int> nullinfo =
+      TensorInfo<DATATYPE, unsigned int>(NULL, 1, zero, zero);
+    TensorInfo<DATATYPE, unsigned int> bias1I = nullinfo;
+    TensorInfo<DATATYPE, unsigned int> bias2I = nullinfo;
+
+    if(has_bias){
+      bias1I = getTensorInfo<THCTensor, unsigned int>(state, bias1);
+      bias2I = getTensorInfo<THCTensor, unsigned int>(state, bias2);
+      bias1I.collapseDims();
+      bias2I.collapseDims();
+    }
+
+    FILL_DIM(unsigned int, maxDim, GRU_FORWARD);
       
   }else{
 
@@ -374,25 +853,32 @@ void THNN_(GRUFused_updateOutput)(
       getTensorInfo<THCTensor, unsigned long>(state, input);
     TensorInfo<DATATYPE, unsigned long> hiddenI =
       getTensorInfo<THCTensor, unsigned long>(state, hidden);
-    TensorInfo<DATATYPE, unsigned long> outputI =
-      getTensorInfo<THCTensor, unsigned long>(state, output);
-    TensorInfo<DATATYPE, unsigned long> prevHI =
-      getTensorInfo<THCTensor, unsigned long>(state, prevH);
-    TensorInfo<DATATYPE, unsigned long> bias1I =
-      getTensorInfo<THCTensor, unsigned long>(state, bias1);
-    TensorInfo<DATATYPE, unsigned long> bias2I =
-      getTensorInfo<THCTensor, unsigned long>(state, bias2);
+    TensorInfo<DATATYPE, unsigned long> hyI =
+      getTensorInfo<THCTensor, unsigned long>(state, hy);
+    TensorInfo<DATATYPE, unsigned long> hxI =
+      getTensorInfo<THCTensor, unsigned long>(state, hx);
 
-    unsigned long hid_size = prevHI.sizes[prevHI.dims-1];
+    unsigned long hid_size = hxI.sizes[hxI.dims-1];
 
     inputI.collapseDims();
     hiddenI.collapseDims();
-    outputI.collapseDims();
-    prevHI.collapseDims();
-    bias1I.collapseDims();
-    bias2I.collapseDims();
+    hyI.collapseDims();
+    hxI.collapseDims();
 
-    FILL_FORWARD(unsigned long, maxDim);
+    unsigned long zero[1] = {0};
+    TensorInfo<DATATYPE, unsigned long> nullinfo =
+      TensorInfo<DATATYPE, unsigned long>(NULL, 1, zero, zero);
+    TensorInfo<DATATYPE, unsigned long> bias1I = nullinfo;
+    TensorInfo<DATATYPE, unsigned long> bias2I = nullinfo;
+    
+    if(has_bias){
+      bias1I = getTensorInfo<THCTensor, unsigned long>(state, bias1);
+      bias2I = getTensorInfo<THCTensor, unsigned long>(state, bias2);
+      bias1I.collapseDims();
+      bias2I.collapseDims();
+    }
+
+    FILL_DIM(unsigned long, maxDim, GRU_FORWARD);
   }
 
   THCudaCheck(cudaGetLastError());
@@ -437,7 +923,7 @@ void THNN_(GRUFused_updateGradInput)(
     gradoutI.collapseDims();
     gradinI.collapseDims();
 
-    FILL_BACKWARD(unsigned int, maxDim);
+    FILL_DIM(unsigned int, maxDim, GRU_BACKWARD);
       
   }else{
     TensorInfo<DATATYPE, unsigned long> inputI =
@@ -456,7 +942,7 @@ void THNN_(GRUFused_updateGradInput)(
     gradoutI.collapseDims();
     gradinI.collapseDims();
 
-    FILL_BACKWARD(unsigned long, maxDim);
+    FILL_DIM(unsigned long, maxDim, GRU_BACKWARD);
 
   }
   THCudaCheck(cudaGetLastError());

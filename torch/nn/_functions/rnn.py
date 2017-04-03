@@ -18,20 +18,26 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hx, cx = hidden
-    gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
-    ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+    if not input.is_cuda:
+        hx, cx = hidden
+        gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
 
-    ingate = F.sigmoid(ingate)
-    forgetgate = F.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
-    outgate = F.sigmoid(outgate)
+        ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
-    cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+        ingate = F.sigmoid(ingate)
+        forgetgate = F.sigmoid(forgetgate)
+        cellgate = F.tanh(cellgate)
+        outgate = F.sigmoid(outgate)
 
-    return hy, cy
+        cy = (forgetgate * cx) + (ingate * cellgate)
+        hy = outgate * F.tanh(cy)
 
+        return hy, cy
+    else:
+        igates = F.linear(input, w_ih, None)
+        hgates = F.linear(hidden[0], w_hh, None)
+        hy, cy = F.lstmfused(igates, hgates, b_ih, b_hh, hidden[1])
+        return hy, cy
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 

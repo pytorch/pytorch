@@ -219,6 +219,7 @@ def _generate_function_classes(scope_dict):
         'PReLU',
         'RReLU',
         'GRUFused',
+        'LSTMFused',
         'unfolded',
     }
     name_remap = {
