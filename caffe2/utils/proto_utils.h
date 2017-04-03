@@ -182,7 +182,9 @@ class ArgumentHelper {
   template <typename T>
   bool HasSingleArgumentOfType(const string& name) const;
   template <typename T>
-  vector<T> GetRepeatedArgument(const string& name) const;
+  vector<T> GetRepeatedArgument(
+      const string& name,
+      const std::vector<T>& default_value = std::vector<T>()) const;
 
   template <typename MessageType>
   MessageType GetMessageArgument(const string& name) const {

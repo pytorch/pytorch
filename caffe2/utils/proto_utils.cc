@@ -264,29 +264,30 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(size_t, i, true)
 INSTANTIATE_GET_SINGLE_ARGUMENT(string, s, false)
 #undef INSTANTIATE_GET_SINGLE_ARGUMENT
 
-#define INSTANTIATE_GET_REPEATED_ARGUMENT(                                     \
-    T, fieldname, enforce_lossless_conversion)                                 \
-  template <>                                                                  \
-  vector<T> ArgumentHelper::GetRepeatedArgument<T>(const string& name) const { \
-    if (arg_map_.count(name) == 0) {                                           \
-      return vector<T>();                                                      \
-    }                                                                          \
-    vector<T> values;                                                          \
-    for (const auto& v : arg_map_.at(name)->fieldname()) {                     \
-      if (enforce_lossless_conversion) {                                       \
-        auto supportsConversion =                                              \
-            SupportsLosslessConversion<decltype(v), T>(v);                     \
-        CAFFE_ENFORCE(                                                         \
-            supportsConversion,                                                \
-            "Value",                                                           \
-            v,                                                                 \
-            " of argument ",                                                   \
-            name,                                                              \
-            "cannot be represented correctly in a target type");               \
-      }                                                                        \
-      values.push_back(v);                                                     \
-    }                                                                          \
-    return values;                                                             \
+#define INSTANTIATE_GET_REPEATED_ARGUMENT(                             \
+    T, fieldname, enforce_lossless_conversion)                         \
+  template <>                                                          \
+  vector<T> ArgumentHelper::GetRepeatedArgument<T>(                    \
+      const string& name, const std::vector<T>& default_value) const { \
+    if (arg_map_.count(name) == 0) {                                   \
+      return default_value;                                            \
+    }                                                                  \
+    vector<T> values;                                                  \
+    for (const auto& v : arg_map_.at(name)->fieldname()) {             \
+      if (enforce_lossless_conversion) {                               \
+        auto supportsConversion =                                      \
+            SupportsLosslessConversion<decltype(v), T>(v);             \
+        CAFFE_ENFORCE(                                                 \
+            supportsConversion,                                        \
+            "Value",                                                   \
+            v,                                                         \
+            " of argument ",                                           \
+            name,                                                      \
+            "cannot be represented correctly in a target type");       \
+      }                                                                \
+      values.push_back(v);                                             \
+    }                                                                  \
+    return values;                                                     \
   }
 
 INSTANTIATE_GET_REPEATED_ARGUMENT(float, floats, false)
