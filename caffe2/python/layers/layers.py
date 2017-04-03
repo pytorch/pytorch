@@ -16,6 +16,18 @@ IdList = schema.List(np.int64)
 IdScoreList = schema.Map(np.int64, np.float32)
 
 
+def get_categorical_limit(record):
+    if schema.equal_schemas(record, IdList):
+        key = 'items'
+    elif schema.equal_schemas(record, IdScoreList):
+        key = 'keys'
+    else:
+        raise NotImplementedError()
+    assert record[key].metadata is not None, (
+        "Blob {} doesn't have metadata".format(str(record[key]())))
+    return record[key].metadata.categorical_limit
+
+
 class InstantiationContext(object):
     """
     List of contexts where layer could be instantitated

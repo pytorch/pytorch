@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
+    get_categorical_limit,
     IdList,
     IdScoreList,
     LayerParameter,
@@ -39,9 +40,8 @@ class SparseLookup(ModelLayer):
             format(reducer)
         self.reducer = reducer
 
-        assert input_record.items.metadata is not None,\
-            "Features without metadata are not supported"
-        input_dim = input_record.items.metadata.categorical_limit
+        input_dim = get_categorical_limit(input_record)
+
         assert input_dim is not None, "Unbounded features are not supported"
 
         self.output_schema = schema.Scalar(
@@ -66,6 +66,13 @@ class SparseLookup(ModelLayer):
             'UniformFill', {'min': -scale, 'max': scale})
 
         self.w = model.net.NextScopedBlob(name + "_w")
+        if schema.equal_schemas(self.input_record, IdList):
+            sparse_key = self.input_record.items()
+        elif schema.equal_schemas(self.input_record, IdScoreList):
+            sparse_key = self.input_record.keys()
+        else:
+            raise NotImplementedError()
+
         if self.input_record.lengths.metadata:
             avg_length = self.input_record.lengths.metadata.expected_value
         else:
@@ -81,7 +88,7 @@ class SparseLookup(ModelLayer):
                                                 ),
                 optimizer=weight_optim,
                 ps_param=LayerPsParam(
-                    sparse_key=self.input_record.items(),
+                    sparse_key=sparse_key,
                     average_length=avg_length
                 )
             ))
