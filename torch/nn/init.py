@@ -23,13 +23,13 @@ def calculate_gain(nonlinearity, param=None):
     Examples:
         >>> gain = nn.init.gain('lrelu')
     """
-    if gain == 'sigmoid':
+    if nonlinearity == 'sigmoid':
         return 1
-    elif gain == 'tanh':
+    elif nonlinearity == 'tanh':
         return 5.0 / 3
-    elif gain == 'relu':
+    elif nonlinearity == 'relu':
         return math.sqrt(2.0)
-    elif gain == 'leaky_relu':
+    elif nonlinearity == 'leaky_relu':
         if param is None:
             negative_slope = 0.01
         elif isinstance(param, int) or isinstance(param, float):
@@ -131,7 +131,7 @@ def dirac(tensor, scaled=True):
         >>> nn.init.dirac(w)
     """
     dimensions = tensor.ndimension()
-    if dimension not in [3, 4, 5]:
+    if dimensions not in [3, 4, 5]:
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
 
     if isinstance(tensor, Variable):
@@ -151,10 +151,11 @@ def dirac(tensor, scaled=True):
 
 
 def _calculate_fan_in_and_fan_out(tensor):
-    if tensor.ndimension() < 2:
+    dimensions = tensor.ndimension()
+    if dimensions < 2:
         raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions")
 
-    if tensor.ndimension() == 2:  # Linear
+    if dimensions == 2:  # Linear
         fan_in = tensor.size(1)
         fan_out = tensor.size(0)
     else:
