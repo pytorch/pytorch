@@ -242,32 +242,44 @@ endif()
 # Determine if blas was compiled with the f2c conventions
 IF (BLAS_LIBRARIES)
   SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+  
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
 float y[4] = { .1, .01, .001, .0001 };
-int four = 4;
-int one = 1;
+#ifdef WIN32
+  typedef __int64 BLINT;
+#else
+  typedef long BLINT;
+#endif
+BLINT four = 4;
+BLINT one = 1;
 extern double sdot_();
 int main() {
-  int i;
   double r = sdot_(&four, x, &one, y, &one);
   exit((float)r != (float).1234);
 }" BLAS_F2C_DOUBLE_WORKS )
+
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
 float y[4] = { .1, .01, .001, .0001 };
-int four = 4;
-int one = 1;
+#ifdef WIN32
+  typedef __int64 BLINT;
+#else
+  typedef long BLINT;
+#endif
+BLINT four = 4;
+BLINT one = 1;
 extern float sdot_();
 int main() {
   int i;
   double r = sdot_(&four, x, &one, y, &one);
   exit((float)r != (float).1234);
 }" BLAS_F2C_FLOAT_WORKS )
+
   IF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
     MESSAGE(STATUS "This BLAS uses the F2C return conventions")
     SET(BLAS_F2C TRUE)
