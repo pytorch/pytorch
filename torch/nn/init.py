@@ -142,11 +142,11 @@ def dirac(tensor, scaled=True):
     val = 1.0 / tensor.size(1) if scaled else 1
 
     if dimensions == 3:  # Temporal convolution
-        tensor[:, :, module.size(2) // 2].fill_(val)
+        tensor[:, :, tensor.size(2) // 2].fill_(val)
     elif dimensions == 4:  # Spatial convolution
-        tensor[:, :, module.size(2) // 2, module.size(3) // 2].fill_(val)
+        tensor[:, :, tensor.size(2) // 2, tensor.size(3) // 2].fill_(val)
     else:  # Volumetric convolution
-        tensor[:, :, module.size(2) // 2, module.size(3) // 2, module.size(4) // 2].fill_(val)
+        tensor[:, :, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2].fill_(val)
     return tensor
 
 
