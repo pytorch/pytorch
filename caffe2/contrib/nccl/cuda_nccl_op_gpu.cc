@@ -30,7 +30,21 @@ nccl::NCCLExecution getNCCLElements(
   return ex;
 }
 
+namespace {
+// Check if all inputs are float
 template <typename T>
+bool AllInputsAre(OperatorBase* op) {
+  for (auto i = 0; i < op->def().input_size(); ++i) {
+    if (op->Input<TensorCUDA>(i).IsType<T>()) {
+      continue;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+}; // namespace
+
 class NCCLAllreduceOp final : public Operator<CUDAContext> {
  public:
   using Operator::Operator;
@@ -39,14 +53,21 @@ class NCCLAllreduceOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     if (InputSize() == 1)
       return true;
-    nccl::NCCL<T>::AllReduce(getNCCLElements(this, context_));
-    return true;
+
+    if (AllInputsAre<float>(this)) {
+      nccl::NCCL<float>::AllReduce(getNCCLElements(this, context_));
+      return true;
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::AllReduce(getNCCLElements(this, context_));
+      return true;
+    } else {
+      return false;
+    }
   }
 
  protected:
 };
 
-template <typename T>
 class NCCLBroadcastOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
@@ -54,14 +75,20 @@ class NCCLBroadcastOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     if (InputSize() == 1)
       return true;
-    nccl::NCCL<T>::Broadcast(getNCCLElements(this, context_));
-    return true;
+    if (AllInputsAre<float>(this)) {
+      nccl::NCCL<float>::Broadcast(getNCCLElements(this, context_));
+      return true;
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::Broadcast(getNCCLElements(this, context_));
+      return true;
+    } else {
+      return false;
+    }
   }
 
  protected:
 };
 
-template <typename T>
 class NCCLReduceOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
@@ -72,14 +99,21 @@ class NCCLReduceOp final : public Operator<CUDAContext> {
     const auto& ex = getNCCLElements(this, context_);
     CAFFE_ENFORCE_EQ(
         ex.root, 0, "NCCLReduce has spurious deadlocks for non-zero root");
-    nccl::NCCL<T>::Reduce(ex);
-    return true;
+
+    if (AllInputsAre<float>(this)) {
+      nccl::NCCL<float>::Reduce(ex);
+      return true;
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::Reduce(ex);
+      return true;
+    } else {
+      return false;
+    }
   }
 
  protected:
 };
 
-template <typename T>
 class NCCLAllGatherOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
@@ -87,36 +121,43 @@ class NCCLAllGatherOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     if (InputSize() == 1)
       return true;
-    nccl::NCCL<T>::AllGather(getNCCLElements(this, context_));
-    return true;
+    if (AllInputsAre<float>(this)) {
+      nccl::NCCL<float>::AllGather(getNCCLElements(this, context_));
+      return true;
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::AllGather(getNCCLElements(this, context_));
+      return true;
+    } else {
+      return false;
+    }
   }
 
  protected:
 };
 
 namespace {
-REGISTER_CUDA_OPERATOR(NCCLAllreduce, NCCLAllreduceOp<float>);
+REGISTER_CUDA_OPERATOR(NCCLAllreduce, NCCLAllreduceOp);
 OPERATOR_SCHEMA(NCCLAllreduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .AllowOneToOneInplace();
 SHOULD_NOT_DO_GRADIENT(NCCLAllreduce);
 
-REGISTER_CUDA_OPERATOR(NCCLBroadcast, NCCLBroadcastOp<float>);
+REGISTER_CUDA_OPERATOR(NCCLBroadcast, NCCLBroadcastOp);
 OPERATOR_SCHEMA(NCCLBroadcast)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .EnforceOneToOneInplace();
 SHOULD_NOT_DO_GRADIENT(NCCLBroadcast);
 
-REGISTER_CUDA_OPERATOR(NCCLReduce, NCCLReduceOp<float>);
+REGISTER_CUDA_OPERATOR(NCCLReduce, NCCLReduceOp);
 OPERATOR_SCHEMA(NCCLReduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});
 SHOULD_NOT_DO_GRADIENT(NCCLReduce);
 
-REGISTER_CUDA_OPERATOR(NCCLAllGather, NCCLAllGatherOp<float>);
+REGISTER_CUDA_OPERATOR(NCCLAllGather, NCCLAllGatherOp);
 OPERATOR_SCHEMA(NCCLAllGather)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS);
