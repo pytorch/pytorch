@@ -32,7 +32,7 @@ def calculate_gain(nonlinearity, param=None):
     elif nonlinearity == 'leaky_relu':
         if param is None:
             negative_slope = 0.01
-        elif isinstance(param, int) or isinstance(param, float):
+        elif not isinstance(param, bool) and isinstance(param, int) or isinstance(param, float):
             negative_slope = param
         else:
             raise ValueError("negative_slope {} not a valid number".format(param))

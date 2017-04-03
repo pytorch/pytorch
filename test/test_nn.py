@@ -1936,7 +1936,7 @@ class TestNNInit(TestCase):
         for as_variable in [True, False]:
             for dims in [3, 4, 5]:
                 for scaled in [True, False]:
-                    input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5, as_variable=as_variable)
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
                     init.dirac(input_tensor, scaled)
                     if as_variable:
                         input_tensor = input_tensor.data
