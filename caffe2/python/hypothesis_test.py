@@ -238,12 +238,16 @@ class TestOperators(hu.HypothesisTestCase):
                 do.random_seed = 1000
 
         def run(do):
+            # Reset each time because 'Y' may already exist in the workspace
+            #   on a different device
+            workspace.ResetWorkspace()
+            ws = workspace.C.Workspace()
             op = core.CreateOperator(
                 "XavierFill", [], ["Y"],
                 device_option=do,
                 shape=[2])
-            self.ws.run(op)
-            return self.ws.blobs["Y"].fetch()
+            ws.run(op)
+            return ws.blobs["Y"].fetch()
 
         ys = [run(do) for do in device_options]
         for y in ys[1:]:
