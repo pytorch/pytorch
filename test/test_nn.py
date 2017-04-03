@@ -1859,12 +1859,13 @@ class TestNNInit(TestCase):
     def _random_float(self, a, b):
         return (b - a) * random.random() + a
 
-    # TODO: test_calculate_gain
+    def test_calculate_gain(self):
+        assert True  # TODO
 
     def test_calculate_gain_leaky_relu(self):
         for param in [None, 0, 0.01, 10]:
             gain = init.calculate_gain('leaky_relu', param)
-            # TODO: assert test
+            assert True  # TODO
 
     def test_calculate_gain_leaky_relu_only_accepts_numbers(self):
         for param in [True, [1], {'a': 'b'}]:
@@ -1939,7 +1940,7 @@ class TestNNInit(TestCase):
                     init.dirac(input_tensor, scaled)
                     if as_variable:
                         input_tensor = input_tensor.data
-                    # TODO: Add tests - can add a bit oddly if filters aren't odd and symmetric though
+                    assert True  # TODO: Can act a bit oddly if filters aren't odd and symmetric though
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for as_variable in [True, False]:
