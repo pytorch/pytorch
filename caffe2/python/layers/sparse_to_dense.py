@@ -56,6 +56,24 @@ class SparseToDense(ModelLayer):
                         ('values', input_record[field].values.items),
                     )
                 ))
+            elif feature_specs.feature_type == 'ID_SCORE_LIST':
+                outputs.append((
+                    field,
+                    schema.Struct(
+                        ('ranges',
+                            schema.Scalar(
+                                (
+                                    np.int32,
+                                    (len(feature_specs.feature_ids), 2)
+                                ),
+                                model.net.NextScopedBlob(
+                                    name + '_' + field + '_ranges')
+                            ),
+                         ),
+                        ('ids', input_record[field].values.keys),
+                        ('scores', input_record[field].values.values),
+                    )
+                ))
             else:
                 raise TypeError(
                     "Unsupported input type: {0}".
@@ -104,6 +122,20 @@ class SparseToDense(ModelLayer):
                 id_list_ranges = net.LengthsToRanges(
                     record[field].values.lengths(),
                     net.NextScopedBlob('id_list_ranges')
+                )
+                net.SparseToDenseMask(
+                    [
+                        record[field].keys(), id_list_ranges, self.zero_range,
+                        record[field].lengths()
+                    ],
+                    self.output_schema[field].ranges(),
+                    mask=feature_specs.feature_ids,
+                )
+            elif feature_specs.feature_type == 'ID_SCORE_LIST':
+                # TODO: merge this to the case above?
+                id_list_ranges = net.LengthsToRanges(
+                    record[field].values.lengths(),
+                    net.NextScopedBlob('id_score_list_ranges')
                 )
                 net.SparseToDenseMask(
                     [
