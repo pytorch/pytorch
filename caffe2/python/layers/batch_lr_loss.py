@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import schema
+from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
@@ -43,18 +43,29 @@ class BatchLRLoss(ModelLayer):
             net.NextScopedBlob('two_class_predictions')
         )
         label = self.input_record.label.field_blobs()
-        if self.input_record.label.field_types()[0] != np.int32:
-            label = [
-                net.Cast(label, net.NextScopedBlob('int32_label'), to='int32')]
+        if self.input_record.label.field_type().base != np.int32:
+            label = [net.Cast(
+                label,
+                net.NextScopedBlob('int32_label'),
+                to=core.DataType.INT32)]
+            # LabelCrossEntropyGraidentOp does not output gradient for the label
 
         xent = net.LabelCrossEntropy(
             [class_probabilities] + label,
             net.NextScopedBlob('cross_entropy'),
         )
         if 'weight' in self.input_record.fields:
+            weight_blob = self.input_record.weight()
+            if self.input_record.weight.field_type().base != np.float32:
+                weight_blob = net.Cast(
+                    weight_blob,
+                    weight_blob + '_float32',
+                    to=core.DataType.FLOAT
+                )
+            weight_blob = net.StopGradient([weight_blob], [weight_blob])
             xent = net.Mul(
-                [xent, self.input_record.weight()],
-                net.NextScopedBlob('weighted_scross_entropy'),
+                [xent, weight_blob],
+                net.NextScopedBlob('weighted_cross_entropy'),
             )
 
         if self.average_loss:
