@@ -138,6 +138,7 @@ class Pair : public ::gloo::transport::Pair {
 
   void changeState(state nextState);
   void waitUntilConnected(std::unique_lock<std::mutex>& lock, bool useTimeout);
+  void verifyConnected();
 
   // Used to signal IO exceptions from one thread and propagate onto others.
   void signalIoFailure(const std::string& msg);

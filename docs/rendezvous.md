@@ -36,6 +36,12 @@ The [HashStore](../gloo/rendezvous/hash_store.cc) is an in-process
 implementation of this interface. This is realistically not useful in
 any application but integration tests.
 
+### FileStore
+
+The [FileStore](../gloo/rendezvous/file_store.cc) is a simple file system based
+implementation of this interface. The primary use case is multi-process testing,
+but it may be useful in other scenarios with a shared file system.
+
 ### RedisStore
 
 The [RedisStore](../gloo/rendezvous/redis_store.cc) implementation uses
@@ -44,7 +50,7 @@ server needs to be accessible to all participating machines.
 
 Since the keys used by the Redis implementation are accessible to any
 process using that server -- which would prevent usage for concurrent
-rendezvous executation -- the
+rendezvous execution -- the
 [PrefixStore](../gloo/rendezvous/prefix_store.cc) can be used to scope
 rendezvous to a particular namespace.
 

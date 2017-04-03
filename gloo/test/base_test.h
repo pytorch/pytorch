@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <exception>
 #include <functional>
 #include <thread>
 #include <vector>
@@ -32,13 +33,13 @@ class BaseTest : public ::testing::Test {
 
   void spawnThreads(int size, std::function<void(int)> fn) {
     std::vector<std::thread> threads;
-    std::vector<std::string> errors;
+    std::vector<std::exception_ptr> errors;
     for (int rank = 0; rank < size; rank++) {
       threads.push_back(std::thread([&, rank]() {
         try {
           fn(rank);
-        } catch (const std::exception& ex) {
-          errors.push_back(ex.what());
+        } catch (const std::exception&) {
+          errors.push_back(std::current_exception());
         }
       }));
     }
@@ -50,7 +51,7 @@ class BaseTest : public ::testing::Test {
 
     // Re-throw first exception if there is one
     if (errors.size() > 0) {
-      throw(std::runtime_error(errors[0]));
+      std::rethrow_exception(errors[0]);
     }
   }
 

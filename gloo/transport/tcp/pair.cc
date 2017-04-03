@@ -275,7 +275,7 @@ bool Pair::write(Op& op) {
   int ioc = 0;
   int nbytes = 0;
 
-  GLOO_ENFORCE_EQ(state_, CONNECTED);
+  verifyConnected();
 
   // Include preamble if necessary
   if (op.nwritten_ < sizeof(op.preamble_)) {
@@ -339,7 +339,7 @@ bool Pair::write(Op& op) {
 // below inherits it.
 //
 bool Pair::read(Op& op) {
-  GLOO_ENFORCE_EQ(state_, CONNECTED);
+  verifyConnected();
 
   auto start = std::chrono::steady_clock::now();
 
@@ -637,6 +637,23 @@ void Pair::waitUntilConnected(
   }
 }
 
+void Pair::verifyConnected() {
+  // This code path should only be called after reaching the connected state
+  GLOO_ENFORCE_GE(
+      state_,
+      CONNECTED,
+      "Pair is not connected (",
+      self_.str(),
+      " <--> ",
+      peer_.str(),
+      ")");
+  // Check if the socket has been closed. We were unable to tell if this was an
+  // error or normal tear down, but now throw since we are trying to do IO.
+  if (state_ == CLOSED) {
+    signalIoFailure("Socket closed");
+  }
+}
+
 void Pair::send(Op& op) {
   std::unique_lock<std::mutex> lock(m_);
   checkErrorState();
@@ -644,14 +661,7 @@ void Pair::send(Op& op) {
   // The connect function already wait for the pair to become
   // connected (both in listening and connecting mode).
   // No need to wait again here.
-  GLOO_ENFORCE_EQ(
-      CONNECTED,
-      state_,
-      "Pair is not connected (",
-      self_.str(),
-      " <--> ",
-      peer_.str(),
-      ")");
+  verifyConnected();
 
   // Try to size the send buffer such that the write below completes
   // synchronously and we don't need to finish the write later.
