@@ -389,8 +389,6 @@ class TestTorch(TestCase):
         long_res1 = long_m1.clone()
         long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
-
-
     def test_mm(self):
         # helper function
         def matrixmultiply(mat1, mat2):
