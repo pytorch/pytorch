@@ -374,7 +374,7 @@ def LSTMWithAttention(
         axis=2,
     )
     # [batch_size, encoder_output_dim, encoder_length]
-    encoder_outputs_transposed = model.net.Transpose(
+    encoder_outputs_transposed = model.Transpose(
         encoder_outputs,
         s('encoder_outputs_transposed'),
         axes=[1, 2, 0],

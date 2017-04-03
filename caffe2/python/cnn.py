@@ -589,6 +589,8 @@ class CNNModelHelper(ModelHelperBase):
 
     def Transpose(self, blob_in, blob_out, **kwargs):
         """Transpose."""
+        if self.use_cudnn:
+            kwargs['engine'] = 'CUDNN'
         return self.net.Transpose(blob_in, blob_out, **kwargs)
 
     def Sum(self, blob_in, blob_out, **kwargs):

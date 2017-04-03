@@ -105,7 +105,7 @@ def _calc_attention_logits_from_sum_match(
         dims=[2],
     )
     # [batch_size, encoder_length]
-    attention_logits_transposed = model.net.Transpose(
+    attention_logits_transposed = model.Transpose(
         attention_logits,
         s(scope, 'attention_logits_transposed'),
         axes=[1, 0],

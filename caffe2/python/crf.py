@@ -267,7 +267,7 @@ class CRFWithLoss(object):
             step_model.param_init_net.AddExternalOutput(zero_segment_id)
             """ the CRF step """
             # Do tile
-            prev_transpose = step_model.net.Transpose(
+            prev_transpose = step_model.Transpose(
                 cell_t_prev,
                 [s('prev_transpose')],
                 axes=(0, 2, 1),
