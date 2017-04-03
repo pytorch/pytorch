@@ -54,6 +54,7 @@ static void usage(int status, const char* argv0) {
   X("BENCHMARK is one of:");
   X("  allreduce_ring");
   X("  allreduce_ring_chunked");
+  X("  allreduce_halving_doubling");
   X("  barrier_all_to_all");
   X("  broadcast_one_to_all");
   X("");

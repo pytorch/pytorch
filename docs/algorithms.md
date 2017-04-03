@@ -75,6 +75,41 @@ Second:
 3. Subtract 1 from offset, wrapping when needed
 4. Repeat 1-3 until process has walked entire buffer
 
+### allreduce_halving_doubling
+
+* Communication steps: 2\*lg(P)
+* Bytes on the wire: 2\*S
+
+Phase 2 is implemented in two sub-phases:
+
+1. First, a reduce-scatter is performed in lg(P) steps using a recursive
+vector-halving, distance-doubling approach. In the first step of this algorithm
+processes communicate in pairs (rank 0 with 1, 2 with 3, etc.), sending and
+receiving for different halves of their input buffer. For example, process 0
+sends the second half of its buffer to process 1 and receives and reduces data
+for the first half of the buffer from process 1. A reduction over the received
+data is performed before proceeding to the next communication step, where the
+distance to the destination rank is doubled while the data sent and received is
+halved. After the reduce-scatter phase is finished, each process has a portion
+of the final reduced array.
+
+2. The second sub-phase of Phase 2 performs an allgather. This is again done
+using a recursive algorithm, retracing the communication steps from the
+reduce-scatter in reverse, but this time simply concatenating the received data
+at each step. At each process and step, the portion of the buffer that was being
+sent in the reduce-scatter is received in the allgather, and the portion that was
+being received in the reduce-scatter is now sent.
+
+Across the steps of the reduce-scatter, data is received intto different buffers
+and there is no potential for race conditions. However, mirrored steps of the
+reduce-scatter and allgather (e.g. last step of the reduce-scatter and first
+step of the allgather) write into the same buffers. To prevent race conditions,
+a notification is sent after data is processed in the reduce-scatter
+subphase. This notification is processed in the allgather subphase prior to
+performing the send. In the majority of cases these notification messages will
+arrive long before the step of the allgather where they are processed, so their
+effect on performance should be minimal.
+
 ### cuda_allreduce_ring
 
 CUDA-aware implementation of `allreduce_ring`. GPU side buffers are

@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "gloo/allreduce_halving_doubling.h"
 #include "gloo/allreduce_ring.h"
 #include "gloo/allreduce_ring_chunked.h"
 #include "gloo/barrier_all_to_all.h"
@@ -116,6 +117,12 @@ int main(int argc, char** argv) {
       return gloo::make_unique<
         AllreduceBenchmark<
           AllreduceRingChunked<float>>>(context, x);
+    };
+  } else if (x.benchmark == "allreduce_halving_doubling") {
+    fn = [&](std::shared_ptr<Context>& context) {
+      return gloo::make_unique<
+        AllreduceBenchmark<
+          AllreduceHalvingDoubling<float>>>(context, x);
     };
   } else if (x.benchmark == "barrier_all_to_all") {
     fn = [&](std::shared_ptr<Context>& context) {

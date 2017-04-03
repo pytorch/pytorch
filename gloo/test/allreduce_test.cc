@@ -13,6 +13,7 @@
 
 #include "gloo/allreduce_ring.h"
 #include "gloo/allreduce_ring_chunked.h"
+#include "gloo/allreduce_halving_doubling.h"
 #include "gloo/test/base_test.h"
 
 namespace gloo {
@@ -128,6 +129,23 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::Range(2, 16),
         ::testing::ValuesIn(genMemorySizes()),
         ::testing::Values(allreduceRingChunked)));
+
+static std::function<Func> allreduceHalvingDoubling = [](
+    std::shared_ptr<::gloo::Context> context,
+    std::vector<float*> dataPtrs,
+    int dataSize) {
+  ::gloo::AllreduceHalvingDoubling<float> algorithm(
+      context, dataPtrs, dataSize);
+  algorithm.run();
+};
+
+INSTANTIATE_TEST_CASE_P(
+    AllreduceHalvingDoubling,
+    AllreduceTest,
+    ::testing::Combine(
+      ::testing::ValuesIn(std::vector<int>({8, 16, 32})),
+      ::testing::ValuesIn(std::vector<int>({64, 128, 1000})),
+      ::testing::Values(allreduceHalvingDoubling)));
 
 } // namespace
 } // namespace test
