@@ -47,14 +47,15 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
 
 template <typename T>
 CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
-  const std::shared_ptr<Context>& context,
-  const std::vector<T*>& ptrs,
-  const int count,
-  const std::vector<cudaStream_t>& streams)
-    : Allreduce<T>(context, nullptr),
+    const std::shared_ptr<Context>& context,
+    const std::vector<T*>& ptrs,
+    const int count,
+    const std::vector<cudaStream_t>& streams)
+    : Allreduce<T>(context),
       count_(count),
       bytes_(count * sizeof(T)),
       synchronizeDeviceOutputs_(streams.size() == 0),
+      fn_(CudaReductionFunction<T>::sum),
       leftPair_(this->getLeftPair()),
       rightPair_(this->getRightPair()) {
   auto newStream = true;
@@ -86,9 +87,6 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
   }
 
-  // Reduction function needs to be convertible to CudaReductionFunction.
-  const auto fn = CudaReductionFunction<T>::toDeviceFunction(this->fn_);
-
   for (auto offset = 0; offset < count_; offset += chunkSize_) {
     auto length = chunkSize_;
     if (offset + length <= count_) {
@@ -98,7 +96,7 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
       length = count_ - offset;
     }
 
-    auto reduceOp = cudaDeviceReduce(devicePtrs_, fn, 0, offset, length);
+    auto reduceOp = cudaDeviceReduce(devicePtrs_, fn_, 0, offset, length);
     auto broadcastOp = cudaDeviceBroadcast(devicePtrs_, 0, offset, length);
 
     // Create a device pointer for the chunk on device ptrs[0]. We will use the

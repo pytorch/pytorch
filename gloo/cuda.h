@@ -38,10 +38,18 @@ class CudaShared {
   static std::atomic<std::mutex*> mutex_;
 };
 
+// Forward declaration
+template <typename T>
+class CudaHostPointer;
+
 template<typename T>
 class CudaDevicePointer {
  public:
-  static CudaDevicePointer create(
+  static CudaDevicePointer<T> alloc(
+    size_t count,
+    cudaStream_t stream);
+
+  static CudaDevicePointer<T> create(
     T* ptr,
     size_t count,
     cudaStream_t stream = kStreamNotSet);
@@ -50,7 +58,11 @@ class CudaDevicePointer {
   ~CudaDevicePointer();
 
   // Default constructor creates invalid instance
-  CudaDevicePointer() : count_(0), deviceId_(-1) {}
+  CudaDevicePointer()
+      : device_(nullptr),
+        count_(0),
+        owner_(false),
+        deviceId_(-1) {}
 
   // Move assignment operator
   CudaDevicePointer& operator=(CudaDevicePointer&&);
@@ -87,12 +99,18 @@ class CudaDevicePointer {
   // Copy contents of device pointer to other device pointer.
   void copyFromDeviceAsync(T* src);
 
+  // Copy between pointers.
+  void copyToAsync(CudaHostPointer<T>& dst);
+  void copyFromAsync(CudaHostPointer<T>& src);
+  void copyToAsync(CudaDevicePointer<T>& dst);
+  void copyFromAsync(CudaDevicePointer<T>& src);
+
   // Wait for copy to complete.
   void wait();
 
  protected:
   // Instances must be created through static functions
-  CudaDevicePointer(T* ptr, size_t count);
+  CudaDevicePointer(T* ptr, size_t count, bool owner);
 
   // Instances cannot be copied or copy-assigned
   CudaDevicePointer(const CudaDevicePointer&) = delete;
@@ -103,6 +121,10 @@ class CudaDevicePointer {
 
   // Number of T elements in device pointer
   size_t count_;
+
+  // Record whether or not this instance is this pointer's owner so
+  // that it is freed when this instance is destructed.
+  bool owner_ = false;
 
   // GPU that the device pointer lives on
   int deviceId_;
@@ -123,6 +145,61 @@ class CudaDevicePointer {
 };
 
 template <typename T>
+class CudaHostPointer {
+ public:
+  static CudaHostPointer<T> alloc(size_t count);
+
+  CudaHostPointer(CudaHostPointer&&) noexcept;
+  ~CudaHostPointer();
+
+  // Default constructor creates invalid instance
+  CudaHostPointer() : CudaHostPointer(nullptr, 0, false) {}
+
+  // Move assignment operator
+  CudaHostPointer& operator=(CudaHostPointer&&);
+
+  T* operator*() const {
+    return host_;
+  }
+
+  int getCount() const {
+    return count_;
+  }
+
+  // Copy between pointers.
+  void copyToAsync(CudaHostPointer<T>& dst);
+  void copyFromAsync(CudaHostPointer<T>& src);
+  void copyToAsync(CudaDevicePointer<T>& dst);
+  void copyFromAsync(CudaDevicePointer<T>& src);
+
+  // Wait for copy to complete.
+  void wait();
+
+ protected:
+  // Instances must be created through static functions
+  CudaHostPointer(T* ptr, size_t count, bool owner);
+
+  // Instances cannot be copied or copy-assigned
+  CudaHostPointer(const CudaHostPointer&) = delete;
+  CudaHostPointer& operator=(const CudaHostPointer&) = delete;
+
+  // Host pointer
+  T* host_;
+
+  // Number of T elements in host pointer
+  size_t count_;
+
+  // Record whether or not this instance is this pointer's owner so
+  // that it is freed when this instance is destructed.
+  bool owner_ = false;
+
+  // References to stream/event of most recent async copy;
+  int deviceId_;
+  cudaStream_t stream_;
+  cudaEvent_t event_;
+};
+
+template <typename T>
 void cudaSum(T* x, const T* y, size_t n, const cudaStream_t stream);
 
 template <typename T>
@@ -135,8 +212,11 @@ template <typename T>
 void cudaMin(T* x, const T* y, size_t n, const cudaStream_t stream);
 
 template <typename T>
-class CudaReductionFunction : public ReductionFunction<T> {
-  using Fn = void(T*, const T*, size_t n, const cudaStream_t stream);
+class CudaReductionFunction {
+  using DeviceFunction =
+    void(T*, const T*, size_t n, const cudaStream_t stream);
+  using HostFunction =
+    void(T*, const T*, size_t n);
 
  public:
   static const CudaReductionFunction<T>* sum;
@@ -144,73 +224,59 @@ class CudaReductionFunction : public ReductionFunction<T> {
   static const CudaReductionFunction<T>* min;
   static const CudaReductionFunction<T>* max;
 
-  static const CudaReductionFunction<T>* toDeviceFunction(
-      const ReductionFunction<T>* fn) {
-    switch (fn->type()) {
-      case SUM:
-        return sum;
-      case PRODUCT:
-        return product;
-      case MIN:
-        return min;
-      case MAX:
-        return max;
-      default:
-        GLOO_ENFORCE(false, "Invalid reduction operation type: ", fn->type());
-    }
-  }
+  CudaReductionFunction(
+    ReductionType type,
+    DeviceFunction* deviceFn,
+    HostFunction* hostFn)
+      : type_(type),
+        deviceFn_(deviceFn),
+        hostFn_(hostFn) {}
 
-  static const ReductionFunction<T>* toHostFunction(
-    const ReductionFunction<T>* fn) {
-    switch (fn->type()) {
-      case SUM:
-        return ::gloo::ReductionFunction<T>::sum;
-      case PRODUCT:
-        return ::gloo::ReductionFunction<T>::product;
-      case MIN:
-        return ::gloo::ReductionFunction<T>::min;
-      case MAX:
-        return ::gloo::ReductionFunction<T>::max;
-      default:
-        GLOO_ENFORCE(false, "Invalid reduction operation type: ", fn->type());
-    }
-  }
-
-  CudaReductionFunction(ReductionType type, Fn* fn)
-      : type_(type), fn_(fn) {}
-
-  virtual ReductionType type() const override {
+  ReductionType type() const {
     return type_;
   }
 
-  virtual void call(T* x, const T* y, size_t n) const override {
-    fn_(x, y, n, 0);
+  // Backwards compatibility.
+  // Can be removed when all CUDA algorithms use CudaHostPointer.
+  void call(T* x, const T* y, size_t n) const {
+    hostFn_(x, y, n);
   }
 
-  virtual void callAsync(
-      T* x,
-      const T* y,
-      size_t n,
-      const cudaStream_t stream) const {
-    fn_(x, y, n, stream);
+  void call(
+      CudaHostPointer<T>& dst,
+      const CudaHostPointer<T>& src,
+      size_t n) const {
+    hostFn_(*dst, *src, n);
+  }
+
+  void call(
+      CudaDevicePointer<T>& dst,
+      const CudaDevicePointer<T>& src,
+      size_t n) const {
+    deviceFn_(*dst, *src, n, dst.getStream());
   }
 
  protected:
-  ReductionType type_;
-  Fn* fn_;
+  const ReductionType type_;
+  DeviceFunction* deviceFn_;
+  HostFunction* hostFn_;
 };
 
 template <typename T>
 const CudaReductionFunction<T>* CudaReductionFunction<T>::sum =
-  new CudaReductionFunction<T>(SUM, &::gloo::cudaSum<T>);
+  new CudaReductionFunction<T>(
+    SUM, &::gloo::cudaSum<T>, &::gloo::sum<T>);
 template <typename T>
 const CudaReductionFunction<T>* CudaReductionFunction<T>::product =
-  new CudaReductionFunction<T>(PRODUCT, &::gloo::cudaProduct<T>);
+  new CudaReductionFunction<T>(
+    PRODUCT, &::gloo::cudaProduct<T>, &::gloo::product<T>);
 template <typename T>
 const CudaReductionFunction<T>* CudaReductionFunction<T>::min =
-  new CudaReductionFunction<T>(MIN, &::gloo::cudaMin<T>);
+  new CudaReductionFunction<T>(
+    MIN, &::gloo::cudaMin<T>, &::gloo::min<T>);
 template <typename T>
 const CudaReductionFunction<T>* CudaReductionFunction<T>::max =
-  new CudaReductionFunction<T>(MAX, &::gloo::cudaMax<T>);
+  new CudaReductionFunction<T>(
+    MAX, &::gloo::cudaMax<T>, &::gloo::max<T>);
 
 } // namespace gloo

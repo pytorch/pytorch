@@ -21,11 +21,11 @@ CudaGPUDirectAllreduceRing<T>::CudaGPUDirectAllreduceRing(
   const std::vector<T*>& ptrs,
   int count,
   const std::vector<cudaStream_t>& streams)
-    : Allreduce<T>(context, CudaReductionFunction<T>::sum),
+    : Allreduce<T>(context),
       count_(count),
       bytes_(count_ * sizeof(T)),
       synchronizeDeviceOutputs_(streams.size() == 0),
-      fn_(CudaReductionFunction<T>::toDeviceFunction(Allreduce<T>::fn_)),
+      fn_(CudaReductionFunction<T>::sum),
       leftPair_(this->getLeftPair()),
       rightPair_(this->getRightPair()) {
   auto newStream = true;
@@ -117,7 +117,7 @@ void CudaGPUDirectAllreduceRing<T>::run() {
     recvDataBuf_->waitRecv();
 
     // Reduce
-    fn_->callAsync(*root, *inbox_, count_, root.getStream());
+    fn_->call(root, inbox_, count_);
 
     // Wait for outbox write to complete
     sendDataBuf_->waitSend();

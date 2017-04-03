@@ -11,10 +11,11 @@
 
 #include "gloo/allreduce.h"
 #include "gloo/cuda.h"
+#include "gloo/cuda_workspace.h"
 
 namespace gloo {
 
-template <typename T>
+template <typename T, typename W = CudaHostWorkspace<T> >
 class CudaAllreduceRing : public Allreduce<T> {
  public:
   CudaAllreduceRing(
@@ -23,17 +24,29 @@ class CudaAllreduceRing : public Allreduce<T> {
       const int count,
       const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
 
-  virtual ~CudaAllreduceRing();
+  virtual ~CudaAllreduceRing() = default;
 
   virtual void run() override;
 
  protected:
+  // Both workspace types have their own initialization function.
+  template <typename U = W>
+  void init(
+      typename std::enable_if<std::is_same<U, CudaHostWorkspace<T> >::value,
+                              typename U::Pointer>::type* = 0);
+
+  template <typename U = W>
+  void init(
+      typename std::enable_if<std::is_same<U, CudaDeviceWorkspace<T> >::value,
+                              typename U::Pointer>::type* = 0);
+
   std::vector<CudaDevicePointer<T> > devicePtrs_;
-  std::vector<T*> hostPtrs_;
+  typename W::Pointer scratch_;
 
   const int count_;
   const int bytes_;
   const bool synchronizeDeviceOutputs_;
+  const CudaReductionFunction<T>* fn_;
 
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;
@@ -41,8 +54,8 @@ class CudaAllreduceRing : public Allreduce<T> {
   std::unique_ptr<LocalOp<T> > localReduceOp_;
   std::unique_ptr<LocalOp<T> > localBroadcastOp_;
 
-  T* inbox_;
-  T* outbox_;
+  typename W::Pointer inbox_;
+  typename W::Pointer outbox_;
   std::unique_ptr<transport::Buffer> sendDataBuf_;
   std::unique_ptr<transport::Buffer> recvDataBuf_;
 

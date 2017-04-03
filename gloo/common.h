@@ -38,49 +38,41 @@ enum ReductionType {
 template <typename T>
 class ReductionFunction {
  public:
+  using Function = void(T*, const T*, size_t n);
+
   static const ReductionFunction<T>* sum;
   static const ReductionFunction<T>* product;
   static const ReductionFunction<T>* min;
   static const ReductionFunction<T>* max;
 
-  virtual ~ReductionFunction() {}
-  virtual ReductionType type() const = 0;
-  virtual void call(T*, const T*, size_t n) const = 0;
-};
-
-template <typename T>
-class BuiltInReductionFunction : public ReductionFunction<T> {
-  using Fn = void(T*, const T*, size_t n);
-
- public:
-  BuiltInReductionFunction(ReductionType type, Fn* fn)
+  ReductionFunction(ReductionType type, Function* fn)
       : type_(type), fn_(fn) {}
 
-  virtual ReductionType type() const override {
+  ReductionType type() const {
     return type_;
   }
 
-  virtual void call(T* x, const T* y, size_t n) const override {
+  void call(T* x, const T* y, size_t n) const {
     fn_(x, y, n);
   }
 
  protected:
   ReductionType type_;
-  Fn* fn_;
+  Function* fn_;
 };
 
 template <typename T>
 const ReductionFunction<T>* ReductionFunction<T>::sum =
-  new BuiltInReductionFunction<T>(SUM, &::gloo::sum<T>);
+  new ReductionFunction<T>(SUM, &::gloo::sum<T>);
 template <typename T>
 const ReductionFunction<T>* ReductionFunction<T>::product =
-  new BuiltInReductionFunction<T>(PRODUCT, &::gloo::product<T>);
+  new ReductionFunction<T>(PRODUCT, &::gloo::product<T>);
 template <typename T>
 const ReductionFunction<T>* ReductionFunction<T>::min =
-  new BuiltInReductionFunction<T>(MIN, &::gloo::min<T>);
+  new ReductionFunction<T>(MIN, &::gloo::min<T>);
 template <typename T>
 const ReductionFunction<T>* ReductionFunction<T>::max =
-  new BuiltInReductionFunction<T>(MAX, &::gloo::max<T>);
+  new ReductionFunction<T>(MAX, &::gloo::max<T>);
 
 // Local operation.
 // If an algorithm uses multiple local pointers, local operations

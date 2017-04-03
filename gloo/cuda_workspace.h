@@ -9,26 +9,26 @@
 
 #pragma once
 
-#include "gloo/algorithm.h"
+#include "gloo/cuda.h"
+#include "gloo/cuda_collectives.h"
 
 namespace gloo {
 
+// CUDA workspaces
+//
+// Algorithms take a workspace template argument and if it uses the
+// CudaDeviceWorkspace can be used with a GPUDirect capable transport.
+
 template <typename T>
-class Allreduce : public Algorithm {
+class CudaHostWorkspace {
  public:
-  explicit Allreduce(
-    const std::shared_ptr<Context>& context,
-    const ReductionFunction<T>* fn = nullptr)
-      : Algorithm(context), fn_(fn) {
-    if (fn_ == nullptr) {
-      fn_= ReductionFunction<T>::sum;
-    }
-  }
+  using Pointer = CudaHostPointer<T>;
+};
 
-  virtual ~Allreduce() {};
-
- protected:
-  const ReductionFunction<T>* fn_;
+template <typename T>
+class CudaDeviceWorkspace {
+ public:
+  using Pointer = CudaDevicePointer<T>;
 };
 
 } // namespace gloo

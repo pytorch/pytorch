@@ -96,7 +96,7 @@ class NCCLOp {
 };
 
 template <typename T>
-ncclRedOp_t toReductionOp(const ReductionFunction<T>* fn) {
+ncclRedOp_t toReductionOp(const CudaReductionFunction<T>* fn) {
   switch (fn->type()) {
     case SUM:
       return ncclSum;
@@ -116,7 +116,7 @@ class ReduceOp : public NCCLOp<T> {
  public:
   ReduceOp(
     NCCLExecution<T>&& execution,
-    const ReductionFunction<T>* fn,
+    const CudaReductionFunction<T>* fn,
     const int root)
       : NCCLOp<T>(std::move(execution)), op_(toReductionOp(fn)), root_(root) {
     for (const auto& element : execution.elements) {
@@ -139,7 +139,7 @@ class AllreduceOp : public NCCLOp<T> {
  public:
   AllreduceOp(
     NCCLExecution<T>&& execution,
-    const ReductionFunction<T>* fn)
+    const CudaReductionFunction<T>* fn)
       : NCCLOp<T>(std::move(execution)), op_(toReductionOp(fn)) {
     for (const auto& element : execution.elements) {
       GLOO_ENFORCE_EQ(
@@ -160,7 +160,7 @@ class ReduceScatterOp : public NCCLOp<T> {
  public:
   ReduceScatterOp(
     NCCLExecution<T>&& execution,
-    const ReductionFunction<T>* fn)
+    const CudaReductionFunction<T>* fn)
       : NCCLOp<T>(std::move(execution)), op_(toReductionOp(fn)) {
     for (const auto& element : execution.elements) {
       GLOO_ENFORCE_EQ(
