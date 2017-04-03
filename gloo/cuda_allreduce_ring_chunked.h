@@ -9,13 +9,13 @@
 
 #pragma once
 
-#include "gloo/allreduce.h"
+#include "gloo/algorithm.h"
 #include "gloo/cuda.h"
 
 namespace gloo {
 
 template <typename T>
-class CudaAllreduceRingChunked : public Allreduce<T> {
+class CudaAllreduceRingChunked : public Algorithm {
  public:
   CudaAllreduceRingChunked(
       const std::shared_ptr<Context>& context,

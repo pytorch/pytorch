@@ -51,7 +51,7 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     const std::vector<T*>& ptrs,
     const int count,
     const std::vector<cudaStream_t>& streams)
-    : Allreduce<T>(context),
+    : Algorithm(context),
       count_(count),
       bytes_(count * sizeof(T)),
       synchronizeDeviceOutputs_(streams.size() == 0),
@@ -182,7 +182,7 @@ void CudaAllreduceRingChunked<T>::run() {
         recvDataBuf_[chunkOffset & 1]->waitRecv();
 
         // Reduce
-        this->fn_->call(
+        fn_->call(
           context.hostPtr, inbox_[chunkOffset & 1], context.length);
       }
     } else {

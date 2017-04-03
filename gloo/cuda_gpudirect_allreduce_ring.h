@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include "gloo/allreduce.h"
+#include "gloo/algorithm.h"
 #include "gloo/cuda.h"
 
 namespace gloo {
@@ -23,7 +23,7 @@ struct BroadcastOp;
 } // namespace nccl
 
 template <typename T>
-class CudaGPUDirectAllreduceRing : public Allreduce<T> {
+class CudaGPUDirectAllreduceRing : public Algorithm {
  public:
   CudaGPUDirectAllreduceRing(
     const std::shared_ptr<Context>& context,

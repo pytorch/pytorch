@@ -9,14 +9,14 @@
 
 #pragma once
 
-#include "gloo/allreduce.h"
+#include "gloo/algorithm.h"
 #include "gloo/cuda.h"
 #include "gloo/cuda_workspace.h"
 
 namespace gloo {
 
 template <typename T, typename W = CudaHostWorkspace<T> >
-class CudaAllreduceRing : public Allreduce<T> {
+class CudaAllreduceRing : public Algorithm {
  public:
   CudaAllreduceRing(
       const std::shared_ptr<Context>& context,

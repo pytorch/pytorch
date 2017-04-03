@@ -12,23 +12,24 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "gloo/allreduce.h"
+#include "gloo/algorithm.h"
 #include "gloo/context.h"
 
 namespace gloo {
 
 template <typename T>
-class AllreduceRingChunked : public Allreduce<T> {
+class AllreduceRingChunked : public Algorithm {
  public:
   AllreduceRingChunked(
       const std::shared_ptr<Context>& context,
       const std::vector<T*>& ptrs,
       const int count,
-      const ReductionFunction<T>* fn = nullptr)
-      : Allreduce<T>(context, fn),
+      const ReductionFunction<T>* fn = ReductionFunction<T>::sum)
+      : Algorithm(context),
         ptrs_(ptrs),
         count_(count),
         bytes_(count_ * sizeof(T)),
+        fn_(fn),
         leftPair_(this->getLeftPair()),
         rightPair_(this->getRightPair()) {
     // Use chunks of no less than 1024 bytes (256 * sizeof(float))
@@ -75,7 +76,7 @@ class AllreduceRingChunked : public Allreduce<T> {
   void run() {
     // Reduce specified pointers into ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
-      this->fn_->call(ptrs_[0], ptrs_[i], count_);
+      fn_->call(ptrs_[0], ptrs_[i], count_);
     }
 
     // Kick off copying initial chunks
@@ -122,7 +123,7 @@ class AllreduceRingChunked : public Allreduce<T> {
 
       // Reduce
       if (length > 0) {
-        this->fn_->call(&ptrs_[0][offset], inbox_[chunkOffset & 1], length);
+        fn_->call(&ptrs_[0][offset], inbox_[chunkOffset & 1], length);
       }
 
       // Send notification to node on the left that
@@ -218,6 +219,7 @@ class AllreduceRingChunked : public Allreduce<T> {
   std::vector<T*> ptrs_;
   const int count_;
   const int bytes_;
+  const ReductionFunction<T>* fn_;
 
   std::unique_ptr<transport::Pair>& leftPair_;
   std::unique_ptr<transport::Pair>& rightPair_;

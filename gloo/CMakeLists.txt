@@ -12,7 +12,6 @@ list(APPEND GLOO_SRCS
 
 list(APPEND GLOO_HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/allreduce.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/allreduce_ring_chunked.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/allreduce_ring.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/barrier_all_to_all.h"

@@ -20,7 +20,7 @@ CudaAllreduceRing<T, W>::CudaAllreduceRing(
   const std::vector<T*>& ptrs,
   const int count,
   const std::vector<cudaStream_t>& streams)
-    : Allreduce<T>(context),
+    : Algorithm(context),
       count_(count),
       bytes_(count_ * sizeof(T)),
       synchronizeDeviceOutputs_(streams.size() == 0),
