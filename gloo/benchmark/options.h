@@ -44,6 +44,7 @@ struct options {
   int warmupIterationCount = 5;
   bool showNanos = false;
   int inputs = 1;
+  bool gpuDirect = false;
 };
 
 struct options parseOptions(int argc, char** argv);

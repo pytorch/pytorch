@@ -7,13 +7,13 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include <map>
 #include <memory>
 
 #include "gloo/benchmark/benchmark.h"
 #include "gloo/benchmark/runner.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
-#include "gloo/cuda_gpudirect_allreduce_ring.h"
 #include "gloo/cuda_private.h"
 #include "gloo/common/common.h"
 #include "gloo/common/logging.h"
@@ -88,25 +88,47 @@ class CudaAllreduceBenchmark : public CudaBenchmark {
 int main(int argc, char** argv) {
   auto x = benchmark::parseOptions(argc, argv);
 
+  std::map<std::string, Runner::BenchmarkFn> hostBenchmarks = {
+    {
+      "cuda_allreduce_ring",
+      [&](std::shared_ptr<Context>& context) {
+        using Algorithm = CudaAllreduceRing<float, CudaHostWorkspace<float> >;
+        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+        return gloo::make_unique<Benchmark>(context, x);
+      },
+    },
+    {
+      "cuda_allreduce_ring_chunked",
+      [&](std::shared_ptr<Context>& context) {
+        using Algorithm = CudaAllreduceRingChunked<float>;
+        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+        return gloo::make_unique<Benchmark>(context, x);
+      },
+    },
+  };
+
+  std::map<std::string, Runner::BenchmarkFn> deviceBenchmarks = {
+    {
+      "cuda_allreduce_ring",
+      [&](std::shared_ptr<Context>& context) {
+        using Algorithm = CudaAllreduceRing<float, CudaDeviceWorkspace<float> >;
+        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+        return gloo::make_unique<Benchmark>(context, x);
+      },
+    },
+  };
+
   Runner::BenchmarkFn fn;
-  if (x.benchmark == "cuda_allreduce_ring") {
-    fn = [&](std::shared_ptr<Context>& context) {
-      return gloo::make_unique<
-        CudaAllreduceBenchmark<
-          CudaAllreduceRing<float>>>(context, x);
-    };
-  } else if (x.benchmark == "cuda_allreduce_ring_chunked") {
-    fn = [&](std::shared_ptr<Context>& context) {
-      return gloo::make_unique<
-        CudaAllreduceBenchmark<
-          CudaAllreduceRingChunked<float>>>(context, x);
-    };
-  } else if (x.benchmark == "cuda_gpudirect_allreduce_ring") {
-    fn = [&](std::shared_ptr<Context>& context) {
-      return gloo::make_unique<
-        CudaAllreduceBenchmark<
-          CudaGPUDirectAllreduceRing<float>>>(context, x);
-    };
+  if (x.gpuDirect) {
+    auto it = deviceBenchmarks.find(x.benchmark);
+    if (it != deviceBenchmarks.end()) {
+      fn = it->second;
+    }
+  } else {
+    auto it = hostBenchmarks.find(x.benchmark);
+    if (it != hostBenchmarks.end()) {
+      fn = it->second;
+    }
   }
 
   if (!fn) {
