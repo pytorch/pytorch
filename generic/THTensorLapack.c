@@ -1055,7 +1055,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
     THTensor_(select)(rbi, rb_, 0, batch);
     THIntTensor_select(pivoti, pivots, 0, batch);
 
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_FLOAT)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     int info;
     THLapack_(getrs)('N', n, 1, THTensor_(data)(ai), lda,
                      THIntTensor_data(pivoti), THTensor_(data)(rbi),
