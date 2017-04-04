@@ -23,6 +23,7 @@ class SparseToDenseOp final : public Operator<Context> {
         this, Input(INDICES));
   }
 
+ private:
   template <typename TInd>
   int GetOutputFirstDim(
       const TInd* sparse_indices_vec,
@@ -46,6 +47,18 @@ class SparseToDenseOp final : public Operator<Context> {
 
   template <typename TInd>
   bool DoRunWithType() {
+    return DispatchHelper<
+        TensorTypes2<
+            float,
+            double,
+            int32_t,
+            int64_t,
+            GenericTensorImplementation>,
+        TInd>::call(this, Input(VALUES));
+  }
+
+  template <typename TInd, typename TData>
+  bool DoRunWithType2() {
     auto& sparse_indices = Input(INDICES);
     CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
     auto& sparse_values = Input(VALUES);
@@ -62,29 +75,32 @@ class SparseToDenseOp final : public Operator<Context> {
     auto* output = Output(0);
     output->Resize(shape);
 
-    char* output_data =
-        static_cast<char*>(output->raw_mutable_data(sparse_values.meta()));
-    if (sparse_values.meta().copy() == nullptr) {
-      // If it is not nullptr, the tensor is already initialized by contructor.
-      math::Set(output->nbytes(), '\0', output_data, &context_);
-    }
-    const int block_nitems = sparse_values.size_from_dim(1);
-    const int block_nbytes = block_nitems * sparse_values.itemsize();
-    const char* sparse_values_vec =
-        static_cast<const char*>(sparse_values.raw_data());
+    TData* output_data = output->template mutable_data<TData>();
+    memset(output_data, 0, output->nbytes());
+    const auto block_nitems = sparse_values.size_from_dim(1);
+    const TData* sparse_values_vec = sparse_values.template data<TData>();
 
     for (int32_t i = 0; i < sparse_indices_len; i++) {
       const TInd idx = sparse_indices_vec[i];
       CAFFE_ENFORCE_GE(idx, 0);
       CAFFE_ENFORCE_LT(idx, output_first_dim);
-      context_.template CopyItems<Context, Context>(
-          sparse_values.meta(),
+      math::Add(
           block_nitems,
-          sparse_values_vec + i * block_nbytes,
-          output_data + idx * block_nbytes);
+          output_data + idx * block_nitems,
+          sparse_values_vec + i * block_nitems,
+          output_data + idx * block_nitems,
+          &context_);
     }
-
     return true;
+  }
+
+  template <typename TInd>
+  bool DoRunWithOtherType2() {
+    CAFFE_THROW(
+        "SparseToDense is not implemented on tensor of type ",
+        Input(VALUES).meta().name(),
+        "Consider adding it a type in the list DispatchHelper or implementing "
+        "a generic version (which won't work for duplicated indices though)");
   }
 
  private:

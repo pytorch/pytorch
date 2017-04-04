@@ -30,6 +30,19 @@ def _tensor_and_prefix(draw, dtype, elements, min_dim=1, max_dim=4, **kwargs):
             draw(hu.arrays(extra_, dtype, elements)))
 
 
+def _tensor_and_indices(min_dim=1, max_dim=4, dtype=np.float32,
+                        elements=None, **kwargs):
+    """ generates a tensor and a list of indices of larger tensor of same dim"""
+    data_dims_ = st.lists(hu.dims(**kwargs), min_size=min_dim, max_size=max_dim)
+    original_dim = st.integers(min_value=2, max_value=10)
+    return st.tuples(data_dims_, original_dim).flatmap(lambda pair: st.tuples(
+        st.just(pair[1]),  # original dimension
+        hu.arrays(pair[0], dtype, elements),  # data tensor
+        hu.arrays(pair[0][0], dtype=np.int64, elements=st.integers(
+            min_value=0, max_value=pair[1] - 1)),
+    ))
+
+
 _NUMPY_TYPE_TO_ENUM = {
     np.float32: core.DataType.FLOAT,
     np.int32: core.DataType.INT32,
@@ -2103,25 +2116,20 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @given(X=hu.tensor(min_dim=1,
-                       max_dim=4,
-                       elements=st.floats(min_value=-100, max_value=100)),
-           extra_dim=st.integers(0, 5),
-           **hu.gcs_cpu_only)
-    def test_sparse_to_dense(self, X, extra_dim, gc, dc):
-        N = X.shape[0]
-        first_dim = N + extra_dim
-        D = np.random.uniform(0, 1, size=(first_dim, 3))
-        I = np.random.randint(first_dim, size=N)
+    @given(inp=_dtypes().flatmap(lambda dt: _tensor_and_indices(
+        elements=st.floats(min_value=0.5, max_value=10), dtype=dt)),
+        **hu.gcs_cpu_only)
+    def test_sparse_to_dense(self, inp, gc, dc):
+        first_dim, X, I = inp
+        # values don't matter
+        D = np.random.uniform(0, 1, size=(first_dim,) + X.shape[1:])
 
         op = core.CreateOperator("SparseToDense", ["I", "X", "D"], ["Y"])
 
         def sparse_to_dense(I, X, D):
-            O = np.zeros([first_dim] + list(X.shape[1:]))
-            if len(O.shape) == 1:
-                O[I] = X
-            else:
-                O[I, :] = X
+            O = np.zeros(D.shape)
+            for i, p in enumerate(I):
+                O[p] += X[i]
             return [O]
 
         self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
