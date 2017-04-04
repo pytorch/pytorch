@@ -44,8 +44,7 @@ std::unique_ptr<rpc::RPCMessage> receiveMessage(int socket) {
 MasterCommandChannel::MasterCommandChannel()
   : _rank(0)
   , _poll_events(nullptr)
-  , _exiting(false)
-  , _started(false)
+  , _error_pipe(-1)
   , _error(nullptr)
 {
   rank_type world_size;
@@ -55,10 +54,12 @@ MasterCommandChannel::MasterCommandChannel()
 }
 
 MasterCommandChannel::~MasterCommandChannel() {
-  _exiting = true;
-
-  if (_started)
+  if (_error_thread.joinable()) {
+    ::write(_error_pipe, "exit", 4);
     _error_thread.join();
+
+    ::close(_error_pipe);
+  }
 
   for (auto socket : _sockets) {
     if (socket != -1)
@@ -87,9 +88,11 @@ bool MasterCommandChannel::init() {
 
    // close listen socket
   ::close(_sockets[0]);
-  _sockets[0] = -1;
 
-  _started = true;
+  int fd[2];
+  SYSCHECK(::pipe(fd));
+  _sockets[0] = fd[0];
+  _error_pipe = fd[1];
   _error_thread = std::thread(&MasterCommandChannel::errorHandler, this);
   return true;
 }
@@ -97,7 +100,7 @@ bool MasterCommandChannel::init() {
 void MasterCommandChannel::errorHandler() {
   while (true) {
     auto error = recvError();
-    if (_exiting) {
+    if (std::get<0>(error) == 0) {
       return;
     }
 
@@ -136,22 +139,14 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
     _poll_events[rank].revents = 0;
   }
 
-  try {
-    int ret = 0;
-    while (ret == 0) { // loop until there is data to read
-      SYSCHECK(ret = ::poll(_poll_events.get(), _sockets.size(), 500))
-
-      if (_exiting) {
-        return std::make_tuple(0, "");
-      }
-    }
-  } catch (const std::exception& e) {
-    return std::make_tuple(0, "poll: " + std::string(e.what()));
-  }
-
+  SYSCHECK(::poll(_poll_events.get(), _sockets.size(), -1))
   for (std::size_t rank = 0; rank < _sockets.size(); ++rank) {
     if (this->_poll_events[rank].revents == 0)
       continue;
+
+    if (rank == 0) { // we are notified by master to end
+      return std::make_tuple(0, "");
+    }
 
     if (_poll_events[rank].revents ^ POLLIN) {
       _poll_events[rank].fd = -1; // mark worker as ignored
@@ -163,7 +158,7 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
       std::uint64_t error_length;
       recv_bytes<std::uint64_t>(_poll_events[rank].fd, &error_length, 1);
 
-      std::unique_ptr<char[]> error(new char[error_length + 1]);
+      std::unique_ptr<char[]> error(new char[error_length]);
       recv_bytes<char>(_poll_events[rank].fd, error.get(), error_length);
       return std::make_tuple(rank, std::string(error.get(), error_length));
     } catch (const std::exception& e) {

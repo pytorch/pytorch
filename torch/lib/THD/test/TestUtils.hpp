@@ -4,9 +4,30 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <vector>
+
+struct Barrier {
+  Barrier() : _count(0) {}
+  Barrier(std::size_t count) : _count(count) {}
+
+  void wait() {
+    std::unique_lock<std::mutex> lock{_mutex};
+    if (--_count == 0) {
+      _cv.notify_all();
+    } else {
+      _cv.wait(lock);
+    }
+  }
+
+private:
+  std::mutex _mutex;
+  std::condition_variable _cv;
+  std::size_t _count;
+};
 
 template<typename T>
 typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type

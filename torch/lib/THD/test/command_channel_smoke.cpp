@@ -1,5 +1,6 @@
 #include "../master_worker/common/CommandChannel.hpp"
 #include "../base/ChannelEnvVars.hpp"
+#include "TestUtils.hpp"
 
 #include <cassert>
 #include <cerrno>
@@ -14,6 +15,7 @@ using namespace thd;
 
 std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
+std::unique_ptr<Barrier> g_barrier;
 
 void init_worker(const int& rank, const std::string& master_addr) {
   g_mutex.lock();
@@ -32,10 +34,11 @@ void init_worker(const int& rank, const std::string& master_addr) {
   assert(expected.compare(msg.get()->bytes().to_string()) == 0);
 
   /*
-   * We need to sleep for a while because instant exiting will cause closing
-   * the socket and in result error in `errorHandler` function.
+   * We need to wait until master will do all receiving and sending. This
+   * is because when worker is destroyed it closes all sockets what results in
+   * triggering `poll` function in master's error_handler and throwing exception.
    */
-  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  g_barrier->wait();
 }
 
 void init_master(int world_size, const std::string& master_port) {
@@ -59,6 +62,8 @@ void init_master(int world_size, const std::string& master_port) {
     channel->sendMessage(std::move(rpc_msg), worker_rank);
   }
 
+  g_barrier->wait();
+
   // wait for all workers to finish
   for (auto& worker : g_all_workers) {
     worker.join();
@@ -67,6 +72,7 @@ void init_master(int world_size, const std::string& master_port) {
 
 void run_test_case(const std::string& name, int world_size,
                    const std::string& master_addr, const std::string& master_port) {
+  g_barrier.reset(new Barrier(world_size));
   for (int rank = 1; rank < world_size; ++rank) {
     g_all_workers.push_back(
       std::thread(init_worker, rank, master_addr + ":" + master_port)
