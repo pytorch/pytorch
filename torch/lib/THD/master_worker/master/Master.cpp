@@ -19,17 +19,14 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
   if (!THDProcessGroupInit(channel_type)) return false;
 
   if (dataChannel->getRank() > 0) {
-    /* Worker initialization. Can fail at start but then goes into infinite loop
-     * in which waits for commands from master.
+    /*
+     * Worker initialization. If initialization succeeds it goes into
+     * infinite loop in which waits for commands from master.
      */
     THDWorkerMain();
     return false;
   }
 
-  /* Master initialization. We need to make sure that all connections which
-   * are created in `init` function are set up because only then we can start
-   * `masterErrorThread`.
-   */
   masterCommandChannel.reset(new MasterCommandChannel());
   if (!masterCommandChannel->init()) {
     return false;
