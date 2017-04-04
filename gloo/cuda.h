@@ -22,6 +22,12 @@ namespace gloo {
 
 extern const cudaStream_t kStreamNotSet;
 
+// Forward declarations
+template <typename T>
+class CudaHostPointer;
+template<typename T>
+class CudaReductionFunction;
+
 class CudaShared {
  public:
   // Get the mutex used to synchronize CUDA and NCCL operations
@@ -37,10 +43,6 @@ class CudaShared {
  private:
   static std::atomic<std::mutex*> mutex_;
 };
-
-// Forward declaration
-template <typename T>
-class CudaHostPointer;
 
 template<typename T>
 class CudaDevicePointer {
@@ -66,6 +68,10 @@ class CudaDevicePointer {
 
   // Move assignment operator
   CudaDevicePointer& operator=(CudaDevicePointer&&);
+
+  bool operator ==(const CudaDevicePointer<T>& other) const {
+    return device_ == other.device_ && count_ == other.count_;
+  }
 
   T* operator*() const {
     return device_;
@@ -107,6 +113,20 @@ class CudaDevicePointer {
 
   // Wait for copy to complete.
   void wait();
+
+  // Call reduction function against this pointer
+  void reduceAsync(
+      const CudaReductionFunction<T>* fn,
+      CudaDevicePointer<T>& src);
+
+  // Create range into this pointer
+  CudaDevicePointer<T> range(size_t offset, size_t count) {
+    GLOO_ENFORCE_LE(offset + count, count_);
+    CudaDevicePointer<T> p(device_ + offset, count, false);
+    p.stream_ = stream_;
+    p.streamOwner_ = false;
+    return p;
+  }
 
  protected:
   // Instances must be created through static functions
@@ -158,6 +178,10 @@ class CudaHostPointer {
   // Move assignment operator
   CudaHostPointer& operator=(CudaHostPointer&&);
 
+  bool operator ==(const CudaHostPointer<T>& other) const {
+    return host_ == other.host_ && count_ == other.count_;
+  }
+
   T* operator*() const {
     return host_;
   }
@@ -174,6 +198,18 @@ class CudaHostPointer {
 
   // Wait for copy to complete.
   void wait();
+
+  // Call reduction function against this pointer
+  void reduceAsync(
+      const CudaReductionFunction<T>* fn,
+      CudaHostPointer<T>& src);
+
+  // Create range into this pointer
+  CudaHostPointer<T> range(size_t offset, size_t count) {
+    GLOO_ENFORCE_LE(offset + count, count_);
+    CudaHostPointer<T> p(host_ + offset, count, false);
+    return p;
+  }
 
  protected:
   // Instances must be created through static functions
@@ -260,6 +296,9 @@ class CudaReductionFunction {
   const ReductionType type_;
   DeviceFunction* deviceFn_;
   HostFunction* hostFn_;
+
+  friend class CudaDevicePointer<T>;
+  friend class CudaHostPointer<T>;
 };
 
 template <typename T>

@@ -9,24 +9,20 @@
 
 #include "gloo/cuda_allreduce_ring_chunked.h"
 
-#include <string.h>
-
 #include "gloo/cuda_collectives.h"
 #include "gloo/cuda_private.h"
 #include "gloo/nccl/nccl.h"
 
 namespace gloo {
 
-template <typename T>
-struct CudaAllreduceRingChunked<T>::ChunkContext {
+template <typename T, typename W>
+struct CudaAllreduceRingChunked<T, W>::ChunkContext {
   ChunkContext(
-      CudaDevicePointer<T>&& rootDevicePtr,
-      T* hostPtr,
+      typename W::Pointer&& scratch,
       std::unique_ptr<LocalOp<T> >&& reduceOp,
       std::unique_ptr<LocalOp<T> >&& broadcastOp)
-      : rootDevicePtr(std::move(rootDevicePtr)),
-        hostPtr(hostPtr),
-        length(rootDevicePtr.getCount()),
+      : scratch(std::move(scratch)),
+        length(this->scratch.getCount()),
         reduceOp(std::move(reduceOp)),
         broadcastOp(std::move(broadcastOp)) {}
   ChunkContext(ChunkContext&& other) = default;
@@ -35,18 +31,18 @@ struct CudaAllreduceRingChunked<T>::ChunkContext {
   ChunkContext(const ChunkContext&) = delete;
   ChunkContext& operator=(const ChunkContext&) = delete;
 
-  // Pointers for copying between the device and host
-  CudaDevicePointer<T> rootDevicePtr;
-  T* hostPtr;
+  // Pointer to chunk in scratch buffer
+  typename W::Pointer scratch;
   const size_t length;
+
   // The operations used for local device reduce before running the
   // algorithm and local device broadcast after.
   std::unique_ptr<LocalOp<T> > reduceOp;
   std::unique_ptr<LocalOp<T> > broadcastOp;
 };
 
-template <typename T>
-CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
+template <typename T, typename W>
+CudaAllreduceRingChunked<T, W>::CudaAllreduceRingChunked(
     const std::shared_ptr<Context>& context,
     const std::vector<T*>& ptrs,
     const int count,
@@ -80,12 +76,8 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
   chunkSize_ = std::max(minSize, (count_ + chunks_ - 1) / chunks_);
   chunkBytes_ = chunkSize_ * sizeof(T);
 
-  // Setup host and device memory
-  {
-    // Synchronize memory allocation with NCCL operations
-    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-    CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
-  }
+  // Workspace specific initialization (see below)
+  init();
 
   for (auto offset = 0; offset < count_; offset += chunkSize_) {
     auto length = chunkSize_;
@@ -96,34 +88,22 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
       length = count_ - offset;
     }
 
-    auto reduceOp = cudaDeviceReduce(devicePtrs_, fn_, 0, offset, length);
-    auto broadcastOp = cudaDeviceBroadcast(devicePtrs_, 0, offset, length);
-
-    // Create a device pointer for the chunk on device ptrs[0]. We will use the
-    // associated stream to serialize NCCL operations and device-host memcpys.
-    // The NCCL operation will synchronize the independent device streams with
-    // this master stream.
-    CudaDevicePointer<T> rootDevicePtr = CudaDevicePointer<T>::create(
-        *devicePtrs_[0] + offset, length, devicePtrs_[0].getStream());
-    chunkContext_.push_back(ChunkContext(
-        std::move(rootDevicePtr),
-        hostPtr_ + offset,
-        std::move(reduceOp),
-        std::move(broadcastOp)));
-  }
-
-  // Allocate inboxes
-  for (auto i = 0; i < 2; i++) {
-    inbox_[i] = static_cast<T*>(malloc(bytes_));
+    chunkContext_.push_back(
+        ChunkContext(
+            scratch_.range(offset, length),
+            cudaDeviceReduce(devicePtrs_, scratch_, fn_, offset, length),
+            cudaDeviceBroadcast(devicePtrs_, scratch_, offset, length)));
   }
 
   for (auto i = 0; i < 2; i++) {
     auto slot = this->context_->nextSlot();
 
     // Buffer to send to (rank+1).
-    sendDataBuf_[i] = rightPair_->createSendBuffer(slot, hostPtr_, bytes_);
+    sendDataBuf_[i] =
+      rightPair_->createSendBuffer(slot, *scratch_, bytes_);
     // Buffer that (rank-1) writes to.
-    recvDataBuf_[i] = leftPair_->createRecvBuffer(slot, inbox_[i], chunkBytes_);
+    recvDataBuf_[i] =
+      leftPair_->createRecvBuffer(slot, *inbox_[i], chunkBytes_);
   }
 
   // Dummy buffers for localized barrier.
@@ -137,32 +117,22 @@ CudaAllreduceRingChunked<T>::CudaAllreduceRingChunked(
     rightPair_->createRecvBuffer(notificationSlot, &dummy_, sizeof(dummy_));
 }
 
-template <typename T>
-CudaAllreduceRingChunked<T>::~CudaAllreduceRingChunked() {
-  {
-    // Synchronize memory allocation with NCCL operations
-    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-    CUDA_CHECK(cudaFreeHost(hostPtr_));
-  }
-  for (auto i = 0; i < 2; i++) {
-    if (inbox_[i] != nullptr) {
-      free(inbox_[i]);
-    }
-  }
+template <typename T, typename W>
+CudaAllreduceRingChunked<T, W>::~CudaAllreduceRingChunked() {
 }
 
-template <typename T>
-void CudaAllreduceRingChunked<T>::run() {
+template <typename T, typename W>
+void CudaAllreduceRingChunked<T, W>::run() {
   CudaDeviceGuard guard;
 
-  // Kick off local reduction for each chunk, then copy result to host.
+  // Kick off local reduction for each chunk.
+  // The result is stored in scratch_ at the corresponding chunk offset.
   // Make sure to iterate over the chunks in the order they will be sent.
   for (auto i = 0; i < chunks_; i++) {
     const auto chunkOffset = getChunkOffset(i);
     if (chunkOffset < chunkContext_.size()) {
       auto& context = chunkContext_[chunkOffset];
       context.reduceOp->runAsync();
-      context.rootDevicePtr.copyToHostAsync(context.hostPtr);
     }
   }
 
@@ -173,8 +143,10 @@ void CudaAllreduceRingChunked<T>::run() {
     if (chunkOffset < chunkContext_.size()) {
       auto& context = chunkContext_[chunkOffset];
 
-      // Wait for the local reduction and copy to host memory to complete
-      context.rootDevicePtr.wait();
+      // Wait for the local reduction to complete
+      // When using the host workspace this also makes sure the reduction
+      // result is copied into the host side scratch buffer.
+      context.reduceOp->wait();
 
       // Reduce chunk from previous round. Nothing to do for initial rounds.
       if (round >= 2) {
@@ -182,8 +154,8 @@ void CudaAllreduceRingChunked<T>::run() {
         recvDataBuf_[chunkOffset & 1]->waitRecv();
 
         // Reduce
-        fn_->call(
-          context.hostPtr, inbox_[chunkOffset & 1], context.length);
+        context.scratch.reduceAsync(fn_, inbox_[chunkOffset & 1]);
+        context.scratch.wait();
       }
     } else {
       // Empty chunk but still need to wait on the inbox write to ensure the
@@ -221,15 +193,11 @@ void CudaAllreduceRingChunked<T>::run() {
         // Wait for inbox write to complete
         recvDataBuf_[chunkOffset & 1]->waitRecv();
 
-        // Copy from inbox
-        memcpy(
-            context.hostPtr,
-            inbox_[chunkOffset & 1],
-            context.length * sizeof(T));
+        // Copy chunk from inbox to scratch space
+        context.scratch.copyFromAsync(inbox_[chunkOffset & 1]);
       }
 
       // Broadcast chunk to devices. Do this in all rounds with non-empty chunk.
-      context.rootDevicePtr.copyFromHostAsync(context.hostPtr);
       context.broadcastOp->runAsync();
     } else {
       // Empty chunk but still need to wait on the inbox write to ensure the
@@ -271,8 +239,8 @@ void CudaAllreduceRingChunked<T>::run() {
   }
 }
 
-template <typename T>
-int CudaAllreduceRingChunked<T>::getChunkOffset(int round) {
+template <typename T, typename W>
+int CudaAllreduceRingChunked<T, W>::getChunkOffset(int round) {
   // Imagine a square grid with chunks of memory laid out vertically and nodes
   // horizontally. The diagonal of this grid marks which nodes sends which
   // chunks of memory in the prelude. Processing happens by moving this
@@ -290,8 +258,8 @@ int CudaAllreduceRingChunked<T>::getChunkOffset(int round) {
       chunks_;
 }
 
-template <typename T>
-void CudaAllreduceRingChunked<T>::copyChunkAtOffset(int chunkOffset) {
+template <typename T, typename W>
+void CudaAllreduceRingChunked<T, W>::copyChunkAtOffset(int chunkOffset) {
   // Populate inbox of next participant in the ring.
   size_t offset;
   size_t length;
@@ -312,7 +280,41 @@ void CudaAllreduceRingChunked<T>::copyChunkAtOffset(int chunkOffset) {
   sendDataBuf_[chunkOffset & 0x1]->send(offset * sizeof(T), length * sizeof(T));
 }
 
-// Instantiate template
-template class CudaAllreduceRingChunked<float>;
+template <typename T, typename W>
+template <typename U>
+void CudaAllreduceRingChunked<T, W>::init(
+    typename std::enable_if<std::is_same<U, CudaHostWorkspace<T> >::value,
+    typename U::Pointer>::type*) {
+  // Since reduction is executed on the CPU, the scratch space
+  // where the reduction is accumulated is a new host side buffer.
+  scratch_ = W::Pointer::alloc(count_);
+
+  // Allocate inboxes
+  for (auto i = 0; i < 2; i++) {
+    inbox_[i] = W::Pointer::alloc(chunkSize_);
+  }
+}
+
+template <typename T, typename W>
+template <typename U>
+void CudaAllreduceRingChunked<T, W>::init(
+    typename std::enable_if<std::is_same<U, CudaDeviceWorkspace<T> >::value,
+    typename U::Pointer>::type*) {
+  // Since reduction is executed on the GPU, the scratch space
+  // can use an existing input buffer to accumulate.
+  auto& ptr = devicePtrs_[0];
+  auto count = ptr.getCount();
+  auto stream = ptr.getStream();
+  scratch_ = CudaDevicePointer<T>::create(*ptr, count, stream);
+
+  // Allocate inboxes
+  for (auto i = 0; i < 2; i++) {
+    inbox_[i] = W::Pointer::alloc(chunkSize_, stream);
+  }
+}
+
+// Instantiate templates
+template class CudaAllreduceRingChunked<float, CudaHostWorkspace<float> >;
+template class CudaAllreduceRingChunked<float, CudaDeviceWorkspace<float> >;
 
 } // namespace gloo

@@ -148,8 +148,8 @@ void CudaAllreduceRing<T, W>::init(
   // Run local reduction and broadcast on device.
   // When running with a device workspace we intend to never leave the device.
   if (devicePtrs_.size() > 1) {
-    localReduceOp_ = cudaDeviceReduce(devicePtrs_, fn_, 0);
-    localBroadcastOp_ = cudaDeviceBroadcast(devicePtrs_, 0);
+    localReduceOp_ = cudaDeviceReduce(devicePtrs_, scratch_, fn_, 0, count_);
+    localBroadcastOp_ = cudaDeviceBroadcast(devicePtrs_, scratch_, 0, count_);
   }
 
   // Inbox/outbox must be colocated with scratch buffer to avoid

@@ -11,10 +11,11 @@
 
 #include "gloo/algorithm.h"
 #include "gloo/cuda.h"
+#include "gloo/cuda_workspace.h"
 
 namespace gloo {
 
-template <typename T>
+template <typename T, typename W = CudaHostWorkspace<T> >
 class CudaAllreduceRingChunked : public Algorithm {
  public:
   CudaAllreduceRingChunked(
@@ -31,8 +32,20 @@ class CudaAllreduceRingChunked : public Algorithm {
   int getChunkOffset(int round);
   void copyChunkAtOffset(int chunkOffset);
 
-  std::vector<CudaDevicePointer<T>> devicePtrs_;
-  T* hostPtr_;
+  // Both workspace types have their own initialization function.
+  template <typename U = W>
+  void init(
+    typename std::enable_if<std::is_same<U, CudaHostWorkspace<T> >::value,
+    typename U::Pointer>::type* = 0);
+
+  template <typename U = W>
+  void init(
+    typename std::enable_if<std::is_same<U, CudaDeviceWorkspace<T> >::value,
+    typename U::Pointer>::type* = 0);
+
+  std::vector<CudaDevicePointer<T> > devicePtrs_;
+  typename W::Pointer scratch_;
+
   const int count_;
   const int bytes_;
   const bool synchronizeDeviceOutputs_;
@@ -48,7 +61,7 @@ class CudaAllreduceRingChunked : public Algorithm {
   struct ChunkContext;
   std::vector<ChunkContext> chunkContext_;
 
-  std::array<T*, 2> inbox_;
+  std::array<typename W::Pointer, 2> inbox_;
   std::array<std::unique_ptr<transport::Buffer>, 2> sendDataBuf_;
   std::array<std::unique_ptr<transport::Buffer>, 2> recvDataBuf_;
 

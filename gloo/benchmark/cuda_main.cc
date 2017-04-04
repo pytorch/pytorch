@@ -15,7 +15,6 @@
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
 #include "gloo/cuda_private.h"
-#include "gloo/common/common.h"
 #include "gloo/common/logging.h"
 
 using namespace gloo;
@@ -112,6 +111,15 @@ int main(int argc, char** argv) {
       "cuda_allreduce_ring",
       [&](std::shared_ptr<Context>& context) {
         using Algorithm = CudaAllreduceRing<float, CudaDeviceWorkspace<float> >;
+        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+        return gloo::make_unique<Benchmark>(context, x);
+      },
+    },
+    {
+      "cuda_allreduce_ring_chunked",
+      [&](std::shared_ptr<Context>& context) {
+        using Algorithm =
+            CudaAllreduceRingChunked<float, CudaDeviceWorkspace<float> >;
         using Benchmark = CudaAllreduceBenchmark<Algorithm>;
         return gloo::make_unique<Benchmark>(context, x);
       },

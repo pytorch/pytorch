@@ -72,7 +72,8 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
 
   // Setup local broadcast if needed
   if (devicePtrs_.size() > 1) {
-    localBroadcastOp_ = cudaDeviceBroadcast(devicePtrs_, rootPointerRank);
+    localBroadcastOp_ =
+      cudaDeviceBroadcast(devicePtrs_, devicePtrs_[0], 0, count_);
   }
 }
 
