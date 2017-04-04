@@ -4438,8 +4438,8 @@ Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3)
-    >>> A_LU_data, A_LU_pivots, info = torch.btrifact(A)
-    >>> x = b.trisolve(A_LU_data, A_LU_pivots)
+    >>> A_LU = torch.btrifact(A)
+    >>> x = b.btrisolve(*A_LU)
     >>> torch.norm(A.bmm(x.unsqueeze(2)) - b)
     6.664001874625056e-08
 
