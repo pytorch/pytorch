@@ -55,14 +55,16 @@ class TestLayers(LayersTestCase):
         output_dims = 1000
 
         indices = self.new_record(schema.Scalar((np.int32, (10,))))
+        sampling_prob = self.new_record(schema.Scalar((np.float32, (10, ))))
 
         sampled_fc = self.model.SamplingTrain(
             schema.Struct(
                 ('input', self.model.input_feature_schema.float_features),
                 ('indices', indices),
+                ('sampling_prob', sampling_prob),
             ),
             "FC",
-            output_dims
+            output_dims,
         )
 
         # Check that we don't add prediction layer into the model
@@ -112,9 +114,18 @@ class TestLayers(LayersTestCase):
             ] + sampled_fc_layer._prediction_layer.train_param_blobs,
             sampled_fc.field_blobs()
         )
+        log_spec = OpSpec("Log", [sampling_prob()], [None])
+        sub_spec = OpSpec(
+            "Sub",
+            [sampled_fc.field_blobs()[0], None],
+            sampled_fc.field_blobs()
+        )
 
-        self.assertNetContainOps(
-            train_net, [gather_w_spec, gather_b_spec, train_fc_spec])
+        train_ops = self.assertNetContainOps(
+            train_net,
+            [gather_w_spec, gather_b_spec, train_fc_spec, log_spec, sub_spec])
+
+        self.assertEqual(train_ops[3].output[0], train_ops[4].input[1])
 
         predict_net = self.get_predict_net()
         self.assertNetContainOps(

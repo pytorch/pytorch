@@ -17,6 +17,7 @@ class SamplingTrain(ModelLayer):
         input_record,
         prediction_layer,
         output_dims,
+        subtract_log_odd=True,
         name='sampling_train',
         **kwargs
     ):
@@ -34,6 +35,9 @@ class SamplingTrain(ModelLayer):
             ),
             input_record
         )
+        self.subtract_log_odd = subtract_log_odd
+        if self.subtract_log_odd:
+            assert 'sampling_prob' in input_record
 
         self._prediction_layer = layer_class(
             model,
@@ -61,3 +65,9 @@ class SamplingTrain(ModelLayer):
         ):
             net.Gather([full_blob, self.input_record.indices()], sampled_blob)
         self._prediction_layer.add_train_ops(net)
+        if not self.subtract_log_odd:
+            return
+        log_q = net.Log(self.input_record.sampling_prob(),
+                        net.NextScopedBlob("log_q"))
+        net.Sub([self.output_schema(), log_q], self.output_schema(),
+                broadcast=1, use_grad_hack=1)
