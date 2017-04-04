@@ -12,11 +12,11 @@
 #include <functional>
 #include <memory>
 
+#include "gloo/algorithm.h"
 #include "gloo/barrier.h"
 #include "gloo/benchmark/benchmark.h"
 #include "gloo/benchmark/options.h"
 #include "gloo/benchmark/timer.h"
-#include "gloo/broadcast.h"
 #include "gloo/transport/device.h"
 
 namespace gloo {
@@ -48,7 +48,7 @@ class Runner {
   std::shared_ptr<transport::Device> device_;
 
   long broadcastValue_;
-  std::unique_ptr<Broadcast<long> > broadcast_;
+  std::unique_ptr<Algorithm> broadcast_;
   std::unique_ptr<Barrier> barrier_;
 
   Distribution samples_;

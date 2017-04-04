@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "gloo/common/logging.h"
-#include "gloo/common.h"
 #include "gloo/cuda.h"
 
 namespace gloo {

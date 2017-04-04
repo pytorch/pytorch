@@ -12,12 +12,13 @@
 #include <cstring>
 #include <vector>
 
-#include "gloo/broadcast.h"
+#include "gloo/algorithm.h"
+#include "gloo/common/logging.h"
 
 namespace gloo {
 
 template <typename T>
-class BroadcastOneToAll : public Broadcast<T> {
+class BroadcastOneToAll : public Algorithm {
  public:
   BroadcastOneToAll(
       const std::shared_ptr<Context>& context,
@@ -25,41 +26,45 @@ class BroadcastOneToAll : public Broadcast<T> {
       int count,
       int rootRank = 0,
       int rootPointerRank = 0)
-      : Broadcast<T>(context, rootRank, rootPointerRank),
+      : Algorithm(context),
         ptrs_(ptrs),
         count_(count),
-        bytes_(count * sizeof(T)) {
-    GLOO_ENFORCE_GE(this->getRootPointerRank(), 0);
-    GLOO_ENFORCE_LT(this->getRootPointerRank(), ptrs_.size());
+        bytes_(count * sizeof(T)),
+        rootRank_(rootRank),
+        rootPointerRank_(rootPointerRank) {
+    GLOO_ENFORCE_GE(rootRank_, 0);
+    GLOO_ENFORCE_LT(rootRank_, contextSize_);
+    GLOO_ENFORCE_GE(rootPointerRank_, 0);
+    GLOO_ENFORCE_LT(rootPointerRank_, ptrs_.size());
 
     // Setup pairs/buffers for sender/receivers
-    if (this->contextSize_ > 1) {
-      auto ptr = ptrs_[this->getRootPointerRank()];
-      auto slot = this->context_->nextSlot();
-      if (this->contextRank_ == this->rootRank_) {
-        for (auto i = 0; i < this->contextSize_; i++) {
-          if (i == this->contextRank_) {
+    if (contextSize_ > 1) {
+      auto ptr = ptrs_[rootPointerRank_];
+      auto slot = context_->nextSlot();
+      if (contextRank_ == rootRank_) {
+        for (auto i = 0; i < contextSize_; i++) {
+          if (i == contextRank_) {
             continue;
           }
 
-          auto& pair = this->context_->getPair(i);
+          auto& pair = context_->getPair(i);
           sendDataBuffers_.push_back(
             pair->createSendBuffer(slot, ptr, bytes_));
         }
       } else {
-        auto& rootPair = this->context_->getPair(this->rootRank_);
+        auto& rootPair = context_->getPair(rootRank_);
         recvDataBuffer_ = rootPair->createRecvBuffer(slot, ptr, bytes_);
       }
     }
   }
 
   void run() {
-    if (this->contextSize_ == 1) {
+    if (contextSize_ == 1) {
       broadcastLocally();
       return;
     }
 
-    if (this->contextRank_ == this->rootRank_) {
+    if (contextRank_ == rootRank_) {
       // Fire off all send operations concurrently
       for (auto& buf : sendDataBuffers_) {
         buf->send();
@@ -81,17 +86,19 @@ class BroadcastOneToAll : public Broadcast<T> {
   // Broadcast from root pointer to other pointers
   void broadcastLocally() {
     for (auto i = 0; i < ptrs_.size(); i++) {
-      if (i == this->getRootPointerRank()) {
+      if (i == rootPointerRank_) {
         continue;
       }
 
-      memcpy(ptrs_[i], ptrs_[this->getRootPointerRank()], bytes_);
+      memcpy(ptrs_[i], ptrs_[rootPointerRank_], bytes_);
     }
   }
 
   std::vector<T*> ptrs_;
   const int count_;
   const int bytes_;
+  const int rootRank_;
+  const int rootPointerRank_;
 
   // For the sender (root)
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBuffers_;

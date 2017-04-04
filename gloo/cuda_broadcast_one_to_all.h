@@ -9,14 +9,13 @@
 
 #pragma once
 
-#include "gloo/broadcast.h"
 #include "gloo/cuda.h"
 #include "gloo/cuda_collectives.h"
 
 namespace gloo {
 
 template <typename T>
-class CudaBroadcastOneToAll : public Broadcast<T> {
+class CudaBroadcastOneToAll : public Algorithm {
  public:
   CudaBroadcastOneToAll(
       const std::shared_ptr<Context>& context,
@@ -33,9 +32,10 @@ class CudaBroadcastOneToAll : public Broadcast<T> {
  protected:
   std::vector<CudaDevicePointer<T> > devicePtrs_;
   T* hostPtr_;
-
   const int count_;
   const int bytes_;
+  const int rootRank_;
+  const int rootPointerRank_;
   const bool synchronizeDeviceOutputs_;
 
   // For the sender (root)

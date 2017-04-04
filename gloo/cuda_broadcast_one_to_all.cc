@@ -23,11 +23,16 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
     int rootRank,
     int rootPointerRank,
     const std::vector<cudaStream_t>& streams)
-    : Broadcast<T>(context, rootRank, rootPointerRank),
+    : Algorithm(context),
       hostPtr_(nullptr),
       count_(count),
       bytes_(count * sizeof(T)),
+      rootRank_(rootRank),
+      rootPointerRank_(rootPointerRank),
       synchronizeDeviceOutputs_(streams.size() == 0) {
+  GLOO_ENFORCE_GE(rootRank_, 0);
+  GLOO_ENFORCE_LT(rootRank_, contextSize_);
+
   auto newStream = true;
   if (streams.size() > 0) {
     GLOO_ENFORCE_EQ(streams.size(), ptrs.size());
@@ -46,26 +51,26 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
   }
 
   // Allocate host side buffer if we need to communicate
-  if (this->contextSize_ > 1) {
+  if (contextSize_ > 1) {
     std::lock_guard<std::mutex> lock(CudaShared::getMutex());
     CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
   }
 
   // Setup pairs/buffers for sender/receivers
-  if (this->contextSize_ > 1) {
-    auto slot = this->context_->nextSlot();
-    if (this->contextRank_ == this->rootRank_) {
-      for (int i = 0; i < this->contextSize_; i++) {
-        if (i == this->contextRank_) {
+  if (contextSize_ > 1) {
+    auto slot = context_->nextSlot();
+    if (contextRank_ == rootRank_) {
+      for (int i = 0; i < contextSize_; i++) {
+        if (i == contextRank_) {
           continue;
         }
 
-        auto& pair = this->context_->getPair(i);
+        auto& pair = context_->getPair(i);
         sendDataBuffers_.push_back(
           pair->createSendBuffer(slot, hostPtr_, bytes_));
       }
     } else {
-      auto& rootPair = this->context_->getPair(this->rootRank_);
+      auto& rootPair = context_->getPair(rootRank_);
       recvDataBuffer_ = rootPair->createRecvBuffer(slot, hostPtr_, bytes_);
     }
   }
@@ -87,7 +92,7 @@ CudaBroadcastOneToAll<T>::~CudaBroadcastOneToAll() {
 
 template <typename T>
 void CudaBroadcastOneToAll<T>::run() {
-  if (this->contextSize_ == 1) {
+  if (contextSize_ == 1) {
     if (localBroadcastOp_) {
       localBroadcastOp_->runAsync();
       if (synchronizeDeviceOutputs_) {
@@ -97,10 +102,10 @@ void CudaBroadcastOneToAll<T>::run() {
     return;
   }
 
-  if (this->contextRank_ == this->rootRank_) {
+  if (contextRank_ == rootRank_) {
     // Copy device buffer to host
-    devicePtrs_[this->getRootPointerRank()].copyToHostAsync(hostPtr_);
-    devicePtrs_[this->getRootPointerRank()].wait();
+    devicePtrs_[rootPointerRank_].copyToHostAsync(hostPtr_);
+    devicePtrs_[rootPointerRank_].wait();
 
     // Fire off all send operations concurrently
     for (auto& buf : sendDataBuffers_) {
@@ -123,7 +128,7 @@ void CudaBroadcastOneToAll<T>::run() {
     // Wait on buffer
     recvDataBuffer_->waitRecv();
     // Copy host buffer to device
-    devicePtrs_[this->getRootPointerRank()].copyFromHostAsync(hostPtr_);
+    devicePtrs_[rootPointerRank_].copyFromHostAsync(hostPtr_);
 
     // Broadcast locally after receiving from root
     if (localBroadcastOp_) {
@@ -136,7 +141,7 @@ void CudaBroadcastOneToAll<T>::run() {
     } else {
       // Wait for memcpy to complete
       if (synchronizeDeviceOutputs_) {
-        devicePtrs_[this->getRootPointerRank()].wait();
+        devicePtrs_[rootPointerRank_].wait();
       }
     }
   }

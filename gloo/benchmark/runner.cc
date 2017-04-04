@@ -83,7 +83,7 @@ long Runner::broadcast(long value) {
   // Set value to broadcast only on root.
   // Otherwise it can race with the actual broadcast
   // operation writing to the same memory location.
-  if (broadcast_->getRootRank() == options_.contextRank) {
+  if (options_.contextRank == 0) {
     broadcastValue_ = value;
   }
   broadcast_->run();

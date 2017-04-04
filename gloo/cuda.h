@@ -15,7 +15,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include "gloo/common.h"
+#include "gloo/algorithm.h"
 #include "gloo/common/logging.h"
 
 namespace gloo {
