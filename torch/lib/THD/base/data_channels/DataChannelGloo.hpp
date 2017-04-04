@@ -51,16 +51,28 @@ struct DataChannelGloo : DataChannel {
 
 private:
   template<typename T>
+  void allGatherT(std::vector<thpp::Tensor*>& output,
+                  thpp::Tensor& input, THDGroup group_id);
+
+  template<typename T>
   void allReduceT(thpp::Tensor& data, THDReduceOp operation,
-                 THDGroup group_id = THDGroupWORLD);
+                  THDGroup group_id = THDGroupWORLD);
+
+  template<typename T>
+  void broadcastT(thpp::Tensor& data, rank_type src_rank,
+                  THDGroup group_id = THDGroupWORLD);
 
   ::gloo::rendezvous::PrefixStore getStore();
-  std::shared_ptr<::gloo::rendezvous::Context> getFullMeshCtx();
+  std::shared_ptr<::gloo::rendezvous::Context> getFullMeshCtx(DataOperation op);
 
   rank_type _rank; // Current process' rank
   rank_type _num_processes; // Number of processes in network
   std::unique_ptr<::gloo::rendezvous::Store> _store;
   std::shared_ptr<::gloo::transport::Device> _device;
+  std::unordered_map<
+      DataOperation,
+      std::shared_ptr<::gloo::rendezvous::Context>,
+      DataOperationHash> _contexts;
 };
 
 } // namespace thd
