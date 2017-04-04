@@ -254,8 +254,8 @@ class Operator : public OperatorBase {
 // Convenient macro USE_DISPATCH_HELPER is provided for declaring friendship in
 // case DoRunWithValue or DoRunWithType are declared non-public.
 
-#define USE_DISPATCH_HELPER                        \
-  template <typename Sizes, typename... ExtraArgs> \
+#define USE_DISPATCH_HELPER                           \
+  template <typename FirstArg, typename... ExtraArgs> \
   friend struct DispatchHelper
 
 template <int... Values>
@@ -263,6 +263,16 @@ struct FixedValues {};
 
 template <typename... Types>
 struct TensorTypes {};
+
+// Special tag that can be listed in TensorTypes to denote that a special
+// implementation in 'RunWithOtherType' needs to be called instead of failing
+// Obviously this needs to be the last item in lists, e.g.
+// TensorTypes<float, double, GenericTensorImplementation>
+struct GenericTensorImplementation {};
+
+// Same as TensorTypes but call DoRunWithType2
+template <typename... Types>
+struct TensorTypes2 {};
 
 template <typename Sizes, typename... ExtraArgs>
 struct DispatchHelper;
@@ -287,33 +297,61 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   }
 };
 
-template <typename FirstType, typename... Types, typename... ExtraArgs>
-struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {
-  template <typename Op>
-  static bool call(Op* op, const TypeMeta& meta) {
-    if (meta.Match<FirstType>()) {
-      return op->template DoRunWithType<ExtraArgs..., FirstType>();
-    }
-    return DispatchHelper<TensorTypes<Types...>, ExtraArgs...>::
-        template call<Op>(op, meta);
-  }
-  template <typename Op, typename Context>
-  static bool call(Op* op, const Tensor<Context>& tensor) {
-    return call<Op>(op, tensor.meta());
-  }
-};
-
-template <typename... ExtraArgs>
-struct DispatchHelper<TensorTypes<>, ExtraArgs...> {
-  template <typename Op>
-  static bool call(Op* op, const TypeMeta& meta) {
-    CAFFE_THROW("Unsupported type of tensor: ", meta.name());
-  }
-  template <typename Op, typename Context>
-  static bool call(Op* op, const Tensor<Context>& tensor) {
-    return call<Op>(op, tensor.meta());
-  }
-};
+#define CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(                                 \
+    TensorTypes, DoRunWithType, DoRunWithOtherType)                            \
+  template <typename FirstType, typename... Types, typename... ExtraArgs>      \
+  struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {      \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const TypeMeta& meta) {                           \
+      static_assert(                                                           \
+          !std::is_same<GenericTensorImplementation, FirstType>::value,        \
+          "GenericTensorImplementation must be the last in TensorTypes list"); \
+      if (meta.Match<FirstType>()) {                                           \
+        return op->template DoRunWithType<ExtraArgs..., FirstType>();          \
+      }                                                                        \
+      return DispatchHelper<TensorTypes<Types...>, ExtraArgs...>::             \
+          template call<Op>(op, meta);                                         \
+    }                                                                          \
+    template <typename Op, typename Context>                                   \
+    static bool call(Op* op, const Tensor<Context>& tensor) {                  \
+      return call<Op>(op, tensor.meta());                                      \
+    }                                                                          \
+  };                                                                           \
+                                                                               \
+  template <typename... ExtraArgs>                                             \
+  struct DispatchHelper<TensorTypes<>, ExtraArgs...> {                         \
+    template <typename Op>                                                     \
+    static bool call(Op* /* unused */, const TypeMeta& meta) {                 \
+      CAFFE_THROW("Unsupported type of tensor: ", meta.name());                \
+    }                                                                          \
+    template <typename Op, typename Context>                                   \
+    static bool call(Op* op, const Tensor<Context>& tensor) {                  \
+      return call<Op>(op, tensor.meta());                                      \
+    }                                                                          \
+  };                                                                           \
+                                                                               \
+  template <typename... ExtraArgs>                                             \
+  struct DispatchHelper<                                                       \
+      TensorTypes<GenericTensorImplementation>,                                \
+      ExtraArgs...> {                                                          \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const TypeMeta& meta) {                           \
+      return op->template DoRunWithOtherType<ExtraArgs...>();                  \
+    }                                                                          \
+    template <typename Op, typename Context>                                   \
+    static bool call(Op* op, const Tensor<Context>& tensor) {                  \
+      return call<Op>(op, tensor.meta());                                      \
+    }                                                                          \
+  };
+CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+    TensorTypes,
+    DoRunWithType,
+    DoRunWithOtherType)
+CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+    TensorTypes2,
+    DoRunWithType2,
+    DoRunWithOtherType2)
+#undef CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER
 
 // The device type registry. This works in two phases:
 // (1) gDeviceTypeRegistry() maps the device types values to the actual operator
