@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "gloo/allgather_ring.h"
+#include "gloo/common/common.h"
 #include "gloo/test/base_test.h"
 
 namespace gloo {
@@ -19,40 +20,39 @@ namespace test {
 namespace {
 
 // Test parameterization.
-using Param = std::tuple<int, int>;
+using Param = std::tuple<int, int, int>;
 
 // Test fixture.
 class AllgatherTest : public BaseTest,
                       public ::testing::WithParamInterface<Param> {};
 
-TEST_P(AllgatherTest, TwoPointer) {
+TEST_P(AllgatherTest, VarNumPointer) {
   auto contextSize = std::get<0>(GetParam());
   auto dataSize = std::get<1>(GetParam());
+  auto numPtrs = std::get<2>(GetParam());
 
   spawn(contextSize, [&](std::shared_ptr<Context> context) {
-
-    Fixture inFixture(context, 2, dataSize);
+    Fixture inFixture(context, numPtrs, dataSize);
     inFixture.assignValues();
 
-    Fixture outFixture(context, contextSize, 2 * dataSize);
+    std::unique_ptr<float[]> outPtr =
+        gloo::make_unique<float[]>(numPtrs * dataSize * contextSize);
 
     AllgatherRing<float> algorithm(
-        context,
-        inFixture.getFloatPointers(),
-        outFixture.getFloatPointers(),
-        dataSize);
+        context, inFixture.getFloatPointers(), outPtr.get(), dataSize);
 
     algorithm.run();
 
-    auto stride = contextSize * 2;
+    auto stride = contextSize * numPtrs;
     for (int i = 0; i < contextSize; ++i) {
-      auto val = i * 2;
+      auto val = i * numPtrs;
       for (int j = 0; j < dataSize; j++) {
         float exp = j * stride + val;
-        ASSERT_EQ(outFixture.getFloatPointers()[i][j], exp)
-            << "Mismatch at index [" << i << ", " << j << "]";
-        ASSERT_EQ(outFixture.getFloatPointers()[i][j + dataSize], exp + 1)
-            << "Mismatch at index [" << i << ", " << j + dataSize << "]";
+        for (int k = 0; k < numPtrs; ++k) {
+          ASSERT_EQ(
+              outPtr.get()[i * dataSize * numPtrs + k * dataSize + j], exp + k)
+              << "Mismatch at index [" << i << ", " << j + dataSize << "]";
+        }
       }
     }
   });
@@ -71,8 +71,9 @@ INSTANTIATE_TEST_CASE_P(
     AllgatherRing,
     AllgatherTest,
     ::testing::Combine(
-        ::testing::Range(2, 16),
-        ::testing::ValuesIn(genMemorySizes())));
+        ::testing::Range(2, 10),
+        ::testing::ValuesIn(genMemorySizes()),
+        ::testing::Range(1, 4)));
 
 } // namespace
 } // namespace test
