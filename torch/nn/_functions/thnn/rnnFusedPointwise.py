@@ -2,6 +2,7 @@ import torch
 from torch.autograd.function import Function, InplaceFunction
 from torch._thnn import type2backend
 
+
 class GRUFused(Function):
     def forward(self, input_gate, hidden_gate, hx, ibias=None, hbias=None):
         hy = input_gate.new()
@@ -25,6 +26,7 @@ class GRUFused(Function):
             return input_gate, hidden_gate, gradInput, gb1, gb2
         else:
             return input_gate, hidden_gate, gradInput
+
 
 class LSTMFused(Function):
     def forward(self, input_gate, hidden_gate, cx, ibias=None, hbias=None):

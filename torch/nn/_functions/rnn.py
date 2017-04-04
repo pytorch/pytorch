@@ -39,6 +39,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hy, cy = F.lstmfused(igates, hgates, b_ih, b_hh, hidden[1])
         return hy, cy
 
+
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
     if not input.is_cuda:
