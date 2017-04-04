@@ -139,4 +139,22 @@ void send_value(int socket, T&& value, bool more_data = false) {
   send_bytes<T>(socket, &value, 1, more_data);
 }
 
+enum class DataOperation : uint8_t {
+  ALL_GATHER = 0,
+  GATHER,
+  SCATTER,
+  ALL_REDUCE,
+  REDUCE,
+  BROADCAST,
+  SEND,
+  BARRIER,
+  LAST
+};
+
+struct DataOperationHash {
+  template<typename T>
+    std::uint8_t operator()(T t) const {
+      return static_cast<std::uint8_t>(t);
+    }
+};
 } // namespace thd

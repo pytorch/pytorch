@@ -3,24 +3,29 @@
 
 #include <poll.h>
 #include <system_error>
+#include <unistd.h>
 
 namespace thd {
 
+namespace {
+
 using store_type = std::unordered_map<std::string, std::vector<char>>;
 
-static void store_thread_daemon();
-static bool query(rank_type rank, const std::vector<int>& sockets);
-static bool checkAndUpdate(const store_type& store,
-                           std::vector<std::string>& keys);
-static void wake_up(int socket);
+void store_thread_daemon();
+bool query(rank_type rank, const std::vector<int>& sockets);
+bool checkAndUpdate(const store_type& store,
+                    std::vector<std::string>& keys);
+void wake_up(int socket);
 
-enum class query_type : uint8_t {
-  set,
-  get,
-  wait,
-  finish,
-  stop_waiting
+enum class QueryType : uint8_t {
+  SET,
+  GET,
+  WAIT,
+  FINISH,
+  STOP_WAITING
 };
+
+} // anonymous namespace
 
 Store::Store()
     : _rank(load_rank_env()) {
@@ -38,39 +43,43 @@ Store::Store()
 Store::~Store() {
   // the 0 process has to stop the daemon
   if (_rank == 0) {
-    send_value<query_type>(_socket, query_type::finish);
+    send_value<QueryType>(_socket, QueryType::FINISH);
     _store_thread.join();
   }
+  SYSCHECK(::close(_socket));
 }
 
 void Store::set(const std::string& key, const std::vector<char>& data) {
-  send_value<query_type>(_socket, query_type::set);
+  send_value<QueryType>(_socket, QueryType::SET);
   send_string(_socket, key, true);
   send_vector<char>(_socket, data);
 }
 
 std::vector<char> Store::get(const std::string& key) {
   wait({key});
-  send_value<query_type>(_socket, query_type::get);
+  send_value<QueryType>(_socket, QueryType::GET);
   send_string(_socket, key);
   return recv_vector<char>(_socket);
 }
 
 void Store::wait(const std::vector<std::string>& keys) {
-  send_value<query_type>(_socket, query_type::wait);
+  send_value<QueryType>(_socket, QueryType::WAIT);
   size_type nkeys = keys.size();
   send_bytes<size_type>(_socket, &nkeys, 1, (nkeys > 0));
   for (int i = 0; i < nkeys; i++) {
     send_string(_socket, keys[i], (i != (nkeys - 1)));
   }
   // after sending the query, wait for a 'stop_waiting' reponse
-  query_type qr;
-  recv_bytes<query_type>(_socket, &qr, 1);
-  if (qr != query_type::stop_waiting)
+  QueryType qr;
+  recv_bytes<QueryType>(_socket, &qr, 1);
+  if (qr != QueryType::STOP_WAITING)
     throw std::runtime_error("stop_waiting response expected");
 }
 
-static void store_thread_daemon() {
+namespace {
+
+void store_thread_daemon() {
+  int ret;
   port_type port;
   rank_type world_size;
   int socket;
@@ -83,6 +92,8 @@ static void store_thread_daemon() {
     std::tie(p_socket, std::ignore) = accept(socket);
     sockets[i] = p_socket;
   }
+
+  SYSCHECK(::close(socket));
 
   // listen for requests
   struct pollfd fds[world_size];
@@ -115,32 +126,33 @@ static void store_thread_daemon() {
  * or, in the case of wait
  * type of query | number of args | size of arg1 | arg1 | ...
  */
-static bool query(rank_type rank, const std::vector<int>& sockets) {
+bool query(rank_type rank, const std::vector<int>& sockets) {
   static store_type store_;
-  static std::vector<std::vector<std::string>> awaited_keys(sockets.size());
+  static std::unordered_map<std::string, std::vector<rank_type>> waiting;
+  static std::vector<int> keys_awaited(sockets.size(), 0);
   int socket = sockets[rank];
-  query_type qt;
-  recv_bytes<query_type>(socket, &qt, 1);
-  if (qt == query_type::set) {
+  QueryType qt;
+  recv_bytes<QueryType>(socket, &qt, 1);
+  if (qt == QueryType::SET) {
     std::string key = recv_string(socket);
     store_[key] = recv_vector<char>(socket);
-    // On "set" wake up all of the processes that wait
+    // On "set", wake up all of the processes that wait
     // for keys already in the store
-    for (std::size_t i = 0; i < sockets.size(); i++) {
-      auto& p_socket = sockets[i];
-      auto& p_keys = awaited_keys[i];
-      if (checkAndUpdate(store_, p_keys)) {
-        wake_up(p_socket);
-        awaited_keys[i].clear();
+    auto to_wake = waiting.find(key);
+    if (to_wake != waiting.end()) {
+      for (int proc : to_wake->second) {
+        if (--keys_awaited[proc] == 0)
+          wake_up(sockets[proc]);
       }
+      waiting.erase(to_wake);
     }
     return false;
-  } else if (qt == query_type::get) {
+  } else if (qt == QueryType::GET) {
     std::string key = recv_string(socket);
     std::vector<char> data = store_.at(key);
     send_vector(socket, data);
     return false;
-  } else if (qt == query_type::wait) {
+  } else if (qt == QueryType::WAIT) {
     size_type nargs;
     recv_bytes<size_type>(socket, &nargs, 1);
     std::vector<std::string> keys(nargs);
@@ -150,17 +162,20 @@ static bool query(rank_type rank, const std::vector<int>& sockets) {
     if (checkAndUpdate(store_, keys)) {
       wake_up(socket);
     } else {
-      awaited_keys[socket] = std::move(keys);
+      for (auto& key : keys) {
+        waiting[key].push_back(rank);
+      }
+      keys_awaited[rank] = keys.size();
     }
     return false;
-  } else if (qt == query_type::finish) {
+  } else if (qt == QueryType::FINISH) {
     return true;
   } else {
     throw std::runtime_error("expected a query type");
   }
 }
 
-static bool checkAndUpdate(const store_type& store,
+bool checkAndUpdate(const store_type& store,
                            std::vector<std::string>& keys) {
   bool ret = true;
   for (auto it = keys.begin(); it != keys.end(); it++) {
@@ -172,8 +187,10 @@ static bool checkAndUpdate(const store_type& store,
   return ret;
 }
 
-static void wake_up(int socket) {
-  send_value<query_type>(socket, query_type::stop_waiting);
+void wake_up(int socket) {
+  send_value<QueryType>(socket, QueryType::STOP_WAITING);
 }
+
+} // anonymous namespace
 
 } // namespace thd
