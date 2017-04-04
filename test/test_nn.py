@@ -1874,6 +1874,7 @@ class TestNNInit(TestCase):
 
     def test_calculate_gain_only_accepts_valid_nonlinearities(self):
         for n in [3, 5, 6]:
+            # Generate random strings of lengths that definitely aren't supported
             random_string = ''.join([random.choice(string.ascii_lowercase) for i in range(n)])
             with self.assertRaises(ValueError):
                 init.calculate_gain(random_string)
@@ -1932,7 +1933,7 @@ class TestNNInit(TestCase):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
                     init.eye(tensor)
 
-    def test_dirac(self):
+    def test_dirac_properties(self):
         for as_variable in [True, False]:
             for dims in [3, 4, 5]:
                 for scaled in [True, False]:
@@ -1940,7 +1941,44 @@ class TestNNInit(TestCase):
                     init.dirac(input_tensor, scaled)
                     if as_variable:
                         input_tensor = input_tensor.data
-                    assert True  # TODO: Can act a bit oddly if filters aren't odd and symmetric though
+
+                    c_out, c_in = input_tensor.size(0), input_tensor.size(1)
+                    # Check number of nonzeros is product of first 2 dims
+                    assert torch.nonzero(input_tensor).size(0) == c_out * c_in
+
+                    # Check sum of values
+                    if scaled:
+                        assert input_tensor.sum() == c_out
+                    else:
+                        assert input_tensor.sum() == c_out * c_in
+
+    def test_dirac_identity(self):
+        in_c, out_c, kernel_size = 8, 1, 3
+        for scaled in [True, False]:
+            normalise = in_c if scaled else 1
+            # Test 1D
+            input_var = self._create_random_nd_tensor(3, size_min=5, size_max=5, as_variable=True)
+            input_var.data.copy_(torch.randn(input_var.size()))  # Fill with random values
+            filter_var = Variable(torch.zeros(in_c, out_c, kernel_size))
+            init.dirac(filter_var, scaled)
+            output_var = F.conv1d(input_var, filter_var)
+            self.assertEqual(input_var[:, :, 1:-1].sum(1) / normalise, output_var)
+
+            # Test 2D
+            input_var = self._create_random_nd_tensor(4, size_min=5, size_max=5, as_variable=True)
+            input_var.data.copy_(torch.randn(input_var.size()))
+            filter_var = Variable(torch.zeros(in_c, out_c, kernel_size, kernel_size))
+            init.dirac(filter_var, scaled)
+            output_var = F.conv2d(input_var, filter_var)
+            self.assertEqual(input_var[:, :, 1:-1, 1:-1].sum(1) / normalise, output_var)
+
+            # Test 3D
+            input_var = self._create_random_nd_tensor(5, size_min=5, size_max=5, as_variable=True)
+            input_var.data.copy_(torch.randn(input_var.size()))
+            filter_var = Variable(torch.zeros(in_c, out_c, kernel_size, kernel_size, kernel_size))
+            init.dirac(filter_var, scaled)
+            output_var = F.conv1d(input_var, filter_var)
+            self.assertEqual(input_var[:, :, 1:-1, 1:-1].sum(1) / normalise, output_var)
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for as_variable in [True, False]:
