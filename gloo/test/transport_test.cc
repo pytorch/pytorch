@@ -18,17 +18,40 @@ namespace gloo {
 namespace test {
 namespace {
 
+enum IoMode {
+  Async,
+  Blocking,
+  Polling
+};
+
 // Test parameterization.
-using Param = std::tuple<int, int, int>;
+using Param = std::tuple<int, int, int, IoMode>;
 
 // Test fixture.
 class TransportMultiProcTest : public MultiProcTest,
                                public ::testing::WithParamInterface<Param> {};
 
+static void setMode(std::unique_ptr<transport::Pair>& pair, IoMode mode) {
+  switch(mode) {
+    case IoMode::Async:
+      // Async is default mode
+      break;
+    case IoMode::Blocking:
+      pair->setSync(true, false);
+      break;
+    case IoMode::Polling:
+      pair->setSync(true, true);
+      break;
+    default:
+      ASSERT_TRUE(false);
+  }
+}
+
 TEST_P(TransportMultiProcTest, IoErrors) {
   const auto processCount = std::get<0>(GetParam());
   const auto elementCount = std::get<1>(GetParam());
   const auto sleepMs = std::get<2>(GetParam());
+  const auto mode = std::get<3>(GetParam());
 
   spawnAsync(processCount, [&](std::shared_ptr<Context> context) {
       std::vector<float> data;
@@ -39,12 +62,14 @@ TEST_P(TransportMultiProcTest, IoErrors) {
       const auto& leftRank = (processCount + context->rank - 1) % processCount;
       auto& left = context->getPair(leftRank);
       left->setTimeout(50);
+      setMode(left, mode);
       recvBuffer = left->createRecvBuffer(
       0, data.data(), data.size() * sizeof(float));
 
       const auto& rightRank = (context->rank + 1) % processCount;
       auto& right = context->getPair(rightRank);
       right->setTimeout(50);
+      setMode(right, mode);
       sendBuffer = right->createSendBuffer(
       0, data.data(), data.size() * sizeof(float));
 
@@ -71,7 +96,7 @@ TEST_P(TransportMultiProcTest, IoErrors) {
   for (auto i = 0; i < processCount; i++) {
     if (i != 0) {
       const auto result = getResult(i);
-      ASSERT_TRUE(WIFEXITED(result));
+      ASSERT_TRUE(WIFEXITED(result)) << result;
       ASSERT_EQ(kExitWithIoException, WEXITSTATUS(result));
     }
   }
@@ -122,7 +147,7 @@ TEST_P(TransportMultiProcTest, IoTimeouts) {
     if (i != 0) {
       waitProcess(i);
       const auto result = getResult(i);
-      ASSERT_TRUE(WIFEXITED(result));
+      ASSERT_TRUE(WIFEXITED(result)) << result;
       ASSERT_EQ(kExitWithIoException, WEXITSTATUS(result));
     }
   }
@@ -145,7 +170,8 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::Combine(
         ::testing::Values(2, 3, 4),
         ::testing::ValuesIn(genMemorySizes()),
-        ::testing::Values(0, 5, 50)));
+        ::testing::Values(0, 5, 50),
+        ::testing::Values(IoMode::Async, IoMode::Blocking, IoMode::Polling)));
 
 } // namespace
 } // namespace test

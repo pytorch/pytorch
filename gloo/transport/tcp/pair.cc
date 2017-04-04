@@ -16,6 +16,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -32,6 +33,16 @@
 namespace gloo {
 namespace transport {
 namespace tcp {
+
+// One-time init to use EPIPE errors instead of SIGPIPE
+namespace {
+struct Initializer {
+  Initializer() {
+    signal(SIGPIPE, SIG_IGN);
+  }
+};
+Initializer initializer;
+}
 
 const std::chrono::milliseconds Pair::kNoTimeout =
     std::chrono::milliseconds::zero();
@@ -80,7 +91,6 @@ static void setSocketBlocking(int fd, bool enable) {
 
 void Pair::setSync(bool sync, bool busyPoll) {
   std::unique_lock<std::mutex> lock(m_);
-  checkErrorState();
 
   if (!sync) {
     GLOO_THROW_INVALID_OPERATION_EXCEPTION("Can only switch to sync mode");
@@ -89,17 +99,22 @@ void Pair::setSync(bool sync, bool busyPoll) {
   // Wait for pair to be connected. No need to wait for timeout here. If
   // necessary, the connect path will timeout and signal this thread.
   waitUntilConnected(lock, false);
+  if (state_ == CLOSED) {
+    signalIoFailure(GLOO_ERROR_MSG("Socket unexpectedly closed"));
+  }
 
-  // Unregister from loop and switch socket to blocking mode
-  dev_->unregisterDescriptor(fd_);
-  setSocketBlocking(fd_, true);
+  if (!sync_) {
+    // If async, unregister from loop and switch socket to blocking mode
+    dev_->unregisterDescriptor(fd_);
+    setSocketBlocking(fd_, true);
 
-  // If the pair was still flushing a write, finish it.
-  if (tx_.buf_ != nullptr) {
-    auto rv = write(tx_);
-    GLOO_ENFORCE(rv, "Write must always succeed in sync mode");
-    tx_.buf_->handleSendCompletion();
-    memset(&tx_, 0, sizeof(tx_));
+    // If the pair was still flushing a write, finish it.
+    if (tx_.buf_ != nullptr) {
+      auto rv = write(tx_);
+      GLOO_ENFORCE(rv, "Write must always succeed in sync mode");
+      tx_.buf_->handleSendCompletion();
+      memset(&tx_, 0, sizeof(tx_));
+    }
   }
 
   sync_ = true;
@@ -109,7 +124,6 @@ void Pair::setSync(bool sync, bool busyPoll) {
 void Pair::setTimeout(int timeoutInMs) {
   std::unique_lock<std::mutex> lock(m_);
   int rv;
-  checkErrorState();
 
   if (timeoutInMs < 0) {
     GLOO_THROW_INVALID_OPERATION_EXCEPTION("Invalid timeout", timeoutInMs);
@@ -118,6 +132,9 @@ void Pair::setTimeout(int timeoutInMs) {
   // Wait for pair to be connected. No need to wait for timeout here. If
   // necessary, the connect path will timeout and signal this thread.
   waitUntilConnected(lock, false);
+  if (state_ == CLOSED) {
+    signalIoFailure(GLOO_ERROR_MSG("Socket unexpectedly closed"));
+  }
 
   struct timeval tv = {};
   if (timeoutInMs > 0) {
@@ -420,7 +437,12 @@ bool Pair::read(Op& op) {
     // Transition to CLOSED on EOF
     if (rv == 0) {
       changeState(CLOSED);
-      return false;
+      if (sync_) {
+        signalIoFailure(
+            GLOO_ERROR_MSG("Remote socket closed during sync read"));
+      } else {
+        return false;
+      }
     }
 
     op.nread_ += rv;
