@@ -151,6 +151,8 @@ class ConvPoolOpBase : public Operator<Context> {
     if (operator_def.name().find("Conv") == 0 ||
         operator_def.name().find("Pool") != std::string::npos) {
       for (int dim = 0; dim < kernel_.size(); ++dim) {
+        CAFFE_ENFORCE_GE(pads_[dim], 0);
+        CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
         CAFFE_ENFORCE(
             kernel_[dim],
             "If you are doing convolution or pooling, you will need to set "
@@ -162,8 +164,6 @@ class ConvPoolOpBase : public Operator<Context> {
       CAFFE_ENFORCE_GE(kernel_[dim], 0);
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
-      CAFFE_ENFORCE_GE(pads_[dim], 0);
-      CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
     }
 
     if (group_ != 1) {
@@ -495,8 +495,6 @@ protected:
      case LegacyPadding::NOTSET:
        // We will just use the direct padding head and tail values, but we
        // will verify that they are non-negative.
-       CAFFE_ENFORCE(*pad_head >= 0);
-       CAFFE_ENFORCE(*pad_tail >= 0);
        CAFFE_ENFORCE_GE(in_size + *pad_head + *pad_tail, dkernel);
        *out_size = static_cast<int>(
            static_cast<float>(in_size + *pad_head + *pad_tail - dkernel) /
