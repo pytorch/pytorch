@@ -1,5 +1,7 @@
 #include "caffe2/operators/utility_ops.h"
 
+#include <cmath>
+
 namespace caffe2 {
 namespace {
 
@@ -918,5 +920,56 @@ bool MaxGradientOp<T, Context>::RunOnDevice() {
   }
   return true;
 }
+
+template <>
+bool NanCheckOp<CPUContext>::RunOnDevice() {
+  auto& X = Input(0);
+  auto* Y = Output(0);
+  const int D = X.size();
+  const float* data = X.data<float>();
+  ConstEigenVectorMap<float> input_data(data, D);
+
+  bool all_finite = input_data.allFinite();
+
+  if (!all_finite) {
+    std::cerr << "Tensor contained NaN or inf: [" << this->def().input(0) << "]"
+              << std::endl;
+
+    for (int j = 0; j < InputSize(); j++) {
+      std::cerr << "Tensor name: " << this->def().input(j) << std::endl;
+      std::cerr << "Input tensor:" << std::endl;
+      tensorPrinter_.Print<float>(Input(j));
+      std::cerr << "NaN idxs:" << std::endl;
+      const float* x = Input(j).data<float>();
+      for (size_t i = 0; i < Input(j).size(); ++i) {
+        if (std::isnan(x[i]) || std::isinf(x[i])) {
+          std::cerr << i << " ";
+        }
+      }
+      std::cerr << std::endl;
+    }
+    return false;
+  }
+
+  if (&X != Y) {
+    Y->CopyFrom(X, &context_);
+  }
+  return true;
+}
+REGISTER_CPU_OPERATOR(NanCheck, NanCheckOp<CPUContext>);
+REGISTER_GRADIENT(NanCheck, GetNanCheckGradient);
+
+OPERATOR_SCHEMA(NanCheck)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShapeOfInput(0)
+    .SetDoc("Identity operator, but checks all values for nan or inf")
+    .Input(0, "tensor", "Tensor to check for nan/inf")
+    .Output(
+        0,
+        "output",
+        "Tensor to copy input into if no NaNs or inf."
+        " Can be in-place");
 
 } // namespace caffe2

@@ -45,6 +45,57 @@ class TestUtilityOps(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X, axes],
                                    transpose_ref)
 
+    @given(m=st.integers(5, 10), n=st.integers(5, 10),
+           o=st.integers(5, 10), nans=st.booleans(), **hu.gcs)
+    def test_nan_check(self, m, n, o, nans, gc, dc):
+        other = np.array([1, 2, 3]).astype(np.float32)
+        X = np.random.rand(m, n, o).astype(np.float32)
+        if nans:
+            x_nan = np.random.randint(0, m)
+            y_nan = np.random.randint(0, n)
+            z_nan = np.random.randint(0, o)
+            X[x_nan, y_nan, z_nan] = float('NaN')
+
+        # print('nans: {}'.format(nans))
+        # print(X)
+
+        def nan_reference(X, Y):
+            if not np.isnan(X).any():
+                return [X]
+            else:
+                return [np.array([])]
+
+        op = core.CreateOperator(
+            "NanCheck",
+            ["X", "other"],
+            ["Y"]
+        )
+
+        try:
+            self.assertReferenceChecks(
+                device_option=gc,
+                op=op,
+                inputs=[X, other],
+                reference=nan_reference,
+            )
+            if nans:
+                self.assertTrue(False, "Did not fail when presented with NaN!")
+        except RuntimeError:
+            self.assertTrue(nans, "No NaNs but failed")
+
+        try:
+            self.assertGradientChecks(
+                device_option=gc,
+                op=op,
+                inputs=[X],
+                outputs_to_check=0,
+                outputs_with_grads=[0],
+            )
+            if nans:
+                self.assertTrue(False, "Did not fail when gradient had NaN!")
+        except RuntimeError:
+            pass
+
     @given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
     def test_elementwise_max(self, n, m, d, gc, dc):

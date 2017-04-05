@@ -10,6 +10,31 @@
 namespace caffe2 {
 
 template <class Context>
+class NanCheckOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  NanCheckOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override;
+
+ private:
+  TensorPrinter tensorPrinter_;
+  Tensor<Context> scratch_;
+};
+
+struct GetNanCheckGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  std::vector<OperatorDef> GetGradientDefs() override {
+    return {CreateOperatorDef(
+        "NanCheck",
+        "",
+        std::vector<string>{GO(0)},
+        std::vector<string>{GI(0)})};
+  }
+};
+
+template <class Context>
 class WallClockTimeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
