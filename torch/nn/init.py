@@ -23,7 +23,7 @@ def calculate_gain(nonlinearity, param=None):
         param: optional parameter for the nonlinear function
 
     Examples:
-        >>> gain = nn.init.gain('lrelu')
+        >>> gain = nn.init.gain('leaky_relu')
     """
     linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
     if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
@@ -138,7 +138,7 @@ def dirac(tensor, scaled=True):
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
 
     if isinstance(tensor, Variable):
-        dirac(tensor.data)
+        dirac(tensor.data, scaled=scaled)
         return tensor
 
     tensor.zero_()

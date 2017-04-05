@@ -1859,13 +1859,34 @@ class TestNNInit(TestCase):
     def _random_float(self, a, b):
         return (b - a) * random.random() + a
 
-    def test_calculate_gain(self):
-        assert True  # TODO
+    def test_calculate_gain_linear(self):
+        for fn in ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose2d', 'conv_transpose2d', 'conv_transpose3d']:
+            gain = init.calculate_gain(fn)
+            self.assertEqual(gain, 1)
+
+    def test_calculate_gain_nonlinear(self):
+        for fn in ['sigmoid', 'tanh', 'relu', 'leaky_relu']:
+            gain = init.calculate_gain(fn)
+            if fn == 'sigmoid':
+                self.assertEqual(gain, 1)
+            elif fn == 'tanh':  # 5 / 3
+                self.assertEqual(gain, 1.6666666666666667)
+            elif fn == 'relu':  # sqrt(2)
+                self.assertEqual(gain, 1.4142135623730951)
+            elif fn == 'leaky_relu':  # sqrt(2 / 1 + slope^2))
+                self.assertEqual(gain, 1.4141428569978354)
 
     def test_calculate_gain_leaky_relu(self):
         for param in [None, 0, 0.01, 10]:
             gain = init.calculate_gain('leaky_relu', param)
-            assert True  # TODO
+            if param is None:  # Default slope is 0.01
+                self.assertEqual(gain, 1.4141428569978354)
+            elif param == 0:  # No slope = same gain as normal ReLU
+                self.assertEqual(gain, 1.4142135623730951)
+            elif param == 0.01:
+                self.assertEqual(gain, 1.4141428569978354)
+            elif param == 10:
+                self.assertEqual(gain, 0.14071950894605836)
 
     def test_calculate_gain_leaky_relu_only_accepts_numbers(self):
         for param in [True, [1], {'a': 'b'}]:
@@ -1958,24 +1979,24 @@ class TestNNInit(TestCase):
             normalise = in_c if scaled else 1
             # Test 1D
             input_var = Variable(torch.randn(batch, in_c, size))
-            filter_var = Variable(torch.zeros(in_c, out_c, kernel_size))
+            filter_var = Variable(torch.zeros(out_c, in_c, kernel_size))
             init.dirac(filter_var, scaled)
             output_var = F.conv1d(input_var, filter_var)
             self.assertEqual(input_var[:, :, 1:-1].sum(1) / normalise, output_var)
 
             # Test 2D
             input_var = Variable(torch.randn(batch, in_c, size, size))
-            filter_var = Variable(torch.zeros(in_c, out_c, kernel_size, kernel_size))
+            filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size))
             init.dirac(filter_var, scaled)
             output_var = F.conv2d(input_var, filter_var)
             self.assertEqual(input_var[:, :, 1:-1, 1:-1].sum(1) / normalise, output_var)
 
             # Test 3D
             input_var = Variable(torch.randn(batch, in_c, size, size, size))
-            filter_var = Variable(torch.zeros(in_c, out_c, kernel_size, kernel_size, kernel_size))
+            filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size))
             init.dirac(filter_var, scaled)
-            output_var = F.conv1d(input_var, filter_var)
-            self.assertEqual(input_var[:, :, 1:-1, 1:-1].sum(1) / normalise, output_var)
+            output_var = F.conv3d(input_var, filter_var)
+            self.assertEqual(input_var[:, :, 1:-1, 1:-1, 1:-1].sum(1) / normalise, output_var)
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for as_variable in [True, False]:
