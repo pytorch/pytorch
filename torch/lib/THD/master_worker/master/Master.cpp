@@ -20,8 +20,9 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
 
   if (dataChannel->getRank() > 0) {
     /*
-     * Worker initialization. If initialization succeeds it goes into
-     * infinite loop in which waits for commands from master.
+     * Worker initialization. It goes into infinite loop in which waits
+     * for commands from master. Returning from `THDWorkerMain` indicates
+     * a failure so it will `return false`.
      */
     THDWorkerMain();
     return false;
