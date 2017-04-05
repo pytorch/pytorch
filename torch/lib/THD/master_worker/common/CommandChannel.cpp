@@ -11,6 +11,7 @@
 #include <string>
 #include <stdexcept>
 #include <utility>
+#include <iostream>
 
 namespace thd {
 namespace {
@@ -55,7 +56,9 @@ MasterCommandChannel::MasterCommandChannel()
 
 MasterCommandChannel::~MasterCommandChannel() {
   if (_error_thread.joinable()) {
-    ::write(_error_pipe, "exit", 4);
+    if (::write(_error_pipe, "exit", 4) != 4) {
+      std::cerr << "Failed to notify error thread" << std::endl;
+    }
     _error_thread.join();
 
     ::close(_error_pipe);
