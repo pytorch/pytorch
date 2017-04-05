@@ -270,4 +270,7 @@ class DataLoader(object):
         return DataLoaderIter(self)
 
     def __len__(self):
-        return int(math.ceil(len(self.sampler) / float(self.batch_size)))
+        if self.drop_last:
+            return len(self.sampler) // self.batch_size
+        else:
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size
