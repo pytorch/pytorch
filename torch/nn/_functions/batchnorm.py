@@ -20,6 +20,7 @@ class BatchNorm(Function):
         # don't use cuDNN for half inputs because cuDNN requires the weight and
         # bias tensors to be floats, unlike THCUNN which requires half tensors.
         self.use_cudnn = (cudnn.is_acceptable(input) and
+                          cudnn.version() > 5110 and
                           weight is not None and bias is not None and
                           not isinstance(input, torch.cuda.HalfTensor))
 

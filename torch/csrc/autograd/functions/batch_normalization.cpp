@@ -27,7 +27,8 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 #ifdef WITH_CUDNN
   use_cudnn = (input->data->isCuda()
                && input->data->type() != thpp::Type::HALF
-               && weight && bias && cudnn_enabled);
+               && weight && bias
+               && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
   auto output = input->data->newTensor();
@@ -91,7 +92,8 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
 #ifdef WITH_CUDNN
   use_cudnn = (input->isCuda()
                && input->type() != thpp::Type::HALF
-               && weight && bias && training && cudnn_enabled);
+               && weight && bias && training
+               && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
   std::unique_ptr<Tensor> grad_input;
