@@ -18,7 +18,8 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws),
-        cudnn_wrapper_(&context_) {
+        cudnn_wrapper_(&context_),
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
@@ -29,15 +30,18 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    DCHECK_EQ(X.ndim(), 2);
+    const auto canonical_axis = X.canonical_axis_index(axis_);
+    const int N = X.size_to_dim(canonical_axis);
+    const int D = X.size_from_dim(canonical_axis);
+
     Y->ResizeLike(X);
     if (dims_ != X.dims()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
           cudnnTypeWrapper<T>::type,
-          X.dim32(0),
-          X.dim32(1),
+          N,
+          D,
           1,
           1));
       dims_ = X.dims();
@@ -57,6 +61,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
+  int axis_;
   cudnnTensorDescriptor_t desc_;
   vector<TIndex> dims_;
 };
@@ -67,7 +72,8 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws),
-        cudnn_wrapper_(&context_) {
+        cudnn_wrapper_(&context_),
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
@@ -79,20 +85,19 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     auto& Y = Input(0);
     auto& dY = Input(1);
     auto* dX = Output(0);
-    DCHECK_EQ(Y.ndim(), 2);
-    DCHECK(Y.dims() == dY.dims());
-    int N = Y.dim32(0);
-    int D = Y.dim32(1);
-    DCHECK_EQ(dY.dim32(0), N);
-    DCHECK_EQ(dY.dim32(1), D);
+    const auto canonical_axis = Y.canonical_axis_index(axis_);
+    const int N = Y.size_to_dim(canonical_axis);
+    const int D = Y.size_from_dim(canonical_axis);
+
+    CHECK_EQ(Y.dims(), dY.dims());
     dX->ResizeLike(Y);
     if (dims_ != Y.dims()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
           cudnnTypeWrapper<T>::type,
-          Y.dim32(0),
-          Y.dim32(1),
+          N,
+          D,
           1,
           1));
       dims_ = Y.dims();
@@ -114,6 +119,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
+  int axis_;
   cudnnTensorDescriptor_t desc_;
   vector<TIndex> dims_;
 };

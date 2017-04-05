@@ -14,8 +14,10 @@ import unittest
 class TestSoftmaxOps(hu.HypothesisTestCase):
 
     @given(n=st.sampled_from([2, 4, 71, 103]),
-           D=st.sampled_from([4, 8, 64, 79, 256, 333]), **hu.gcs)
-    def test_softmax(self, n, D, gc, dc):
+           D=st.sampled_from([4, 8, 64, 79, 256, 333]),
+           engine=st.sampled_from([None, 'CUDNN']),
+           **hu.gcs)
+    def test_softmax(self, n, D, engine, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         X = np.random.rand(n, D).astype(np.float32)
@@ -39,6 +41,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             "Softmax",
             ["X"],
             ["probs"],
+            engine=engine
         )
 
         self.assertReferenceChecks(
@@ -49,8 +52,10 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         )
 
     @given(n=st.sampled_from([2, 4, 71, 103, 555, 751, 1201]),
-           D=st.sampled_from([4, 8, 64, 79, 256, 333, 1000]), **hu.gcs)
-    def test_softmax_grad(self, n, D, gc, dc):
+           D=st.sampled_from([4, 8, 64, 79, 256, 333, 1000]),
+           engine=st.sampled_from([None, 'CUDNN']),
+           **hu.gcs)
+    def test_softmax_grad(self, n, D, engine, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
         Y = np.random.rand(n, D).astype(np.float32)
@@ -69,6 +74,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             "SoftmaxGradient",
             ["Y", "dY"],
             ["dX"],
+            engine=engine
         )
 
         self.assertReferenceChecks(
@@ -78,10 +84,10 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             reference=label_softmax_grad,
         )
 
-
-
-    @given(axis=st.integers(min_value=1, max_value=4), **hu.gcs)
-    def test_softmax_axis(self, axis, gc, dc):
+    @given(axis=st.integers(min_value=1, max_value=4),
+           engine=st.sampled_from([None, 'CUDNN']),
+           **hu.gcs)
+    def test_softmax_axis(self, axis, engine, gc, dc):
         np.random.seed(1)
         X = np.random.randn(1, 2, 3, 2, 1).astype(np.float32)
         X = X + 1e-2
@@ -115,6 +121,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             ["X"],
             ["probs"],
             axis=axis,
+            engine=engine
         )
 
         self.assertReferenceChecks(
