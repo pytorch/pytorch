@@ -16,7 +16,7 @@ class PairwiseDistance(Module):
 
         Shape:
             - Input: :math:`(N, D)` where `D = vector dimension`
-            - Output: :math:`(N, 1)
+            - Output: :math:`(N, 1)`
 
         >>> pdist = nn.PairwiseDistance(2)
         >>> input1 = autograd.Variable(torch.randn(100, 128))

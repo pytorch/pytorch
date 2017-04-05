@@ -52,9 +52,11 @@
 #endif
 
 #if IS_CUDA
+#define THBoolTensor THCudaByteTensor
 #define THPBoolTensor THCPByteTensor
 #define THPBoolTensorClass THCPByteTensorClass
 #else
+#define THBoolTensor THByteTensor
 #define THPBoolTensor THPByteTensor
 #define THPBoolTensorClass THPByteTensorClass
 #endif
@@ -96,6 +98,7 @@ typedef THLongStorage THStride;
 #undef THIndexTensor_
 #undef THPIndexTensor
 #undef THPIndexTensorClass
+#undef THBoolTensor
 #undef THPBoolTensor
 #undef THPBoolTensorClass
 #undef RealStr

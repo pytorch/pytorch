@@ -266,13 +266,10 @@ IMPLEMENT_STATELESS(mm)
 IMPLEMENT_STATELESS(bmm)
 // TODO: this doesn't implement options that return numbers!
 IMPLEMENT_STATELESS(multinomial)
-IMPLEMENT_STATELESS(uniform)
 IMPLEMENT_STATELESS(normal)
-IMPLEMENT_STATELESS(cauchy)
-IMPLEMENT_STATELESS(log_normal)
-IMPLEMENT_STATELESS(random)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(range)
+IMPLEMENT_STATELESS(arange)
 IMPLEMENT_STATELESS(gather)
 IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
@@ -600,16 +597,13 @@ static PyMethodDef TorchMethods[] = {
   {"mm",              (PyCFunction)THPModule_mm,                METH_VARARGS | METH_KEYWORDS, NULL},
   {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS | METH_KEYWORDS, NULL},
-  {"uniform",         (PyCFunction)THPModule_uniform,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cauchy",          (PyCFunction)THPModule_cauchy,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"log_normal",      (PyCFunction)THPModule_log_normal,        METH_VARARGS | METH_KEYWORDS, NULL},
-  {"random",          (PyCFunction)THPModule_random,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"arange",          (PyCFunction)THPModule_arange,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},

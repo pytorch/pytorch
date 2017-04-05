@@ -182,6 +182,7 @@ ${cpu}
         'double': 'float',
         'accreal': '" RealStr "',
         'bool': 'bool',
+        'const char*': 'bool',  # Can come only from bool option.
     }
 
     OUT_INIT = """
@@ -385,6 +386,7 @@ ${cpu}
         for option in declaration['options']:
             for arg in option['arguments']:
                 if arg['name'] == 'self':
+                    arg['assign_name'] = 'self'
                     arg['name'] = 'source'
         return declaration
 
@@ -434,7 +436,7 @@ ${cpu}
             return self.preprocessor_guard(code, declaration['defined_if'])
         return code
 
-    def process_all_unpacks(self, code, option):
+    def process_all_call_arg(self, code, option):
         return 'LIBRARY_STATE ' + code
 
     def process_all_checks(self, code, option):
@@ -458,7 +460,7 @@ ${cpu}
 
         return code
 
-    def process_option_code_template(self, template, option):
+    def process_pre_arg_assign(self, template, option):
         new_args = []
         for arg in option['arguments']:
             if not option.get('output_provided', True) and arg.get('output'):

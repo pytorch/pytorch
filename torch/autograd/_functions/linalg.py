@@ -53,3 +53,19 @@ class Trace(Function):
         grad_input = grad_output.new(isize).zero_()
         grad_input.view(-1)[::(isize[1] + 1)] = grad_output[0]
         return grad_input
+
+
+class Cross(Function):
+
+    def __init__(self, dim=-1):
+        self.dim = dim
+
+    def forward(self, input, other):
+        self.save_for_backward(input, other)
+        return torch.cross(input, other, self.dim)
+
+    def backward(self, grad_output):
+        input, other = self.saved_tensors
+        grad_input = torch.cross(other, grad_output, self.dim)
+        grad_other = torch.cross(grad_output, input, self.dim)
+        return grad_input, grad_other

@@ -25,8 +25,8 @@ ENDIF()
 ######################################################################
 
 IF(MSVC)
-  # MSVC now supports C99 since VS2013/VS2015
-  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /std:c99")
+  # MSVC now supports C99 since VS2013/VS2015, however the standard version switch is not provided yet
+  # SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /std:c99")
 ELSE(MSVC)
   # enable gnu99 and not c99 because we use
   # gnu extensions like posix_memalign
@@ -212,7 +212,7 @@ ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
 IF(C_AVX_FOUND)
   IF(MSVC)
     SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "/Ox /fp:fast ${C_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(vector/AVX.c PROPERTIES COMPILE_FLAGS "/Ox ${C_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(vector/AVX.c PROPERTIES COMPILE_FLAGS "/Ox /arch:AVX ${C_AVX_FLAGS}")
   ELSE(MSVC)
     SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${C_AVX_FLAGS}")
     SET_SOURCE_FILES_PROPERTIES(vector/AVX.c PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX_FLAGS}")
@@ -222,7 +222,7 @@ ENDIF(C_AVX_FOUND)
 
 IF(C_AVX2_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(vector/AVX2.c PROPERTIES COMPILE_FLAGS "/Ox ${C_AVX2_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(vector/AVX2.c PROPERTIES COMPILE_FLAGS "/Ox /arch:AVX2 ${C_AVX2_FLAGS}")
   ELSE(MSVC)
     SET_SOURCE_FILES_PROPERTIES(vector/AVX2.c PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX2_FLAGS}")
   ENDIF(MSVC)

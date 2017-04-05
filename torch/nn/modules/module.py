@@ -102,6 +102,10 @@ class Module(object):
             self._parameters[name] = param
 
     def add_module(self, name, module):
+        """Adds a child module to the current module.
+
+        The module can be accessed as an attribute using the given name.
+        """
         if hasattr(self, name):
             raise KeyError("attribute already exists '{}'".format(name))
         if not isinstance(module, Module) and module is not None:
@@ -230,7 +234,8 @@ class Module(object):
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        return object.__getattr__(self, name)
+        raise AttributeError("'{}' object has no attribute '{}'".format(
+            type(self).__name__, name))
 
     def __setattr__(self, name, value):
         def remove_from(*dicts):

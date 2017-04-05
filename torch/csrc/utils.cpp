@@ -270,7 +270,8 @@ struct Option {
       arguments(), is_variadic(is_variadic), has_out(has_out) {};
   Option(const Option&) = delete;
   Option(Option&& other):
-    arguments(std::move(other.arguments)), is_variadic(other.is_variadic) {};
+    arguments(std::move(other.arguments)), is_variadic(other.is_variadic),
+    has_out(other.has_out) {};
 
   std::vector<Argument> arguments;
   bool is_variadic;
