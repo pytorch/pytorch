@@ -79,7 +79,7 @@ To run a benchmark:
 1. Copy the benchmark tool to all participating machines
 
 2. Start a Redis server on any host (either a client machine or one of
-   the machines participating in the test).
+   the machines participating in the test). Note that Redis Cluster is **not** supported.
 
 3. Determine some unique ID for the benchmark run (e.g. the `uuid`
    tool or some number).
