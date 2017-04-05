@@ -13,7 +13,8 @@ import unittest
 
 class TestSoftmaxOps(hu.HypothesisTestCase):
 
-    @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
+    @given(n=st.sampled_from([2, 4, 71, 103]),
+           D=st.sampled_from([4, 8, 64, 79, 256, 333]), **hu.gcs)
     def test_softmax(self, n, D, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -37,7 +38,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         op = core.CreateOperator(
             "Softmax",
             ["X"],
-            ["probs"]
+            ["probs"],
         )
 
         self.assertReferenceChecks(
@@ -47,8 +48,37 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             reference=label_softmax,
         )
 
-        self.assertGradientChecks(
-            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
+    @given(n=st.sampled_from([2, 4, 71, 103, 555, 751, 1201]),
+           D=st.sampled_from([4, 8, 64, 79, 256, 333, 1000]), **hu.gcs)
+    def test_softmax_grad(self, n, D, gc, dc):
+        # n = number of examples, D = |labels|
+        # Initialize X and add 1e-2 for numerical stability
+        Y = np.random.rand(n, D).astype(np.float32)
+        dY = np.random.rand(n, D).astype(np.float32)
+        Y = Y + 1e-2
+
+        # Reference implementation of cross entropy with soft labels
+        def label_softmax_grad(X, dY):
+            dX = Y * 0.0
+            for i in range(n):
+                d = np.dot(Y[i, :], dY[i, :])
+                dX[i, :] = Y[i, :] * (dY[i, :] - d)
+            return [dX]
+
+        op = core.CreateOperator(
+            "SoftmaxGradient",
+            ["Y", "dY"],
+            ["dX"],
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[Y, dY],
+            reference=label_softmax_grad,
+        )
+
+
 
     @given(axis=st.integers(min_value=1, max_value=4), **hu.gcs)
     def test_softmax_axis(self, axis, gc, dc):
@@ -143,8 +173,8 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs_gpu_only)
     def test_softmax_with_loss_large(self, gc, dc):
-        for n in [64, 128, 256, 512]:
-            for D in [1000, 5000, 10000, 50000]:
+        for n in [64, 512]:
+            for D in [1000, 5000, 50000]:
                 # n = number of examples, D = |labels|
                 # Initialize X and add 1e-2 for numerical stability
                 X = np.random.rand(n, D).astype(np.float32)
@@ -503,7 +533,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         '''
         from caffe2.proto import caffe2_pb2
 
-        for j in range(3):
+        for _j in range(3):
             gpuop = core.CreateOperator(
                 "SoftmaxWithLoss",
                 ["X_gpu", "label_gpu"],
