@@ -10,11 +10,13 @@ def calculate_gain(nonlinearity, param=None):
     ============ =========================================
     nonlinearity gain
     ============ =========================================
+    linear       :math:`1`
+    conv{3,4,5}d :math:`1`
     sigmoid      :math:`1`
     tanh         :math:`5 / 3`
     relu         :math:`\sqrt{2}`
-    lreaky_relu  :math:`\sqrt{2 / (1 + negative_slope^2)}`
-    =========== ==========================================
+    leaky_relu   :math:`\sqrt{2 / (1 + negative_slope^2)}`
+    ============ =========================================
 
     Args:
         nonlinearity: the nonlinear function (`nn.functional` name)
@@ -23,7 +25,8 @@ def calculate_gain(nonlinearity, param=None):
     Examples:
         >>> gain = nn.init.gain('lrelu')
     """
-    if nonlinearity == 'sigmoid':
+    linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
+    if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
         return 1
     elif nonlinearity == 'tanh':
         return 5.0 / 3

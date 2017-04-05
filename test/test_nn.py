@@ -1873,7 +1873,7 @@ class TestNNInit(TestCase):
                 init.calculate_gain('leaky_relu', param)
 
     def test_calculate_gain_only_accepts_valid_nonlinearities(self):
-        for n in [3, 5, 6]:
+        for n in [2, 5, 25]:
             # Generate random strings of lengths that definitely aren't supported
             random_string = ''.join([random.choice(string.ascii_lowercase) for i in range(n)])
             with self.assertRaises(ValueError):
@@ -1946,35 +1946,32 @@ class TestNNInit(TestCase):
                     # Check number of nonzeros is product of first 2 dims
                     assert torch.nonzero(input_tensor).size(0) == c_out * c_in
 
-                    # Check sum of values
+                    # Check sum of values (can have precision issues, hence assertEqual)
                     if scaled:
-                        assert input_tensor.sum() == c_out
+                        self.assertEqual(input_tensor.sum(), c_out)
                     else:
-                        assert input_tensor.sum() == c_out * c_in
+                        self.assertEqual(input_tensor.sum(), c_out * c_in)
 
     def test_dirac_identity(self):
-        in_c, out_c, kernel_size = 8, 1, 3
+        batch, in_c, out_c, size, kernel_size = 8, 3, 1, 5, 3
         for scaled in [True, False]:
             normalise = in_c if scaled else 1
             # Test 1D
-            input_var = self._create_random_nd_tensor(3, size_min=5, size_max=5, as_variable=True)
-            input_var.data.copy_(torch.randn(input_var.size()))  # Fill with random values
+            input_var = Variable(torch.randn(batch, in_c, size))
             filter_var = Variable(torch.zeros(in_c, out_c, kernel_size))
             init.dirac(filter_var, scaled)
             output_var = F.conv1d(input_var, filter_var)
             self.assertEqual(input_var[:, :, 1:-1].sum(1) / normalise, output_var)
 
             # Test 2D
-            input_var = self._create_random_nd_tensor(4, size_min=5, size_max=5, as_variable=True)
-            input_var.data.copy_(torch.randn(input_var.size()))
+            input_var = Variable(torch.randn(batch, in_c, size, size))
             filter_var = Variable(torch.zeros(in_c, out_c, kernel_size, kernel_size))
             init.dirac(filter_var, scaled)
             output_var = F.conv2d(input_var, filter_var)
             self.assertEqual(input_var[:, :, 1:-1, 1:-1].sum(1) / normalise, output_var)
 
             # Test 3D
-            input_var = self._create_random_nd_tensor(5, size_min=5, size_max=5, as_variable=True)
-            input_var.data.copy_(torch.randn(input_var.size()))
+            input_var = Variable(torch.randn(batch, in_c, size, size, size))
             filter_var = Variable(torch.zeros(in_c, out_c, kernel_size, kernel_size, kernel_size))
             init.dirac(filter_var, scaled)
             output_var = F.conv1d(input_var, filter_var)
