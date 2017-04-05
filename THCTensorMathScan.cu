@@ -6,6 +6,8 @@
 #include "THCReduce.cuh"
 #include "THCNumerics.cuh"
 #include "THCTensorMathReduce.cuh"
+#include <thrust/scan.h>
+#include <thrust/execution_policy.h>
 
 /* Perform an inclusive scan along an outer dimension of a tensor.
  *
@@ -20,8 +22,8 @@
  */
 template<typename T, class BinaryOp>
 __global__ void THCTensor_kernel_scanOuterDim(T *tgt_, T *src_,
-                                                 unsigned num_orows, unsigned num_irows, unsigned row_size,
-                                                 T init, BinaryOp binary_op)
+                                              unsigned num_orows, unsigned num_irows, unsigned row_size,
+                                              T init, BinaryOp binary_op)
 {
   for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
@@ -52,8 +54,8 @@ __global__ void THCTensor_kernel_scanOuterDim(T *tgt_, T *src_,
  */
 template<typename T, int num_threads_x, int num_threads_y, class BinaryFunction>
 __global__ void THCTensor_kernel_scanInnermostDim(T *tgt_, T *src_,
-                                                     unsigned num_rows, unsigned row_size,
-                                                     T init, BinaryFunction binary_op)
+                                                  unsigned num_rows, unsigned row_size,
+                                                  T init, BinaryFunction binary_op)
 {
   __shared__ T sbuf[num_threads_y][2 * num_threads_x];
 
