@@ -77,6 +77,10 @@ class CudaDevicePointer {
     return device_;
   }
 
+  T& operator[](size_t index) const {
+    return device_[index];
+  }
+
   int getCount() const {
     return count_;
   }
@@ -184,6 +188,10 @@ class CudaHostPointer {
 
   T* operator*() const {
     return host_;
+  }
+
+  T& operator[](size_t index) const {
+    return host_[index];
   }
 
   int getCount() const {

@@ -129,6 +129,11 @@ Both local reduction in phase 1 and broadcast in phase 3 is pipelined
 with the communication steps where this data is needed or becomes
 available.
 
+### cuda_allreduce_halving_doubling
+
+CUDA-aware implementation of `allreduce_halving_doubling`. Currently no
+pipelining is done between reduction/broadcast steps and the communication.
+
 ## Barrier
 
 Synchronization point between processes.

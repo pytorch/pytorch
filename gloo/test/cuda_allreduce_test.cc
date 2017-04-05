@@ -11,6 +11,7 @@
 #include <memory>
 #include <vector>
 
+#include "gloo/cuda_allreduce_halving_doubling.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
 #include "gloo/test/cuda_base_test.h"
@@ -150,6 +151,24 @@ INSTANTIATE_TEST_CASE_P(
       ::testing::Range(2, 16),
       ::testing::ValuesIn(genMemorySizes()),
       ::testing::Values(allreduceRingChunked)));
+
+static std::function<Func> allreduceHalvingDoubling = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+      new ::gloo::CudaAllreduceHalvingDoubling<float>(
+          context, ptrs, count, streams));
+};
+
+INSTANTIATE_TEST_CASE_P(
+    AllreduceHalvingDoubling,
+    CudaAllreduceTest,
+    ::testing::Combine(
+      ::testing::ValuesIn(std::vector<int>({8, 16, 32})),
+      ::testing::ValuesIn(std::vector<int>({64, 128, 1000})),
+      ::testing::Values(allreduceHalvingDoubling)));
 
 } // namespace
 } // namespace test
