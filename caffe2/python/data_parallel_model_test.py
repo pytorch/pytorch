@@ -186,6 +186,7 @@ class RecurrentNetworkParallelTest(TestCase):
             forward_pass_builder_fun=model_build_fun,
             param_update_builder_fun=param_update_fun,
             devices=gpu_devices,
+            optimize_gradient_memory=True,
         )
 
         # Change all initialization to be ConstantFills so that
