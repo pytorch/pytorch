@@ -23,7 +23,7 @@ class SGD(Optimizer):
         >>> optimizer.step()
 
     __ http://www.cs.toronto.edu/%7Ehinton/absps/momentum.pdf
-    
+
     .. note::
         The implementation of SGD with Momentum/Nesterov subtly differs from
         Sutskever et. al. and implementations in some other frameworks.
