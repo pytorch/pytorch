@@ -54,6 +54,7 @@ def _calc_attention_weights(
     attention_weights = model.Softmax(
         attention_logits_transposed,
         s(scope, 'attention_weights'),
+        engine='CUDNN',
     )
     # TODO: make this operation in-place
     # [batch_size, encoder_length, 1]
