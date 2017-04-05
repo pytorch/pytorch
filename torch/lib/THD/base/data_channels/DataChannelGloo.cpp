@@ -56,13 +56,17 @@ DataChannelGloo::~DataChannelGloo() {
 
 
 bool DataChannelGloo::init() {
-  // there is a separate context for every operation
-  for (uint8_t i = 0; i < static_cast<uint8_t>(DataOperation::LAST); i++) {
-    _contexts[static_cast<DataOperation>(i)] =
-        std::make_shared<Context>(_rank, _num_processes);
-    auto store = getStore();
-    _contexts[static_cast<DataOperation>(i)]->connectFullMesh(store, _device);
-  }
+  std::vector<rank_type> ranks;
+  ranks.reserve(_num_processes);
+  for (rank_type rank = 0; rank < _num_processes; ++rank)
+    ranks.push_back(rank);
+
+  _groups.insert({
+    THDGroupWORLD,
+    DataChannel::Group(ranks, _num_processes - 1)
+  });
+
+  createContexts(THDGroupWORLD);
   return true;
 }
 
@@ -71,6 +75,17 @@ PrefixStore DataChannelGloo::getStore() {
   return PrefixStore(std::to_string(id++), *_store);
 }
 
+void DataChannelGloo::createContexts(THDGroup group_id) {
+  // there is a separate context for every operation
+  auto group = _groups.at(group_id);
+  for (uint8_t i = 0; i < static_cast<uint8_t>(DataOperation::LAST); i++) {
+    auto key = std::make_tuple(static_cast<DataOperation>(i), group_id);
+    _contexts[key] = std::make_shared<Context>(group.mustGetGroupRank(_rank),
+                                               group.size());
+    auto store = getStore();
+    _contexts[key]->connectFullMesh(store, _device);
+  }
+}
 
 rank_type DataChannelGloo::getRank() {
   return _rank;
@@ -81,8 +96,9 @@ rank_type DataChannelGloo::getNumProcesses() {
   return _num_processes;
 }
 
-std::shared_ptr<Context> DataChannelGloo::getFullMeshCtx(DataOperation op) {
-  return _contexts[op];
+std::shared_ptr<Context> DataChannelGloo::getFullMeshCtx(DataOperation op,
+                                                         THDGroup group_id) {
+  return _contexts[std::make_tuple(op, group_id)];
 }
 
 template<typename T>
@@ -92,7 +108,7 @@ void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
   std::uint64_t all_tensor_bytes = tensor_bytes * output.size();
   std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensor_bytes]);
   ::gloo::AllgatherRing<T> algo(
-        getFullMeshCtx(DataOperation::ALL_GATHER),
+        getFullMeshCtx(DataOperation::ALL_GATHER, group_id),
         {reinterpret_cast<T*>(input.data())},
         reinterpret_cast<T*>(tmp_data.get()),
         input.numel()
@@ -127,7 +143,7 @@ template<typename T>
 void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
                                  THDGroup group_id) {
   ::gloo::AllreduceRing<T> algo(
-        getFullMeshCtx(DataOperation::ALL_REDUCE),
+        getFullMeshCtx(DataOperation::ALL_REDUCE, group_id),
         {reinterpret_cast<T*>(t.data())},
         t.numel(),
         THDToGlooReduceOp<T>(operation)
@@ -151,7 +167,7 @@ template<typename T>
 void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
                                 THDGroup group_id) {
   ::gloo::BroadcastOneToAll<T> algo(
-        getFullMeshCtx(DataOperation::BROADCAST),
+        getFullMeshCtx(DataOperation::BROADCAST, group_id),
         {reinterpret_cast<T*>(data.data())},
         data.numel(),
         src_rank
@@ -203,9 +219,7 @@ void DataChannelGloo::receive(thpp::Tensor& data, rank_type src_rank) {
 }
 
 void DataChannelGloo::barrier(THDGroup group_id) {
-  ::gloo::BarrierAllToAll algo(
-          getFullMeshCtx(DataOperation::BARRIER)
-        );
+  ::gloo::BarrierAllToAll algo(getFullMeshCtx(DataOperation::BARRIER, group_id));
   algo.run();
 }
 
@@ -220,7 +234,12 @@ auto DataChannelGloo::ireceive(thpp::Tensor& data, rank_type src_rank) -> Reques
 }
 
 THDGroup DataChannelGloo::newGroup(const std::vector<rank_type>& ranks) {
-  throw std::runtime_error("DataChannelGloo doesn't support creation of new groups");
+  auto new_group = DataChannel::Group(ranks, _num_processes - 1);
+  THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
+
+  _groups.insert({new_group_id, new_group});
+
+  createContexts(new_group_id);
 }
 
 namespace {

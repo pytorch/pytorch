@@ -151,10 +151,16 @@ enum class DataOperation : uint8_t {
   LAST
 };
 
-struct DataOperationHash {
-  template<typename T>
-    std::uint8_t operator()(T t) const {
-      return static_cast<std::uint8_t>(t);
-    }
-};
 } // namespace thd
+
+
+namespace std {
+
+template<>
+struct hash<::thd::DataOperation> {
+  std::size_t operator()(const ::thd::DataOperation& op) const {
+    return hash<uint8_t>()(static_cast<uint8_t>(op));
+  }
+};
+
+} // namespace std

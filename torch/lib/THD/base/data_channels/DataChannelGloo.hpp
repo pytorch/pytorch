@@ -11,6 +11,20 @@
 #include <cstdint>
 #include <map>
 #include <vector>
+#include <tuple>
+
+namespace std {
+
+template<>
+struct hash<std::tuple<::thd::DataOperation, THDGroup>> {
+  std::size_t operator()(const std::tuple<::thd::DataOperation,
+                         THDGroup>& k) const {
+    return hash<::thd::DataOperation>()(std::get<0>(k)) ^
+        hash<THDGroup>()(std::get<1>(k));
+  }
+};
+
+} // namespace std
 
 namespace thd {
 
@@ -63,16 +77,19 @@ private:
                   THDGroup group_id = THDGroupWORLD);
 
   ::gloo::rendezvous::PrefixStore getStore();
-  std::shared_ptr<::gloo::rendezvous::Context> getFullMeshCtx(DataOperation op);
+  void createContexts(THDGroup group_id);
+
+  std::shared_ptr<::gloo::rendezvous::Context>
+  getFullMeshCtx(DataOperation op, THDGroup group_id = THDGroupWORLD);
 
   rank_type _rank; // Current process' rank
   rank_type _num_processes; // Number of processes in network
   std::unique_ptr<::gloo::rendezvous::Store> _store;
   std::shared_ptr<::gloo::transport::Device> _device;
+  std::unordered_map<THDGroup, DataChannel::Group> _groups;
   std::unordered_map<
-      DataOperation,
-      std::shared_ptr<::gloo::rendezvous::Context>,
-      DataOperationHash> _contexts;
+      std::tuple<DataOperation, THDGroup>,
+      std::shared_ptr<::gloo::rendezvous::Context>>_contexts;
 };
 
 } // namespace thd
