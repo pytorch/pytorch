@@ -1,6 +1,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
+#include "softmax_op.h"
 #include "softmax_with_loss_op.h"
 
 namespace caffe2 {
@@ -572,11 +573,97 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
+// Implementation for the CUDA context.
+template <>
+bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
+  auto& X = Input(0);
+  auto* P = Output(0);
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  const int N = X.size_to_dim(canonical_axis);
+  const int D = X.size_from_dim(canonical_axis);
+  P->ResizeLike(X);
+  if (sum_multiplier_.size() != D) {
+    sum_multiplier_.Resize(D);
+    math::Set<float, CUDAContext>(
+        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  }
+  if (scale_.size() != D) {
+    scale_.Resize(D);
+  }
+  Softmax(
+      N,
+      D,
+      X.data<float>(),
+      sum_multiplier_.data<float>(),
+      scale_.mutable_data<float>(),
+      P->mutable_data<float>(),
+      &context_);
+  return true;
+}
+#define SOFTMAX_NUM_THREADS 128
+
+// The softmax gradient kernel. This kernel has to be called with the number of
+// threads per block being no more than SOFTMAX_NUM_THREADS.
+namespace {
+__global__ void softmax_gradient_kernel(
+    const int dim,
+    const float* Y,
+    const float* dY,
+    float* dX) {
+  Y += blockIdx.x * dim;
+  dY += blockIdx.x * dim;
+  dX += blockIdx.x * dim;
+  const int idx = threadIdx.x;
+  __shared__ float reduction_buffer[SOFTMAX_NUM_THREADS];
+  float tmp;
+
+  // A two-level reduction to compute the inner products.
+  tmp = 0;
+  for (int i = idx; i < dim; i += blockDim.x) {
+    tmp += dY[i] * Y[i];
+  }
+  reduction_buffer[idx] = tmp;
+  __syncthreads();
+  if (idx == 0) {
+    tmp = reduction_buffer[0];
+    for (int i = 1; i < blockDim.x; ++i)
+      tmp += reduction_buffer[i];
+    reduction_buffer[0] = tmp;
+  }
+  __syncthreads();
+  // Compute gradient.
+  tmp = reduction_buffer[0];
+  for (int i = idx; i < dim; i += blockDim.x) {
+    dX[i] = Y[i] * (dY[i] - tmp);
+  }
+}
+} // namespace
+
+template <>
+bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
+  auto& Y = Input(0);
+  auto& dY = Input(1);
+  auto* dX = Output(0);
+  const auto canonical_axis = Y.canonical_axis_index(axis_);
+  const int N = Y.size_to_dim(canonical_axis);
+  const int D = Y.size_from_dim(canonical_axis);
+  dX->ResizeLike(Y);
+  softmax_gradient_kernel<<<
+      N,
+      SOFTMAX_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      D, Y.data<float>(), dY.data<float>(), dX->mutable_data<float>());
+  return true;
+}
 
 namespace {
 REGISTER_CUDA_OPERATOR(SoftmaxWithLoss,
                        SoftmaxWithLossOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SoftmaxWithLossGradient,
                        SoftmaxWithLossGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(Softmax, SoftmaxOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CUDAContext>);
+
 } // namespace
 } // namespace caffe2
