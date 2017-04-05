@@ -10,6 +10,7 @@ import collections
 import time
 import copy
 from caffe2.python import workspace
+from caffe2.proto import caffe2_pb2
 
 import logging
 
@@ -130,6 +131,8 @@ def share_grad_blobs(net, losses, param_grads, namescope):
     log.info("Remapping {} blobs, using {} shared".format(
         len(mapping), len(renamed),
     ))
+    log.debug("Assignments: {}".format(mapping))
+
     apply_assignments(netproto, mapping)
     log.info("Gradient memory optimization took {} secs".format(
         time.time() - start_time),
@@ -232,10 +235,35 @@ def apply_assignments(net, blob_assignments):
         return blob_assignments[blob]
 
     for op in net.op:
+        # Descend into subnets of the recurrent network
+        if op.type.startswith('RecurrentNetwork'):
+            apply_recurrent_blob_assignments(op, blob_assignments, canonical_name)
+
         for i, input_ in enumerate(op.input):
             op.input[i] = canonical_name(input_)
         for i, output in enumerate(op.output):
             op.output[i] = canonical_name(output)
+
+
+def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
+    log.debug("Applying assignments to recurrent op: {}".format(op.type))
+    import google.protobuf.text_format as protobuftx
+    step_args = [a for a in op.arg if a.name.endswith("step_net")]
+    for step_arg in step_args:
+        step_proto = caffe2_pb2.NetDef()
+        protobuftx.Merge(step_arg.s, step_proto)
+        apply_assignments(step_proto, blob_assignments)
+        for i, einp in enumerate(step_proto.external_input):
+            if einp in blob_assignments:
+                step_proto.external_input[i] = canonical_name(einp)
+        step_arg.s = str(step_proto)
+    # Store renamings
+    for blob, renamed in blob_assignments.items():
+        if blob in list(op.input) + list(op.output):
+            a = caffe2_pb2.Argument()
+            a.name = blob + ".rename"
+            a.s = str(renamed)
+            op.arg.extend([a])
 
 
 def optimize_interference(net, static_blobs,
