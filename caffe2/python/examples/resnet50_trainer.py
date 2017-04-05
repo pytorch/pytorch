@@ -173,7 +173,8 @@ def Train(args):
         order="NCHW",
         name="resnet50",
         use_cudnn=True,
-        cudnn_exhaustive_search=True
+        cudnn_exhaustive_search=True,
+        ws_nbytes_limit=(args.cudnn_workspace_limit_mb * 1024 * 1024),
     )
 
     if args.num_shards > 1:
@@ -355,6 +356,8 @@ def main():
                         help="Initial learning rate.")
     parser.add_argument("--weight_decay", type=float, default=1e-4,
                         help="Weight decay (L2 regularization)")
+    parser.add_argument("--cudnn_workspace_limit_mb", type=int, default=64,
+                        help="CuDNN workspace limit in MBs")
     parser.add_argument("--num_shards", type=int, default=1,
                         help="Number of machines in distributed run")
     parser.add_argument("--shard_id", type=int, default=0,
