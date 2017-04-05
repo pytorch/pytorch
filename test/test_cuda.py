@@ -94,23 +94,23 @@ def small_3d_positive(t):
 
 
 def small_3d_unique(t):
-    return t(S, S, S).copy_(torch.range(1, S * S * S))
+    return t(S, S, S).copy_(torch.arange(1, S * S * S + 1))
 
 
 def small_1d_lapack(t):
-    return t(1, 3).copy_(torch.range(1, 3).view(3))
+    return t(1, 3).copy_(torch.arange(1, 4).view(3))
 
 
 def small_2d_lapack(t):
-    return t(3, 3).copy_(torch.range(1, 9).view(3, 3))
+    return t(3, 3).copy_(torch.arange(1, 10).view(3, 3))
 
 
 def small_2d_lapack_skinny(t):
-    return t(3, 4).copy_(torch.range(1, 12).view(3, 4))
+    return t(3, 4).copy_(torch.arange(1, 13).view(3, 4))
 
 
 def small_2d_lapack_fat(t):
-    return t(4, 3).copy_(torch.range(1, 12).view(4, 3))
+    return t(4, 3).copy_(torch.arange(1, 13).view(4, 3))
 
 
 def new_t(*sizes):
@@ -506,7 +506,7 @@ class TestCuda(TestCase):
 
     def test_from_sequence(self):
         seq = [list(range(i * 4, i * 4 + 4)) for i in range(5)]
-        reference = torch.range(0, 19).resize_(5, 4)
+        reference = torch.arange(0, 20).resize_(5, 4)
         for t in types:
             cuda_type = get_gpu_type(t)
             self.assertEqual(cuda_type(seq), reference)

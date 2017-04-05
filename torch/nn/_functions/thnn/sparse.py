@@ -33,7 +33,7 @@ class Embedding(Function):
     def _make_sparse(self, indices, tensor_type):
         i = torch.LongTensor(2, indices.numel())
         v = torch.ones(indices.numel())
-        i[1].copy_(torch.range(0, indices.numel() - 1))
+        i[1].copy_(torch.arange(0, indices.numel()))
         i[0].copy_(indices)
         SparseTensor = getattr(sparse, tensor_type.__name__)
         return SparseTensor(i, v, torch.Size(

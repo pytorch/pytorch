@@ -230,12 +230,14 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
 
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(resizeAs)(fgradInput, finput);
-  THTensor_(transpose)(weight, weight, 1, 2);
+
+  THTensor *tweight = THTensor_(new)();
+  THTensor_(transpose)(tweight, weight, 1, 2);
 
   if(input->nDimension == 3)
   {
     THNN_(SpatialConvolutionLocal_updateGradInput_frame)
-      (gradInput, gradOutput, weight,
+      (gradInput, gradOutput, tweight,
        fgradInput, kW, kH, dW, dH, padW, padH,
        nInputPlane, inputWidth, inputHeight,
        nOutputPlane, outputWidth, outputHeight);
@@ -253,7 +255,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
       THTensor *fgradInput_t = THTensor_(newSelect)(fgradInput, 0, t);
 
       THNN_(SpatialConvolutionLocal_updateGradInput_frame)
-	(gradInput_t, gradOutput_t, weight, fgradInput_t,
+	(gradInput_t, gradOutput_t, tweight, fgradInput_t,
 	 kW, kH, dW, dH, padW, padH,
 	 nInputPlane, inputWidth, inputHeight,
 	 nOutputPlane, outputWidth, outputHeight);
@@ -264,8 +266,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
     }
   }
 
-  THTensor_(transpose)(weight, weight, 1, 2);
-
+  THTensor_(free)(tweight);
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
   if (freeWeight)

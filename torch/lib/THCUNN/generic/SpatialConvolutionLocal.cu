@@ -230,7 +230,8 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   THCTensor *fgradInput_n = THCTensor_(new)(state);
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
-  THCTensor_(transpose)(state, weight, weight, 1, 2);
+  THCTensor *tweight = THCTensor_(new)(state);
+  THCTensor_(transpose)(state, tweight, weight, 1, 2);
 
   // For each elt in batch, do:
   for (int elt = 0; elt < batchSize; elt ++) {
@@ -258,7 +259,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
     THCTensor_(baddbmm)(state, fgradInput3d,
                         ScalarConvert<int, real>::to(0),
                         fgradInput3d, ScalarConvert<int, real>::to(1),
-                        weight, gradOutput3d);
+                        tweight, gradOutput3d);
     // fgradInput3d:  oH*oW x nInputPlane*kH*kW x 1
 
     // Unpack columns back into input:
@@ -288,8 +289,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
     THCTensor_(resize3d)(state, gradInput, nInputPlane, inputHeight, inputWidth);
   }
 
-  THCTensor_(transpose)(state, weight, weight, 1, 2);
-
+  THCTensor_(free)(state, tweight);
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
   if (freeWeight)

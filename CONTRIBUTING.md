@@ -26,8 +26,8 @@ To locally develop with PyTorch, here are some tips:
 1. Uninstall all existing pytorch installs
 ```
 conda uninstall pytorch
-pip uninstall pytorch
-pip uninstall pytorch # run this command twice
+pip uninstall torch
+pip uninstall torch # run this command twice
 ```
 
 2. Locally clone a copy of PyTorch from source:

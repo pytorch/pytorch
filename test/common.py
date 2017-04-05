@@ -2,6 +2,7 @@ import sys
 import os
 import argparse
 import unittest
+import warnings
 import contextlib
 from functools import wraps
 from itertools import product
@@ -48,6 +49,14 @@ def skipIfNoLapack(fn):
             if 'Lapack library not found' in e.args[0]:
                 raise unittest.SkipTest('Compiled without Lapack')
             raise
+    return wrapper
+
+
+def suppress_warnings(fn):
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fn(*args, **kwargs)
     return wrapper
 
 

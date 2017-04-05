@@ -72,6 +72,28 @@ __device__ T reduceBlock(T* smem,
   return r;
 }
 
+// Block-wide reduction where each thread locally reduces N
+// values before letting a single warp take over - assumes
+// threadVals is in registers, not shared memory
+template <typename T, typename ReduceOp, int N>
+__device__ T reduceBlockN(T *smem,
+                         T threadVals[N],
+                         int numVals,
+                         ReduceOp reduceOp,
+                         T init) {
+  int offset = threadIdx.x * N;
+  T local = offset < numVals ? threadVals[0] : init;
+
+#pragma unroll
+  for (int i = 1; i < N; ++i) {
+    ++offset;
+    T next = offset < numVals ? threadVals[i] : init;
+    local = reduceOp(local, next);
+  }
+
+  return reduceBlock<T, ReduceOp>(smem, blockDim.x < numVals ? blockDim.x : numVals, local, reduceOp, init);
+}
+
 // Make sure the given tensor doesn't have too many dimensions
 void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg);
 

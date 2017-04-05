@@ -1921,12 +1921,12 @@ static const char *R = &__R;
   name: btrisolve
   cname: btrisolve
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  only_stateless: true
+  with_stateless: true
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* LU
-    - THTensor* x
-    - THIntegerTensor* pivots
+    - THTensor* self
+    - THTensor* LU_data
+    - THIntegerTensor* LU_pivots
 ]]

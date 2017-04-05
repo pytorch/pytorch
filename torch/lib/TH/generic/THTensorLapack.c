@@ -1010,7 +1010,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
   }
 }
 
-void THTensor_(btrisolve)(THTensor *rb_, THTensor *atf, THTensor *b, THIntTensor *pivots)
+void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor *pivots)
 {
   THArgCheck(THTensor_(nDimension)(atf) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(atf));
 
@@ -1055,7 +1055,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *atf, THTensor *b, THIntTensor
     THTensor_(select)(rbi, rb_, 0, batch);
     THIntTensor_select(pivoti, pivots, 0, batch);
 
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_FLOAT)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     int info;
     THLapack_(getrs)('N', n, 1, THTensor_(data)(ai), lda,
                      THIntTensor_data(pivoti), THTensor_(data)(rbi),

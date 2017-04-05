@@ -280,7 +280,7 @@ class TestAutograd(TestCase):
         self.assertIsNone(w.creator)
 
     def test_indexing(self):
-        x = torch.range(1, 16).resize_(4, 4)
+        x = torch.arange(1, 17).resize_(4, 4)
         y = Variable(x, requires_grad=True)
 
         def check_index(idx):
@@ -597,6 +597,10 @@ class TestAutograd(TestCase):
                 x2 = x2.cuda(1)
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
+
+        for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
+            y = Variable(torch.randn(5, 5).type(t))
+            self.assertIs(type(x.type_as(y).data), t)
 
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
@@ -1034,6 +1038,9 @@ function_tests = [
     (Dot, (), ((L,), (L,)),),
     (Max, (), ((S, S, S),),),
     (Repeat, (torch.Size([2, 3, 1, 2]),), ((S, S, S, S),)),
+    (Cumsum, (0,), ((S, S, S),)),
+    (Cumsum, (1,), ((S, S, S),), 'dim1'),
+    (Cumsum, (0,), ((S,),), '1d'),
     (Min, (), ((S, S, S),),),
     (Max, (0,), ((S, S, S),), 'dim'),
     (Min, (0,), ((S, S, S),), 'dim'),
@@ -1067,6 +1074,8 @@ function_tests = [
     (Triu, (), ((S, S),)),
     (Triu, (2,), ((S, S),), 'idx'),
     (Trace, (), ((S, S),)),
+    (Cross, (), ((S, 3), (S, 3))),
+    (Cross, (1,), ((S, 3, S), (S, 3, S)), 'dim'),
     (Clone, (), ((S, M, S),)),
     (Squeeze, (), ((S, 1, M, 1),)),
     (Squeeze, (1,), ((S, 1, M, 1),), 'dim'),
@@ -1147,6 +1156,8 @@ method_tests = [
     ('renorm', (S, S, S), (2, 1, 0.5)),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
+    ('cumsum', (S, S, S), (1,)),
+    ('cumsum', (S,), (0,), '1d'),
     ('addmm', (S, M), ((S, S), (S, M)),),
     ('addmm', (S, M), (0.2, 0.6, (S, S), (S, M)), 'coef'),
     ('addbmm', (S, M), ((S, S, S), (S, S, M)),),
@@ -1172,6 +1183,8 @@ method_tests = [
     ('tril', (M, M), ()),
     ('triu', (M, M), ()),
     ('trace', (M, M), ()),
+    ('cross', (S, 3), ((S, 3),)),
+    ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
     ('clone', (S, M, S), ()),
     ('eq', (S, S, S), ((S, S, S),)),
     ('ne', (S, S, S), ((S, S, S),)),

@@ -472,7 +472,6 @@
 
 [[
   name: mode
-  defined_if: "!IS_CUDA"
   with_stateless: True
   return: argument 0,1
   options:
@@ -596,5 +595,3 @@
   arguments:
     - THTensor* self
 ]]
-
-

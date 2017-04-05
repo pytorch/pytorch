@@ -294,6 +294,56 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
+def adaptive_max_pool1d(input, output_size, return_indices=False):
+    r"""Applies a 1D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+        return_indices: whether to return pooling indices
+    """
+    return _functions.thnn.AdaptiveMaxPool1d(output_size, return_indices)(input)
+
+
+def adaptive_max_pool2d(input, output_size, return_indices=False):
+    r"""Applies a 2D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+        return_indices: whether to return pooling indices
+    """
+    return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
+
+
+def adaptive_avg_pool1d(input, output_size):
+    r"""Applies a 1D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+    """
+    return _functions.thnn.AdaptiveAvgPool1d(output_size)(input)
+
+
+def adaptive_avg_pool2d(input, output_size):
+    r"""Applies a 2D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+    """
+    return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
+
+
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
@@ -589,7 +639,7 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
 
         Shape:
             - Input: :math:`(N, D)` where `D = vector dimension`
-            - Output: :math:`(N, 1)
+            - Output: :math:`(N, 1)`
 
         >>> input1 = autograd.Variable(torch.randn(100, 128))
         >>> input2 = autograd.Variable(torch.randn(100, 128))
