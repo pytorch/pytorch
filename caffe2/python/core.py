@@ -1707,7 +1707,7 @@ class Net(object):
     def __getattr__(self, op_type):
         if op_type.startswith('__'):
             raise AttributeError('Attribute {} not found.'.format(op_type))
-        if not IsOperator(op_type):
+        if not IsOperator(op_type) and not IsOperatorWithEngine(op_type, "CUDNN"):
             raise RuntimeError(
                 'Method ' + op_type + ' is not a registered operator.' +
                 ' Did you mean: [' +

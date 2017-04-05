@@ -1,6 +1,8 @@
 #include "caffe2/operators/recurrent_op_cudnn.h"
 #include "caffe2/utils/math.h"
 
+#include <map>
+
 namespace caffe2 {
 
 namespace detail {
@@ -88,20 +90,23 @@ void RecurrentBaseOp<T>::initialize(
   CAFFE_ENFORCE(rnnInputStr == "linear" || rnnInputStr == "skip");
   const auto rnnInput =
       rnnInputStr == "linear" ? CUDNN_LINEAR_INPUT : CUDNN_SKIP_INPUT;
+
   // Dropout setup
   {
-    size_t stateSize;
-    CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
-        cudnn_wrapper_.inline_cudnn_handle(), &stateSize));
-    dropoutStates->Resize(std::vector<int>{static_cast<int>(
-        stateSize / 4 /* sizeof(T) - workaround clang bug */)});
-    CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
-        dropoutDesc_,
-        cudnn_wrapper_.inline_cudnn_handle(),
-        OperatorBase::GetSingleArgument<float>("dropout", 0.0),
-        dropoutStates->template mutable_data<T>(),
-        stateSize,
-        OperatorBase::GetSingleArgument<int>("seed", 0)));
+    if (dropoutStates) {
+      size_t stateSize;
+      CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
+          cudnn_wrapper_.inline_cudnn_handle(), &stateSize));
+      dropoutStates->Resize(std::vector<int>{static_cast<int>(
+          stateSize / 4 /* sizeof(T) - workaround clang bug */)});
+      CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
+          dropoutDesc_,
+          cudnn_wrapper_.inline_cudnn_handle(),
+          OperatorBase::GetSingleArgument<float>("dropout", 1.0),
+          dropoutStates->template mutable_data<T>(),
+          stateSize,
+          OperatorBase::GetSingleArgument<int>("seed", 0)));
+    }
   }
 
   // RNN setup
@@ -290,7 +295,7 @@ template <typename T>
 bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
   if (Input(INPUT).dims() != cachedInputDims_) {
-    initialize(Input(INPUT), Output(DROPOUT_STATES));
+    initialize(Input(INPUT));
     cachedInputDims_ = Input(INPUT).dims();
   }
   CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
@@ -331,26 +336,23 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
         yDesc_->descs(),
         InputData(GRAD_OUTPUT), // Input(GRAD_OUTPUT).template data<T>(),
         hyDesc_,
-        InputData(GRAD_HIDDEN_OUTPUT), // Input(GRAD_HIDDEN_OUTPUT).template
-        // data<T>(),
+        // Note: like CNTK, ignore these gradient inputs. t16675365 to
+        // reconsider.
+        nullptr,
         cyDesc_,
-        InputData(
-            GRAD_CELL_OUTPUT), // Input(GRAD_CELL_OUTPUT).template data<T>(),
+        nullptr,
         wDesc_,
         InputData(WEIGHT), // Input(WEIGHT).template data<T>(),
         hxDesc_,
         InputData(HIDDEN_INPUT), // Input(HIDDEN_INPUT).template data<T>(),
         cxDesc_,
-        InputData(CELL_INPUT), // Input(CELL_INPUT).template data<T>(),
+        InputData(CELL_INPUT),
         xDesc_->descs(),
-        OutputData(
-            GRAD_INPUT), // Output(GRAD_INPUT)->template mutable_data<T>(),
+        OutputData(GRAD_INPUT),
         hxDesc_,
-        OutputData(GRAD_HIDDEN_INPUT), // Output(GRAD_HIDDEN_INPUT)->template
-        // mutable_data<T>(),
+        OutputData(GRAD_HIDDEN_INPUT),
         cxDesc_,
-        OutputData(GRAD_CELL_INPUT), // Output(GRAD_CELL_INPUT)->template
-        // mutable_data<T>(),
+        OutputData(GRAD_CELL_INPUT),
         state->workspace().get(cudnnWsNbytes_),
         cudnnWsNbytes_,
         reserve,
@@ -377,58 +379,117 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
   return true;
 }
 
-template <typename T>
-bool RecurrentInitOp<T>::RunOnDevice() {
-  initialize(Input(INPUT), Output(DROPOUT_STATES));
-  size_t weightsSize;
-  CUDNN_ENFORCE(cudnnGetRNNParamsSize(
-      cudnn_wrapper_.inline_cudnn_handle(),
-      rnnDesc_,
-      xDesc_->descs()[0],
-      &weightsSize,
-      cudnnTypeWrapper<T>::type));
-  Output(WEIGHT)->Resize(std::vector<int>{
-      (static_cast<int>(weightsSize / 4))}); // sizeof(T) - workaround clang bug
-  math::RandUniform<T, CUDAContext>(
-      Output(WEIGHT)->size(),
-      -OperatorBase::GetSingleArgument<float>("scale", 0.01),
-      OperatorBase::GetSingleArgument<float>("scale", 0.01),
-      Output(WEIGHT)->template mutable_data<T>(),
-      &context_);
+template <typename T, RecurrentParamOpMode mode>
+bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
+  initialize(Input(0));
 
-  if (OperatorBase::GetSingleArgument<string>("rnn_mode", "lstm") != "lstm") {
-    return true;
+  if (mode == SET_PARAM) {
+    size_t paramsSize;
+    CUDNN_ENFORCE(cudnnGetRNNParamsSize(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        rnnDesc_,
+        xDesc_->descs()[0],
+        &paramsSize,
+        cudnnTypeWrapper<T>::type));
+
+    CAFFE_ENFORCE_EQ(
+        paramsSize / 4, Input(1).size(), "Incorrect weight initialization");
   }
 
-  // For LSTMs, initialize the forget gates to have a bias of 1.0
-  for (auto i = 0; i < OperatorBase::GetSingleArgument<int>("num_layers", 0);
-       ++i) {
+  int layer = OperatorBase::GetSingleArgument<int>("layer", 0);
+  std::string param_type =
+      OperatorBase::GetSingleArgument<string>("param_type", "");
+  std::string input_type =
+      OperatorBase::GetSingleArgument<string>("input_type", "");
+
+  // Mapping to CUDNN constants
+  std::map<string, int> weight_constants = {{"input_gate_w", 0},
+                                            {"forget_gate_w", 1},
+                                            {"cell_w", 2},
+                                            {"output_gate_w", 3}};
+  std::map<string, int> bias_constants = {{"input_gate_b", 0},
+                                          {"forget_gate_b", 1},
+                                          {"cell_b", 2},
+                                          {"output_gate_b", 3}};
+  if (bias_constants.find(param_type) != bias_constants.end()) {
+    int param_id = bias_constants[param_type] + 4 * (input_type == "recurrent");
+
     cudnnFilterDescriptor_t biasDesc;
     CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&biasDesc));
     void* bias;
+
     CUDNN_ENFORCE(cudnnGetRNNLinLayerBiasParams(
         cudnn_wrapper_.inline_cudnn_handle(),
         rnnDesc_,
-        i,
+        layer,
         xDesc_->descs()[0],
         wDesc_,
-        Output(WEIGHT)->template data<T>(),
-        5, // Forget gate bias for recurrent input
+        Input(1).template data<T>(),
+        param_id, // Forget gate bias for recurrent input
         biasDesc,
         &bias));
     int numBiasDims;
-    std::array<int, 3> biasDims;
+    std::vector<int> biasDims(3);
     cudnnDataType_t dt;
     cudnnTensorFormat_t tf;
     // For some reason, the CuDNN Bias tensor is 3 dimensional
     CUDNN_ENFORCE(cudnnGetFilterNdDescriptor(
         biasDesc, 3, &dt, &tf, &numBiasDims, biasDims.data()));
     CAFFE_ENFORCE_EQ(numBiasDims, 3);
-    math::Set<T, CUDAContext>(
-        biasDims[0] * biasDims[1] * biasDims[2],
-        1.0,
-        static_cast<T*>(bias),
-        &context_);
+
+    if (mode == SET_PARAM) {
+      CAFFE_ENFORCE_EQ(
+          biasDims[0] * biasDims[1] * biasDims[2], Input(2).size());
+      context_.template Copy<T, CUDAContext, CUDAContext>(
+          biasDims[0] * biasDims[1] * biasDims[2],
+          Input(2).template data<T>(),
+          static_cast<T*>(bias));
+    } else {
+      Output(0)->Resize(biasDims);
+      context_.template Copy<T, CUDAContext, CUDAContext>(
+          biasDims[0] * biasDims[1] * biasDims[2],
+          static_cast<T*>(bias),
+          Output(0)->template mutable_data<T>());
+    }
+  } else if (weight_constants.find(param_type) != weight_constants.end()) {
+    int param_id =
+        weight_constants[param_type] + 4 * (input_type == "recurrent");
+    cudnnFilterDescriptor_t matrixParamDesc;
+    CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&matrixParamDesc));
+    void* pmatrix;
+    CUDNN_ENFORCE(cudnnGetRNNLinLayerMatrixParams(
+        cudnn_wrapper_.inline_cudnn_handle(),
+        rnnDesc_,
+        layer,
+        xDesc_->descs()[0],
+        wDesc_,
+        Input(1).template data<T>(),
+        param_id, // Forget gate bias for recurrent input
+        matrixParamDesc,
+        &pmatrix));
+    int numDims;
+    std::vector<int> matDims(3);
+    cudnnDataType_t dt;
+    cudnnTensorFormat_t tf;
+
+    CUDNN_ENFORCE(cudnnGetFilterNdDescriptor(
+        matrixParamDesc, 3, &dt, &tf, &numDims, matDims.data()));
+    CAFFE_ENFORCE_EQ(numDims, 3);
+    if (mode == SET_PARAM) {
+      CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).size());
+      context_.template Copy<T, CUDAContext, CUDAContext>(
+          matDims[0] * matDims[1] * matDims[2],
+          Input(2).template data<T>(),
+          static_cast<T*>(pmatrix));
+    } else {
+      Output(0)->Resize(matDims);
+      context_.template Copy<T, CUDAContext, CUDAContext>(
+          matDims[0] * matDims[1] * matDims[2],
+          static_cast<T*>(pmatrix),
+          Output(0)->template mutable_data<T>());
+    }
+  } else {
+    CAFFE_ENFORCE(false, "Unknown param type:", param_type);
   }
 
   return true;
@@ -455,11 +516,50 @@ input_mode) are passed directly through to CuDNN.
 )DOC");
 REGISTER_CUDNN_OPERATOR(RecurrentGradient, RecurrentGradientOp<float>);
 OPERATOR_SCHEMA(RecurrentGradient)
-    .NumInputs(9)
+    .NumInputs(7)
     .NumOutputs(6)
     .AllowInplace({{4, 5}});
-REGISTER_CUDNN_OPERATOR(RecurrentInit, RecurrentInitOp<float>);
-OPERATOR_SCHEMA(RecurrentInit).NumInputs(1).NumOutputs(2);
+
+REGISTER_CUDNN_OPERATOR(
+    RecurrentParamSet,
+    RecurrentParamAccessOp<float, SET_PARAM>);
+OPERATOR_SCHEMA(RecurrentParamSet)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .EnforceInplace({{1, 0}})
+    .SetDoc("Set individual parameters of a recurrent net.")
+    .Arg("param_type", R"DOC(Type of param to be set:
+                  "input_gate_w", "forget_gate_w", "cell_w", "output_gate_w"
+                  "input_gate_b", "forget_gate_b", "cell_b", "output_gate_b"
+                  )DOC")
+    .Arg("input_type", "'recurrent' or 'input'")
+    .Arg("layer", "layer index (starting from 0)")
+    .Input(0, "input", R"DOC(Input blob. Needed for infering the shapes.
+                        A dummy tensor matching the input shape is ok.)DOC")
+    .Input(1, "all_params", "Blob holding all the parameters")
+    .Input(2, "param", "Values for the specified parameter")
+    .Output(
+        0,
+        "all_params",
+        "Blob holding all the parameters (same as input(1))");
+
+REGISTER_CUDNN_OPERATOR(
+    RecurrentParamGet,
+    RecurrentParamAccessOp<float, GET_PARAM>);
+OPERATOR_SCHEMA(RecurrentParamGet)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .SetDoc("Retrieve individual parameters of a recurrent net op.")
+    .Arg("param_type", R"DOC(Type of param to be set:
+                  "input_gate_w", "forget_gate_w", "cell_w", "output_gate_w"
+                  "input_gate_b", "forget_gate_b", "cell_b", "output_gate_b"
+                  )DOC")
+    .Arg("input_type", "'recurrent' or 'input'")
+    .Arg("layer", "layer index (starting from 0)")
+    .Input(0, "input", R"DOC(Input blob. Needed for infering the shapes.
+                        A dummy tensor matching the input shape is ok.)DOC")
+    .Input(1, "all_params", "Blob holding all the parameters")
+    .Output(0, "param", "Blob holding the requested values");
 
 struct GetRecurrentGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -473,9 +573,10 @@ struct GetRecurrentGradient : public GradientMakerBase {
                        I(3), // WEIGHT
                        O(3), // RNN_SCRATCH
                        O(0), // OUTPUT
-                       GO(0), // GRAD_OUTPUT
-                       GO(1), // GRAD_HIDDEN_OUTPUT
-                       GO(2)}, // GRAD_CELL_OUTPUT
+                       GO(0)}, // GRAD_OUTPUT
+        // TODO: not currently using these gradients, investigate t16675365
+        //     GO(1), // GRAD_HIDDEN_OUTPUT
+        //     GO(2)}, // GRAD_CELL_OUTPUT
         vector<string>{
             GI(0), // GRAD_INPUT
             GI(1), // GRAD_HIDDEN_INPUT
