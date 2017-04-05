@@ -10,8 +10,6 @@
 #include <map>
 #include <memory>
 
-#include <folly/Singleton.h>
-
 #include "gloo/benchmark/benchmark.h"
 #include "gloo/benchmark/runner.h"
 #include "gloo/cuda_allreduce_ring.h"
@@ -87,8 +85,6 @@ class CudaAllreduceBenchmark : public CudaBenchmark {
 } // namespace
 
 int main(int argc, char** argv) {
-  folly::SingletonVault::singleton()->registrationComplete();
-
   auto x = benchmark::parseOptions(argc, argv);
 
   std::map<std::string, Runner::BenchmarkFn> hostBenchmarks = {
