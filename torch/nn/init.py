@@ -7,16 +7,16 @@ from torch.autograd import Variable
 
 def calculate_gain(nonlinearity, param=None):
     """Return the recommended gain value for the given nonlinearity function. The values are as follows:
-    ============ =========================================
+    ============ ==========================================
     nonlinearity gain
-    ============ =========================================
+    ============ ==========================================
     linear       :math:`1`
-    conv{3,4,5}d :math:`1`
+    conv{1,2,3}d :math:`1`
     sigmoid      :math:`1`
     tanh         :math:`5 / 3`
     relu         :math:`\sqrt{2}`
-    leaky_relu   :math:`\sqrt{2 / (1 + negative_slope^2)}`
-    ============ =========================================
+    leaky_relu   :math:`\sqrt{2 / (1 + negative\_slope^2)}`
+    ============ ==========================================
 
     Args:
         nonlinearity: the nonlinear function (`nn.functional` name)
@@ -36,6 +36,7 @@ def calculate_gain(nonlinearity, param=None):
         if param is None:
             negative_slope = 0.01
         elif not isinstance(param, bool) and isinstance(param, int) or isinstance(param, float):
+            # True/False are instances of int, hence check above
             negative_slope = param
         else:
             raise ValueError("negative_slope {} not a valid number".format(param))
@@ -177,7 +178,7 @@ def xavier_uniform(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-a, a)` where
-    :math:`a = gain \times \sqrt{2 / (fan_in + fan_out)} \times \sqrt{3}`. Also known as Glorot initialisation.
+    :math:`a = gain \times \sqrt{2 / (fan\_in + fan\_out)} \times \sqrt{3}`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -185,7 +186,7 @@ def xavier_uniform(tensor, gain=1):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.xavier_uniform(w, gain=math.sqrt(2.0))
+        >>> nn.init.xavier_uniform(w, gain=nn.init.calculate_gain('relu'))
     """
     if isinstance(tensor, Variable):
         xavier_uniform(tensor.data, gain=gain)
@@ -201,7 +202,7 @@ def xavier_normal(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    :math:`std = gain \times \sqrt{2 / (fan_in + fan_out)}`. Also known as Glorot initialisation.
+    :math:`std = gain \times \sqrt{2 / (fan\_in + fan\_out)}`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -234,7 +235,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015), using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-bound, bound)` where
-    :math:`bound = \sqrt{2 / ((1 + a^2) \times fan_in)} \times \sqrt{3}`. Also known as He initialisation.
+    :math:`bound = \sqrt{2 / ((1 + a^2) \times fan\_in)} \times \sqrt{3}`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -261,7 +262,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015), using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    :math:`std = \sqrt{2 / ((1 + a^2) \times fan_in)}`. Also known as He initialisation.
+    :math:`std = \sqrt{2 / ((1 + a^2) \times fan\_in)}`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
