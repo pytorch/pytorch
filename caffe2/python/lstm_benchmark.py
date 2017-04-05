@@ -35,6 +35,7 @@ def generate_data(T, shape, num_labels):
 
     workspace.RunNetOnce(generate_input_init_net)
     generate_input_net = core.Net('generate_input')
+
     generate_input_net.EnqueueBlobs([queue, "scratch"], ["scratch"])
     generate_input_net.EnqueueBlobs([label_queue, "label_scr"], ["label_scr"])
     np.random.seed(2603)
@@ -51,11 +52,13 @@ def generate_data(T, shape, num_labels):
         workspace.FeedBlob("scratch", X)
         workspace.FeedBlob("label_scr", labels)
         workspace.RunNetOnce(generate_input_net.Proto())
+
     log.info("Finished data generation")
+
     return queue, label_queue
 
 
-def create_model(args, queue, label_queue):
+def create_model(args, queue, label_queue, input_shape):
     model = cnn.CNNModelHelper(name="LSTM_bench")
     seq_lengths, hidden_init, cell_init, target = \
         model.net.AddExternalInputs(
@@ -66,19 +69,38 @@ def create_model(args, queue, label_queue):
         )
     input_blob = model.DequeueBlobs(queue, "input_data")
     labels = model.DequeueBlobs(label_queue, "label")
-    all_hidden, last_hidden, _, last_state = recurrent.LSTM(
-        model=model,
-        input_blob=input_blob,
-        seq_lengths=seq_lengths,
-        initial_states=(hidden_init, cell_init),
-        dim_in=args.input_dim,
-        dim_out=args.hidden_dim,
-        scope="lstm1",
-    )
-    weights = model.UniformFill(labels, "weights")
 
+
+    if args.implementation == "own":
+        output, last_hidden, _, last_state = recurrent.LSTM(
+            model=model,
+            input_blob=input_blob,
+            seq_lengths=seq_lengths,
+            initial_states=(hidden_init, cell_init),
+            dim_in=args.input_dim,
+            dim_out=args.hidden_dim,
+            scope="lstm1",
+        )
+    elif args.implementation == "cudnn":
+        # We need to feed a placeholder input so that RecurrentInitOp
+        # can infer the dimensions.
+        model.param_init_net.ConstantFill([], input_blob, shape=input_shape)
+        output, last_hidden, _ = recurrent.cudnn_LSTM(
+            model=model,
+            input_blob=input_blob,
+            initial_states=(hidden_init, cell_init),
+            dim_in=args.input_dim,
+            dim_out=args.hidden_dim,
+            scope="cudnnlstm",
+        )
+
+    else:
+        assert False, "Unknown implementation"
+
+
+    weights = model.UniformFill(labels, "weights")
     softmax, loss = model.SoftmaxWithLoss(
-        [model.Flatten(all_hidden), labels, weights],
+        [model.Flatten(output), labels, weights],
         ['softmax', 'loss'],
     )
 
@@ -94,11 +116,12 @@ def create_model(args, queue, label_queue):
     workspace.FeedBlob(cell_init, np.zeros(
         [1, args.batch_size, args.hidden_dim], dtype=np.float32
     ))
-    return model
+    return model, output
 
 
 def Caffe2LSTM(args):
     T = args.data_size // args.batch_size
+
     input_blob_shape = [args.seq_length, args.batch_size, args.input_dim]
     queue, label_queue = generate_data(T // args.seq_length,
                                        input_blob_shape,
@@ -109,7 +132,7 @@ def Caffe2LSTM(args):
         np.array([args.seq_length] * args.batch_size, dtype=np.int32)
     )
 
-    model = create_model(args, queue, label_queue)
+    model, output = create_model(args, queue, label_queue, input_blob_shape)
 
     workspace.RunNetOnce(model.param_init_net)
     workspace.CreateNet(model.net)
@@ -124,16 +147,17 @@ def Caffe2LSTM(args):
     for iteration in range(0, num_iters, args.iters_to_report):
         iters_once = min(args.iters_to_report, num_iters - iteration)
         workspace.RunNet(model.net.Proto().name, iters_once)
+
         new_time = time.time()
-        log.info("Iter: {} / {}. Entries Per Second: {}k". format(
+        log.info("Iter: {} / {}. Entries Per Second: {}k.". format(
             iteration,
             num_iters,
-            entries_per_iter * iters_once / (new_time - last_time) // 1000
+            entries_per_iter * iters_once / (new_time - last_time) // 1000,
         ))
         last_time = new_time
 
     log.info("Done. Total EPS: {}k".format(
-        entries_per_iter * num_iters / (time.time() - start_time) // 1000
+        entries_per_iter * num_iters / (time.time() - start_time) // 1000,
     ))
 
 
@@ -185,6 +209,12 @@ def GetArgumentParser():
         "--gpu",
         action="store_true",
         help="Run all on GPU",
+    )
+    parser.add_argument(
+        "--implementation",
+        type=str,
+        default="own",
+        help="'cudnn' or 'own'"
     )
 
     return parser

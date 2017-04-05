@@ -38,7 +38,7 @@ class RecurrentBaseOp : public Operator<CUDAContext> {
  protected:
   void initialize(
       const Tensor<CUDAContext>& input,
-      Tensor<CUDAContext>* dropoutStates,
+      Tensor<CUDAContext>* dropoutStates = nullptr,
       // If passed, reshapes to the appropriate size
       Tensor<CUDAContext>* output = nullptr,
       Tensor<CUDAContext>* hiddenOutput = nullptr,
@@ -94,6 +94,18 @@ class RecurrentOp : public RecurrentBaseOp<T> {
   OUTPUT_TAGS(OUTPUT, HIDDEN_OUTPUT, CELL_OUTPUT, RNN_SCRATCH, DROPOUT_STATES);
 };
 
+enum RecurrentParamOpMode { SET_PARAM, GET_PARAM };
+
+template <typename T, RecurrentParamOpMode mode>
+class RecurrentParamAccessOp : public RecurrentBaseOp<T> {
+ public:
+  USE_RECURRENT_BASE_FUNCTIONS
+  RecurrentParamAccessOp(const OperatorDef& operator_def, Workspace* ws)
+      : RecurrentBaseOp<T>(operator_def, ws) {}
+
+  bool RunOnDevice() override;
+};
+
 template <typename T>
 class RecurrentGradientOp : public RecurrentBaseOp<T> {
  public:
@@ -123,19 +135,6 @@ class RecurrentGradientOp : public RecurrentBaseOp<T> {
       RNN_SCRATCH_OUT);
 };
 
-template <typename T>
-class RecurrentInitOp : public RecurrentBaseOp<T> {
- public:
-  USE_RECURRENT_BASE_FUNCTIONS
-  RecurrentInitOp(const OperatorDef& operator_def, Workspace* ws)
-      : RecurrentBaseOp<T>(operator_def, ws) {}
-
-  virtual bool RunOnDevice() override;
-
- protected:
-  INPUT_TAGS(INPUT);
-  OUTPUT_TAGS(WEIGHT, DROPOUT_STATES);
-};
 
 } // namespace caffe2
 
