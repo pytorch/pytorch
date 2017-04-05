@@ -86,26 +86,41 @@ void extractLinks(
     OperatorBase* op,
     const std::string& internalArg,
     const std::string& externalArg,
-    const std::string offsetArg,
+    const std::string& offsetArg,
+    const std::string& windowArg,
     std::vector<detail::Link>* links) {
   const auto& internal = op->GetRepeatedArgument<std::string>(internalArg);
   const auto& external = op->GetRepeatedArgument<std::string>(externalArg);
   const auto& offset = op->GetRepeatedArgument<int32_t>(offsetArg);
-  CAFFE_ENFORCE(
-      internal.size() == offset.size(),
+  const auto& window = op->GetRepeatedArgument<int32_t>(
+      windowArg, vector<int32_t>(offset.size(), 1));
+  CAFFE_ENFORCE_EQ(
+      internal.size(),
+      offset.size(),
       "internal/offset mismatch: ",
       internalArg,
+      " ",
       externalArg);
-  CAFFE_ENFORCE(
-      external.size() == offset.size(),
-      "external/offset mismatch",
+  CAFFE_ENFORCE_EQ(
+      external.size(),
+      offset.size(),
+      "external/offset mismatch: ",
       externalArg,
+      " ",
       offsetArg);
+  CAFFE_ENFORCE_EQ(
+      external.size(),
+      window.size(),
+      "external/window mismatch: ",
+      externalArg,
+      " ",
+      windowArg);
   for (auto i = 0; i < internal.size(); ++i) {
     detail::Link l;
     l.internal = internal[i];
     l.external = external[i];
     l.offset = offset[i];
+    l.window = window[i];
     links->push_back(l);
   }
 }

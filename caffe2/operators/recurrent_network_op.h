@@ -39,6 +39,7 @@ struct Link {
   std::string internal;
   std::string external;
   int32_t offset{0};
+  int32_t window{1};
 };
 
 template <typename T, typename Context>
@@ -86,16 +87,21 @@ void initializeRecurrentInput(
   CAFFE_ENFORCE_LE(input.ndim(), 3, rc.input);
 
   const auto stateSize = input.dim(input.ndim() - 1);
-  // States at [0, ..., T] (inclusive)
-  state->Resize(seqLen + 1, batchSize, stateSize);
-
+  // Sometimes we want to provide more than one initial step.
+  // For example, if we do a convolution op in step net
+  // and need a sufficient left padding around the input.
+  // This could be used together with links where window != 1.
+  auto initialStateLength = 1;
   if (input.ndim() == 3) {
-    CAFFE_ENFORCE_EQ(input.dim(0), 1, rc.input);
+    initialStateLength = input.dim(0);
   }
+  // States at [0, ..., (T + initialStateLength - 1)] (inclusive)
+  state->Resize(seqLen + initialStateLength, batchSize, stateSize);
+
   if (input.ndim() >= 2) {
     CAFFE_ENFORCE_EQ(input.dim(input.ndim() - 2), batchSize, rc.input);
     context->template Copy<T, Context, Context>(
-        batchSize * stateSize,
+        batchSize * stateSize * initialStateLength,
         input.template data<T>(),
         state->template mutable_data<T>());
   } else {
@@ -130,16 +136,18 @@ void applyLink(const Link& link, size_t t, Workspace* ws) {
       (t + link.offset) * externalTimestepSize;
   auto internalDims = externalTensor->dims();
   // Single timestep
-  internalDims[0] = 1;
+  internalDims[0] = link.window;
   internalTensor->Resize(internalDims);
-  internalTensor->ShareExternalPointer(externalData, externalTimestepSize);
+  internalTensor->ShareExternalPointer(
+      externalData, externalTimestepSize * link.window);
 }
 
 void extractLinks(
     OperatorBase* op,
     const std::string& internalArg,
     const std::string& externalArg,
-    const std::string offsetArg,
+    const std::string& offsetArg,
+    const std::string& windowArg,
     std::vector<detail::Link>* links);
 } // namespace detail
 
@@ -211,7 +219,12 @@ class RecurrentNetworkOp final : public Operator<Context> {
   std::vector<detail::Link> constructLinks() {
     std::vector<detail::Link> links;
     detail::extractLinks(
-        this, "link_internal", "link_external", "link_offset", &links);
+        this,
+        "link_internal",
+        "link_external",
+        "link_offset",
+        "link_window",
+        &links);
     return links;
   }
 
@@ -359,12 +372,18 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   std::vector<detail::Link> constructLinks() {
     std::vector<detail::Link> links;
     detail::extractLinks(
-        this, "link_internal", "link_external", "link_offset", &links);
+        this,
+        "link_internal",
+        "link_external",
+        "link_offset",
+        "link_window",
+        &links);
     detail::extractLinks(
         this,
         "backward_link_internal",
         "backward_link_external",
         "backward_link_offset",
+        "",
         &links);
     return links;
   }
@@ -443,11 +462,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         CAFFE_ENFORCE(ag->dims() == g.dims());
         T* ag_data = ag->template mutable_data<T>();
         math::Add<T, Context>(
-            g.size(),
-            g.template data<T>(),
-            ag_data,
-            ag_data,
-            &context_);
+            g.size(), g.template data<T>(), ag_data, ag_data, &context_);
       }
     };
 
