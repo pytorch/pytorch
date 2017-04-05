@@ -202,7 +202,7 @@ class LoadOp final : public Operator<Context> {
       blob->Reset();
     }
     blob->Deserialize(proto);
-    if (!blob->IsType<Tensor<Context>>()) {
+    if (!proto.has_tensor()) {
       // Only tensors can be seen multiple times as chunks.
       CAFFE_ENFORCE(blob_states.count(key) == 0, "Blob duplicated:", key);
       blob_states[key] = BlobState();
@@ -228,7 +228,11 @@ class LoadOp final : public Operator<Context> {
           "Tensor parts are bigger than target size for tensor: ",
           key);
     } else {
-      auto total_size = blob->Get<Tensor<Context>>().size();
+      const auto& dims = proto.tensor().dims();
+      int64_t total_size = 1;
+      for (const auto& dim : dims) {
+        total_size *= dim;
+      }
       auto current_size = total_size;
       if (proto.tensor().has_segment()) {
         current_size =
