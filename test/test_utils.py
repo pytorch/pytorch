@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import traceback
 import torch
+import torch.utils.data
 import torch.cuda
 import warnings
 from torch.autograd import Variable
@@ -105,6 +106,7 @@ class DatasetMock(object):
 
     def __len__(self):
         return 10
+
 
 class TestDataLoader(TestCase):
     def setUp(self):
