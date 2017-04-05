@@ -9,6 +9,8 @@
 
 #include <memory>
 
+#include <folly/Singleton.h>
+
 #include "gloo/allreduce_halving_doubling.h"
 #include "gloo/allreduce_ring.h"
 #include "gloo/allreduce_ring_chunked.h"
@@ -103,6 +105,8 @@ class BroadcastOneToAllBenchmark : public Benchmark {
 } // namespace
 
 int main(int argc, char** argv) {
+  folly::SingletonVault::singleton()->registrationComplete();
+
   auto x = benchmark::parseOptions(argc, argv);
 
   Runner::BenchmarkFn fn;
