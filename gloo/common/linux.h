@@ -11,9 +11,19 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
 namespace gloo {
 
 const std::set<std::string>& kernelModules();
+
+const int kPCIClass3D = 0x030200;
+const int kPCIClassNetwork = 0x020000;
+
+std::vector<std::string> pciDevices(int pciBusID);
+
+int pciDistance(const std::string& a, const std::string& b);
+
+const std::string& networkInterfaceToBusID(const std::string& interface);
 
 } // namespace gloo
