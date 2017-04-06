@@ -12,11 +12,11 @@
 
 #include "gloo/benchmark/benchmark.h"
 #include "gloo/benchmark/runner.h"
+#include "gloo/common/logging.h"
 #include "gloo/cuda_allreduce_halving_doubling.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
 #include "gloo/cuda_private.h"
-#include "gloo/common/logging.h"
 
 using namespace gloo;
 using namespace gloo::benchmark;
@@ -51,7 +51,7 @@ class CudaBenchmark : public Benchmark {
     return ptrs;
   }
 
-  std::vector<CudaMemory<float> > inputs_;
+  std::vector<CudaMemory<float>> inputs_;
 };
 
 template <class T>
@@ -89,50 +89,62 @@ int main(int argc, char** argv) {
   auto x = benchmark::parseOptions(argc, argv);
 
   std::map<std::string, Runner::BenchmarkFn> hostBenchmarks = {
-    {
-      "cuda_allreduce_halving_doubling",
-      [&](std::shared_ptr<Context>& context) {
-        using Algorithm = CudaAllreduceHalvingDoubling<float>;
-        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
-        return gloo::make_unique<Benchmark>(context, x);
+      {
+          "cuda_allreduce_halving_doubling",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm =
+                CudaAllreduceHalvingDoubling<float, CudaHostWorkspace<float>>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
       },
-    },
-    {
-      "cuda_allreduce_ring",
-      [&](std::shared_ptr<Context>& context) {
-        using Algorithm = CudaAllreduceRing<float, CudaHostWorkspace<float> >;
-        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
-        return gloo::make_unique<Benchmark>(context, x);
+      {
+          "cuda_allreduce_ring",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm =
+                CudaAllreduceRing<float, CudaHostWorkspace<float>>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
       },
-    },
-    {
-      "cuda_allreduce_ring_chunked",
-      [&](std::shared_ptr<Context>& context) {
-        using Algorithm = CudaAllreduceRingChunked<float>;
-        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
-        return gloo::make_unique<Benchmark>(context, x);
+      {
+          "cuda_allreduce_ring_chunked",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm = CudaAllreduceRingChunked<float>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
       },
-    },
   };
 
   std::map<std::string, Runner::BenchmarkFn> deviceBenchmarks = {
-    {
-      "cuda_allreduce_ring",
-      [&](std::shared_ptr<Context>& context) {
-        using Algorithm = CudaAllreduceRing<float, CudaDeviceWorkspace<float> >;
-        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
-        return gloo::make_unique<Benchmark>(context, x);
+      {
+          "cuda_allreduce_halving_doubling",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm =
+                CudaAllreduceHalvingDoubling<float, CudaDeviceWorkspace<float>>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
       },
-    },
-    {
-      "cuda_allreduce_ring_chunked",
-      [&](std::shared_ptr<Context>& context) {
-        using Algorithm =
-            CudaAllreduceRingChunked<float, CudaDeviceWorkspace<float> >;
-        using Benchmark = CudaAllreduceBenchmark<Algorithm>;
-        return gloo::make_unique<Benchmark>(context, x);
+      {
+          "cuda_allreduce_ring",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm =
+                CudaAllreduceRing<float, CudaDeviceWorkspace<float>>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
       },
-    },
+      {
+          "cuda_allreduce_ring_chunked",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm =
+                CudaAllreduceRingChunked<float, CudaDeviceWorkspace<float>>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
+      },
   };
 
   Runner::BenchmarkFn fn;

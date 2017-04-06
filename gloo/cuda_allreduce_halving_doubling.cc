@@ -115,8 +115,10 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
       numReceiving = recvOffsets_[i] + numItems > count_
           ? count_ - recvOffsets_[i]
           : numItems;
-      this->fn_->call(
-        &(*scratch_)[recvOffsets_[i]], &recvBuf_[bufferOffset], numReceiving);
+      auto recvBufAtOffset = recvBuf_.range(bufferOffset, numReceiving);
+      auto scratchAtOffset = scratch_.range(recvOffsets_[i], numReceiving);
+      scratchAtOffset.reduceAsync(fn_, recvBufAtOffset);
+      scratchAtOffset.wait();
     }
     bufferOffset += numItems;
     sendNotificationBufs_[i]->send();
@@ -143,10 +145,10 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
       numReceiving = sendOffsets_[i] + numItems > count_
           ? count_ - sendOffsets_[i]
           : numItems;
-      memcpy(
-        &(*scratch_)[sendOffsets_[i]],
-          &recvBuf_[bufferOffset],
-          numReceiving * sizeof(T));
+      auto recvBufAtOffset = recvBuf_.range(bufferOffset, numReceiving);
+      auto scratchAtOffset = scratch_.range(sendOffsets_[i], numReceiving);
+      scratchAtOffset.copyFromAsync(recvBufAtOffset);
+      scratchAtOffset.wait();
     }
     numItems <<= 1;
   }
