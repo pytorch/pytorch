@@ -21,14 +21,14 @@ int THTensor_(nDimension)(const THTensor *self)
 long THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor",
-      dim+1, THTensor_(nDimension)(self));
+      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
   return self->size[dim];
 }
 
 long THTensor_(stride)(const THTensor *self, int dim)
 {
-  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor", dim+1,
-      THTensor_(nDimension)(self));
+  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
   return self->stride[dim];
 }
 
