@@ -2,9 +2,6 @@
 #define TH_GENERIC_FILE "generic/FusedRNNKernel.c"
 #else
 
-//add then sigmoid
-//returns sigmoid(A+B)
-
 void THNN_(GRUFused_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -52,6 +49,5 @@ void THNN_(LSTMFused_updateGradInput)(
 {
   THAssertMsg(false, "Not implemented for CPU");
 }
-
 
 #endif

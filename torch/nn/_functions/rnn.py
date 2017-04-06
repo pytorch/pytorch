@@ -1,6 +1,8 @@
 from torch.autograd import Function, NestedIOFunction, Variable
 import torch.backends.cudnn as cudnn
 from .. import functional as F
+from .thnn import rnnFusedPointwise as fusedBackend
+
 try:
     import torch.backends.cudnn.rnn
 except ImportError:
@@ -18,47 +20,47 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    if not input.is_cuda:
-        hx, cx = hidden
-        gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
-
-        ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
-
-        ingate = F.sigmoid(ingate)
-        forgetgate = F.sigmoid(forgetgate)
-        cellgate = F.tanh(cellgate)
-        outgate = F.sigmoid(outgate)
-
-        cy = (forgetgate * cx) + (ingate * cellgate)
-        hy = outgate * F.tanh(cy)
-
-        return hy, cy
-    else:
+    if input.is_cuda:
         igates = F.linear(input, w_ih, None)
         hgates = F.linear(hidden[0], w_hh, None)
-        hy, cy = F.lstmfused(igates, hgates, b_ih, b_hh, hidden[1])
-        return hy, cy
+        state = fusedBackend.LSTMFused()
+        return b_ih and state(igates, hgates, hidden[1], b_ih, b_hh) or state(igates, hgates, hidden[1])
+
+    hx, cx = hidden
+    gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+
+    ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+
+    ingate = F.sigmoid(ingate)
+    forgetgate = F.sigmoid(forgetgate)
+    cellgate = F.tanh(cellgate)
+    outgate = F.sigmoid(outgate)
+
+    cy = (forgetgate * cx) + (ingate * cellgate)
+    hy = outgate * F.tanh(cy)
+
+    return hy, cy
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
-    if not input.is_cuda:
-        gi = F.linear(input, w_ih, b_ih)
-        gh = F.linear(hidden, w_hh, b_hh)
-        i_r, i_i, i_n = gi.chunk(3, 1)
-        h_r, h_i, h_n = gh.chunk(3, 1)
-
-        resetgate = F.sigmoid(i_r + h_r)
-        inputgate = F.sigmoid(i_i + h_i)
-        newgate = F.tanh(i_n + resetgate * h_n)
-        hy = newgate + inputgate * (hidden - newgate)
-
-        return hy
-    else:
+    if input.is_cuda:
         gi = F.linear(input, w_ih, False)
         gh = F.linear(hidden, w_hh, False)
-        hy = F.grufused(gi, gh, b_ih, b_hh, hidden)
-        return hy
+        state = fusedBackend.GRUFused()
+        return b_ih and state(gi, gh, hidden, b_ih, b_hh) or state(gi, gh, hidden)
+
+    gi = F.linear(input, w_ih, b_ih)
+    gh = F.linear(hidden, w_hh, b_hh)
+    i_r, i_i, i_n = gi.chunk(3, 1)
+    h_r, h_i, h_n = gh.chunk(3, 1)
+
+    resetgate = F.sigmoid(i_r + h_r)
+    inputgate = F.sigmoid(i_i + h_i)
+    newgate = F.tanh(i_n + resetgate * h_n)
+    hy = newgate + inputgate * (hidden - newgate)
+
+    return hy
 
 
 def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):

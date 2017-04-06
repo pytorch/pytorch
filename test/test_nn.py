@@ -1407,49 +1407,51 @@ class TestNN(NNTestCase):
         hx_val = torch.randn(num_layers, batch, hidden_size)
         grad_hy = torch.randn(num_layers, batch, hidden_size)
         prev = torch.backends.cudnn.enabled
-        torch.backends.cudnn.enabled = False
-        for module in (nn.GRU, nn.LSTM):
-            for bias in (True, False):
-                rnn = module(input_size, hidden_size, num_layers, bias=bias)
-                rnn_cuda = module(input_size, hidden_size, num_layers, bias=bias).cuda()
-                copy_rnn(rnn, rnn_cuda)
+        try:
+            torch.backends.cudnn.enabled = False
+            for module in (nn.GRU, nn.LSTM):
+                for bias in (True, False):
+                    rnn = module(input_size, hidden_size, num_layers, bias=bias)
+                    rnn_cuda = module(input_size, hidden_size, num_layers, bias=bias).cuda()
+                    copy_rnn(rnn, rnn_cuda)
 
-                is_lstm = type(rnn) == nn.LSTM
-                if is_lstm:
-                    hx = (Variable(hx_val.clone(), requires_grad=True),
-                          Variable(hx_val.clone().add(1), requires_grad=True))
-                    hx_cuda = (Variable(hx_val.clone().cuda(), requires_grad=True),
-                               Variable(hx_val.clone().cuda().add(1), requires_grad=True))
-                else:
-                    hx = Variable(hx_val.clone(), requires_grad=True)
-                    hx_cuda = Variable(hx_val.clone().cuda(), requires_grad=True)
+                    is_lstm = isinstance(rnn, nn.LSTM)
+                    if is_lstm:
+                        hx = (Variable(hx_val.clone(), requires_grad=True),
+                              Variable(hx_val.clone().add(1), requires_grad=True))
+                        hx_cuda = (Variable(hx_val.clone().cuda(), requires_grad=True),
+                                   Variable(hx_val.clone().cuda().add(1), requires_grad=True))
+                    else:
+                        hx = Variable(hx_val.clone(), requires_grad=True)
+                        hx_cuda = Variable(hx_val.clone().cuda(), requires_grad=True)
 
-                inp = Variable(input_val.clone(), requires_grad=True)
-                inp_cu = Variable(input_val.clone().cuda(), requires_grad=True)
-                output1, hy1 = rnn(inp, hx)
-                output2, hy2 = rnn_cuda(inp_cu, hx_cuda)
-                if is_lstm:
-                    torch.autograd.backward(
-                        [output1, hy1[0], hy1[1]], [grad_output, grad_hy, grad_hy + 1]
-                    )
-                    torch.autograd.backward(
-                        [output2, hy2[0], hy2[1]],
-                        [grad_output.clone().cuda(), grad_hy.clone().cuda(), (grad_hy + 1).cuda()]
-                    )
-                else:
-                    torch.autograd.backward([output1, hy1], [grad_output, grad_hy])
-                    torch.autograd.backward([output2, hy2], [grad_output.clone().cuda(), grad_hy.clone().cuda()])
+                    inp = Variable(input_val.clone(), requires_grad=True)
+                    inp_cu = Variable(input_val.clone().cuda(), requires_grad=True)
+                    output1, hy1 = rnn(inp, hx)
+                    output2, hy2 = rnn_cuda(inp_cu, hx_cuda)
+                    if is_lstm:
+                        torch.autograd.backward(
+                            [output1, hy1[0], hy1[1]], [grad_output, grad_hy, grad_hy + 1]
+                        )
+                        torch.autograd.backward(
+                            [output2, hy2[0], hy2[1]],
+                            [grad_output.cuda(), grad_hy.cuda(), (grad_hy + 1).cuda()]
+                        )
+                    else:
+                        torch.autograd.backward([output1, hy1], [grad_output, grad_hy])
+                        torch.autograd.backward([output2, hy2], [grad_output.cuda(), grad_hy.cuda()])
 
-                self.assertEqual(output1, output2)
-                self.assertEqual(hy1, hy2)
+                    self.assertEqual(output1, output2)
+                    self.assertEqual(hy1, hy2)
 
-                check_rnn_grads(rnn, rnn_cuda)
-                self.assertEqual(inp.grad.data, inp_cu.grad.data)
-                if is_lstm:
-                    self.assertEqual(hx[0].grad.data, hx_cuda[0].grad.data)
-                    self.assertEqual(hx[1].grad.data, hx_cuda[1].grad.data)
-                else:
-                    self.assertEqual(hx.grad.data, hx_cuda.grad.data)
+                    check_rnn_grads(rnn, rnn_cuda)
+                    self.assertEqual(inp.grad.data, inp_cu.grad.data)
+                    if is_lstm:
+                        self.assertEqual(hx[0].grad.data, hx_cuda[0].grad.data)
+                        self.assertEqual(hx[1].grad.data, hx_cuda[1].grad.data)
+                    else:
+                        self.assertEqual(hx.grad.data, hx_cuda.grad.data)
+        finally:
             torch.backends.cudnn.enabled = prev
 
     def test_rnn_initial_hidden_state(self):
@@ -1493,7 +1495,7 @@ class TestNN(NNTestCase):
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
         def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
-            is_lstm = type(rnn) == nn.LSTM
+            is_lstm = isinstance(rnn, nn.LSTM)
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
