@@ -996,6 +996,9 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
+        # Check for None device_ids
+        out = dp.data_parallel(l, i)
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_output(self):
         def fn(input):
