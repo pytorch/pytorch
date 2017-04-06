@@ -44,14 +44,11 @@ struct Initializer {
 Initializer initializer;
 }
 
-const std::chrono::milliseconds Pair::kNoTimeout =
-    std::chrono::milliseconds::zero();
-
 Pair::Pair(const std::shared_ptr<Device>& dev)
     : dev_(dev),
       state_(INITIALIZING),
       sync_(false),
-      timeout_(kNoTimeout),
+      timeout_(dev_->getTimeout()),
       busyPoll_(false),
       fd_(FD_INVALID),
       sendBufferSize_(0),
@@ -119,34 +116,6 @@ void Pair::setSync(bool sync, bool busyPoll) {
 
   sync_ = true;
   busyPoll_ = busyPoll;
-}
-
-void Pair::setTimeout(int timeoutInMs) {
-  std::unique_lock<std::mutex> lock(m_);
-  int rv;
-
-  if (timeoutInMs < 0) {
-    GLOO_THROW_INVALID_OPERATION_EXCEPTION("Invalid timeout", timeoutInMs);
-  }
-
-  // Wait for pair to be connected. No need to wait for timeout here. If
-  // necessary, the connect path will timeout and signal this thread.
-  waitUntilConnected(lock, false);
-  if (state_ == CLOSED) {
-    signalIoFailure(GLOO_ERROR_MSG("Socket unexpectedly closed"));
-  }
-
-  struct timeval tv = {};
-  if (timeoutInMs > 0) {
-    tv.tv_sec = timeoutInMs / 1000;
-    tv.tv_usec = (timeoutInMs % 1000) * 1000;
-  }
-  rv = setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  GLOO_ENFORCE_NE(rv, -1);
-  rv = setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-  GLOO_ENFORCE_NE(rv, -1);
-
-  timeout_ = std::chrono::milliseconds(timeoutInMs);
 }
 
 void Pair::listen() {
@@ -399,7 +368,7 @@ bool Pair::read(Op& op) {
         if (errno == EAGAIN) {
           if (sync_) {
             auto hasTimedOut = [&]{
-              return (timeout_ != kNoTimeout) &&
+              return (timeout_ != Device::kNoTimeout) &&
                 ((std::chrono::steady_clock::now() - start) >= timeout_);
             };
             if (busyPoll_ && !hasTimedOut()) {
@@ -570,6 +539,15 @@ void Pair::handleConnected() {
   rv = setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen);
   GLOO_ENFORCE_NE(rv, -1);
 
+  // Set timeout
+  struct timeval tv = {};
+  tv.tv_sec = timeout_.count() / 1000;
+  tv.tv_usec = (timeout_.count() % 1000) * 1000;
+  rv = setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  GLOO_ENFORCE_NE(rv, -1);
+  rv = setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  GLOO_ENFORCE_NE(rv, -1);
+
   dev_->registerDescriptor(fd_, EPOLLIN, this);
   changeState(CONNECTED);
 }
@@ -648,7 +626,7 @@ void Pair::waitUntilConnected(
     checkErrorState();
     return state_ >= CONNECTED;
   };
-  auto timeoutSet = timeout_ != kNoTimeout;
+  auto timeoutSet = timeout_ != Device::kNoTimeout;
   if (useTimeout && timeoutSet) {
     auto done = cv_.wait_for(lock, timeout_, pred);
     if (!done) {

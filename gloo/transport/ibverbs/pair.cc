@@ -204,10 +204,6 @@ void Pair::setSync(bool sync, bool busyPoll) {
   busyPoll_ = true;
 }
 
-void Pair::setTimeout(int /* timeoutInMs */) {
-  GLOO_ENFORCE(false, "The ibverbs transport does not support setting timeout");
-}
-
 void Pair::receiveMemoryRegion() {
   auto mr = make_unique<MemoryRegion>(dev_->pd_);
   struct ibv_sge list = mr->sge();

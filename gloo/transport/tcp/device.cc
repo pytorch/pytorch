@@ -19,11 +19,16 @@
 #include <array>
 
 #include "gloo/common/logging.h"
+#include "gloo/common/error.h"
 #include "gloo/transport/tcp/pair.h"
 
 namespace gloo {
 namespace transport {
 namespace tcp {
+
+static const std::chrono::seconds kTimeoutDefault = std::chrono::seconds(30);
+const std::chrono::milliseconds Device::kNoTimeout =
+    std::chrono::milliseconds::zero();
 
 std::shared_ptr<transport::Device> CreateDevice(const struct attr& attr) {
   struct attr x = attr;
@@ -40,7 +45,8 @@ std::shared_ptr<transport::Device> CreateDevice(const struct attr& attr) {
   return std::shared_ptr<transport::Device>(device);
 }
 
-Device::Device(const struct attr& attr) : attr_(attr) {
+Device::Device(const struct attr& attr)
+    : attr_(attr), timeout_(kTimeoutDefault) {
   fd_ = epoll_create(1);
   GLOO_ENFORCE_NE(fd_, -1, "epoll_create: ", strerror(errno));
 
@@ -53,6 +59,20 @@ Device::~Device() {
   loop_->join();
 
   close(fd_);
+}
+
+void Device::setTimeout(const std::chrono::milliseconds& timeout) {
+  if (timeout < std::chrono::milliseconds::zero()) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("Invalid timeout", timeout.count());
+  }
+
+  std::unique_lock<std::mutex> lock(m_);
+  timeout_ = timeout;
+}
+
+std::chrono::milliseconds Device::getTimeout() {
+  std::unique_lock<std::mutex> lock(m_);
+  return timeout_;
 }
 
 std::unique_ptr<transport::Pair> Device::createPair() {

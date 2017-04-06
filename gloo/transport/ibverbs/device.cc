@@ -109,6 +109,10 @@ Device::~Device() {
   GLOO_ENFORCE_EQ(rv, 0);
 }
 
+void Device::setTimeout(const std::chrono::milliseconds& /* timeout */) {
+  GLOO_ENFORCE(false, "The ibverbs transport does not support setting timeout");
+}
+
 std::unique_ptr<transport::Pair> Device::createPair() {
   auto pair = new Pair(shared_from_this());
   return std::unique_ptr<transport::Pair>(pair);

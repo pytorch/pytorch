@@ -68,9 +68,14 @@ void MultiProcTest::spawnAsync(
       workers_.push_back(pid);
     }
   }
-  // Wait for all processes to finish initializing
+  // Wait for all processes to finish initializing. Set a sufficiently
+  // large timeout so that we do not block forever in case one of the processes
+  // fails.
+  struct timespec ts;
+  ASSERT_EQ(0, clock_gettime(CLOCK_REALTIME, &ts));
+  ts.tv_sec += 30;
   for (auto i = 0; i < size; i++) {
-    ASSERT_EQ(0, sem_wait(semaphore_));
+    ASSERT_EQ(0, sem_timedwait(semaphore_, &ts));
   }
   workerResults_.resize(workers_.size());
 }

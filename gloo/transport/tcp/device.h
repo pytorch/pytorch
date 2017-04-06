@@ -47,12 +47,15 @@ class Device : public ::gloo::transport::Device,
   explicit Device(const struct attr& attr);
   virtual ~Device();
 
+  virtual void setTimeout(const std::chrono::milliseconds& timeout) override;
   virtual std::unique_ptr<::gloo::transport::Pair> createPair()
       override;
 
  protected:
   void loop();
 
+  static const std::chrono::milliseconds kNoTimeout;
+  std::chrono::milliseconds getTimeout();
   void registerDescriptor(int fd, int events, Pair* p);
   void unregisterDescriptor(int fd);
 
@@ -67,6 +70,7 @@ class Device : public ::gloo::transport::Device,
   static constexpr auto capacity_ = 64;
 
   int fd_;
+  std::chrono::milliseconds timeout_;
 
   std::mutex m_;
   std::condition_variable cv_;

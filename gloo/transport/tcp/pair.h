@@ -71,8 +71,6 @@ class Pair : public ::gloo::transport::Pair {
 
   virtual void setSync(bool sync, bool busyPoll) override;
 
-  virtual void setTimeout(int timeoutInMs) override;
-
   virtual std::unique_ptr<::gloo::transport::Buffer>
   createSendBuffer(int slot, void* ptr, size_t size) override;
 
@@ -86,7 +84,6 @@ class Pair : public ::gloo::transport::Pair {
   state state_;
   std::atomic<bool> sync_;
   std::chrono::milliseconds timeout_;
-  static const std::chrono::milliseconds kNoTimeout;
   // When set, instructs pair to use busy-polling on receive.
   // Can only be used with sync receive mode.
   bool busyPoll_;

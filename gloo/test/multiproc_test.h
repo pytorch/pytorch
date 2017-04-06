@@ -13,6 +13,7 @@
 #include <semaphore.h>
 #include <signal.h>
 
+#include <chrono>
 #include <string>
 
 #include "gloo/common/logging.h"
@@ -76,6 +77,7 @@ class MultiProcWorker {
       std::function<void(std::shared_ptr<Context>)> fn) {
     auto context =
       std::make_shared<::gloo::rendezvous::Context>(rank, size);
+    device_->setTimeout(std::chrono::milliseconds(300));
     context->connectFullMesh(*store_, device_);
     sem_post(semaphore_);
     fn(std::move(context));

@@ -7,7 +7,6 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include <chrono>
 #include <functional>
 #include <thread>
 #include <vector>
@@ -61,14 +60,12 @@ TEST_P(TransportMultiProcTest, IoErrors) {
 
       const auto& leftRank = (processCount + context->rank - 1) % processCount;
       auto& left = context->getPair(leftRank);
-      left->setTimeout(50);
       setMode(left, mode);
       recvBuffer = left->createRecvBuffer(
       0, data.data(), data.size() * sizeof(float));
 
       const auto& rightRank = (context->rank + 1) % processCount;
       auto& right = context->getPair(rightRank);
-      right->setTimeout(50);
       setMode(right, mode);
       sendBuffer = right->createSendBuffer(
       0, data.data(), data.size() * sizeof(float));
@@ -115,13 +112,11 @@ TEST_P(TransportMultiProcTest, IoTimeouts) {
 
       const auto& leftRank = (processCount + context->rank - 1) % processCount;
       auto& left = context->getPair(leftRank);
-      left->setTimeout(50);
       recvBuffer = left->createRecvBuffer(
       0, data.data(), data.size() * sizeof(float));
 
       const auto& rightRank = (context->rank + 1) % processCount;
       auto& right = context->getPair(rightRank);
-      right->setTimeout(50);
       sendBuffer = right->createSendBuffer(
       0, data.data(), data.size() * sizeof(float));
 

@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <memory>
 
 #include "gloo/transport/pair.h"
@@ -24,6 +25,7 @@ class Device {
  public:
   virtual ~Device() = 0;
 
+  virtual void setTimeout(const std::chrono::milliseconds& timeout) = 0;
   virtual std::unique_ptr<Pair> createPair() = 0;
 };
 
