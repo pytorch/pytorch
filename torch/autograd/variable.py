@@ -486,6 +486,9 @@ class Variable(_C._VariableBase):
     def cumsum(self, dim):
         return Cumsum(dim)(self)
 
+    def cumprod(self, dim):
+        return Cumprod(dim)(self)
+
     def var(self, dim=None, unbiased=True):
         mean = self.mean(dim)
         if dim is None:

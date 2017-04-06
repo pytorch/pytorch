@@ -609,5 +609,16 @@ class Cumsum(Function):
         grad_input += grad_output
         return grad_input
 
+class Cumprod(Function):
+    
+    def __init__(self, dim):
+        super(Cumprod, self).__init__()
+        self.dim = dim
+
+    def forward(self, input):
+        return torch.cumprod(input, dim=self.dim)
+
+    def backward(self, grad_output):
+        assert False, "Backward of Cumprod not implemented"
 
 # TODO: unfold
