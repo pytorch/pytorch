@@ -230,3 +230,20 @@ class MemongerTest(hu.HypothesisTestCase):
         # longer path is in front of the shorter one
         orders_gt = [0]
         self.assertEqual(orders_gt, orders)
+
+    def test_compute_assignments_greedy(self):
+        LiveRange = memonger.LiveRange
+        ranges_sorted = [
+            ('b1', LiveRange(1, 3, 10)),
+            ('b2', LiveRange(3, 4, 1)),
+            ('b3', LiveRange(5, 6, 1)),
+            ('b4', LiveRange(5, 7, 10)),
+        ]
+        assignment_gt = [
+            [ranges_sorted[0], ranges_sorted[3]],
+            [ranges_sorted[1], ranges_sorted[2]],
+        ]
+
+        best = memonger.compute_assignments_greedy(ranges_sorted, None)
+        self.assertEqual(memonger.get_memory_usage(best), 11)
+        self.assertEqual(best, assignment_gt)
