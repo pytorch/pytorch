@@ -2,7 +2,7 @@ from .optimizer import Optimizer, required
 
 
 class SGD(Optimizer):
-    """Implements stochastic gradient descent (optionally with momentum).
+    r"""Implements stochastic gradient descent (optionally with momentum).
 
     Nesterov momentum is based on the formula from
     `On the importance of initialization and momentum in deep learning`__.
@@ -27,14 +27,23 @@ class SGD(Optimizer):
     .. note::
         The implementation of SGD with Momentum/Nesterov subtly differs from
         Sutskever et. al. and implementations in some other frameworks.
+
         Considering the specific case of Momentum, the update can be written as
-        :math:`v = \rho * v + g`,
-        :math:`p = p - lr * v`,
+
+        .. math::
+                  v = \rho * v + g \\
+                  p = p - lr * v
+
         where p, g, v and :math:`\rho` denote the parameters, gradient, velocity, and
-        momentum respectively. This is in constrast to Sutskever et. al. and
-        other frameworks which employ an update of the form:
-        :math:`v = \rho * v + lr * g`,
-        :math:`p = p - v`.
+        momentum respectively.
+
+        This is in constrast to Sutskever et. al. and
+        other frameworks which employ an update of the form
+
+        .. math::
+             v = \rho * v + lr * g \\
+             p = p - v
+
         The Nesterov version is analogously modified.
     """
 
