@@ -5,7 +5,7 @@ from torch._thnn import type2backend
 
 class GRUFused(Function):
     def __init__(self):
-        self.backend=None
+        self.backend = None
 
     def forward(self, input_gate, hidden_gate, hx, ibias=None, hbias=None):
         if self.backend is None:
