@@ -350,7 +350,8 @@ def ExtractPredictorNet(
     input_blobs,
     output_blobs,
     device=None,
-    renames=None
+    renames=None,
+    disabled_inputs=None
 ):
     '''
     Takes a model net for training and returns a net which can be
@@ -361,6 +362,8 @@ def ExtractPredictorNet(
     @param output_blobs list/set of blob names that are outputs of predictor
     @param device optional device option that is assigned
     @param renames dictionary of blob name to a new name (optional)
+    @param disabled_inputs optional set of blobs that are 'switched off'. This
+                will cause branches with those blobs as inputs to be removed
     '''
     predict_net = core.Net(net_proto.name + "_predict")
     predict_proto = predict_net.Proto()
@@ -372,6 +375,9 @@ def ExtractPredictorNet(
     output_blobs = {str(b) for b in output_blobs}
     external_inputs = set(input_blobs)
     external_outputs = set(output_blobs)
+
+    if disabled_inputs is not None:
+        known_blobs = known_blobs - set(disabled_inputs)
 
     ops = list(net_proto.op)
 
@@ -424,7 +430,7 @@ def ExtractPredictorNet(
                 set(op.output).intersection(orig_external_outputs)
             )
         else:
-            logging.warning(
+            logging.debug(
                 "Op {} had unknown inputs: {}".format(
                     op.type, set(op.input).difference(known_blobs)
                 )
