@@ -443,9 +443,17 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   const float* weights = (InputSize() > 4 ? Input(2).data<float>() : NULL);
 
   auto* dX = Output(0);
+  dX->ResizeLike(X);
+
   int N = X.dim32(0);
   int D = X.dim32(1);
-  dX->ResizeLike(X);
+
+  if (only_loss_) {
+    // Memory saving trick to share the buffer with the softmax output.
+    // Softmax output is thus overwritten.
+    dX->ShareData(P);
+  }
+
   total_weight_ptr_.Resize(1);
 
   if (!spatial_mode_) {
@@ -459,8 +467,10 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     if (!label_prob_mode_) {
       if (weights == nullptr) {
         // Copy softmax probabilities into dX
-        context_.Copy<float, CUDAContext, CUDAContext>(
-            P.size(), P.data<float>(), dX->mutable_data<float>());
+        if (!only_loss_) {
+          context_.Copy<float, CUDAContext, CUDAContext>(
+              P.size(), P.data<float>(), dX->mutable_data<float>());
+        }
         LabelCrossEntropyGradientKernel<<<
             CAFFE_GET_BLOCKS(N),
             CAFFE_CUDA_NUM_THREADS,
