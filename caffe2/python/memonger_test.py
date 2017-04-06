@@ -164,3 +164,69 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(loss2, optimized_loss2)
         np.testing.assert_almost_equal(grad, optimized_grad)
+
+    def test_topological_sort_longest_path(self):
+        m = cnn.CNNModelHelper()
+        # 0
+        m.Copy("conv0_w_comp", "conv0_w")
+        # 1
+        conv0 = m.Conv("data", "conv0", 32, 32, 4)
+        # 2
+        m.Copy("conv2_w", "conv2_w")
+        # 3
+        m.Conv(conv0, "conv2", 16, 32, 4)
+
+        g = memonger.compute_interference_graph(m.net.Proto().op)
+
+        orders_org = memonger.topological_sort_traversal(g)
+        orders_gt_org = [2, 0, 1, 3]
+        self.assertEqual(orders_gt_org, orders_org)
+
+        orders = memonger.topological_sort_traversal_longest_path(g)
+        # longer path is in front of the shorter one
+        orders_gt = [0, 1, 2, 3]
+        self.assertEqual(orders_gt, orders)
+
+    def test_topological_sort_longest_path_multi_target(self):
+        # two outputs: conv2 and data4
+        m = cnn.CNNModelHelper()
+        # 0
+        m.Copy("conv0_w_comp", "conv0_w")
+        # 1
+        conv0 = m.Conv("data", "conv0", 32, 32, 4)
+        # 2
+        m.Copy("conv2_w", "conv2_w")
+        # 3
+        m.Conv(conv0, "conv2", 16, 32, 4)
+        # 4
+        m.Copy("data1", "data2")
+        # 5
+        m.Copy("data2", "data3")
+
+        g = memonger.compute_interference_graph(m.net.Proto().op)
+
+        orders_org = memonger.topological_sort_traversal(g)
+        orders_gt_org = [4, 5, 2, 0, 1, 3]
+        self.assertEqual(orders_gt_org, orders_org)
+
+        orders = memonger.topological_sort_traversal_longest_path(g)
+        # longer path is in front of the shorter one
+        orders_gt = [0, 1, 2, 3, 4, 5]
+        self.assertEqual(orders_gt, orders)
+
+    def test_topological_sort_longest_path_single_node(self):
+        # single node
+        m = cnn.CNNModelHelper()
+        # 0
+        m.Copy("conv0_w_comp", "conv0_w")
+
+        g = memonger.compute_interference_graph(m.net.Proto().op)
+
+        orders_org = memonger.topological_sort_traversal(g)
+        orders_gt_org = [0]
+        self.assertEqual(orders_gt_org, orders_org)
+
+        orders = memonger.topological_sort_traversal_longest_path(g)
+        # longer path is in front of the shorter one
+        orders_gt = [0]
+        self.assertEqual(orders_gt, orders)

@@ -140,6 +140,168 @@ def share_grad_blobs(net, losses, param_grads, namescope):
     return netproto
 
 
+def _find_source_nodes(g):
+    ''' Return nodes without predecessors '''
+    ret = []
+    for cn in g:
+        cur_pred = g.predecessors(cn)
+        if not cur_pred:
+            ret.append(cn)
+    return ret
+
+
+def _find_target_nodes(g):
+    ''' Return nodes without successors '''
+    ret = []
+    for cn in g:
+        cur_succ = g.successors(cn)
+        if not cur_succ:
+            ret.append(cn)
+    return ret
+
+
+def _add_single_target_ifneeded(g):
+    targets = _find_target_nodes(g)
+    assert len(targets) >= 1
+    if len(targets) == 1:
+        return g
+    ret = copy.deepcopy(g)
+
+    def _next_available_idx(g):
+        ret = -1
+        for cn in g:
+            if cn > ret:
+                ret = cn
+        ret += 1
+        return ret
+
+    target_node_idx = _next_available_idx(g)
+    ret.add_node(target_node_idx)
+    for cn in targets:
+        ret.add_edge(cn, target_node_idx)
+
+    return ret
+
+
+def _get_path(pred_list, dist_list):
+    ''' Get the path from nx.bellman_ford()'s output '''
+
+    # distances are negative
+    assert all(dist_list[x] <= 0 for x in dist_list)
+    # node with longest distance to source is the target
+    target = min(dist_list, key=lambda x: dist_list[x])
+
+    ret = []
+    cur = target
+    while cur is not None:
+        ret.append(cur)
+        cur = pred_list[cur]
+    return list(reversed(ret))
+
+
+def _get_longest_paths(g, source_nodes):
+    ''' Get the longest path for nodes in 'source_nodes'
+        Find with bellman_ford() by setting weight = -1
+    '''
+
+    ng = copy.deepcopy(g)
+    for u, v in ng.edges():
+        ng[u][v]["weight"] = -1
+
+    ret = {}
+    for cn in source_nodes:
+        pred, dist = nx.bellman_ford(ng, cn, weight="weight")
+        path = _get_path(pred, dist)
+        assert path[0] == cn
+        assert len(path) - 1 == -dist[path[-1]]
+        ret[cn] = path
+
+    return ret
+
+
+def _build_tree(paths):
+    ''' Build a tree for given paths based on common elements.
+        Last elements of all paths are the same, which is the root of the tree.
+    '''
+    assert all(cp[-1] == paths[0][-1] for cp in paths)
+    g = nx.DiGraph()
+    node_set = {y for x in paths for y in x}
+    g.add_nodes_from(node_set)
+    for cp in paths:
+        for ce in zip(cp[0:-1], cp[1:]):
+            g.add_edge(ce[1], ce[0])
+
+    root = paths[0][-1]
+    _compute_tree_height(g, root)
+
+    return (g, root)
+
+
+def _compute_tree_height(g, root):
+    ''' Compute the heights of the tree for all nodes
+        Height of leaves are 0
+    '''
+    def _get_height(root):
+        children = g.successors(root)
+        height = 0
+        if children:
+            child_heights = [_get_height(x) for x in children]
+            height = max(child_heights) + 1
+        g.node[root]["height"] = height
+        return height
+
+    _get_height(root)
+
+
+def _sort_tree_leaves(g, root):
+    ''' For each node, sort its child nodes based on the height of the nodes.
+        Return the leaf nodes of the tree after sorting.
+    '''
+    def _get_height(root):
+        return g.node[root]["height"]
+
+    def _get_sorted_leaves(root):
+        children = g.successors(root)
+        if not children:
+            return [root]
+        child_heights = [_get_height(x) for x in children]
+        order = sorted(range(len(children)), key=lambda x: child_heights[x])
+        ret = []
+        for co in order:
+            cr = children[co]
+            ret += _get_sorted_leaves(cr)
+
+        return ret
+
+    return _get_sorted_leaves(root)
+
+
+def topological_sort_traversal_longest_path(g):
+    ''' The graph 'g' may contain several source nodes (nodes without incoming
+        edge), which could have be in any order and still being a valid
+        topoligical sorting result. We would like to arrange these source nodes
+        so that the average live spans of the computed blobs are shorter.
+        The idea is to sort the source nodes based on the length of their path to
+        the target node so that the one with longer path is used first.
+        This is done by:
+        - Add a single target node if there are multiple target nodes in 'g'.
+        - Find the longest path between each source and the target node.
+        - Convert the longest paths to a tree with the target node being the root
+          and source nodes being the leaves.
+        - Sort the nodes of the tree based on the height of the tree.
+    '''
+    gt = _add_single_target_ifneeded(g)
+    source_nodes = _find_source_nodes(gt)
+    lpaths = _get_longest_paths(gt, source_nodes)
+    tree, root = _build_tree(lpaths.values())
+    sorted_sources = _sort_tree_leaves(tree, root)
+    assert(sorted(sorted_sources) == sorted(source_nodes))
+
+    ret = nx.topological_sort(g, sorted_sources)
+    assert(len(ret) == len(g.node))
+    return ret
+
+
 def topological_sort_traversal(g):
     return nx.topological_sort(g)
 
@@ -297,6 +459,7 @@ def optimize_interference(net, static_blobs,
         blob_assignments=blob_assignments,
         assignments=assignments)
 
+
 Statistics = collections.namedtuple(
     'Statistics', ['baseline_nbytes', 'optimized_nbytes'])
 
@@ -307,7 +470,7 @@ def compute_statistics(assignments):
     blob_bytes = {
         blob: blob_nbytes(blob) for assignment in assignments
         for (blob, _) in assignment}
-    baseline_nbytes = sum(v for _, v in blob_bytes.iteritems())
+    baseline_nbytes = sum(v for _, v in blob_bytes.items())
     optimized_nbytes = sum(
         max(blob_bytes[blob] for (blob, _) in assignment)
         for assignment in assignments)
