@@ -18,26 +18,58 @@
 #include <unordered_map>
 
 
+
+#define RETURN_IF_NOT_IN_GROUP(name)                                          \
+  rank_type ##name; bool _e;                                                  \
+  std::tie(##name, _e) = _groups.at(group_id).getGroupRank(_rank);            \
+  if (!_e) return;
+
+
+#define GENERATE_ALL_TYPES(type, func, args...)                               \
+  switch (type) {                                                             \
+    case ::thpp::Type::CHAR: func<char>(args); break;                         \
+    case ::thpp::Type::UCHAR: func<unsigned char>(args); break;               \
+    case ::thpp::Type::FLOAT: func<float>(args); break;                       \
+    case ::thpp::Type::DOUBLE: func<double>(args); break;                     \
+    /* case ::thpp::Type::HALF: func<float>(args); break; */                  \
+    case ::thpp::Type::SHORT: func<short>(args); break;                       \
+    case ::thpp::Type::USHORT: func<unsigned short>(args); break;             \
+    case ::thpp::Type::INT: func<int>(args); break;                           \
+    case ::thpp::Type::UINT: func<unsigned int>(args); break;                 \
+    case ::thpp::Type::LONG: func<long>(args); break;                         \
+    case ::thpp::Type::ULONG: func<unsigned long>(args); break;               \
+    case ::thpp::Type::LONG_LONG: func<long long>(args); break;               \
+    case ::thpp::Type::ULONG_LONG: func<unsigned long long>(args); break;     \
+    default:                                                                  \
+      throw std::runtime_error("Invalid " + std::string(#func) + " function type"); \
+  }
+
+
 namespace thd {
 
-using ::gloo::rendezvous::PrefixStore;
-using ::gloo::rendezvous::Context;
+DataChannelGloo::RequestGloo::RequestGloo(QueueWorker::Request&& request)
+  : _request(std::move(request)) {
+}
 
-namespace {
 
-template<typename T>
+DataChannelGloo::RequestGloo::~RequestGloo() {}
 
-const ::gloo::ReductionFunction<T> *THDToGlooReduceOp(THDReduceOp op);
 
-} // anonymous namespace
+bool DataChannelGloo::RequestGloo::isCompleted() {
+  return _request.isCompleted();
+}
+
+
+void DataChannelGloo::RequestGloo::wait() {
+  _request.wait();
+}
+
 
 DataChannelGloo::DataChannelGloo()
   : _rank(load_rank_env())
 {
   _store = std::unique_ptr<Store>(new thd::Store());
 
-  ::gloo::transport::tcp::attr attr; // default options listen on all interfaces
-  _device = ::gloo::transport::tcp::CreateDevice(attr);
   if (_rank == 0) {
     _num_processes = load_world_size_env();
     auto num_proc_str = std::to_string(_num_processes);
@@ -48,6 +80,12 @@ DataChannelGloo::DataChannelGloo()
     _num_processes = std::atoll(
             std::string(world_size.begin(), world_size.end()).c_str());
   }
+
+  ::gloo::transport::tcp::attr attr; // default options listen on all interfaces
+  _device = ::gloo::transport::tcp::CreateDevice(attr);
+
+  GlooCache::get().setRank(_rank);
+  GlooCache::get().setDevice(_device);
 }
 
 
@@ -66,26 +104,16 @@ bool DataChannelGloo::init() {
     DataChannel::Group(ranks, _num_processes - 1)
   });
 
-  createContexts(THDGroupWORLD);
   return true;
 }
 
-PrefixStore DataChannelGloo::getStore() {
+store_type DataChannelGloo::getStore() {
+  // This `id` \/ has to be consistent on all instances but also
+  // has to be different for each operation.
   static std::uint64_t id = 0; // TODO: that's not a good solution
-  return PrefixStore(std::to_string(id++), *_store);
+  return ::gloo::rendezvous::PrefixStore(std::to_string(id++), *_store);
 }
 
-void DataChannelGloo::createContexts(THDGroup group_id) {
-  // there is a separate context for every operation
-  auto group = _groups.at(group_id);
-  for (uint8_t i = 0; i < static_cast<uint8_t>(DataOperation::LAST); i++) {
-    auto key = std::make_tuple(static_cast<DataOperation>(i), group_id);
-    _contexts[key] = std::make_shared<Context>(group.mustGetGroupRank(_rank),
-                                               group.size());
-    auto store = getStore();
-    _contexts[key]->connectFullMesh(store, _device);
-  }
-}
 
 rank_type DataChannelGloo::getRank() {
   return _rank;
@@ -96,113 +124,128 @@ rank_type DataChannelGloo::getNumProcesses() {
   return _num_processes;
 }
 
-std::shared_ptr<Context> DataChannelGloo::getFullMeshCtx(DataOperation op,
-                                                         THDGroup group_id) {
-  return _contexts[std::make_tuple(op, group_id)];
-}
 
 template<typename T>
 void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
                                  thpp::Tensor& input, THDGroup group_id) {
+  auto& store = getStore();
+  RETURN_IF_NOT_IN_GROUP(_)
+
   std::uint64_t tensor_bytes = input.elementSize() * input.numel();
   std::uint64_t all_tensor_bytes = tensor_bytes * output.size();
-  std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensor_bytes]);
-  ::gloo::AllgatherRing<T> algo(
-        getFullMeshCtx(DataOperation::ALL_GATHER, group_id),
-        {reinterpret_cast<T*>(input.data())},
-        reinterpret_cast<T*>(tmp_data.get()),
-        input.numel()
-      );
-  algo.run();
+  auto ret = GlooCache.get().getAlgorithm<DataOperation::ALL_GATHER, T>(
+    group_id, _groups.at(group_id), store,
+    tensor_bytes, all_tensor_bytes, input.numel());
+
+  std::memcpy(std::get<1>(ret).get(), input.data(), tensor_bytes);
+  std::get<0>(ret)->run();
+
   for (std::size_t i = 0; i < output.size(); i++) {
-    memcpy(output.at(i)->data(), tmp_data.get() + (i * tensor_bytes), tensor_bytes);
+    std::memcpy(output.at(i)->data(),
+                std::get<2>(ret).get() + (i * tensor_bytes),
+                tensor_bytes);
   }
 }
 
 void DataChannelGloo::allGather(std::vector<thpp::Tensor*>& output,
                                 thpp::Tensor& input, THDGroup group_id) {
-  if (input.type() == ::thpp::Type::FLOAT) {
-    allGatherT<float>(output, input, group_id);
-  }
+  GENERATE_ALL_TYPES(input.type(), allGatherT, output, input, group_id)
 }
 
-// gather and scatter are in fact not supported by gloo
+
+// XXX: `gather` is not supported by Gloo yet.
 void DataChannelGloo::gather(std::vector<thpp::Tensor*>& output,
                              thpp::Tensor& input, rank_type dst_rank,
                              THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo doesn't support gather");
 }
 
+
+// XXX: `scatter` is not supported by Gloo yet.
 void DataChannelGloo::scatter(std::vector<thpp::Tensor*>& input,
                               thpp::Tensor& output,
                               rank_type src_rank, THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo doesn't support scatter");
 }
 
+
 template<typename T>
 void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
                                  THDGroup group_id) {
-  ::gloo::AllreduceRing<T> algo(
-        getFullMeshCtx(DataOperation::ALL_REDUCE, group_id),
-        {reinterpret_cast<T*>(t.data())},
-        t.numel(),
-        THDToGlooReduceOp<T>(operation)
-      );
-  algo.run();
+  auto& store = getStore();
+  RETURN_IF_NOT_IN_GROUP(_)
+
+  std::uint64_t tensor_bytes = t.elementSize() * t.numel();
+  auto ret = GlooCache::get().getAlgorithm<DataOperation::ALL_REDUCE, T>(
+    group_id, _groups.at(group_id), store,
+    tensor_bytes, t.numel(), operation);
+
+  std::memcpy(std::get<1>(ret).get(), t.data(), tensor_bytes);
+  std::get<0>(ret)->run();
+  std::memcpy(t.data(), std::get<2>(ret).get(), tensor_bytes);
 }
 
 void DataChannelGloo::allReduce(thpp::Tensor& data, THDReduceOp operation,
                                 THDGroup group_id) {
-  if (data.type() == ::thpp::Type::FLOAT) {
-    allReduceT<float>(data, operation, group_id);
-  }
+  GENERATE_ALL_TYPES(data.type(), allReduceT, data, operation, group_id)
 }
 
+
+// XXX: `reduce` is not supported by Gloo yet.
 void DataChannelGloo::reduce(thpp::Tensor& data, THDReduceOp operation,
                              rank_type dst_rank, THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo doesn't support reduce");
 }
 
+
 template<typename T>
 void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
                                 THDGroup group_id) {
-  ::gloo::BroadcastOneToAll<T> algo(
-        getFullMeshCtx(DataOperation::BROADCAST, group_id),
-        {reinterpret_cast<T*>(data.data())},
-        data.numel(),
-        src_rank
-      );
-  algo.run();
+  auto& store = getStore();
+  RETURN_IF_NOT_IN_GROUP(group_rank)
+
+  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  auto ret = GlooCache::get().getAlgorithm<DataOperation::BROADCAST, T>(
+    group_id, _groups.at(group_id), store,
+    tensor_bytes, data.numel(), src_rank);
+
+  if (group_rank == src_rank)
+    std::memcpy(std::get<1>(ret).get(), t.data(), tensor_bytes);
+
+  std::get<0>(ret)->run();
+
+  if (group_rank != src_rank)
+    std::memcpy(t.data(), std::get<2>(ret).get(), tensor_bytes);
 }
+
 
 void DataChannelGloo::broadcast(thpp::Tensor& data, rank_type src_rank,
                                 THDGroup group_id) {
-  if (data.type() == ::thpp::Type::FLOAT) {
-    broadcastT<float>(data, src_rank, group_id);
-  }
+  GENERATE_ALL_TYPES(data.type(), broadcastT, data, src_rank, group_id)
 }
 
 
 void DataChannelGloo::send(const Scalar& data, rank_type dst_rank) {
-  std::unique_ptr<Scalar> data_copy(data.clone());
-  auto ctx = getFullMeshCtx(DataOperation::SEND);
-  auto& pair = ctx->getPair(dst_rank);
-  pair->createSendBuffer(ctx->nextSlot(), data_copy->data(), data_copy->elementSize())->send();
+  auto request = _send_worker.push([this, &data, dst_rank]{
+    this->_send(data, dst_rank);
+  });
+  request.wait();
 }
 
 
 void DataChannelGloo::send(thpp::Tensor& data, rank_type dst_rank) {
-  auto ctx = getFullMeshCtx(DataOperation::SEND);
-  auto& pair = ctx->getPair(dst_rank);
-  uint64_t tensor_bytes = data.elementSize() * data.numel();
-  pair->createSendBuffer(ctx->nextSlot(), data.data(), tensor_bytes)->send();
+  auto request = _send_worker.push([this, &data, dst_rank]{
+    this->_send(data, dst_rank);
+  });
+  request.wait();
 }
 
 
 void DataChannelGloo::receive(Scalar& data, rank_type src_rank) {
-  auto ctx = getFullMeshCtx(DataOperation::SEND);
-  auto& pair = ctx->getPair(src_rank);
-  pair->createRecvBuffer(ctx->nextSlot(), data.data(), data.elementSize())->waitRecv();
+  auto request = _receive_worker.push([this, &data, src_rank]{
+    this->_receive(data, src_rank);
+  });
+  request.wait();
 }
 
 
@@ -212,55 +255,94 @@ void DataChannelGloo::receive(thpp::Tensor& data) {
 
 
 void DataChannelGloo::receive(thpp::Tensor& data, rank_type src_rank) {
-  auto ctx = getFullMeshCtx(DataOperation::SEND);
-  auto& pair = ctx->getPair(src_rank);
-  uint64_t tensor_bytes = data.elementSize() * data.numel();
-  pair->createRecvBuffer(ctx->nextSlot(), data.data(), tensor_bytes)->waitRecv();
+  auto request = _receive_worker.push([this, &data, src_rank]{
+    this->_receive(data, src_rank);
+  });
+  request.wait();
 }
+
+
+auto DataChannelGloo::isend(thpp::Tensor& data, rank_type dst_rank) -> RequestGloo* {
+  std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
+  auto request = _send_worker.push([this, copy_tensor, dst_rank]{
+    this->_send(*copy_tensor, dst_rank);
+  });
+  return new DataChannelGloo::RequestGloo(std::move(request));
+}
+
+
+auto DataChannelGloo::ireceive(thpp::Tensor& data, rank_type src_rank) -> RequestGloo* {
+  std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
+  auto request = _receive_worker.push([this, copy_tensor, src_rank]{
+    this->_receive(*copy_tensor, src_rank);
+  });
+  return new DataChannelGloo::RequestGloo(std::move(request));
+}
+
 
 void DataChannelGloo::barrier(THDGroup group_id) {
-  ::gloo::BarrierAllToAll algo(getFullMeshCtx(DataOperation::BARRIER, group_id));
-  algo.run();
+  auto& store = getStore();
+  RETURN_IF_NOT_IN_GROUP(_)
+
+  auto ret = GlooCache::get().getAlgorithm<DataOperation::BARRIER, T>(
+    group_id, _groups.at(group_id), store);
+  std::get<0>(ret)->run();
 }
 
-
-auto DataChannelGloo::isend(thpp::Tensor& data, rank_type dst_rank) -> Request* {
-  throw std::runtime_error("DataChannelGloo doesn't support isend");
-}
-
-
-auto DataChannelGloo::ireceive(thpp::Tensor& data, rank_type src_rank) -> Request*{
-  throw std::runtime_error("DataChannelGloo doesn't support ireceive");
-}
 
 THDGroup DataChannelGloo::newGroup(const std::vector<rank_type>& ranks) {
   auto new_group = DataChannel::Group(ranks, _num_processes - 1);
   THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
 
   _groups.insert({new_group_id, new_group});
-
-  createContexts(new_group_id);
 }
 
-namespace {
 
-template<typename T>
-const ::gloo::ReductionFunction<T> *THDToGlooReduceOp(THDReduceOp op) {
-  switch (op) {
-    case THDReduceMIN:
-      return ::gloo::ReductionFunction<T>::min;
-    case THDReduceMAX:
-      return ::gloo::ReductionFunction<T>::max;
-    case THDReduceSUM:
-      return ::gloo::ReductionFunction<T>::sum;
-    case THDReducePRODUCT:
-      return ::gloo::ReductionFunction<T>::product;
-    default:
-      throw std::invalid_argument("unknown reduce operation");
-  }
+void DataChannelGloo::_send(const Scalar& data, rank_type dst_rank) {
+  auto& store = getStore();
+  std::unique_ptr<Scalar> data_copy(data.clone());
+  auto ctx = GlooCache::get().getSharedContext<DataOperation::SEND>(
+    _groups.at(THDGroupWORLD),
+    store
+  );
+  auto& pair = ctx->getPair(dst_rank);
+  pair->createSendBuffer(ctx->nextSlot(), data_copy->data(), data_copy->elementSize())->waitSend();
 }
 
-} // anonymous namespace
+
+void DataChannelGloo::_send(thpp::Tensor& data, rank_type dst_rank) {
+  auto& store = getStore();
+  auto ctx = GlooCache::get().getSharedContext<DataOperation::SEND>(
+    _groups.at(THDGroupWORLD),
+    store
+  );
+  auto& pair = ctx->getPair(dst_rank);
+  uint64_t tensor_bytes = data.elementSize() * data.numel();
+  pair->createSendBuffer(ctx->nextSlot(), data.data(), tensor_bytes)->waitSend();
+}
+
+
+void DataChannelGloo::_receive(Scalar& data, rank_type src_rank) {
+  auto& store = getStore();
+  auto ctx = GlooCache::get().getSharedContext<DataOperation::SEND>(
+    _groups.at(THDGroupWORLD),
+    store
+  );
+  auto& pair = ctx->getPair(src_rank);
+  pair->createRecvBuffer(ctx->nextSlot(), data.data(), data.elementSize())->waitRecv();
+}
+
+
+void DataChannelGloo::_receive(thpp::Tensor& data, rank_type src_rank) {
+  auto& store = getStore();
+  auto ctx = GlooCache::get().getSharedContext<DataOperation::SEND>(
+    _groups.at(THDGroupWORLD),
+    store
+  );
+  auto& pair = ctx->getPair(src_rank);
+  uint64_t tensor_bytes = data.elementSize() * data.numel();
+  pair->createRecvBuffer(ctx->nextSlot(), data.data(), tensor_bytes)->waitRecv();
+}
 
 } // namespace thd
 
