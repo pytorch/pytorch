@@ -8,8 +8,6 @@ from __future__ import unicode_literals
 from caffe2.python import core, model_helper, schema
 from caffe2.python.layers import layers
 
-from functools import partial
-
 import logging
 import numpy as np
 logger = logging.getLogger(__name__)
@@ -235,135 +233,8 @@ class LayerModelHelper(model_helper.ModelHelperBase):
             optimizer(
                 train_net, train_init_net, param, grad_map.get(str(param)))
 
-    # TODO(amalevich): Optimizer should not really in model. Move it out.
-    # Copy over from another Helper
-    def SgdOptim(self, base_lr=0.01, policy='fixed', **kwargs):
-        return partial(self.Sgd, base_lr=base_lr, policy=policy, **kwargs)
-
-    def AdagradOptim(self, alpha=0.01, epsilon=1e-4, **kwargs):
-        return partial(self.Adagrad, alpha=alpha, epsilon=epsilon, **kwargs)
-
-    def FtrlOptim(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0, **kwargs):
-        return partial(self.Ftrl, alpha=alpha, beta=beta, lambda1=lambda1,
-                       lambda2=lambda2, **kwargs)
-
     def _GetOne(self):
         return self.global_constants['ONE']
-
-    def Adagrad(self, net, param_init_net,
-                param, grad, alpha, epsilon, sparse_dedup_aggregator=None,
-                engine=''):
-        if alpha <= 0:
-            return
-
-        param_square_sum = param_init_net.ConstantFill(
-            [param],
-            core.ScopedBlobReference(param + "_square_sum"),
-            value=0.0
-        )
-        # Set learning rate to negative so that we can add the grad to param
-        # directly later.
-        lr = param_init_net.ConstantFill(
-            [], core.ScopedBlobReference(param + "_lr"), value=-alpha)
-        if isinstance(grad, core.GradientSlice):
-            if sparse_dedup_aggregator:
-                grad = net.DeduplicateGradientSlices(
-                    grad, aggregator=sparse_dedup_aggregator)
-
-            net.SparseAdagrad(
-                [param, param_square_sum, grad.indices, grad.values, lr],
-                [param, param_square_sum],
-                epsilon=epsilon,
-                engine=engine
-            )
-
-        else:
-            net.Adagrad(
-                [param, param_square_sum, grad, lr],
-                [param, param_square_sum],
-                epsilon=epsilon,
-                engine=engine
-            )
-
-    def Ftrl(self, net, param_init_net,
-             param, grad, alpha, beta, lambda1, lambda2,
-             sparse_dedup_aggregator=None, engine=''):
-        if alpha <= 0:
-            return
-
-        nz = param_init_net.ConstantFill(
-            [param],
-            core.ScopedBlobReference(param + "_ftrl_nz"),
-            extra_shape=[2],
-            value=0.0
-        )
-        if isinstance(grad, core.GradientSlice):
-            if sparse_dedup_aggregator:
-                grad = net.DeduplicateGradientSlices(
-                    grad, aggregator=sparse_dedup_aggregator)
-
-            net.SparseFtrl(
-                [param, nz, grad.indices, grad.values],
-                [param, nz],
-                engine=engine,
-                alpha=alpha,
-                beta=beta,
-                lambda1=lambda1,
-                lambda2=lambda2
-            )
-        else:
-            net.Ftrl(
-                [param, nz, grad],
-                [param, nz],
-                engine=engine,
-                alpha=alpha,
-                beta=beta,
-                lambda1=lambda1,
-                lambda2=lambda2
-            )
-
-    def Sgd(self, net, param_init_net,
-            param, grad, base_lr, policy, momentum=0.0, **kwargs):
-        if (base_lr <= 0):
-            return
-        # Set learning rate to negative so that we can add the grad to param
-        # directly later.
-
-        # TODO(amalevich): Get rid of iter duplication if other parts are good
-        # enough
-        lr = net.LearningRate(
-            [net.Iter([], 1)],
-            core.ScopedBlobReference(param + "_lr"),
-            base_lr=-base_lr,
-            policy=policy,
-            **kwargs
-        )
-
-        if momentum > 0:
-            momentum_data = param_init_net.ConstantFill(
-                param, core.ScopedBlobReference(param + "_momentum"), value=0.)
-
-        if isinstance(grad, core.GradientSlice):
-            assert momentum == 0., "Doesn't support momentum for sparse"
-            net.ScatterWeightedSum(
-                [param, self._GetOne(),
-                 grad.indices, grad.values, lr],
-                param
-            )
-        else:
-            if momentum > 0.:
-                net.MomentumSGD(
-                    [grad, momentum_data, lr], [grad, momentum_data],
-                    momentum=momentum,
-                    nesterov=1)
-                coeff = self._GetOne()
-            else:
-                coeff = lr
-
-            net.WeightedSum(
-                [param, self._GetOne(), grad, coeff],
-                param
-            )
 
     # An optimizer which allows us to do NO optimization
     def NoOptim(self, *args, **kwargs):
