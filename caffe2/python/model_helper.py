@@ -81,6 +81,8 @@ class ModelHelperBase(object):
         self.init_params = init_params
         self.allow_not_known_ops = allow_not_known_ops
         self.skip_sparse_optim = skip_sparse_optim
+        self.weights = []
+        self.biases = []
 
     def get_name(self):
         return self.name
