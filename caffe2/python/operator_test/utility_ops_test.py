@@ -151,7 +151,7 @@ class TestUtilityOps(hu.HypothesisTestCase):
     def test_elementwise_avg(self, n, gc, dc):
         X = np.random.rand(n).astype(np.float32)
 
-        def sum_op(X):
+        def avg_op(X):
             return [np.mean(X)]
 
         op = core.CreateOperator(
@@ -165,5 +165,13 @@ class TestUtilityOps(hu.HypothesisTestCase):
             device_option=gc,
             op=op,
             inputs=[X],
-            reference=sum_op,
+            reference=avg_op,
+        )
+
+        self.assertGradientChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            outputs_to_check=0,
+            outputs_with_grads=[0],
         )

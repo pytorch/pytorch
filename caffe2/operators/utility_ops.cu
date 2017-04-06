@@ -8,6 +8,32 @@
 #include "utility_ops.h"
 
 namespace caffe2 {
+namespace {
+template <typename T>
+__global__ void SumElementsKernel(
+    bool average, const int N, const T* dY, T* dX) {
+  const T value = average ? (*dY) / N : *dY;
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    dX[i] = value;
+  }
+}
+}  // namespace
+
+template <>
+bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {
+  auto& X = Input(0);
+  auto& dY = Input(1);
+  DCHECK_EQ(dY.size(), 1);
+  auto* dX = Output(0);
+  dX->ResizeLike(X);
+  SumElementsKernel<float><<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      average_, X.size(), dY.data<float>(), dX->mutable_data<float>());
+  return true;
+}
 
 __global__ void NanCheckKernel(int N, const float* X, bool* result) {
   bool has_nan = false;
@@ -183,5 +209,8 @@ bool GatherOp<CUDAContext>::DoRunWithType() {
 
 namespace {
 REGISTER_CUDA_OPERATOR(Gather, GatherOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+  SumElementsGradient,
+  SumElementsGradientOp<float, CUDAContext>);
 }  // namespace
 }  // namespace caffe2
