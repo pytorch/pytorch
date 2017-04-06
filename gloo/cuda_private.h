@@ -100,38 +100,6 @@ class CudaMemory {
   T* ptr_;
 };
 
-// Convenience class for managing the lifetime of a GPU stream
-class CudaStream {
- public:
-  CudaStream() : device_(getCurrentGPUID()) {
-    int loPri, hiPri;
-    CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&loPri, &hiPri));
-    CUDA_CHECK(cudaStreamCreateWithPriority(
-        &stream_, cudaStreamNonBlocking, hiPri));
-  }
-  CudaStream(CudaStream&& other) noexcept
-      : device_(other.device_), stream_(other.stream_) {
-    other.stream_ = nullptr;
-  }
-  ~CudaStream() {
-    if (stream_ != nullptr) {
-      CudaDeviceScope scope(device_);
-      CUDA_CHECK(cudaStreamDestroy(stream_));
-    }
-  }
-
-  cudaStream_t operator*() const {
-    return stream_;
-  }
-
- protected:
-  CudaStream(const CudaStream&) = delete;
-  CudaStream& operator=(const CudaStream&) = delete;
-
-  const int device_;
-  cudaStream_t stream_;
-};
-
 // Container class for a set of per-device streams
 class CudaDeviceStreams {
  public:
@@ -139,8 +107,7 @@ class CudaDeviceStreams {
     const int numDevices = getDeviceCount();
     streams_.reserve(numDevices);
     for (auto i = 0; i < numDevices; i++) {
-      CudaDeviceScope scope(i);
-      streams_.push_back(CudaStream());
+      streams_.push_back(CudaStream(i));
     }
   }
   cudaStream_t operator[](const int i) {

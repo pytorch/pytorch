@@ -33,14 +33,14 @@ CudaAllreduceRing<T, W>::CudaAllreduceRing(
     newStream = false;
   }
 
-  for (int i = 0; i < ptrs.size(); i++) {
+  for (auto i = 0; i < ptrs.size(); i++) {
+    auto ptr = CudaDevicePointer<T>::create(ptrs[i], count_);
     if (newStream) {
-      devicePtrs_.push_back(
-          CudaDevicePointer<T>::create(ptrs[i], count_));
+      streams_.push_back(CudaStream(ptr.getDeviceID()));
     } else {
-      devicePtrs_.push_back(
-          CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
+      streams_.push_back(CudaStream(ptr.getDeviceID(), streams[i]));
     }
+    devicePtrs_.push_back(std::move(ptr));
   }
 
   // Workspace specific initialization (see below)
@@ -68,14 +68,15 @@ CudaAllreduceRing<T, W>::CudaAllreduceRing(
 template <typename T, typename W>
 void CudaAllreduceRing<T, W>::run() {
   CudaDeviceGuard guard;
+  CudaStream& stream = streams_[0];
 
   if (localReduceOp_) {
     localReduceOp_->run();
   }
 
   // Initialize outbox with locally reduced values
-  scratch_.copyToAsync(outbox_);
-  scratch_.wait();
+  stream.copyAsync(outbox_, scratch_);
+  stream.wait();
 
   int numRounds = this->contextSize_ - 1;
   for (int round = 0; round < numRounds; round++) {
@@ -86,15 +87,16 @@ void CudaAllreduceRing<T, W>::run() {
     recvDataBuf_->waitRecv();
 
     // Reduce
-    fn_->call(scratch_, inbox_, count_);
+    fn_->call(scratch_, inbox_, count_, stream);
+    stream.wait();
 
     // Wait for outbox write to complete
     sendDataBuf_->waitSend();
 
     // Prepare for next round if necessary
     if (round < (numRounds - 1)) {
-      outbox_.copyFromAsync(inbox_);
-      outbox_.wait();
+      stream.copyAsync(outbox_, inbox_);
+      stream.wait();
     }
 
     // Send notification to node on the left that
@@ -126,8 +128,8 @@ void CudaAllreduceRing<T, W>::init(
   // Execute local reduction and broadcast from host.
   // If devicePtrs_.size() == 1 these functions construct an op that
   // executes a memcpy such that scratch_ always holds the result.
-  localReduceOp_ = cudaHostReduce(devicePtrs_, scratch_, fn_);
-  localBroadcastOp_ = cudaHostBroadcast(devicePtrs_, scratch_);
+  localReduceOp_ = cudaHostReduce(streams_, devicePtrs_, scratch_, fn_);
+  localBroadcastOp_ = cudaHostBroadcast(streams_, devicePtrs_, scratch_);
 
   inbox_ = W::Pointer::alloc(count_);
   outbox_ = W::Pointer::alloc(count_);
@@ -142,22 +144,23 @@ void CudaAllreduceRing<T, W>::init(
   // can use an existing input buffer to accumulate.
   auto& ptr = devicePtrs_[0];
   auto count = ptr.getCount();
-  auto stream = ptr.getStream();
-  scratch_ = CudaDevicePointer<T>::create(*ptr, count, stream);
+  scratch_ = CudaDevicePointer<T>::create(*ptr, count);
 
   // Run local reduction and broadcast on device.
   // When running with a device workspace we intend to never leave the device.
   if (devicePtrs_.size() > 1) {
-    localReduceOp_ = cudaDeviceReduce(devicePtrs_, scratch_, fn_, 0, count_);
-    localBroadcastOp_ = cudaDeviceBroadcast(devicePtrs_, scratch_, 0, count_);
+    localReduceOp_ =
+      cudaDeviceReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
+    localBroadcastOp_ =
+      cudaDeviceBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
   }
 
   // Inbox/outbox must be colocated with scratch buffer to avoid
   // cross device copies while accumulating the reduction.
   {
     CudaDeviceScope scope(scratch_.getDeviceID());
-    inbox_ = W::Pointer::alloc(count, stream);
-    outbox_ = W::Pointer::alloc(count, stream);
+    inbox_ = W::Pointer::alloc(count);
+    outbox_ = W::Pointer::alloc(count);
   }
 }
 

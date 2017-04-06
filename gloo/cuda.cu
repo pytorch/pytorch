@@ -18,96 +18,35 @@ const cudaStream_t kStreamNotSet = (cudaStream_t)(-1);
 static std::mutex defaultCudaMutex;
 std::atomic<std::mutex*> CudaShared::mutex_(&defaultCudaMutex);
 
-template <typename T>
-CudaDevicePointer<T> CudaDevicePointer<T>::alloc(
-    size_t count,
-    cudaStream_t stream) {
-  T* ptr = nullptr;
-  size_t bytes = count * sizeof(T);
-  {
-    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-    CUDA_CHECK(cudaMalloc(&ptr, bytes));
-  }
-  auto p = create(ptr, count, stream);
-  p.owner_ = true;
-  return p;
-}
+CudaStream::CudaStream(int deviceId, cudaStream_t stream)
+    : deviceId_(deviceId),
+      stream_(stream),
+      streamOwner_(false) {
+  CudaDeviceScope scope(deviceId_);
 
-template<typename T>
-CudaDevicePointer<T> CudaDevicePointer<T>::create(
-    T* ptr,
-    size_t count,
-    cudaStream_t stream) {
-  CudaDevicePointer p(ptr, count, false);
-
-  // Create new stream for operations concerning this pointer
-  if (stream == kStreamNotSet) {
-    CudaDeviceScope scope(p.deviceId_);
+  // Create new stream if it wasn't specified
+  if (stream_ == kStreamNotSet) {
     int loPri, hiPri;
     CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&loPri, &hiPri));
     CUDA_CHECK(cudaStreamCreateWithPriority(
-                 &p.stream_, cudaStreamNonBlocking, hiPri));
-    p.streamOwner_ = true;
-  } else {
-    p.stream_ = stream;
+                 &stream_, cudaStreamNonBlocking, hiPri));
+    streamOwner_ = true;
   }
 
-  return p;
-}
-
-template<typename T>
-CudaDevicePointer<T>::CudaDevicePointer(T* ptr, size_t count, bool owner)
-    : device_(ptr),
-      count_(count),
-      owner_(owner),
-      deviceId_(getGPUIDForPointer(device_)) {
-  CudaDeviceScope scope(deviceId_);
+  // Create new event to synchronize operations against
   CUDA_CHECK(cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
 }
 
-template<typename T>
-CudaDevicePointer<T>::CudaDevicePointer(CudaDevicePointer<T>&& other) noexcept
-    : device_(other.device_),
-      count_(other.count_),
-      owner_(other.owner_),
-      deviceId_(other.deviceId_),
-      streamOwner_(other.streamOwner_),
+CudaStream::CudaStream(CudaStream&& other) noexcept
+    : deviceId_(other.deviceId_),
       stream_(other.stream_),
+      streamOwner_(other.streamOwner_),
       event_(other.event_) {
-  // Nullify fields that would otherwise be destructed
-  other.device_ = nullptr;
-  other.owner_ = false;
   other.stream_ = nullptr;
   other.event_ = nullptr;
 }
 
-template<typename T>
-CudaDevicePointer<T>& CudaDevicePointer<T>::operator=(
-    CudaDevicePointer<T>&& other) {
-  device_ = other.device_;
-  count_ = other.count_;
-  owner_ = other.owner_;
-  deviceId_ = other.deviceId_;
-  streamOwner_ = other.streamOwner_;
-  stream_ = other.stream_;
-  event_ = other.event_;
-
-  // Nullify fields that would otherwise be destructed
-  other.device_ = nullptr;
-  other.owner_ = false;
-  other.stream_ = nullptr;
-  other.event_ = nullptr;
-
-  return *this;
-}
-
-template<typename T>
-CudaDevicePointer<T>::~CudaDevicePointer() {
-  CudaDeviceScope scope(deviceId_);
-  if (owner_ && device_ != nullptr) {
-    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-    CUDA_CHECK(cudaFree(device_));
-  }
+CudaStream::~CudaStream() {
   if (event_ != nullptr) {
     // Make sure outstanding operations are complete. If the event
     // hasn't been queued this call will return immediately.
@@ -119,116 +58,138 @@ CudaDevicePointer<T>::~CudaDevicePointer() {
   }
 }
 
-template<typename T>
-void CudaDevicePointer<T>::copyToHostAsync(T* dst) {
+template <typename T>
+void CudaStream::copyAsync(
+    CudaHostPointer<T>& dst,
+    CudaDevicePointer<T>& src) {
   CudaDeviceScope scope(deviceId_);
+  GLOO_ENFORCE_LE(dst.getCount(), src.getCount());
   CUDA_CHECK(cudaMemcpyAsync(
-               dst,
-               device_,
-               count_ * sizeof(T),
-               cudaMemcpyDeviceToHost,
-               stream_));
+                 *dst,
+                 *src,
+                 dst.getCount() * sizeof(T),
+                 cudaMemcpyDeviceToHost,
+                 stream_));
   CUDA_CHECK(cudaEventRecord(event_, stream_));
 }
 
-template<typename T>
-void CudaDevicePointer<T>::copyFromHostAsync(T* src) {
+template <typename T>
+void CudaStream::copyAsync(
+    CudaHostPointer<T>& dst,
+    CudaHostPointer<T>& src) {
   CudaDeviceScope scope(deviceId_);
+  GLOO_ENFORCE_LE(dst.getCount(), src.getCount());
   CUDA_CHECK(cudaMemcpyAsync(
-               device_,
-               src,
-               count_ * sizeof(T),
-               cudaMemcpyDeviceToHost,
-               stream_));
+                 *dst,
+                 *src,
+                 dst.getCount() * sizeof(T),
+                 cudaMemcpyHostToHost,
+                 stream_));
   CUDA_CHECK(cudaEventRecord(event_, stream_));
 }
 
-template<typename T>
-void CudaDevicePointer<T>::copyToDeviceAsync(T* dst) {
+template <typename T>
+void CudaStream::copyAsync(
+    CudaDevicePointer<T>& dst,
+    CudaDevicePointer<T>& src) {
   CudaDeviceScope scope(deviceId_);
+  GLOO_ENFORCE_LE(dst.getCount(), src.getCount());
   CUDA_CHECK(cudaMemcpyAsync(
-               dst,
-               device_,
-               count_ * sizeof(T),
-               cudaMemcpyDeviceToDevice,
-               stream_));
+                 *dst,
+                 *src,
+                 dst.getCount() * sizeof(T),
+                 cudaMemcpyDeviceToDevice,
+                 stream_));
   CUDA_CHECK(cudaEventRecord(event_, stream_));
 }
 
-template<typename T>
-void CudaDevicePointer<T>::copyFromDeviceAsync(T* src) {
+template <typename T>
+void CudaStream::copyAsync(
+    CudaDevicePointer<T>& dst,
+    CudaHostPointer<T>& src) {
   CudaDeviceScope scope(deviceId_);
+  GLOO_ENFORCE_LE(dst.getCount(), src.getCount());
   CUDA_CHECK(cudaMemcpyAsync(
-               device_,
-               src,
-               count_ * sizeof(T),
-               cudaMemcpyDeviceToDevice,
-               stream_));
+                 *dst,
+                 *src,
+                 dst.getCount() * sizeof(T),
+                 cudaMemcpyHostToDevice,
+                 stream_));
   CUDA_CHECK(cudaEventRecord(event_, stream_));
 }
 
-template<typename T>
-void CudaDevicePointer<T>::copyToAsync(CudaHostPointer<T>& dst) {
-  CudaDeviceScope scope(deviceId_);
-  CUDA_CHECK(cudaMemcpyAsync(
-               *dst,
-               device_,
-               count_ * sizeof(T),
-               cudaMemcpyDeviceToHost,
-               stream_));
+void CudaStream::record() {
   CUDA_CHECK(cudaEventRecord(event_, stream_));
 }
 
-template<typename T>
-void CudaDevicePointer<T>::copyFromAsync(CudaHostPointer<T>& src) {
-  CudaDeviceScope scope(deviceId_);
-  CUDA_CHECK(cudaMemcpyAsync(
-               device_,
-               *src,
-               count_ * sizeof(T),
-               cudaMemcpyHostToDevice,
-               stream_));
-  CUDA_CHECK(cudaEventRecord(event_, stream_));
-}
-
-template<typename T>
-void CudaDevicePointer<T>::copyToAsync(CudaDevicePointer<T>& dst) {
-  CudaDeviceScope scope(deviceId_);
-  CUDA_CHECK(cudaMemcpyAsync(
-               *dst,
-               device_,
-               count_ * sizeof(T),
-               cudaMemcpyDeviceToDevice,
-               stream_));
-  CUDA_CHECK(cudaEventRecord(event_, stream_));
-}
-
-template<typename T>
-void CudaDevicePointer<T>::copyFromAsync(CudaDevicePointer<T>& src) {
-  CudaDeviceScope scope(deviceId_);
-  CUDA_CHECK(cudaMemcpyAsync(
-               device_,
-               *src,
-               count_ * sizeof(T),
-               cudaMemcpyDeviceToDevice,
-               stream_));
-  CUDA_CHECK(cudaEventRecord(event_, stream_));
-}
-
-template<typename T>
-void CudaDevicePointer<T>::wait() {
+void CudaStream::wait() {
   CudaDeviceScope scope(deviceId_);
   CUDA_CHECK(cudaEventSynchronize(event_));
 }
 
+template <typename T>
+CudaDevicePointer<T> CudaDevicePointer<T>::alloc(
+    size_t count) {
+  T* ptr = nullptr;
+  size_t bytes = count * sizeof(T);
+  {
+    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
+    CUDA_CHECK(cudaMalloc(&ptr, bytes));
+  }
+  auto p = create(ptr, count);
+  p.owner_ = true;
+  return p;
+}
+
 template<typename T>
-void CudaDevicePointer<T>::reduceAsync(
-    const CudaReductionFunction<T>* fn,
-    CudaDevicePointer<T>& src) {
+CudaDevicePointer<T> CudaDevicePointer<T>::create(
+    T* ptr,
+    size_t count) {
+  CudaDevicePointer p(ptr, count, false);
+  return p;
+}
+
+template<typename T>
+CudaDevicePointer<T>::CudaDevicePointer(T* ptr, size_t count, bool owner)
+    : device_(ptr),
+      count_(count),
+      owner_(owner),
+      deviceId_(getGPUIDForPointer(device_)) {
+}
+
+template<typename T>
+CudaDevicePointer<T>::CudaDevicePointer(CudaDevicePointer<T>&& other) noexcept
+    : device_(other.device_),
+      count_(other.count_),
+      owner_(other.owner_),
+      deviceId_(other.deviceId_) {
+  // Nullify fields that would otherwise be destructed
+  other.device_ = nullptr;
+  other.owner_ = false;
+}
+
+template<typename T>
+CudaDevicePointer<T>& CudaDevicePointer<T>::operator=(
+    CudaDevicePointer<T>&& other) {
+  device_ = other.device_;
+  count_ = other.count_;
+  owner_ = other.owner_;
+  deviceId_ = other.deviceId_;
+
+  // Nullify fields that would otherwise be destructed
+  other.device_ = nullptr;
+  other.owner_ = false;
+
+  return *this;
+}
+
+template<typename T>
+CudaDevicePointer<T>::~CudaDevicePointer() {
   CudaDeviceScope scope(deviceId_);
-  GLOO_ENFORCE_LE(count_, src.count_);
-  fn->deviceFn_(**this, *src, count_, stream_);
-  CUDA_CHECK(cudaEventRecord(event_, stream_));
+  if (owner_ && device_ != nullptr) {
+    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
+    CUDA_CHECK(cudaFree(device_));
+  }
 }
 
 template <typename T>
@@ -246,25 +207,16 @@ template <typename T>
 CudaHostPointer<T>::CudaHostPointer(T* ptr, size_t count, bool owner)
     : host_(ptr),
       count_(count),
-      owner_(owner),
-      deviceId_(-1),
-      stream_(nullptr),
-      event_(nullptr) {}
+      owner_(owner) {}
 
 template <typename T>
 CudaHostPointer<T>::CudaHostPointer(CudaHostPointer&& other) noexcept
     : host_(other.host_),
       count_(other.count_),
-      owner_(other.owner_),
-      deviceId_(other.deviceId_),
-      stream_(other.stream_),
-      event_(other.event_) {
+      owner_(other.owner_) {
   other.host_ = nullptr;
   other.count_ = 0;
   other.owner_ = false;
-  other.deviceId_ = -1;
-  other.stream_ = nullptr;
-  other.event_ = nullptr;
 }
 
 template<typename T>
@@ -272,15 +224,9 @@ CudaHostPointer<T>& CudaHostPointer<T>::operator=(CudaHostPointer<T>&& other) {
   host_ = other.host_;
   count_ = other.count_;
   owner_ = other.owner_;
-  deviceId_ = other.deviceId_;
-  stream_ = other.stream_;
-  event_ = other.event_;
   other.host_ = nullptr;
   other.count_ = 0;
   other.owner_ = false;
-  other.deviceId_ = -1;
-  other.stream_ = nullptr;
-  other.event_ = nullptr;
   return *this;
 }
 
@@ -292,69 +238,25 @@ CudaHostPointer<T>::~CudaHostPointer() {
   }
 }
 
-template<typename T>
-void CudaHostPointer<T>::copyToAsync(CudaHostPointer<T>& dst) {
-  wait();
-  memcpy(dst.host_, host_, count_ * sizeof(T));
-}
-
-template<typename T>
-void CudaHostPointer<T>::copyFromAsync(CudaHostPointer<T>& src) {
-  wait();
-  memcpy(host_, src.host_, count_ *  sizeof(T));
-}
-
-template<typename T>
-void CudaHostPointer<T>::copyToAsync(CudaDevicePointer<T>& dst) {
-  // Wait for completion of in-flight copy if destination uses different stream.
-  if (stream_ != nullptr && dst.getStream() != stream_) {
-    wait();
-  }
-
-  dst.copyFromAsync(*this);
-  deviceId_ = dst.getDeviceID();
-  stream_ = dst.getStream();
-  event_ = dst.getEvent();
-}
-
-template<typename T>
-void CudaHostPointer<T>::copyFromAsync(CudaDevicePointer<T>& src) {
-  // Wait for completion of in-flight copy if source uses different stream.
-  if (stream_ != nullptr && src.getStream() != stream_) {
-    wait();
-  }
-
-  src.copyToAsync(*this);
-  deviceId_ = src.getDeviceID();
-  stream_ = src.getStream();
-  event_ = src.getEvent();
-}
-
-template<typename T>
-void CudaHostPointer<T>::wait() {
-  // If a copy operation stored the corresponding CUDA event we
-  // wait for it. Otherwise there is nothing to wait for.
-  if (event_ != nullptr) {
-    CudaDeviceScope scope(deviceId_);
-    CUDA_CHECK(cudaEventSynchronize(event_));
-    deviceId_ = -1;
-    stream_ = nullptr;
-    event_ = nullptr;
-  }
-}
-
-template<typename T>
-void CudaHostPointer<T>::reduceAsync(
-    const CudaReductionFunction<T>* fn,
-    CudaHostPointer<T>& src) {
-  GLOO_ENFORCE_LE(count_, src.count_);
-  wait();
-  fn->hostFn_(**this, *src, count_);
-}
-
 // Instantiate templates
 template class CudaDevicePointer<float>;
 template class CudaHostPointer<float>;
+
+template void CudaStream::copyAsync<float>(
+    CudaHostPointer<float>& dst,
+    CudaDevicePointer<float>& src);
+
+template void CudaStream::copyAsync<float>(
+    CudaHostPointer<float>& dst,
+    CudaHostPointer<float>& src);
+
+template void CudaStream::copyAsync<float>(
+    CudaDevicePointer<float>& dst,
+    CudaDevicePointer<float>& src);
+
+template void CudaStream::copyAsync<float>(
+    CudaDevicePointer<float>& dst,
+    CudaHostPointer<float>& src);
 
 // Borrowed limits from Caffe2 code (see core/common_gpu.h)
 constexpr static int kCudaNumThreads = 512;

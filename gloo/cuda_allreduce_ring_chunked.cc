@@ -60,13 +60,14 @@ CudaAllreduceRingChunked<T, W>::CudaAllreduceRingChunked(
     newStream = false;
   }
 
-  for (int i = 0; i < ptrs.size(); i++) {
+  for (auto i = 0; i < ptrs.size(); i++) {
+    auto ptr = CudaDevicePointer<T>::create(ptrs[i], count_);
     if (newStream) {
-      devicePtrs_.push_back(CudaDevicePointer<T>::create(ptrs[i], count_));
+      streams_.push_back(CudaStream(ptr.getDeviceID()));
     } else {
-      devicePtrs_.push_back(
-          CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
+      streams_.push_back(CudaStream(ptr.getDeviceID(), streams[i]));
     }
+    devicePtrs_.push_back(std::move(ptr));
   }
 
   // Determine chunk size. Use chunks of no less than 1024 bytes
@@ -91,8 +92,10 @@ CudaAllreduceRingChunked<T, W>::CudaAllreduceRingChunked(
     chunkContext_.push_back(
         ChunkContext(
             scratch_.range(offset, length),
-            cudaDeviceReduce(devicePtrs_, scratch_, fn_, offset, length),
-            cudaDeviceBroadcast(devicePtrs_, scratch_, offset, length)));
+            cudaDeviceReduce(
+              streams_, devicePtrs_, scratch_, fn_, offset, length),
+            cudaDeviceBroadcast(
+              streams_, devicePtrs_, scratch_, offset, length)));
   }
 
   for (auto i = 0; i < 2; i++) {
@@ -124,6 +127,7 @@ CudaAllreduceRingChunked<T, W>::~CudaAllreduceRingChunked() {
 template <typename T, typename W>
 void CudaAllreduceRingChunked<T, W>::run() {
   CudaDeviceGuard guard;
+  CudaStream& stream = streams_[0];
 
   // Kick off local reduction for each chunk.
   // The result is stored in scratch_ at the corresponding chunk offset.
@@ -154,8 +158,12 @@ void CudaAllreduceRingChunked<T, W>::run() {
         recvDataBuf_[chunkOffset & 1]->waitRecv();
 
         // Reduce
-        context.scratch.reduceAsync(fn_, inbox_[chunkOffset & 1]);
-        context.scratch.wait();
+        fn_->call(
+            context.scratch,
+            inbox_[chunkOffset & 1],
+            context.scratch.getCount(),
+            stream);
+        stream.wait();
       }
     } else {
       // Empty chunk but still need to wait on the inbox write to ensure the
@@ -194,7 +202,8 @@ void CudaAllreduceRingChunked<T, W>::run() {
         recvDataBuf_[chunkOffset & 1]->waitRecv();
 
         // Copy chunk from inbox to scratch space
-        context.scratch.copyFromAsync(inbox_[chunkOffset & 1]);
+        stream.copyAsync(context.scratch, inbox_[chunkOffset & 1]);
+        stream.wait();
       }
 
       // Broadcast chunk to devices. Do this in all rounds with non-empty chunk.
@@ -304,12 +313,11 @@ void CudaAllreduceRingChunked<T, W>::init(
   // can use an existing input buffer to accumulate.
   auto& ptr = devicePtrs_[0];
   auto count = ptr.getCount();
-  auto stream = ptr.getStream();
-  scratch_ = CudaDevicePointer<T>::create(*ptr, count, stream);
+  scratch_ = CudaDevicePointer<T>::create(*ptr, count);
 
   // Allocate inboxes
   for (auto i = 0; i < 2; i++) {
-    inbox_[i] = W::Pointer::alloc(chunkSize_, stream);
+    inbox_[i] = W::Pointer::alloc(chunkSize_);
   }
 }
 

@@ -9,12 +9,13 @@
 
 #pragma once
 
+#include "gloo/algorithm.h"
 #include "gloo/cuda.h"
-#include "gloo/cuda_collectives.h"
+#include "gloo/cuda_workspace.h"
 
 namespace gloo {
 
-template <typename T>
+template <typename T, typename W = CudaHostWorkspace<T> >
 class CudaBroadcastOneToAll : public Algorithm {
  public:
   CudaBroadcastOneToAll(
@@ -25,13 +26,21 @@ class CudaBroadcastOneToAll : public Algorithm {
       int rootPointerRank = 0,
       const std::vector<cudaStream_t>& streams = std::vector<cudaStream_t>());
 
-  virtual ~CudaBroadcastOneToAll();
+  virtual ~CudaBroadcastOneToAll() = default;
 
   virtual void run() override;
 
  protected:
+  // Both workspace types have their own initialization function.
+  template <typename U = W>
+  void init(
+      typename std::enable_if<std::is_same<U, CudaHostWorkspace<T> >::value,
+                              typename U::Pointer>::type* = 0);
+
   std::vector<CudaDevicePointer<T> > devicePtrs_;
-  T* hostPtr_;
+  std::vector<CudaStream> streams_;
+  typename W::Pointer scratch_;
+
   const int count_;
   const int bytes_;
   const int rootRank_;

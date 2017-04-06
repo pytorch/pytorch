@@ -32,6 +32,7 @@ class CudaFixture {
       srcs.push_back(CudaMemory<float>(count));
       ptrs.push_back(
         CudaDevicePointer<float>::create(*srcs.back(), count));
+      streams.push_back(CudaStream(i));
     }
   }
 
@@ -45,21 +46,19 @@ class CudaFixture {
   void assignValues() {
     const auto stride = context->size * srcs.size();
     for (int i = 0; i < srcs.size(); i++) {
-      const auto& stream = ptrs[i].getStream();
-      srcs[i].set((context->rank * srcs.size()) + i, stride, stream);
-      CUDA_CHECK(cudaStreamSynchronize(stream));
+      srcs[i].set((context->rank * srcs.size()) + i, stride, *streams[i]);
+      CUDA_CHECK(cudaStreamSynchronize(*streams[i]));
     }
   }
 
   void assignValuesAsync() {
     const auto stride = context->size * srcs.size();
     for (int i = 0; i < srcs.size(); i++) {
-      const auto& stream = ptrs[i].getStream();
       // Insert sleep on stream to force to artificially delay the
       // kernel that actually populates the memory to surface
       // synchronization errors.
-      cudaSleep(stream, 100000);
-      srcs[i].set((context->rank * srcs.size()) + i, stride, stream);
+      cudaSleep(*streams[i], 100000);
+      srcs[i].set((context->rank * srcs.size()) + i, stride, *streams[i]);
     }
   }
 
@@ -73,8 +72,8 @@ class CudaFixture {
 
   std::vector<cudaStream_t> getCudaStreams() const {
     std::vector<cudaStream_t> out;
-    for (const auto& ptr : ptrs) {
-      out.push_back(ptr.getStream());
+    for (const auto& stream : streams) {
+      out.push_back(stream.getStream());
     }
     return out;
   }
@@ -88,15 +87,16 @@ class CudaFixture {
   }
 
   void synchronizeCudaStreams() {
-    for (const auto& ptr : ptrs) {
-      CudaDeviceScope scope(ptr.getDeviceID());
-      CUDA_CHECK(cudaStreamSynchronize(ptr.getStream()));
+    for (const auto& stream : streams) {
+      CudaDeviceScope scope(stream.getDeviceID());
+      CUDA_CHECK(cudaStreamSynchronize(stream.getStream()));
     }
   }
 
   std::shared_ptr<Context> context;
   const int count;
   std::vector<CudaDevicePointer<float> > ptrs;
+  std::vector<CudaStream> streams;
   std::vector<CudaMemory<float> > srcs;
 };
 

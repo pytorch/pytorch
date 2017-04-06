@@ -36,9 +36,15 @@ namespace nccl {
 
 template <typename T>
 struct NCCLElement {
-  NCCLElement(CudaDevicePointer<T> src, CudaDevicePointer<T> dst)
+  NCCLElement(
+      CudaDevicePointer<T> src,
+      CudaStream& srcStream,
+      CudaDevicePointer<T> dst,
+      CudaStream& dstStream)
       : src(std::move(src)),
+        srcStream(srcStream),
         dst(std::move(dst)),
+        dstStream(srcStream),
         device(src.getDeviceID()) {
     GLOO_ENFORCE_EQ(
         src.getCount(),
@@ -51,7 +57,9 @@ struct NCCLElement {
   }
 
   CudaDevicePointer<T> src;
+  CudaStream& srcStream;
   CudaDevicePointer<T> dst;
+  CudaStream& dstStream;
   const int device;
 };
 

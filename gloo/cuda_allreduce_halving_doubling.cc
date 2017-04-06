@@ -38,13 +38,14 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
     newStream = false;
   }
 
-  for (int i = 0; i < ptrs.size(); i++) {
+  for (auto i = 0; i < ptrs.size(); i++) {
+    auto ptr = CudaDevicePointer<T>::create(ptrs[i], count_);
     if (newStream) {
-      devicePtrs_.push_back(CudaDevicePointer<T>::create(ptrs[i], count_));
+      streams_.push_back(CudaStream(ptr.getDeviceID()));
     } else {
-      devicePtrs_.push_back(
-          CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
+      streams_.push_back(CudaStream(ptr.getDeviceID(), streams[i]));
     }
+    devicePtrs_.push_back(std::move(ptr));
   }
 
   // Workspace specific initialization
@@ -91,6 +92,7 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
 template <typename T, typename W>
 void CudaAllreduceHalvingDoubling<T, W>::run() {
   CudaDeviceGuard guard;
+  CudaStream& stream = streams_[0];
 
   if (localReduceOp_) {
     localReduceOp_->run();
@@ -117,8 +119,8 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
           : numItems;
       auto recvBufAtOffset = recvBuf_.range(bufferOffset, numReceiving);
       auto scratchAtOffset = scratch_.range(recvOffsets_[i], numReceiving);
-      scratchAtOffset.reduceAsync(fn_, recvBufAtOffset);
-      scratchAtOffset.wait();
+      fn_->call(scratchAtOffset, recvBufAtOffset, numReceiving, stream);
+      stream.wait();
     }
     bufferOffset += numItems;
     sendNotificationBufs_[i]->send();
@@ -147,8 +149,8 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
           : numItems;
       auto recvBufAtOffset = recvBuf_.range(bufferOffset, numReceiving);
       auto scratchAtOffset = scratch_.range(sendOffsets_[i], numReceiving);
-      scratchAtOffset.copyFromAsync(recvBufAtOffset);
-      scratchAtOffset.wait();
+      stream.copyAsync(scratchAtOffset, recvBufAtOffset);
+      stream.wait();
     }
     numItems <<= 1;
   }
@@ -172,8 +174,8 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
   // Execute local reduction and broadcast from host.
   // If devicePtrs_.size() == 1 these functions construct an op that
   // executes a memcpy such that scratch_ always holds the result.
-  localReduceOp_ = cudaHostReduce(devicePtrs_, scratch_, fn_);
-  localBroadcastOp_ = cudaHostBroadcast(devicePtrs_, scratch_);
+  localReduceOp_ = cudaHostReduce(streams_, devicePtrs_, scratch_, fn_);
+  localBroadcastOp_ = cudaHostBroadcast(streams_, devicePtrs_, scratch_);
 
   recvBuf_ = W::Pointer::alloc(count_);
 }
@@ -188,21 +190,22 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
   // can use an existing input buffer to accumulate.
   auto& ptr = devicePtrs_[0];
   auto count = ptr.getCount();
-  auto stream = ptr.getStream();
-  scratch_ = CudaDevicePointer<T>::create(*ptr, count, stream);
+  scratch_ = CudaDevicePointer<T>::create(*ptr, count);
 
   // Run local reduction and broadcast on device.
   // When running with a device workspace we intend to never leave the device.
   if (devicePtrs_.size() > 1) {
-    localReduceOp_ = cudaDeviceReduce(devicePtrs_, scratch_, fn_, 0, count_);
-    localBroadcastOp_ = cudaDeviceBroadcast(devicePtrs_, scratch_, 0, count_);
+    localReduceOp_ =
+      cudaDeviceReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
+    localBroadcastOp_ =
+      cudaDeviceBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
   }
 
   // Inbox/outbox must be colocated with scratch buffer to avoid
   // cross device copies while accumulating the reduction.
   {
     CudaDeviceScope scope(scratch_.getDeviceID());
-    recvBuf_ = W::Pointer::alloc(count, stream);
+    recvBuf_ = W::Pointer::alloc(count);
   }
 }
 

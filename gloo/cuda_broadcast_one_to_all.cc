@@ -15,8 +15,8 @@
 
 namespace gloo {
 
-template <typename T>
-CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
+template <typename T, typename W>
+CudaBroadcastOneToAll<T, W>::CudaBroadcastOneToAll(
     const std::shared_ptr<Context>& context,
     const std::vector<T*>& ptrs,
     int count,
@@ -24,7 +24,6 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
     int rootPointerRank,
     const std::vector<cudaStream_t>& streams)
     : Algorithm(context),
-      hostPtr_(nullptr),
       count_(count),
       bytes_(count * sizeof(T)),
       rootRank_(rootRank),
@@ -39,22 +38,18 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
     newStream = false;
   }
 
-  // Create CUDA device pointers
   for (auto i = 0; i < ptrs.size(); i++) {
+    auto ptr = CudaDevicePointer<T>::create(ptrs[i], count_);
     if (newStream) {
-      devicePtrs_.push_back(
-        CudaDevicePointer<T>::create(ptrs[i], count_));
+      streams_.push_back(CudaStream(ptr.getDeviceID()));
     } else {
-      devicePtrs_.push_back(
-        CudaDevicePointer<T>::create(ptrs[i], count_, streams[i]));
+      streams_.push_back(CudaStream(ptr.getDeviceID(), streams[i]));
     }
+    devicePtrs_.push_back(std::move(ptr));
   }
 
-  // Allocate host side buffer if we need to communicate
-  if (contextSize_ > 1) {
-    std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-    CUDA_CHECK(cudaMallocHost(&hostPtr_, bytes_));
-  }
+  // Workspace specific initialization (see below)
+  init();
 
   // Setup pairs/buffers for sender/receivers
   if (contextSize_ > 1) {
@@ -67,31 +62,23 @@ CudaBroadcastOneToAll<T>::CudaBroadcastOneToAll(
 
         auto& pair = context_->getPair(i);
         sendDataBuffers_.push_back(
-          pair->createSendBuffer(slot, hostPtr_, bytes_));
+          pair->createSendBuffer(slot, *scratch_, bytes_));
       }
     } else {
       auto& rootPair = context_->getPair(rootRank_);
-      recvDataBuffer_ = rootPair->createRecvBuffer(slot, hostPtr_, bytes_);
+      recvDataBuffer_ = rootPair->createRecvBuffer(slot, *scratch_, bytes_);
     }
   }
 
   // Setup local broadcast if needed
   if (devicePtrs_.size() > 1) {
     localBroadcastOp_ =
-      cudaDeviceBroadcast(devicePtrs_, devicePtrs_[0], 0, count_);
+      cudaDeviceBroadcast(streams_, devicePtrs_, devicePtrs_[0], 0, count_);
   }
 }
 
-template <typename T>
-CudaBroadcastOneToAll<T>::~CudaBroadcastOneToAll() {
-  std::lock_guard<std::mutex> lock(CudaShared::getMutex());
-  if (hostPtr_ != nullptr) {
-    CUDA_CHECK(cudaFreeHost(hostPtr_));
-  }
-}
-
-template <typename T>
-void CudaBroadcastOneToAll<T>::run() {
+template <typename T, typename W>
+void CudaBroadcastOneToAll<T, W>::run() {
   if (contextSize_ == 1) {
     if (localBroadcastOp_) {
       localBroadcastOp_->runAsync();
@@ -103,9 +90,11 @@ void CudaBroadcastOneToAll<T>::run() {
   }
 
   if (contextRank_ == rootRank_) {
+    CudaStream& stream = streams_[rootPointerRank_];
+
     // Copy device buffer to host
-    devicePtrs_[rootPointerRank_].copyToHostAsync(hostPtr_);
-    devicePtrs_[rootPointerRank_].wait();
+    stream.copyAsync(scratch_, devicePtrs_[rootPointerRank_]);
+    stream.wait();
 
     // Fire off all send operations concurrently
     for (auto& buf : sendDataBuffers_) {
@@ -125,10 +114,13 @@ void CudaBroadcastOneToAll<T>::run() {
       buf->waitSend();
     }
   } else {
+    CudaStream& stream = streams_[rootPointerRank_];
+
     // Wait on buffer
     recvDataBuffer_->waitRecv();
+
     // Copy host buffer to device
-    devicePtrs_[rootPointerRank_].copyFromHostAsync(hostPtr_);
+    stream.copyAsync(devicePtrs_[rootPointerRank_], scratch_);
 
     // Broadcast locally after receiving from root
     if (localBroadcastOp_) {
@@ -141,13 +133,26 @@ void CudaBroadcastOneToAll<T>::run() {
     } else {
       // Wait for memcpy to complete
       if (synchronizeDeviceOutputs_) {
-        devicePtrs_[rootPointerRank_].wait();
+        stream.wait();
       }
     }
   }
 }
 
+template <typename T, typename W>
+template <typename U>
+void CudaBroadcastOneToAll<T, W>::init(
+    typename std::enable_if<std::is_same<U, CudaHostWorkspace<T> >::value,
+                            typename U::Pointer>::type*) {
+  // Allocate host side buffer if we need to communicate
+  if (contextSize_ > 1) {
+    // Since broadcast transmits from/to a buffer in system memory, the
+    // scratch space is a new host side buffer.
+    scratch_ = W::Pointer::alloc(count_);
+  }
+}
+
 // Instantiate template
-template class CudaBroadcastOneToAll<float>;
+template class CudaBroadcastOneToAll<float, CudaHostWorkspace<float>>;
 
 } // namespace gloo

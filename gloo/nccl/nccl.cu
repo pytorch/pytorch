@@ -138,7 +138,7 @@ void NCCLOp<T>::wait() {
   auto& elements = execution_.elements;
   for (auto i = 0; i < elements.size(); ++i) {
     CudaDeviceScope scope(elements[i].device);
-    elements[i].dst.wait();
+    elements[i].dstStream.wait();
   }
 }
 
@@ -155,11 +155,11 @@ void NCCLOp<T>::runNCCL(F&& f) {
   // Kick off the NCCL operation on each device
   for (auto i = 0; i < elements.size(); i++) {
     const auto& element = elements[i];
-    const auto& srcStream = element.src.getStream();
-    const auto& dstStream = element.dst.getStream();
+    const auto& srcStream = element.srcStream.getStream();
+    const auto& dstStream = element.dstStream.getStream();
     const auto& ncclStream = getNcclStreams()[element.device];
-    const auto& srcEvent = element.src.getEvent();
-    const auto& dstEvent = element.dst.getEvent();
+    const auto& srcEvent = element.srcStream.getEvent();
+    const auto& dstEvent = element.dstStream.getEvent();
 
     CudaDeviceScope scope(element.device);
     // Synchronize the source and destination with the NCCL stream. Record

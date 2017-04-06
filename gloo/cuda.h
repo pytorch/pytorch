@@ -23,6 +23,8 @@ namespace gloo {
 extern const cudaStream_t kStreamNotSet;
 
 // Forward declarations
+template<typename T>
+class CudaDevicePointer;
 template <typename T>
 class CudaHostPointer;
 template<typename T>
@@ -44,17 +46,72 @@ class CudaShared {
   static std::atomic<std::mutex*> mutex_;
 };
 
+class CudaStream {
+ public:
+  explicit CudaStream(int deviceId, cudaStream_t stream = kStreamNotSet);
+
+  // Move constructor
+  CudaStream(CudaStream&& other) noexcept;
+
+  ~CudaStream();
+
+  cudaStream_t operator*() const {
+    return stream_;
+  }
+
+  int getDeviceID() const {
+    return deviceId_;
+  }
+
+  cudaStream_t getStream() const {
+    return stream_;
+  }
+
+  cudaEvent_t getEvent() const {
+    return event_;
+  }
+
+  template <typename T>
+  void copyAsync(CudaHostPointer<T>& dst, CudaDevicePointer<T>& src);
+  template <typename T>
+  void copyAsync(CudaHostPointer<T>& dst, CudaHostPointer<T>& src);
+  template <typename T>
+  void copyAsync(CudaDevicePointer<T>& dst, CudaDevicePointer<T>& src);
+  template <typename T>
+  void copyAsync(CudaDevicePointer<T>& dst, CudaHostPointer<T>& src);
+
+  void record();
+
+  void wait();
+
+ protected:
+  // Instances cannot be copied or copy-assigned
+  CudaStream(const CudaStream&) = delete;
+  CudaStream& operator=(const CudaStream&) = delete;
+
+  // GPU that the stream belongs to.
+  int deviceId_;
+
+  // Operations are always run on a stream such that they can run
+  // concurrently with other operations. The stream can be specified
+  // at construction time if one has already been created outside this
+  // library. If it is not specified, a new stream is created.
+  cudaStream_t stream_;
+  cudaEvent_t event_;
+
+  // If no stream is specified at construction time, this class
+  // allocates a new stream for operations against CUDA pointers.
+  // Record whether or not this instance is a stream's owner so that
+  // it is destroyed when this instance is destructed.
+  bool streamOwner_;
+};
+
 template<typename T>
 class CudaDevicePointer {
  public:
-  static CudaDevicePointer<T> alloc(
-    size_t count,
-    cudaStream_t stream);
+  static CudaDevicePointer<T> alloc(size_t count);
 
-  static CudaDevicePointer<T> create(
-    T* ptr,
-    size_t count,
-    cudaStream_t stream = kStreamNotSet);
+  static CudaDevicePointer<T> create(T* ptr, size_t count);
 
   CudaDevicePointer(CudaDevicePointer&&) noexcept;
   ~CudaDevicePointer();
@@ -89,47 +146,10 @@ class CudaDevicePointer {
     return deviceId_;
   }
 
-  cudaStream_t getStream() const {
-    return stream_;
-  }
-
-  cudaEvent_t getEvent() const {
-    return event_;
-  }
-
-  // Copy contents of device pointer to host.
-  void copyToHostAsync(T* dst);
-
-  // Copy contents of host pointer to device.
-  void copyFromHostAsync(T* src);
-
-  // Copy contents of device pointer to other device pointer.
-  void copyToDeviceAsync(T* dst);
-
-  // Copy contents of device pointer to other device pointer.
-  void copyFromDeviceAsync(T* src);
-
-  // Copy between pointers.
-  void copyToAsync(CudaHostPointer<T>& dst);
-  void copyFromAsync(CudaHostPointer<T>& src);
-  void copyToAsync(CudaDevicePointer<T>& dst);
-  void copyFromAsync(CudaDevicePointer<T>& src);
-
-  // Wait for copy to complete.
-  void wait();
-
-  // Call reduction function against this pointer
-  void reduceAsync(
-      const CudaReductionFunction<T>* fn,
-      CudaDevicePointer<T>& src);
-
   // Create range into this pointer
-  CudaDevicePointer<T> range(size_t offset, size_t count) {
+  CudaDevicePointer<T> range(size_t offset, size_t count) const {
     GLOO_ENFORCE_LE(offset + count, count_);
-    CudaDevicePointer<T> p(device_ + offset, count, false);
-    p.stream_ = stream_;
-    p.streamOwner_ = false;
-    return p;
+    return CudaDevicePointer<T>(device_ + offset, count, false);
   }
 
  protected:
@@ -152,20 +172,6 @@ class CudaDevicePointer {
 
   // GPU that the device pointer lives on
   int deviceId_;
-
-  // Operations on this pointer are run always run on a stream such
-  // that they don't block other operations being executed on the GPU
-  // this pointer lives on. The stream can be specified at
-  // construction time if one has already been created outside this
-  // library. If it is not specified, a new stream is created.
-  cudaStream_t stream_ = kStreamNotSet;
-  cudaEvent_t event_ = 0;
-
-  // If no stream is specified at construction time, this class
-  // allocates a new stream for operations against this pointer.
-  // Record whether or not this instance is a stream's owner so that
-  // it is destroyed when this instance is destructed.
-  bool streamOwner_ = false;
 };
 
 template <typename T>
@@ -198,25 +204,10 @@ class CudaHostPointer {
     return count_;
   }
 
-  // Copy between pointers.
-  void copyToAsync(CudaHostPointer<T>& dst);
-  void copyFromAsync(CudaHostPointer<T>& src);
-  void copyToAsync(CudaDevicePointer<T>& dst);
-  void copyFromAsync(CudaDevicePointer<T>& src);
-
-  // Wait for copy to complete.
-  void wait();
-
-  // Call reduction function against this pointer
-  void reduceAsync(
-      const CudaReductionFunction<T>* fn,
-      CudaHostPointer<T>& src);
-
   // Create range into this pointer
-  CudaHostPointer<T> range(size_t offset, size_t count) {
+  CudaHostPointer<T> range(size_t offset, size_t count) const {
     GLOO_ENFORCE_LE(offset + count, count_);
-    CudaHostPointer<T> p(host_ + offset, count, false);
-    return p;
+    return CudaHostPointer<T>(host_ + offset, count, false);
   }
 
  protected:
@@ -236,11 +227,6 @@ class CudaHostPointer {
   // Record whether or not this instance is this pointer's owner so
   // that it is freed when this instance is destructed.
   bool owner_ = false;
-
-  // References to stream/event of most recent async copy;
-  int deviceId_;
-  cudaStream_t stream_;
-  cudaEvent_t event_;
 };
 
 template <typename T>
@@ -289,15 +275,22 @@ class CudaReductionFunction {
   void call(
       CudaHostPointer<T>& dst,
       const CudaHostPointer<T>& src,
-      size_t n) const {
+      size_t n,
+      CudaStream& stream) const {
+    // The specified stream may still have a memcpy in flight to
+    // either of the CudaHostPointers. Wait on the stream to make sure
+    // they have finished before executing the reduction function.
+    stream.wait();
     hostFn_(*dst, *src, n);
   }
 
   void call(
       CudaDevicePointer<T>& dst,
       const CudaDevicePointer<T>& src,
-      size_t n) const {
-    deviceFn_(*dst, *src, n, dst.getStream());
+      size_t n,
+      CudaStream& stream) const {
+    deviceFn_(*dst, *src, n, *stream);
+    stream.record();
   }
 
  protected:
