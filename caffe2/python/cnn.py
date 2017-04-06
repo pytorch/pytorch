@@ -28,8 +28,6 @@ class CNNModelHelper(ModelHelperBase):
             param_model=param_model,
         )
 
-        self.weights = []
-        self.biases = []
         self.order = order
         self.use_cudnn = use_cudnn
         self.cudnn_exhaustive_search = cudnn_exhaustive_search
