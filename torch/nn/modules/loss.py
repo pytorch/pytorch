@@ -46,7 +46,7 @@ class L1Loss(_Loss):
 
     The sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the constructor argument `sizeAverage=False`
+    The division by `n` can be avoided if one sets the constructor argument `size_average=False`
     """
     pass
 
@@ -81,7 +81,7 @@ class NLLLoss(_WeightedLoss):
         weight (Tensor, optional): a manual rescaling weight given to each class.
                                    If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-                                       However, if the field sizeAverage is set to False,
+                                       However, if the field size_average is set to False,
                                        the losses are instead summed for each minibatch.
 
 
@@ -113,7 +113,7 @@ class NLLLoss2d(_WeightedLoss):
         weight (Tensor, optional): a manual rescaling weight given to each class.
             If given, has to be a 1D Tensor having as many elements, as there are classes.
         size_average: By default, the losses are averaged over observations for each minibatch.
-            However, if the field sizeAverage is set to False, the losses
+            However, if the field size_average is set to False, the losses
             are instead summed for each minibatch. Default: True
 
     Shape:
@@ -153,7 +153,7 @@ class KLDivLoss(_WeightedLoss):
 
     By default, the losses are averaged for each minibatch over observations
     **as well as** over dimensions. However, if the field
-    `sizeAverage` is set to `False`, the losses are instead summed.
+    `size_average` is set to `False`, the losses are instead summed.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
@@ -172,7 +172,7 @@ class MSELoss(_Loss):
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
-    `sizeAverage` to `False`.
+    `size_average` to `False`.
 
     """
     pass
@@ -192,7 +192,7 @@ class BCELoss(_WeightedLoss):
     an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.
 
     By default, the losses are averaged for each minibatch over observations
-    *as well as* over dimensions. However, if the field `sizeAverage` is set
+    *as well as* over dimensions. However, if the field `size_average` is set
     to `False`, the losses are instead summed.
 
     """
@@ -213,7 +213,7 @@ class HingeEmbeddingLoss(_Loss):
     `x` and `y` arbitrary shapes with a total of `n` elements each
     the sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the internal variable `sizeAverage=False`.
+    The division by `n` can be avoided if one sets the internal variable `size_average=False`.
 
     The `margin` has a default value of `1`, or can be set in the constructor.
     """
@@ -255,7 +255,7 @@ class SmoothL1Loss(_Loss):
     the sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
-    `sizeAverage` to `False`
+    `size_average` to `False`
     """
     pass
 
@@ -270,7 +270,7 @@ class SoftMarginLoss(_Loss):
         loss(x, y) = sum_i (log(1 + exp(-y[i]*x[i]))) / x.nelement()
 
     The normalization by the number of elements in the input can be disabled by
-    setting `self.sizeAverage` to `False`.
+    setting `self.size_average` to `False`.
     """
     pass
 
@@ -346,10 +346,10 @@ class CosineEmbeddingLoss(Module):
         loss(x, y) = {
                      { max(0, cos(x1, x2) - margin), if y == -1
 
-    If the internal variable `sizeAverage` is equal to `True`,
+    If the internal variable `size_average` is equal to `True`,
     the loss function averages the loss over the batch samples;
-    if `sizeAverage` is `False`, then the loss function sums over the
-    batch samples. By default, `sizeAverage = True`.
+    if `size_average` is `False`, then the loss function sums over the
+    batch samples. By default, `size_average = True`.
     """
 
     def __init__(self, margin=0, size_average=True):
@@ -374,10 +374,10 @@ class MarginRankingLoss(Module):
 
         loss(x, y) = max(0, -y * (x1 - x2) + margin)
 
-    if the internal variable `sizeAverage = True`,
+    if the internal variable `size_average = True`,
     the loss function averages the loss over the batch samples;
-    if `sizeAverage = False`, then the loss function sums over the batch samples.
-    By default, `sizeAverage` equals to `True`.
+    if `size_average = False`, then the loss function sums over the batch samples.
+    By default, `size_average` equals to `True`.
     """
 
     def __init__(self, margin=0, size_average=True):
@@ -408,7 +408,7 @@ class MultiMarginLoss(Module):
         loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] - x[i]))^p) / x.size(0)
 
     By default, the losses are averaged over observations for each minibatch.
-    However, if the field `sizeAverage` is set to `False`,
+    However, if the field `size_average` is set to `False`,
     the losses are instead summed.
     """
 
