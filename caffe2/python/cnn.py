@@ -591,11 +591,14 @@ class CNNModelHelper(ModelHelperBase):
             kwargs['engine'] = 'CUDNN'
         return self.net.Transpose(blob_in, blob_out, **kwargs)
 
-    def Softmax(self, blob_in, blob_out, **kwargs):
+    def Softmax(self, blob_in, blob_out=None, **kwargs):
         """Softmax."""
         if self.use_cudnn:
             kwargs['engine'] = 'CUDNN'
-        return self.net.Softmax(blob_in, blob_out, **kwargs)
+        if blob_out is not None:
+            return self.net.Softmax(blob_in, blob_out, **kwargs)
+        else:
+            return self.net.Softmax(blob_in, **kwargs)
 
     def Sum(self, blob_in, blob_out, **kwargs):
         """Sum"""
