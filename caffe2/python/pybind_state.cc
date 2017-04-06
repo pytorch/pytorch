@@ -762,7 +762,7 @@ void addGlobalMethods(py::module& m) {
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
-          def.get()->ParseFromString(proto);
+          CAFFE_ENFORCE(def.get()->ParseFromString(proto));
           nets.push_back(std::move(def));
         }
 
@@ -780,7 +780,7 @@ void addGlobalMethods(py::module& m) {
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
-          def.get()->ParseFromString(proto);
+          CAFFE_ENFORCE(def.get()->ParseFromString(proto));
           nets.push_back(std::move(def));
         }
 
