@@ -212,7 +212,16 @@ class Module(object):
                     "didn't return None".format(hook))
         var = result
         while not isinstance(var, Variable):
-            var = var[0]
+            if isinstance(var, (list, tuple)):
+                var = var[0]
+            elif isinstance(var, dict):
+                var = var.values()[0]
+            else:
+                raise RuntimeError(
+                    "Expected results from forward to be of type: (list, tuple, dict, Variable),"
+                    "received {}".format(type(var))
+                )
+
         creator = var.creator
         if creator is not None and len(self._backward_hooks) > 0:
             for hook in self._backward_hooks.values():
