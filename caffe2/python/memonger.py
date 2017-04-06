@@ -16,7 +16,7 @@ import logging
 
 log = logging.getLogger("memonger")
 log.setLevel(logging.INFO)
-LiveRange = collections.namedtuple('LiveRange', ["defined", "used"])
+LiveRange = collections.namedtuple('LiveRange', ["defined", "used", "size"])
 
 
 def share_grad_blobs(net, losses, param_grads, namescope):
@@ -306,8 +306,9 @@ def topological_sort_traversal(g):
     return nx.topological_sort(g)
 
 
-def compute_ranges(linearized_ops):
-    blobs = collections.defaultdict(lambda: LiveRange(defined=None, used=None))
+def compute_ranges(linearized_ops, blob_sizes=None):
+    blobs = collections.defaultdict(
+        lambda: LiveRange(defined=None, used=None, size=None))
     for i, op in enumerate(linearized_ops):
         for blob in op.input:
             used = blobs[blob].used
@@ -316,6 +317,9 @@ def compute_ranges(linearized_ops):
             else:
                 used = max(used, i)
             blobs[blob] = blobs[blob]._replace(used=used)
+            blob_size = blob_sizes[blob] if blob_sizes else None
+            assert not blob_sizes or blob_size is not None
+            blobs[blob] = blobs[blob]._replace(size=blob_size)
         for blob in op.output:
             defined = blobs[blob].defined
             if defined is None:
@@ -323,6 +327,9 @@ def compute_ranges(linearized_ops):
             else:
                 defined = min(defined, i)
             blobs[blob] = blobs[blob]._replace(defined=defined)
+            blob_size = blob_sizes[blob] if blob_sizes else None
+            assert not blob_sizes or blob_size is not None
+            blobs[blob] = blobs[blob]._replace(size=blob_size)
 
     return blobs
 
@@ -348,6 +355,74 @@ def compute_blob_assignments(assignments):
     return blob_assignments
 
 
+def _get_max_size(assignment):
+    if not assignment:
+        return 0
+    ret = max([x[1].size for x in assignment])
+    ret = 0 if ret is None else ret
+    return ret
+
+
+def get_memory_usage(assignments):
+    ret = 0
+    for cur in assignments:
+        ret += _get_max_size(cur)
+    return ret
+
+
+def compute_assignments_greedy(ranges_sorted, init_assignments=None):
+    assignments = init_assignments or []
+    visited = {y[0] for x in assignments for y in x}
+
+    for (name, range_) in ranges_sorted:
+        if name in visited:
+            continue
+        assigned = False
+        best_assignment = 0
+        min_dist = float("inf")
+        candidate_size = range_.size or 0
+        for idx, assignment in enumerate(assignments):
+            if is_compatible(range_, assignment, []):
+                assigned = True
+                dist = abs(_get_max_size(assignment) - candidate_size)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_assignment = idx
+        if assigned:
+            assignment = assignments[best_assignment]
+            assignment.append((name, range_))
+        else:
+            assignments.append([(name, range_)])
+    return assignments
+
+
+def get_updated_ranges(ranges, max_live=None):
+    ''' Set LiveRange.defined = -1 if it is None
+        Set LiveRange.used = max_live if it is None
+        Set LiveRanee.size = 1 if it is None
+    '''
+
+    def _get_max_live(ranges):
+        max_live = max(x[1].used for x in ranges if x[1].used) + 1
+        return max_live
+
+    def _update_range(x, max_live, size):
+        cx = x
+        if x[1].defined is None:
+            cx = (cx[0], cx[1]._replace(defined=-1))
+        if x[1].used is None:
+            cx = (cx[0], cx[1]._replace(used=max_live))
+        if x[1].size is None:
+            cx = (cx[0], cx[1]._replace(size=size))
+        return cx
+
+    if max_live is None:
+        max_live = _get_max_live(ranges)
+    ranges = [_update_range(x, max_live, 1) for x in ranges]
+
+    return ranges
+
+
 def compute_assignments(ranges, static_blobs):
     # Sort the ranges based on when they are last used.
     # If LiveRange.used is None, then the blob is never used and could
@@ -357,18 +432,28 @@ def compute_assignments(ranges, static_blobs):
         list(ranges.items()),
         key=lambda p: (p[1].used is None, p[1].used),
     )
-    assignments = []
-    for (name, range_) in ranges:
-        assigned = False
-        for assignment in assignments:
-            if is_compatible(range_, assignment, static_blobs):
-                assignment.append((name, range_))
-                assigned = True
-                break
-        if assigned:
-            continue
-        assignments.append([(name, range_)])
-    return assignments
+    # Update None values
+    ranges = get_updated_ranges(ranges)
+
+    # sharable blobs
+    ranges_sharable = [x for x in ranges if x[0] not in static_blobs]
+    # static blobs, not sharable
+    ranges_static = [x for x in ranges if x[0] in static_blobs]
+
+    log.info("Total sharable blobs {}".format(len(ranges_sharable)))
+
+    best_assignment = compute_assignments_greedy(ranges_sharable, [])
+    best_assignment += [[x] for x in ranges_static]
+
+    # verify_assignments(best_assignment)
+
+    return best_assignment
+
+
+def verify_assignments(assignments):
+    for cur in assignments:
+        for x, y in zip(cur[0:-1], cur[1:]):
+            assert x[1].used < y[1].defined
 
 
 def compute_interference_graph(ops):
@@ -429,7 +514,8 @@ def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
 
 
 def optimize_interference(net, static_blobs,
-                          ordering_function=topological_sort_traversal):
+                          ordering_function=topological_sort_traversal,
+                          blob_sizes=None):
     """
     1) Use a BFS traversal of the execution graph to generate an
        ordering of the node executions.
@@ -450,7 +536,7 @@ def optimize_interference(net, static_blobs,
     del net.op[:]
     net.op.extend(linearized_ops)
 
-    ranges = compute_ranges(linearized_ops)
+    ranges = compute_ranges(linearized_ops, blob_sizes)
     assignments = compute_assignments(ranges, static_blobs)
     blob_assignments = compute_blob_assignments(assignments)
     apply_assignments(net, blob_assignments)
@@ -477,3 +563,18 @@ def compute_statistics(assignments):
     return Statistics(
         baseline_nbytes=baseline_nbytes,
         optimized_nbytes=optimized_nbytes)
+
+
+def collect_blob_sizes(net):
+    ''' College blob sizes from worksapce '''
+    def blob_nbytes(blob):
+        return workspace.FetchBlob(blob).nbytes
+
+    blobs = {}
+    for op in net.op:
+        for blob in op.input:
+            blobs[blob] = blob_nbytes(blob)
+        for blob in op.output:
+            blobs[blob] = blob_nbytes(blob)
+
+    return blobs
