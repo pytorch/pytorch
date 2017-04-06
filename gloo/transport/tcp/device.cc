@@ -61,6 +61,13 @@ Device::~Device() {
   close(fd_);
 }
 
+std::string Device::str() const {
+  std::stringstream ss;
+  ss << "tcp:";
+  ss << "host=" << attr_.hostname;
+  return ss.str();
+}
+
 void Device::setTimeout(const std::chrono::milliseconds& timeout) {
   if (timeout < std::chrono::milliseconds::zero()) {
     GLOO_THROW_INVALID_OPERATION_EXCEPTION("Invalid timeout", timeout.count());

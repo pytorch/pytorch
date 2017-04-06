@@ -41,7 +41,10 @@ class Device : public ::gloo::transport::Device,
   Device(const struct attr& attr, ibv_context* context);
   virtual ~Device();
 
+  virtual std::string str() const override;
+
   virtual void setTimeout(const std::chrono::milliseconds& timeout) override;
+
   virtual std::unique_ptr<::gloo::transport::Pair> createPair()
       override;
 

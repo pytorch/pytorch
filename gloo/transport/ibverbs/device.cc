@@ -15,6 +15,7 @@
 #include <array>
 
 #include "gloo/common/error.h"
+#include "gloo/common/linux.h"
 #include "gloo/common/logging.h"
 #include "gloo/transport/ibverbs/pair.h"
 
@@ -107,6 +108,21 @@ Device::~Device() {
 
   rv = ibv_close_device(context_);
   GLOO_ENFORCE_EQ(rv, 0);
+}
+
+std::string Device::str() const {
+  std::stringstream ss;
+  ss << "ibverbs:";
+  ss << "dev=" << attr_.name;
+  ss << "," << "port=" << attr_.port;
+  ss << "," << "index=" << attr_.index;
+
+  // nv_peer_mem module must be loaded for GPUDirect
+  if (kernelModules().count("nv_peer_mem") > 0) {
+    ss << "," << "gpudirect=ok";
+  }
+
+  return ss.str();
 }
 
 void Device::setTimeout(const std::chrono::milliseconds& /* timeout */) {

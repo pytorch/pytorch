@@ -189,11 +189,31 @@ void Runner::printHeader() {
     return;
   }
 
+  std::cout << std::left << std::setw(13) << "Device:";
+  std::cout << device_->str() << std::endl;
+
+  std::cout << std::left << std::setw(13) << "Algorithm:";
+  std::cout << options_.benchmark << std::endl;
+
+  std::cout << std::left << std::setw(13) << "Options:";
+  std::cout << "processes=" << options_.contextSize;
+  std::cout << ", inputs=" << options_.inputs;
+  if (options_.benchmark.compare(0, 5, "cuda_") == 0) {
+    std::cout << ", gpudirect=";
+    if (options_.transport == "ibverbs" && options_.gpuDirect) {
+      std::cout << "yes";
+    } else {
+      std::cout << "no";
+    }
+  }
+  std::cout << std::endl << std::endl;
+
   std::string suffix = "(us)";
   if (options_.showNanos) {
     suffix = "(ns)";
   }
 
+  std::cout << std::right;
   std::cout << std::setw(11) << "elements";
   std::cout << std::setw(11) << ("min " + suffix);
   std::cout << std::setw(11) << ("p50 " + suffix);
