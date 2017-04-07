@@ -17,16 +17,16 @@ void THSTensor_(zero)(THSTensor *self) {
 
 void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value) {
   if (r_ == t) {
-    THTensor *r_values_ = THSTensor_(values)(r_);
+    THTensor *r_values_ = THSTensor_(newValues)(r_);
     THTensor_(mul)(r_values_, r_values_, value);
     THTensor_(free)(r_values_);
   } else {
     THSTensor_(resizeAs)(r_, t);
 
-    THLongTensor *r_indices_ = THSTensor_(indices)(r_);
-    THTensor *r_values_ = THSTensor_(values)(r_);
-    THLongTensor *t_indices_ = THSTensor_(indices)(t);
-    THTensor *t_values_ = THSTensor_(values)(t);
+    THLongTensor *r_indices_ = THSTensor_(newIndices)(r_);
+    THTensor *r_values_ = THSTensor_(newValues)(r_);
+    THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
+    THTensor *t_values_ = THSTensor_(newValues)(t);
 
     THLongTensor_resizeAs(r_indices_, t_indices_);
     THLongTensor_copy(r_indices_, t_indices_);
@@ -43,16 +43,16 @@ void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value) {
 
 void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value) {
   if (r_ == t) {
-    THTensor *r_values_ = THSTensor_(values)(r_);
+    THTensor *r_values_ = THSTensor_(newValues)(r_);
     THTensor_(div)(r_values_, r_values_, value);
     THTensor_(free)(r_values_);
   } else {
     THSTensor_(resizeAs)(r_, t);
 
-    THLongTensor *r_indices_ = THSTensor_(indices)(r_);
-    THTensor *r_values_ = THSTensor_(values)(r_);
-    THLongTensor *t_indices_ = THSTensor_(indices)(t);
-    THTensor *t_values_ = THSTensor_(values)(t);
+    THLongTensor *r_indices_ = THSTensor_(newIndices)(r_);
+    THTensor *r_values_ = THSTensor_(newValues)(r_);
+    THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
+    THTensor *t_values_ = THSTensor_(newValues)(t);
 
     THLongTensor_resizeAs(r_indices_, t_indices_);
     THLongTensor_copy(r_indices_, t_indices_);
@@ -87,10 +87,10 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
   long nDimI = THSTensor_(nDimensionI)(src);
   long nDimV = THSTensor_(nDimensionV)(src);
-  THLongTensor *t_indices_ = THSTensor_(indices)(t);
-  THTensor *t_values_ = THSTensor_(values)(t);
-  THLongTensor *src_indices_ = THSTensor_(indices)(src);
-  THTensor *s_values_ = THSTensor_(values)(src);
+  THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
+  THTensor *t_values_ = THSTensor_(newValues)(t);
+  THLongTensor *src_indices_ = THSTensor_(newIndices)(src);
+  THTensor *s_values_ = THSTensor_(newValues)(src);
   THLongTensor *r_indices_ = THLongTensor_newWithSize2d(nDimI, max_nnz);
   THTensor *r_values_ = THSTensor_(newValuesWithSizeOf)(s_values_, max_nnz);
   THTensor_(zero)(r_values_);
@@ -169,10 +169,10 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t, THSTensor *src) {
   ptrdiff_t max_nnz = t_nnz < s_nnz ? t_nnz : s_nnz;
   long nDimI = THSTensor_(nDimensionI)(src);
   long nDimV = THSTensor_(nDimensionV)(src);
-  THLongTensor *t_indices_ = THSTensor_(indices)(t);
-  THTensor *t_values_ = THSTensor_(values)(t);
-  THLongTensor *src_indices_ = THSTensor_(indices)(src);
-  THTensor *s_values_ = THSTensor_(values)(src);
+  THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
+  THTensor *t_values_ = THSTensor_(newValues)(t);
+  THLongTensor *src_indices_ = THSTensor_(newIndices)(src);
+  THTensor *s_values_ = THSTensor_(newValues)(src);
   THLongTensor *r_indices_ = THLongTensor_newWithSize2d(nDimI, max_nnz);
   THTensor *r_values_ = THSTensor_(newValuesWithSizeOf)(s_values_, max_nnz);
   THTensor_(zero)(r_values_);
@@ -276,8 +276,8 @@ void THSTensor_(spaddmm)(THTensor *r_,
       "Expected dim 1 size %d, got %d", dim_k, THTensor_(size)(t, 1));
 
   nnz     = THSTensor_(nnz)(sparse);
-  indices = THSTensor_(indices)(sparse);
-  values  = THSTensor_(values)(sparse);
+  indices = THSTensor_(newIndices)(sparse);
+  values  = THSTensor_(newValues)(sparse);
 
   csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
@@ -343,8 +343,9 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
       "Expected dim 1 size %d, got %d", dim_k, THSTensor_(size)(t, 1));
 
   nnz     = THSTensor_(nnz)(sparse);
-  indices = THSTensor_(indices)(sparse);
-  values  = THSTensor_(values)(sparse);
+  indices = THSTensor_(newIndices)(sparse);
+  values  = THSTensor_(newValues)(sparse);
+
   csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
   t_nnz = THSTensor_(nnz)(t);
@@ -357,8 +358,8 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
     narrowi = THLongTensor_newNarrow(newi, 1, 0, t_nnz);
     narrowv = THTensor_(newNarrow)(newv, 0, 0, t_nnz);
 
-    THLongTensor_copy(narrowi, THSTensor_(indices)(t));
-    THTensor_(copy)(narrowv, THSTensor_(values)(t));
+    THLongTensor_copy(narrowi, THSTensor_(newIndices)(t));
+    THTensor_(copy)(narrowv, THSTensor_(newValues)(t));
     THTensor_(mul)(newv, newv, beta);
 
     THLongTensor_free(narrowi);
@@ -431,7 +432,7 @@ void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse, THTensor *d
   // Initialize the sparse matrix that will be used with spaddmm to send rows
   // from the dense matrix to rows of the output's value tensor
   THSTensor *newSparse = THSTensor_(newClone)(sparse);
-  THLongTensor *spIndices = THSTensor_(indices)(newSparse);
+  THLongTensor *spIndices = THSTensor_(newIndices)(newSparse);
   THLongTensor *valueIndices = THLongTensor_new();
   THLongTensor_select(valueIndices, spIndices, 0, 0);
 
@@ -464,8 +465,8 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
   THSTensor_(contiguous)(sparse);
 
   long k;
-  THLongTensor  *indices = THSTensor_(indices)(sparse);
-  THTensor      *values = THSTensor_(values)(sparse);
+  THLongTensor  *indices = THSTensor_(newIndices)(sparse);
+  THTensor      *values = THSTensor_(newValues)(sparse);
   THLongStorage *storage = THSTensor_(newSizeOf)(sparse);
   long          *sizes = storage->data;
   long          nDim = THTensor_(nDimension)(dense);

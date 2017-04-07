@@ -20,20 +20,20 @@
 #define V_INFO(tensor) getTensorInfo<THCTensor, unsigned long>(state, tensor)
 
 THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
-  THLongStorage *storage;
-  THCTensor *other;
+  THLongStorage *size;
+  THCTensor *dst;
 
   THCSTensor_(contiguous)(state, self);
 
   // set up the new tensor
-  storage = THCSTensor_(newSizeOf)(state, self);
-  other = THCTensor_(newWithSize)(state, storage, NULL);
-  THLongStorage_free(storage);
-  THCTensor_(zero)(state, other);
+  size = THCSTensor_(newSizeOf)(state, self);
+  dst = THCTensor_(newWithSize)(state, size, NULL);
+  THLongStorage_free(size);
+  THCTensor_(zero)(state, dst);
 
   const ptrdiff_t nnz = THCSTensor_(nnz)(state, self);
   if (nnz == 0) {
-    return other;
+    return dst;
   }
 
   // TODO more benchmarking
@@ -45,7 +45,7 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
     THCSTensor_sparseElementwiseKernelScalar<TensorAddOp<real>, unsigned long, real>
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           TensorAddOp<real>(),
-          V_INFO(other), I_INFO(self->indices), V_INFO(self->values),
+          V_INFO(dst), I_INFO(self->indices), V_INFO(self->values),
           (unsigned long)(nnz));
   } else {
     THArgCheck(getApplyGrid(state, nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
@@ -53,12 +53,12 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
     THCSTensor_sparseElementwiseKernel<TensorAddOp<real>, unsigned long, real>
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           TensorAddOp<real>(),
-          V_INFO(other), I_INFO(self->indices), V_INFO(self->values),
+          V_INFO(dst), I_INFO(self->indices), V_INFO(self->values),
           (unsigned long)(nnz));
   }
 
   THCudaCheck(cudaGetLastError());
-  return other;
+  return dst;
 }
 
 void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
@@ -90,8 +90,8 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   // So the indices tensor of S is guaranteed to be sorted
 
   // Initialize tensors
-  THCIndexTensor *indices = THCSTensor_(indices)(state, self);
-  THCTensor *values = THCSTensor_(values)(state, self);
+  THCIndexTensor *indices = THCSTensor_(newIndices)(state, self);
+  THCTensor *values = THCSTensor_(newValues)(state, self);
   THCudaLongTensor *sIndices = THCudaLongTensor_newWithSize2d(state, 2, self->nnz);
   THCTensor *sValues = THCTensor_(newWithSize1d)(state, self->nnz);
   THCTensor_(fill)(state, sValues, ScalarConvert<int, real>::to(1));
@@ -105,7 +105,7 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   THCIndexTensor *indicesScalar = THCIndexTensor_(newWithSize1d)(state, self->nnz);
   THCIndexTensor *indicesSlice = THCIndexTensor_(new)(state);
   THCIndexTensor_(zero)(state, indicesScalar);
-  integer factor = 1;
+  long factor = 1;
   for (int i = self->nDimensionI - 1; i >= 0; i--) {
     THCIndexTensor_(select)(state, indicesSlice, indices, 0, i);
     THCIndexTensor_(cadd)(state, indicesScalar, indicesScalar, factor, indicesSlice);
@@ -116,7 +116,7 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   // stable sort indices and remember the permutation
   thrust::device_ptr<long> permutationIter(THCudaLongTensor_data(state, permutation));
   THRUST_EXEC(thrust::sequence, permutationIter, permutationIter + self->nnz);
-  thrust::device_ptr<integer> indicesIter(THCIndexTensor_(data)(state, indicesScalar));
+  thrust::device_ptr<indexT> indicesIter(THCIndexTensor_(data)(state, indicesScalar));
   THRUST_EXEC(thrust::stable_sort_by_key, indicesIter, indicesIter + self->nnz, permutationIter);
   // Note: the code below is much faster and seems to work, but the sort is not stable.
   // It could be that csrmm2 works even when column indices are not sorted within rows
@@ -125,9 +125,9 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   // THCIndexTensor_(free)(state, indicesScalarClone);
 
   // compute a list of unique indices, along with their position in the original index tensor (using the saved permutation)
-  thrust::device_ptr<long> uniquePositionsIter(THCudaLongTensor_data(state, uniquePositions));
-  thrust::device_vector<integer> uniqueIndicesBuffer(self->nnz); // not used, can we optimize?
-  thrust::pair<thrust::device_vector<integer>::iterator, thrust::device_ptr<long> > newEnd =
+  thrust::device_ptr<indexT> uniquePositionsIter(THCudaLongTensor_data(state, uniquePositions));
+  thrust::device_vector<indexT> uniqueIndicesBuffer(self->nnz); // not used, can we optimize?
+  thrust::pair<thrust::device_vector<long>::iterator, thrust::device_ptr<long> > newEnd =
     THRUST_EXEC(thrust::unique_by_key_copy, indicesIter, indicesIter + self->nnz, permutationIter, uniqueIndicesBuffer.begin(), uniquePositionsIter);
   long newNnz = newEnd.second - uniquePositionsIter;
   THCudaLongTensor_resize1d(state, uniquePositions, newNnz);
@@ -135,7 +135,7 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   // compute the mapping of sorted indices to their final location after deduplication
   THCudaLongTensor_set1d(state, mapping, 0, 0);
   thrust::device_ptr<long> mappingIter(THCudaLongTensor_data(state, mapping));
-  thrust::not_equal_to<integer> op;
+  thrust::not_equal_to<indexT> op;
   THRUST_EXEC(thrust::transform, indicesIter, indicesIter + self->nnz - 1, indicesIter + 1, mappingIter + 1, op);
   THRUST_EXEC(thrust::inclusive_scan, mappingIter, mappingIter + self->nnz, mappingIter);
 
@@ -209,13 +209,11 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   long nDimI = THCSTensor_(nDimensionI)(state, self);
   long nDimV = THCSTensor_(nDimensionV)(state, self);
   THArgCheck(d1 < nDimI && d2 < nDimI, 1, "Transposed dimensions should be sparse. Got nDimI: %ld, d1: %ld, d2: %ld", nDimI, d1, d2);
-  THCIndexTensor *indices = THCSTensor_(indices)(state, self);
+  THCIndexTensor *indices = THCSTensor_(newIndices)(state, self);
   long nnz = THCSTensor_(nnz)(state, self);
   THCIndexTensor *buffer = THCIndexTensor_(newWithSize1d)(state, nnz);
-  THCIndexTensor *slice1 = THCIndexTensor_(new)(state);
-  THCIndexTensor *slice2 = THCIndexTensor_(new)(state);
-  THCIndexTensor_(select)(state, slice1, indices, 0, d1);
-  THCIndexTensor_(select)(state, slice2, indices, 0, d2);
+  THCIndexTensor *slice1 = THCIndexTensor_(newSelect)(state, indices, 0, d1);
+  THCIndexTensor *slice2 = THCIndexTensor_(newSelect)(state, indices, 0, d2);
   THCIndexTensor_(copy)(state, buffer, slice1);
   THCIndexTensor_(copy)(state, slice1, slice2);
   THCIndexTensor_(copy)(state, slice2, buffer);
