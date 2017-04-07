@@ -59,6 +59,7 @@ cmake .. \
     -DPROTOBUF_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc \
     -DCMAKE_VERBOSE_MAKEFILE=1 \
     -DUSE_MPI=OFF \
+    -DUSE_OPENMP=OFF \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_CXX_FLAGS_RELEASE=-s \
     || exit 1
