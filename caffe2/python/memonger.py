@@ -11,7 +11,7 @@ import time
 import copy
 from caffe2.python import workspace
 from caffe2.proto import caffe2_pb2
-
+import enum
 import logging
 
 log = logging.getLogger("memonger")
@@ -307,6 +307,9 @@ def topological_sort_traversal(g):
 
 
 def compute_ranges(linearized_ops, blob_sizes=None):
+    if not blob_sizes:
+        log.warning('Provide blob sizes to get more accurate assignments.')
+
     blobs = collections.defaultdict(
         lambda: LiveRange(defined=None, used=None, size=None))
     for i, op in enumerate(linearized_ops):
@@ -396,6 +399,133 @@ def compute_assignments_greedy(ranges_sorted, init_assignments=None):
     return assignments
 
 
+def _get_count(assignments):
+    ''' Return number of blobs in assignments '''
+    if assignments:
+        return sum([len(x) for x in assignments])
+    return 0
+
+
+def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
+    ''' Compute assignment for blobs in 'ranges_sorted' on top of 'init_assignment'
+        using dynamic programming + recursion.
+
+        ranges_sorted: blobs sorted by 'used'
+        init_assignment: assignment to start with, blobs in 'ranges_sorted' should
+                         not be used in 'init_assignment'
+
+        Using f(b, k, init) to represent the best assignment for blobs b[0:k]
+        given initial assignment 'init', we have
+            f(b, k, init) = f(b, j, init) +
+                            find_best(b[j:k], f(b, j, init))
+        where j is the index of the last best assignment that is independent of
+        blob b[k - 1] (b[k - 1] is compatible with all assignments in
+        f(b, j, init)), and find_best(b1, init1) gives the best assignment
+        for blobs in 'b1' based on the initial assignment 'init1', and blobs
+        b1[0:-1] should be incompatible with with b1[-1]. f(b, len(b), []) gives
+        the best assignment for blobs 'b'.
+
+        For find_best(b, init), since b[0:-1] are not compatible with b[-1], we
+        could reduce it to a smaller problem to find best assignment for b[0:-1]
+        as
+            find_best(b, init) = min {
+                f(b[0:-1], len(b) - 1, init - x) + [x, b[-1]] for x in init, or
+                f(b[0:-1], len(b) - 1, init) + [b[-1]]
+            }
+        where min{} gives the assignment with minimum memory usage.
+    '''
+
+    def _get_compatible_prev(candidate_range, best_assignments, cur_idx):
+        ''' Find closest position k of best_assignments that is independent of
+            candidate_range that candiate_range is compatible with all assignments
+            in best_assignments[k].
+            Return -1 if not found.
+        '''
+        def is_compatible_all(candidate_range, assignments):
+            ''' return true if compatiable for all assignments in assignments '''
+            return all([is_compatible(candidate_range[1], x, []) for x in assignments])
+
+        ii = cur_idx - 1
+        while ii >= 0:
+            cba = best_assignments[ii]
+            if is_compatible_all(candidate_range, cba):
+                return ii
+            ii -= 1
+        return -1
+
+    def _find_best(ranges, init_assignment, prev_best_assignment, counter):
+        ''' Find the best assignment for blobs 'ranges' given an initialized
+            assignment 'init_assignment'.
+
+            Blobs in ranges[0:-1] should be incompatible with blob range[-1].
+            'prev_best_assignment': best assignment for blobs in ranges[:-1]
+
+            By assigning ranges[-1] to each assignment k in 'init_assignment' or
+            in a new assignment, the problem becomes a smaller problem to find
+            the best assignment for ranges[0:-1] given the initial assignment
+            init_assigment[0:k, (k+1):-1].
+        '''
+        # Blob to check
+        find_range = ranges[-1]
+        # Blobs in ranges[0:-1] are incompatible with ranges[-1] so that we can
+        # reduce it to a smaller problem.
+        assert all(not is_compatible(x[1], [find_range], []) for x in ranges[0:-1])
+
+        sz = len(init_assignment)
+        best_candidates = []
+        # Try to assign 'find_range' to each assignment in init_assignment
+        for ii in range(sz):
+            if not is_compatible(find_range[1], init_assignment[ii], []):
+                continue
+            cur_best = copy.deepcopy(init_assignment)
+            cur_best[ii].append(find_range)
+            if len(ranges) > 1:
+                cur_best_tmp = [x for i, x in enumerate(cur_best) if i != ii]
+                # reduce to a smaller dp problem
+                cur_best_tmp = compute_assignments_dp(
+                    ranges[:-1], cur_best_tmp, counter)
+                cur_best = cur_best_tmp + [cur_best[ii]]
+            best_candidates.append(cur_best)
+        # Try to put 'find_range' in a new assignment
+        best_candidates.append(prev_best_assignment + [[find_range]])
+
+        ret = min(best_candidates, key=lambda x: get_memory_usage(x))
+        return ret
+
+    if not counter:
+        counter = [0]
+    counter[0] += 1
+
+    if counter and counter[0] % 5000 == 0:
+        rs = [ranges_sorted[0][1].defined, ranges_sorted[-1][1].used]
+        log.info('Finding assignments {} ({} -> {})...'.format(
+            counter[0], rs[0], rs[1]))
+
+    init_assignment = init_assignment or []
+    # best_assignments[k]: best assignments for first k blobs ranges_sorted[0:(k+1)]
+    best_assignments = []
+    # Find best assignment for blobs ranges_sorted[0:ii]
+    for ii, cur_range in enumerate(ranges_sorted):
+        # closest best_assignment that is independent of ranges_sorted[ii]
+        prev_idx = _get_compatible_prev(cur_range, best_assignments, ii)
+        prev_best = copy.deepcopy(init_assignment) if prev_idx < 0 else \
+                    copy.deepcopy(best_assignments[prev_idx])
+        # Need to find best assignment for blobs in 'ranges_part'
+        ranges_part = ranges_sorted[(prev_idx + 1):(ii + 1)]
+        cur_best = _find_best(
+            ranges_part, prev_best,
+            best_assignments[-1] if best_assignments else init_assignment,
+            counter)
+        assert _get_count(cur_best) == _get_count(prev_best) + len(ranges_part)
+        best_assignments.append(copy.deepcopy(cur_best))
+
+    assert len(best_assignments) == len(ranges_sorted)
+
+    best = best_assignments[-1]
+
+    return best
+
+
 def get_updated_ranges(ranges, max_live=None):
     ''' Set LiveRange.defined = -1 if it is None
         Set LiveRange.used = max_live if it is None
@@ -423,7 +553,16 @@ def get_updated_ranges(ranges, max_live=None):
     return ranges
 
 
-def compute_assignments(ranges, static_blobs):
+def compute_assignments(ranges, static_blobs, algo):
+    '''
+    algo: Method used to find assignments (AssignmentAlgorithm.GREEDY or
+          AssignmentAlgorithm.DYNAMIC_PROGRAMMING).
+          AssignmentAlgorithm.DYNAMIC_PROGRAMMING gives optimal soultion at the
+          cost of more computation.
+          AssignmentAlgorithm.GREEDY may be better in the case 'blob_sizes' is
+          not provided.
+    '''
+
     # Sort the ranges based on when they are last used.
     # If LiveRange.used is None, then the blob is never used and could
     # be consumed externally. Sort these to the end of the list as opposed
@@ -435,14 +574,20 @@ def compute_assignments(ranges, static_blobs):
     # Update None values
     ranges = get_updated_ranges(ranges)
 
-    # sharable blobs
+    # Sharable blobs
     ranges_sharable = [x for x in ranges if x[0] not in static_blobs]
-    # static blobs, not sharable
+    # Static blobs, not sharable
     ranges_static = [x for x in ranges if x[0] in static_blobs]
 
     log.info("Total sharable blobs {}".format(len(ranges_sharable)))
 
-    best_assignment = compute_assignments_greedy(ranges_sharable, [])
+    best_assignment = []
+    if algo == AssignmentAlgorithm.DYNAMIC_PROGRAMMING:
+        best_assignment = compute_assignments_dp(ranges_sharable, [])
+    elif algo == AssignmentAlgorithm.GREEDY:
+        best_assignment = compute_assignments_greedy(ranges_sharable, [])
+    else:
+        assert "Invalid algo name {}".format(algo)
     best_assignment += [[x] for x in ranges_static]
 
     # verify_assignments(best_assignment)
@@ -513,9 +658,28 @@ def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
             op.arg.extend([a])
 
 
+class AssignmentAlgorithm(enum.Enum):
+    GREEDY = 0
+    DYNAMIC_PROGRAMMING = 1
+
+
 def optimize_interference(net, static_blobs,
                           ordering_function=topological_sort_traversal,
-                          blob_sizes=None):
+                          blob_sizes=None,
+                          algo=AssignmentAlgorithm.GREEDY):
+    """
+    ordering_function: topological_sort_traversal or
+                       topological_sort_traversal_longest_path.
+                       topological_sort_traversal_longest_path gives better
+                       results but needs a bit more computation.
+    algo: Method used to find assignments (AssignmentAlgorithm.GREEDY or
+          AssignmentAlgorithm.DYNAMIC_PROGRAMMING).
+          AssignmentAlgorithm.DYNAMIC_PROGRAMMING gives optimal soultion at the
+          cost of more computation.
+          AssignmentAlgorithm.GREEDY may be better in the case 'blob_sizes' is
+          not provided.
+    """
+
     """
     1) Use a BFS traversal of the execution graph to generate an
        ordering of the node executions.
@@ -537,7 +701,7 @@ def optimize_interference(net, static_blobs,
     net.op.extend(linearized_ops)
 
     ranges = compute_ranges(linearized_ops, blob_sizes)
-    assignments = compute_assignments(ranges, static_blobs)
+    assignments = compute_assignments(ranges, static_blobs, algo)
     blob_assignments = compute_blob_assignments(assignments)
     apply_assignments(net, blob_assignments)
     return Optimization(
