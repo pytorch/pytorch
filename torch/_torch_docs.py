@@ -343,8 +343,8 @@ Args:
 
 Example::
 
-    >>> vec1 = torch.range(1, 3)
-    >>> vec2 = torch.range(1, 2)
+    >>> vec1 = torch.arange(1, 4)
+    >>> vec2 = torch.arange(1, 3)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
      1  2
@@ -1546,8 +1546,8 @@ Args:
 
 Example::
 
-    >>> v1 = torch.range(1, 4)
-    >>> v2 = torch.range(1, 3)
+    >>> v1 = torch.arange(1, 5)
+    >>> v2 = torch.arange(1, 4)
     >>> torch.ger(v1, v2)
 
       1   2   3
@@ -1774,7 +1774,7 @@ Args:
 
 Example::
 
-    >>> x = torch.range(1, 5)
+    >>> x = torch.arange(1, 6)
     >>> x
 
      1
@@ -1837,7 +1837,7 @@ Args:
 
 Example::
 
-    >>> start = torch.range(1, 4)
+    >>> start = torch.arange(1, 5)
     >>> end = torch.Tensor(4).fill_(10)
     >>> start
 
@@ -2832,7 +2832,7 @@ Args:
 
 Example::
 
-    torch.normal(means=torch.range(1, 10), std=torch.range(1, 0.1, -0.1))
+    torch.normal(means=torch.arange(1, 11), std=torch.arange(1, 0, -0.1))
 
      1.5104
      1.6955
@@ -2857,7 +2857,7 @@ Args:
 
 Example::
 
-    >>> torch.normal(mean=0.5, std=torch.range(1, 5))
+    >>> torch.normal(mean=0.5, std=torch.arange(1, 6))
 
       0.5723
       0.0871
@@ -2877,7 +2877,7 @@ Args:
 
 Example::
 
-    >>> torch.normal(means=torch.range(1, 5))
+    >>> torch.normal(means=torch.arange(1, 6))
 
      1.1681
      2.8884
@@ -3000,8 +3000,8 @@ Example::
      3.0829
     [torch.FloatTensor of size 4]
 
-    >>> exp = torch.range(1, 4)
-    >>> a = torch.range(1, 4)
+    >>> exp = torch.arange(1, 5)
+    >>> a = torch.arange(1, 5)
     >>> a
 
      1
@@ -3043,7 +3043,7 @@ Args:
 
 Example::
 
-    >>> exp = torch.range(1, 4)
+    >>> exp = torch.arange(1, 5)
     >>> base = 2
     >>> torch.pow(base, exp)
 
@@ -3260,6 +3260,9 @@ returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
 from :attr:`start` to :attr:`end` with step :attr:`step`. Step is the gap between two values in the tensor.
 :math:`x_{i+1} = x_i + step`
 
+Warning:
+    This function is deprecated in favor of :func:`torch.arange`.
+
 Args:
     start (float): The starting value for the set of points
     end (float): The ending value for the set of points
@@ -3288,6 +3291,38 @@ Example::
     [torch.FloatTensor of size 7]
 
 """)
+
+add_docstr(torch._C.arange,
+           """
+arange(start, end, step=1, out=None) -> Tensor
+
+Teturns a 1D Tensor of size :math:`floor((end - start) / step)` with values
+from the interval ``[start, end)`` taken with step :attr:`step` starting from `start`.
+
+Args:
+    start (float): The starting value for the set of points
+    end (float): The ending value for the set of points
+    step (float): The gap between each pair of adjacent points
+    out (Tensor, optional): The result `Tensor`
+
+Example::
+
+    >>> torch.arange(1, 4)
+
+     1
+     2
+     3
+    [torch.FloatTensor of size 3]
+
+    >>> torch.arange(1, 2.5, 0.5)
+
+     1.0000
+     1.5000
+     2.0000
+    [torch.FloatTensor of size 3]
+
+""")
+
 
 add_docstr(torch._C.remainder,
            """
@@ -4019,7 +4054,7 @@ Args:
 
 Example::
 
-    >>> x = torch.range(1, 5)
+    >>> x = torch.arange(1, 6)
     >>> x
 
      1
@@ -4064,7 +4099,7 @@ Returns the sum of the elements of the diagonal of the input 2D matrix.
 
 Example::
 
-    >>> x = torch.range(1, 9).view(3, 3)
+    >>> x = torch.arange(1, 10).view(3, 3)
     >>> x
 
      1  2  3
@@ -4262,6 +4297,8 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
+A negative dim value can be used and will correspond to :math:`dim + input.dim() + 1`
+
 Args:
     input (Tensor): the input `Tensor`
     dim (int): The index at which to insert the singleton dimension
@@ -4365,13 +4402,14 @@ Example::
 
 add_docstr(torch._C.btrifact,
            """
-btrifact(A) -> Tensor, Tensor, IntTensor
+btrifact(A, info=None) -> Tensor, IntTensor
 
 Batch LU factorization.
 
-Returns a tuple containing the LU factorization, pivots, and pivot format,
-and info if the factorizations succeeded across the minibatch.
-The error codes are from dgetrf and a non-zero value indicates an error occurred.
+Returns a tuple containing the LU factorization and pivots.
+The optional argument `info` provides information if the
+factorization succeeded for each minibatch example.
+The info values are from dgetrf and a non-zero value indicates an error occurred.
 The specific values are from cublas if cuda is being used, otherwise LAPACK.
 
 Arguments:
@@ -4380,14 +4418,14 @@ Arguments:
 Example::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> A_LU_data, A_LU_pivots, info = A.btrifact()
+    >>> A_LU = A.btrifact()
 
 """)
 
 
 add_docstr(torch._C.btrisolve,
            """
-btrisolve(b, A_LU_data, A_LU_pivots) -> Tensor
+btrisolve(b, LU_data, LU_pivots) -> Tensor
 
 Batch LU solve.
 
@@ -4395,14 +4433,15 @@ Returns the LU solve of the linear system Ax = b.
 
 Arguments:
     b (Tensor): RHS tensor.
-    A_LU (Tensor, IntTensor, fmt): LU-factorization of A from btrifact.
+    LU_data (Tensor): Pivoted LU factorization of A from btrifact.
+    LU_pivots (IntTensor): Pivots of the LU factorization.
 
 Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3)
-    >>> A_LU_data, A_LU_pivots, info = torch.btrifact(A)
-    >>> x = b.trisolve(A_LU_data, A_LU_pivots)
+    >>> A_LU = torch.btrifact(A)
+    >>> x = b.btrisolve(*A_LU)
     >>> torch.norm(A.bmm(x.unsqueeze(2)) - b)
     6.664001874625056e-08
 

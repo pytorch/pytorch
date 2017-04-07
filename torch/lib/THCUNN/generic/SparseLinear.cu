@@ -175,10 +175,11 @@ void THNN_(SparseLinear_accGradParameters)(
       THCudaIntTensor_data(state, colPtrs), CUSPARSE_INDEX_BASE_ONE);
 
   // FORTRAN expects contiguous col-major matricies
-  THCTensor_(transpose)(state, gradOutput, NULL, 0, 1);
+  THCTensor *tgradOutput = THCTensor_(new)(state);
+  THCTensor_(transpose)(state, tgradOutput, gradOutput, 0, 1);
   THCTensor_(resize2d)(state, buf, batchnum, outDim);
-  THCTensor_(copy)(state, buf, gradOutput);
-  THCTensor_(transpose)(state, gradOutput, NULL, 0, 1); // Restore gradOutput
+  THCTensor_(copy)(state, buf, tgradOutput);
+  THCTensor_(free)(state, tgradOutput);
 
   real one = ScalarConvert<int, real>::to(1);
   cusparseMatDescr_t descr = 0;

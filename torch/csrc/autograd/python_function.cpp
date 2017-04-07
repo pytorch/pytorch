@@ -729,7 +729,7 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
   if (value == Py_None) {
     value = nullptr;
   }
-  Py_XDECREF(self->*ptr);
+  Py_XDECREF((self->*ptr));
   Py_XINCREF(value);
   self->*ptr = value;
   return 0;

@@ -21,10 +21,10 @@ class MaskedSelect(Module):
     def updateGradInput(self, input, gradOutput):
         input, mask = input
         if input.type() == 'torch.cuda.FloatTensor':
-            torch.range(0, mask.nelement() - 1, out=self._maskIndexBufferCPU).resize_(mask.size())
+            torch.arange(0, mask.nelement(), out=self._maskIndexBufferCPU).resize_(mask.size())
             self._maskIndexBuffer.resize_(self._maskIndexBufferCPU.size()).copy_(self._maskIndexBufferCPU)
         else:
-            torch.range(0, mask.nelement() - 1, out=self._maskIndexBuffer).resize_(mask.size())
+            torch.arange(0, mask.nelement(), out=self._maskIndexBuffer).resize_(mask.size())
 
         torch.masked_select(self._maskIndexBuffer, mask, out=self._maskIndices)
         self._gradBuffer.resize_(input.nelement()).zero_()

@@ -475,7 +475,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -493,7 +494,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - CONSTANT false
 ]]
 
@@ -512,7 +514,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - CONSTANT false
 ]]
 
@@ -534,7 +537,8 @@
           output: True
         - THTensor* self
         - real p
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -549,7 +553,8 @@
           output: True
         - THTensor* self
         - real p
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - real maxnorm
 ]]
 
@@ -563,7 +568,8 @@
         - THTensor* self
         - THTensor* self
         - real p
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - real maxnorm
 ]]
 
@@ -813,7 +819,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -830,7 +837,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -841,7 +849,8 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
 ]]
 
 [[
@@ -852,7 +861,8 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
 ]]
 
 [[
@@ -1402,7 +1412,9 @@
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
     THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+    #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+    #endif
   arguments:
     - arg: THTensor* result
       output: True
@@ -1421,7 +1433,9 @@
   before_call: |
     long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     THTensor_(resize1d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s);
+    #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+    #endif
   arguments:
     - arg: THTensor* result
       output: True
@@ -1442,7 +1456,9 @@
         long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
         long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
         THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+        #if !IS_CUDA
         THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+        #endif
       arguments:
         - arg: THTensor* result
           output: True
@@ -1478,7 +1494,9 @@
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 1);
     long s3 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 2);
     THTensor_(resize3d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2, s3);
+    #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
+    #endif
   arguments:
     - arg: THTensor* result
       output: True
@@ -1905,7 +1923,7 @@ static const char *R = &__R;
       output: True
     - arg: THIntegerTensor* info
       kwarg_only: True
-      default: THIntegerTensor_(new)(LIBRARY_STATE_NOARGS)
+      default: NULL
     - THTensor* self
 ]]
 
@@ -1913,12 +1931,12 @@ static const char *R = &__R;
   name: btrisolve
   cname: btrisolve
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  only_stateless: true
+  with_stateless: true
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* LU
-    - THTensor* x
-    - THIntegerTensor* pivots
+    - THTensor* self
+    - THTensor* LU_data
+    - THIntegerTensor* LU_pivots
 ]]

@@ -46,7 +46,7 @@ struct hardtanhupdateGradInput_functor
 
   __device__ void operator()(T *gradInput, const T *input, const T *gradOutput) const
   {
-    if (*input < min_val_ || *input > max_val_)
+    if (*input <= min_val_ || *input >= max_val_)
       *gradInput = ScalarConvert<int, T>::to(0);
     else
       *gradInput = *gradOutput;

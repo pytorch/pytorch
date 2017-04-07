@@ -154,10 +154,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
         from tools.cwrap.plugins.NullableArguments import NullableArguments
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
+        from tools.cwrap.plugins.WrapDim import WrapDim
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             BoolOption(), thp_plugin, AutoGPU(condition='IS_CUDA'),
-            ArgcountSortPlugin(), KwargsPlugin()
+            ArgcountSortPlugin(), KwargsPlugin(), WrapDim()
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
@@ -413,7 +414,7 @@ if WITH_CUDA:
                        )
     extensions.append(THCUNN)
 
-version = '0.1.10'
+version = '0.1.11'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     version = os.getenv('PYTORCH_BUILD_VERSION') \

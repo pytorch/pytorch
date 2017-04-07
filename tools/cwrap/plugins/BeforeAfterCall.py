@@ -18,6 +18,11 @@ class BeforeAfterCall(CWrapPlugin):
             prepend_str = before_call_template.substitute(args)
         template.insert(offset, prepend_str)
 
+    def process_pre_arg_assign(self, template, option):
+        if option.get('before_arg_assign'):
+            self.insert_snippet(template, option, 0, 'before_arg_assign')
+        return template
+
     def process_option_code_template(self, template, option):
         if option.get('before_call') or option.get('after_call'):
             call_idx = template.index('$call')

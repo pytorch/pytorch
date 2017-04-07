@@ -294,6 +294,56 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
+def adaptive_max_pool1d(input, output_size, return_indices=False):
+    r"""Applies a 1D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+        return_indices: whether to return pooling indices
+    """
+    return _functions.thnn.AdaptiveMaxPool1d(output_size, return_indices)(input)
+
+
+def adaptive_max_pool2d(input, output_size, return_indices=False):
+    r"""Applies a 2D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+        return_indices: whether to return pooling indices
+    """
+    return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
+
+
+def adaptive_avg_pool1d(input, output_size):
+    r"""Applies a 1D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool1d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer)
+    """
+    return _functions.thnn.AdaptiveAvgPool1d(output_size)(input)
+
+
+def adaptive_avg_pool2d(input, output_size):
+    r"""Applies a 2D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or double-integer tuple)
+    """
+    return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
+
+
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
@@ -572,3 +622,85 @@ def pad(input, pad, mode='constant', value=0):
             return _functions.thnn.ReplicationPad3d(*pad)(input)
     else:
         raise NotImplementedError("Only 4D and 5D padding is supported for now")
+
+
+# distance
+
+def pairwise_distance(x1, x2, p=2, eps=1e-6):
+    r"""
+    Computes the batchwise pairwise distance between vectors v1,v2:
+
+        .. math ::
+            \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
+
+        Args:
+            x1: first input tensor
+            x2: second input tensor
+            p: the norm degree. Default: 2
+
+        Shape:
+            - Input: :math:`(N, D)` where `D = vector dimension`
+            - Output: :math:`(N, 1)`
+
+        >>> input1 = autograd.Variable(torch.randn(100, 128))
+        >>> input2 = autograd.Variable(torch.randn(100, 128))
+        >>> output = F.pairwise_distance(input1, input2, p=2)
+        >>> output.backward()
+    """
+    assert x1.size() == x2.size(), "Input sizes must be equal."
+    assert x1.dim() == 2, "Input must be a 2D matrix."
+    diff = torch.abs(x1 - x2)
+    out = torch.pow(diff + eps, p).sum(dim=1)
+    return torch.pow(out, 1. / p)
+
+
+def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False):
+    r"""Creates a criterion that measures the triplet loss given an input tensors x1, x2, x3
+    and a margin with a value greater than 0.
+    This is used for measuring a relative similarity between samples. A triplet is composed by
+    `a`, `p` and `n`: anchor, positive examples and negative example respectively.
+    The shape of all input variables should be :math:`(N, D)`.
+
+    The distance swap is described in detail in the paper `Learning shallow convolutional feature descriptors with
+    triplet losses`_ by V. Balntas, E. Riba et al.
+
+    .. math::
+        L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)
+
+    where :math: `d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
+
+    Args:
+        anchor: anchor input tensor
+        positive: positive input tensor
+        negative: negative input tensor
+        p: the norm degree. Default: 2
+        eps: small epsilon value to avoid numerical issues
+        swap: compute distance swap
+
+    Shape:
+        - Input: :math:`(N, D)` where `D = vector dimension`
+        - Output: :math:`(N, 1)`
+
+        >>> input1 = autograd.Variable(torch.randn(100, 128))
+        >>> input2 = autograd.Variable(torch.randn(100, 128))
+        >>> input3 = autograd.Variable(torch.randn(100, 128))
+        >>> output = F.triplet_margin_loss(input1, input2, input3, p=2)
+        >>> output.backward()
+
+    .. _Learning shallow convolutional feature descriptors with triplet losses:
+        http://www.iis.ee.ic.ac.uk/%7Evbalnt/shallow_descr/TFeat_paper.pdf
+    """
+    assert anchor.size() == positive.size(), "Input sizes between positive and negative must be equal."
+    assert anchor.size() == negative.size(), "Input sizes between anchor and negative must be equal."
+    assert positive.size() == negative.size(), "Input sizes between positive and negative must be equal."
+    assert anchor.dim() == 2, "Inputd must be a 2D matrix."
+    assert margin > 0.0, 'Margin should be positive value.'
+    d_p = pairwise_distance(anchor, positive, p, eps)
+    d_n = pairwise_distance(anchor, negative, p, eps)
+    if swap:
+        d_s = pairwise_distance(positive, negative, p, eps)
+        d_n = torch.min(d_n, d_s)
+
+    dist_hinge = torch.clamp(margin + d_p - d_n, min=0.0)
+    loss = torch.mean(dist_hinge)
+    return loss
