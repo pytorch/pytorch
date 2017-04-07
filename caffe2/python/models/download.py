@@ -21,7 +21,7 @@ except ImportError:
     HTTPError = urllib.HTTPError
     URLError = urllib.URLError
 
-DOWNLOAD_BASE_URL = "https://github.com/caffe2/models/raw/master/"
+DOWNLOAD_BASE_URL = "https://s3.amazonaws.com/caffe2/models/"
 DOWNLOAD_COLUMNS = 70
 
 
@@ -44,7 +44,7 @@ def deleteDirectory(top_dir):
 
 
 def progressBar(percentage):
-    full = DOWNLOAD_COLUMNS * percentage / 100
+    full = int(DOWNLOAD_COLUMNS * percentage / 100)
     bar = full * "#" + (DOWNLOAD_COLUMNS - full) * " "
     sys.stdout.write(u"\u001b[1000D[" + bar + "] " + str(percentage) + "%")
     sys.stdout.flush()
@@ -57,19 +57,17 @@ def downloadFromURLToFile(url, filename):
         size = int(response.info().getheader('Content-Length').strip())
         downloaded_size = 0
         chunk = min(size, 8192)
-        data = ''
-        progressBar(0)
-        while True:
-            data_chunk = response.read(chunk)
-            if not data_chunk:
-                break
-            data += data_chunk
-            downloaded_size += chunk
-            progressBar(100 * downloaded_size / size)
-        print("")  # New line to fix for progress bar
         print("Writing to {filename}".format(filename=filename))
+        progressBar(0)
         with open(filename, "wb") as local_file:
-            local_file.write(data)
+            while True:
+                data_chunk = response.read(chunk)
+                if not data_chunk:
+                    break
+                local_file.write(data_chunk)
+                downloaded_size += chunk
+                progressBar(int(100 * downloaded_size / size))
+        print("")  # New line to fix for progress bar
     except HTTPError as e:
         raise Exception("Could not download model. [HTTP Error] {code}: {reason}."
                         .format(code=e.code, reason=e.reason))
