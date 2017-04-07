@@ -358,6 +358,7 @@ class Tensor {
     // Finally, do sharing.
     data_ = src.data_;
     capacity_ = src.capacity_;
+    shares_data_ = true;
   }
 
   /**
@@ -412,6 +413,11 @@ class Tensor {
     } else {
       capacity_ = nbytes();
     }
+    shares_data_ = true;
+  }
+
+  bool shares_data() {
+    return shares_data_;
   }
 
   /**
@@ -612,6 +618,7 @@ class Tensor {
   TIndex size_ = -1;
   TypeMeta meta_;
   std::shared_ptr<void> data_;
+  bool shares_data_ = false;
   size_t capacity_ = 0;
   // In case of chunk load we store how much data was already loaded
 
@@ -702,13 +709,14 @@ TypeMeta GetTensorType(void* c) {
 }
 
 // Shape call registry
-typedef vector<TIndex> (*ShapeCall)(void*);
+typedef vector<TIndex> (*ShapeCall)(void*, bool& shares_data);
 ShapeCall GetShapeCallFunction(CaffeTypeId id);
 void RegisterShapeCallFunction(CaffeTypeId id, ShapeCall c);
 
 template <class Context>
-vector<TIndex> GetTensorShape(void* c) {
+vector<TIndex> GetTensorShape(void* c, bool& shares_data) {
   Tensor<Context>* tc = static_cast<Tensor<Context>*>(c);
+  shares_data = tc->shares_data();
   return tc->dims();
 }
 

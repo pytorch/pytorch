@@ -5,8 +5,9 @@
 #include <mutex>
 
 #include "caffe2/core/logging.h"
-#include "caffe2/core/operator.h"
 #include "caffe2/core/net.h"
+#include "caffe2/core/operator.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 
@@ -15,6 +16,11 @@ CAFFE2_DEFINE_bool(
     false,
     "If used we will handle exceptions in executor threads. "
     "This avoids SIGABRT but may cause process to deadlock");
+
+CAFFE2_DEFINE_bool(
+    caffe2_print_blob_sizes_at_exit,
+    false,
+    "If true, workspace destructor will print all blob shapes");
 
 #if CAFFE2_MOBILE
 // Threadpool restrictions
@@ -134,6 +140,56 @@ struct CompiledExecutionStep {
   ShouldContinue shouldContinue;
   std::atomic<bool> gotFailure{false};
 };
+
+void Workspace::PrintBlobSizes() {
+  vector<string> blobs = LocalBlobs();
+  size_t cumtotal = 0;
+
+  // First get total sizes and sort
+  vector<std::pair<size_t, std::string>> blob_sizes;
+  for (const auto& s : blobs) {
+    Blob* b = this->GetBlob(s);
+    ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
+    if (shape_fun) {
+      bool shares_data = false;
+      auto shape = shape_fun(b->GetRaw(), shares_data);
+      size_t total = 1;
+      for (const auto d : shape) {
+        total *= d;
+      }
+      if (shares_data) {
+        // Blobs sharing data do not actually take any memory
+        total = 0;
+      }
+      cumtotal += total;
+      blob_sizes.push_back(make_pair(total, s));
+    }
+  }
+  std::sort(
+      blob_sizes.begin(),
+      blob_sizes.end(),
+      [](const std::pair<size_t, std::string>& a,
+         const std::pair<size_t, std::string>& b) {
+        return b.first < a.first;
+      });
+
+  // Then print in descending order
+  LOG(INFO) << "---- Workspace blobs: (name, shape, numitems) ---- ";
+  for (const auto& sb : blob_sizes) {
+    Blob* b = this->GetBlob(sb.second);
+    ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
+    CHECK(shape_fun != nullptr);
+    bool _shares_data = false;
+    auto shape = shape_fun(b->GetRaw(), _shares_data);
+    std::stringstream ss;
+    ss << sb.second << ";";
+    for (const auto d : shape) {
+      ss << d << ",";
+    }
+    LOG(INFO) << ss.str() << ";" << sb.first;
+  }
+  LOG(INFO) << "Total;;" << cumtotal;
+}
 
 vector<string> Workspace::LocalBlobs() const {
   vector<string> names;

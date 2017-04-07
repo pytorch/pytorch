@@ -22,6 +22,8 @@
 #include "caffe2/utils/threadpool/ThreadPool.h"
 #endif // CAFFE2_MOBILE
 
+CAFFE2_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
+
 namespace caffe2 {
 
 class NetBase;
@@ -42,6 +44,7 @@ struct StopOnSignal {
   std::shared_ptr<SignalHandler> handler_;
 };
 
+
 /**
  * Workspace is a class that holds all the related objects created during
  * runtime: (1) all blobs, and (2) all instantiated networks. It is the owner of
@@ -55,7 +58,8 @@ class Workspace {
   /**
    * Initializes an empty workspace.
    */
-  Workspace() {}
+  Workspace() {
+  }
   /**
    * Initializes an empty workspace with the given root folder.
    *
@@ -81,7 +85,10 @@ class Workspace {
    */
   Workspace(const string& root_folder, Workspace* shared)
       : root_folder_(root_folder), shared_(shared) {}
-  ~Workspace() {}
+  ~Workspace() {
+    if (FLAGS_caffe2_print_blob_sizes_at_exit)
+      PrintBlobSizes();
+  }
 
   /**
    * Allows to add a parent workspace post factum after the object
@@ -114,6 +121,8 @@ class Workspace {
   inline bool HasBlob(const string& name) const {
     return (blob_map_.count(name) || (shared_ && shared_->HasBlob(name)));
   }
+
+  void PrintBlobSizes();
 
   /**
    * Creates a blob of the given name. The pointer to the blob is returned, but
