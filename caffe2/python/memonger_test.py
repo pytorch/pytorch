@@ -15,8 +15,9 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=1, max_value=10),
            output_dim=st.integers(min_value=1, max_value=10),
            batch_size=st.integers(min_value=1, max_value=10),
-           do=st.sampled_from(hu.device_options))
-    def test_simple_memonger(self, input_dim, output_dim, batch_size, do):
+           do=st.sampled_from(hu.device_options),
+           algo=st.sampled_from(memonger.AssignmentAlgorithm))
+    def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo):
         m = cnn.CNNModelHelper()
         fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
         fc2 = m.FC(fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
@@ -33,7 +34,8 @@ class MemongerTest(hu.HypothesisTestCase):
             [o for op in m.param_init_net.Proto().op for o in op.output] + \
             ["data", "label", "loss", input_to_grad["fc1_w"]]
 
-        optimization = memonger.optimize_interference(m.Proto(), static_blobs)
+        optimization = memonger.optimize_interference(
+            m.Proto(), static_blobs, algo=algo)
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
         label = np.random.randint(
             low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
@@ -50,6 +52,18 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(grad, optimized_grad)
         stats = memonger.compute_statistics(optimization.assignments)
         self.assertLess(stats.optimized_nbytes, stats.baseline_nbytes)
+
+        # run with blob sizes
+        blob_sizes = memonger.collect_blob_sizes(m.Proto())
+        optimization1 = memonger.optimize_interference(
+            m.Proto(), static_blobs, blob_sizes=blob_sizes, algo=algo)
+        workspace.RunNetOnce(optimization1.net)
+        optimized_loss = workspace.FetchBlob("loss")
+        optimized_grad = workspace.FetchBlob(str(input_to_grad["fc1_w"]))
+        np.testing.assert_almost_equal(loss, optimized_loss)
+        np.testing.assert_almost_equal(grad, optimized_grad)
+        stats = memonger.compute_statistics(optimization1.assignments)
+        self.assertLessEqual(stats.optimized_nbytes, stats.baseline_nbytes)
 
     @given(input_dim=st.integers(min_value=1, max_value=4),
            output_dim=st.integers(min_value=1, max_value=4),
@@ -247,3 +261,26 @@ class MemongerTest(hu.HypothesisTestCase):
         best = memonger.compute_assignments_greedy(ranges_sorted, None)
         self.assertEqual(memonger.get_memory_usage(best), 11)
         self.assertEqual(best, assignment_gt)
+
+    def test_compute_assignments_dp(self):
+        LiveRange = memonger.LiveRange
+        ranges_sorted = [
+            ('b1', LiveRange(1, 3, 10)),
+            ('b2', LiveRange(3, 4, 1)),
+            ('b3', LiveRange(5, 6, 1)),
+            ('b4', LiveRange(5, 7, 10)),
+        ]
+
+        best = memonger.compute_assignments_dp(ranges_sorted, None)
+        self.assertEqual(memonger.get_memory_usage(best), 11)
+
+    def test_compute_assignments_dp1(self):
+        LiveRange = memonger.LiveRange
+        ranges_sorted = [
+            ('b1', LiveRange(1, 2, 10)),
+            ('b2', LiveRange(4, 6, 1)),
+            ('b3', LiveRange(5, 6, 10)),
+        ]
+
+        best = memonger.compute_assignments_dp(ranges_sorted, [])
+        self.assertEqual(memonger.get_memory_usage(best), 11)
