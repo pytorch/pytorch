@@ -658,6 +658,27 @@ class CreateTensorVectorOp final : public Operator<Context> {
 };
 
 template <class Context>
+class TensorVectorSizeOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(TensorVectorSizeOp);
+
+  bool RunOnDevice() override {
+    auto& vector_ptr =
+        OperatorBase::Input<TensorVectorPtr<Context>>(TENSOR_VECTOR);
+    auto* size = Output(SIZE);
+    size->Resize();
+    // 32-bit should be enough here
+    *size->template mutable_data<int32_t>() = vector_ptr->size();
+    return true;
+  }
+
+ private:
+  INPUT_TAGS(TENSOR_VECTOR);
+  OUTPUT_TAGS(SIZE);
+};
+
+template <class Context>
 class ConcatTensorVectorOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -779,6 +800,7 @@ REGISTER_CPU_OPERATOR(CheckDatasetConsistency, CheckDatasetConsistencyOp);
 REGISTER_CPU_OPERATOR(Append, AppendOp<CPUContext>);
 REGISTER_CPU_OPERATOR(AtomicAppend, AtomicAppendOp<CPUContext>);
 REGISTER_CPU_OPERATOR(CreateTensorVector, CreateTensorVectorOp<CPUContext>);
+REGISTER_CPU_OPERATOR(TensorVectorSize, TensorVectorSizeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ConcatTensorVector, ConcatTensorVectorOp<CPUContext>);
 REGISTER_CPU_OPERATOR(CollectTensor, CollectTensorOp<CPUContext>);
 
@@ -993,6 +1015,13 @@ OPERATOR_SCHEMA(CreateTensorVector)
     .NumOutputs(1)
     .SetDoc("Create a std::unique_ptr<std::vector<Tensor> >");
 
+OPERATOR_SCHEMA(TensorVectorSize)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc("Get the size of the input vector")
+    .Input(0, "tensor vector", "std::unique_ptr<std::vector<Tensor> >")
+    .Output(0, "size", "int32_t size");
+
 OPERATOR_SCHEMA(ConcatTensorVector)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1028,6 +1057,7 @@ SHOULD_NOT_DO_GRADIENT(CheckDatasetConsistency);
 SHOULD_NOT_DO_GRADIENT(Append);
 SHOULD_NOT_DO_GRADIENT(AtomicAppend);
 SHOULD_NOT_DO_GRADIENT(CreateTensorVector);
+SHOULD_NOT_DO_GRADIENT(TensorVectorSize);
 SHOULD_NOT_DO_GRADIENT(ConcatTensorVector);
 SHOULD_NOT_DO_GRADIENT(CollectTensor);
 } // namespace

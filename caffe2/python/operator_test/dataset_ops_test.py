@@ -194,7 +194,7 @@ class TestDatasetOps(TestCase):
         workspace.RunNetOnce(read_init_net)
         workspace.CreateNet(read_next_net)
 
-        for i, entry in enumerate(entries):
+        for entry in entries:
             workspace.RunNet(str(read_next_net))
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
@@ -275,7 +275,6 @@ class TestDatasetOps(TestCase):
         workspace.RunNetOnce(read_init_net)
 
         workspace.CreateNet(read_next_net)
-        read_next_net_name = str(read_next_net)
 
         for i in range(len(entries)):
             k = idx[i] if i in idx else i
@@ -391,9 +390,12 @@ class TestDatasetOps(TestCase):
         # concat the collected tensors
         concat_net = core.Net('concat_net')
         bconcated_map = {}
+        bsize_map = {}
         for b in blobs:
             bconcated_map[b] = b + '_concated'
+            bsize_map[b] = b + '_size'
             concat_net.ConcatTensorVector([bvec_map[b]], [bconcated_map[b]])
+            concat_net.TensorVectorSize([bvec_map[b]], [bsize_map[b]])
 
         workspace.RunNetOnce(concat_net)
 
@@ -401,6 +403,9 @@ class TestDatasetOps(TestCase):
         reference_result = workspace.FetchBlob(bconcated_map[blobs[0]])
         self.assertEqual(reference_result.shape,
                          (min(num_to_collect, max_example_to_cover), 2))
+        size = workspace.FetchBlob(bsize_map[blobs[0]])
+        self.assertEqual(tuple(), size.shape)
+        self.assertEqual(min(num_to_collect, max_example_to_cover), size.item())
 
         hist, _ = np.histogram(reference_result[:, 0], bins=10,
                                range=(1, max_example_to_cover))
