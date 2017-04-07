@@ -266,6 +266,8 @@ void THSTensor_(spaddmm)(THTensor *r_,
   dim_j = THSTensor_(size)(sparse, 1);
   dim_k = THTensor_(size)(dense, 1);
 
+  THTensor_(resize2d)(r_, dim_i, dim_k);
+
   THArgCheck(THTensor_(size)(dense, 0) == dim_j, 3,
       "Expected dim 0 size %d, got %d", dim_j, THTensor_(size)(dense, 0));
   THArgCheck(THTensor_(size)(t, 0) == dim_i, 1,
@@ -280,7 +282,6 @@ void THSTensor_(spaddmm)(THTensor *r_,
   csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
   // r_ = alpha * sparse * dense
-  THTensor_(resize2d)(r_, dim_i, dim_k);
   if (beta == 0) {
     THTensor_(zero)(r_);
   } else {
@@ -326,12 +327,14 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
       "scalar values expected, got %dD values", sparse->nDimensionV);
   THArgCheck(dense->nDimension == 2, 2,
       "matrices expected, got %dD tensor", dense->nDimension);
-
   THSTensor_(contiguous)(sparse);
 
   dim_i = THSTensor_(size)(sparse, 0);
   dim_j = THSTensor_(size)(sparse, 1);
   dim_k = THTensor_(size)(dense, 1);
+
+  THSTensor_(resize2d)(r_, dim_i, dim_k);
+
 
   THArgCheck(THTensor_(size)(dense, 0) == dim_j, 3,
       "Expected dim 0 size %d, got %d", dim_j, THTensor_(size)(dense, 0));
@@ -343,7 +346,6 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   nnz     = THSTensor_(nnz)(sparse);
   indices = THSTensor_(indices)(sparse);
   values  = THSTensor_(values)(sparse);
-
   csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
   t_nnz = THSTensor_(nnz)(t);
@@ -394,7 +396,6 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   }
 
 
-  THSTensor_(resize2d)(r_, dim_i, dim_k);
   // to avoid a clone
   r_->indices = newi;
   r_-> values = newv;
