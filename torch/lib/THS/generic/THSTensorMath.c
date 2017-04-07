@@ -281,7 +281,11 @@ void THSTensor_(spaddmm)(THTensor *r_,
 
   // r_ = alpha * sparse * dense
   THTensor_(resize2d)(r_, dim_i, dim_k);
-  THTensor_(mul)(r_, t, beta);
+  if (beta == 0) {
+    THTensor_(zero)(r_);
+  } else {
+    THTensor_(mul)(r_, t, beta);
+  }
 #pragma omp parallel for private(h, i) schedule(static) if (nnz > 10000)
   for (h = 0; h < dim_i; h++) {
     long i_start = THTensor_fastGet1d(csr, h);
