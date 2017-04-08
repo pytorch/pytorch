@@ -284,6 +284,10 @@ void THSTensor_(spaddmm)(THTensor *r_,
   // r_ = alpha * sparse * dense
   if (beta == 0) {
     THTensor_(zero)(r_);
+  } else if (beta == 1) {
+    if (r_ != t) {
+      THTensor_(copy)(r_, t);
+    }
   } else {
     THTensor_(mul)(r_, t, beta);
   }

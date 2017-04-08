@@ -58,6 +58,8 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   long k = THCSTensor_(size)(state, sparse, 1);
   long n = THCTensor_(size)(state, dense, 1);
 
+  THCTensor_(resize2d)(state, r_, m, n);
+
   THArgCheck(THCTensor_(size)(state, t, 0) == m, 1,
       "Expected dim 0 size %d, got %d", m, THCTensor_(size)(state, t, 0));
   THArgCheck(THCTensor_(size)(state, t, 1) == n, 1,
@@ -79,10 +81,14 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
 
   char transpose_dense;
 
-  if(t != r_)
-  {
-    THCTensor_(resizeAs)(state, r_, t);
-    THCTensor_(copy)(state, r_, t);
+  if (beta == 0) {
+    THCTensor_(zero)(state, r_);
+  } else if (beta == ScalarConvert<int, real>::to(1)) {
+    if (t != r_) {
+      THCTensor_(copy)(state, r_, t);
+    }
+  } else {
+    THCTensor_(mul)(state, r_, t, beta);
   }
 
   /* r_ */
