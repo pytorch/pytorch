@@ -13,68 +13,152 @@ import unittest
 
 
 class TestPiecewiseLinearTransform(hu.HypothesisTestCase):
+    def constrain(self, v, min_val, max_val):
+        def constrain_internal(x):
+            return min(max(x, min_val), max_val)
+        return np.array([constrain_internal(x) for x in v])
+
+    def transform(self, x, bounds, slopes, intercepts):
+        n = len(slopes)
+        x_ = self.constrain(x, bounds[0], bounds[-1])
+        index = np.minimum(
+            np.maximum(
+                np.searchsorted(bounds, x_) - 1,
+                0
+            ),
+            n - 1
+        )
+        y = slopes[index] * x_ + intercepts[index]
+        return y
+
     @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
-    def test_piecewise_linear_transform_general(self, n, gc, dc):
-        W = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
-        b = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
-        # make sure bucket range are increating!
-        bucket_range = np.random.uniform(0.1, 0.9,
-                                         (2, n + 1)).astype(np.float32)
-        bucket_base = np.array(list(range(n + 1)))
-        bucket_range[0, :] = bucket_range[0, :] + bucket_base
-        bucket_range[1, :] = bucket_range[1, :] + bucket_base
-        # make x[i] inside bucket i, for the ease of testing
-        X = np.random.uniform(0, 0.9, (n, 2)).astype(np.float32)
-        for i in range(len(X)):
-            X[i][0] = X[i][0] * bucket_range[0][i] + \
-                (1 - X[i][0]) * bucket_range[0][i + 1]
-            X[i][1] = X[i][1] * bucket_range[1][i] + \
-                (1 - X[i][1]) * bucket_range[1][i + 1]
+    def test_multi_predictions_params_from_arg(self, n, gc, dc):
+        slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
+        intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
+        bounds = np.random.uniform(0.1, 0.9,
+                                   (2, n + 1)).astype(np.float32)
+        bounds.sort()
+        X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
 
         op = core.CreateOperator(
             "PiecewiseLinearTransform", ["X"], ["Y"],
-            bounds=bucket_range.flatten().tolist(),
-            slopes=W.flatten().tolist(),
-            intercepts=b.flatten().tolist(),
-            pieces=n
+            bounds=bounds.flatten().tolist(),
+            slopes=slopes.flatten().tolist(),
+            intercepts=intercepts.flatten().tolist(),
         )
 
         def piecewise(x, *args, **kw):
-            return [W.transpose() * x + b.transpose()]
+            x_0 = self.transform(
+                x[:, 0], bounds[0, :], slopes[0, :], intercepts[0, :])
+            x_1 = self.transform(
+                x[:, 1], bounds[1, :], slopes[1, :], intercepts[1, :])
+
+            return [np.vstack((x_0, x_1)).transpose()]
 
         self.assertReferenceChecks(gc, op, [X], piecewise)
         self.assertDeviceChecks(dc, op, [X], [0])
 
     @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
-    def test_piecewise_linear_transform_binary(self, n, gc, dc):
-        W = np.random.uniform(-1, 1, size=n).astype(np.float32)
-        b = np.random.uniform(-1, 1, size=n).astype(np.float32)
-        bucket_range = np.random.uniform(
-            0, 1, n + 1).astype(np.float32)
-        bucket_range.sort()
+    def test_binary_predictions_params_from_arg(self, n, gc, dc):
+        slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
+        intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
+        bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
+        bounds.sort()
 
-        # make x[i] inside bucket i, for the ease of testing
-        X = np.random.uniform(0, 0.9, (n, 2)).astype(np.float32)
-        for i in range(len(X)):
-            X[i][1] = X[i][1] * bucket_range[i] + \
-                (1 - X[i][1]) * bucket_range[i + 1]
+        X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
         X[:, 0] = 1 - X[:, 1]
 
         op = core.CreateOperator(
             "PiecewiseLinearTransform", ["X"], ["Y"],
-            bounds=bucket_range.flatten().tolist(),
-            slopes=W.flatten().tolist(),
-            intercepts=b.flatten().tolist(),
+            bounds=bounds.flatten().tolist(),
+            slopes=slopes.flatten().tolist(),
+            intercepts=intercepts.flatten().tolist(),
             pieces=n,
             binary=True,
         )
 
         def piecewise(x):
-            positive = W.transpose() * x[:, 1] + b.transpose()
-            return [np.vstack((1 - positive, positive)).transpose()]
+            x_ = self.transform(x[:, 1], bounds, slopes, intercepts)
+            return [np.vstack((1 - x_, x_)).transpose()]
 
         self.assertReferenceChecks(gc, op, [X], piecewise)
         self.assertDeviceChecks(dc, op, [X], [0])
+
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    def test_multi_predictions_params_from_input(self, n, gc, dc):
+        slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
+        intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
+        bounds = np.random.uniform(0.1, 0.9,
+                                   (2, n + 1)).astype(np.float32)
+        bounds.sort()
+        X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
+
+        op = core.CreateOperator(
+            "PiecewiseLinearTransform",
+            ["X", "bounds", "slopes", "intercepts"],
+            ["Y"],
+        )
+
+        def piecewise(x, bounds, slopes, intercepts):
+            x_0 = self.transform(
+                x[:, 0], bounds[0, :], slopes[0, :], intercepts[0, :])
+            x_1 = self.transform(
+                x[:, 1], bounds[1, :], slopes[1, :], intercepts[1, :])
+
+            return [np.vstack((x_0, x_1)).transpose()]
+
+        self.assertReferenceChecks(
+            gc, op, [X, bounds, slopes, intercepts], piecewise)
+        self.assertDeviceChecks(dc, op, [X, bounds, slopes, intercepts], [0])
+
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    def test_binary_predictions_params_from_input(self, n, gc, dc):
+        slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
+        intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
+        bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
+        bounds.sort()
+
+        X = np.random.uniform(0, 1, (n, 2)).astype(np.float32)
+        X[:, 0] = 1 - X[:, 1]
+
+        op = core.CreateOperator(
+            "PiecewiseLinearTransform",
+            ["X", "bounds", "slopes", "intercepts"],
+            ["Y"],
+            binary=True,
+        )
+
+        def piecewise(x, bounds, slopes, intercepts):
+            x_ = self.transform(x[:, 1], bounds, slopes, intercepts)
+            return [np.vstack((1 - x_, x_)).transpose()]
+
+        self.assertReferenceChecks(
+            gc, op, [X, bounds, slopes, intercepts], piecewise)
+        self.assertDeviceChecks(dc, op, [X, bounds, slopes, intercepts], [0])
+
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    def test_1D_predictions_params_from_input(self, n, gc, dc):
+        slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
+        intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
+        bounds = np.random.uniform(0.1, 0.9, n + 1).astype(np.float32)
+        bounds.sort()
+
+        X = np.random.uniform(0, 1, size=n).astype(np.float32)
+
+        op = core.CreateOperator(
+            "PiecewiseLinearTransform",
+            ["X", "bounds", "slopes", "intercepts"],
+            ["Y"],
+            binary=True,
+        )
+
+        def piecewise(x, bounds, slopes, intercepts):
+            x_ = self.transform(x, bounds, slopes, intercepts)
+            return [x_]
+
+        self.assertReferenceChecks(
+            gc, op, [X, bounds, slopes, intercepts], piecewise)
+        self.assertDeviceChecks(dc, op, [X, bounds, slopes, intercepts], [0])
 
 
 if __name__ == "__main__":
