@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, scope
+from caffe2.python import core, scope, model_helpers
 from caffe2.python.model_helper import ModelHelperBase
 from caffe2.proto import caffe2_pb2
 
@@ -226,7 +226,6 @@ class CNNModelHelper(ModelHelperBase):
             **kwargs
         )
 
-
     def GroupConv(
         self,
         blob_in,
@@ -342,176 +341,23 @@ class CNNModelHelper(ModelHelperBase):
         )
         return concat
 
-    def _FC_or_packed_FC(
-        self, op_call, blob_in, blob_out, dim_in, dim_out, weight_init=None,
-        bias_init=None, **kwargs
-    ):
-        """FC"""
-        weight_init = weight_init or ('XavierFill', {})
-        bias_init = bias_init or ('ConstantFill', {})
-        blob_out = blob_out or self.net.NextName()
-        if self.init_params:
-            weight = self.param_init_net.__getattr__(weight_init[0])(
-                [],
-                blob_out + '_w',
-                shape=[dim_out, dim_in],
-                **weight_init[1]
-            )
-            bias = self.param_init_net.__getattr__(bias_init[0])(
-                [],
-                blob_out + '_b',
-                shape=[dim_out, ],
-                **bias_init[1]
-            )
-        else:
-            weight = core.ScopedBlobReference(
-                blob_out + '_w', self.param_init_net)
-            bias = core.ScopedBlobReference(
-                blob_out + '_b', self.param_init_net)
-
-        if 'freeze_bias' in kwargs:
-            self.params.extend([weight])
-        else:
-            self.params.extend([weight, bias])
-
-        self.weights.append(weight)
-        self.biases.append(bias)
-        return op_call([blob_in, weight, bias], blob_out, **kwargs)
-
     def FC(self, *args, **kwargs):
-        return self._FC_or_packed_FC(self.net.FC, *args, **kwargs)
+        return model_helpers.FC(self, *args, **kwargs)
 
     def PackedFC(self, *args, **kwargs):
-        return self._FC_or_packed_FC(self.net.PackedFC, *args, **kwargs)
+        return model_helpers.PackedFC(self, *args, **kwargs)
 
-    def FC_Decomp(
-        self, blob_in, blob_out, dim_in, dim_out,
-        rank_approx=5, weight_init=None,
-        bias_init=None, **kwargs
-    ):
-        """FC_Decomp version
-        Here we assume that the rank of original input is bigger than 5.
-        """
-        weight_init = weight_init if weight_init else ('XavierFill', {})
-        bias_init = bias_init if bias_init else ('ConstantFill', {})
-        blob_out = blob_out or self.net.NextName()
-        u = self.param_init_net.__getattr__(weight_init[0])(
-            [],
-            blob_out + '_u',
-            shape=[dim_out, rank_approx],
-            **weight_init[1]
-        )
-        v = self.param_init_net.__getattr__(weight_init[0])(
-            [],
-            blob_out + '_v',
-            shape=[dim_in, rank_approx],
-            **weight_init[1]
-        )
-        bias = self.param_init_net.__getattr__(bias_init[0])(
-            [],
-            blob_out + '_b',
-            shape=[dim_out, ],
-            **bias_init[1]
-        )
-        self.params.extend([u, v, bias])
-        return self.net.FC_Decomp([blob_in, u, v, bias], blob_out, **kwargs)
+    def FC_Prune(self, *args, **kwargs):
+        return model_helpers.FC_Prune(self, *args, **kwargs)
 
-    def FC_Prune(
-        self, blob_in, blob_out, dim_in, dim_out,
-        weight_init=None, bias_init=None, mask_init=None,
-        threshold=0.00001, need_compress_rate=False,
-        comp_lb=0.05,
-        **kwargs
-    ):
-        """FC_Prune version
-        Runnable so far. Great!:)
-        """
-        weight_init = weight_init if weight_init else ('XavierFill', {})
-        bias_init = bias_init if bias_init else ('ConstantFill', {})
-        mask_init = mask_init if mask_init else ('ConstantFill', {})
-        blob_out = blob_out or self.net.NextName()
-        compress_rate = blob_out + '_compress_rate'
-        if self.init_params:
-            compress_lb = self.param_init_net.ConstantFill(
-                [],
-                blob_out + '_lb',
-                shape=[1],
-                value=comp_lb
-            )
-            weight = self.param_init_net.__getattr__(weight_init[0])(
-                [],
-                blob_out + '_w',
-                shape=[dim_out, dim_in],
-                **weight_init[1]
-            )
-            mask = self.param_init_net.ConstantFill(
-                [],
-                blob_out + '_m',
-                shape=[dim_out, dim_in],
-                value=1.0
-            )
-            ag_dw = self.param_init_net.__getattr__(mask_init[0])(
-                [],
-                blob_out + '_ag_dw',
-                shape=[dim_out, dim_in],
-                **mask_init[1]
-            )
-            bias = self.param_init_net.__getattr__(bias_init[0])(
-                [],
-                blob_out + '_b',
-                shape=[dim_out, ],
-                **bias_init[1]
-            )
-            mask_seq = self.param_init_net.__getattr__(mask_init[0])(
-                [],
-                blob_out + '_mask_seq',
-                shape=[dim_out, dim_in],
-                **mask_init[1]
-            )
-            thres = self.param_init_net.ConstantFill(
-                [],
-                blob_out + '_thres',
-                shape=[1],
-                value=threshold
-            )
-        else:
-            compress_lb = core.ScopedBlobReference(
-                blob_out + '_lb', self.param_init_net)
-            weight = core.ScopedBlobReference(
-                blob_out + '_w', self.param_init_net)
-            bias = core.ScopedBlobReference(
-                blob_out + '_b', self.param_init_net)
-            mask = core.ScopedBlobReference(
-                blob_out + '_m', self.param_init_net)
-            ag_dw = core.ScopedBlobReference(
-                blob_out + '_ag_dw', self.param_init_net)
-            mask_seq = core.ScopedBlobReference(
-                blob_out + '_mask_seq', self.param_init_net)
-            thres = core.ScopedBlobReference(
-                blob_out + '_thres', self.param_init_net)
+    def FC_Decomp(self, *args, **kwargs):
+        return model_helpers.FC_Decomp(self, *args, **kwargs)
 
-        self.params.extend([weight, bias])
-        if need_compress_rate:
-            return self.net.FC_Prune([blob_in, weight, mask,
-                                      bias, ag_dw, mask_seq,
-                                      thres, compress_lb],
-                                     [blob_out, compress_rate], **kwargs)
-        else:
-            return self.net.FC_Prune([blob_in, weight, mask,
-                                      bias, ag_dw, mask_seq,
-                                      thres, compress_lb],
-                                     blob_out, **kwargs)
+    def FC_Sparse(self, *args, **kwargs):
+        return model_helpers.FC_Sparse(self, *args, **kwargs)
 
-    def FC_Sparse(
-        self, blob_in, blob_out, w_csr, iw, jw, bias,
-        **kwargs
-    ):
-        """FC_Sparse: Only takes in alocated weights"""
-        if not (w_csr and iw and jw and bias):
-            print("Warning...")
-        self.params.extend([w_csr, iw, jw, bias])
-        return self.net.FC_Sparse([blob_in, w_csr, iw, jw, bias],
-                                  blob_out, **kwargs)
+    def Dropout(self, *args, **kwargs):
+        return model_helpers.Dropout(self, *args, **kwargs)
 
     def LRN(self, blob_in, blob_out, **kwargs):
         """LRN"""
@@ -520,12 +366,6 @@ class CNNModelHelper(ModelHelperBase):
             [blob_out, "_" + blob_out + "_scale"],
             order=self.order,
             **kwargs
-        )[0]
-
-    def Dropout(self, blob_in, blob_out, **kwargs):
-        """Dropout"""
-        return self.net.Dropout(
-            blob_in, [blob_out, "_" + blob_out + "_mask"], **kwargs
         )[0]
 
     def MaxPool(self, blob_in, blob_out, **kwargs):
