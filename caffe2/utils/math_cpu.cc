@@ -709,19 +709,19 @@ void RandGaussian<float, CPUContext>(
   }
 }
 
-template<>
-void Sum<float, CPUContext>(
-    const int N, const float* x, float* y,
-    CPUContext* context) {
-  *y = ConstEigenVectorMap<float>(x, N).sum();
-}
+#define CAFFE2_SPECIALIZED_SUM(T)                                \
+  template <>                                                    \
+  void Sum<T, CPUContext>(                                       \
+      const int N, const T* x, T* y, CPUContext* /* unused */) { \
+    *y = ConstEigenVectorMap<T>(x, N).sum();                     \
+  }
 
-template<>
-void Sum<double, CPUContext>(
-    const int N, const double* x, double* y,
-    CPUContext* context) {
-  *y = ConstEigenVectorMap<double>(x, N).sum();
-}
+CAFFE2_SPECIALIZED_SUM(float);
+CAFFE2_SPECIALIZED_SUM(double);
+CAFFE2_SPECIALIZED_SUM(int32_t);
+CAFFE2_SPECIALIZED_SUM(int64_t);
+
+#undef CAFFE2_SPECIALIZED_SUM
 
 template <>
 void Select<float, CPUContext>(
