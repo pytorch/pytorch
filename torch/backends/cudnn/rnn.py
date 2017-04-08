@@ -2,6 +2,7 @@ import torch.cuda
 import torch.backends.cudnn as cudnn
 from torch.backends.cudnn import check_error
 import ctypes
+import warnings
 
 
 def get_cudnn_mode(mode):
@@ -43,7 +44,7 @@ def init_rnn_descriptor(fn, handle):
         )
     dropout_desc = fn.dropout_state[dropout_desc_name].get()
     dropout_desc.set_dropout(dropout_p, fn.dropout_seed)
-    return cudnn.RNNDescriptor(
+    rnn_desc = cudnn.RNNDescriptor(
         handle,
         fn.hidden_size,
         fn.num_layers,
@@ -51,8 +52,13 @@ def init_rnn_descriptor(fn, handle):
         fn.input_mode,
         fn.bidirectional,
         fn.mode,
-        fn.datatype
+        fn.datatype,
+        fn.persistent
     )
+    if rnn_desc.persistent is False and fn.persistent is True:
+        warnings.warn("Warning: persistent RNN is not available for this configuration, switched to standard RNN")
+        fn.persistent = rnn_desc.persistent
+    return rnn_desc
 
 
 def init_weight_descriptor(fn, weight):
@@ -190,7 +196,11 @@ def forward(fn, input, hx, weight, output, hy):
         handle = cudnn.get_handle()
         fn.datatype = cudnn._typemap[input.type()]
         is_input_packed = fn.batch_sizes is not None
-
+        if is_input_packed:
+            warnings.warn(
+                "Warning: persistent algorithm not supported for variable length input."
+                "Switching to standard")
+            fn.persistent = False  # persistent algo is not supported for variable length input
         if fn.mode == cudnn.CUDNN_LSTM:
             hx, cx = hx
             hy, cy = hy
