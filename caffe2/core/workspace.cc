@@ -152,17 +152,14 @@ void Workspace::PrintBlobSizes() {
     ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
     if (shape_fun) {
       bool shares_data = false;
-      auto shape = shape_fun(b->GetRaw(), shares_data);
-      size_t total = 1;
-      for (const auto d : shape) {
-        total *= d;
-      }
+      size_t capacity;
+      auto shape = shape_fun(b->GetRaw(), shares_data, capacity);
       if (shares_data) {
         // Blobs sharing data do not actually take any memory
-        total = 0;
+        capacity = 0;
       }
-      cumtotal += total;
-      blob_sizes.push_back(make_pair(total, s));
+      cumtotal += capacity;
+      blob_sizes.push_back(make_pair(capacity, s));
     }
   }
   std::sort(
@@ -174,21 +171,25 @@ void Workspace::PrintBlobSizes() {
       });
 
   // Then print in descending order
-  LOG(INFO) << "---- Workspace blobs: (name, shape, numitems) ---- ";
+  LOG(INFO) << "---- Workspace blobs: ---- ";
+  LOG(INFO) << "name;current shape;capacity bytes;percentage";
   for (const auto& sb : blob_sizes) {
     Blob* b = this->GetBlob(sb.second);
     ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
     CHECK(shape_fun != nullptr);
     bool _shares_data = false;
-    auto shape = shape_fun(b->GetRaw(), _shares_data);
+    size_t capacity;
+    auto shape = shape_fun(b->GetRaw(), _shares_data, capacity);
     std::stringstream ss;
     ss << sb.second << ";";
     for (const auto d : shape) {
       ss << d << ",";
     }
-    LOG(INFO) << ss.str() << ";" << sb.first;
+    LOG(INFO) << ss.str() << ";" << sb.first << ";" << std::setprecision(3)
+              << (cumtotal > 0 ? 100.0 * double(sb.first) / cumtotal : 0.0)
+              << "%";
   }
-  LOG(INFO) << "Total;;" << cumtotal;
+  LOG(INFO) << "Total;;" << cumtotal << ";100%";
 }
 
 vector<string> Workspace::LocalBlobs() const {

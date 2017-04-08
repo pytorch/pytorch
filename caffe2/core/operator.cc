@@ -272,7 +272,8 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
     }
     if (shape_fun) {
       bool _shares_data;
-      auto shape = shape_fun(b->GetRaw(), _shares_data);
+      size_t _capacity;
+      auto shape = shape_fun(b->GetRaw(), _shares_data, _capacity);
       for (auto d : shape) {
         tp.add_dims(d);
       }
