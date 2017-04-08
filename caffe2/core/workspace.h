@@ -86,8 +86,9 @@ class Workspace {
   Workspace(const string& root_folder, Workspace* shared)
       : root_folder_(root_folder), shared_(shared) {}
   ~Workspace() {
-    if (FLAGS_caffe2_print_blob_sizes_at_exit)
+    if (FLAGS_caffe2_print_blob_sizes_at_exit) {
       PrintBlobSizes();
+    }
   }
 
   /**

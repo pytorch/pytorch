@@ -550,6 +550,10 @@ class Tensor {
    * This is equivalent to calling size() * itemsize().
    */
   inline size_t nbytes() const { return size_ * meta_.itemsize(); }
+
+  inline size_t capacity_nbytes() const {
+    return capacity_;
+  }
   /**
    * Returns the dimensions of the tensor as a vector.
    */
@@ -709,14 +713,15 @@ TypeMeta GetTensorType(void* c) {
 }
 
 // Shape call registry
-typedef vector<TIndex> (*ShapeCall)(void*, bool& shares_data);
+typedef vector<TIndex> (*ShapeCall)(void*, bool& shares_data, size_t& capacity);
 ShapeCall GetShapeCallFunction(CaffeTypeId id);
 void RegisterShapeCallFunction(CaffeTypeId id, ShapeCall c);
 
 template <class Context>
-vector<TIndex> GetTensorShape(void* c, bool& shares_data) {
+vector<TIndex> GetTensorShape(void* c, bool& shares_data, size_t& capacity) {
   Tensor<Context>* tc = static_cast<Tensor<Context>*>(c);
   shares_data = tc->shares_data();
+  capacity = tc->capacity_nbytes();
   return tc->dims();
 }
 
