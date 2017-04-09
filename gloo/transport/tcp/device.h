@@ -35,6 +35,7 @@ struct attr {
   int ai_socktype;
   int ai_protocol;
   struct sockaddr_storage ai_addr;
+  int ai_addrlen;
 };
 
 std::shared_ptr<::gloo::transport::Device> CreateDevice(

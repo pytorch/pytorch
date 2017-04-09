@@ -122,55 +122,29 @@ void Pair::listen() {
   std::lock_guard<std::mutex> lock(m_);
   int rv;
 
-  struct addrinfo hints;
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = dev_->attr_.ai_family;
-  hints.ai_socktype = SOCK_STREAM;
-
-  struct addrinfo* result;
-  rv = getaddrinfo(dev_->attr_.hostname.data(), nullptr, &hints, &result);
-  GLOO_ENFORCE_NE(rv, -1);
-  for (auto rp = result; rp != nullptr; rp = rp->ai_next) {
-    auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-    if (fd == -1) {
-      continue;
-    }
-
-    rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
-    if (rv == -1) {
-      close(fd);
-      continue;
-    }
-
-    // bind(2) successful, keep copy of address
-    self_ = Address::fromSockName(fd);
-
-    // listen(2) on socket
-    fd_ = fd;
-    rv = ::listen(fd_, 1);
-    if (rv == -1) {
-      close(fd_);
-      fd_ = FD_INVALID;
-      signalIoFailure(GLOO_ERROR_MSG("listen: ", strerror(errno)));
-    }
-    break;
+  const auto& attr = dev_->attr_;
+  auto fd = socket(attr.ai_family, attr.ai_socktype, attr.ai_protocol);
+  if (fd == -1) {
+    signalIoFailure(GLOO_ERROR_MSG("socket: ", strerror(errno)));
   }
 
-  // Expect listening file descriptor at this point.
-  // If there is none, build error message that includes all
-  // addresses that we attempted to bind to.
-  if (fd_ == FD_INVALID) {
-    std::stringstream err;
-    for (auto rp = result; rp != nullptr; rp = rp->ai_next) {
-      err << Address(rp->ai_addr, rp->ai_addrlen).str();
-      if (rp->ai_next != nullptr) {
-        err << ", ";
-      }
-    }
-    signalIoFailure(GLOO_ERROR_MSG("Attempted to bind to: ", err));
+  rv = bind(fd, (const sockaddr*)&attr.ai_addr, attr.ai_addrlen);
+  if (rv == -1) {
+    close(fd);
+    signalIoFailure(GLOO_ERROR_MSG("bind: ", strerror(errno)));
   }
 
-  freeaddrinfo(result);
+  // listen(2) on socket
+  fd_ = fd;
+  rv = ::listen(fd_, 1);
+  if (rv == -1) {
+    close(fd_);
+    fd_ = FD_INVALID;
+    signalIoFailure(GLOO_ERROR_MSG("listen: ", strerror(errno)));
+  }
+
+  // Keep copy of address
+  self_ = Address::fromSockName(fd);
 
   // Register with device so we're called when peer connects
   changeState(LISTENING);

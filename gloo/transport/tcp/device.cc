@@ -68,6 +68,7 @@ std::shared_ptr<transport::Device> CreateDevice(const struct attr& src) {
     attr.ai_socktype = rp->ai_socktype;
     attr.ai_protocol = rp->ai_protocol;
     memcpy(&attr.ai_addr, rp->ai_addr, rp->ai_addrlen);
+    attr.ai_addrlen = rp->ai_addrlen;
     close(fd);
     break;
   }
