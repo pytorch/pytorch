@@ -78,7 +78,9 @@ std::shared_ptr<::gloo::transport::Device> CreateDevice(
 }
 
 Device::Device(const struct attr& attr, ibv_context* context)
-    : attr_(attr), context_(context) {
+    : attr_(attr),
+      pciBusID_(infinibandToBusID(attr.name)),
+      context_(context) {
   int rv;
 
   pd_ = ibv_alloc_pd(context_);
@@ -112,17 +114,22 @@ Device::~Device() {
 
 std::string Device::str() const {
   std::stringstream ss;
-  ss << "ibverbs:";
-  ss << "dev=" << attr_.name;
-  ss << "," << "port=" << attr_.port;
-  ss << "," << "index=" << attr_.index;
+  ss << "ibverbs";
+  ss << ", pci=" << pciBusID_;
+  ss << ", dev=" << attr_.name;
+  ss << ", port=" << attr_.port;
+  ss << ", index=" << attr_.index;
 
   // nv_peer_mem module must be loaded for GPUDirect
   if (kernelModules().count("nv_peer_mem") > 0) {
-    ss << "," << "gpudirect=ok";
+    ss << ", gpudirect=ok";
   }
 
   return ss.str();
+}
+
+const std::string& Device::getPCIBusID() const {
+  return pciBusID_;
 }
 
 void Device::setTimeout(const std::chrono::milliseconds& /* timeout */) {

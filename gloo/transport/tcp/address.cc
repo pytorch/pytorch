@@ -55,7 +55,11 @@ std::string Address::str() const {
   }
 
   auto len = strlen(str);
-  snprintf(str + len, sizeof(str) - len, "]:%d", port);
+  if (port > 0) {
+    snprintf(str + len, sizeof(str) - len, "]:%d", port);
+  } else {
+    snprintf(str + len, sizeof(str) - len, "]");
+  }
 
   return str;
 }

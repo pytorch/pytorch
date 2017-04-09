@@ -24,6 +24,8 @@ std::vector<std::string> pciDevices(int pciBusID);
 
 int pciDistance(const std::string& a, const std::string& b);
 
-const std::string& networkInterfaceToBusID(const std::string& interface);
+const std::string& interfaceToBusID(const std::string& name);
+
+const std::string& infinibandToBusID(const std::string& name);
 
 } // namespace gloo

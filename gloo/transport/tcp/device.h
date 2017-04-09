@@ -32,6 +32,9 @@ struct attr {
   // The address family defaults to AF_UNSPEC such that getaddrinfo(3)
   // will try to find either IPv4 or IPv6 addresses.
   int ai_family = AF_UNSPEC;
+  int ai_socktype;
+  int ai_protocol;
+  struct sockaddr_storage ai_addr;
 };
 
 std::shared_ptr<::gloo::transport::Device> CreateDevice(
@@ -48,6 +51,8 @@ class Device : public ::gloo::transport::Device,
   virtual ~Device();
 
   virtual std::string str() const override;
+
+  virtual const std::string& getPCIBusID() const override;
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout) override;
 
@@ -74,6 +79,8 @@ class Device : public ::gloo::transport::Device,
 
   int fd_;
   std::chrono::milliseconds timeout_;
+  std::string interfaceName_;
+  std::string pciBusID_;
 
   std::mutex m_;
   std::condition_variable cv_;

@@ -43,6 +43,8 @@ class Device : public ::gloo::transport::Device,
 
   virtual std::string str() const override;
 
+  virtual const std::string& getPCIBusID() const override;
+
   virtual void setTimeout(const std::chrono::milliseconds& timeout) override;
 
   virtual std::unique_ptr<::gloo::transport::Pair> createPair()
@@ -50,6 +52,7 @@ class Device : public ::gloo::transport::Device,
 
  protected:
   struct attr attr_;
+  const std::string pciBusID_;
   ibv_context* context_;
   ibv_pd* pd_;
   ibv_comp_channel* comp_channel_;

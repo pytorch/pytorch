@@ -134,14 +134,32 @@ int pciDistance(const std::string& a, const std::string& b) {
   return (partsA.size() - prefixLength) + (partsB.size() - prefixLength);
 }
 
-const std::string& networkInterfaceToBusID(const std::string& name) {
+const std::string& interfaceToBusID(const std::string& name) {
   static std::once_flag once;
   static std::map<std::string, std::string> map;
 
   std::call_once(once, [](){
       for (const auto& device : pciDevices(kPCIClassNetwork)) {
         // Register interfaces for this devices
-        for (const auto& interface : listDir(kSysfsPath + device + "/net")) {
+        const auto path = kSysfsPath + device + "/net";
+        for (const auto& interface : listDir(path)) {
+          map[interface] = device;
+        }
+      }
+    });
+
+  return map[name];
+}
+
+const std::string& infinibandToBusID(const std::string& name) {
+  static std::once_flag once;
+  static std::map<std::string, std::string> map;
+
+  std::call_once(once, [](){
+      for (const auto& device : pciDevices(kPCIClassNetwork)) {
+        // Register interfaces for this devices
+        const auto path = kSysfsPath + device + "/infiniband";
+        for (const auto& interface : listDir(path)) {
           map[interface] = device;
         }
       }
