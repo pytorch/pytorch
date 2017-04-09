@@ -149,6 +149,9 @@
 #include "generic/SparseLinear.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/IndexLinear.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/Sqrt.c"
 #include "THGenerateFloatTypes.h"
 
