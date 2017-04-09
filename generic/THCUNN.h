@@ -379,6 +379,60 @@ TH_API void THNN_(SparseLinear_updateParameters)(
                   THCTensor *lastInput,
                   accreal learningRate);
 
+TH_API void THNN_(IndexLinear_updateOutput)(
+                  THCState *state,
+                  THCudaLongTensor *keys,
+                  long keysOffset,
+                  THCTensor *values,
+                  THCudaLongTensor *sizes,
+                  THCudaLongTensor *cumSumSizes,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  THCTensor *normalizedValues,
+                  int   train);
+
+TH_API void THNN_(IndexLinear_accGradParameters)(
+                  THCState *state,
+                  THCudaLongTensor *keys,
+                  long keysOffset,
+                  THCTensor *values,
+                  THCudaLongTensor *sizes,
+                  THCudaLongTensor *cumSumSizes,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  THCTensor* valuesBuffer,
+                  accreal weightDecay,
+                  accreal scale);
+
+TH_API void THNN_(IndexLinear_accUpdateGradParameters)(
+                  THCState *state,
+                  THCudaLongTensor *keys,
+                  long keysOffset,
+                  THCTensor *values,
+                  THCudaLongTensor *sizes,
+                  THCudaLongTensor *cumSumSizes,
+                  THCTensor *gradOutput,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  accreal weightDecay,
+                  accreal scale);
+
+TH_API void THNN_(IndexLinear_updateParameters)(
+                  THCState *state,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  THCudaLongTensor *runningKeys,
+                  THCudaLongTensor *cumSumSizes,
+                  long keysOffset,
+                  accreal weightDecay,
+                  accreal learningRate);
+
 TH_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
