@@ -20,7 +20,7 @@ of a couple in-place methods, that would overwrite inputs required for
 gradient computation). In most cases Tensors can be safely replaced with
 Variables and the code will remain to work just fine. Because of this,
 we're not documenting all the operations on variables, and you should
-refere to :class:`torch.Tensor` docs for this purpose.
+refer to :class:`torch.Tensor` docs for this purpose.
 
 In-place operations on Variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
