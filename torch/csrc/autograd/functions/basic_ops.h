@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <THPP/THPP.h>
 
 #include "torch/csrc/autograd/function.h"
