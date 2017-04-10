@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/operators/reduction_ops.h"
 #include "caffe2/operators/utility_ops.h"
 #include "caffe2/utils/math.h"
 

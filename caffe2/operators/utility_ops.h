@@ -462,59 +462,6 @@ class ScatterWeightedSumOp : public Operator<Context> {
   }
 };
 
-template <typename T, class Context>
-class SumElementsOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-
-  SumElementsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        average_(OperatorBase::GetSingleArgument<bool>("average", false)) {}
-  SumElementsOp(const OperatorDef& operator_def, Workspace* ws, bool average)
-      : Operator<Context>(operator_def, ws), average_(average) {}
-  ~SumElementsOp() {}
-
-  bool RunOnDevice() override {
-    auto& X = Input(0);
-    auto* sum = Output(0);
-    sum->Resize(vector<TIndex>());
-    T* data = sum->template mutable_data<T>();
-    math::Sum<T, Context>(X.size(), X.template data<T>(), data, &context_);
-    if (average_) {
-      math::Scale<T, Context>(
-          1,
-          static_cast<T>(1.) / X.size(),
-          sum->template data<T>(),
-          data,
-          &context_);
-    }
-    return true;
-  }
-
- private:
-  bool average_;
-};
-
-template <typename T, class Context>
-class SumElementsGradientOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-
-  SumElementsGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        average_(OperatorBase::GetSingleArgument<bool>("average", false)) {}
-  SumElementsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws,
-      bool average)
-      : Operator<Context>(operator_def, ws), average_(average) {}
-  ~SumElementsGradientOp() {}
-
-  bool RunOnDevice() override;
-
- private:
-  bool average_;
-};
 
 template <typename T, class Context>
 class MaxOp : public Operator<Context> {

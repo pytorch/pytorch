@@ -333,7 +333,7 @@ void Dot<double, CUDAContext>(
 // reduction here.
 #define SUM_KERNEL_NTHREADS 128
 template <typename T>
-__global__ void SumKernel(const int N, const T* X, T* Y) {
+__global__ void SumKernel(const int N, const T* X, T* Y, bool square) {
   const int idx = threadIdx.x;
   __shared__ T reduction_buffer[SUM_KERNEL_NTHREADS];
 
@@ -341,8 +341,14 @@ __global__ void SumKernel(const int N, const T* X, T* Y) {
 
   // A multilevel reduction.
   // N -> 128
-  for (int i = idx; i < N; i += SUM_KERNEL_NTHREADS) {
-    reduction_buffer[idx] += X[i];
+  if (!square) {
+    for (int i = idx; i < N; i += SUM_KERNEL_NTHREADS) {
+      reduction_buffer[idx] += X[i];
+    }
+  } else {
+    for (int i = idx; i < N; i += SUM_KERNEL_NTHREADS) {
+      reduction_buffer[idx] += X[i] * X[i];
+    }
   }
   __syncthreads();
   // 128 -> 32
@@ -363,15 +369,28 @@ __global__ void SumKernel(const int N, const T* X, T* Y) {
   }
 }
 
-#define CAFFE2_MATH_SUM_FUNC(T)                                                \
-template<>                                                                     \
-void Sum<T, CUDAContext>(const int N, const T* x, T* y, CUDAContext* context) {\
-  SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>(N, x, y);   \
-}
+#define CAFFE2_MATH_SUM_FUNC(T)                                       \
+  template <>                                                         \
+  void Sum<T, CUDAContext>(                                           \
+      const int N, const T* x, T* y, CUDAContext* context) {          \
+    SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>( \
+        N, x, y, false);                                              \
+  }
 
 CAFFE2_MATH_SUM_FUNC(float)
 CAFFE2_MATH_SUM_FUNC(double)
 #undef CAFFE2_MATH_SUM_FUNC
+
+#define CAFFE2_MATH_SUMSQR_FUNC(T)                                    \
+  template <>                                                         \
+  void SumSqr<T, CUDAContext>(                                        \
+      const int N, const T* x, T* y, CUDAContext* context) {          \
+    SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>( \
+        N, x, y, true);                                               \
+  }
+
+CAFFE2_MATH_SUMSQR_FUNC(float)
+#undef CAFFE2_MATH_SUMSQR_FUNC
 
 namespace {
 template <typename T>
