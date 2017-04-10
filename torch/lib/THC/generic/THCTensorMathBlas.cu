@@ -793,18 +793,14 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
   if (!THCudaIntTensor_isContiguous(state, pivots)) {
       THError("Error: pivots is not contiguous.");
   }
-  int *pivots_gpu;
-  THCudaCheck(THCudaMalloc(state, (void**)&pivots_gpu, sizeof(int)*num_batches*n));
-  THCudaIntTensor_resize1d(state, pivots, num_batches*n);
-  THCudaCheck(cudaMemcpy(pivots_gpu, THCudaIntTensor_data(state, pivots), sizeof(int)*num_batches*n, cudaMemcpyHostToDevice));
-  THCudaIntTensor_resize2d(state, pivots, num_batches, n);
 
+  int *pivots_data = THCudaIntTensor_data(state, pivots);
   int info;
 
 #ifdef THC_REAL_IS_FLOAT
-  THCudaBlas_Sgetrs(state, 'n', n, nrhs, d_atf, lda, pivots_gpu, d_result, ldb, &info, num_batches);
+  THCudaBlas_Sgetrs(state, 'n', n, nrhs, d_atf, lda, pivots_data, d_result, ldb, &info, num_batches);
 #elif defined(THC_REAL_IS_DOUBLE)
-  THCudaBlas_Dgetrs(state, 'n', n, nrhs, d_atf, lda, pivots_gpu, d_result, ldb, &info, num_batches);
+  THCudaBlas_Dgetrs(state, 'n', n, nrhs, d_atf, lda, pivots_data, d_result, ldb, &info, num_batches);
 #endif
 
   if (info < 0) {
@@ -813,7 +809,6 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
 
   THCudaFree(state, d_result);
   THCudaFree(state, d_atf);
-  THCudaFree(state, pivots_gpu);
 
   if (atf_ != atf) {
     THCTensor_(free)(state, atf_);
