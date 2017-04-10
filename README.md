@@ -196,7 +196,7 @@ docker build -t pytorch-cudnnv6 .
 ```
 and run  with nvidia-docker:
 ```
-nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv5
+nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv6
 ```
 Please note that pytorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
@@ -219,7 +219,7 @@ Three pointers to get you started:
 ## Releases and Contributing
 
 PyTorch has a 90 day release cycle (major releases). 
-It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+It's current state is Beta, we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 

@@ -2281,10 +2281,38 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv1d',
-        constructor_args=(4, 5, 3),
+        constructor_args=(4, 5, 3, 2),
         input_size=(2, 4, 10),
         cudnn=True,
         desc='stride'
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(4, 5, 3, 1, 1),
+        input_size=(2, 4, 10),
+        cudnn=True,
+        desc='pad1'
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(4, 5, 5, 1, 2),
+        input_size=(2, 4, 10),
+        cudnn=True,
+        desc='pad2'
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(4, 4, 3, 1, 1),
+        input_size=(1, 4, 1),
+        cudnn=True,
+        desc='pad1size1'
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(4, 4, 5, 1, 2),
+        input_size=(1, 4, 1),
+        cudnn=True,
+        desc='pad2size1'
     ),
     dict(
         fullname='Conv1d_dilated',
