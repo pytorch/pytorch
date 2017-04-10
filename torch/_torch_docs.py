@@ -559,17 +559,17 @@ Example::
 
 add_docstr(torch._C.cat,
            """
-cat(inputs, dimension=0) -> Tensor
+cat(seq, dim=0) -> Tensor
 
-Concatenates the given sequence of :attr:`inputs` Tensors in the given dimension.
+Concatenates the given sequence of :attr:`seq` Tensors in the given dimension.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split` and :func:`torch.chunk`
 
 :func:`cat` can be best understood via examples.
 
 Args:
-    inputs (sequence of Tensors): Can be any python sequence of `Tensor` of the same type.
-    dimension (int, optional): The dimension over which the tensors are concatenated
+    seq (sequence of Tensors): Can be any python sequence of `Tensor` of the same type.
+    dim (int, optional): The dimension over which the tensors are concatenated
 
 Example::
 

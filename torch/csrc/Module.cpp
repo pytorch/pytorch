@@ -353,13 +353,19 @@ static PyObject * THPModule_randperm(PyObject *_unused, PyObject *args, PyObject
   return THPUtils_dispatchStateless(tensor, "randperm", args, kwargs);
 }
 
-static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
+static PyObject * THPModule_cat(PyObject *_unused, PyObject *args, PyObject *kwargs)
 {
   PyObject *tensor = THPDefaultTensorClass;
   THPObjectPtr iterator;
   THPObjectPtr item;
-  if (args && PyTuple_Size(args) > 0) {
-    PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
+  PyObject *first_arg;
+  if (args && PyTuple_GET_SIZE(args) > 0) {
+    first_arg = PyTuple_GET_ITEM(args, 0);
+  } else if (kwargs && PyTuple_GET_ITEM(args, 0)) {
+    first_arg = PyDict_GetItemString(kwargs, "seq");
+  }
+
+  if (first_arg) {
     if (THPModule_isTensor(first_arg)) {
       tensor = first_arg;
     } else if (PySequence_Check(first_arg)) {
@@ -371,7 +377,7 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
     PyErr_Clear();
   }
 
-  return THPUtils_dispatchStateless(tensor, "cat", args, NULL);
+  return THPUtils_dispatchStateless(tensor, "cat", args, kwargs);
 }
 
 PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)
@@ -605,7 +611,7 @@ static PyMethodDef TorchMethods[] = {
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"arange",          (PyCFunction)THPModule_arange,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
+  {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
   {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"gels",            (PyCFunction)THPModule_gels,              METH_VARARGS | METH_KEYWORDS, NULL},

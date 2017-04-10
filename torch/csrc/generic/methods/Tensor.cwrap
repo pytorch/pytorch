@@ -704,27 +704,36 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: THPTensor_stateless_(cat)
   python_name: cat
+  method_flags: METH_KEYWORDS
   only_register: True
   only_stateless: True
 ]]
 #ifndef TH_REAL_IS_HALF
-static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
+static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
 #if IS_CUDA
   THCPAutoGPU __autogpu_guard(-1);
 #endif
-  Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
+  Py_ssize_t _tuplecount = args ? PyTuple_GET_SIZE(args) : 0;
+  Py_ssize_t _dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+  Py_ssize_t _argcount = _tuplecount + _dictcount;
   std::vector<THPObjectPtr> items;
   std::vector<THTensor *> item_tensors;
-  PyObject *sequence;
   Py_ssize_t seq_length;
   THPTensorPtr result;
   long dimension = -1;
+  PyObject *sequence = _tuplecount > 0 ? PyTuple_GET_ITEM(args, 0)
+                     : (kwargs ? PyDict_GetItemString(kwargs, "seq") : NULL);
+  PyObject *pydim = _tuplecount > 1 ? PyTuple_GET_ITEM(args, 1)
+                  : (kwargs ? PyDict_GetItemString(kwargs, "dim") : NULL);
 
-  if (_argcount == 0 || _argcount > 2 || !PySequence_Check(PyTuple_GET_ITEM(args, 0)))
+  if (_argcount == 0 || _argcount > 2)
     goto invalid_arguments;
-  sequence = PyTuple_GET_ITEM(args, 0);
+  if (sequence == NULL || (_argcount > 1 && pydim == NULL))
+    goto invalid_arguments;
+  if (!PySequence_Check(sequence))
+    goto invalid_arguments;
   seq_length = PySequence_Length(sequence);
   THPUtils_assert(seq_length > 0, "sequence length has to be positive, but is %lld",
                   (long long)seq_length);
@@ -738,10 +747,10 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
     item_tensors.push_back(((THPTensor*)items[i].get())->cdata);
   }
 
-  if (_argcount == 2) {
-    if (!THPUtils_checkLong(PyTuple_GET_ITEM(args, 1)))
+  if (pydim) {
+    if (!THPUtils_checkLong(pydim))
       goto invalid_arguments;
-    dimension = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
+    dimension = THPUtils_unpackLong(pydim);
   } else {
     dimension = 0;
   }
@@ -769,9 +778,9 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
   return (PyObject*)result.release();
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "cat", 2,
-      "(sequence[" THPTensorStr "] tensors)",
-      "(sequence[" THPTensorStr "] tensors, int dim)");
+  THPUtils_invalidArguments(args, kwargs, "cat", 2,
+      "(sequence[" THPTensorStr "] seq)",
+      "(sequence[" THPTensorStr "] seq, int dim)");
   return NULL;
   END_HANDLE_TH_ERRORS
 }
