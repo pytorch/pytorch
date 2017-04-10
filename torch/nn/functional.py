@@ -430,7 +430,7 @@ def sigmoid(input):
 
 def linear(input, weight, bias=None):
     state = _functions.linear.Linear()
-    return state(input, weight) if bias is None or state(input, weight, bias)
+    return state(input, weight) if bias is None else state(input, weight, bias)
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
