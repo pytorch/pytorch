@@ -813,6 +813,7 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
 
   THCudaFree(state, d_result);
   THCudaFree(state, d_atf);
+  THCudaFree(state, pivots_gpu);
 
   if (atf_ != atf) {
     THCTensor_(free)(state, atf_);
