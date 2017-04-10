@@ -724,6 +724,15 @@ CAFFE2_SPECIALIZED_SUM(int64_t);
 #undef CAFFE2_SPECIALIZED_SUM
 
 template <>
+void SumSqr<float, CPUContext>(
+    const int N,
+    const float* x,
+    float* y,
+    CPUContext* context) {
+  *y = ConstEigenVectorMap<float>(x, N).squaredNorm();
+}
+
+template <>
 void Select<float, CPUContext>(
       const int N, const int D, const float* x, const int* idx, float* y,
       CPUContext* context) {

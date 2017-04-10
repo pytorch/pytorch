@@ -119,63 +119,6 @@ class TestUtilityOps(hu.HypothesisTestCase):
             reference=max_op,
         )
 
-    @given(n=st.integers(5, 8), **hu.gcs)
-    def test_elementwise_sum(self, n, gc, dc):
-        X = np.random.rand(n).astype(np.float32)
-
-        def sum_op(X):
-            return [np.sum(X)]
-
-        op = core.CreateOperator(
-            "SumElements",
-            ["X"],
-            ["y"]
-        )
-
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=sum_op,
-        )
-
-        self.assertGradientChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            outputs_to_check=0,
-            outputs_with_grads=[0],
-        )
-
-    @given(n=st.integers(5, 8), **hu.gcs)
-    def test_elementwise_avg(self, n, gc, dc):
-        X = np.random.rand(n).astype(np.float32)
-
-        def avg_op(X):
-            return [np.mean(X)]
-
-        op = core.CreateOperator(
-            "SumElements",
-            ["X"],
-            ["y"],
-            average=1
-        )
-
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=avg_op,
-        )
-
-        self.assertGradientChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            outputs_to_check=0,
-            outputs_with_grads=[0],
-        )
-
     @given(
         inputs=st.integers(min_value=1, max_value=20).flatmap(
             lambda size: st.tuples(

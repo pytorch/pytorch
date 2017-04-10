@@ -14,10 +14,6 @@ REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Sum, SumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SumInt, SumOp<int, CPUContext>);
-REGISTER_CPU_OPERATOR(SumElements, SumElementsOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(
-    SumElementsGradient,
-    SumElementsGradientOp<float, CPUContext>);
 
 REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
@@ -79,27 +75,6 @@ OPERATOR_SCHEMA(Print)
     .Input(0, "tensor", "The tensor to print.");
 
 OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);
-
-OPERATOR_SCHEMA(SumElements)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .ScalarType(TensorProto::FLOAT)
-    .SetDoc("Sums the elements of the input tensor.")
-    .Arg("average", "whether to average or not")
-    .Input(0, "X", "Tensor to sum up")
-    .Output(0, "sum", "Scalar sum");
-
-class GetSumElementsGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "SumElementsGradient",
-        "",
-        vector<string>{I(0), GO(0)},
-        vector<string>{GI(0)});
-  }
-};
-REGISTER_GRADIENT(SumElements, GetSumElementsGradient);
 
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
@@ -1006,19 +981,4 @@ OPERATOR_SCHEMA(NanCheck)
         "output",
         "Tensor to copy input into if no NaNs or inf."
         " Can be in-place");
-
-template <typename T, class Context>
-bool SumElementsGradientOp<T, Context>::RunOnDevice() {
-  auto& X = Input(0);
-  TensorCPU sum_grad = TensorCPU(Input(1));
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
-  DCHECK_EQ(sum_grad.size(), 1);
-  math::Set<T, Context>(
-      dX->size(),
-      static_cast<T>(sum_grad.data<T>()[0] * (average_ ? 1.0 / X.size() : 1)),
-      dX->template mutable_data<T>(),
-      &context_);
-  return true;
-}
 } // namespace caffe2

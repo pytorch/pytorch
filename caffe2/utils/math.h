@@ -207,6 +207,10 @@ void Dot(const int N, const T* a, const T* b, T* y, Context* context);
 template <typename T, class Context>
 void Sum(const int N, const T* x, T* y, Context* context);
 
+// Sum of squares of vector x, and writes the result to a single value y.
+template <typename T, class Context>
+void SumSqr(const int N, const T* x, T* y, Context* context);
+
 // Select does index selection of the rows a N*D matrix x, and gives the N
 // dimensional vector y that contains the selected data.
 template <typename T, class Context>
