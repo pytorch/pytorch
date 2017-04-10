@@ -15,20 +15,20 @@ void THNN_(FusedRNNAssertSizes)(THCState *state, int factor, int count, ...)
   THCTensor *input = va_arg(list, THCTensor*);
   THCTensor *hidden = va_arg(list, THCTensor*);
   THArgCheck(THCTensor_(nElement)(state, input) ==
-         THCTensor_(nElement)(state, hidden),
-         3, "Input and Hidden tensor sizes should be the same.");
+             THCTensor_(nElement)(state, hidden),
+             3, "Input and Hidden tensor sizes should be the same.");
 
   THAssertMsg(TensorUtils<THCTensor>::getDims(state, input) <= MAX_CUTORCH_DIMS,
-         "Tensor dimension is too large.");
+              "Tensor dimension is too large.");
 
   THAssertMsg(TensorUtils<THCTensor>::getDims(state, hidden) <= MAX_CUTORCH_DIMS,
-         "Tensor dimension is too large.");
+              "Tensor dimension is too large.");
 
   for (int arg=2; arg < count; ++arg){
     THCTensor *tens = va_arg(list, THCTensor*);
     THArgCheck(THCTensor_(nElement)(state, input) ==
-           THCTensor_(nElement)(state, tens)*factor,
-           3, "A pointwise tensor was not the right size, should have 1/%u the elements of input/hidden tensor.", arg, factor);
+               THCTensor_(nElement)(state, tens)*factor,
+               3, "A pointwise tensor was not the right size, should have 1/%u the elements of input/hidden tensor.", arg, factor);
     THAssertMsg(TensorUtils<THCTensor>::getDims(state, tens) <= MAX_CUTORCH_DIMS,
          "Tensor dimension is too large.");
   }
@@ -61,9 +61,9 @@ bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
   for (int arg=0; arg < count; ++arg){
     THCTensor *tens = va_arg(list, THCTensor*);
     if (!TensorUtils<THCTensor>::canUse32BitIndexMath(state, tens)){
-    va_end(list);
-    return false;
-      }
+      va_end(list);
+      return false;
+    }
   }
   va_end(list);
   return true;
@@ -75,9 +75,7 @@ bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
 #define H2F(input) __half2float(input)
 #define F2H(input) __float2half(input)
 
-template <typename T,
-      typename IndexType,
-      int Dims>
+template <typename T, typename IndexType, int Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
@@ -115,20 +113,20 @@ __global__ void
       T b1r, b1i, b1n, b2r, b2i, b2n;
 
       if(has_bias){
-    b1r = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+0*hsz);
-    b1i = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+1*hsz);
-    b1n = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+2*hsz);
+        b1r = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+0*hsz);
+        b1i = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+1*hsz);
+        b1n = DEVICE_LINEAR_GET(Bias1, linearIndex%hsz+2*hsz);
 
-    b2r = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+0*hsz);
-    b2i = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+1*hsz);
-    b2n = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+2*hsz);
+        b2r = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+0*hsz);
+        b2i = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+1*hsz);
+        b2n = DEVICE_LINEAR_GET(Bias2, linearIndex%hsz+2*hsz);
       }else{
 #ifndef THC_REAL_IS_HALF
-    b1r = 0.0; b1i = 0.0; b1n = 0.0;
-    b2r = 0.0; b2i = 0.0; b2n = 0.0;
+        b1r = 0.0; b1i = 0.0; b1n = 0.0;
+        b2r = 0.0; b2i = 0.0; b2n = 0.0;
 #else
-    b1r = F2H(0.0); b1i = F2H(0.0); b1n = F2H(0.0);
-    b2r = F2H(0.0); b2i = F2H(0.0); b2n = F2H(0.0);
+        b1r = F2H(0.0); b1i = F2H(0.0); b1n = F2H(0.0);
+        b2r = F2H(0.0); b2i = F2H(0.0); b2n = F2H(0.0);
 #endif
       }
 
@@ -176,14 +174,12 @@ __global__ void
     }
 }
 
-template <typename T,
-      typename IndexType,
-      int Dims>
+template <typename T, typename IndexType, int Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
 __global__ void
-  THNN_(GRUBackward)(TensorInfo<T, IndexType> input,
+THNN_(GRUBackward)(TensorInfo<T, IndexType> input,
              TensorInfo<T, IndexType> hidden,
              TensorInfo<T, IndexType> gradoutput,
              TensorInfo<T, IndexType> gradinput,
@@ -244,9 +240,7 @@ __global__ void
   }
 }
 
-template <typename T,
-      typename IndexType,
-      int Dims>
+template <typename T, typename IndexType, int Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
@@ -360,9 +354,7 @@ __global__ void
     }
 }
 
-template <typename T,
-      typename IndexType,
-      int Dims>
+template <typename T, typename IndexType, int Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
@@ -488,19 +480,19 @@ __global__ void
      TensorInfo<DATATYPE, ITYPE> gradinputI,                            \
      ITYPE hsz,                                                         \
      ITYPE totalElements);                                              \
-  
+
 
 #define EXPAND_DIM(ITYPE)                            \
   EXPAND_FUNCTION(ITYPE, -2)                         \
   EXPAND_FUNCTION(ITYPE, -1)                         \
   EXPAND_FUNCTION(ITYPE, 1)                          \
   EXPAND_FUNCTION(ITYPE, 2)                          \
-  
+
 
 #define EXPAND_TYPE                        \
   EXPAND_DIM(unsigned int)                 \
   EXPAND_DIM(unsigned long)                \
-  
+
 
 EXPAND_TYPE
 
@@ -547,7 +539,7 @@ EXPAND_TYPE
 #define GRU_BACKWARD(ITYPE, DIM) THNN_(GRUBackward)                     \
   <DATATYPE, ITYPE, DIM>                                                \
   <<<grid, block, 0, THCState_getCurrentStream(state)>>>                \
-  (inputI, hiddenI, gradoutI, gradinI, hid_size, totalElements);    
+  (inputI, hiddenI, gradoutI, gradinI, hid_size, totalElements);
 
 // ************ END Create actual function calls ************ //
 
@@ -599,7 +591,7 @@ void THNN_(LSTM_forw_ind_wrap)(
                  hid_size*4 == THCTensor_(nElement)(state, bias2),
                  "Bias in pointwise operation is an incorrect size, must be 4 x feature size.");
   }
-  
+
   inputI.collapseDims();
   hiddenI.collapseDims();
   cxI.collapseDims();

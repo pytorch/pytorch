@@ -24,7 +24,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         igates = F.linear(input, w_ih, None)
         hgates = F.linear(hidden[0], w_hh, None)
         state = fusedBackend.LSTMFused()
-        return b_ih and state(igates, hgates, hidden[1], b_ih, b_hh) or state(igates, hgates, hidden[1])
+        return state(igates, hgates, hidden[1]) if b_ih is None else state(igates, hgates, hidden[1], b_ih, b_hh) or 
 
     hx, cx = hidden
     gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
@@ -48,7 +48,7 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         gi = F.linear(input, w_ih, False)
         gh = F.linear(hidden, w_hh, False)
         state = fusedBackend.GRUFused()
-        return b_ih and state(gi, gh, hidden, b_ih, b_hh) or state(gi, gh, hidden)
+        return state(gi, gh, hidden) if b_ih is None else state(gi, gh, hidden, b_ih, b_hh)
 
     gi = F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
