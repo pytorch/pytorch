@@ -63,6 +63,9 @@ std::vector<char> RedisStore::get(const std::string& key) {
     GLOO_THROW_IO_EXCEPTION(redis_->errstr);
   }
   redisReply* reply = static_cast<redisReply*>(ptr);
+  if (reply->type == REDIS_REPLY_ERROR) {
+    GLOO_THROW_IO_EXCEPTION("Error: ", reply->str);
+  }
   GLOO_ENFORCE_EQ(reply->type, REDIS_REPLY_STRING);
   std::vector<char> result(reply->str, reply->str + reply->len);
   freeReplyObject(reply);
@@ -89,6 +92,9 @@ bool RedisStore::check(const std::vector<std::string>& keys) {
     GLOO_THROW_IO_EXCEPTION(redis_->errstr);
   }
   redisReply* reply = static_cast<redisReply*>(ptr);
+  if (reply->type == REDIS_REPLY_ERROR) {
+    GLOO_THROW_IO_EXCEPTION("Error: ", reply->str);
+  }
   GLOO_ENFORCE_EQ(reply->type, REDIS_REPLY_INTEGER);
   auto result = (reply->integer == keys.size());
   freeReplyObject(reply);
