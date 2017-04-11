@@ -25,6 +25,36 @@ def _one_hots():
 
 class TestOneHotOps(hu.HypothesisTestCase):
     @given(
+        x=hu.tensor(
+            min_dim=2, max_dim=2, dtype=np.int32,
+            elements=st.integers(min_value=0, max_value=10)),
+        **hu.gcs)
+    def test_batch_one_hot(self, x, gc, dc):
+        d = x.shape[1]
+        lens = []
+        vals = []
+        for i in range(0, d):
+            val = np.unique(x[:, i])
+            vals.extend(val)
+            lens.append(len(val))
+        lens = np.array(lens, dtype=np.int32)
+        vals = np.array(vals, dtype=np.int32)
+
+        def ref(x, lens, vals):
+            output_dim = vals.size
+            ret = np.zeros((x.shape[0], output_dim)).astype(x.dtype)
+            p = 0
+            for i, l in enumerate(lens):
+                for j in range(0, l):
+                    v = vals[p + j]
+                    ret[x[:, i] == v, p + j] = 1
+                p += lens[i]
+            return (ret, )
+
+        op = core.CreateOperator('BatchOneHot', ["X", "LENS", "VALS"], ["Y"])
+        self.assertReferenceChecks(gc, op, [x, lens, vals], ref)
+
+    @given(
         hot_indices=hu.tensor(
             min_dim=1, max_dim=1, dtype=np.int64,
             elements=st.integers(min_value=0, max_value=42)),
@@ -74,6 +104,7 @@ class TestOneHotOps(hu.HypothesisTestCase):
             op,
             [lengths, indices, index_size],
             segment_one_hot_ref)
+
 
 if __name__ == "__main__":
     import unittest

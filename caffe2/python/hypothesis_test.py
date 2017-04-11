@@ -1675,6 +1675,31 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, [a], ref)
         self.assertEqual(dst, out.dtype)
 
+    @given(a=hu.tensor(),
+           eps=st.floats(min_value=1e-4, max_value=1e-2),
+           **hu.gcs)
+    def test_logit(self, a, eps, gc, dc):
+        def ref(data):
+            data = np.clip(data, eps, 1.0 - eps)
+            return (np.log(data / (1 - data)), )
+
+        op = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps)
+        self.assertDeviceChecks(dc, op, [a], [0])
+        self.assertReferenceChecks(gc, op, [a], ref)
+
+    @given(a=hu.tensor(elements=st.floats(allow_nan=True)),
+           value=st.floats(min_value=-10, max_value=10),
+           **hu.gcs)
+    def test_replace_nan(self, a, value, gc, dc):
+        def ref(data):
+            out = np.copy(data)
+            out[np.isnan(data)] = value
+            return (out, )
+
+        op = core.CreateOperator('ReplaceNaN', ["X"], ["Y"], value=value)
+        self.assertDeviceChecks(dc, op, [a], [0])
+        self.assertReferenceChecks(gc, op, [a], ref)
+
     @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
            flatmap(lambda dtype: hu.tensor(
                min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
