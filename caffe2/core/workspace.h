@@ -95,7 +95,7 @@ class Workspace {
    * Allows to add a parent workspace post factum after the object
    * was already constructed.
    */
-  void AddParentWorkspace(Workspace* shared) {
+  void SetParentWorkspace(Workspace* shared) {
     shared_ = shared;
   }
 

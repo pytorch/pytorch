@@ -324,21 +324,25 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
 
     @given(t=st.integers(1, 4),
            n=st.integers(1, 5),
-           d=st.integers(1, 5))
-    def test_lstm(self, t, n, d):
+           d=st.integers(1, 5),
+           memory_optim=st.booleans())
+    def test_lstm(self, t, n, d, memory_optim):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
             self.lstm(
-                recurrent.LSTM, t, n, d, lstm_reference, outputs_with_grads)
+                recurrent.LSTM, t, n, d, lstm_reference, outputs_with_grads,
+                memory_optim)
 
     @given(t=st.integers(1, 4),
            n=st.integers(1, 5),
-           d=st.integers(1, 5))
-    def test_milstm(self, t, n, d):
+           d=st.integers(1, 5),
+           memory_optim=st.booleans())
+    def test_milstm(self, t, n, d, memory_optim):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
             self.lstm(
-                recurrent.MILSTM, t, n, d, milstm_reference, outputs_with_grads)
+                recurrent.MILSTM, t, n, d, milstm_reference,
+                outputs_with_grads, memory_optim)
 
-    def lstm(self, create_lstm, t, n, d, ref, outputs_with_grads):
+    def lstm(self, create_lstm, t, n, d, ref, outputs_with_grads, memory_optim):
         model = CNNModelHelper(name='external')
         input_blob, seq_lengths, hidden_init, cell_init = (
             model.net.AddExternalInputs(
@@ -347,7 +351,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         create_lstm(
             model, input_blob, seq_lengths, (hidden_init, cell_init),
             d, d, scope="external/recurrent",
-            outputs_with_grads=outputs_with_grads)
+            outputs_with_grads=outputs_with_grads,
+            memory_optimization=memory_optim)
 
         op = model.net._net.op[-1]
 
@@ -654,6 +659,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
            decoder_input_length=st.integers(1, 3),
            decoder_state_dim=st.integers(1, 3),
            batch_size=st.integers(1, 3),
+           lstm_mem_optim=st.booleans(),
+           attention_mem_optim=st.booleans(),
            **hu.gcs)
     def test_lstm_with_recurrent_attention(
         self,
@@ -662,6 +669,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         decoder_input_length,
         decoder_state_dim,
         batch_size,
+        lstm_mem_optim,
+        attention_mem_optim,
         gc,
         dc,
     ):
@@ -696,7 +705,9 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
                 decoder_input_dim=decoder_state_dim,
                 decoder_state_dim=decoder_state_dim,
                 scope='external/LSTMWithAttention',
-                attention_type=AttentionType.Recurrent
+                attention_type=AttentionType.Recurrent,
+                lstm_memory_optimization=lstm_mem_optim,
+                attention_memory_optimization=attention_mem_optim
             )
             op = model.net._net.op[-1]
         workspace.RunNetOnce(model.param_init_net)

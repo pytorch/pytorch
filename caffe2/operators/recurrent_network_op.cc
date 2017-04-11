@@ -2,7 +2,7 @@
 #include "caffe2/core/workspace.h"
 
 namespace caffe2 {
-CAFFE_KNOWN_TYPE(std::vector<std::shared_ptr<Workspace>>);
+CAFFE_KNOWN_TYPE(detail::ScratchWorkspaces);
 
 namespace {
 REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<float, CPUContext>);

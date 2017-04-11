@@ -70,7 +70,6 @@ def create_model(args, queue, label_queue, input_shape):
     input_blob = model.DequeueBlobs(queue, "input_data")
     labels = model.DequeueBlobs(label_queue, "label")
 
-
     if args.implementation == "own":
         output, last_hidden, _, last_state = recurrent.LSTM(
             model=model,
@@ -80,6 +79,7 @@ def create_model(args, queue, label_queue, input_shape):
             dim_in=args.input_dim,
             dim_out=args.hidden_dim,
             scope="lstm1",
+            memory_optimization=args.memory_optimization,
         )
     elif args.implementation == "cudnn":
         # We need to feed a placeholder input so that RecurrentInitOp
@@ -96,7 +96,6 @@ def create_model(args, queue, label_queue, input_shape):
 
     else:
         assert False, "Unknown implementation"
-
 
     weights = model.UniformFill(labels, "weights")
     softmax, loss = model.SoftmaxWithLoss(
@@ -214,7 +213,12 @@ def GetArgumentParser():
         "--implementation",
         type=str,
         default="own",
-        help="'cudnn' or 'own'"
+        help="'cudnn' or 'own'",
+    )
+    parser.add_argument(
+        "--memory_optimization",
+        action="store_true",
+        help="Whether to use memory optimized LSTM or not",
     )
 
     return parser
