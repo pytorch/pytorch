@@ -26,54 +26,148 @@ Detailed build matrix (hit refresh if you see icons not showing up due to heroku
 
     git clone --recursive https://github.com/caffe2/caffe2.git
     cd caffe2
-    
-#### OS X
-    
+
+### OS X
+
     brew install automake protobuf
     mkdir build && cd build
     cmake ..
     make
 
-#### Ubuntu
+### Ubuntu
 
-    sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev cmake python-protobuf
-    sudo pip install numpy
-    wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
-    sudo dpkg -i cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
-    sudo apt-get update
-    sudo apt-get install cuda
-    sudo apt-get install git
+This build is confirmed for:
 
-    CUDNN_URL="http://developer.download.nvidia.com/compute/redist/cudnn/v5.1/cudnn-8.0-linux-x64-v5.1.tgz" &&
-    curl -fsSL ${CUDNN_URL} -O &&
-    sudo tar -xzf cudnn-8.0-linux-x64-v5.1.tgz -C /usr/local &&
-    rm cudnn-8.0-linux-x64-v5.1.tgz &&
-    sudo ldconfig
-    
+* Ubuntu 14.04
+* Ubuntu 16.06
+
+#### Required Dependencies
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+      build-essential \
+      cmake \
+      git \
+      libgoogle-glog-dev \
+      libprotobuf-dev \
+      protobuf-compiler \
+      python-dev \
+      python-pip                          
+sudo pip install numpy protobuf
+```
+
+#### Optional GPU Support
+
+If you plan to use GPU instead of CPU only, then you should install NVIDIA CUDA and cuDNN, a GPU-accelerated library of primitives for deep neural networks.
+[NVIDIA's detailed instructions](http://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#ubuntu-installation) or if you're feeling lucky try the quick install set of commands below.
+
+**Update your graphics card drivers first!** Otherwise you may suffer from a wide range of difficult to diagnose errors.
+
+**For Ubuntu 14.04**
+
+```bash
+sudo apt-get update && sudo apt-get install wget -y --no-install-recommends
+wget "http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_8.0.61-1_amd64.deb"
+sudo dpkg -i cuda-repo-ubuntu1404_8.0.61-1_amd64.deb
+sudo apt-get update
+sudo apt-get install cuda
+```
+
+**For Ubuntu 16.04**
+
+```bash
+sudo apt-get update && sudo apt-get install wget -y --no-install-recommends
+wget "http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_8.0.61-1_amd64.deb"
+sudo dpkg -i cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
+sudo apt-get update
+sudo apt-get install cuda
+```
+
+#### Install cuDNN (all Ubuntu versions)
+
+```
+CUDNN_URL="http://developer.download.nvidia.com/compute/redist/cudnn/v5.1/cudnn-8.0-linux-x64-v5.1.tgz"
+wget ${CUDNN_URL}
+sudo tar -xzf cudnn-8.0-linux-x64-v5.1.tgz -C /usr/local
+rm cudnn-8.0-linux-x64-v5.1.tgz && sudo ldconfig
+```
+
+#### Optional Dependencies
+
+> Note `libgflags2` is for Ubuntu 14.04. `libgflags-dev` is for Ubuntu 16.04.
+
+```bash
+# for Ubuntu 14.04
+sudo apt-get install -y --no-install-recommends libgflags2
+```
+
+```bash
+# for Ubuntu 16.04
+sudo apt-get install -y --no-install-recommends libgflags-dev
+```
+
+```bash
+# for both Ubuntu 14.04 and 16.04
+sudo apt-get install -y --no-install-recommends \
+      libgtest-dev \
+      libiomp-dev \
+      libleveldb-dev \
+      liblmdb-dev \
+      libopencv-dev \
+      libopenmpi-dev \
+      libsnappy-dev \
+      openmpi-bin \
+      openmpi-doc \
+      python-pydot
+```
+
+Check the Python section below and install optional packages before you build.
+
     mkdir build && cd build
     cmake ..
     make
 
-#### Android and iOS
+### Android and iOS
 
 We use CMake's Android and iOS ports to build native binaries that you can then integrate into your Android or XCode projects. See scripts/build_android.sh and scripts/build_ios.sh for more details.
 
 For Android, one can also use gradle to build Caffe2 directly with Android Studio. An example project can be found [here](https://github.com/bwasti/AICamera). Note that you may need to configure Android Studio so that it has the right SDK and NDK versions to build the code.
 
-#### Raspberry Pi
+### Raspberry Pi
 
 For Raspbian, run scripts/build_raspbian.sh on the Raspberry Pi.
 
-#### Tegra X1
+### Tegra X1
 
 To install Caffe2 on NVidia's Tegra X1 platform, simply install the latest system with the NVidia JetPack installer, and then run scripts/build_tegra_x1.sh on the Tegra device.
-    
+
 ## Python support
 
 To run the tutorials you'll need ipython-notebooks and matplotlib, which can be installed on OS X with:
-    
-    brew install matplotlib --with-python3
-    pip install ipython notebook
+
+```    
+brew install matplotlib --with-python3
+pip install ipython notebook
+```
+
+You may also find these required for specific tutorials and examples, so you can run this to get all of the prerequisites at once:
+
+```
+sudo pip install \
+      flask \
+      graphviz \
+      hypothesis \
+      jupyter \
+      matplotlib \
+      pydot python-nvd3 \
+      pyyaml \
+      requests \
+      scikit-image \
+      scipy \
+      setuptools \
+      tornado
+```
 
 ## Build status (known working)
 
@@ -86,11 +180,11 @@ OS X (Clang)
 - [x] Default GPU build
 
 Options (both Clang and GCC)
-- [ ] Nervana GPU
+- [x] Nervana GPU
 - [ ] ZMQ
-- [ ] RocksDB
-- [ ] MPI
-- [ ] OpenMP
+- [x] RocksDB
+- [x] MPI
+- [x] OpenMP
 - [x] No LMDB
 - [x] No LevelDB
 - [x] No OpenCV
@@ -103,4 +197,5 @@ BLAS
 Other
 - [x] CMake 2.8 support
 - [x] List of dependencies for Ubuntu 14.04
+- [x] List of dependencies for Ubuntu 16.04
 - [x] List of dependencies for OS X
