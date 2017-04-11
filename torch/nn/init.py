@@ -147,11 +147,11 @@ def dirac(tensor):
 
     for d in range(min_dim):
         if dimensions == 3:  # Temporal convolution
-            tensor[d, d, tensor.size(2) // 2].fill_(1)
+            tensor[d, d, tensor.size(2) // 2] = 1
         elif dimensions == 4:  # Spatial convolution
-            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2].fill_(1)
+            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
         else:  # Volumetric convolution
-            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2].fill_(1)
+            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
     return tensor
 
 
