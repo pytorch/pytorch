@@ -200,6 +200,7 @@ def _generate_function_classes(scope_dict):
     classes_to_generate = {fn.name.partition('_')[0] for fn in function_list}
     exceptions = {
         'Linear',
+        'IndexLinear',
         'SpatialFullConvolution',
         'SpatialConvolutionMM',
         'SparseLinear',
