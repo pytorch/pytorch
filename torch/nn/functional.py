@@ -391,7 +391,7 @@ def hardshrink(input, lambd=0.5):
 
 
 def tanhshrink(input):
-    return input - torch.tanh(input)
+    return input - _functions.thnn.Tanh()(input)
 
 
 def softsign(input):
@@ -419,11 +419,11 @@ def log_softmax(input):
 
 
 def tanh(input):
-    return torch.tanh(input)
+    return _functions.thnn.Tanh()(input)
 
 
 def sigmoid(input):
-    return torch.sigmoid(input)
+    return _functions.thnn.Sigmoid()(input)
 
 
 # etc.
