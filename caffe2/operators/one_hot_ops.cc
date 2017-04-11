@@ -1,7 +1,52 @@
+#include "caffe2/operators/one_hot_ops.h"
+
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 
 namespace caffe2 {
+
+template <>
+template <typename T>
+bool BatchOneHotOp<CPUContext>::DoRunWithType() {
+  auto& input = Input(X);
+  auto& lens = Input(LENS);
+  auto& vals = Input(VALS);
+  CAFFE_ENFORCE_GE(input.ndim(), 1);
+  auto N = input.dim(0);
+  auto D = input.size_from_dim(1);
+  CAFFE_ENFORCE_EQ(lens.size(), D);
+
+  const auto* lens_data = lens.template data<int32_t>();
+  TIndex output_dim = 0;
+  for (TIndex i = 0; i < D; i++) {
+    CAFFE_ENFORCE_GE(lens_data[i], 0);
+    output_dim += lens_data[i];
+  }
+  CAFFE_ENFORCE_EQ(vals.size(), output_dim);
+  auto* output = Output(ONE_HOT);
+  output->Resize(N, output_dim);
+
+  const auto* input_data = input.template data<T>();
+  const auto* vals_data = vals.template data<T>();
+  auto* output_data = output->template mutable_data<T>();
+  // eigen is column-major
+  auto input_m = ConstEigenMatrixMap<T>(input_data, D, N);
+  auto output_m = EigenMatrixMap<T>(output_data, output_dim, N);
+
+  // `p` is the column position in output_data, that points to the next
+  // column to be filled.
+  TIndex p = 0;
+  // one-hot encoding for each example.
+  for (TIndex j = 0; j < D; j++) {
+    for (TIndex t = 0; t < lens_data[j]; t++) {
+      output_m.row(p) =
+          input_m.row(j).cwiseEqual(vals_data[p]).template cast<T>();
+      p++;
+    }
+  }
+  return true;
+}
+
 namespace {
 
 class OneHotOp : public Operator<CPUContext> {
@@ -73,9 +118,31 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     return true;
   }
 };
-
+REGISTER_CPU_OPERATOR(BatchOneHot, BatchOneHotOp<CPUContext>);
 REGISTER_CPU_OPERATOR(OneHot, OneHotOp);
 REGISTER_CPU_OPERATOR(SegmentOneHot, SegmentOneHotOp);
+
+OPERATOR_SCHEMA(BatchOneHot)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(Input is a matrix tensor. Its first dimension is the batch
+size. Expand each column of it using one hot encoding. The `lengths` specifies
+the size of each column after encoding, and the `values` is the dictionary value
+of one-hot encoding for each column. For example
+
+If data = [[2, 3], [4, 1], [2, 5]], lengths = [2, 3],
+and values = [2, 4, 1, 3, 5], then
+
+output = [[1, 0, 0, 1, 0], [0, 1, 1, 0, 0], [1, 0, 0, 0, 1]]
+
+)DOC")
+    .Input(0, "data", "input tensor matrix")
+    .Input(1, "lengths", "the size is the same as the width of the `data`")
+    .Input(2, "values", "one hot encoding dictionary values")
+    .Output(
+        0,
+        "output",
+        "output matrix that expands each input column with one hot encoding");
 
 OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
@@ -101,6 +168,7 @@ that has the elements in each sequence set to 1.0, and 0.0 everywhere else.
     .Input(2, "index_size_tensor", "Size of the index")
     .Output(0, "one_hots", "Matrix of size len(lengths) x index_size");
 
+NO_GRADIENT(BatchOneHot);
 NO_GRADIENT(OneHot);
 NO_GRADIENT(SegmentOneHot);
 }
