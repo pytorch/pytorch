@@ -142,7 +142,7 @@ def dirac(tensor):
         return tensor
 
     sizes = tensor.size()
-    min_dim = math.min(sizes[0], sizes[1])
+    min_dim = min(sizes[0], sizes[1])
     tensor.zero_()
 
     for d in range(min_dim):

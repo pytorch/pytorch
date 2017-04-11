@@ -1963,7 +1963,7 @@ class TestNNInit(TestCase):
                     input_tensor = input_tensor.data
 
                 c_out, c_in = input_tensor.size(0), input_tensor.size(1)
-                min_d = math.min(c_out, c_in)
+                min_d = min(c_out, c_in)
                 # Check number of nonzeros is equivalent to smallest dim
                 assert input_tensor.nonzero().size(0) == min_d
                 # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
