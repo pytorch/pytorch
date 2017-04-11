@@ -256,72 +256,15 @@ class DivGradientOp final : public Operator<Context> {
   bool RunOnDevice() override;
 };
 
-namespace SRLHelper {
-
-template <typename T>
-void sum2one(const T* a, T* y, size_t n);
-
-template <typename T>
-void RunWithBroadcast1(const T* a, T* y, size_t pre, size_t n, CPUContext*);
-
-template <typename T>
-void RunWithBroadcast2(
-    const T* a,
-    T* y,
-    size_t pre,
-    size_t n,
-    size_t post,
-    CPUContext*);
-
-} // namespace SRLHelper
-
 // Sum reduction operator that is used for computing the gradient in cases
 // where the forward op is in broadcast mode.
 template <class Context>
 class SumReduceLikeOp final : public Operator<Context> {
  public:
+  USE_SIMPLE_CTOR_DTOR(SumReduceLikeOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SumReduceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        OP_SINGLE_ARG(bool, "broadcast", enable_broadcast_, 0),
-        OP_SINGLE_ARG(int, "axis", axis_, -1),
-        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
-        OP_SINGLE_ARG(string, "order", order_, "NCHW") {
-    if (axis_ != -1) {
-      // Get axis from an explicit axis argument.
-      CAFFE_ENFORCE_EQ(
-          axis_str_.size(),
-          0,
-          "Args axis and axis_str cannot be used simultaneously.");
-    } else if (axis_str_.size()) {
-      // Get the axis index semantically.
-      CAFFE_ENFORCE_EQ(
-          axis_str_.size(), 1, "Unsupported axis string", axis_str_);
-      size_t semantic_axis_ = order_.find(axis_str_);
-      CAFFE_ENFORCE_NE(
-          semantic_axis_,
-          string::npos,
-          "Unrecognizable axis string ",
-          axis_str_,
-          " from order string ",
-          order_);
-      axis_ = semantic_axis_;
-    }
-  }
 
-  bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, double, int, long>>::call(
-        this, Input(0));
-  }
-
-  template <typename T>
-  bool DoRunWithType();
-
- private:
-  bool enable_broadcast_;
-  int axis_;
-  string axis_str_;
-  string order_;
+  bool RunOnDevice() override;
 };
 
 template <class Context>

@@ -80,11 +80,25 @@ class GetAddGradient : public GradientMakerBase {
     }
     SetDense(0, GO(0));
 
+    if (HasArgument(Def(), "use_grad_hack")) {
+      // TODO: remove this hack when SumReduceLike is implemented.
+      // This only works if the broadcasting is along the first dimension
+      return SingleGradientDef(
+          "ReduceFrontSum",
+          "add_grad",
+          vector<string>{GO(0)},
+          vector<string>{GI(1)});
+    }
+
     return SingleGradientDef(
         "SumReduceLike",
         "",
         vector<string>{GO(0), I(1)},
         vector<string>{GI(1)});
+  }
+  // Make sure the broadcast argument is not copied over.
+  bool CopyArguments() const override {
+    return false;
   }
 };
 REGISTER_GRADIENT(Add, GetAddGradient);
@@ -107,34 +121,21 @@ class GetSubGradient : public GradientMakerBase {
           vector<string>{GO(0)},
           vector<string>{GI(1) + "_autogen_pre_red"}));
 
-      Argument broadcast, axis, axis_str, order;
-      if (HasArgument(Def(), "broadcast")) {
-        broadcast = GetArgument(Def(), "broadcast");
+      if (HasArgument(Def(), "use_grad_hack")) {
+        // TODO: remove this hack when SumReduceLike is implemented.
+        // This only works if the broadcasting is along the first dimension
+        grad_ops.push_back(CreateOperatorDef(
+            "ReduceFrontSum",
+            "sub_grad",
+            vector<string>{GI(1) + "_autogen_pre_red"},
+            vector<string>{GI(1)}));
       } else {
-        broadcast = MakeArgument<int>("broadcast", 0);
+        grad_ops.push_back(CreateOperatorDef(
+            "SumReduceLike",
+            "",
+            vector<string>{GI(1) + "_autogen_pre_red", I(1)},
+            vector<string>{GI(1)}));
       }
-      if (HasArgument(Def(), "axis")) {
-        axis = GetArgument(Def(), "axis");
-      } else {
-        axis = MakeArgument<int>("axis", -1);
-      }
-      if (HasArgument(Def(), "axis_str")) {
-        axis_str = GetArgument(Def(), "axis_str");
-      } else {
-        axis_str = MakeArgument<string>("axis_str", "");
-      }
-      if (HasArgument(Def(), "order")) {
-        order = GetArgument(Def(), "order");
-      } else {
-        order = MakeArgument<string>("order", "NCHW");
-      }
-      grad_ops.push_back(CreateOperatorDef(
-          "SumReduceLike",
-          "",
-          vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-          vector<string>{GI(1)},
-          vector<Argument>{broadcast, axis, axis_str, order}));
-
       return grad_ops;
     }
   }
@@ -160,47 +161,34 @@ class GetMulGradient : public GradientMakerBase {
           CreateOperatorDef(
               "Mul", "", vector<string>{GO(0), I(0)}, vector<string>{GI(1)})};
     } else {
-      Argument broadcast, axis, axis_str, order;
-      if (HasArgument(Def(), "broadcast")) {
-        broadcast = GetArgument(Def(), "broadcast");
-      } else {
-        broadcast = MakeArgument<int>("broadcast", 0);
-      }
-      if (HasArgument(Def(), "axis")) {
-        axis = GetArgument(Def(), "axis");
-      } else {
-        axis = MakeArgument<int>("axis", -1);
-      }
-      if (HasArgument(Def(), "axis_str")) {
-        axis_str = GetArgument(Def(), "axis_str");
-      } else {
-        axis_str = MakeArgument<string>("axis_str", "");
-      }
-      if (HasArgument(Def(), "order")) {
-        order = GetArgument(Def(), "order");
-      } else {
-        order = MakeArgument<string>("order", "NCHW");
-      }
-
       vector<OperatorDef> grad_ops;
       grad_ops.push_back(CreateOperatorDef(
           "Mul",
           "mul_grad_1st_op",
           vector<string>{GO(0), I(1)},
           vector<string>{GI(0)},
-          vector<Argument>{broadcast, axis, axis_str, order}));
+          vector<Argument>{MakeArgument<int>("broadcast", 1)}));
       grad_ops.push_back(CreateOperatorDef(
           "Mul",
           "mul_gradient_2nd_op",
           vector<string>{GO(0), I(0)},
           vector<string>{GI(1) + "_autogen_pre_red"}));
 
-      grad_ops.push_back(CreateOperatorDef(
-          "SumReduceLike",
-          "mul_with_broadcast_grad_3",
-          vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-          vector<string>{GI(1)},
-          vector<Argument>{broadcast, axis, axis_str, order}));
+      if (HasArgument(Def(), "use_grad_hack")) {
+        // TODO: remove this hack when SumReduceLike has been implemented.
+        // This only works properly if broadcasting is along the first dimension
+        grad_ops.push_back(CreateOperatorDef(
+            "ReduceFrontSum",
+            "mul_grad_3rd_op",
+            vector<string>{GI(1) + "_autogen_pre_red"},
+            vector<string>{GI(1)}));
+      } else {
+        grad_ops.push_back(CreateOperatorDef(
+            "SumReduceLike",
+            "mul_with_broadcast_grad_3",
+            vector<string>{GI(1) + "_autogen_pre_red", I(1)},
+            vector<string>{GI(1)}));
+      }
 
       return grad_ops;
     }
