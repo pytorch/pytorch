@@ -36,6 +36,45 @@ using db::DB;
 using db::Transaction;
 
 template <class Context>
+class DBExistsOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  DBExistsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        ws_(ws),
+        absolute_path_(
+            OperatorBase::GetSingleArgument<int>("absolute_path", false)),
+        db_name_(OperatorBase::GetSingleArgument<string>("db_name", "")),
+        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")) {}
+
+  bool RunOnDevice() override {
+    string full_db_name =
+        absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
+    auto* output = Output(0);
+    output->Resize();
+    bool* exists = output->template mutable_data<bool>();
+    // Warning! We assume that creating a DB throws an exception if the DB
+    // does not exist. If the DB constructor does not follow this design
+    // pattern,
+    // the returned output (the existence tensor) can be wrong.
+    try {
+      std::unique_ptr<DB> db(
+          caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
+      *exists = true;
+    } catch (...) {
+      *exists = false;
+    }
+    return true;
+  }
+
+ private:
+  Workspace* ws_;
+  bool absolute_path_;
+  std::string db_name_;
+  std::string db_type_;
+};
+
+template <class Context>
 class LoadOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
