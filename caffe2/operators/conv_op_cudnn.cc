@@ -140,13 +140,16 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   size_t cudnn_state_;
 };
 
-template <typename T>
+
 class CudnnConvOp final : public CudnnConvOpBase {
  public:
   CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws)  {}
 
   ~CudnnConvOp() {}
+
+  template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
+  bool DoRunWithType();
 
   bool RunOnDevice() override;
 
@@ -158,7 +161,6 @@ class CudnnConvOp final : public CudnnConvOpBase {
   INPUT_TAGS(INPUT, FILTER, BIAS);
 };
 
-template <typename T>
 class CudnnConvGradientOp final : public CudnnConvOpBase {
  public:
   CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
@@ -170,6 +172,11 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
   }
 
   ~CudnnConvGradientOp() {}
+
+  template <typename T_X, typename T_DY, typename T_W, typename T_B,
+            typename MATH,
+            typename T_DX, typename T_DW, typename T_DB>
+  bool DoRunWithType();
 
   bool RunOnDevice() override;
 
@@ -189,8 +196,8 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
 // Implementations
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename T>
-bool CudnnConvOp<T>::RunOnDevice() {
+template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
+bool CudnnConvOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto* Y = Output(0);
@@ -243,13 +250,13 @@ bool CudnnConvOp<T>::RunOnDevice() {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.dims();
-      SetTensor4dDescriptorWithGroup<T>(bottom_desc_, N, C, H, W);
+      SetTensor4dDescriptorWithGroup<T_X>(bottom_desc_, N, C, H, W);
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
-          cudnnTypeWrapper<T>::type,
+          cudnnTypeWrapper<T_W>::type,
           GetCudnnTensorFormat(order_),
           M / group_,
           C / group_,
@@ -259,7 +266,7 @@ bool CudnnConvOp<T>::RunOnDevice() {
         CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
             bias_desc_,
             GetCudnnTensorFormat(order_),
-            cudnnTypeWrapper<T>::type,
+            cudnnTypeWrapper<T_B>::type,
             1,
             M,
             1,
@@ -267,12 +274,12 @@ bool CudnnConvOp<T>::RunOnDevice() {
       }
     }
     // Set the output
-    SetTensor4dDescriptorWithGroup<T>(top_desc_, N, M, H_out, W_out);
+    SetTensor4dDescriptorWithGroup<T_Y>(top_desc_, N, M, H_out, W_out);
     // Set the output with descriptor useful for bias addition in one run
     CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         top_desc_for_bias_,
         GetCudnnTensorFormat(order_),
-        cudnnTypeWrapper<T>::type,
+        cudnnTypeWrapper<T_B>::type,
         N,
         M,
         H_out,
@@ -288,7 +295,7 @@ bool CudnnConvOp<T>::RunOnDevice() {
         dilation_h(),
         dilation_w(),
         CUDNN_CROSS_CORRELATION,
-        cudnnTypeWrapper<T>::type));
+        cudnnTypeWrapper<MATH>::type));
 #else
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
@@ -318,12 +325,12 @@ bool CudnnConvOp<T>::RunOnDevice() {
           CUDNN_ENFORCE(cudnnFindConvolutionForwardAlgorithmEx(
               state->cudnn_handle(),
               bottom_desc_,
-              X.template data<T>(),
+              X.template data<T_X>(),
               filter_desc_,
-              filter.template data<T>(),
+              filter.template data<T_W>(),
               conv_desc_,
               top_desc_,
-              Y->template mutable_data<T>(),
+              Y->template mutable_data<T_Y>(),
               kNUM_CUDNN_FWD_ALGS,
               &returned_algo_count,
               perf_stat.data(),
@@ -363,18 +370,18 @@ bool CudnnConvOp<T>::RunOnDevice() {
     cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
       CUDNN_ENFORCE(cudnnConvolutionForward(
           state->cudnn_handle(),
-          cudnnTypeWrapper<T>::kOne(),
+          cudnnTypeWrapper<T_X>::kOne(),
           bottom_desc_,
-          X.template data<T>() + i * group_offset_X,
+          X.template data<T_X>() + i * group_offset_X,
           filter_desc_,
-          filter.template data<T>() + i * group_offset_filter,
+          filter.template data<T_W>() + i * group_offset_filter,
           conv_desc_,
           algo_,
           state->workspace().get(cudnn_ws_nbytes_),
           cudnn_ws_nbytes_,
-          cudnnTypeWrapper<T>::kZero(),
+          cudnnTypeWrapper<T_Y>::kZero(),
           top_desc_,
-          Y->template mutable_data<T>() + i * group_offset_Y));
+          Y->template mutable_data<T_Y>() + i * group_offset_Y));
     });
   }
   // Bias
@@ -386,21 +393,41 @@ bool CudnnConvOp<T>::RunOnDevice() {
 
     CUDNN_ENFORCE(cudnnAddTensor(
         cudnn_wrapper_.inline_cudnn_handle(),
-        cudnnTypeWrapper<T>::kOne(),
+        cudnnTypeWrapper<T_B>::kOne(),
         bias_desc_,
-        bias.template data<T>(),
-        cudnnTypeWrapper<T>::kOne(),
+        bias.template data<T_B>(),
+        cudnnTypeWrapper<T_Y>::kOne(),
         top_desc_for_bias_,
-        Y->template mutable_data<T>()));
+        Y->template mutable_data<T_Y>()));
   }
   // Done.
   return true;
 }
 
-// TODO(Yangqing): a lot of the function contents are very similar. Consider
-// consolidating them.
-template <typename T>
-bool CudnnConvGradientOp<T>::RunOnDevice() {
+bool CudnnConvOp::RunOnDevice() {
+
+  if (Input(0).IsType<float>()) {
+    return DoRunWithType<float,      // X
+                         float,      // W
+                         float,      // B
+                         float,      // Math
+                         float>();   // Y
+  } else if (Input(0).IsType<float16>()) {
+    return DoRunWithType<float16,      // X
+                         float16,      // W
+                         float16,      // B
+                         float,      // Math
+                         float16>();   // Y
+  } else {
+    LOG(FATAL) << "Unsupported type inputs";
+  }
+  return true;
+}
+
+template <typename T_X, typename T_DY, typename T_W, typename T_B,
+          typename MATH,
+          typename T_DX, typename T_DW, typename T_DB>
+bool CudnnConvGradientOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
@@ -454,13 +481,13 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.dims();
-      SetTensor4dDescriptorWithGroup<T>(bottom_desc_, N, C, H, W);
+      SetTensor4dDescriptorWithGroup<T_X>(bottom_desc_, N, C, H, W);
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
-          cudnnTypeWrapper<T>::type,
+          cudnnTypeWrapper<T_W>::type,
           GetCudnnTensorFormat(order_),
           M / group_,
           C / group_,
@@ -470,7 +497,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
             bias_desc_,
             GetCudnnTensorFormat(order_),
-            cudnnTypeWrapper<T>::type,
+            cudnnTypeWrapper<T_B>::type,
             1,
             M,
             1,
@@ -478,12 +505,12 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
       }
     }
     // Set the output
-    SetTensor4dDescriptorWithGroup<T>(top_desc_, N, M, H_out, W_out);
+    SetTensor4dDescriptorWithGroup<T_DX>(top_desc_, N, M, H_out, W_out);
     // Set the output with descriptor useful for bias addition in one run
     CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         top_desc_for_bias_,
         GetCudnnTensorFormat(order_),
-        cudnnTypeWrapper<T>::type,
+        cudnnTypeWrapper<T_DB>::type,
         N,
         M,
         H_out,
@@ -499,7 +526,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         dilation_h(),
         dilation_w(),
         CUDNN_CROSS_CORRELATION,
-        cudnnTypeWrapper<T>::type));
+        cudnnTypeWrapper<MATH>::type));
 #else
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
@@ -541,12 +568,12 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
                   CUDNN_ENFORCE(cudnnFindConvolutionBackwardFilterAlgorithmEx(
                       state->cudnn_handle(),
                       bottom_desc_,
-                      X.template data<T>(),
+                      X.template data<T_X>(),
                       top_desc_,
-                      dY.template data<T>(),
+                      dY.template data<T_DY>(),
                       conv_desc_,
                       filter_desc_,
-                      dfilter->template mutable_data<T>(),
+                      dfilter->template mutable_data<T_DW>(),
                       kNUM_CUDNN_BWD_FILTER_ALGS,
                       &returned_algo_count,
                       filter_perf_stat.data(),
@@ -572,9 +599,9 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
                     auto* dX =
                         Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
                     dX->ResizeLike(X);
-                    const T* filter_data = filter.template data<T>();
-                    const T* dYdata = dY.template data<T>();
-                    T* dXdata = dX->template mutable_data<T>();
+                    const T_W* filter_data = filter.template data<T_W>();
+                    const T_DY* dYdata = dY.template data<T_DY>();
+                    T_DX* dXdata = dX->template mutable_data<T_DX>();
                     CUDNN_ENFORCE(cudnnFindConvolutionBackwardDataAlgorithmEx(
                         state->cudnn_handle(),
                         filter_desc_,
@@ -607,15 +634,17 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
           cudnn_ws_nbytes_limit_,
           &bwd_filter_algo_));
       // choose backward algo for data
-      CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataAlgorithm(
-          cudnn_wrapper_.inline_cudnn_handle(),
-          filter_desc_,
-          top_desc_,
-          conv_desc_,
-          bottom_desc_,
-          CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
-          cudnn_ws_nbytes_limit_,
-          &bwd_data_algo_));
+      if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+        CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataAlgorithm(
+            cudnn_wrapper_.inline_cudnn_handle(),
+            filter_desc_,
+            top_desc_,
+            conv_desc_,
+            bottom_desc_,
+            CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
+            cudnn_ws_nbytes_limit_,
+            &bwd_data_algo_));
+      }
     }
     // get workspace for backwards filter algorithm
     CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterWorkspaceSize(
@@ -626,15 +655,19 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         filter_desc_,
         bwd_filter_algo_,
         &bwd_filter_ws_size));
-    // get workspace for backwards data algorithm
-    CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataWorkspaceSize(
-        cudnn_wrapper_.inline_cudnn_handle(),
-        filter_desc_,
-        top_desc_,
-        conv_desc_,
-        bottom_desc_,
-        bwd_data_algo_,
-        &bwd_data_ws_size));
+    if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      // get workspace for backwards data algorithm
+      CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataWorkspaceSize(
+          cudnn_wrapper_.inline_cudnn_handle(),
+          filter_desc_,
+          top_desc_,
+          conv_desc_,
+          bottom_desc_,
+          bwd_data_algo_,
+          &bwd_data_ws_size));
+    } else {
+      bwd_data_ws_size = 0;
+    }
     cudnn_ws_nbytes_ = std::max(bwd_filter_ws_size, bwd_data_ws_size);
 
     VLOG(1) << "CuDNN bwd algorithm: " << bwd_filter_algo_ << ", "
@@ -648,80 +681,83 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
     dbias->Resize(M);
     CUDNN_ENFORCE(cudnnConvolutionBackwardBias(
         cudnn_wrapper_.inline_cudnn_handle(),
-        cudnnTypeWrapper<T>::kOne(),
+        cudnnTypeWrapper<T_DY>::kOne(),
         top_desc_for_bias_,
-        dY.template data<T>(),
-        cudnnTypeWrapper<T>::kZero(),
+        dY.template data<T_DY>(),
+        cudnnTypeWrapper<T_DB>::kZero(),
         bias_desc_,
-        dbias->template mutable_data<T>()));
+        dbias->template mutable_data<T_DB>()));
   }
 
   for (int i = 0; i < group_; ++i) {
     cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
       CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
           state->cudnn_handle(),
-          cudnnTypeWrapper<T>::kOne(),
+          cudnnTypeWrapper<T_X>::kOne(),
           bottom_desc_,
-          X.template data<T>() + i * group_offset_X,
+          X.template data<T_X>() + i * group_offset_X,
           top_desc_,
-          dY.template data<T>() + i * group_offset_Y,
+          dY.template data<T_DY>() + i * group_offset_Y,
           conv_desc_,
           bwd_filter_algo_,
           state->workspace().get(cudnn_ws_nbytes_),
           cudnn_ws_nbytes_,
-          cudnnTypeWrapper<T>::kZero(),
+          cudnnTypeWrapper<T_DW>::kZero(),
           filter_desc_,
-          dfilter->template mutable_data<T>() + i * group_offset_filter));
+          dfilter->template mutable_data<T_DW>() + i * group_offset_filter));
       if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
         // Compute the gradient w.r.t. the input.
         auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
         dX->ResizeLike(X);
         CUDNN_ENFORCE(cudnnConvolutionBackwardData(
             state->cudnn_handle(),
-            cudnnTypeWrapper<T>::kOne(),
+            cudnnTypeWrapper<T_W>::kOne(),
             filter_desc_,
-            filter.template data<T>() + i * group_offset_filter,
+            filter.template data<T_W>() + i * group_offset_filter,
             top_desc_,
-            dY.template data<T>() + i * group_offset_Y,
+            dY.template data<T_DY>() + i * group_offset_Y,
             conv_desc_,
             bwd_data_algo_,
             state->workspace().get(cudnn_ws_nbytes_),
             cudnn_ws_nbytes_,
-            cudnnTypeWrapper<T>::kZero(),
+            cudnnTypeWrapper<T_DX>::kZero(),
             bottom_desc_,
-            dX->template mutable_data<T>() + i * group_offset_X));
+            dX->template mutable_data<T_DX>() + i * group_offset_X));
       }
     });
   }
   return true;
 }
 
-REGISTER_CUDNN_OPERATOR(Conv, CudnnConvOp<float>);
-REGISTER_CUDNN_OPERATOR(ConvGradient, CudnnConvGradientOp<float>);
-
-REGISTER_CUDNN_OPERATOR(ConvFp16, CudnnConvOp<float16>);
-REGISTER_CUDNN_OPERATOR(ConvFp16Gradient, CudnnConvGradientOp<float16>);
-
-class GetConvFp16Gradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    CAFFE_ENFORCE(def_.input_size() == 3 || def_.input_size() == 2);
-    if (def_.input_size() == 3) {
-      return SingleGradientDef(
-          "ConvFp16Gradient",
-          "",
-          vector<string>{I(0), I(1), GO(0)},
-          vector<string>{GI(1), GI(2), GI(0)});
-    } else {
-      return SingleGradientDef(
-          "ConvFp16Gradient",
-          "",
-          vector<string>{I(0), I(1), GO(0)},
-          vector<string>{GI(1), GI(0)},
-          vector<Argument>{MakeArgument<int>("no_bias", 1)});
-    }
+// TODO(Yangqing): a lot of the function contents are very similar. Consider
+// consolidating them.
+bool CudnnConvGradientOp::RunOnDevice() {
+  if (Input(0).IsType<float>()) {
+    return DoRunWithType<float,    //  X
+                         float,    // dY
+                         float,    //  W
+                         float,    //  b
+                         float,    // Math
+                         float,    // dX
+                         float,    // dW
+                         float>(); // db
   }
-};
-REGISTER_GRADIENT(ConvFp16, GetConvFp16Gradient);
+  else if (Input(0).IsType<float16>()) {
+    return DoRunWithType<float16,    //  X
+                         float16,    // dY
+                         float16,    //  W
+                         float16,    //  b
+                         float,    // Math
+                         float16,    // dX
+                         float16,    // dW
+                         float16>(); // db
+  } else {
+    LOG(FATAL) << "Unsupported input types";
+  }
+  return true;
+}
+
+REGISTER_CUDNN_OPERATOR(Conv, CudnnConvOp);
+REGISTER_CUDNN_OPERATOR(ConvGradient, CudnnConvGradientOp);
 
 }  // namespace caffe2
