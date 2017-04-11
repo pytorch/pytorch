@@ -11,7 +11,15 @@ This build is confirmed for:
 
 ```bash
 sudo apt-get update
-sudo apt-get install python-dev python-pip git build-essential cmake libprotobuf-dev protobuf-compiler libgoogle-glog-dev
+sudo apt-get install -y --no-install-recommends \
+      build-essential \
+      cmake \
+      git \
+      libgoogle-glog-dev \
+      libprotobuf-dev \
+      protobuf-compiler \
+      python-dev \
+      python-pip                          
 sudo pip install numpy protobuf
 ```
 
@@ -53,12 +61,45 @@ rm cudnn-8.0-linux-x64-v5.1.tgz && sudo ldconfig
 
 ### Optional Dependencies
 
+> Note `libgflags2` is for Ubuntu 14.04. `libgflags-dev` is for Ubuntu 16.04.
+
 ```bash
-sudo apt-get install libgtest-dev libgflags2 libgflags-dev liblmdb-dev libleveldb-dev libsnappy-dev libopencv-dev libiomp-dev openmpi-bin openmpi-doc libopenmpi-dev python-pydot
-sudo pip install flask graphviz hypothesis jupyter matplotlib pydot python-nvd3 pyyaml requests scikit-image scipy setuptools tornado
+# for Ubuntu 14.04
+sudo apt-get install -y --no-install-recommends libgflags2
 ```
 
-* Note for Ubuntu 16.04 `libgflags2` should be replaced with `libgflags-dev`.
+```bash
+# for Ubuntu 16.04
+sudo apt-get install -y --no-install-recommends libgflags-dev
+```
+
+```bash
+# for both Ubuntu 14.04 and 16.04
+sudo apt-get install -y --no-install-recommends \
+      libgtest-dev \
+      libiomp-dev \
+      libleveldb-dev \
+      liblmdb-dev \
+      libopencv-dev \
+      libopenmpi-dev \
+      libsnappy-dev \
+      openmpi-bin \
+      openmpi-doc \
+      python-pydot
+sudo pip install \
+      flask \
+      graphviz \
+      hypothesis \
+      jupyter \
+      matplotlib \
+      pydot python-nvd3 \
+      pyyaml \
+      requests \
+      scikit-image \
+      scipy \
+      setuptools \
+      tornado
+```
 
 ### Clone & Build
 
@@ -114,6 +155,8 @@ ssh -N -f -L localhost:8888:localhost:8889 -i "your-public-cert.pem" ubuntu@supe
 |Solution | Try virtualenv or Anaconda. The [Anaconda](https://www.continuum.io/downloads) platform provides a single script to install many of the necessary packages for Caffe2, including Python. Using Anaconda is outside the scope of these instructions, but if you are interested, it may work well for you.|
 |pip version | If you plan to use Python with Caffe2 then you need pip.|
 |Solution | `sudo apt-get install python-pip` and also try using pip2 instead of pip.|
+|"AttributeError: 'module' object has no attribute 'MakeArgument'" | Occurs when calling `core.CreateOperator`|
+|Solution | Check your install directory (`/usr/local/`), and remove the folder `/caffe2/python/utils`|
 
 |Building from source||
 |----|-----|
