@@ -1965,7 +1965,7 @@ class TestNNInit(TestCase):
                 c_out, c_in = input_tensor.size(0), input_tensor.size(1)
                 min_d = min(c_out, c_in)
                 # Check number of nonzeros is equivalent to smallest dim
-                assert input_tensor.nonzero().size(0) == min_d
+                assert torch.nonzero(input_tensor).size(0) == min_d
                 # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
                 self.assertEqual(input_tensor.sum(), min_d)
 
@@ -1977,7 +1977,7 @@ class TestNNInit(TestCase):
         init.dirac(filter_var)
         output_var = F.conv1d(input_var, filter_var)
         self.assertEqual(input_var[:, :, 1:-1], output_var[:, :in_c, :])  # Assert in_c outputs are preserved
-        assert output_var[:, in_c:, :].nonzero().numel() == 0  # Assert extra outputs are 0
+        assert torch.nonzero(output_var[:, in_c:, :]).numel() == 0  # Assert extra outputs are 0
 
         # Test 2D
         input_var = Variable(torch.randn(batch, in_c, size, size))
@@ -1985,7 +1985,7 @@ class TestNNInit(TestCase):
         init.dirac(filter_var)
         output_var = F.conv2d(input_var, filter_var)
         self.assertEqual(input_var[:, :, 1:-1, 1:-1], output_var[:, :in_c, :, :])
-        assert output_var[:, in_c:, :, :].nonzero().numel() == 0
+        assert torch.nonzero(output_var[:, in_c:, :, :]).numel() == 0
 
         # Test 3D
         input_var = Variable(torch.randn(batch, in_c, size, size, size))
@@ -1993,7 +1993,7 @@ class TestNNInit(TestCase):
         init.dirac(filter_var)
         output_var = F.conv3d(input_var, filter_var)
         self.assertEqual(input_var[:, :, 1:-1, 1:-1, 1:-1], output_var[:, :in_c, :, :])
-        assert output_var[:, in_c:, :, :, :].nonzero().numel() == 0
+        assert torch.nonzero(output_var[:, in_c:, :, :, :]).numel() == 0
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for as_variable in [True, False]:
