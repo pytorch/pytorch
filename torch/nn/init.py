@@ -138,7 +138,7 @@ def dirac(tensor):
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
 
     if isinstance(tensor, Variable):
-        dirac(tensor.data, scaled=scaled)
+        dirac(tensor.data)
         return tensor
 
     sizes = tensor.size()
