@@ -417,11 +417,11 @@ TH_API void THNN_(SparseLinear_updateParameters)(
 
 TH_API void THNN_(IndexLinear_updateOutput)(
                   THCState *state,
-                  THCudaLongTensor *keys,
+                  THCIndexTensor *keys,
                   long keysOffset,
                   THCTensor *values,
-                  THCudaLongTensor *sizes,
-                  THCudaLongTensor *cumSumSizes,
+                  THCIndexTensor *sizes,
+                  THCIndexTensor *cumSumSizes,
                   THCTensor *output,
                   THCTensor *weight,
                   THCTensor *bias,
@@ -430,11 +430,11 @@ TH_API void THNN_(IndexLinear_updateOutput)(
 
 TH_API void THNN_(IndexLinear_accGradParameters)(
                   THCState *state,
-                  THCudaLongTensor *keys,
+                  THCIndexTensor *keys,
                   long keysOffset,
                   THCTensor *values,
-                  THCudaLongTensor *sizes,
-                  THCudaLongTensor *cumSumSizes,
+                  THCIndexTensor *sizes,
+                  THCIndexTensor *cumSumSizes,
                   THCTensor *gradOutput,
                   THCTensor *gradWeight,
                   THCTensor *gradBias,
@@ -446,11 +446,11 @@ TH_API void THNN_(IndexLinear_accGradParameters)(
 
 TH_API void THNN_(IndexLinear_accUpdateGradParameters)(
                   THCState *state,
-                  THCudaLongTensor *keys,
+                  THCIndexTensor *keys,
                   long keysOffset,
                   THCTensor *values,
-                  THCudaLongTensor *sizes,
-                  THCudaLongTensor *cumSumSizes,
+                  THCIndexTensor *sizes,
+                  THCIndexTensor *cumSumSizes,
                   THCTensor *gradOutput,
                   THCTensor *weight,
                   THCTensor *bias,
@@ -463,8 +463,8 @@ TH_API void THNN_(IndexLinear_updateParameters)(
                   THCTensor *gradBias,
                   THCTensor *weight,
                   THCTensor *bias,
-                  THCudaLongTensor *runningKeys,
-                  THCudaLongTensor *cumSumSizes,
+                  THCIndexTensor *runningKeys,
+                  THCIndexTensor *cumSumSizes,
                   long keysOffset,
                   accreal weightDecay,
                   accreal learningRate);
