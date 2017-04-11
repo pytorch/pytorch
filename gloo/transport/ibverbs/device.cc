@@ -28,11 +28,15 @@ class ibv_devices {
  public:
   ibv_devices() {
     list_ = ibv_get_device_list(&size_);
-    GLOO_ENFORCE(list_);
+    if (list_ == nullptr) {
+      size_ = 0;
+    }
   }
 
   ~ibv_devices() {
-    ibv_free_device_list(list_);
+    if (list_ != nullptr) {
+      ibv_free_device_list(list_);
+    }
   }
 
   int size() {
