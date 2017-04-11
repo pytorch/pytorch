@@ -103,7 +103,7 @@ def constant(tensor, val):
 
 def eye(tensor):
     """Fills the 2-dimensional input Tensor or Variable with the identity matrix. Preserves the identity of the inputs in
-    Linear layers.
+    Linear layers, where as many inputs are preserved as possible.
 
     Args:
         tensor: a 2-dimensional torch.Tensor or autograd.Variable
@@ -122,13 +122,12 @@ def eye(tensor):
     return tensor.copy_(torch.eye(tensor.size(0), tensor.size(1)))
 
 
-def dirac(tensor, scaled=True):
+def dirac(tensor):
     """Fills the {3, 4, 5}-dimensional input Tensor or Variable with the Dirac delta function. Preserves the identity of
-    the inputs in Convolutional layers.
+    the inputs in Convolutional layers, where as many input channels are preserved as possible.
 
     Args:
         tensor: a {3, 4, 5}-dimensional torch.Tensor or autograd.Variable
-        scaled: a boolean indicating that the output of the sum of the filters will be the identity
 
     Examples:
         >>> w = torch.Tensor(3, 16, 5, 5)
@@ -142,15 +141,17 @@ def dirac(tensor, scaled=True):
         dirac(tensor.data, scaled=scaled)
         return tensor
 
+    sizes = tensor.size()
+    min_dim = math.min(sizes[0], sizes[1])
     tensor.zero_()
-    val = 1.0 / tensor.size(1) if scaled else 1
 
-    if dimensions == 3:  # Temporal convolution
-        tensor[:, :, tensor.size(2) // 2].fill_(val)
-    elif dimensions == 4:  # Spatial convolution
-        tensor[:, :, tensor.size(2) // 2, tensor.size(3) // 2].fill_(val)
-    else:  # Volumetric convolution
-        tensor[:, :, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2].fill_(val)
+    for d in range(min_dim):
+        if dimensions == 3:  # Temporal convolution
+            tensor[d, d, tensor.size(2) // 2].fill_(1)
+        elif dimensions == 4:  # Spatial convolution
+            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2].fill_(1)
+        else:  # Volumetric convolution
+            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2].fill_(1)
     return tensor
 
 

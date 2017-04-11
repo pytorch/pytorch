@@ -1957,54 +1957,50 @@ class TestNNInit(TestCase):
     def test_dirac_properties(self):
         for as_variable in [True, False]:
             for dims in [3, 4, 5]:
-                for scaled in [True, False]:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
-                    init.dirac(input_tensor, scaled)
-                    if as_variable:
-                        input_tensor = input_tensor.data
+                input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
+                init.dirac(input_tensor)
+                if as_variable:
+                    input_tensor = input_tensor.data
 
-                    c_out, c_in = input_tensor.size(0), input_tensor.size(1)
-                    # Check number of nonzeros is product of first 2 dims
-                    assert torch.nonzero(input_tensor).size(0) == c_out * c_in
-
-                    # Check sum of values (can have precision issues, hence assertEqual)
-                    if scaled:
-                        self.assertEqual(input_tensor.sum(), c_out)
-                    else:
-                        self.assertEqual(input_tensor.sum(), c_out * c_in)
+                c_out, c_in = input_tensor.size(0), input_tensor.size(1)
+                min_d = math.min(c_out, c_in)
+                # Check number of nonzeros is equivalent to smallest dim
+                assert input_tensor.nonzero().size(0) == min_d
+                # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
+                self.assertEqual(input_tensor.sum(), min_d)
 
     def test_dirac_identity(self):
-        batch, in_c, out_c, size, kernel_size = 8, 3, 1, 5, 3
-        for scaled in [True, False]:
-            normalise = in_c if scaled else 1
-            # Test 1D
-            input_var = Variable(torch.randn(batch, in_c, size))
-            filter_var = Variable(torch.zeros(out_c, in_c, kernel_size))
-            init.dirac(filter_var, scaled)
-            output_var = F.conv1d(input_var, filter_var)
-            self.assertEqual(input_var[:, :, 1:-1].sum(1) / normalise, output_var)
+        batch, in_c, out_c, size, kernel_size = 8, 3, 4, 5, 3
+        # Test 1D
+        input_var = Variable(torch.randn(batch, in_c, size))
+        filter_var = Variable(torch.zeros(out_c, in_c, kernel_size))
+        init.dirac(filter_var)
+        output_var = F.conv1d(input_var, filter_var)
+        self.assertEqual(input_var[:, :, 1:-1], output_var[:, :in_c, :])  # Assert in_c outputs are preserved
+        assert output_var[:, in_c:, :].nonzero().numel() == 0  # Assert extra outputs are 0
 
-            # Test 2D
-            input_var = Variable(torch.randn(batch, in_c, size, size))
-            filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size))
-            init.dirac(filter_var, scaled)
-            output_var = F.conv2d(input_var, filter_var)
-            self.assertEqual(input_var[:, :, 1:-1, 1:-1].sum(1) / normalise, output_var)
+        # Test 2D
+        input_var = Variable(torch.randn(batch, in_c, size, size))
+        filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size))
+        init.dirac(filter_var)
+        output_var = F.conv2d(input_var, filter_var)
+        self.assertEqual(input_var[:, :, 1:-1, 1:-1], output_var[:, :in_c, :, :])
+        assert output_var[:, in_c:, :, :].nonzero().numel() == 0
 
-            # Test 3D
-            input_var = Variable(torch.randn(batch, in_c, size, size, size))
-            filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size))
-            init.dirac(filter_var, scaled)
-            output_var = F.conv3d(input_var, filter_var)
-            self.assertEqual(input_var[:, :, 1:-1, 1:-1, 1:-1].sum(1) / normalise, output_var)
+        # Test 3D
+        input_var = Variable(torch.randn(batch, in_c, size, size, size))
+        filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size))
+        init.dirac(filter_var)
+        output_var = F.conv3d(input_var, filter_var)
+        self.assertEqual(input_var[:, :, 1:-1, 1:-1, 1:-1], output_var[:, :in_c, :, :])
+        assert output_var[:, in_c:, :, :, :].nonzero().numel() == 0
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for as_variable in [True, False]:
             for dims in [1, 2, 6]:
-                for scaled in [True, False]:
-                    with self.assertRaises(ValueError):
-                        tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
-                        init.dirac(tensor, scaled)
+                with self.assertRaises(ValueError):
+                    tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
+                    init.dirac(tensor)
 
     def test_xavier_uniform_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
