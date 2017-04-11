@@ -111,6 +111,7 @@ class cudnnTypeWrapper<float> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
   typedef const float ScalingParamType;
+  typedef float BNParamType;
   static ScalingParamType* kOne() {
     static ScalingParamType v = 1.0;
     return &v;
@@ -126,6 +127,7 @@ class cudnnTypeWrapper<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
   typedef const double ScalingParamType;
+  typedef double BNParamType;
   static ScalingParamType* kOne() {
     static ScalingParamType v = 1.0;
     return &v;
@@ -141,6 +143,7 @@ class cudnnTypeWrapper<float16> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
   typedef const float ScalingParamType;
+  typedef float BNParamType;
   static ScalingParamType* kOne() {
     static ScalingParamType v = 1.0;
     return &v;

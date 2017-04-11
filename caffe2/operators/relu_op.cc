@@ -29,8 +29,8 @@ bool ReluOp<float, CPUContext>::RunOnDevice() {
 
 template <>
 bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& dY = Input(1);
+  auto& Y = Input(1);
+  auto& dY = Input(2);
   auto* dX = Output(0);
   DCHECK_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
@@ -39,10 +39,10 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   // TODO: proper vectorization with Eigen
-  EigenVectorArrayMap<float> Xvec(dXdata, dX->size());
+  EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
   ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
   ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());
-  Xvec = dYvec * Yvec.cwiseSign();
+  dXvec = dYvec * Yvec.cwiseSign();
   /* Previous implementation
   for (int i = 0; i < Y.size(); ++i) {
     dXdata[i] = Ydata[i] > 0 ? dYdata[i] : 0;
@@ -71,11 +71,11 @@ the tensor elementwise.
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(ReluGradient)
-  .NumInputs(2)
+  .NumInputs(3)
   .NumOutputs(1)
-  .AllowInplace({{1, 0}})
+  .AllowInplace({{2, 0}})
   .SetDoc(R"DOC(
-ReluGradient takes both Y and dY and uses this to update dX according to the
+ReluGradient takes X, Y and dY and uses this to update dX according to the
 chain rule and derivatives of the rectified linear function.
 )DOC");
 
@@ -84,7 +84,7 @@ class GetReluGradient : public GradientMakerBase {
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         def_.type() + "Gradient", "",
-        vector<string>{O(0), GO(0)},
+        vector<string>{I(0), O(0), GO(0)},
         vector<string>{GI(0)});
   }
 };
