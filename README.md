@@ -182,9 +182,14 @@ conda install numpy pyyaml setuptools cmake cffi
 ```
 
 #### Install PyTorch
+On Linux
 ```bash
-export MACOSX_DEPLOYMENT_TARGET=10.9 # if OSX
 python setup.py install
+```
+
+On OSX
+```bash
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
 ### Docker image
