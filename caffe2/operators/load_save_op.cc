@@ -10,11 +10,26 @@ void LoadOp<CPUContext>::SetCurrentDevice(BlobProto* proto) {
 }
 
 namespace {
+REGISTER_CPU_OPERATOR(DBExists, DBExistsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Load, LoadOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Save, SaveOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Checkpoint, CheckpointOp<CPUContext>);
 // CPU Operator old name: do NOT use, we may deprecate this later.
 REGISTER_CPU_OPERATOR(Snapshot, CheckpointOp<CPUContext>);
+
+OPERATOR_SCHEMA(DBExists)
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Checks if the DB exists.
+)DOC")
+    .Output(0, "exists", "A scalar bool Tensor.")
+    .Arg(
+        "absolute_path",
+        "(int, default 0) if set, use the db path directly and do not prepend "
+        "the current root folder of the workspace.")
+    .Arg("db_name", "(string) the path to the db to load.")
+    .Arg("db_type", "(string) the type of the db.");
 
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, 1)
@@ -105,6 +120,7 @@ counter). This is determined whether we need to do checkpointing.
         "(iter mod every) is zero.");
 
 NO_GRADIENT(Load);
+SHOULD_NOT_DO_GRADIENT(DBExists);
 SHOULD_NOT_DO_GRADIENT(Save);
 SHOULD_NOT_DO_GRADIENT(Checkpoint);
 SHOULD_NOT_DO_GRADIENT(Snapshot);

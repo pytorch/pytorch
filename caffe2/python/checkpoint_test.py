@@ -124,10 +124,22 @@ class TestCheckpoint(TestCase):
             job_runner = JobRunner(compiled_job, checkpoint)
             job_runner.load_blobs_from_checkpoints(blob_names=model_blob_names,
                                                    epoch=1, session=session)
-            # Check that all the model blobs are loaded.
-            for blob_name in model_blob_names:
-                self.assertTrue(ws.has_blob(blob_name))
-                self.assertEquals(ws.fetch_blob(blob_name), np.array([103]))
+
+            # Check that we can successfully load from checkpoints of epochs
+            # 1 to 4, but not epoch 5.
+            for epoch in range(1, 5):
+                self.assertTrue(
+                    job_runner.load_blobs_from_checkpoints(
+                        blob_names=model_blob_names, epoch=epoch,
+                        session=session))
+                # Check that all the model blobs are loaded.
+                for blob_name in model_blob_names:
+                    self.assertTrue(ws.has_blob(blob_name))
+                    self.assertEquals(ws.fetch_blob(blob_name),
+                                      np.array([EXPECTED_TOTALS[epoch - 1]]))
+            self.assertFalse(
+                job_runner.load_blobs_from_checkpoints(
+                    blob_names=model_blob_names, epoch=5, session=session))
 
         finally:
             shutil.rmtree(tmpdir)

@@ -136,7 +136,7 @@ class CheckpointManager(object):
             else:
                 ops.Load(
                     [], self._blob_names,
-                    db=self._dbname(retrieve_from_epoch),
+                    db=self._db_name(retrieve_from_epoch),
                     db_type=self._db_type,
                     absolute_path=True)
         self._names_output = task.outputs()[0]
@@ -146,7 +146,7 @@ class CheckpointManager(object):
         assert self._names_output
         return self._names_output.fetch().tolist()
 
-    def _dbname(self, epoch):
+    def _db_name(self, epoch):
         return '%s.%06d' % (self._db, epoch)
 
     def load(self, epoch):
@@ -155,12 +155,12 @@ class CheckpointManager(object):
         resumed from a given epoch. This task will run a Load op that will
         load and deserialize all relevant blobs from a persistent storage.
         """
-        logger.info('Load from %s' % self._dbname(epoch))
+        logger.info('Load from %s' % self._db_name(epoch))
         with Task() as task:
             ops.Load(
                 [],
                 self.blob_list(),
-                db=self._dbname(epoch),
+                db=self._db_name(epoch),
                 db_type=self._db_type,
                 absolute_path=True)
         return task
@@ -180,15 +180,28 @@ class CheckpointManager(object):
             A Task which loads the specified blobs from the checkpoint of the
             given epoch.
         """
-        logger.info('Load from %s' % self._dbname(epoch))
+        logger.info('Load from %s' % self._db_name(epoch))
         with Task() as task:
             ops.Load(
                 [],
                 blob_names,
-                db=self._dbname(epoch),
+                db=self._db_name(epoch),
                 db_type=self._db_type,
                 absolute_path=True,
                 allow_incomplete=True)
+        return task
+
+    def check_db_exists(self, epoch):
+        logger.info('Check existence of %s' % self._db_name(epoch))
+        with Task() as task:
+            existence = ops.Const(False)
+            ops.DBExists(
+                [],
+                [existence],
+                db_name=self._db_name(epoch),
+                db_type=self._db_type,
+                absolute_path=True)
+            task.add_output(existence)
         return task
 
     def save(self, epoch):
@@ -197,10 +210,10 @@ class CheckpointManager(object):
         epoch is run. This will execute a Save ops to serialize and persist
         blobs present in the global workspaace.
         """
-        logger.info('Save to %s' % self._dbname(epoch))
+        logger.info('Save to %s' % self._db_name(epoch))
         with Task() as task:
             ops.Save(
-                self.blob_list(), [], db=self._dbname(epoch),
+                self.blob_list(), [], db=self._db_name(epoch),
                 db_type=self._db_type, absolute_path=True)
         return task
 
@@ -266,9 +279,16 @@ class MultiNodeCheckpointManager(object):
                     self._node_managers.append((node, manager))
         assert self._node_managers is not None, 'must initialize node managers'
         for _, manager in self._node_managers:
-            with TaskGroup(WorkspaceType.GLOBAL) as task_group:
-                manager.load_blobs_from_checkpoint(blob_names, epoch)
-            session.run(task_group)
+            existence_task = manager.check_db_exists(epoch)
+            session.run(existence_task)
+            existence = existence_task.outputs()[0].fetch()
+            if not existence:
+                logger.info('DB %s does not exist!' % manager._db_name(epoch))
+                return False
+            load_task = manager.load_blobs_from_checkpoint(blob_names, epoch)
+            session.run(load_task)
+        logger.info('Successfully loaded from checkpoints.')
+        return True
 
     def save(self, epoch):
         return self._task_group(self._node_manager_class.save, epoch)
@@ -356,9 +376,8 @@ class JobRunner(object):
         if not self.checkpoint:
             raise ValueError('Checkpoint manager is None')
         logger.info('Loading checkpoint for epoch {} ...'.format(epoch))
-        self.checkpoint.load_blobs_locally(self.job.nodes_to_checkpoint(),
-                                           blob_names, epoch, session)
-        logger.info('Checkpoint loaded.')
+        return self.checkpoint.load_blobs_locally(self.job.nodes_to_checkpoint(),
+                                                  blob_names, epoch, session)
 
 
 def epoch_limiter(num_epochs):
