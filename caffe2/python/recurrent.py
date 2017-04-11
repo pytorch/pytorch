@@ -110,7 +110,7 @@ def recurrent_net(
         x[1] for x in initial_cell_inputs] + references
     all_outputs = []
 
-    cell_net.Proto().type = 'simple'
+    cell_net.Proto().type = 'prof_dag'
     backward_cell_net.Proto().type = 'simple'
 
     # Internal arguments used by RecurrentNetwork operator
@@ -733,6 +733,7 @@ def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         shape=[4 * dim_out],
         value=0.0
     )
+    model.params.extend([alpha, beta1, beta2, b])
     # alpha * (xW^T * hU^T)
     # Shape: [1, batch_size, 4 * hidden_size]
     alpha_tdash = step_model.net.Mul(
