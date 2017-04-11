@@ -32,9 +32,10 @@ class InstantiationContext(object):
     """
     List of contexts where layer could be instantitated
     """
+    CALIBRATION = 'calibration'
     EVAL = 'eval'
-    TRAINING = 'training'
     PREDICTION = 'prediction'
+    TRAINING = 'training'
 
 
 _LAYER_REGISTRY = {}
@@ -184,7 +185,8 @@ class ModelLayer(object):
         # assiciated with the layer that produces them
         with scope.NameScope(self.name):
             if context not in {InstantiationContext.PREDICTION,
-                               InstantiationContext.EVAL}:
+                               InstantiationContext.EVAL,
+                               InstantiationContext.CALIBRATION}:
                 assert init_net, (
                     "Only prediction and eval context don't need init_net")
             if init_net:
@@ -198,6 +200,8 @@ class ModelLayer(object):
                 self.add_train_ops(net)
             elif context == InstantiationContext.EVAL:
                 self.add_eval_ops(net)
+            elif context == InstantiationContext.CALIBRATION:
+                self.add_calibration_ops(net)
             else:
                 self.add_ops(net)
 
@@ -211,5 +215,10 @@ class ModelLayer(object):
 
     def add_train_ops(self, net):
         # Default eval layer implementation is completely matching eval
+        # layer implementation.
+        self.add_eval_ops(net)
+
+    def add_calibration_ops(self, net):
+        # Default calibration layer implementation is completely matching eval
         # layer implementation.
         self.add_eval_ops(net)
