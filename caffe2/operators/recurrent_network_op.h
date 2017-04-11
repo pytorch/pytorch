@@ -42,6 +42,11 @@ struct Link {
   int32_t window{1};
 };
 
+struct ScratchWorkspaces {
+  std::vector<std::shared_ptr<Workspace>> stepWorkspaces;
+  std::shared_ptr<Workspace> forwardSharedWs = nullptr;
+};
+
 template <typename T, typename Context>
 void applyOffsetAlias(const OffsetAlias& oc, Workspace* ws, Context* context) {
   VLOG(1) << "Aliasing: " << oc.src << " to: " << oc.dst
@@ -216,6 +221,22 @@ class RecurrentNetworkOp final : public Operator<Context> {
     return aliases;
   }
 
+  /**
+    * Some blobs can be marked as to be recomputed on backward pass.
+    * For those blobs, we do not want to allocate on each step workspace,
+    * but we instead store that blob in the shared workspace so all
+    * steps can use the same buffer on forward pass.
+    */
+  void initializeBlobsToRecomputeOnBackward(Workspace* forwardSharedWs) {
+    std::vector<std::string> v;
+    const auto& blobs = OperatorBase::GetRepeatedArgument<std::string>(
+        "recompute_blobs_on_backward", v);
+    for (const auto& b : blobs) {
+      // Note: if the blob already was created, this is a no-op.
+      forwardSharedWs->CreateBlob(b);
+    }
+  }
+
   std::vector<detail::Link> constructLinks() {
     std::vector<detail::Link> links;
     detail::extractLinks(
@@ -236,9 +257,19 @@ class RecurrentNetworkOp final : public Operator<Context> {
           ri, seqLen, batchSize, sharedWs_, &context_);
     }
 
+    detail::ScratchWorkspaces* scratch =
+        OperatorBase::Output<detail::ScratchWorkspaces>(OutputSize() - 1);
     std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
-        *OperatorBase::Output<std::vector<std::shared_ptr<Workspace>>>(
-            OutputSize() - 1);
+        scratch->stepWorkspaces;
+    std::shared_ptr<Workspace>& forwardSharedWs = scratch->forwardSharedWs;
+    if (!forwardSharedWs) {
+      forwardSharedWs = std::make_shared<Workspace>(sharedWs_);
+    }
+
+    // Caller can decide that some of the forward activations
+    // are recomputed on backward pass. Then those activations do not
+    // have to be stored in step workspaces but can be shared.
+    initializeBlobsToRecomputeOnBackward(forwardSharedWs.get());
 
     if (seqLen > stepWorkspaces.size()) {
       stepWorkspaces.resize(seqLen);
@@ -247,7 +278,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
     for (auto t = 0; t < seqLen; ++t) {
       auto& currentStepWorkspace = stepWorkspaces[t];
       if (!currentStepWorkspace) {
-        currentStepWorkspace = std::make_shared<Workspace>(sharedWs_);
+        currentStepWorkspace =
+            std::make_shared<Workspace>(forwardSharedWs.get());
       }
 
       for (const auto& link : links_) {
@@ -544,9 +576,10 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       }
     };
 
+    const detail::ScratchWorkspaces& scratch =
+        OperatorBase::Input<detail::ScratchWorkspaces>(InputSize() - 1);
     const std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
-        OperatorBase::Input<std::vector<std::shared_ptr<Workspace>>>(
-            InputSize() - 1);
+        scratch.stepWorkspaces;
     CAFFE_ENFORCE_GE(stepWorkspaces.size(), seqLen);
 
     accumulateFinalInputGradients();
@@ -554,7 +587,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       // We use local workspace for all the blobs which are not a part
       // of backward links. This way we reuse memory for all the internal
       // gradient blobs of the backward step net across all the timesteps
-      localWs_.AddParentWorkspace(stepWorkspaces[t].get());
+      localWs_.SetParentWorkspace(stepWorkspaces[t].get());
       accumulateInputGradients(t);
       for (const auto& link : links_) {
         detail::applyLink<T, Context>(link, t, &localWs_);
@@ -564,7 +597,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       // workspace of this operator. The reason for this is that
       // otherwise if we use the same net at each timestep,
       // its inputs / outputs won't peak up new blobs after
-      // attaching a new parent using AddParentWorkspace
+      // attaching a new parent using SetParentWorkspace
       auto old_net_name = stepNetDef_.name();
       auto net_name = MakeString(old_net_name, "_", t);
       auto* stepNet = localWs_.GetNet(net_name);

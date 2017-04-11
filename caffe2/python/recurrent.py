@@ -18,9 +18,11 @@ from caffe2.python.attention import (
 )
 
 
+
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
-        links, timestep=None, scope=None, outputs_with_grads=(0,)
+        links, timestep=None, scope=None, outputs_with_grads=(0,),
+        recompute_blobs_on_backward=None,
 ):
     '''
     net: the main net operator should be added to
@@ -48,6 +50,10 @@ def recurrent_net(
 
     outputs_with_grads : position indices of output blobs which will receive
     error gradient (from outside recurrent network) during backpropagation
+
+    recompute_blobs_on_backward: specify a list of blobs that will be
+                 recomputed for backward pass, and thus need not to be
+                 stored for each forward timestep.
     '''
     assert len(inputs) == 1, "Only one input blob is supported so far"
 
@@ -88,8 +94,26 @@ def recurrent_net(
         cell_net.Proto().op, inner_outputs_map)
     backward_mapping = {str(k): v for k, v in backward_mapping.items()}
     backward_cell_net = core.Net("RecurrentBackwardStep")
-
     del backward_cell_net.Proto().op[:]
+
+    if recompute_blobs_on_backward is not None:
+        # Insert operators to re-compute the specified blobs.
+        # They are added in the same order as for the forward pass, thus
+        # the order is correct.
+        recompute_blobs_on_backward = set(
+            [str(b) for b in recompute_blobs_on_backward]
+        )
+        for op in cell_net.Proto().op:
+            if not recompute_blobs_on_backward.isdisjoint(set(op.output)):
+                backward_cell_net.Proto().op.extend([op])
+                assert set(op.output).issubset(recompute_blobs_on_backward), \
+                       'Outputs {} are output by op but not recomputed: {}'.format(
+                            set(op.output) - recompute_blobs_on_backward,
+                            op
+                       )
+    else:
+        recompute_blobs_on_backward = set()
+
     backward_cell_net.Proto().op.extend(backward_ops)
     # compute blobs used but not defined in the backward pass
     backward_ssa, backward_blob_versions = core.get_ssa(
@@ -224,6 +248,7 @@ def recurrent_net(
         backward_step_net=str(backward_cell_net.Proto()),
         timestep="timestep" if timestep is None else str(timestep),
         outputs_with_grads=outputs_with_grads,
+        recompute_blobs_on_backward=map(str, recompute_blobs_on_backward)
     )
     # The last output is a list of step workspaces,
     # which is only needed internally for gradient propogation
@@ -231,7 +256,8 @@ def recurrent_net(
 
 
 def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
-         scope, outputs_with_grads=(0,), return_params=False):
+         scope, outputs_with_grads=(0,), return_params=False,
+         memory_optimization=False):
     '''
     Adds a standard LSTM recurrent network operator to a model.
 
@@ -254,6 +280,10 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     external error gradient during backpropagation
 
     return_params: if True, will return a dictionary of parameters of the LSTM
+
+    memory_optimization: if enabled, the LSTM step is recomputed on backward step
+                   so that we don't need to store forward activations for each
+                   timestep. Saves memory with cost of computation.
     '''
     def s(name):
         # We have to manually scope due to our internal/external blob
@@ -296,6 +326,7 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         timestep=timestep,
         scope=scope,
         outputs_with_grads=outputs_with_grads,
+        recompute_blobs_on_backward=[gates_t] if memory_optimization else None
     )
     if return_params:
         params = {
@@ -488,6 +519,8 @@ def LSTMWithAttention(
     attention_type=AttentionType.Regular,
     outputs_with_grads=(0, 4),
     weighted_encoder_outputs=None,
+    lstm_memory_optimization=False,
+    attention_memory_optimization=False,
 ):
     '''
     Adds a LSTM with attention mechanism to a model.
@@ -535,6 +568,11 @@ def LSTMWithAttention(
     encoder outputs (that the default, when weighted_encoder_outputs is None).
     However, it can be something more complicated - like a separate
     encoder network (for example, in case of convolutional encoder)
+
+    lstm_memory_optimization: recompute LSTM activations on backward pass, so
+                 we don't need to store their values in forward passes
+
+    attention_memory_optimization: recompute attention for backward pass
     '''
 
     def s(name):
@@ -609,7 +647,7 @@ def LSTMWithAttention(
         ['hidden_t_intermediate', s('cell_t')],
     )
     if attention_type == AttentionType.Recurrent:
-        attention_weighted_encoder_context_t, _ = apply_recurrent_attention(
+        attention_weighted_encoder_context_t, _, attention_blobs = apply_recurrent_attention(
             model=step_model,
             encoder_output_dim=encoder_output_dim,
             encoder_outputs_transposed=encoder_outputs_transposed,
@@ -622,7 +660,7 @@ def LSTMWithAttention(
             ),
         )
     else:
-        attention_weighted_encoder_context_t, _ = apply_regular_attention(
+        attention_weighted_encoder_context_t, _, attention_blobs = apply_regular_attention(
             model=step_model,
             encoder_output_dim=encoder_output_dim,
             encoder_outputs_transposed=encoder_outputs_transposed,
@@ -637,6 +675,11 @@ def LSTMWithAttention(
         hidden_t,
         attention_weighted_encoder_context_t,
     )
+    recompute_blobs = []
+    if attention_memory_optimization:
+        recompute_blobs.extend(attention_blobs)
+    if lstm_memory_optimization:
+        recompute_blobs.extend([gates_t])
 
     return recurrent_net(
         net=model.net,
@@ -662,11 +705,12 @@ def LSTMWithAttention(
         timestep=timestep,
         scope=scope,
         outputs_with_grads=outputs_with_grads,
+        recompute_blobs_on_backward=recompute_blobs,
     )
 
 
 def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
-           scope, outputs_with_grads=(0,)):
+           scope, outputs_with_grads=(0,), memory_optimization=False):
     '''
     Adds MI flavor of standard LSTM recurrent network operator to a model.
     See https://arxiv.org/pdf/1606.06630.pdf
@@ -688,6 +732,10 @@ def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
 
     outputs_with_grads : position indices of output blobs which will receive
     external error gradient during backpropagation
+
+    memory_optimization: if enabled, the LSTM step is recomputed on backward step
+                   so that we don't need to store forward activations for each
+                   timestep. Saves memory with cost of computation.
     '''
     def s(name):
         # We have to manually scope due to our internal/external blob
@@ -819,5 +867,6 @@ def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         timestep=timestep,
         scope=scope,
         outputs_with_grads=outputs_with_grads,
+        recompute_blobs_on_backward=[gates_t] if memory_optimization else None
     )
     return output, last_output, all_states, last_state
