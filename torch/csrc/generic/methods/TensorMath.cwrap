@@ -475,7 +475,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -493,7 +494,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - CONSTANT false
 ]]
 
@@ -512,7 +514,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - CONSTANT false
 ]]
 
@@ -534,7 +537,8 @@
           output: True
         - THTensor* self
         - real p
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -549,7 +553,8 @@
           output: True
         - THTensor* self
         - real p
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - real maxnorm
 ]]
 
@@ -563,7 +568,8 @@
         - THTensor* self
         - THTensor* self
         - real p
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - real maxnorm
 ]]
 
@@ -813,7 +819,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -830,7 +837,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -841,7 +849,8 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
 ]]
 
 [[
@@ -852,7 +861,8 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
 ]]
 
 [[
@@ -1459,11 +1469,6 @@
         - THTensor* mat2
     - cname: spaddmm
       sparse: True
-      before_call: |
-        long s1 = THSTensor_(size)(LIBRARY_STATE ((THSPTensor*)$arg4)->cdata, 0);
-        long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
-        THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
-        THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
       arguments:
         - arg: THTensor* result
           output: True

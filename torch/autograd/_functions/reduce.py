@@ -60,8 +60,9 @@ class Prod(_DimReduceFunction):
                 return grad_input
         else:
             input, output = self.saved_tensors
+            dim = self.dim if self.dim >= 0 else self.dim + input.dim()
             zero_mask = input == 0
-            slice_zero_count = zero_mask.sum(self.dim)
+            slice_zero_count = zero_mask.sum(dim)
             total_zeros = slice_zero_count.sum()
             grad_input = grad_output.mul(output).expand_as(input).div(input)
             if total_zeros == 0:
@@ -71,9 +72,13 @@ class Prod(_DimReduceFunction):
             grad_input[some_zeros] = 0
 
             single_zero_idx = slice_zero_count.eq(1).nonzero()
+
+            if len(single_zero_idx) == 0:
+                return grad_input
+
             for idx in single_zero_idx:
                 idx_tuple = tuple(idx.cpu())
-                input_idx_tuple = idx_tuple[:self.dim] + (slice(0, None),) + idx_tuple[self.dim + 1:]
+                input_idx_tuple = idx_tuple[:dim] + (slice(0, None),) + idx_tuple[dim + 1:]
 
                 # slice_mask and input_copy are 1D
                 slice_mask = zero_mask[input_idx_tuple]
@@ -81,7 +86,7 @@ class Prod(_DimReduceFunction):
                 zero_idx = slice_mask.nonzero()[0, 0]
                 input_copy[zero_idx] = 1.
 
-                grad_idx_tuple = idx_tuple[:self.dim] + (zero_idx,) + idx_tuple[self.dim + 1:]
+                grad_idx_tuple = idx_tuple[:dim] + (zero_idx,) + idx_tuple[dim + 1:]
                 grad_input[grad_idx_tuple] = grad_output[idx_tuple] * input_copy.prod()
 
             return grad_input

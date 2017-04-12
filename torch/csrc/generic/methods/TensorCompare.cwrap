@@ -416,7 +416,8 @@
         - arg: THIndexTensor* min_indices
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -442,7 +443,8 @@
         - arg: THIndexTensor* max_indices
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -467,7 +469,8 @@
           output: True
         - THTensor* self
         - long k
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -489,7 +492,8 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -512,7 +516,8 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -535,7 +540,8 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - CONSTANT false
     - arguments:
         - arg: THTensor* values
@@ -543,7 +549,8 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - bool descending
 ]]
 
@@ -571,7 +578,8 @@
           output: True
         - THTensor* self
         - long k
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - arg: bool largest
           default: "true"
         - arg: bool sorted

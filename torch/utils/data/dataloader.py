@@ -60,12 +60,29 @@ def _pin_memory_loop(in_queue, out_queue, done_event):
             out_queue.put((idx, batch))
 
 
+numpy_type_map = {
+    'float64': torch.DoubleTensor,
+    'float32': torch.FloatTensor,
+    'float16': torch.HalfTensor,
+    'int64': torch.LongTensor,
+    'int32': torch.IntTensor,
+    'int16': torch.ShortTensor,
+    'int8': torch.CharTensor,
+    'uint8': torch.ByteTensor,
+}
+
+
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
     if torch.is_tensor(batch[0]):
         return torch.stack(batch, 0)
-    elif type(batch[0]).__module__ == 'numpy' and type(batch[0]).__name__ == 'ndarray':
-        return torch.stack([torch.from_numpy(b) for b in batch], 0)
+    elif type(batch[0]).__module__ == 'numpy':
+        elem = batch[0]
+        if type(elem).__name__ == 'ndarray':
+            return torch.stack([torch.from_numpy(b) for b in batch], 0)
+        if elem.shape == ():  # scalars
+            py_type = float if elem.dtype.name.startswith('float') else int
+            return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
     elif isinstance(batch[0], int):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
@@ -103,6 +120,7 @@ class DataLoaderIter(object):
         self.sampler = loader.sampler
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory
+        self.drop_last = loader.drop_last
         self.done_event = threading.Event()
 
         self.samples_remaining = len(self.sampler)
@@ -141,11 +159,15 @@ class DataLoaderIter(object):
                 self._put_indices()
 
     def __len__(self):
-        return int(math.ceil(len(self.sampler) / float(self.batch_size)))
+        if self.drop_last:
+            return len(self.sampler) // self.batch_size
+        else:
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size
 
     def __next__(self):
-        if self.num_workers == 0:
-            # same-process loading
+        if self.num_workers == 0:  # same-process loading
+            if self.drop_last and self.samples_remaining < self.batch_size:
+                raise StopIteration
             if self.samples_remaining == 0:
                 raise StopIteration
             indices = self._next_indices()
@@ -187,9 +209,12 @@ class DataLoaderIter(object):
     def _put_indices(self):
         assert self.batches_outstanding < 2 * self.num_workers
         if self.samples_remaining > 0:
-            self.index_queue.put((self.send_idx, self._next_indices()))
-            self.batches_outstanding += 1
-            self.send_idx += 1
+            if self.samples_remaining < self.batch_size and self.drop_last:
+                self._next_indices()
+            else:
+                self.index_queue.put((self.send_idx, self._next_indices()))
+                self.batches_outstanding += 1
+                self.send_idx += 1
 
     def _process_next_batch(self, batch):
         self.rcvd_idx += 1
@@ -236,15 +261,20 @@ class DataLoader(object):
             (default: 0)
         collate_fn (callable, optional)
         pin_memory (bool, optional)
+        drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
+            if the dataset size is not divisible by the batch size. If False and
+            the size of dataset is not divisible by the batch size, then the last batch
+            will be smaller. (default: False)
     """
 
-    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
-                 num_workers=0, collate_fn=default_collate, pin_memory=False):
+    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, num_workers=0,
+                 collate_fn=default_collate, pin_memory=False, drop_last=False):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
+        self.drop_last = drop_last
 
         if sampler is not None:
             self.sampler = sampler
@@ -257,4 +287,7 @@ class DataLoader(object):
         return DataLoaderIter(self)
 
     def __len__(self):
-        return int(math.ceil(len(self.sampler) / float(self.batch_size)))
+        if self.drop_last:
+            return len(self.sampler) // self.batch_size
+        else:
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size

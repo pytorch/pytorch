@@ -661,10 +661,12 @@ class Variable(_C._VariableBase):
         return Transpose(dim1, dim2)(self)
 
     def select(self, dim, _index):
+        dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
         return Index(index)(self)
 
     def narrow(self, dim, start_index, length):
+        dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + \
             (slice(start_index, start_index + length),)
 
