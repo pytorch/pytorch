@@ -368,22 +368,13 @@ class CNNModelHelper(ModelHelperBase):
             **kwargs
         )[0]
 
-    def MaxPool(self, blob_in, blob_out, **kwargs):
-        """Max pooling"""
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-        return self.net.MaxPool(blob_in, blob_out, order=self.order, **kwargs)
+    def MaxPool(self, *args, **kwargs):
+        return model_helpers.MaxPool(self, *args, use_cudnn=self.use_cudnn,
+                                     **kwargs)
 
-    def AveragePool(self, blob_in, blob_out, **kwargs):
-        """Average pooling"""
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-        return self.net.AveragePool(
-            blob_in,
-            blob_out,
-            order=self.order,
-            **kwargs
-        )
+    def AveragePool(self, *args, **kwargs):
+        return model_helpers.AveragePool(self, *args, use_cudnn=self.use_cudnn,
+                                         **kwargs)
 
     def Concat(self, blobs_in, blob_out, **kwargs):
         """Depth Concat."""
