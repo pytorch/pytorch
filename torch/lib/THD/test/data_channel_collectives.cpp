@@ -39,6 +39,10 @@ void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
 
 void test_send_recv_tensor_any_source(std::shared_ptr<thd::DataChannel> data_channel,
                                       int workers) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support receiving from any source
+  }
+
   if (data_channel->getRank() == 0) {
     std::set<int> ranks;
     for (int i = 0; i < workers; i++) {
@@ -91,6 +95,10 @@ void _test_reduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
 }
 
 void test_reduce(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support reduce
+  }
+
   _test_reduce_helper(data_channel, THDReduceOp::THDReduceSUM,
                       2, 2 + (workers * (workers + 1) / 2));
   _test_reduce_helper(data_channel, THDReduceOp::THDReducePRODUCT,
@@ -124,6 +132,10 @@ void test_allReduce(std::shared_ptr<thd::DataChannel> data_channel, int workers)
 }
 
 void test_scatter(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support scatter
+  }
+
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (data_channel->getRank() == 0) {
@@ -139,6 +151,10 @@ void test_scatter(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void test_gather(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support gather
+  }
+
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
@@ -293,6 +309,10 @@ void test_broadcast_group(std::shared_ptr<thd::DataChannel> data_channel,
 
 void test_reduce_group(std::shared_ptr<thd::DataChannel> data_channel,
                        THDGroup group, std::vector<thd::rank_type> group_ranks) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support reduce
+  }
+
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5}, 10);
     data_channel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, group_ranks[0], group);
@@ -323,6 +343,10 @@ void test_allReduce_group(std::shared_ptr<thd::DataChannel> data_channel,
 
 void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
                         THDGroup group, std::vector<thd::rank_type> group_ranks) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support scatter
+  }
+
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
@@ -346,6 +370,10 @@ void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
 
 void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
                        THDGroup group, std::vector<thd::rank_type> group_ranks) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support gather
+  }
+
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
@@ -421,8 +449,8 @@ void test_send_recv_invalid_rank(std::shared_ptr<thd::DataChannel> data_channel)
   auto rank = data_channel->getRank();
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
 
-  if (g_data_channel_type == "tcp") {
-    { // cannot send or recveive to self
+  if (g_data_channel_type == "tcp" || g_data_channel_type == "gloo") {
+    { // cannot send or receive to self
       ASSERT_THROWS(std::logic_error, data_channel->send(*int_tensor, rank))
       ASSERT_THROWS(std::logic_error, data_channel->receive(*int_tensor, rank))
     }
@@ -437,7 +465,7 @@ void test_send_recv_invalid_rank(std::shared_ptr<thd::DataChannel> data_channel)
 // Cannot create empty group or group will be null
 void test_empty_group(std::shared_ptr<thd::DataChannel> data_channel) {
   // in MPI there will be created NULL_COMM
-  if (g_data_channel_type == "tcp") {
+  if (g_data_channel_type == "tcp" || g_data_channel_type == "gloo") {
     ASSERT_THROWS(std::logic_error, data_channel->newGroup({}))
   }
 }
@@ -603,6 +631,35 @@ void init_tcp_worker(unsigned int id, int workers) {
   run_all_tests(worker_channel, workers);
 }
 
+#ifdef WITH_GLOO
+void init_gloo_master(int workers) {
+  g_mutex.lock();
+  setenv(thd::WORLD_SIZE_ENV, std::to_string((workers + 1)).data(), 1);
+  setenv(thd::RANK_ENV, "0", 1);
+  setenv(thd::MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
+  auto masterChannel = std::make_shared<thd::DataChannelGloo>(); // reads all env variable
+  g_mutex.unlock();
+
+  assert(masterChannel->init());
+  run_all_tests(masterChannel, workers);
+
+  // wait for all workers to finish
+  for (auto& worker : g_all_workers) {
+    worker.join();
+  }
+}
+
+void init_gloo_worker(unsigned int id, int workers) {
+  g_mutex.lock();
+  setenv(thd::RANK_ENV, std::to_string(id).data(), 1);
+  setenv(thd::MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
+  auto worker_channel = std::make_shared<thd::DataChannelGloo>(); // reads all env variable
+  g_mutex.unlock();
+
+  assert(worker_channel->init());
+  run_all_tests(worker_channel, workers);
+}
+#endif // WITH_GLOO
 
 #ifdef WITH_MPI
 void init_mpi_process() {
@@ -623,17 +680,35 @@ int main(int argc, char const *argv[]) {
     for (auto workers : WORKERS_NUM) {
       std::cout << "TCP (workers: " << workers << "):" << std::endl;
       // start tcp master
-      std::thread master_thread(init_tcp_master, workers);
+      std::thread tcp_master_thread(init_tcp_master, workers);
 
       // start tcp worker
       for (int id = 1; id <= workers; ++id) {
         g_all_workers.push_back(std::thread(init_tcp_worker, id, workers));
       }
 
-      master_thread.join();
+      tcp_master_thread.join();
       g_all_workers.clear();
 
       std::cout << "TCP - OK" << std::endl;
+
+#ifdef WITH_GLOO
+    g_data_channel_type = "gloo";
+    for (auto workers : WORKERS_NUM) {
+      std::cout << "Gloo (workers: " << workers << "):" << std::endl;
+      // start gloo master
+      std::thread gloo_master_thread(init_gloo_master, workers);
+
+      // start gloo worker
+      for (int id = 1; id <= workers; ++id) {
+        g_all_workers.push_back(std::thread(init_gloo_worker, id, workers));
+      }
+
+      gloo_master_thread.join();
+      g_all_workers.clear();
+
+      std::cout << "Gloo - OK" << std::endl;
+#endif // WITH_GLOO
     }
 #ifdef WITH_MPI
     std::cout << "--------------------------" << std::endl;
