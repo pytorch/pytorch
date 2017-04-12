@@ -85,7 +85,7 @@ class TestPooling(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_pooling_1d(self, stride, pad, kernel, size, input_channels,
                         batch_size, order, method, gc, dc):
         assume(pad < kernel)
@@ -116,7 +116,7 @@ class TestPooling(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_pooling_3d(self, stride, pad, kernel, size, input_channels,
                         batch_size, order, method, gc, dc):
         assume(pad < kernel)
