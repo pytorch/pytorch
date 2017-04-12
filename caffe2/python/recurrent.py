@@ -134,7 +134,7 @@ def recurrent_net(
         x[1] for x in initial_cell_inputs] + references
     all_outputs = []
 
-    cell_net.Proto().type = 'prof_dag'
+    cell_net.Proto().type = 'simple'
     backward_cell_net.Proto().type = 'simple'
 
     # Internal arguments used by RecurrentNetwork operator
