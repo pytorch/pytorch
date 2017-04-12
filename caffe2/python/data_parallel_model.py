@@ -96,6 +96,7 @@ def Parallelize_GPU(
                             'Model builder func must return list of loss blobs'
 
                 losses_by_gpu[device] = losses
+    _ValidateParams(model_helper_obj.params)
 
     # Create parameter map
     model_helper_obj._device_grouped_blobs =\
@@ -117,6 +118,8 @@ def Parallelize_GPU(
 
     log.info("Adding gradient operators")
     _AddGradientOperators(devices, model_helper_obj, losses_by_gpu)
+
+    _ValidateParams(model_helper_obj.params)
 
     # Group gradients by device and register to blob lookup
     param_to_grad = model_helper_obj.param_to_grad
@@ -646,9 +649,26 @@ def _GroupByDevice(devices, params, non_data_params):
                 p, len(ps), ps,
             )
         # Ensure ordering
-        assert(ps[devices[0]] == params[j])
+        if (ps[devices[0]] != params[j]):
+            log.error("Params: {}".format(params))
+            log.error("Grouped: {}".format(grouped.keys()))
+            assert ps[devices[0]] == params[j], \
+                "Incorrect ordering: {}".format(ps)
 
     return grouped
+
+
+def _ValidateParams(params):
+    set_params = set(params)
+    if len(params) > len(set_params):
+        dupes = []
+        sp = sorted(params)
+        for j, p in enumerate(sp):
+            if j > 0 and params[j - 1] == p:
+                dupes.append(p)
+
+        assert len(params) == len(set_params), \
+            "Duplicate entries in params: {}".format(dupes)
 
 
 def _OptimizeGradientMemory(model, losses_by_gpu, devices):
