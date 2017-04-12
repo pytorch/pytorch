@@ -18,6 +18,8 @@ struct ReadyQueue;
 struct FunctionTask;
 struct BackwardTask;
 
+// A single instance of this struct should be created through the whole process lifetime.
+// The worker thread creation logic and Engine's destructor rely on this.
 struct Engine {
   Engine();
   virtual ~Engine();

@@ -85,6 +85,7 @@ auto ReadyQueue::pop_back() -> FunctionTask {
 Engine::Engine() : ready_queues() {
 }
 
+// This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
 auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
