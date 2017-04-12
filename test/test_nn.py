@@ -461,7 +461,7 @@ class TestNN(NNTestCase):
     def test_named_parameters(self):
         def num_params(module):
             return len(dict(module.named_parameters()))
-        
+
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
@@ -475,17 +475,16 @@ class TestNN(NNTestCase):
 
         for name in dict(l.named_parameters()).keys():
             self.assertTrue(name in ['bias', 'weight'])
-            
+
         for name in dict(n.named_parameters()).keys():
             self.assertTrue(name in ['l1.bias', 'l1.weight', 'param'])
 
         for name in dict(s.named_parameters()).keys():
             self.assertTrue(name in ['0.l1.bias', '0.l1.weight', '0.param'])
-            
+
         self.assertEqual(num_params(l), 2)
         self.assertEqual(num_params(n), 3)
         self.assertEqual(num_params(s), 3)
-        
 
     def test_children(self):
         l1 = nn.Linear(2, 2)
