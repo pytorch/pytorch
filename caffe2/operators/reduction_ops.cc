@@ -28,6 +28,8 @@ OPERATOR_SCHEMA(SumSqrElements)
     .Input(0, "X", "Tensor to sum up")
     .Output(0, "sum", "Scalar sum of squares");
 
+OPERATOR_SCHEMA(SumElementsGradient).NumInputs(2).NumOutputs(1);
+
 class GetSumElementsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
