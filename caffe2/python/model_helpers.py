@@ -13,3 +13,5 @@ from caffe2.python.helpers.pooling import *
 from caffe2.python.helpers.normalization import *
 from caffe2.python.helpers.nonlinearity import *
 from caffe2.python.helpers.array_helpers import *
+from caffe2.python.helpers.algebra import *
+from caffe2.python.helpers.train import *
