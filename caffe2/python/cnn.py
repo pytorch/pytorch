@@ -373,6 +373,13 @@ class CNNModelHelper(ModelHelperBase):
         return model_helpers.InstanceNorm(self, *args,
                                           use_cudnn=self.use_cudnn, **kwargs)
 
+    def Relu(self, *args, **kwargs):
+        return model_helpers.Relu(self, *args, order=self.order,
+                                  use_cudnn=self.use_cudnn, **kwargs)
+
+    def PRelu(self, *args, **kwargs):
+        return model_helpers.PRelu(self, *args, **kwargs)
+
     def MaxPool(self, *args, **kwargs):
         return model_helpers.MaxPool(self, *args, use_cudnn=self.use_cudnn,
                                      **kwargs)
@@ -394,32 +401,6 @@ class CNNModelHelper(ModelHelperBase):
         """The old depth concat function - we should move to use concat."""
         print("DepthConcat is deprecated. use Concat instead.")
         return self.Concat(blobs_in, blob_out, **kwargs)
-
-    def PRelu(self, blob_in, blob_out, num_channels=1, slope_init=None,
-              **kwargs):
-        """PRelu"""
-        slope_init = (
-            slope_init if slope_init else ('ConstantFill', {'value': 0.25}))
-        if self.init_params:
-            slope = self.param_init_net.__getattr__(slope_init[0])(
-                [],
-                blob_out + '_slope',
-                shape=[num_channels],
-                **slope_init[1]
-            )
-        else:
-            slope = core.ScopedBlobReference(
-                blob_out + '_slope', self.param_init_net)
-
-        self.params.extend([slope])
-
-        return self.net.PRelu([blob_in, slope], [blob_out])
-
-    def Relu(self, blob_in, blob_out, **kwargs):
-        """Relu."""
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-        return self.net.Relu(blob_in, blob_out, order=self.order, **kwargs)
 
     def Transpose(self, blob_in, blob_out, **kwargs):
         """Transpose."""
