@@ -169,7 +169,7 @@ On Linux
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 
 # Install basic dependencies
-conda install numpy mkl setuptools cmake gcc cffi
+conda install numpy pyyaml mkl setuptools cmake gcc cffi
 
 # Add LAPACK support for the GPU
 conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
