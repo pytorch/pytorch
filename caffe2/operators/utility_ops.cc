@@ -41,6 +41,7 @@ REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Duplicate, DuplicateOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
+REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
@@ -496,6 +497,31 @@ Example:
         "1-D tensor of size N with lengths over gathered data"
         " for each row in a batch. sum(LENGTHS) == OUTPUT.size()");
 
+OPERATOR_SCHEMA(LengthsGather)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Gather items from sparse tensor. Sparse tensor is described by items and
+lengths. This operator gathers items corresponding to lengths at the given
+indices. This deliberately doesn't return lengths of OUTPUTS so that both lists
+and maps can be supported without special cases. If you need lengths tensor for
+ OUTPUT, use `Gather`.
+
+Example:
+```
+ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+LENGTHS = [0, 2, 3, 1, 4]
+INDICES = [0, 2, 4]
+
+OUTPUT = [2, 3, 4, 6, 7, 8, 9]
+```
+
+)DOC")
+    .Input(0, "ITEMS", "items tensor")
+    .Input(1, "LENGTHS", "lengths tensor")
+    .Input(2, "INDICES", "indices into LENGTHS where items should be gathered")
+    .Output(0, "OUTPUT", "1-D tensor containing gathered items");
+
 OPERATOR_SCHEMA(Unique)
     .NumInputs(1)
     .NumOutputs(1, 2)
@@ -885,6 +911,7 @@ SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
 SHOULD_NOT_DO_GRADIENT(Slice);
 GRADIENT_NOT_IMPLEMENTED_YET(Duplicate);
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
+SHOULD_NOT_DO_GRADIENT(LengthsGather);
 SHOULD_NOT_DO_GRADIENT(AccumulateHistogram);
 
 } // namespace

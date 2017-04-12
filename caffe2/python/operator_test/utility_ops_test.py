@@ -120,6 +120,47 @@ class TestUtilityOps(hu.HypothesisTestCase):
         )
 
     @given(
+        inputs=hu.lengths_tensor(max_value=30).flatmap(
+            lambda pair: st.tuples(
+                st.just(pair[0]),
+                st.just(pair[1]),
+                hu.dims(max_value=len(pair[1])),
+            )
+        ).flatmap(
+            lambda tup: st.tuples(
+                st.just(tup[0]),
+                st.just(tup[1]),
+                hu.arrays(
+                    tup[2], dtype=np.int32,
+                    elements=st.integers(
+                        min_value=0, max_value=len(tup[1]) - 1)),
+            )
+        ),
+        **hu.gcs_cpu_only)
+    def test_lengths_gather(self, inputs, gc, dc):
+        items = inputs[0]
+        lengths = inputs[1]
+        indices = inputs[2]
+
+        def lengths_gather_op(items, lengths, indices):
+            ends = np.cumsum(lengths)
+            return [np.concatenate(
+                list(items[ends[i] - lengths[i]:ends[i]] for i in indices))]
+
+        op = core.CreateOperator(
+            "LengthsGather",
+            ["items", "lengths", "indices"],
+            ["output"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[items, lengths, indices],
+            reference=lengths_gather_op,
+        )
+
+    @given(
         inputs=st.integers(min_value=1, max_value=20).flatmap(
             lambda size: st.tuples(
                 hu.arrays([size]),

@@ -1317,6 +1317,76 @@ class GatherRangesOp : public Operator<Context> {
   }
 };
 
+template <class Context>
+class LengthsGatherOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(LengthsGatherOp);
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, OperatorBase::Input<TensorCPU>(INDICES));
+  }
+
+  template <typename Index>
+  bool DoRunWithType() {
+    auto& items = Input(ITEMS);
+    auto& lengths = Input(LENGTHS);
+    auto& indices = Input(INDICES);
+    auto* output = Output(0);
+
+    CAFFE_ENFORCE_GE(items.ndim(), 1, "ITEMS should be at least 1-D");
+    CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS should be 1-D");
+    CAFFE_ENFORCE_EQ(indices.ndim(), 1, "INDICES should be 1-D");
+
+    const auto* lengths_data = lengths.template data<int32_t>();
+    const auto* indices_data = indices.template data<Index>();
+
+    TIndex total_length = 0;
+    for (size_t i = 0; i < indices.size(); ++i) {
+      auto idx = indices_data[i];
+      CAFFE_ENFORCE_LT(idx, lengths.size());
+      total_length += lengths_data[idx];
+    }
+    auto shape = items.dims();
+    shape[0] = total_length;
+    output->Resize(shape);
+
+    offsets_.clear();
+    TIndex running_offset = 0;
+    offsets_.reserve(lengths.size());
+    for (size_t i = 0; i < lengths.size(); ++i) {
+      offsets_.push_back(running_offset);
+      running_offset += lengths_data[i];
+    }
+    CAFFE_ENFORCE_EQ(
+        items.dim(0),
+        running_offset,
+        "LENGTHS must match the first dimension of ITEMS");
+
+    auto src_base = static_cast<const char*>(items.raw_data());
+    auto block_size = items.size_from_dim(1);
+    auto block_bytesize = block_size * items.itemsize();
+    auto out = static_cast<char*>(output->raw_mutable_data(items.meta()));
+
+    for (size_t i = 0; i < indices.size(); ++i) {
+      auto idx = indices_data[i];
+      auto length = lengths_data[idx];
+      context_.template CopyItems<Context, Context>(
+          items.meta(),
+          length * block_size,
+          src_base + offsets_[idx] * block_bytesize,
+          out);
+      out += length * block_bytesize;
+    }
+    return true;
+  }
+
+  std::vector<TIndex> offsets_;
+
+  INPUT_TAGS(ITEMS, LENGTHS, INDICES);
+};
+
 // Since we just do copying, consider untemplating it on T and using raw_data()
 /**
  * Deduplicates input indices vector and optionally produces reverse remapping.
