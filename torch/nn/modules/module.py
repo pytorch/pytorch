@@ -349,16 +349,28 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L,)
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
         """
+        for name, param in self.named_parameters():
+            yield param
+
+    def named_parameters(self, memo=None):
+        """Returns an iterator over module parameters, yielding both the
+        name of the parameter as well as the parameter itself
+        
+        Example:
+            >>> for name, param in self.named_parameters():
+            >>>    if name in ['bias']:
+            >>>        print(param.size())
+        """
         if memo is None:
             memo = set()
-        for p in self._parameters.values():
+        for name, p in self._parameters.items():
             if p is not None and p not in memo:
                 memo.add(p)
-                yield p
+                yield name, p
         for module in self.children():
-            for p in module.parameters(memo):
-                yield p
-
+            for name, p in module.named_parameters(memo):
+                yield name, p
+                
     def children(self):
         """Returns an iterator over immediate children modules."""
         for name, module in self.named_children():

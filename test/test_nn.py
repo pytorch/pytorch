@@ -458,6 +458,35 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 3)
         self.assertEqual(num_params(s), 3)
 
+    def test_named_parameters(self):
+        def num_params(module):
+            return len(dict(module.named_parameters()))
+        
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = l
+                self.l2 = l
+                self.param = Parameter(torch.Tensor(3, 5))
+
+        l = nn.Linear(10, 20)
+        n = Net()
+        s = nn.Sequential(n, n, n, n)
+
+        for name in dict(l.named_parameters()).keys():
+            self.assertTrue(name in ['bias', 'weight'])
+            
+        for name in dict(n.named_parameters()).keys():
+            self.assertTrue(name in ['bias', 'weight', 'param'])
+
+        for name in dict(s.named_parameters()).keys():
+            self.assertTrue(name in ['bias', 'weight', 'param'])
+            
+        self.assertEqual(num_params(l), 2)
+        self.assertEqual(num_params(n), 3)
+        self.assertEqual(num_params(s), 3)
+        
+
     def test_children(self):
         l1 = nn.Linear(2, 2)
         l2 = nn.Linear(2, 2)
