@@ -358,7 +358,7 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args, PyObject *kwa
   PyObject *tensor = THPDefaultTensorClass;
   THPObjectPtr iterator;
   THPObjectPtr item;
-  PyObject *first_arg;
+  PyObject *first_arg=nullptr;
   if (args && PyTuple_GET_SIZE(args) > 0) {
     first_arg = PyTuple_GET_ITEM(args, 0);
   } else if (kwargs && PyTuple_GET_ITEM(args, 0)) {
