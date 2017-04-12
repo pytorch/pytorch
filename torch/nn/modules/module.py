@@ -210,15 +210,23 @@ class Module(object):
                 raise RuntimeError(
                     "forward hooks should never return any values, but '{}'"
                     "didn't return None".format(hook))
-        var = result
-        while not isinstance(var, Variable):
-            var = var[0]
-        creator = var.creator
-        if creator is not None and len(self._backward_hooks) > 0:
-            for hook in self._backward_hooks.values():
-                wrapper = functools.partial(hook, self)
-                functools.update_wrapper(wrapper, hook)
-                creator.register_hook(wrapper)
+
+        var_list = result
+        if isinstance(var_list, dict):
+            var_list = list(var_list.values())
+        elif isinstance(var_list, (tuple, list)):
+            pass
+        else:
+            var_list = [var_list]
+
+        for var in var_list:
+            assert isinstance(var, Variable)
+            creator = var.creator
+            if creator is not None and len(self._backward_hooks) > 0:
+                for hook in self._backward_hooks.values():
+                    wrapper = functools.partial(hook, self)
+                    functools.update_wrapper(wrapper, hook)
+                    creator.register_hook(wrapper)
         return result
 
     def __getattr__(self, name):
