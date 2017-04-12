@@ -1365,7 +1365,10 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
     THTensor_(copy)(r_, t);
   }
 
-  if(beta != 1)
+  if(beta == 0) {
+    THTensor_(zero)(r_);
+  }
+  else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
   if(r_->stride[0] == 1)
