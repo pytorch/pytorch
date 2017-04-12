@@ -37,7 +37,6 @@ def CurrentDeviceScope():
     return _threadlocal_scope.devicescope
 
 
-# NOTE: using NameScope is NOT thread-safe! (TODO t13621185)
 @contextlib.contextmanager
 def NameScope(prefix, reset=False):
     global _threadlocal_scope
