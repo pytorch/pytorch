@@ -90,7 +90,7 @@ Engine::~Engine() = default;
 
 auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
   while (1) {
-    FunctionTask task = queue.get()->pop_back();
+    FunctionTask task = queue->pop_back();
     if (!task.base->has_error.load()) {
       try {
         evaluate_function(task);
