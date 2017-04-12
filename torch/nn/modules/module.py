@@ -352,7 +352,7 @@ class Module(object):
         for name, param in self.named_parameters():
             yield param
 
-    def named_parameters(self, memo=None):
+    def named_parameters(self, memo=None, prefix=''):
         """Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself
         
@@ -366,9 +366,10 @@ class Module(object):
         for name, p in self._parameters.items():
             if p is not None and p not in memo:
                 memo.add(p)
-                yield name, p
-        for module in self.children():
-            for name, p in module.named_parameters(memo):
+                yield prefix + ('.' if prefix else '') + name, p
+        for mname, module in self.named_children():
+            submodule_prefix = prefix + ('.' if prefix else '') + mname
+            for name, p in module.named_parameters(memo, submodule_prefix):
                 yield name, p
                 
     def children(self):

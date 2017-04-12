@@ -477,10 +477,10 @@ class TestNN(NNTestCase):
             self.assertTrue(name in ['bias', 'weight'])
             
         for name in dict(n.named_parameters()).keys():
-            self.assertTrue(name in ['bias', 'weight', 'param'])
+            self.assertTrue(name in ['l1.bias', 'l1.weight', 'param'])
 
         for name in dict(s.named_parameters()).keys():
-            self.assertTrue(name in ['bias', 'weight', 'param'])
+            self.assertTrue(name in ['0.l1.bias', '0.l1.weight', '0.param'])
             
         self.assertEqual(num_params(l), 2)
         self.assertEqual(num_params(n), 3)
