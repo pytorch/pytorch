@@ -355,7 +355,7 @@ class Module(object):
     def named_parameters(self, memo=None, prefix=''):
         """Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself
-        
+
         Example:
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
@@ -371,7 +371,7 @@ class Module(object):
             submodule_prefix = prefix + ('.' if prefix else '') + mname
             for name, p in module.named_parameters(memo, submodule_prefix):
                 yield name, p
-                
+
     def children(self):
         """Returns an iterator over immediate children modules."""
         for name, module in self.named_children():
