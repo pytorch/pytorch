@@ -641,6 +641,36 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         self.assertEqual(sum_op.output[0], "x2_grad")
         self.assertEqual(input_to_grad["x1"], "x1_grad")
 
+    def testAddAndDynamicConstant(self):
+        net = core.Net("test_net")
+        net.FC(["x1", "x1_w", "x1_b"], ["x2"])
+        net.Relu("x2", "x2")
+        net.ConstantFill(["x2"], ["x3"])
+        net.Add(["x2", "x3"], "x4")
+        net.FC(["x4", "x4_w", "x4_b"], ["x5"])
+        net.SoftmaxWithLoss(["x5", "labels"], ["softmax", "loss"])
+        input_to_grad = net.AddGradientOperators(["loss"])
+        for op in net.Proto().op:
+            self.assertFalse(op.type == 'Sum')
+
+        self.assertTrue("x4" in input_to_grad)
+        self.assertTrue("x1" in input_to_grad)
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
+
+    def testAddAndStaticConstant(self):
+        net = core.Net("test_net")
+        net.FC(["x1", "x1_w", "x1_b"], ["x2"])
+        net.Relu("x2", "x2")
+        net.ConstantFill([], ["x3"], shape=[1])
+        net.Add(["x2", "x3"], "x4", broadcast=1)
+        net.FC(["x4", "x4_w", "x4_b"], ["x5"])
+        net.SoftmaxWithLoss(["x5", "labels"], ["softmax", "loss"])
+        input_to_grad = net.AddGradientOperators(["loss"])
+        print(input_to_grad)
+
+        self.assertTrue("x1" in input_to_grad)
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
+
     def testSubOpInMiddle(self):
         #  x1-->Relu--x2----------------->Sub-->x4
         #                |                 |

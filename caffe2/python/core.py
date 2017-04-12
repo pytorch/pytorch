@@ -744,7 +744,7 @@ class IR(object):
         forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
         additional_sum_ops = []
         grad_map = {}
-        for i, input_name in enumerate(set(forward_op.input)):
+        for _i, input_name in enumerate(set(forward_op.input)):
             input_version = in_versions[input_name]
             input_usage = self.input_usages[input_name][input_version]
             if (len(input_usage) <= 1 or fwd_op_idx != input_usage[0]):
@@ -802,7 +802,14 @@ class IR(object):
                 forward_op_idx, gradient_ops, g_output, g_input)
             # Record the gradient map to all_input_to_grad.
             for name, grad in zip(forward_op.input, g_input):
-                new_input_to_grad[name] = grad
+                # Do not overwrite an existing gradient with a None
+                # unless the input is also an output of the op, since
+                # we update the blob version when blob is output of an
+                # operator.
+                if grad is not None or \
+                    name not in input_to_grad or \
+                        name in list(forward_op.output):
+                        new_input_to_grad[name] = grad
 
         return new_input_to_grad, gradient_ops
 
@@ -1006,7 +1013,7 @@ def get_undefined_blobs(ssa):
     are used before they are defined, which corresponds to inputs at version 0.
     """
     undef_blobs = set()
-    for inputs, outputs in ssa:
+    for inputs, _outputs in ssa:
         undef_blobs |= set(name for (name, ver) in inputs if ver == 0)
     return undef_blobs
 
@@ -1018,7 +1025,7 @@ def get_output_producers(ssa):
     the blob. A versioned blob is a tuple (blob_name, version).
     """
     producers = {}
-    for i, (inputs, outputs) in enumerate(ssa):
+    for i, (_inputs, outputs) in enumerate(ssa):
         for o in outputs:
             producers[o] = i
     return producers
