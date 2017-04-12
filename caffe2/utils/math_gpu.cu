@@ -149,6 +149,34 @@ void Gemv<float, CUDAContext>(
       1));
 }
 
+template <>
+void Gemv<double, CUDAContext>(
+    const CBLAS_TRANSPOSE TransA,
+    const int M,
+    const int N,
+    const double alpha,
+    const double* A,
+    const double* x,
+    const double beta,
+    double* y,
+    CUDAContext* context) {
+  cublasOperation_t cuTransA =
+      (TransA == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
+  CUBLAS_ENFORCE(cublasDgemv(
+      context->cublas_handle(),
+      cuTransA,
+      N,
+      M,
+      &alpha,
+      A,
+      N,
+      x,
+      1,
+      &beta,
+      y,
+      1));
+}
+
 // Batched Add variants
 namespace {
 
