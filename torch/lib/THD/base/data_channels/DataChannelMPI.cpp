@@ -10,25 +10,6 @@
 #include <unordered_map>
 
 
-namespace std {
-
-template<>
-struct hash<THDReduceOp> {
-  std::size_t operator()(const THDReduceOp& op) const {
-    return hash<int>()(static_cast<int>(op));
-  }
-};
-
-template<>
-struct hash<thpp::Type> {
-  std::size_t operator()(const thpp::Type& type) const {
-    return hash<char>()(static_cast<char>(type));
-  }
-};
-
-} // namespace std
-
-
 namespace thd {
 
 namespace {
