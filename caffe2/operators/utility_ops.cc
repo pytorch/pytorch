@@ -38,7 +38,6 @@ REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Duplicate, DuplicateOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
@@ -387,39 +386,6 @@ OPERATOR_SCHEMA(IsEmpty)
     .SetDoc("Returns true iff the input tensor has size == 0")
     .Input(0, "tensor", "Tensor of any type.")
     .Output(0, "is_empty", "Scalar bool tensor. True if input is empty.");
-
-OPERATOR_SCHEMA(Duplicate)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .SetDoc(R"DOC(
-Given DATA tensor of rank r >= 1, and LENGTHS tensor of rank 1, duplicate each
-entry of the outer-most dimension of DATA according to LENGTHS, and concatenate
-them in an output tensor of rank r.
-
-Example:
-  DATA  = [
-      [1.0, 1.2],
-      [2.3, 3.4],
-      [4.5, 5.7],
-      [6.8, 7.9],
-  ]
-  LENGTHS = [0, 1, 3, 2]
-  OUTPUT = [
-      [2.3, 3.4],
-      [4.5, 5.7],
-      [4.5, 5.7],
-      [4.5, 5.7],
-      [6.8, 7.9],
-      [6.8, 7.9],
-  ]
-)DOC")
-    .Input(
-        0,
-        "DATA",
-        "Tensor of rank r >= 1. First dimension must be equal to the size of "
-        "lengths")
-    .Input(1, "LENGTHS", "Tensor of int32 lengths of rank 1")
-    .Output(0, "OUTPUT", "Tensor of rank r");
 
 OPERATOR_SCHEMA(Gather)
     .NumInputs(2)
@@ -909,7 +875,6 @@ SHOULD_NOT_DO_GRADIENT(SegmentIdsToRanges);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
 // TODO(azzolini): Add support for slice gradient
 SHOULD_NOT_DO_GRADIENT(Slice);
-GRADIENT_NOT_IMPLEMENTED_YET(Duplicate);
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
 SHOULD_NOT_DO_GRADIENT(LengthsGather);
 SHOULD_NOT_DO_GRADIENT(AccumulateHistogram);

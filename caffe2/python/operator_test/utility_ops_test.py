@@ -159,33 +159,3 @@ class TestUtilityOps(hu.HypothesisTestCase):
             inputs=[items, lengths, indices],
             reference=lengths_gather_op,
         )
-
-    @given(
-        inputs=st.integers(min_value=1, max_value=20).flatmap(
-            lambda size: st.tuples(
-                hu.arrays([size]),
-                hu.arrays([size], dtype=np.int32,
-                          elements=st.integers(min_value=0, max_value=20)),
-            )
-        ),
-        **hu.gcs_cpu_only)
-    def test_duplicate(self, inputs, gc, dc):
-        data, lengths = inputs
-
-        def duplicate_op(data, lengths):
-            return [np.concatenate([
-                [d] * l for d, l in zip(data, lengths)
-            ])]
-
-        op = core.CreateOperator(
-            "Duplicate",
-            ["data", "lengths"],
-            ["output"]
-        )
-
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[data, lengths],
-            reference=duplicate_op,
-        )
