@@ -11,6 +11,26 @@
 #include <unordered_map>
 #include <utility>
 
+
+namespace std {
+
+template<>
+struct hash<THDReduceOp> {
+  std::size_t operator()(const THDReduceOp& op) const {
+    return hash<int>()(static_cast<int>(op));
+  }
+};
+
+template<>
+struct hash<thpp::Type> {
+  std::size_t operator()(const thpp::Type& type) const {
+    return hash<char>()(static_cast<char>(type));
+  }
+};
+
+} // namespace std
+
+
 namespace thd {
 
 struct DataChannel {
@@ -25,41 +45,6 @@ struct DataChannel {
     virtual void wait() = 0;
   };
 
-  DataChannel() {};
-  virtual ~DataChannel() {};
-
-  virtual bool init() = 0;
-
-  virtual rank_type getRank() = 0;
-  virtual rank_type getNumProcesses() = 0;
-
-  virtual void allGather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
-                         THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void gather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
-                      rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void scatter(std::vector<thpp::Tensor*>& input, thpp::Tensor& output,
-                       rank_type src_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void allReduce(thpp::Tensor& data, THDReduceOp operation,
-                         THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void reduce(thpp::Tensor& data, THDReduceOp operation,
-                      rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void broadcast(thpp::Tensor& data, rank_type src_rank,
-                         THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void send(const Scalar& value, rank_type src_rank) = 0;
-  virtual void send(thpp::Tensor& data, rank_type dst_rank) = 0;
-  virtual void receive(Scalar& value, rank_type src_rank) = 0;
-  virtual void receive(thpp::Tensor& data) = 0; // receive from any source
-  virtual void receive(thpp::Tensor& data, rank_type src_rank) = 0;
-  virtual Request* isend(thpp::Tensor& data, rank_type dst_rank) = 0;
-  virtual Request* ireceive(thpp::Tensor& data, rank_type src_rank) = 0;
-
-  virtual void barrier(THDGroup group_id = THDGroupWORLD) = 0;
-
-  virtual THDGroup newGroup(const std::vector<rank_type>& ranks) = 0;
-
-  static DataChannel* newChannel(THDChannelType type);
-
-protected:
   struct Group {
     Group();
     /*
@@ -96,6 +81,40 @@ protected:
     // maps old ranks (global ranks) to new group ranks
     std::unordered_map<rank_type, rank_type> _old2new;
   };
+
+  DataChannel() {};
+  virtual ~DataChannel() {};
+
+  virtual bool init() = 0;
+
+  virtual rank_type getRank() = 0;
+  virtual rank_type getNumProcesses() = 0;
+
+  virtual void allGather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
+                         THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void gather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
+                      rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void scatter(std::vector<thpp::Tensor*>& input, thpp::Tensor& output,
+                       rank_type src_rank, THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void allReduce(thpp::Tensor& data, THDReduceOp operation,
+                         THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void reduce(thpp::Tensor& data, THDReduceOp operation,
+                      rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void broadcast(thpp::Tensor& data, rank_type src_rank,
+                         THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void send(const Scalar& value, rank_type src_rank) = 0;
+  virtual void send(thpp::Tensor& data, rank_type dst_rank) = 0;
+  virtual void receive(Scalar& value, rank_type src_rank) = 0;
+  virtual void receive(thpp::Tensor& data) = 0; // receive from any source
+  virtual void receive(thpp::Tensor& data, rank_type src_rank) = 0;
+  virtual Request* isend(thpp::Tensor& data, rank_type dst_rank) = 0;
+  virtual Request* ireceive(thpp::Tensor& data, rank_type src_rank) = 0;
+
+  virtual void barrier(THDGroup group_id = THDGroupWORLD) = 0;
+
+  virtual THDGroup newGroup(const std::vector<rank_type>& ranks) = 0;
+
+  static DataChannel* newChannel(THDChannelType type);
 };
 
 } // namespace thd

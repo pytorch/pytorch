@@ -191,6 +191,6 @@ void wake_up(int socket) {
   send_value<QueryType>(socket, QueryType::STOP_WAITING);
 }
 
-} // anonymous namespace
+} // anonymous namespace 
 
 } // namespace thd

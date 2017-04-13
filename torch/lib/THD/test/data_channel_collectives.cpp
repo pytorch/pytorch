@@ -1,7 +1,10 @@
-#include "../base/data_channels/DataChannelTCP.hpp"
+#ifdef WITH_GLOO
+#include "../base/data_channels/DataChannelGloo.hpp"
+#endif // WITH_GLOO
 #ifdef WITH_MPI
 #include "../base/data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
+#include "../base/data_channels/DataChannelTCP.hpp"
 #include "../base/ChannelEnvVars.hpp"
 #include "TestUtils.hpp"
 

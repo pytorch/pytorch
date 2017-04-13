@@ -1,9 +1,11 @@
 #include "DataChannel.hpp"
+#ifdef WITH_GLOO
+#include "data_channels/DataChannelGloo.hpp"
+#endif // WITH_GLOO
 #ifdef WITH_MPI
 #include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
 #include "data_channels/DataChannelTCP.hpp"
-#include "data_channels/DataChannelGloo.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -14,12 +16,14 @@ namespace thd {
 DataChannel* DataChannel::newChannel(THDChannelType type) {
   if (type == THDChannelTCP)
     return new DataChannelTCP();
-  else if (type == THDChannelGloo)
-    return new DataChannelGloo();
 #ifdef WITH_MPI
   else if (type == THDChannelMPI)
     return new DataChannelMPI();
 #endif // WITH_MPI
+#ifdef WITH_GLOO
+  else if (type == THDChannelGloo)
+    return new DataChannelGloo();
+#endif // WITH_GLOO
   throw std::runtime_error("unsupported data channel type");
 }
 
