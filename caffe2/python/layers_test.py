@@ -192,6 +192,87 @@ class TestLayers(LayersTestCase):
             sampling_prob
         )
 
+    def testGatherRecord(self):
+        indices = np.array([1, 3, 4], dtype=np.int32)
+        dense = np.array(range(20), dtype=np.float32).reshape(10, 2)
+        lengths = np.array(range(10), dtype=np.int32)
+        items = np.array(range(lengths.sum()), dtype=np.int64)
+        items_lengths = np.array(range(lengths.sum()), dtype=np.int32)
+        items_items = np.array(range(items_lengths.sum()), dtype=np.int64)
+        record = self.new_record(schema.Struct(
+            ('dense', schema.Scalar(np.float32)),
+            ('sparse', schema.Struct(
+                ('list', schema.List(np.int64)),
+                ('list_of_list', schema.List(schema.List(np.int64))),
+            )),
+        ))
+        indices_record = self.new_record(schema.Scalar(np.int32))
+        input_record = schema.Struct(
+            ('indices', indices_record),
+            ('record', record),
+        )
+        schema.FeedRecord(
+            input_record,
+            [indices, dense, lengths, items, lengths, items_lengths,
+             items_items])
+        gathered_record = self.model.GatherRecord(input_record)
+        self.assertTrue(schema.equal_schemas(gathered_record, record))
+
+        # just to make run_train_net works
+        self.model.loss = self.model.StopGradient(gathered_record.dense, 1)
+
+        self.run_train_net()
+        gathered_dense = workspace.FetchBlob(gathered_record.dense())
+        np.testing.assert_array_equal(
+            np.concatenate([dense[i:i + 1] for i in indices]), gathered_dense)
+        gathered_lengths = workspace.FetchBlob(
+            gathered_record.sparse.list.lengths())
+        np.testing.assert_array_equal(
+            np.concatenate([lengths[i:i + 1] for i in indices]),
+            gathered_lengths)
+        gathered_items = workspace.FetchBlob(
+            gathered_record.sparse.list.items())
+        offsets = lengths.cumsum() - lengths
+        np.testing.assert_array_equal(
+            np.concatenate([
+                items[offsets[i]: offsets[i] + lengths[i]]
+                for i in indices
+            ]), gathered_items)
+
+        gathered_items_lengths = workspace.FetchBlob(
+            gathered_record.sparse.list_of_list.items.lengths())
+        np.testing.assert_array_equal(
+            np.concatenate([
+                items_lengths[offsets[i]: offsets[i] + lengths[i]]
+                for i in indices
+            ]),
+            gathered_items_lengths
+        )
+
+        nested_offsets = []
+        nested_lengths = []
+        nested_offset = 0
+        j = 0
+        for l in lengths:
+            nested_offsets.append(nested_offset)
+            nested_length = 0
+            for _i in range(l):
+                nested_offset += items_lengths[j]
+                nested_length += items_lengths[j]
+                j += 1
+            nested_lengths.append(nested_length)
+
+        gathered_items_items = workspace.FetchBlob(
+            gathered_record.sparse.list_of_list.items.items())
+        np.testing.assert_array_equal(
+            np.concatenate([
+                items_items[nested_offsets[i]:
+                            nested_offsets[i] + nested_lengths[i]]
+                for i in indices
+            ]),
+            gathered_items_items
+        )
+
     def testFunctionalLayer(self):
         def normalize(net, in_record, out_record):
             mean = net.ReduceFrontMean(in_record(), 1)
