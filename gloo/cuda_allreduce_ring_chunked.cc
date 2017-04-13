@@ -322,7 +322,15 @@ void CudaAllreduceRingChunked<T, W>::init(
 }
 
 // Instantiate templates
-template class CudaAllreduceRingChunked<float, CudaHostWorkspace<float> >;
-template class CudaAllreduceRingChunked<float, CudaDeviceWorkspace<float> >;
+#define INSTANTIATE_TEMPLATE(T)                                         \
+template class CudaAllreduceRingChunked<T, CudaHostWorkspace<T> >;      \
+template class CudaAllreduceRingChunked<T, CudaDeviceWorkspace<T> >;
+
+INSTANTIATE_TEMPLATE(int8_t);
+INSTANTIATE_TEMPLATE(int32_t);
+INSTANTIATE_TEMPLATE(int64_t);
+INSTANTIATE_TEMPLATE(uint64_t);
+INSTANTIATE_TEMPLATE(float);
+INSTANTIATE_TEMPLATE(double);
 
 } // namespace gloo

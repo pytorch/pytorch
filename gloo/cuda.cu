@@ -242,24 +242,32 @@ CudaHostPointer<T>::~CudaHostPointer() {
 }
 
 // Instantiate templates
-template class CudaDevicePointer<float>;
-template class CudaHostPointer<float>;
+#define INSTANTIATE_COPY_ASYNC(T)                                       \
+  template class CudaDevicePointer<T>;                                  \
+  template class CudaHostPointer<T>;                                    \
+                                                                        \
+  template void CudaStream::copyAsync<T>(                               \
+      CudaHostPointer<T>& dst,                                          \
+      CudaDevicePointer<T>& src);                                       \
+                                                                        \
+  template void CudaStream::copyAsync<T>(                               \
+      CudaHostPointer<T>& dst,                                          \
+      CudaHostPointer<T>& src);                                         \
+                                                                        \
+  template void CudaStream::copyAsync<T>(                               \
+      CudaDevicePointer<T>& dst,                                        \
+      CudaDevicePointer<T>& src);                                       \
+                                                                        \
+  template void CudaStream::copyAsync<T>(                               \
+      CudaDevicePointer<T>& dst,                                        \
+      CudaHostPointer<T>& src);
 
-template void CudaStream::copyAsync<float>(
-    CudaHostPointer<float>& dst,
-    CudaDevicePointer<float>& src);
-
-template void CudaStream::copyAsync<float>(
-    CudaHostPointer<float>& dst,
-    CudaHostPointer<float>& src);
-
-template void CudaStream::copyAsync<float>(
-    CudaDevicePointer<float>& dst,
-    CudaDevicePointer<float>& src);
-
-template void CudaStream::copyAsync<float>(
-    CudaDevicePointer<float>& dst,
-    CudaHostPointer<float>& src);
+INSTANTIATE_COPY_ASYNC(int8_t);
+INSTANTIATE_COPY_ASYNC(int32_t);
+INSTANTIATE_COPY_ASYNC(int64_t);
+INSTANTIATE_COPY_ASYNC(uint64_t);
+INSTANTIATE_COPY_ASYNC(float);
+INSTANTIATE_COPY_ASYNC(double);
 
 // Borrowed limits from Caffe2 code (see core/common_gpu.h)
 constexpr static int kCudaNumThreads = 512;
@@ -293,8 +301,18 @@ static inline int cudaGetBlocks(const int N) {
         dst, src, n);                                                   \
   }
 
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int8_t, cudaSum, +);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int8_t, cudaProduct, *);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int32_t, cudaSum, +);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int32_t, cudaProduct, *);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int64_t, cudaSum, +);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int64_t, cudaProduct, *);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(uint64_t, cudaSum, +);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(uint64_t, cudaProduct, *);
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(float, cudaSum, +);
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(float, cudaProduct, *);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(double, cudaSum, +);
+DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(double, cudaProduct, *);
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(T, Funcname, op)            \
   __global__                                                            \
@@ -321,7 +339,17 @@ DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(float, cudaProduct, *);
         dst, src, n);                                                   \
   }
 
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int8_t, cudaMin, <);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int8_t, cudaMax, >);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int32_t, cudaMin, <);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int32_t, cudaMax, >);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int64_t, cudaMin, <);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int64_t, cudaMax, >);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(uint64_t, cudaMin, <);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(uint64_t, cudaMax, >);
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(float, cudaMin, <);
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(float, cudaMax, >);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(double, cudaMin, <);
+DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(double, cudaMax, >);
 
 } // namespace gloo

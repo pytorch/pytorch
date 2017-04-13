@@ -152,7 +152,16 @@ void CudaBroadcastOneToAll<T, W>::init(
   }
 }
 
-// Instantiate template
-template class CudaBroadcastOneToAll<float, CudaHostWorkspace<float>>;
+// Instantiate templates
+#define INSTANTIATE_TEMPLATE(T)                                         \
+template class CudaBroadcastOneToAll<T, CudaHostWorkspace<T> >;
+
+
+INSTANTIATE_TEMPLATE(int8_t);
+INSTANTIATE_TEMPLATE(int32_t);
+INSTANTIATE_TEMPLATE(int64_t);
+INSTANTIATE_TEMPLATE(uint64_t);
+INSTANTIATE_TEMPLATE(float);
+INSTANTIATE_TEMPLATE(double);
 
 } // namespace gloo

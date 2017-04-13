@@ -313,8 +313,16 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
         i == steps_ - 1 ? sendCounts_[i] + recvCounts_[i] : sendCounts_[i]));
   }
 }
-// Instantiate templates
-template class CudaAllreduceHalvingDoubling<float, CudaHostWorkspace<float>>;
-template class CudaAllreduceHalvingDoubling<float, CudaDeviceWorkspace<float>>;
+
+#define INSTANTIATE_TEMPLATE(T)                                         \
+template class CudaAllreduceHalvingDoubling<T, CudaHostWorkspace<T> >;  \
+template class CudaAllreduceHalvingDoubling<T, CudaDeviceWorkspace<T> >;
+
+INSTANTIATE_TEMPLATE(int8_t);
+INSTANTIATE_TEMPLATE(int32_t);
+INSTANTIATE_TEMPLATE(int64_t);
+INSTANTIATE_TEMPLATE(uint64_t);
+INSTANTIATE_TEMPLATE(float);
+INSTANTIATE_TEMPLATE(double);
 
 } // namespace gloo

@@ -165,7 +165,15 @@ void CudaAllreduceRing<T, W>::init(
 }
 
 // Instantiate templates
-template class CudaAllreduceRing<float, CudaHostWorkspace<float> >;
-template class CudaAllreduceRing<float, CudaDeviceWorkspace<float> >;
+#define INSTANTIATE_TEMPLATE(T)                                         \
+template class CudaAllreduceRing<T, CudaHostWorkspace<T> >;             \
+template class CudaAllreduceRing<T, CudaDeviceWorkspace<T> >;
+
+INSTANTIATE_TEMPLATE(int8_t);
+INSTANTIATE_TEMPLATE(int32_t);
+INSTANTIATE_TEMPLATE(int64_t);
+INSTANTIATE_TEMPLATE(uint64_t);
+INSTANTIATE_TEMPLATE(float);
+INSTANTIATE_TEMPLATE(double);
 
 } // namespace gloo

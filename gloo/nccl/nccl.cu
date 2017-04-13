@@ -124,9 +124,39 @@ template <typename T>
 class ncclTypeWrapper;
 
 template <>
+class ncclTypeWrapper<int8_t> {
+ public:
+  static const ncclDataType_t type = ncclChar;
+};
+
+template <>
+class ncclTypeWrapper<int32_t> {
+ public:
+  static const ncclDataType_t type = ncclInt;
+};
+
+template <>
+class ncclTypeWrapper<int64_t> {
+ public:
+  static const ncclDataType_t type = ncclInt64;
+};
+
+template <>
+class ncclTypeWrapper<uint64_t> {
+ public:
+  static const ncclDataType_t type = ncclUint64;
+};
+
+template <>
 class ncclTypeWrapper<float> {
  public:
   static const ncclDataType_t type = ncclFloat;
+};
+
+template <>
+class ncclTypeWrapper<double> {
+ public:
+  static const ncclDataType_t type = ncclDouble;
 };
 
 template <typename T>
@@ -260,15 +290,23 @@ void AllgatherOp<T>::runAsync() {
   });
 }
 
-template class NCCLExecution<float>;
-template class NCCLContext<float>;
-template class NCCLOp<float>;
+#define DEFINE_NCCL_TYPES_AND_OPS(T)                                    \
+template class NCCLExecution<T>;                                        \
+template class NCCLContext<T>;                                          \
+template class NCCLOp<T>;                                               \
+                                                                        \
+template class ReduceOp<T>;                                             \
+template class AllreduceOp<T>;                                          \
+template class ReduceScatterOp<T>;                                      \
+template class BroadcastOp<T>;                                          \
+template class AllgatherOp<T>;
 
-template class ReduceOp<float>;
-template class AllreduceOp<float>;
-template class ReduceScatterOp<float>;
-template class BroadcastOp<float>;
-template class AllgatherOp<float>;
+DEFINE_NCCL_TYPES_AND_OPS(int8_t);
+DEFINE_NCCL_TYPES_AND_OPS(int32_t);
+DEFINE_NCCL_TYPES_AND_OPS(int64_t);
+DEFINE_NCCL_TYPES_AND_OPS(uint64_t);
+DEFINE_NCCL_TYPES_AND_OPS(float);
+DEFINE_NCCL_TYPES_AND_OPS(double);
 
 } // namespace nccl
 } // namespace gloo
