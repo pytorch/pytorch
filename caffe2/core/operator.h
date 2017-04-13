@@ -98,6 +98,28 @@ class OperatorBase {
     return Run(stream_id);
   }
 
+  virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
+    bool found_input;
+    if (err->caller() != nullptr) {
+      for (int i = 0; i < inputs_.size(); i++) {
+        if (inputs_[i]->GetRaw() == err->caller()) {
+          found_input = true;
+          err->AppendMessage("\n** while accessing input: " + def().input(i));
+          break;
+        }
+      }
+      for (int i = 0; i < outputs_.size(); i++) {
+        if (outputs_[i]->GetRaw() == err->caller()) {
+          if (found_input) {
+            err->AppendMessage("\n OR ");
+          }
+          err->AppendMessage("\n** while accessing output: " + def().output(i));
+          break;
+        }
+      }
+    }
+  }
+
   inline const OperatorDef& def() const {
     return operator_def_;
   }
@@ -181,6 +203,7 @@ class Operator : public OperatorBase {
       return (started && finished);
     } catch (EnforceNotMet& err) {
       err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
+      AddRelatedBlobInfo(&err);
       throw;
     }
   }
@@ -191,6 +214,7 @@ class Operator : public OperatorBase {
       return RunOnDevice();
     } catch (EnforceNotMet& err) {
       err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
+      AddRelatedBlobInfo(&err);
       throw;
     }
   }

@@ -398,11 +398,11 @@ class Tensor {
       size_t capacity,
       Deleter&& d) {
     meta_ = meta;
-    CAFFE_ENFORCE(
+    CAFFE_ENFORCE_WITH_CALLER(
         meta_.id(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
-    CAFFE_ENFORCE(
+    CAFFE_ENFORCE_WITH_CALLER(
         size_ > 0,
         "To share data with a raw pointer, you need to set shape first.");
     data_.reset(src, std::forward<Deleter>(d));
@@ -425,7 +425,7 @@ class Tensor {
    * or raw_mutable_data() must have been called prior to this function call.
    */
   inline const void* raw_data() const {
-    CAFFE_ENFORCE(data_.get() || size_ == 0);
+    CAFFE_ENFORCE_WITH_CALLER(data_.get() || size_ == 0);
     return data_.get();
   }
 
@@ -437,12 +437,12 @@ class Tensor {
    */
   template <typename T>
   inline const T* data() const {
-    CAFFE_ENFORCE(
+    CAFFE_ENFORCE_WITH_CALLER(
         data_.get() || size_ == 0,
         "The tensor is of non-zero shape, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
-    CAFFE_ENFORCE(
+    CAFFE_ENFORCE_WITH_CALLER(
         IsType<T>(),
         "Tensor type mismatch, caller expects elements to be ",
         TypeMeta::Name<T>(),
@@ -468,9 +468,8 @@ class Tensor {
       return data_.get();
     } else {
       meta_ = meta;
-      CAFFE_ENFORCE_GE(
-          size_,
-          0,
+      CAFFE_ENFORCE_WITH_CALLER(
+          size_ >= 0,
           "Tensor is not initialized. You probably need to call Resize() "
           "before calling mutable_data()");
       if (size_ == 0) {
@@ -509,9 +508,8 @@ class Tensor {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data() {
-    CAFFE_ENFORCE_NE(
-        meta_.id(),
-        0,
+    CAFFE_ENFORCE_WITH_CALLER(
+        meta_.id() != 0,
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(meta_);
