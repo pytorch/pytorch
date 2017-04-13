@@ -99,7 +99,8 @@ class EnforceNotMet : public std::exception {
       const char* file,
       const int line,
       const char* condition,
-      const string& msg);
+      const string& msg,
+      const void* caller=nullptr);
   void AppendMessage(const string& msg);
   string msg() const;
   inline const vector<string>& msg_stack() const {
@@ -108,10 +109,13 @@ class EnforceNotMet : public std::exception {
 
   const char* what() const noexcept override;
 
+  const void* caller() const noexcept;
+
  private:
   vector<string> msg_stack_;
   string full_msg_;
   string stack_trace_;
+  const void* caller_;
 };
 
 #define CAFFE_ENFORCE(condition, ...)                                         \
@@ -119,6 +123,14 @@ class EnforceNotMet : public std::exception {
     if (!(condition)) {                                                       \
       throw ::caffe2::EnforceNotMet(                                          \
           __FILE__, __LINE__, #condition, ::caffe2::MakeString(__VA_ARGS__)); \
+    }                                                                         \
+  } while (false)
+
+#define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                             \
+  do {                                                                        \
+    if (!(condition)) {                                                       \
+      throw ::caffe2::EnforceNotMet(                                          \
+          __FILE__, __LINE__, #condition, ::caffe2::MakeString(__VA_ARGS__), this); \
     }                                                                         \
   } while (false)
 

@@ -58,7 +58,8 @@ EnforceNotMet::EnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
-    const string& msg)
+    const string& msg,
+    const void* caller)
     : msg_stack_{MakeString(
           "[enforce fail at ",
           StripBasename(std::string(file)),
@@ -73,6 +74,7 @@ EnforceNotMet::EnforceNotMet(
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << msg_stack_[0];
   }
+  caller_ = caller;
   full_msg_ = this->msg();
 }
 
@@ -88,6 +90,10 @@ string EnforceNotMet::msg() const {
 
 const char* EnforceNotMet::what() const noexcept {
   return full_msg_.c_str();
+}
+
+const void* EnforceNotMet::caller() const noexcept {
+  return caller_;
 }
 
 }  // namespace caffe2
