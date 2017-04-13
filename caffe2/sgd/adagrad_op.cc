@@ -32,7 +32,7 @@ REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdagrad)
     .NumInputs(5)
     .NumOutputs(2)
-    .AllowInplace({{0, 0}, {1, 1}})
+    .EnforceInplace({{0, 0}, {1, 1}})
     .SetDoc(R"DOC(
 
 Given inputs (param, history, indices, grad, lr), runs the dense AdaGrad

@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 
+import hypothesis
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
@@ -64,15 +65,28 @@ class TestMomentumSGD(hu.HypothesisTestCase):
            momentum=st.floats(min_value=0.1, max_value=0.9),
            nesterov=st.booleans(),
            lr=st.floats(min_value=0.1, max_value=0.9),
-           **hu.gcs_cpu_only)
+           data_strategy=st.data(),
+           **hu.gcs)
     def test_sparse_momentum_sgd(
-            self, inputs, momentum, nesterov, lr, gc, dc):
+            self, inputs, momentum, nesterov, lr, data_strategy, gc, dc):
         w, grad, m = inputs
-        indices = np.arange(m.shape[0])
-        indices = indices[indices % 2 == 0]
 
+        # Create an indexing array containing values which index into grad
+        indices = data_strategy.draw(
+            hu.tensor(dtype=np.int64,
+                      elements=st.sampled_from(np.arange(grad.shape[0]))),
+        )
+        hypothesis.note('indices.shape: %s' % str(indices.shape))
+
+        # For now, the indices must be unique
+        hypothesis.assume(np.array_equal(np.unique(indices.flatten()),
+                                         np.sort(indices.flatten())))
+
+        # Sparsify grad
         grad = grad[indices]
+        # Make momentum >= 0
         m = np.abs(m)
+        # Convert lr to a numpy array
         lr = np.asarray([lr], dtype=np.float32)
 
         op = core.CreateOperator(

@@ -7,37 +7,18 @@ namespace caffe2 {
 template <typename Context>
 void adagrad_update(
     int N,
-    const float* g,
-    const float* h,
-    float* ng,
-    float* nh,
-    float epsilon,
-    const float* lr,
-    Context* context) {
-  // TODO(cxj): use OMP when it is reliable
-  // #pragma omp parallel for
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float hi = nh[i] = h[i] + gi * gi;
-    ng[i] = lr[0] * gi / (std::sqrt(hi) + epsilon);
-  }
-}
-
-template <typename Context>
-void adagrad_compute(
-    int N,
     const float* w,
     const float* g,
     const float* h,
     float* nw,
     float* nh,
     float epsilon,
-    float lr,
+    const float *lr,
     Context* context) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float hi = nh[i] = h[i] + gi * gi;
-    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
+    nw[i] = w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
   }
 }
 
@@ -53,7 +34,7 @@ class AdagradOp final : public Operator<Context> {
     CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
-    adagrad_compute<Context>(
+    adagrad_update<Context>(
         Input(GRAD).size(),
         Input(PARAM).template data<T>(),
         Input(GRAD).template data<T>(),
@@ -61,7 +42,7 @@ class AdagradOp final : public Operator<Context> {
         Output(OUTPUT_PARAM)->template mutable_data<T>(),
         Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
         epsilon_,
-        Input(LR).template data<T>()[0],
+        Input(LR).template data<T>(),
         &context_);
     return true;
   }
@@ -81,6 +62,12 @@ class SparseAdagradOp final : public Operator<Context> {
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
+    // Enforce shapes
+    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_1).size());
+    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+    CAFFE_ENFORCE_EQ(Input(PARAM).size_from_dim(1),
+        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
   }
@@ -88,9 +75,6 @@ class SparseAdagradOp final : public Operator<Context> {
   template <typename SIndex>
   bool DoRunWithType() {
     const auto* lr = Input(LR).template data<T>();
-    Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
-    Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
-
     auto n = Input(GRAD).dim(0);
 
     const auto* indices = Input(INDICES).template data<SIndex>();
@@ -114,7 +98,7 @@ class SparseAdagradOp final : public Operator<Context> {
       } else {
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
-        adagrad_compute(
+        adagrad_update(
             block_size,
             paramIn + offsetIdx,
             gradIn + offsetI,
@@ -122,7 +106,7 @@ class SparseAdagradOp final : public Operator<Context> {
             paramOut + offsetIdx,
             momentOut + offsetIdx,
             epsilon_,
-            lr[0],
+            lr,
             &context_);
       }
     }

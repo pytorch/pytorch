@@ -115,6 +115,13 @@ class SparseAdamOp final : public Operator<Context> {
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
+    // Enforce shapes
+    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_1).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_2).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).size_from_dim(1),
+        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
   }
@@ -128,10 +135,6 @@ class SparseAdamOp final : public Operator<Context> {
     const auto t = iter + 1;
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
-
-    Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
-    Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
-    Output(OUTPUT_MOMENT_2)->ResizeLike(Input(MOMENT_2));
 
     auto n = Input(GRAD).dim(0);
     auto block_size = Input(GRAD).size() / n;

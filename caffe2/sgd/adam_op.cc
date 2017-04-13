@@ -43,7 +43,7 @@ REGISTER_CPU_OPERATOR(SparseAdam, SparseAdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdam)
     .NumInputs(7)
     .NumOutputs(3)
-    .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
+    .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
     .SetDoc(R"DOC(
 
 Computes the Adam Update for the sparse case.
