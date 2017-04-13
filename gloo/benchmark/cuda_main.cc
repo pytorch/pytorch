@@ -14,6 +14,7 @@
 #include "gloo/benchmark/runner.h"
 #include "gloo/common/logging.h"
 #include "gloo/cuda_allreduce_halving_doubling.h"
+#include "gloo/cuda_allreduce_halving_doubling_pipelined.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
 #include "gloo/cuda_private.h"
@@ -99,6 +100,16 @@ int main(int argc, char** argv) {
           },
       },
       {
+          "cuda_allreduce_halving_doubling_pipelined",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm = CudaAllreduceHalvingDoublingPipelined<
+                float,
+                CudaHostWorkspace<float>>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
+      },
+      {
           "cuda_allreduce_ring",
           [&](std::shared_ptr<Context>& context) {
             using Algorithm =
@@ -123,6 +134,16 @@ int main(int argc, char** argv) {
           [&](std::shared_ptr<Context>& context) {
             using Algorithm =
                 CudaAllreduceHalvingDoubling<float, CudaDeviceWorkspace<float>>;
+            using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
+      },
+      {
+          "cuda_allreduce_halving_doubling_pipelined",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm = CudaAllreduceHalvingDoublingPipelined<
+                float,
+                CudaDeviceWorkspace<float>>;
             using Benchmark = CudaAllreduceBenchmark<Algorithm>;
             return gloo::make_unique<Benchmark>(context, x);
           },

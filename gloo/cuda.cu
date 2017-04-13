@@ -185,6 +185,9 @@ CudaDevicePointer<T>& CudaDevicePointer<T>::operator=(
 
 template<typename T>
 CudaDevicePointer<T>::~CudaDevicePointer() {
+  if (deviceId_ < 0) {
+    return;
+  }
   CudaDeviceScope scope(deviceId_);
   if (owner_ && device_ != nullptr) {
     std::lock_guard<std::mutex> lock(CudaShared::getMutex());

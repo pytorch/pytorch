@@ -27,13 +27,17 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
       const std::shared_ptr<Context>& context,
       const std::vector<T*>& ptrs,
       const int count,
-      const std::vector<cudaStream_t>& streams  = std::vector<cudaStream_t>());
+      const std::vector<cudaStream_t>& streams  = std::vector<cudaStream_t>(),
+      bool pipelineBroadcastAndReduce = false);
 
   virtual ~CudaAllreduceHalvingDoubling() = default;
 
   virtual void run() override;
 
  protected:
+
+  void devicePointerInit();
+
   // Both workspace types have their own initialization function.
   template <typename U = W>
   void init(
@@ -42,6 +46,16 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
 
   template <typename U = W>
   void init(
+      typename std::enable_if<std::is_same<U, CudaDeviceWorkspace<T> >::value,
+                              typename U::Pointer>::type* = 0);
+
+  template <typename U = W>
+  void initReductionsAndBroadcasts(
+      typename std::enable_if<std::is_same<U, CudaHostWorkspace<T> >::value,
+                              typename U::Pointer>::type* = 0);
+
+  template <typename U = W>
+  void initReductionsAndBroadcasts(
       typename std::enable_if<std::is_same<U, CudaDeviceWorkspace<T> >::value,
                               typename U::Pointer>::type* = 0);
 
@@ -73,15 +87,33 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBufs_;
   std::vector<std::unique_ptr<transport::Buffer>> recvDataBufs_;
 
+  std::vector<size_t> sendCounts_;
+  std::vector<size_t> recvCounts_;
+
   int dummy_;
   std::vector<std::unique_ptr<transport::Buffer>> sendNotificationBufs_;
   std::vector<std::unique_ptr<transport::Buffer>> recvNotificationBufs_;
+
+  std::unique_ptr<LocalOp<T>> reduceBeforeFirstSend_;
+  std::unique_ptr<LocalOp<T>> reduceBeforeFirstRecv_;
 
   std::unique_ptr<LocalOp<T> > localReduceOp_;
   std::unique_ptr<LocalOp<T> > localBroadcastOp_;
 
   // buffer where data is received prior to being reduced
   typename W::Pointer recvBuf_;
+
+  typename W::Pointer scratchPtrForFirstSend_;
+  typename W::Pointer scratchPtrForFirstRecv_;
+
+  std::vector<CudaDevicePointer<T>> devicePtrsForFirstSend_;
+  std::vector<CudaDevicePointer<T>> devicePtrsForFirstRecv_;
+
+  std::vector<typename W::Pointer> scratchPtrForBroadcast_;
+  std::vector<std::vector<CudaDevicePointer<T>>> devicePtrsForBroadcast_;
+  std::vector<std::unique_ptr<LocalOp<T>>> broadcastOps_;
+
+  bool pipelined_;
 };
 
 } // namespace gloo
