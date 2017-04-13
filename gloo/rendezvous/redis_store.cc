@@ -7,7 +7,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "redis_store.h"
+#include "gloo/rendezvous/redis_store.h"
 
 #include <chrono>
 #include <thread>

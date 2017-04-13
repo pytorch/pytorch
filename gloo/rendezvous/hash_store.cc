@@ -9,11 +9,14 @@
 
 #include "gloo/rendezvous/hash_store.h"
 
+#include "gloo/common/logging.h"
+
 namespace gloo {
 namespace rendezvous {
 
 void HashStore::set(const std::string& key, const std::vector<char>& data) {
   std::unique_lock<std::mutex> lock(m_);
+  GLOO_ENFORCE(map_.find(key) == map_.end(), "Key '", key, "' already set");
   map_[key] = data;
   cv_.notify_all();
 }
