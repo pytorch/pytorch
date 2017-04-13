@@ -79,7 +79,8 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseMomentumSGDUpdate)
     .NumInputs(5)
     .NumOutputs(3)
-    .AllowInplace({{0, 0}, {1, 1}, {3, 2}})
+    .AllowInplace({{0, 0}})
+    .EnforceInplace({{1, 1}, {3, 2}})
     .TensorInferenceFunction(
         [](const OperatorDef& /* unused */, const vector<TensorShape>& in) {
           vector<TensorShape> out(3);

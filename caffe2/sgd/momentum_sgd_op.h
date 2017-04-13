@@ -123,21 +123,21 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
         nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", 0)) {}
 
   bool RunOnDevice() override {
+    // Resize [potentially] out-of-place blobs
+    Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+
+    // Enforce shapes
+    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENTUM).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).size_from_dim(1),
+        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
   }
 
   template <typename SIndex>
   bool DoRunWithType() {
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(GRAD));
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(MOMENTUM));
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(PARAM).size() == Input(MOMENTUM).size());
-
-    Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
-    Output(OUTPUT_MOMENTUM)->ResizeLike(Input(MOMENTUM));
-    Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
-
     auto block_size = Input(PARAM).size() / Input(PARAM).dim(0);
     auto n = Input(GRAD).size() / block_size;
 
