@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 import argparse
 import logging
 import numpy as np
+import time
 
 from caffe2.python import core, workspace, experiment_util, data_parallel_model, dyndep
 from caffe2.python import timeout_guard, cnn
@@ -96,17 +97,20 @@ def RunEpoch(
     TODO: add checkpointing here.
     '''
     # TODO: add loading from checkpoint
+    log.info("Starting epoch {}/{}".format(epoch, args.num_epochs))
     epoch_iters = int(args.epoch_size / total_batch_size / num_shards)
     for i in range(epoch_iters):
-        log.info("Start iteration {}/{} of epoch {}".format(
-            i, epoch_iters, epoch,
-        ))
-
         # This timeout is required (temporarily) since CUDA-NCCL
         # operators might deadlock when synchronizing between GPUs.
         timeout = 600.0 if i == 0 else 60.0
         with timeout_guard.CompleteInTimeOrDie(timeout):
+            t1 = time.time()
             workspace.RunNet(train_model.net.Proto().name)
+            t2 = time.time()
+            dt = t2 - t1
+
+        fmt = "Finished iteration {}/{} of epoch {} ({:.2f} images/sec)"
+        log.info(fmt.format(i + 1, epoch_iters, epoch, total_batch_size / dt))
 
     num_images = epoch * epoch_iters * total_batch_size
     prefix = "gpu_{}".format(train_model._devices[0])
