@@ -13,6 +13,9 @@
 
 namespace gloo {
 
+// Do host reduce/bcast on buf size less than 256KB and device reduce above
+const size_t kOnDeviceThreshold = 256 * 1024;
+
 Algorithm::Algorithm(const std::shared_ptr<Context>& context)
     : context_(context),
       contextRank_(context_->rank),

@@ -16,6 +16,8 @@
 
 namespace gloo {
 
+extern const size_t kOnDeviceThreshold;
+
 class Algorithm {
  public:
   explicit Algorithm(const std::shared_ptr<Context>&);

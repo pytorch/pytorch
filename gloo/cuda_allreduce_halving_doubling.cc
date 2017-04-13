@@ -230,12 +230,19 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
   // where they are accumulated is a new host side buffer.
   scratch_ = W::Pointer::alloc(count_);
 
-  // Execute local reduction and broadcast from host.
+  // Execute local reduction and broadcast.
   // If devicePtrs_.size() == 1 these functions construct an op that
   // executes a memcpy such that scratch_ always holds the result.
-  localReduceOp_ = cudaHostReduce(streams_, devicePtrs_, scratch_, fn_);
-  localBroadcastOp_ = cudaHostBroadcast(streams_, devicePtrs_, scratch_);
 
+  if (bytes_ < kOnDeviceThreshold) {
+    localReduceOp_ = cudaHostReduce(streams_, devicePtrs_, scratch_, fn_);
+    localBroadcastOp_ = cudaHostBroadcast(streams_, devicePtrs_, scratch_);
+  } else {
+    localReduceOp_ =
+      cudaDeviceReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
+    localBroadcastOp_ =
+      cudaDeviceBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
+  }
   recvBuf_ = W::Pointer::alloc(count_);
 }
 
@@ -274,13 +281,41 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
     typename std::enable_if<
         std::is_same<U, CudaHostWorkspace<T>>::value,
         typename U::Pointer>::type*) {
-  reduceBeforeFirstSend_ = cudaHostReduce(
-      streams_, devicePtrsForFirstSend_, scratchPtrForFirstSend_, fn_);
-  reduceBeforeFirstRecv_ = cudaHostReduce(
-      streams_, devicePtrsForFirstRecv_, scratchPtrForFirstRecv_, fn_);
+  if (sendCounts_[0] * sizeof(T) < kOnDeviceThreshold) {
+    reduceBeforeFirstSend_ = cudaHostReduce(
+        streams_, devicePtrsForFirstSend_, scratchPtrForFirstSend_, fn_);
+    reduceBeforeFirstRecv_ = cudaHostReduce(
+        streams_, devicePtrsForFirstRecv_, scratchPtrForFirstRecv_, fn_);
+  } else {
+    reduceBeforeFirstSend_ = cudaDeviceReduce(
+        streams_,
+        devicePtrsForFirstSend_,
+        scratchPtrForFirstSend_,
+        fn_,
+        0,
+        sendCounts_[0]);
+    reduceBeforeFirstRecv_ = cudaDeviceReduce(
+        streams_,
+        devicePtrsForFirstRecv_,
+        scratchPtrForFirstRecv_,
+        fn_,
+        0,
+        recvCounts_[0]);
+  }
   for (int i = 0; i < steps_; i++) {
-    broadcastOps_.push_back(cudaHostBroadcast(
-        streams_, devicePtrsForBroadcast_[i], scratchPtrForBroadcast_[i]));
+    const size_t numElementsInBcast =
+        i == steps_ - 1 ? sendCounts_[i] + recvCounts_[i] : sendCounts_[i];
+    if (numElementsInBcast * sizeof(T) < kOnDeviceThreshold) {
+      broadcastOps_.push_back(cudaHostBroadcast(
+          streams_, devicePtrsForBroadcast_[i], scratchPtrForBroadcast_[i]));
+    } else {
+      broadcastOps_.push_back(cudaDeviceBroadcast(
+          streams_,
+          devicePtrsForBroadcast_[i],
+          scratchPtrForBroadcast_[i],
+          0,
+          numElementsInBcast));
+    }
   }
 }
 
