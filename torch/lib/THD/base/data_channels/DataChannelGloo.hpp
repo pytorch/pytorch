@@ -36,7 +36,7 @@ struct hash<std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t,
     return (
       hash<::thd::DataOperation>()(std::get<0>(k)) ^
       hash<THDGroup>()(std::get<1>(k)) ^
-      hash<std::size_t>()(std::get<2>(k)) ^ 
+      hash<std::size_t>()(std::get<2>(k)) ^
       hash<std::size_t>()(std::get<3>(k)) ^
       hash<THDReduceOp>()(std::get<4>(k))
     );
@@ -108,7 +108,8 @@ private:
   void broadcastT(thpp::Tensor& data, rank_type src_rank,
                   THDGroup group_id = THDGroupWORLD);
 
-  store_type getStore();
+  template<DataOperation op, typename... Args>
+  store_type getStore(DataOperation op, THDGroup group_id, Args... args);
 
   void _send(const Scalar& data, rank_type dst_id);
   void _send(thpp::Tensor& data, rank_type dst_id);
