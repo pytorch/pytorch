@@ -9,15 +9,23 @@
 
 #include "gloo/common/linux.h"
 
+#include <dirent.h>
+#include <errno.h>
+#include <ifaddrs.h>
+#include <linux/ethtool.h>
+#include <linux/if.h>
+#include <linux/sockios.h>
+#include <linux/version.h>
+#include <netdb.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <fstream>
 #include <map>
 #include <mutex>
-
-#include <dirent.h>
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
 
 #include "gloo/common/logging.h"
 
@@ -166,6 +174,83 @@ const std::string& infinibandToBusID(const std::string& name) {
     });
 
   return map[name];
+}
+
+static int getInterfaceSpeedGLinkSettings(int sock, struct ifreq* ifr) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
+  constexpr auto link_mode_data_nwords = 3 * 127;
+  struct {
+    struct ethtool_link_settings req;
+    __u32 link_mode_data[link_mode_data_nwords];
+  } ecmd;
+  int rv;
+
+  ifr->ifr_data = &ecmd;
+  memset(&ecmd, 0, sizeof(ecmd));
+  ecmd.req.cmd = ETHTOOL_GLINKSETTINGS;
+
+  rv = ioctl(sock, SIOCETHTOOL, ifr);
+  if (rv < 0 || ecmd.req.link_mode_masks_nwords >= 0) {
+    return SPEED_UNKNOWN;
+  }
+
+  ecmd.req.cmd = ETHTOOL_GLINKSETTINGS;
+  ecmd.req.link_mode_masks_nwords = -ecmd.req.link_mode_masks_nwords;
+  rv = ioctl(sock, SIOCETHTOOL, ifr);
+  if (rv < 0) {
+    return SPEED_UNKNOWN;
+  }
+
+  return ecmd.req.speed;
+#else
+  (void)sock;
+  (void)ifr;
+  return SPEED_UNKNOWN;
+#endif
+}
+
+static int getInterfaceSpeedGSet(int sock, struct ifreq* ifr) {
+  struct ethtool_cmd edata;
+  int rv;
+
+  ifr->ifr_data = &edata;
+  memset(&edata, 0, sizeof(edata));
+  edata.cmd = ETHTOOL_GSET;
+
+  rv = ioctl(sock, SIOCETHTOOL, ifr);
+  if (rv < 0) {
+    return SPEED_UNKNOWN;
+  }
+
+  return ethtool_cmd_speed(&edata);
+}
+
+int getInterfaceSpeedByName(const std::string& ifname) {
+  int sock;
+  struct ifreq ifr;
+  int rv;
+  size_t len;
+
+  sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+  if (sock < 0) {
+    return SPEED_UNKNOWN;
+  }
+
+  memset(&ifr, 0, sizeof(ifreq));
+  len = ifname.length();
+  len = std::min(len, sizeof(ifr.ifr_name) - 1);
+  memcpy(ifr.ifr_name, ifname.c_str(), len);
+  ifr.ifr_name[len] = '\0';
+
+  rv = getInterfaceSpeedGLinkSettings(sock, &ifr);
+  if (rv != SPEED_UNKNOWN) {
+    close(sock);
+    return rv;
+  }
+  rv = getInterfaceSpeedGSet(sock, &ifr);
+  close(sock);
+
+  return rv;
 }
 
 } // namespace gloo

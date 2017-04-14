@@ -55,6 +55,8 @@ class Device : public ::gloo::transport::Device,
 
   virtual const std::string& getPCIBusID() const override;
 
+  virtual int getInterfaceSpeed() const override;
+
   virtual void setTimeout(const std::chrono::milliseconds& timeout) override;
 
   virtual std::unique_ptr<::gloo::transport::Pair> createPair()
@@ -81,6 +83,7 @@ class Device : public ::gloo::transport::Device,
   int fd_;
   std::chrono::milliseconds timeout_;
   std::string interfaceName_;
+  int interfaceSpeedMbps_;
   std::string pciBusID_;
 
   std::mutex m_;

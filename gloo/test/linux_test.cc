@@ -28,6 +28,14 @@ TEST_F(LinuxTest, NetworkInterfaceToBusID) {
   // ASSERT_NE("", nic);
 }
 
+TEST_F(LinuxTest, NetworkInterfaceSpeed) {
+  // Commented because not every machine has an eth0.
+  //
+  // const std::string ifname("eth0");
+  // int speed = getInterfaceSpeedByName(ifname);
+  // ASSERT_GE(speed, 0) << "Uknown interface speed, ifname: " << ifname;
+}
+
 TEST_F(LinuxTest, PCIDistance) {
   auto nics = pciDevices(kPCIClassNetwork);
   auto gpus = pciDevices(kPCIClass3D);

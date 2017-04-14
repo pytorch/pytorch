@@ -117,6 +117,7 @@ Device::Device(const struct attr& attr)
     : attr_(attr),
       timeout_(kTimeoutDefault),
       interfaceName_(sockaddrToInterfaceName(attr_)),
+      interfaceSpeedMbps_(getInterfaceSpeedByName(interfaceName_)),
       pciBusID_(interfaceToBusID(interfaceName_)) {
   fd_ = epoll_create(1);
   GLOO_ENFORCE_NE(fd_, -1, "epoll_create: ", strerror(errno));
@@ -137,12 +138,17 @@ std::string Device::str() const {
   ss << "tcp";
   ss << ", pci=" << pciBusID_;
   ss << ", iface=" << interfaceName_;
+  ss << ", speed=" << interfaceSpeedMbps_;
   ss << ", addr=" << Address(attr_.ai_addr).str();
   return ss.str();
 }
 
 const std::string& Device::getPCIBusID() const {
   return pciBusID_;
+}
+
+int Device::getInterfaceSpeed() const {
+  return interfaceSpeedMbps_;
 }
 
 void Device::setTimeout(const std::chrono::milliseconds& timeout) {

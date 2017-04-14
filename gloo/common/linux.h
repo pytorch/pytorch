@@ -26,6 +26,8 @@ int pciDistance(const std::string& a, const std::string& b);
 
 const std::string& interfaceToBusID(const std::string& name);
 
+int getInterfaceSpeedByName(const std::string& ifname);
+
 const std::string& infinibandToBusID(const std::string& name);
 
 } // namespace gloo
