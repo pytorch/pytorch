@@ -28,6 +28,7 @@ void LSTMUnit(
     const int32_t* seqLengths,
     T* C,
     T* H,
+    const T forget_bias,
     Context* context) {
   for (int n = 0; n < N; ++n) {
     const bool valid = t < seqLengths[n];
@@ -37,7 +38,7 @@ void LSTMUnit(
         C[d] = C_prev[d];
       } else {
         const T i = sigmoid(X[d]);
-        const T f = sigmoid(X[1 * D + d]);
+        const T f = sigmoid(X[1 * D + d] + forget_bias);
         const T o = sigmoid(X[2 * D + d]);
         const T g = tanh(X[3 * D + d]);
         const T c_prev = C_prev[d];
@@ -70,6 +71,7 @@ void LSTMUnitGradient(
     T* H_prev_diff,
     T* C_prev_diff,
     T* X_diff,
+    const T forget_bias,
     Context* context) {
   for (int n = 0; n < N; ++n) {
     const bool valid = t < seqLengths[n];
@@ -89,7 +91,7 @@ void LSTMUnitGradient(
         *g_diff = 0;
       } else {
         const T i = sigmoid(X[d]);
-        const T f = sigmoid(X[1 * D + d]);
+        const T f = sigmoid(X[1 * D + d] + forget_bias);
         const T o = sigmoid(X[2 * D + d]);
         const T g = tanh(X[3 * D + d]);
         const T c_prev = C_prev[d];
@@ -120,6 +122,12 @@ void LSTMUnitGradient(
 template <typename T, typename Context>
 class LSTMUnitOp : public Operator<Context> {
  public:
+  LSTMUnitOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        forget_bias_(
+            static_cast<T>(OperatorBase::template GetSingleArgument<float>(
+                "forget_bias",
+                0.0))) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
 
@@ -142,18 +150,26 @@ class LSTMUnitOp : public Operator<Context> {
     Output(HIDDEN_T)->ResizeLike(Input(CELL_T_M_1));
     auto* H = Output(HIDDEN_T)->template mutable_data<T>();
     detail::LSTMUnit<T, Context>(
-        N, D, t, H_prev, C_prev, X, seqLengths, C, H, &context_);
+        N, D, t, H_prev, C_prev, X, seqLengths, C, H, forget_bias_, &context_);
     return true;
   }
 
  protected:
   INPUT_TAGS(HIDDEN_T_M_1, CELL_T_M_1, GATES, SEQ_LENGTHS, TIMESTEP);
   OUTPUT_TAGS(HIDDEN_T, CELL_T);
+
+  T forget_bias_;
 };
 
 template <typename T, typename Context>
 class LSTMUnitGradientOp : public Operator<Context> {
  public:
+  LSTMUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        forget_bias_(
+            static_cast<T>(OperatorBase::template GetSingleArgument<float>(
+                "forget_bias",
+                0.0))) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
 
@@ -194,6 +210,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
         H_prev_diff,
         C_prev_diff,
         X_diff,
+        forget_bias_,
         &context_);
     return true;
   }
@@ -210,6 +227,8 @@ class LSTMUnitGradientOp : public Operator<Context> {
       HIDDEN_T_GRAD,
       CELL_T_GRAD, );
   OUTPUT_TAGS(HIDDEN_T_M_1_GRAD, CELL_T_M_1_GRAD, GATES_GRAD);
+
+  T forget_bias_;
 };
 
 } // namespace caffe2
