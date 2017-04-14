@@ -853,8 +853,21 @@ REGISTER_GRADIENT(Copy, GetCopyGradient);
 struct GetGPUToCPUGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "CopyCPUToGPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+    if (g_output_[0].IsDense()) {
+      return SingleGradientDef(
+          "CopyCPUToGPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+    } else {
+      return vector<OperatorDef>{CreateOperatorDef(
+                                     "CopyCPUToGPU",
+                                     "",
+                                     std::vector<string>{GO_I(0)},
+                                     std::vector<string>{GI_I(0)}),
+                                 CreateOperatorDef(
+                                     "CopyCPUToGPU",
+                                     "",
+                                     std::vector<string>{GO_V(0)},
+                                     std::vector<string>{GI_V(0)})};
+    }
   }
 };
 REGISTER_GRADIENT(CopyGPUToCPU, GetGPUToCPUGradient);
@@ -862,8 +875,21 @@ REGISTER_GRADIENT(CopyGPUToCPU, GetGPUToCPUGradient);
 struct GetCPUToGPUGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "CopyGPUToCPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+    if (g_output_[0].IsDense()) {
+      return SingleGradientDef(
+          "CopyGPUToCPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+    } else {
+      return vector<OperatorDef>{CreateOperatorDef(
+                                     "CopyGPUToCPU",
+                                     "",
+                                     std::vector<string>{GO_I(0)},
+                                     std::vector<string>{GI_I(0)}),
+                                 CreateOperatorDef(
+                                     "CopyGPUToCPU",
+                                     "",
+                                     std::vector<string>{GO_V(0)},
+                                     std::vector<string>{GI_V(0)})};
+    }
   }
 };
 REGISTER_GRADIENT(CopyCPUToGPU, GetCPUToGPUGradient);
