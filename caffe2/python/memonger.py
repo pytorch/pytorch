@@ -37,40 +37,74 @@ def share_grad_blobs(net, losses, param_grads, namescope):
 
     def is_grad_op(op):
         # TODO: something smarter
-        for inp in op.input:
-            if is_grad_blob(inp):
-                return True
-        for out in op.output:
-            if is_grad_blob(out):
+        for b in list(op.input) + list(op.output):
+            if is_grad_blob(b):
                 return True
         return False
 
-    start_time = time.time()
-    log.warn("NOTE: Executing *experimental* memonger to " +
-             "optimize gradient memory")
+    log.warn("NOTE: Executing memonger to optimize gradient memory")
 
-    # Collect ops that have something to do with
-    # gradients
+    # Collect ops that have something to do with gradients
     if not namescope.endswith("/"):
         namescope += "/"
 
     netproto = copy.deepcopy(net.Proto())
     grad_ops = [op for op in netproto.op if is_grad_op(op)]
+    return _compute_blob_recycling_for_dag(
+        netproto, losses, grad_ops, is_grad_blob, namescope
+    )
+
+
+def optimize_inference_for_dag(net, input_blobs, namescope=""):
+    netproto = copy.deepcopy(net.Proto())
+    external_input = set(net.Proto().external_input)
+    external_output = set(net.Proto().external_output)
+
+    def is_activation_blob(b):
+        return b not in external_input and b not in external_output
+
+    seen_as_output = set()
+    ops = list(net.Proto().op)
+
+    # Sanity check: check that all external inputs are properlyh accounted
+    # and that no gradient ops are included in 'net'
+    for op in ops:
+        for b in op.input:
+            if is_activation_blob(b) and b not in seen_as_output:
+                assert False, "{} not in external input".format(b)
+        seen_as_output = seen_as_output.union(set(op.output))
+        assert not op.is_gradient_op, \
+            "You can only pass inference-only nets to optimize_inference_for_dag"
+
+    return _compute_blob_recycling_for_dag(
+        netproto, input_blobs, ops, is_activation_blob, namescope
+    )
+
+
+def _compute_blob_recycling_for_dag(
+    netproto, heads, ops, is_shareable, namescope
+):
+    '''
+    Computes a blob recycling by traversing the computation DAG. The resulting
+    model can be executed safely on a DAGNet.
+    '''
+    start_time = time.time()
 
     # Create mapping from blobs to ops
     blobs_to_ops = collections.defaultdict(lambda: [])
     blob_input_count = collections.defaultdict(lambda: 0)
     op_inputs = collections.defaultdict(lambda: 0)
     op_visit_count = collections.defaultdict(lambda: 0)
-    for i, op in enumerate(grad_ops):
+
+    for i, op in enumerate(ops):
         for inp in op.input:
-            if is_grad_blob(inp) or inp in losses:
-                # Ignore in-place transformation ops (self cycles)
+            if is_shareable(inp) or inp in heads:
+                # Ignore in-place transformation ops (self-cycles)
                 if inp not in op.output:
                     blobs_to_ops[inp].append(i)
                     op_inputs[i] += 1
 
-    # Traverse operators starting from the loss blobs.
+    # Traverse operators starting from the heads' blobs.
     # Keep tabs on when blobs are seen first and last, and also
     # when operators have their input satisfied. Share blobs only
     # under same branch, avoiding problems with parallel workers.
@@ -78,17 +112,17 @@ def share_grad_blobs(net, losses, param_grads, namescope):
     mapping = {}
 
     def descend(op_idx, free_blobs):
-        cur_op = grad_ops[op_idx]
+        cur_op = ops[op_idx]
         new_free_blobs = set()
         for inp in cur_op.input:
-            if is_grad_blob(inp):
+            if is_shareable(inp):
                 blob_input_count[inp] += 1
                 if blob_input_count[inp] == len(blobs_to_ops[inp]):
                     actual_blob = inp if inp not in mapping else mapping[inp]
                     new_free_blobs.add(actual_blob)
 
         for outp in cur_op.output:
-            if is_grad_blob(outp):
+            if is_shareable(outp):
                 if outp not in output_blobs:
                     # First seen this blob as output, can assign to a free blob
                     for freeb in free_blobs:
@@ -111,9 +145,9 @@ def share_grad_blobs(net, losses, param_grads, namescope):
                     first_branch = False
                     descend(inp_op_idx, free_blobs_fwd)
 
-    # Start DFS from the losses
-    for loss in losses:
-        for op_idx in blobs_to_ops[loss]:
+    # Start DFS from the heads' (losses or inputs)
+    for head_blob in heads:
+        for op_idx in blobs_to_ops[head_blob]:
             descend(op_idx, set())
 
     # Rename the shared blobs
@@ -134,7 +168,7 @@ def share_grad_blobs(net, losses, param_grads, namescope):
     log.debug("Assignments: {}".format(mapping))
 
     apply_assignments(netproto, mapping)
-    log.info("Gradient memory optimization took {} secs".format(
+    log.info("Memonger optimization took {} secs".format(
         time.time() - start_time),
     )
     return netproto

@@ -11,6 +11,13 @@ import hypothesis.strategies as st
 from hypothesis import given
 
 
+def count_blobs(proto):
+    blobs = set()
+    for op in proto.op:
+        blobs = blobs.union(set(op.input)).union(set(op.output))
+    return len(blobs)
+
+
 class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=1, max_value=10),
            output_dim=st.integers(min_value=1, max_value=10),
@@ -82,15 +89,6 @@ class MemongerTest(hu.HypothesisTestCase):
                .AveragedLoss([], "loss")
         input_to_grad = m.AddGradientOperators(["name_x/loss"])
 
-        def count_blobs(proto):
-            blob_set = set()
-            for op in proto.op:
-                for inp in op.input:
-                    blob_set.add(inp)
-                for outp in op.output:
-                    blob_set.add(outp)
-            return len(blob_set)
-
         blobs_before = count_blobs(m.net.Proto())
         optim_proto = memonger.share_grad_blobs(
             m.net,
@@ -139,15 +137,6 @@ class MemongerTest(hu.HypothesisTestCase):
                .AveragedLoss([], "loss2")
         input_to_grad = m.AddGradientOperators(["name_x/loss1", "name_x/loss2"])
 
-        def count_blobs(proto):
-            blob_set = set()
-            for op in proto.op:
-                for inp in op.input:
-                    blob_set.add(inp)
-                for outp in op.output:
-                    blob_set.add(outp)
-            return len(blob_set)
-
         blobs_before = count_blobs(m.net.Proto())
         optim_proto = memonger.share_grad_blobs(
             m.net,
@@ -178,6 +167,62 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(loss2, optimized_loss2)
         np.testing.assert_almost_equal(grad, optimized_grad)
+
+    @given(input_dim=st.integers(min_value=4, max_value=4),
+           output_dim=st.integers(min_value=4, max_value=4),
+           batch_size=st.integers(min_value=4, max_value=4))
+    def test_forward_optim_tree_daggy(self, input_dim, output_dim, batch_size):
+        m = cnn.CNNModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        with core.NameScope("name_x"):
+            fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = m.FC(fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+
+            fc3 = m.FC(fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = m.FC(fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = m.FC(fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+
+            # Branch
+            fc3b = m.FC(fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
+            fc4b = m.FC(fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
+            fc5b = m.FC(fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
+
+            fc5sum = m.Sum([fc5, fc5b], "fc5sum")
+
+            fc5.Relu([], fc5sum) \
+               .Softmax([], "pred1") \
+               .LabelCrossEntropy(["label"], ["xent1"]) \
+               .AveragedLoss([], "loss1")
+            fc6 = m.FC(fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6.Relu([], fc6) \
+               .Softmax([], "pred2") \
+               .LabelCrossEntropy(["label"], ["xent2"]) \
+               .AveragedLoss([], "loss2")
+
+        blobs_before = count_blobs(m.net.Proto())
+        optim_proto = memonger.optimize_inference_for_dag(
+            m.net, ["name_x/data"], "name_x"
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
+        # Test networks produce exactly same results
+        data = np.random.randn(batch_size, input_dim).astype(np.float32)
+        label = np.random.randint(
+            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        workspace.RunNetOnce(m.param_init_net)
+        workspace.FeedBlob("name_x/data", data)
+        workspace.FeedBlob("name_x/label", label)
+        workspace.RunNetOnce(m.net)
+        loss1 = workspace.FetchBlob("name_x/loss1")
+        loss2 = workspace.FetchBlob("name_x/loss2")
+        workspace.RunNetOnce(optim_proto)
+        optimized_loss1 = workspace.FetchBlob("name_x/loss1")
+        optimized_loss2 = workspace.FetchBlob("name_x/loss2")
+        np.testing.assert_almost_equal(loss1, optimized_loss1)
+        np.testing.assert_almost_equal(loss2, optimized_loss2)
 
     def test_topological_sort_longest_path(self):
         m = cnn.CNNModelHelper()
