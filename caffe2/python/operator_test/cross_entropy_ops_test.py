@@ -42,8 +42,9 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
                 ),
             )
         ),
+        **hu.gcs
     )
-    def test_sigmoid_cross_entropy_with_logits(self, inputs):
+    def test_sigmoid_cross_entropy_with_logits(self, inputs, gc, dc):
         logits, targets = inputs
 
         def sigmoid_xentr_logit_ref(logits, targets):
@@ -63,10 +64,10 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             ['logits', 'targets'],
             ['xentropy'])
         self.assertReferenceChecks(
-            hu.cpu_do,
-            op,
-            [logits, targets],
-            sigmoid_xentr_logit_ref,
+            device_option=gc,
+            op=op,
+            inputs=[logits, targets],
+            reference=sigmoid_xentr_logit_ref,
             output_to_grad='xentropy',
             grad_reference=sigmoid_xentr_logit_grad_ref)
 
