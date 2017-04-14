@@ -1,3 +1,4 @@
+#include <chrono>
 #include <vector>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
@@ -79,9 +80,69 @@ class StatRegistryUpdateOp : public Operator<CPUContext> {
   }
 };
 
+class TimerInstance {
+ public:
+  explicit TimerInstance(const std::string& name)
+      : running_(false), stat_(name) {}
+
+  void begin() {
+    CAFFE_ENFORCE(!running_, "Called TimerBegin on an already running timer.");
+    running_ = true;
+    start_ = std::chrono::high_resolution_clock::now();
+  }
+
+  void end() {
+    CAFFE_ENFORCE(running_, "Called TimerEnd on a stopped timer.");
+    using namespace std::chrono;
+    auto duration = high_resolution_clock::now() - start_;
+    auto nanos = duration_cast<nanoseconds>(duration).count();
+    CAFFE_EVENT(stat_, time_ns, nanos);
+    running_ = false;
+  }
+
+ private:
+  bool running_;
+  std::chrono::high_resolution_clock::time_point start_;
+
+  struct TimerStat {
+    CAFFE_STAT_CTOR(TimerStat);
+    CAFFE_AVG_EXPORTED_STAT(time_ns);
+  } stat_;
+};
+
+struct TimerBeginOp : public Operator<CPUContext> {
+  TimerBeginOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws), timer_([this]() {
+          auto givenName = GetSingleArgument<std::string>("counter_name", "");
+          return givenName.empty() ? def().output().Get(0) : givenName;
+        }()) {}
+
+  bool RunOnDevice() override {
+    *OperatorBase::Output<TimerInstance*>(0) = &timer_;
+    timer_.begin();
+    return true;
+  }
+
+ private:
+  TimerInstance timer_;
+};
+
+struct TimerEndOp : public Operator<CPUContext> {
+  TimerEndOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    OperatorBase::Input<TimerInstance*>(0)->end();
+    return true;
+  }
+};
+
 REGISTER_CPU_OPERATOR(StatRegistryCreate, StatRegistryCreateOp);
 REGISTER_CPU_OPERATOR(StatRegistryUpdate, StatRegistryUpdateOp);
 REGISTER_CPU_OPERATOR(StatRegistryExport, StatRegistryExportOp);
+
+REGISTER_CPU_OPERATOR(TimerBegin, TimerBeginOp);
+REGISTER_CPU_OPERATOR(TimerEnd, TimerEndOp);
 
 OPERATOR_SCHEMA(StatRegistryCreate)
     .NumInputs(0)
@@ -124,5 +185,21 @@ OPERATOR_SCHEMA(StatRegistryExport)
         "(default true) Whether to atomically reset the counters afterwards.");
 }
 
+OPERATOR_SCHEMA(TimerBegin)
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Start a wallclock timer, returning a pointer to it.
+The timer is stopped by calling TimerEnd)DOC")
+    .Arg("counter_name", "Name of the timer. If not provided, use output name.")
+    .Output(0, "timer", "Pointer to timer, to be passed to TimerEnd.");
+
+OPERATOR_SCHEMA(TimerEnd)
+    .NumInputs(1)
+    .NumOutputs(0)
+    .SetDoc("Stop a timer started with TimerBegin, publishing a CAFFE_EVENT")
+    .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.");
+
+CAFFE_KNOWN_TYPE(TimerInstance*);
 CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::StatRegistry>);
 } // namespace caffe2
