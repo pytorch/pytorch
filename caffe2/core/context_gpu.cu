@@ -120,7 +120,15 @@ static void Caffe2InitializeCuda() {
       continue;
     }
     // Enable peer access.
-    for (int j = 0; j < NumCudaDevices(); ++j) {
+    const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
+    const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;
+    const int peer_end = std::min(
+        NumCudaDevices(), (peer_group + 1) * CAFFE2_CUDA_MAX_PEER_SIZE);
+    VLOG(1) << "Enabling peer access within group #" << peer_group
+            << ", from gpuid " << peer_start << " to " << peer_end - 1
+            << ", for gpuid " << i << ".";
+
+    for (int j = peer_start; j < peer_end; ++j) {
       if (i == j) continue;
       int can_access;
       CUDA_ENFORCE(cudaDeviceCanAccessPeer(&can_access, i, j));
