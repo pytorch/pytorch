@@ -114,9 +114,8 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
 
   template <typename T, typename M>
   bool DoRunWithType() {
-    const auto& X = Input(0);
-    const auto& Y = Input(1);
-    const auto& dY = Input(2);
+    const auto& Y = Input(0);
+    const auto& dY = Input(1);
     auto* dX = Output(0);
     // See if we need to reshape.
     if (Y.dims() != cudnn_input_dims_) {
@@ -151,7 +150,13 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
         data_desc_,
         dY.template data<T>(),
         data_desc_,
-        X.template data<T>(), // X data.
+        // Note: strictly speaking, we should be using the input data in this
+        // case, but for the ReLU case we rely on the underlying implementation
+        // that only the output is needed to calculate the Relu gradient. This
+        // will enable us to do memory optimization for in-place relu. To
+        // ensure this is correct, a unit test is provided at
+        // caffe2/python/operator_test/relu_op_test.py
+        Y.template data<T>(),
         cudnnTypeWrapper<T>::kZero(),
         data_desc_,
         dX->template mutable_data<T>()));
@@ -160,7 +165,6 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
 
   bool RunOnDevice() override {
     const auto& Y = Input(0);
-    const auto& dY = Input(1);
     auto* dX = Output(0);
     dX->ResizeLike(Y);
 
@@ -180,7 +184,7 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
   cudnnActivationDescriptor_t activ_desc_;
   vector<TIndex> cudnn_input_dims_;
   StorageOrder order_;
-  // Input: X, Y, dY; Output: dX
+  // Input: Y, dY; Output: dX
 };
 
 namespace {
