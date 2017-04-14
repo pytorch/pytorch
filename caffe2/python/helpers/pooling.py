@@ -1,3 +1,5 @@
+## @package pooling
+# Module caffe2.python.helpers.pooling
 ## @package fc
 # Module caffe2.python.helpers.pooling
 from __future__ import absolute_import
