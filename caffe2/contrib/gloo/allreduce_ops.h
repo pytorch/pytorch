@@ -79,6 +79,13 @@ class AllreduceOp final : public Operator<Context> {
   void initializeRingFull();
   void initializeRingChunked();
 
+  // The halving/doubling algorithm can currently only be used
+  // if the context size is a power of two.
+  bool canUseHalvingDoubling() {
+    auto size = init_.context->size;
+    return (size & (size - 1)) == 0;
+  }
+
   std::once_flag once_;
   std::unique_ptr<::gloo::Algorithm> algorithm_;
 
