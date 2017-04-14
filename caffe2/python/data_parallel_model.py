@@ -483,17 +483,41 @@ def _AllReduceGradientsSingleHost(devices, model):
 
         if _IsGPUBlob(model, grad_name):
             with core.DeviceScope(master_device_opt):
-                assert not isinstance(grads_group[0], core.GradientSlice), \
-                    "GPU sync of gradient slices not implemented"
-                model.NCCLAllreduce(
-                    grads_group,
-                    grads_group,
-                    control_input=last_out,
-                )
-                # last_out is used to serialize the execution of nccls
-                last_out = grads_group[0]
+                if not isinstance(grads_group[0], core.GradientSlice):
+                    model.NCCLAllreduce(
+                        grads_group,
+                        grads_group,
+                        control_input=last_out,
+                    )
+
+                    # last_out is used to serialize the execution of nccls
+                    last_out = grads_group[0]
+                else:
+                    # Sparse gradients: all-gather for indices and values
+                    master_ns = "gpu_{}".format(devices[0])
+                    grad_idx_concat, _ = model.net.Concat(
+                        [g.indices for g in grads_group],
+                        ["{}/{}_index_concat".format(master_ns, grad_name),
+                         "{}/{}_index_splitinfo".format(master_ns, grad_name)],
+                        axis=0,
+                        name="note:data_parallel_model")
+                    for gpu, g in model._device_grouped_blobs[grad_name].items():
+                        device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu)
+                        with core.DeviceScope(device_opt):
+                            model.Copy(grad_idx_concat, g.indices)
+
+                    grad_val_concat, _ = model.net.Concat(
+                        [g.values for g in grads_group],
+                        ["{}/{}_val_concat".format(master_ns, grad_name),
+                         "{}/{}_val_splitinfo".format(master_ns, grad_name)],
+                        axis=0, name="note:data_parallel_model")
+                    for gpu, g in model._device_grouped_blobs[grad_name].items():
+                        device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu)
+                        with core.DeviceScope(device_opt):
+                            model.Copy(grad_val_concat, g.values)
+
         else:
-            assert not isinstance(grads_group[0], core.GradientSlice), \
+            assert isinstance(grads_group[0], core.GradientSlice), \
                 "Synchronizing gradient slices not supported"
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
                 # Poor man's allreduce
@@ -542,8 +566,7 @@ def _GetReverseOrderedGrads(model):
 def stripParamName(param):
     # Format is "a/b/c/d" -> "b/c/d"
     if isinstance(param, core.GradientSlice):
-        # We index GradientSlices by the indices name
-        name = str(param.indices)
+        return stripParamName(param.indices) + ":" + stripParamName(param.values)
     else:
         name = str(param)
     return name[name.index(scope._NAMESCOPE_SEPARATOR) + 1:]
@@ -554,7 +577,7 @@ def _AnalyzeOperators(model):
     Look at all the operators and check that they do not cross device scopes
     '''
     for op in model.Proto().op:
-        if "NCCL" in op.type or "Copy" in op.type:
+        if "NCCL" in op.type or "Copy" in op.type or "Concat" in op.type:
             continue
         if "Allreduce" in op.type and "GLOO" in op.engine:
             continue
