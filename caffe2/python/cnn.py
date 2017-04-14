@@ -154,12 +154,21 @@ class CNNModelHelper(ModelHelperBase):
             del kwargs['no_bias']
         if group != 1:
             kwargs['group'] = group
-        return self.net.Conv(
-            inputs,
-            blob_out,
-            kernels=kernels,
-            order=self.order,
-            **kwargs)
+
+        if is_nd:
+            return self.net.Conv(
+                inputs,
+                blob_out,
+                kernels=kernels,
+                order=self.order,
+                **kwargs)
+        else:
+            return self.net.Conv(
+                inputs,
+                blob_out,
+                kernel=kernel,
+                order=self.order,
+                **kwargs)
 
     def ConvNd(self, blob_in, blob_out, dim_in, dim_out, kernel,
                weight_init=None, bias_init=None, group=1, transform_inputs=None,
