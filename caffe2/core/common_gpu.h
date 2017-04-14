@@ -30,7 +30,15 @@
 /**
  * The maximum number of GPUs that caffe2 recognizes.
  */
-#define CAFFE2_COMPILE_TIME_MAX_GPUS 8
+#define CAFFE2_COMPILE_TIME_MAX_GPUS 16
+/**
+ * The maximum number of peers that each gpu can have when doing p2p setup.
+ * Currently, according to NVidia documentation, each device can support a
+ * system-wide maximum of eight peer connections.
+ * When Caffe2 sets up peer access resources, if we have more than 8 gpus,
+ * we will enable peer access in groups of 8.
+ */
+#define CAFFE2_CUDA_MAX_PEER_SIZE 8
 
 namespace caffe2 {
 
