@@ -107,8 +107,10 @@ bool DataChannelGloo::init() {
 
 
 template<DataOperation op, typename... Args>
-store_type DataChannelGloo::getStore(THDGroup group_id, Args... args) {
-  std::string unique_prefix = std::to_string(op) + "-" + std::to_string(group_id);
+DataChannelGloo::store_type
+DataChannelGloo::getStore(THDGroup group_id, Args... args) {
+  std::string unique_prefix = std::to_string(static_cast<uint8_t>(op)) + "-" +
+      std::to_string(group_id);
   std::vector<std::string> v = {std::to_string(args)...};
   for (auto it = v.begin(); it != v.end(); ++it) {
     unique_prefix += "-" + *it;

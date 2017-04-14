@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../ChannelUtils.hpp"
 #include "../DataChannel.hpp"
 #include "DataChannelUtils.hpp"
 
@@ -109,7 +110,7 @@ private:
                   THDGroup group_id = THDGroupWORLD);
 
   template<DataOperation op, typename... Args>
-  store_type getStore(DataOperation op, THDGroup group_id, Args... args);
+  store_type getStore(THDGroup group_id, Args... args);
 
   void _send(const Scalar& data, rank_type dst_id);
   void _send(thpp::Tensor& data, rank_type dst_id);
@@ -178,7 +179,7 @@ struct GlooCache {
   template<DataOperation op>
   std::shared_ptr<context_type> getSharedContext(
     const DataChannel::Group& group,
-    DataChannelGloo::store_type& store
+    DataChannelGloo::store_type&& store
   ) {
     if (_shared_contexts.find(op) == _shared_contexts.end()) {
       _shared_contexts[op] = createContext(group, store);
@@ -194,7 +195,7 @@ struct GlooCache {
 
   template<DataOperation D, typename T, typename... Args>
   value_type getAlgorithm(THDGroup group_id, const DataChannel::Group& group,
-                          DataChannelGloo::store_type& store, Args... args) {
+                          DataChannelGloo::store_type&& store, Args... args) {
     auto key = algorithm_spec<D, T>::key(group_id, args...);
     if (_algorithms.find(key) == _algorithms.end()) {
       _algorithms[key] = algorithm_spec<D, T>::create(group, store, args...);
