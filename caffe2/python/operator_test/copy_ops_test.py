@@ -88,6 +88,31 @@ class CopyOpsTest(unittest.TestCase):
         )
 
     @unittest.skipIf(workspace.NumCudaDevices() < 1, "Need at least 1 GPU.")
+    def test_cpu2gpu_gpu2cpu_sparse_gradients(self):
+        model = cnn.CNNModelHelper(name="copy_test")
+        v = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
+        indices = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
+        cpu_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
+        gpu_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+
+        with core.DeviceScope(gpu_opt):
+            vcpu = model.CopyGPUToCPU(v, "vcpu")
+
+        with core.DeviceScope(cpu_opt):
+            g = model.Gather([vcpu, indices], "g")
+
+        with core.DeviceScope(gpu_opt):
+            ggpu = model.CopyCPUToGPU(g, "ggpu")
+            f = model.FC(ggpu, "out", dim_in=4, dim_out=6)
+            (softmax, loss) = model.SoftmaxWithLoss(
+                [f, "label"],
+                ["softmax", "loss"],
+            )
+        gradient_map = model.AddGradientOperators([loss])
+        self.assertTrue("v" in gradient_map)
+        self.assertTrue(isinstance(gradient_map['v'], core.GradientSlice))
+
+    @unittest.skipIf(workspace.NumCudaDevices() < 1, "Need at least 1 GPU.")
     def test_cpu2gpu_gpu2cpu_gradients(self):
         model = cnn.CNNModelHelper(name="copy_test")
 
