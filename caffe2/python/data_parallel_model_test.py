@@ -8,7 +8,6 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, data_parallel_model, cnn, recurrent
 from caffe2.python.test_util import TestCase
 
-
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
 class GPUDataParallelModelTest(TestCase):
@@ -246,19 +245,28 @@ class RecurrentNetworkParallelTest(TestCase):
 @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
 class SparseDataParallelModelTest(TestCase):
 
-    def run_model(self, V, gpu_devices):
+    '''
+    Create and run the model. We try with both storing indices for gather
+    on CPU and on GPU
+    '''
+    def run_model(self, V, gpu_devices, cpu_indices):
 
-        '''
-            Helper function for test_equiv
-            '''
         def input_builder_fun(model):
             return None
 
         def model_build_fun(model, loss_scale):
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                gathered_cpu = model.net.Gather(
-                    [self.vecs, 'indices'], 'gathered_cpu')
-            gathered = model.CopyCPUToGPU(gathered_cpu, "gathered")
+            if cpu_indices:
+                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+                    gathered_cpu = model.net.Gather(
+                        [self.vecs, 'indices'], 'gathered_cpu')
+
+                gathered = model.CopyCPUToGPU(gathered_cpu, "gathered")
+            else:
+                gpu_vecs = model.param_init_net.CopyCPUToGPU(
+                    self.vecs, "gpuvecs",
+                )
+                model.params.append(gpu_vecs)
+                gathered = model.net.Gather([gpu_vecs, 'indices'], 'gathered')
             flattened = model.Flatten(gathered, "flattened")
             fc = model.FC(flattened, "fc", 16 * 16, 1,
                           ("ConstantFill", {}), ("ConstantFill", {}))
@@ -270,15 +278,34 @@ class SparseDataParallelModelTest(TestCase):
             return [loss]
 
         def param_update_fun(model):
-
             ONE = model.param_init_net.ConstantFill(
                 [], "ONE", shape=[1], value=1.0,
             )
             LR = model.CopyCPUToGPU(self.LR, "LR")
             for param in model.GetParams():
                 param_grad = model.param_to_grad[param]
-                assert not isinstance(param_grad, core.GradientSlice)
-                model.WeightedSum([param, ONE, param_grad, LR], param)
+                if not isinstance(param_grad, core.GradientSlice):
+                    model.WeightedSum([param, ONE, param_grad, LR], param)
+                else:
+                    param_momentum = model.param_init_net.ConstantFill(
+                        [param],
+                        '{}_momentum'.format(param),
+                        value=0.0,
+                    )
+                    model.net.SparseMomentumSGDUpdate(
+                        [
+                            param_grad.values,
+                            param_momentum,
+                            LR,
+                            param,
+                            param_grad.indices,
+                        ],
+                        [
+                            param_grad.values, param_momentum, param
+                        ],
+                        momentum=0.1,
+                        nesterov=0,
+                    )
 
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
@@ -297,7 +324,11 @@ class SparseDataParallelModelTest(TestCase):
                 )
                 self.vecs = model.param_init_net.UniformFill(
                     [], "vecs", shape=[V, 16])
-                model.params.append(self.vecs)
+                if cpu_indices:
+                    model.params.append(self.vecs)
+                self.ONE_CPU = model.param_init_net.ConstantFill(
+                    [], "ONE_CPU", shape=[1], value=1.0,
+                )
 
         data_parallel_model.Parallelize_GPU(
             model,
@@ -308,26 +339,28 @@ class SparseDataParallelModelTest(TestCase):
         )
 
         # Update the vecs
-        ONE_CPU = model.param_init_net.ConstantFill(
-            [], "ONE_CPU", shape=[1], value=1.0,
-        )
-
-        with core.NameScope("cpu"):
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                for param in model.GetParams():
-                    param_grad = model.param_to_grad[param]
-                    model.ScatterWeightedSum([param, ONE_CPU,
-                                              param_grad.indices,
-                                              param_grad.values,
-                                              self.LR],
-                                              self.vecs)
+        if cpu_indices:
+            with core.NameScope("cpu"):
+                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+                    for param in model.GetParams():
+                        param_grad = model.param_to_grad[param]
+                        model.ScatterWeightedSum([param, self.ONE_CPU,
+                                                  param_grad.indices,
+                                                  param_grad.values,
+                                                  self.LR],
+                                                  self.vecs)
+        else:
+            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+                model.CopyGPUToCPU("gpu_0/gpuvecs", self.vecs)
 
         np.random.seed(2603)
 
         # Each run has same input, independent of number of gpus
         batch_size = 64
         for i in range(0, 10):
-            full_indices = (np.random.rand(batch_size, 16) * V).astype(np.int32)
+            full_indices = np.random.permutation(V)[:batch_size * 16].reshape(
+                batch_size, 16
+            )
             full_labels = full_indices[:, 0] % 2
             batch_per_device = batch_size // len(gpu_devices)
 
@@ -337,7 +370,11 @@ class SparseDataParallelModelTest(TestCase):
                 indices = full_indices[st:en, :].astype(np.int32)
                 labels = full_labels[st:en].astype(np.float32)
 
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+                device_for_indices = core.DeviceOption(caffe2_pb2.CPU)
+                if not cpu_indices:
+                    device_for_indices = core.DeviceOption(caffe2_pb2.CUDA, g)
+
+                with core.DeviceScope(device_for_indices):
                     workspace.FeedBlob("gpu_{}/indices".format(g), indices)
 
                 with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
@@ -351,34 +388,53 @@ class SparseDataParallelModelTest(TestCase):
                     self.vecs,
                     orig_vecs
                 )
+                if not cpu_indices:
+                    for g in gpu_devices:
+                        workspace.FeedBlob(
+                            "gpu_{}/gpuvecs".format(g),
+                            orig_vecs,
+                            device_option=core.DeviceOption(caffe2_pb2.CUDA, g),
+                        )
                 workspace.CreateNet(model.net)
 
             workspace.RunNet(model.net.Proto().name)
+            if len(gpu_devices) == 2:
+                open("dump.txt", "w").write(str(model.net.Proto()))
+                if not cpu_indices:
+                    idx = workspace.FetchBlob("gpu_0/indices")
+                    idx = list(idx.flatten())
+                    n = len(idx)
+                    nu = len(set(idx))
+                    assert n == nu, "We cannot have duplicate indices"
 
         # Sanity check to see the vecs were updated
         self.assertFalse(
             np.allclose(workspace.FetchBlob(self.vecs), orig_vecs))
-        return [workspace.FetchBlob(self.vecs),
+        return [workspace.FetchBlob(self.vecs if cpu_indices else "gpu_0/gpuvecs"),
                 workspace.FetchBlob("gpu_0/fc_w")]
 
-    def test_equiv_sparse(self):
+    def _test_equiv_sparse(self, cpu_indices):
         '''
             Test that the model produces exactly same results given
             total batchsize, independent of number of GPUs.
-            '''
+        '''
         V = 10000
-        result_2gpus = self.run_model(V, [0, 1])
-        result_1gpus = self.run_model(V, [0])
+        result_2gpus = self.run_model(V, [0, 1], cpu_indices)
+        result_1gpus = self.run_model(V, [0], cpu_indices)
 
         self.assertTrue(np.allclose(result_1gpus[0], result_2gpus[0]))
         self.assertTrue(np.allclose(result_1gpus[1], result_2gpus[1]))
 
         if workspace.NumCudaDevices() >= 4:
-            result_4gpus = self.run_model(V, range(4))
+            result_4gpus = self.run_model(V, range(4), cpu_indices)
             self.assertTrue(np.allclose(result_1gpus[0], result_4gpus[0]))
             self.assertTrue(np.allclose(result_1gpus[1], result_4gpus[1]))
 
         if workspace.NumCudaDevices() >= 8:
-            result_8gpus = self.run_model(V, range(8))
+            result_8gpus = self.run_model(V, range(8), cpu_indices)
             self.assertTrue(np.allclose(result_1gpus[0], result_8gpus[0]))
             self.assertTrue(np.allclose(result_1gpus[1], result_8gpus[1]))
+
+    def test_equiv_sparse(self):
+        self._test_equiv_sparse(True)
+        self._test_equiv_sparse(False)
