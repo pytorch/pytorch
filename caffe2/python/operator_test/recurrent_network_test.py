@@ -21,7 +21,8 @@ def tanh(x):
     return 2.0 * sigmoid(2.0 * x) - 1
 
 
-def lstm_unit(hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep):
+def lstm_unit(hidden_t_prev, cell_t_prev, gates,
+              seq_lengths, timestep, forget_bias=0.0):
     D = cell_t_prev.shape[2]
     G = gates.shape[2]
     N = gates.shape[1]
@@ -39,7 +40,7 @@ def lstm_unit(hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep):
     o_t = gates[:, 2, :].reshape(N, D)
     g_t = gates[:, 3, :].reshape(N, D)
     i_t = sigmoid(i_t)
-    f_t = sigmoid(f_t)
+    f_t = sigmoid(f_t + forget_bias)
     o_t = sigmoid(o_t)
     g_t = tanh(g_t)
     valid = (t < seq_lengths).astype(np.int32)
@@ -54,7 +55,7 @@ def lstm_unit(hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep):
 
 
 def lstm_reference(input, hidden_input, cell_input,
-                   gates_w, gates_b, seq_lengths):
+                   gates_w, gates_b, seq_lengths, forget_bias):
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
@@ -79,6 +80,7 @@ def lstm_reference(input, hidden_input, cell_input,
             gates,
             seq_lengths,
             t,
+            forget_bias,
         )
         hidden[t + 1] = hidden_t
         cell[t + 1] = cell_t
@@ -100,7 +102,8 @@ def milstm_reference(
         beta1,
         beta2,
         b,
-        seq_lengths):
+        seq_lengths,
+        forget_bias):
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
@@ -128,6 +131,7 @@ def milstm_reference(
             gates,
             seq_lengths,
             t,
+            forget_bias,
         )
         hidden[t + 1] = hidden_t
         cell[t + 1] = cell_t
@@ -328,9 +332,24 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
            memory_optim=st.booleans())
     def test_lstm(self, t, n, d, memory_optim):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+            def ref(*args):
+                return lstm_reference(*args, forget_bias=0.0)
             self.lstm(
-                recurrent.LSTM, t, n, d, lstm_reference, outputs_with_grads,
+                recurrent.LSTM, t, n, d, ref, outputs_with_grads,
                 memory_optim)
+
+    @given(t=st.integers(1, 4),
+           n=st.integers(1, 5),
+           d=st.integers(1, 5),
+           memory_optim=st.booleans(),
+           forget_bias=st.floats(-10.0, 10.0))
+    def test_lstm_forget_bias(self, t, n, d, memory_optim, forget_bias):
+        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+            def ref(*args):
+                return lstm_reference(*args, forget_bias=forget_bias)
+            self.lstm(
+                recurrent.LSTM, t, n, d, ref, outputs_with_grads,
+                memory_optim, forget_bias)
 
     @given(t=st.integers(1, 4),
            n=st.integers(1, 5),
@@ -338,11 +357,27 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
            memory_optim=st.booleans())
     def test_milstm(self, t, n, d, memory_optim):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+            def ref(*args):
+                return milstm_reference(*args, forget_bias=0.0)
             self.lstm(
-                recurrent.MILSTM, t, n, d, milstm_reference,
+                recurrent.MILSTM, t, n, d, ref,
                 outputs_with_grads, memory_optim)
 
-    def lstm(self, create_lstm, t, n, d, ref, outputs_with_grads, memory_optim):
+    @given(t=st.integers(1, 4),
+           n=st.integers(1, 5),
+           d=st.integers(1, 5),
+           memory_optim=st.booleans(),
+           forget_bias=st.floats(-10.0, 10.0))
+    def test_milstm_forget_bias(self, t, n, d, memory_optim, forget_bias):
+        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+            def ref(*args):
+                return milstm_reference(*args, forget_bias=forget_bias)
+            self.lstm(
+                recurrent.MILSTM, t, n, d, ref,
+                outputs_with_grads, memory_optim, forget_bias)
+
+    def lstm(self, create_lstm, t, n, d, ref,
+             outputs_with_grads, memory_optim, forget_bias=0.0):
         model = CNNModelHelper(name='external')
         input_blob, seq_lengths, hidden_init, cell_init = (
             model.net.AddExternalInputs(
@@ -352,7 +387,9 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             model, input_blob, seq_lengths, (hidden_init, cell_init),
             d, d, scope="external/recurrent",
             outputs_with_grads=outputs_with_grads,
-            memory_optimization=memory_optim)
+            memory_optimization=memory_optim,
+            forget_bias=forget_bias,
+        )
 
         op = model.net._net.op[-1]
 

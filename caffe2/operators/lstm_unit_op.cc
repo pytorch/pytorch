@@ -4,7 +4,10 @@ namespace caffe2 {
 
 namespace {
 REGISTER_CPU_OPERATOR(LSTMUnit, LSTMUnitOp<float, CPUContext>);
-OPERATOR_SCHEMA(LSTMUnit).NumInputs(5).NumOutputs(2).SetDoc(R"DOC(
+OPERATOR_SCHEMA(LSTMUnit)
+    .NumInputs(5)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
 
 LSTMUnit computes the activations of a standard LSTM (without peephole
 connections), in a sequence-length aware fashion.
@@ -14,7 +17,8 @@ state (NxD), and the sequence lengths (N), computes the LSTM
 activations, avoiding computation if the input is invalid (as in, the
 value at X{t][n] >= seqLengths[n].
 
-)DOC");
+)DOC")
+    .Arg("forget_bias", "Bias term to add in while calculating forget gate");
 REGISTER_CPU_OPERATOR(LSTMUnitGradient, LSTMUnitGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(LSTMUnitGradient).NumInputs(9).NumOutputs(3);
 

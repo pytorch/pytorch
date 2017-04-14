@@ -257,7 +257,7 @@ def recurrent_net(
 
 def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
          scope, outputs_with_grads=(0,), return_params=False,
-         memory_optimization=False):
+         memory_optimization=False, forget_bias=0.0):
     '''
     Adds a standard LSTM recurrent network operator to a model.
 
@@ -306,6 +306,7 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     hidden_t, cell_t = step_model.net.LSTMUnit(
         [hidden_t_prev, cell_t_prev, gates_t, seq_lengths, timestep],
         [s('hidden_t'), s('cell_t')],
+        forget_bias=forget_bias,
     )
     step_model.net.AddExternalOutputs(cell_t, hidden_t)
 
@@ -521,6 +522,7 @@ def LSTMWithAttention(
     weighted_encoder_outputs=None,
     lstm_memory_optimization=False,
     attention_memory_optimization=False,
+    forget_bias=0.0,
 ):
     '''
     Adds a LSTM with attention mechanism to a model.
@@ -645,6 +647,7 @@ def LSTMWithAttention(
     hidden_t_intermediate, cell_t = step_model.net.LSTMUnit(
         [hidden_t_prev, cell_t_prev, gates_t, decoder_input_lengths, timestep],
         ['hidden_t_intermediate', s('cell_t')],
+        forget_bias=forget_bias,
     )
     if attention_type == AttentionType.Recurrent:
         attention_weighted_encoder_context_t, _, attention_blobs = apply_recurrent_attention(
@@ -710,7 +713,8 @@ def LSTMWithAttention(
 
 
 def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
-           scope, outputs_with_grads=(0,), memory_optimization=False):
+           scope, outputs_with_grads=(0,), memory_optimization=False,
+           forget_bias=0.0):
     '''
     Adds MI flavor of standard LSTM recurrent network operator to a model.
     See https://arxiv.org/pdf/1606.06630.pdf
@@ -847,6 +851,7 @@ def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     hidden_t, cell_t = step_model.net.LSTMUnit(
         [hidden_t_prev, cell_t_prev, gates_t_rs, seq_lengths, timestep],
         [s('hidden_t'), s('cell_t')],
+        forget_bias=forget_bias,
     )
     step_model.net.AddExternalOutputs(cell_t, hidden_t)
 
