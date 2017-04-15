@@ -12,6 +12,10 @@
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 
+#if defined(_MSC_VER)
+#include "caffe2/utils/windows_cpu_supports.h"
+#endif
+
 namespace caffe2 {
 namespace python {
 
