@@ -4,6 +4,10 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/mkl_utils.h"
 
+#if defined(_MSC_VER)
+#include "caffe2/utils/windows_cpu_supports.h"
+#endif
+
 #ifdef CAFFE2_HAS_MKL_SGEMM_PACK
 
 namespace caffe2 {
