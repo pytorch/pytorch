@@ -55,7 +55,7 @@ class BooleanMaskOp final : public Operator<Context> {
     auto& mask = Input(1);
     auto* dataOut = Output(0);
     CAFFE_ENFORCE(data.ndim() >= 1);
-    CAFFE_ENFORCE(mask.ndim(), 1);
+    CAFFE_ENFORCE_EQ(mask.ndim(), 1);
     CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
 
     const auto* maskPtr = mask.template data<bool>();
@@ -113,9 +113,8 @@ OPERATOR_SCHEMA(BooleanMask)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a data 1D tensor and a mask (boolean) tensor of same shape, returns a
-tensor containing only the elements corresponding to positions where the mask
-is true.
+Given a data tensor and a 1D boolean mask tensor, returns a tensor containing
+only the elements corresponding to positions where the mask is true.
 )DOC")
     .Input(0, "data", "The 1D, original data tensor.")
     .Input(1, "mask", "A tensor of bools of same shape as `data`.")
