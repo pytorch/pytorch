@@ -36,12 +36,6 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
 enable_testing()
 
-# External projects
-include(ExternalProject)
-
-include(cmake/Utils.cmake)
-include(cmake/Summary.cmake)
-
 # options
 option(USE_THREADS "Use Threads" ON)
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
@@ -49,6 +43,7 @@ option(USE_GLOG "Use GLOG" ON)
 option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_LMDB "Use LMDB" ON)
 option(USE_LEVELDB "Use LMDB" ON)
+option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_NNPACK "Use NNPACK" ON)
 option(USE_OPENCV "Use openCV" ON)
@@ -63,6 +58,12 @@ option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(BUILD_PYTHON "Build python binaries" ON)
 option(BUILD_BINARY "Build c++ binary executives" ON)
+
+# External projects
+include(ExternalProject)
+
+include(cmake/Utils.cmake)
+include(cmake/Summary.cmake)
 
 # options that do not affect the main binaries, but affects testing binaries
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)

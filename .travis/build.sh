@@ -17,7 +17,10 @@ elif [[ $BUILD_TARGET == 'ios' ]]; then
 #***************#
 # iOS build     #
 #***************#
-  sh ../scripts/build_ios.sh
+  # Note: we will only build arm64 in the travis case for faster compilation.
+  # You might want to build a fat binary containng armv7, armv7s and arm64.
+  # This can be done by simply not passing in the CMAKE_OSX_ARCHITECTURES flag.
+  sh ../scripts/build_ios.sh -DCMAKE_OSX_ARCHITECTURES=arm64
 elif [[ $TRAVIS_OS_NAME == 'osx' ]]; then
 #************#
 # OS X build #

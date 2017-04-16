@@ -11,6 +11,11 @@ if (USE_THREADS)
   list(APPEND Caffe2_DEPENDENCY_LIBS ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
+# ---[ protobuf
+if (USE_LITE_PROTO)
+  add_definitions(-DCAFFE2_USE_LITE_PROTO)
+endif()
+
 # ---[ BLAS
 set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
 set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")

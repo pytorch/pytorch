@@ -40,5 +40,6 @@ cmake .. \
     -DCMAKE_THREAD_LIBS_INIT=-lpthread \
     -DCMAKE_HAVE_THREADS_LIBRARY=1 \
     -DCMAKE_USE_PTHREADS_INIT=1 \
+    $@ \
     || exit 1
 make
