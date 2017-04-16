@@ -11,7 +11,12 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          int kH,
                          int dT,
                          int dW,
-                         int dH) {
+                         int dH,
+                         int padT,
+                         int padW,
+                         int padH,
+                         bool ceil_mode,
+                         bool count_include_pad ){
   long nslices;
   long itime;
   long iheight;
@@ -54,9 +59,33 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   itime   = input->size[dimt];
   iheight = input->size[dimh];
   iwidth  = input->size[dimw];
-  otime   = (itime   - kT) / dT + 1;
-  oheight = (iheight - kH) / dH + 1;
-  owidth  = (iwidth  - kW) / dW + 1;
+  if(ceil_mode)
+  {
+    owidth  = (long)(ceil((float)(iwidth  - kW + 2*padW) / dimw)) + 1;
+    oheight = (long)(ceil((float)(iheight - kH + 2*padH) / dimh)) + 1;
+    otime=(long)(ceil((float)(itime - kT+ 2*padT) / dimt)) + 1;
+  }
+  else
+  {
+    owidth  = (long)(floor((float)(iwidth  - kW + 2*padW) / dimw)) + 1;
+    oheight = (long)(floor((float)(iheight - kH + 2*padH) / dimh)) + 1;
+    otime=(long)(floor((float)(itime - kT+ 2*padT) / dimt)) + 1;
+  }
+
+  if (padW || padH || padT)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((oheight - 1)*dimh >= iheight + padH)
+      --oheight;
+    if ((owidth  - 1)*dimw >= iwidth  + padW)
+      --owidth;
+      if ((otime  - 1)*dimt >= itime  + padT)
+        --otime;
+
+  }
+
+
 
   if (gradOutput != NULL) {
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimN, nslices);
@@ -81,7 +110,12 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int kH,
           int dT,
           int dW,
-          int dH)
+          int dH,
+          int padT,
+          int padW,
+          int padH,
+          bool ceil_mode,
+          bool count_include_pad)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -124,6 +158,9 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
   }
 }
 
+//working 3/28 Jeyte
+//added padding, ceil mode, and count include pad to arguments
+
 void THNN_(VolumetricAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -133,7 +170,12 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
           int kH,
           int dT,
           int dW,
-          int dH)
+          int dH,
+          int padT ,
+          int padW ,
+          int padH ,
+          bool ceil_mode ,
+          bool count_include_pad )
 {
   long nslices;
   long itime;
@@ -147,7 +189,10 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
 
   THNN_(VolumetricAveragePooling_shapeCheck)(
         state, input, NULL, kT, kW, kH,
-        dT, dW, dH);
+        dT, dW, dH,
+        padT,padW,padH,
+        ceil_mode,
+        count_include_pad );
 
   int dimN = 0;
   int dimt = 1;
@@ -167,9 +212,36 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   itime   = input->size[dimt];
   iheight = input->size[dimh];
   iwidth  = input->size[dimw];
-  otime   = (itime   - kT) / dT + 1;
-  oheight = (iheight - kH) / dH + 1;
-  owidth  = (iwidth  - kW) / dW + 1;
+
+  //chnages here
+  //Jeyte 4/5
+  if(ceil_mode)
+  {
+    owidth  = (long)(ceil((float)(iwidth  - kW + 2*padW) / dimw)) + 1;
+    oheight = (long)(ceil((float)(iheight - kH + 2*padH) / dimh)) + 1;
+    otime=(long)(ceil((float)(itime - kT+ 2*padT) / dimt)) + 1;
+  }
+  else
+  {
+    owidth  = (long)(floor((float)(iwidth  - kW + 2*padW) / dimw)) + 1;
+    oheight = (long)(floor((float)(iheight - kH + 2*padH) / dimh)) + 1;
+    otime=(long)(floor((float)(itime - kT+ 2*padT) / dimt)) + 1;
+  }
+
+  if (padW || padH || padT)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((oheight - 1)*dimh >= iheight + padH)
+      --oheight;
+    if ((owidth  - 1)*dimw >= iwidth  + padW)
+      --owidth;
+      if ((otime  - 1)*dimt >= itime  + padT)
+        --otime;
+
+  }
+
+
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
@@ -187,7 +259,10 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
       itime, iwidth, iheight,
       otime, owidth, oheight,
       kT, kW, kH,
-      dT, dW, dH
+      dT, dW, dH,
+      padT, padW, padH,
+      ceil_mode,
+      count_include_pad
     );
   }
   else  /* batch mode */
@@ -205,6 +280,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     output_data = THTensor_(data)(output);
 
 #pragma omp parallel for private(p)
+
     for (p=0; p < nBatch; p++)
     {
       THNN_(VolumetricAveragePooling_updateOutput_frame)(
@@ -212,7 +288,11 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
         itime, iwidth, iheight,
         otime, owidth, oheight,
         kT, kW, kH,
-        dT, dW, dH
+        dT, dW, dH,
+        padT, padW, padH,
+        ceil_mode,
+        count_include_pad
+
       );
     }
   }
@@ -236,7 +316,12 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int kH,
           int dT,
           int dW,
-          int dH)
+          int dH,
+          int padT,
+          int padW,
+          int padH,
+          bool ceil_mode,
+          bool count_include_pad )
 {
   long k;
 #pragma omp parallel for private(k)
@@ -285,7 +370,12 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
           int kH,
           int dT,
           int dW,
-          int dH)
+          int dH,
+          int padT,
+          int padW,
+          int padH,
+          bool ceil_mode,
+          bool count_include_pad )
 {
   int nslices;
   int itime;
@@ -304,7 +394,10 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
 
   THNN_(VolumetricAveragePooling_shapeCheck)(
         state, input, gradOutput, kT, kW, kH,
-        dT, dW, dH);
+        dT, dW, dH,
+        padT,padW,padH,
+        ceil_mode,
+        count_include_pad );
 
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -342,7 +435,10 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
       itime, iwidth, iheight,
       otime, owidth, oheight,
       kT, kW, kH,
-      dT, dW, dH
+      dT, dW, dH,
+      padT,padW,padH,
+      ceil_mode,
+      count_include_pad
     );
   }
   else /* batch mode */
@@ -361,7 +457,10 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
         itime, iwidth, iheight,
         otime, owidth, oheight,
         kT, kW, kH,
-        dT, dW, dH
+        dT, dW, dH,
+        padT,padW,padH,
+        ceil_mode,
+        count_include_pad
       );
     }
   }
