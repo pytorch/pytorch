@@ -35,9 +35,89 @@ endif()
 # (2) Mobile platform - direct build
 ##############################################################################
 
+# We know that NNPACK is only supported with clang due to some builtin
+# function usages, so we will guard it.
+#if (ANDROID)
+#  if (NOT ${CMAKE_C_COMPILER_ID} STREQUAL "Clang")
+#    message(WARNING
+#            "NNPACK currently requires the clang compiler to build. Seems "
+#            "that we are not building with clang, so I will turn off NNPACK "
+#            "build.")
+#    set(USE_NNPACK OFF)
+#    return()
+#  endif()
+#endif()
+
+if (ANDROID)
+  include(third_party/android-cmake/AndroidNdkModules.cmake)
+  android_ndk_import_module_cpufeatures()
+endif()
+
+
 if (ANDROID OR IOS)
   message(WARNING "NNPACK for mobile cmake support is wip")
-  set(USE_NNPACK OFF)
+  set(CAFFE2_THIRD_PARTY_ROOT ${PROJECT_SOURCE_DIR}/third_party)
+
+  # pthreadpool
+  set(CAFFE2_PTHREADPOOL_SRCS
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/pthreadpool/src/threadpool-pthreads.c)
+  add_library(CAFFE2_PTHREADPOOL STATIC ${CAFFE2_PTHREADPOOL_SRCS})
+  target_include_directories(CAFFE2_PTHREADPOOL PRIVATE
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/FXdiv/include
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/pthreadpool/include)
+  # nnpack
+  set(CAFFE2_NNPACK_SRCS
+      # nnpack_ukernels: common files
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/2d-fourier-8x8.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/2d-fourier-16x16.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/2d-winograd-8x8-3x3.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/relu.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/softmax.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/fft-block-mac.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/blas/shdotxf.c
+      # nnpack_ukernels: neon files
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/conv1x1.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/s4gemm.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/c4gemm.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/s4c2gemm.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/c4gemm-conjb.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/s4c2gemm-conjb.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/c4gemm-conjb-transc.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/s4c2gemm-conjb-transc.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/sgemm.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/sdotxf.c
+      # nnpack files
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/init.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-output.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-input-gradient.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-kernel.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-inference.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/fully-connected-output.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/fully-connected-inference.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/pooling-output.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/softmax-output.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/relu-output.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/relu-input-gradient.c
+  )
+  add_library(CAFFE2_NNPACK STATIC ${CAFFE2_NNPACK_SRCS})
+  target_include_directories(CAFFE2_NNPACK PRIVATE
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/include
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/FP16/include
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/FXdiv/include
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/pthreadpool/include
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/psimd/include)
+
+  set(NNPACK_FOUND TRUE)
+  # nnpack.h itself only needs to have nnpack and pthreadpool as include directories.
+  set(NNPACK_INCLUDE_DIRS
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/include
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/pthreadpool/include)
+  set(NNPACK_LIBRARIES $<TARGET_FILE:CAFFE2_NNPACK> $<TARGET_FILE:CAFFE2_PTHREADPOOL>)
+  set(NNPACK_LIBRARY_DIRS $<TARGET_FILE_DIR:CAFFE2_NNPACK> $<TARGET_FILE_DIR:CAFFE2_PTHREADPOOL>)
+  if (ANDROID)
+    set(NNPACK_LIBRARIES ${NNPACK_LIBRARIES} cpufeatures)
+  endif()
   return()
 endif()
 
