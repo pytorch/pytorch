@@ -7,7 +7,7 @@ REGISTER_CPU_OPERATOR(Tile, TileOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(TileGradient, TileGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Tile)
-    .NumInputs(1)
+    .NumInputs(1, 3)
     .NumOutputs(1)
     .TensorInferenceFunction(
         [](const OperatorDef& def, const vector<TensorShape>& in) {
@@ -17,10 +17,16 @@ OPERATOR_SCHEMA(Tile)
 
           auto tiles = helper.GetSingleArgument<int32_t>("tiles", 1);
           auto axis = helper.GetSingleArgument<int32_t>("axis", 0);
-          const auto canonical_axis =
-              canonical_axis_index_(axis, out[0].dims().size());
-          out[0].set_dims(
-              canonical_axis, out[0].dims().Get(canonical_axis) * tiles);
+          if (in.size() > 1) {
+            // Tile or axis is specified as input; we can't determine
+            // the size
+            out[0].set_unknown_shape(true);
+          } else {
+            const auto canonical_axis =
+                canonical_axis_index_(axis, out[0].dims().size());
+            out[0].set_dims(
+                canonical_axis, out[0].dims().Get(canonical_axis) * tiles);
+          }
           return out;
         })
     .SetDoc(R"DOC(
@@ -36,18 +42,29 @@ For example, tiling [[a b c d]] by tile=2, axis=0 produces
     .Arg("tiles", "Number of replicas")
     .Arg("axis", "Axis to replicate along")
     .Input(0, "data", "The input tensor.")
+    .Input(1, "tiles", "(optional) Number of replicas (overrides argument)")
+    .Input(2, "axis", "(optional) Axis to replicate along (overrides argument)")
     .Output(
         0,
         "tiled_data",
         "Tensor that will contain input replicated along the given axis.");
 
-OPERATOR_SCHEMA(TileGradient).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(TileGradient).NumInputs(1, 3).NumOutputs(1);
 
 class GetTileGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    // Check whether the tiles/axis information was
+    // passed through input arguments
+    vector<std::string> g_inputs({GO(0)});
+    if (Def().input_size() > 1) {
+      g_inputs.push_back(I(1));
+    }
+    if (Def().input_size() > 2) {
+      g_inputs.push_back(I(2));
+    }
     return SingleGradientDef(
-        "TileGradient", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+        "TileGradient", "", g_inputs, vector<string>{GI(0)});
   }
 };
 
