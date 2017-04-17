@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, scope, model_helpers
+from caffe2.python import scope, model_helpers
 from caffe2.python.model_helper import ModelHelperBase
 from caffe2.proto import caffe2_pb2
 
@@ -76,279 +76,43 @@ class CNNModelHelper(ModelHelperBase):
                 blob_in, blob_out, **kwargs)
         return data, label
 
-    def _ConvBase(  # noqa
-        self, is_nd, blob_in, blob_out, dim_in, dim_out, kernel,
-        weight_init=None, bias_init=None, group=1, transform_inputs=None,
-        **kwargs
-    ):
-        kernels = []
-        if is_nd:
-            if not isinstance(kernel, list):
-                kernels = [kernel]
-            else:
-                kernels = kernel
-        else:
-            kernels = [kernel] * 2
+    def PadImage(self, blob_in, blob_out, **kwargs):
+        self.net.PadImage(blob_in, blob_out, **kwargs)
 
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-            kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
-            if self.ws_nbytes_limit:
-                kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
+    def ConvNd(self, *args, **kwargs):
+        return model_helpers.ConvNd(self, *args, use_cudnn=self.use_cudnn,
+                                    order=self.order,
+                                    cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+                                    ws_nbytes_limit=self.ws_nbytes_limit,
+                                    **kwargs)
 
-        use_bias =\
-            False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
-        weight_init = weight_init if weight_init else ('XavierFill', {})
-        bias_init = bias_init if bias_init else ('ConstantFill', {})
-        blob_out = blob_out or self.net.NextName()
-        weight_shape = [dim_out]
-        if self.order == "NCHW":
-            weight_shape.append(int(dim_in / group))
-            weight_shape.extend(kernels)
-        else:
-            weight_shape.extend(kernels)
-            weight_shape.append(int(dim_in / group))
+    def Conv(self, *args, **kwargs):
+        return model_helpers.Conv(self, *args, use_cudnn=self.use_cudnn,
+                                  order=self.order,
+                                  cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+                                  ws_nbytes_limit=self.ws_nbytes_limit,
+                                  **kwargs)
 
-        if self.init_params:
-            weight = self.param_init_net.__getattr__(weight_init[0])(
-                [],
-                blob_out + '_w',
-                shape=weight_shape,
-                **weight_init[1]
-            )
-            if use_bias:
-                bias = self.param_init_net.__getattr__(bias_init[0])(
-                    [],
-                    blob_out + '_b',
-                    shape=[dim_out, ],
-                    **bias_init[1]
-                )
-        else:
-            weight = core.ScopedBlobReference(
-                blob_out + '_w', self.param_init_net)
-            if use_bias:
-                bias = core.ScopedBlobReference(
-                    blob_out + '_b', self.param_init_net)
-        if use_bias:
-            self.params.extend([weight, bias])
-        else:
-            self.params.extend([weight])
+    def ConvTranspose(self, *args, **kwargs):
+        return model_helpers.ConvTranspose(self, *args, use_cudnn=self.use_cudnn,
+                                           order=self.order,
+                                           cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+                                           ws_nbytes_limit=self.ws_nbytes_limit,
+                                           **kwargs)
 
-        self.weights.append(weight)
+    def GroupConv(self, *args, **kwargs):
+        return model_helpers.GroupConv(self, *args, use_cudnn=self.use_cudnn,
+                                       order=self.order,
+                                       cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+                                       ws_nbytes_limit=self.ws_nbytes_limit,
+                                       **kwargs)
 
-        if use_bias:
-            self.biases.append(bias)
-
-        if use_bias:
-            inputs = [blob_in, weight, bias]
-        else:
-            inputs = [blob_in, weight]
-
-        if transform_inputs is not None:
-            transform_inputs(self, blob_out, inputs)
-
-        # For the operator, we no longer need to provide the no_bias field
-        # because it can automatically figure this out from the number of
-        # inputs.
-        if 'no_bias' in kwargs:
-            del kwargs['no_bias']
-        if group != 1:
-            kwargs['group'] = group
-
-        if is_nd:
-            return self.net.Conv(
-                inputs,
-                blob_out,
-                kernels=kernels,
-                order=self.order,
-                **kwargs)
-        else:
-            return self.net.Conv(
-                inputs,
-                blob_out,
-                kernel=kernel,
-                order=self.order,
-                **kwargs)
-
-    def ConvNd(self, blob_in, blob_out, dim_in, dim_out, kernel,
-               weight_init=None, bias_init=None, group=1, transform_inputs=None,
-               **kwargs):
-        """N-dimensional convolution for inputs with NCHW storage order.
-        """
-        assert self.order == "NCHW", "ConvNd only supported for NCHW storage."
-        return self._ConvBase(True, blob_in, blob_out, dim_in, dim_out, kernel,
-                              weight_init, bias_init, group, transform_inputs,
-                              **kwargs)
-
-    def Conv(self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-             bias_init=None, group=1, transform_inputs=None, **kwargs):
-        """2-dimensional convolution.
-        """
-        return self._ConvBase(False, blob_in, blob_out, dim_in, dim_out, kernel,
-                              weight_init, bias_init, group, transform_inputs,
-                              **kwargs)
-
-    def ConvTranspose(
-        self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-        bias_init=None, **kwargs
-    ):
-        """ConvTranspose.
-        """
-        weight_init = weight_init if weight_init else ('XavierFill', {})
-        bias_init = bias_init if bias_init else ('ConstantFill', {})
-        blob_out = blob_out or self.net.NextName()
-        weight_shape = (
-            [dim_in, dim_out, kernel, kernel]
-            if self.order == "NCHW" else [dim_in, kernel, kernel, dim_out]
-        )
-        if self.init_params:
-            weight = self.param_init_net.__getattr__(weight_init[0])(
-                [],
-                blob_out + '_w',
-                shape=weight_shape,
-                **weight_init[1]
-            )
-            bias = self.param_init_net.__getattr__(bias_init[0])(
-                [],
-                blob_out + '_b',
-                shape=[dim_out, ],
-                **bias_init[1]
-            )
-        else:
-            weight = core.ScopedBlobReference(
-                blob_out + '_w', self.param_init_net)
-            bias = core.ScopedBlobReference(
-                blob_out + '_b', self.param_init_net)
-        self.params.extend([weight, bias])
-        self.weights.append(weight)
-        self.biases.append(bias)
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-            kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
-            if self.ws_nbytes_limit:
-                kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
-        return self.net.ConvTranspose(
-            [blob_in, weight, bias],
-            blob_out,
-            kernel=kernel,
-            order=self.order,
-            **kwargs
-        )
-
-    def GroupConv(
-        self,
-        blob_in,
-        blob_out,
-        dim_in,
-        dim_out,
-        kernel,
-        weight_init=None,
-        bias_init=None,
-        group=1,
-        **kwargs
-    ):
-        """Group Convolution.
-
-        This is essentially the same as Conv with a group argument passed in.
-        We specialize this for backward interface compatibility.
-        """
-        return self.Conv(blob_in, blob_out, dim_in, dim_out, kernel,
-                         weight_init=weight_init, bias_init=bias_init,
-                         group=group, **kwargs)
-
-    def GroupConv_Deprecated(
-        self,
-        blob_in,
-        blob_out,
-        dim_in,
-        dim_out,
-        kernel,
-        weight_init=None,
-        bias_init=None,
-        group=1,
-        **kwargs
-    ):
-        """GroupConvolution's deprecated interface.
-
-        This is used to simulate a group convolution via split and concat. You
-        should always use the new group convolution in your new code.
-        """
-        weight_init = weight_init if weight_init else ('XavierFill', {})
-        bias_init = bias_init if bias_init else ('ConstantFill', {})
-        use_bias = False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-            kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
-            if self.ws_nbytes_limit:
-                kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
-        if dim_in % group:
-            raise ValueError("dim_in should be divisible by group.")
-        if dim_out % group:
-            raise ValueError("dim_out should be divisible by group.")
-        splitted_blobs = self.net.DepthSplit(
-            blob_in,
-            ['_' + blob_out + '_gconv_split_' + str(i) for i in range(group)],
-            dimensions=[int(dim_in / group) for i in range(group)],
-            order=self.order
-        )
-        weight_shape = (
-            [dim_out / group, dim_in / group, kernel, kernel]
-            if self.order == "NCHW" else
-            [dim_out / group, kernel, kernel, dim_in / group]
-        )
-        # Make sure that the shapes are of int format. Especially for py3 where
-        # int division gives float output.
-        weight_shape = [int(v) for v in weight_shape]
-        conv_blobs = []
-        for i in range(group):
-            if self.init_params:
-                weight = self.param_init_net.__getattr__(weight_init[0])(
-                    [],
-                    blob_out + '_gconv_%d_w' % i,
-                    shape=weight_shape,
-                    **weight_init[1]
-                )
-                if use_bias:
-                    bias = self.param_init_net.__getattr__(bias_init[0])(
-                        [],
-                        blob_out + '_gconv_%d_b' % i,
-                        shape=[int(dim_out / group)],
-                        **bias_init[1]
-                    )
-            else:
-                weight = core.ScopedBlobReference(
-                    blob_out + '_gconv_%d_w' % i, self.param_init_net)
-                if use_bias:
-                    bias = core.ScopedBlobReference(
-                        blob_out + '_gconv_%d_b' % i, self.param_init_net)
-            if use_bias:
-                self.params.extend([weight, bias])
-            else:
-                self.params.extend([weight])
-            self.weights.append(weight)
-            if use_bias:
-                self.biases.append(bias)
-            if use_bias:
-                inputs = [weight, bias]
-            else:
-                inputs = [weight]
-            if 'no_bias' in kwargs:
-                del kwargs['no_bias']
-            conv_blobs.append(
-                splitted_blobs[i].Conv(
-                    inputs,
-                    blob_out + '_gconv_%d' % i,
-                    kernel=kernel,
-                    order=self.order,
-                    **kwargs
-                )
-            )
-        concat, concat_dims = self.net.Concat(
-            conv_blobs,
-            [blob_out, "_" + blob_out + "_concat_dims"],
-            order=self.order
-        )
-        return concat
+    def GroupConv_Deprecated(self, *args, **kwargs):
+        return model_helpers.GroupConv_Deprecated(self, *args, use_cudnn=self.use_cudnn,
+                                                  order=self.order,
+                                                  cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+                                                  ws_nbytes_limit=self.ws_nbytes_limit,
+                                                  **kwargs)
 
     def FC(self, *args, **kwargs):
         return model_helpers.FC(self, *args, **kwargs)
@@ -417,11 +181,6 @@ class CNNModelHelper(ModelHelperBase):
     def AveragePool(self, *args, **kwargs):
         return model_helpers.AveragePool(self, *args, use_cudnn=self.use_cudnn,
                                          order=self.order, **kwargs)
-
-    def PadImage(
-        self, blob_in, blob_out, **kwargs
-    ):
-        self.net.PadImage(blob_in, blob_out, **kwargs)
 
     @property
     def XavierInit(self):
