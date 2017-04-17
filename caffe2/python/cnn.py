@@ -389,6 +389,14 @@ class CNNModelHelper(ModelHelperBase):
     def PRelu(self, *args, **kwargs):
         return model_helpers.PRelu(self, *args, **kwargs)
 
+    def Concat(self, *args, **kwargs):
+        return model_helpers.Concat(self, *args, order=self.order, **kwargs)
+
+    def DepthConcat(self, *args, **kwargs):
+        """The old depth concat function - we should move to use concat."""
+        print("DepthConcat is deprecated. use Concat instead.")
+        return self.Concat(*args, **kwargs)
+
 
     def MaxPool(self, *args, **kwargs):
         return model_helpers.MaxPool(self, *args, use_cudnn=self.use_cudnn,
@@ -397,20 +405,6 @@ class CNNModelHelper(ModelHelperBase):
     def AveragePool(self, *args, **kwargs):
         return model_helpers.AveragePool(self, *args, use_cudnn=self.use_cudnn,
                                          order=self.order, **kwargs)
-
-    def Concat(self, blobs_in, blob_out, **kwargs):
-        """Depth Concat."""
-        return self.net.Concat(
-            blobs_in,
-            [blob_out, "_" + blob_out + "_concat_dims"],
-            order=self.order,
-            **kwargs
-        )[0]
-
-    def DepthConcat(self, blobs_in, blob_out, **kwargs):
-        """The old depth concat function - we should move to use concat."""
-        print("DepthConcat is deprecated. use Concat instead.")
-        return self.Concat(blobs_in, blob_out, **kwargs)
 
     def Transpose(self, blob_in, blob_out, **kwargs):
         """Transpose."""
