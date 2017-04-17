@@ -204,7 +204,10 @@ from sphinx.util.docfields import TypedField
 from sphinx import addnodes
 
 
-def patched_make_field(self, types, domain, items):
+def patched_make_field(self, types, domain, items, **kw):
+    # `kw` catches `env=None` needed for newer sphinx while maingaining
+    #  backwards compatibility when passed along further down!
+
     # type: (List, unicode, Tuple) -> nodes.field
     def handle_item(fieldarg, content):
         par = nodes.paragraph()
@@ -224,7 +227,7 @@ def patched_make_field(self, types, domain, items):
                 typename = typename.replace('float', 'python:float')
                 typename = typename.replace('type', 'python:type')
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
-                                           addnodes.literal_emphasis))
+                                           addnodes.literal_emphasis, **kw))
             else:
                 par += fieldtype
             par += nodes.Text(')')
