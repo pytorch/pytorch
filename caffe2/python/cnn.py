@@ -368,14 +368,20 @@ class CNNModelHelper(ModelHelperBase):
     def Dropout(self, *args, **kwargs):
         return model_helpers.Dropout(self, *args, **kwargs)
 
-    def LRN(self, blob_in, blob_out, **kwargs):
-        """LRN"""
-        return self.net.LRN(
-            blob_in,
-            [blob_out, "_" + blob_out + "_scale"],
-            order=self.order,
-            **kwargs
-        )[0]
+    def LRN(self, *args, **kwargs):
+        return model_helpers.LRN(self, *args, **kwargs)
+
+    def Softmax(self, *args, **kwargs):
+        return model_helpers.Softmax(self, *args, use_cudnn=self.use_cudnn,
+                                     **kwargs)
+
+    def SpatialBN(self, *args, **kwargs):
+        return model_helpers.SpatialBN(self, *args, order=self.order, **kwargs)
+
+    def InstanceNorm(self, *args, **kwargs):
+        return model_helpers.InstanceNorm(self, *args, order=self.order,
+                                          **kwargs)
+
 
     def MaxPool(self, *args, **kwargs):
         return model_helpers.MaxPool(self, *args, use_cudnn=self.use_cudnn,
@@ -431,92 +437,9 @@ class CNNModelHelper(ModelHelperBase):
             kwargs['engine'] = 'CUDNN'
         return self.net.Transpose(blob_in, blob_out, **kwargs)
 
-    def Softmax(self, blob_in, blob_out=None, **kwargs):
-        """Softmax."""
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-        if blob_out is not None:
-            return self.net.Softmax(blob_in, blob_out, **kwargs)
-        else:
-            return self.net.Softmax(blob_in, **kwargs)
-
     def Sum(self, blob_in, blob_out, **kwargs):
         """Sum"""
         return self.net.Sum(blob_in, blob_out, **kwargs)
-
-    def InstanceNorm(self, blob_in, blob_out, dim_in, **kwargs):
-        blob_out = blob_out or self.net.NextName()
-        # Input: input, scale, bias
-        # Output: output, saved_mean, saved_inv_std
-        # scale: initialize with ones
-        # bias: initialize with zeros
-
-        def init_blob(value, suffix):
-            return self.param_init_net.ConstantFill(
-                [], blob_out + "_" + suffix, shape=[dim_in], value=value)
-        scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
-
-        self.params.extend([scale, bias])
-        self.weights.append(scale)
-        self.biases.append(bias)
-        blob_outs = [blob_out, blob_out + "_sm", blob_out + "_siv"]
-        if 'is_test' in kwargs and kwargs['is_test']:
-            blob_outputs = self.net.InstanceNorm(
-                [blob_in, scale, bias], [blob_out],
-                order=self.order, **kwargs)
-            return blob_outputs
-        else:
-            blob_outputs = self.net.InstanceNorm(
-                [blob_in, scale, bias], blob_outs,
-                order=self.order, **kwargs)
-            # Return the output
-            return blob_outputs[0]
-
-    def SpatialBN(self, blob_in, blob_out, dim_in, **kwargs):
-        blob_out = blob_out or self.net.NextName()
-        # Input: input, scale, bias, est_mean, est_inv_var
-        # Output: output, running_mean, running_inv_var, saved_mean,
-        #         saved_inv_var
-        # scale: initialize with ones
-        # bias: initialize with zeros
-        # est mean: zero
-        # est var: ones
-
-        def init_blob(value, suffix):
-            return self.param_init_net.ConstantFill(
-                [], blob_out + "_" + suffix, shape=[dim_in], value=value)
-
-        if self.init_params:
-            scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
-            running_mean = init_blob(0.0, "rm")
-            running_inv_var = init_blob(1.0, "riv")
-        else:
-            scale = core.ScopedBlobReference(
-                    blob_out + '_s', self.param_init_net)
-            bias = core.ScopedBlobReference(
-                    blob_out + '_b', self.param_init_net)
-            running_mean = core.ScopedBlobReference(
-                    blob_out + '_rm', self.param_init_net)
-            running_inv_var = core.ScopedBlobReference(
-                    blob_out + '_riv', self.param_init_net)
-
-        self.params.extend([scale, bias])
-        self.computed_params.extend([running_mean, running_inv_var])
-        self.weights.append(scale)
-        self.biases.append(bias)
-        blob_outs = [blob_out, running_mean, running_inv_var,
-                     blob_out + "_sm", blob_out + "_siv"]
-        if 'is_test' in kwargs and kwargs['is_test']:
-            blob_outputs = self.net.SpatialBN(
-                [blob_in, scale, bias, blob_outs[1], blob_outs[2]], [blob_out],
-                order=self.order, **kwargs)
-            return blob_outputs
-        else:
-            blob_outputs = self.net.SpatialBN(
-                [blob_in, scale, bias, blob_outs[1], blob_outs[2]], blob_outs,
-                order=self.order, **kwargs)
-            # Return the output
-            return blob_outputs[0]
 
     def Iter(self, blob_out, **kwargs):
         if 'device_option' in kwargs:
