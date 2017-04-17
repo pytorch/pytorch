@@ -292,7 +292,9 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
             columns[g].get(), ones[g].get(), kernel_size, *this);
       }
       grad_weight = cat(grad_weights, 0);
-      grad_bias = cat(grad_biases, 0);
+      if (bias && needs_input_grad(2)) {
+        grad_bias = cat(grad_biases, 0);
+      }
     }
   }
 
