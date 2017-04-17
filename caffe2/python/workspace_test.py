@@ -362,8 +362,10 @@ class TestCWorkspace(htu.HypothesisTestCase):
         net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
         ws.create_net(net)
         self.assertIn("testblob", ws.blobs)
-        self.assertIn("test-net", ws.nets)
-        net = ws.nets["test-net"].run()
+        self.assertEqual(len(ws.nets), 1)
+        net_name = ws.nets.keys()[0]
+        self.assertIn("test-net", net_name)  # May have a suffix such as "_1"
+        net = ws.nets[net_name].run()
         blob = ws.blobs["testblob"]
         np.testing.assert_array_equal(
             np.ones((1, 2, 3, 4), dtype=np.float32),
