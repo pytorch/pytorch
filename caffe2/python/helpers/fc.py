@@ -7,14 +7,6 @@ from __future__ import unicode_literals
 
 from caffe2.python import core
 
-__all__ = [
-    'FC',
-    'FC_Prune',
-    'FC_Decomp',
-    'FC_Sparse',
-    'PackedFC',
-]
-
 
 def _FC_or_packed_FC(
     model, op_call, blob_in, blob_out, dim_in, dim_out, weight_init=None,

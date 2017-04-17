@@ -5,10 +5,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-__all__ = [
-    'Dropout',
-]
-
 
 def Dropout(model, blob_in, blob_out, **kwargs):
     """Dropout"""
