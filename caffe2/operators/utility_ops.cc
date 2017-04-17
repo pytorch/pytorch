@@ -3,6 +3,12 @@
 #include <cmath>
 
 namespace caffe2 {
+
+template <>
+bool WeightedSumOp<CPUContext>::RunOnDevice() {
+  return DoRunWithType<float>();
+}
+
 namespace {
 
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
@@ -12,10 +18,9 @@ REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Sum, SumOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(SumInt, SumOp<int, CPUContext>);
-
-REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Sum, SumOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SumInt, SumOp<CPUContext>);
+REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
