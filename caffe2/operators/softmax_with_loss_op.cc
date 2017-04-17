@@ -115,16 +115,26 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
           D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
     }
 
-    Tensor<CPUContext> scalef;
-    scalef.Resize(N); // TOOD: what's the role of scale?
+    rowmax_.Resize(N);
+    losses_.Resize(N);
 
-    SoftmaxCPU(context_, N, D, X, Pdata, scalef, sum_multiplier_);
+    SoftmaxCPU(
+        context_,
+        N,
+        D,
+        X.data<float>(),
+        Pdata,
+        losses_.mutable_data<float>(),
+        sum_multiplier_.data<float>(),
+        !label_prob_mode_,
+        rowmax_.mutable_data<float>());
 
     // Then compute cross entropy
     float loss_sum = 0.0;
     float weight_sum = 0.0;
     if (!label_prob_mode_) {
       const int* label_data = T.data<int>();
+      const float* Xdata = X.data<float>();
 
       for (int i = 0; i < N; ++i) {
         CAFFE_ENFORCE(
@@ -134,10 +144,11 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
             " vs ",
             D);
         float weight = weights ? weights[i] : 1.0;
-        float l = -log(std::max(Pdata[i * D + label_data[i]], 1e-20f)) * weight;
+        float l = -Pdata[i * D + label_data[i]] * weight;
         loss_sum += l;
         weight_sum += weight;
       }
+      math::Exp(N * D, Pdata, Pdata, &context_);
     } else {
       const float* label_data = T.data<float>();
 

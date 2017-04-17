@@ -8,15 +8,15 @@ void SoftmaxCPU(
     CPUContext& context,
     const int N,
     const int D,
-    const Tensor<CPUContext>& X,
+    const float* Xdata,
     float* Ydata,
-    Tensor<CPUContext>& scale,
-    Tensor<CPUContext>& sum_multiplier) {
-  math::RowwiseMax<float, CPUContext>(
-      N, D, X.data<float>(), scale.mutable_data<float>(), &context);
+    float* scale,
+    const float* sum_multiplier,
+    bool logarithmic,
+    float* rowmax) {
+  math::RowwiseMax<float, CPUContext>(N, D, Xdata, rowmax, &context);
   // Put the intermediate result X - max(X) into Y
-  context.template Copy<float, CPUContext, CPUContext>(
-      X.size(), X.data<float>(), Ydata);
+  context.template Copy<float, CPUContext, CPUContext>(N * D, Xdata, Ydata);
   // Subtract the max (for nomuerical reasons)
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
@@ -25,29 +25,29 @@ void SoftmaxCPU(
       D,
       1,
       -1,
-      scale.data<float>(),
-      sum_multiplier.data<float>(),
+      rowmax,
+      sum_multiplier,
       1,
       Ydata,
       &context);
   // Exponentiation
   math::Exp<float, CPUContext>(N * D, Ydata, Ydata, &context);
   math::Gemv<float, CPUContext>(
-      CblasNoTrans,
-      N,
-      D,
-      1,
-      Ydata,
-      sum_multiplier.data<float>(),
-      0,
-      scale.mutable_data<float>(),
-      &context);
+      CblasNoTrans, N, D, 1, Ydata, sum_multiplier, 0, scale, &context);
   // Do division
   // TODO(Yangqing): maybe implement it more beautifully?
-  const float* s = scale.data<float>();
-  for (int i = 0; i < N; ++i) {
-    for (int j = 0; j < D; ++j) {
-      Ydata[i * D + j] /= s[i];
+  if (!logarithmic) {
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < D; ++j) {
+        Ydata[i * D + j] /= scale[i];
+      }
+    }
+  } else {
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < D; ++j) {
+        Ydata[i * D + j] =
+            Xdata[i * D + j] - rowmax[i] - log(fmaxf(scale[i], 1e-20));
+      }
     }
   }
 }

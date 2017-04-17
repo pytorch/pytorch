@@ -9,12 +9,16 @@ namespace caffe2 {
 namespace {
 
 __global__ void LabelCrossEntropyKernel(
-    const int N, const int D, const float* Pdata, const int* labeldata,
-    const float* weights, float* Ydata) {
+    const int N,
+    const int D,
+    const float* logPdata,
+    const int* labeldata,
+    const float* weights,
+    float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
     float weight = weights ? weights[i] : 1.0;
-    Ydata[i] = -logf(max(Pdata[i * D + labeldata[i]], FLT_MIN)) * weight;
+    Ydata[i] = -logPdata[i * D + labeldata[i]] * weight;
   }
 }
 
@@ -237,12 +241,28 @@ __global__ void SpatialSoftmaxLossGradientKernel(const int N, const int D,
  }
 }
 
+__global__ void SoftmaxNormalizeLogsKernel(
+    const int nthreads,
+    const int D,
+    const float* logits,
+    const float* rowmax,
+    const float* scales,
+    float* out_log) {
+  CUDA_1D_KERNEL_LOOP(index, nthreads) {
+    int n = index / D;
+    out_log[index] = logits[index] - rowmax[n] - logf(max(scales[n], FLT_MIN));
+  }
+}
+
 __global__ void SoftmaxNormalizeKernel(
-    const int nthreads, const int D, const float* Pdata, const float* scales,
+    const int nthreads,
+    const int D,
+    const float* probs,
+    const float* scales,
     float* out) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     int n = index / D;
-    out[index] = Pdata[index] / scales[n];
+    out[index] = probs[index] / scales[n];
   }
 }
 
@@ -252,7 +272,9 @@ void Softmax(
     const float* logits,
     const float* sum_multiplier,
     float* scales,
+    float* rowmax,
     float* probs,
+    bool log_softmax,
     CUDAContext* context) {
   const int size = N * D;
 
@@ -264,28 +286,48 @@ void Softmax(
         numBlocks,
         threadsPerBlock,
         0,
-        context->cuda_stream()>>>(N, D, logits, scales);
+        context->cuda_stream()>>>(N, D, logits, rowmax);
   } else {
     RowMaxKernel<<<
         CAFFE_GET_BLOCKS(N),
         CAFFE_CUDA_NUM_THREADS,
         0,
-        context->cuda_stream()>>>(N, D, logits, scales);
+        context->cuda_stream()>>>(N, D, logits, rowmax);
   }
   // Put the intermediate result X - max(X) into Y
   context->Copy<float, CUDAContext, CUDAContext>(size, logits, probs);
   // Subtract the scale
-  math::Gemm<float, CUDAContext>(CblasNoTrans, CblasNoTrans, N, D, 1,
-                                 -1, scales, sum_multiplier, 1, probs, context);
+  math::Gemm<float, CUDAContext>(
+      CblasNoTrans,
+      CblasNoTrans,
+      N,
+      D,
+      1,
+      -1,
+      rowmax,
+      sum_multiplier,
+      1,
+      probs,
+      context);
   // Exponentiation
   math::Exp<float, CUDAContext>(size, probs, probs, context);
   // Sum exponentiated values
   math::Gemv<float, CUDAContext>(CblasNoTrans, N, D, 1, probs, sum_multiplier,
                                  0, scales, context);
   // Normalize
-  SoftmaxNormalizeKernel<<<CAFFE_GET_BLOCKS(size), CAFFE_CUDA_NUM_THREADS,
-                           0, context->cuda_stream()>>>(
-    size, D, probs, scales, probs);
+  if (!log_softmax) {
+    SoftmaxNormalizeKernel<<<
+        CAFFE_GET_BLOCKS(size),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context->cuda_stream()>>>(size, D, probs, scales, probs);
+  } else {
+    SoftmaxNormalizeLogsKernel<<<
+        CAFFE_GET_BLOCKS(size),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context->cuda_stream()>>>(size, D, logits, rowmax, scales, probs);
+  }
 }
 
 } // namespace
@@ -316,6 +358,9 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     if (losses_.size() != N) {
       losses_.Resize(N);
     }
+    if (rowmax_.size() != N) {
+      rowmax_.Resize(N);
+    }
     if (sum_multiplier_.size() != D) {
       sum_multiplier_.Resize(D);
       math::Set<float, CUDAContext>(
@@ -327,7 +372,9 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
         X.data<float>(),
         sum_multiplier_.data<float>(),
         losses_.mutable_data<float>(),
+        rowmax_.mutable_data<float>(),
         P->mutable_data<float>(),
+        !label_prob_mode_, // logarithmic output
         &context_);
     // Compute label xent loss per example
     if (!label_prob_mode_) {
@@ -342,6 +389,10 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
           T.data<int>(),
           weights,
           losses_.mutable_data<float>());
+      // Since we had logarithmic output, we need to exponentiate
+      // them again.
+      math::Exp<float, CUDAContext>(
+          N * D, P->data<float>(), P->mutable_data<float>(), &context_);
     } else {
       ProbCrossEntropyKernel<<<
           CAFFE_GET_BLOCKS(N),
@@ -606,7 +657,9 @@ bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
       X.data<float>(),
       sum_multiplier_.data<float>(),
       scale_.mutable_data<float>(),
+      scale_.mutable_data<float>(),
       P->mutable_data<float>(),
+      false,
       &context_);
   return true;
 }

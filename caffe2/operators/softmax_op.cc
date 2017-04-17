@@ -23,7 +23,16 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
                                  &context_);
   }
 
-  SoftmaxCPU(context_, N, D, X, Ydata, scale_, sum_multiplier_);
+  SoftmaxCPU(
+      context_,
+      N,
+      D,
+      X.data<float>(),
+      Ydata,
+      scale_.mutable_data<float>(),
+      sum_multiplier_.data<float>(),
+      false,
+      scale_.mutable_data<float>());
   return true;
 }
 

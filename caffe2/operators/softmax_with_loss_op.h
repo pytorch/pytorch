@@ -33,6 +33,7 @@ class SoftmaxWithLossOp final : public Operator<Context> {
   StorageOrder order_;
 
   Tensor<Context> losses_; // Per example loss
+  Tensor<Context> rowmax_; // per example row max
   Tensor<Context> weights_; // unignored weights
   Tensor<Context> sum_multiplier_; // Vector of ones for summing via dot prod
   Tensor<Context> total_weight_ptr_;
