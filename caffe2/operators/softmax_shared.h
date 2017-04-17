@@ -10,10 +10,12 @@ void SoftmaxCPU(
     CPUContext& context,
     const int N,
     const int D,
-    const Tensor<CPUContext>& X,
+    const float* Xdata,
     float* Ydata,
-    Tensor<CPUContext>& scale,
-    Tensor<CPUContext>& sum_multiplier);
+    float* scale,
+    const float* sum_multiplier,
+    bool logarithmic,
+    float* rowmax);
 } // namespace caffe2
 
 #endif // #define CAFFE2_OPERATORS_SOFTMAX_SHARED_H_
