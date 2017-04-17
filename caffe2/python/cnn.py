@@ -379,11 +379,11 @@ class CNNModelHelper(ModelHelperBase):
 
     def MaxPool(self, *args, **kwargs):
         return model_helpers.MaxPool(self, *args, use_cudnn=self.use_cudnn,
-                                     **kwargs)
+                                     order=self.order, **kwargs)
 
     def AveragePool(self, *args, **kwargs):
         return model_helpers.AveragePool(self, *args, use_cudnn=self.use_cudnn,
-                                         **kwargs)
+                                         order=self.order, **kwargs)
 
     def Concat(self, blobs_in, blob_out, **kwargs):
         """Depth Concat."""
