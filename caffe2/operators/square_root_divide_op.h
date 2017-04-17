@@ -17,7 +17,7 @@ class SquareRootDivideOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, double>>::call(this, Input(DATA));
+    return DispatchHelper<TensorTypes<float>>::call(this, Input(DATA));
   }
 
  private:

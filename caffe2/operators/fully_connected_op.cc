@@ -3,8 +3,8 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<CPUContext>);
+REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<CPUContext>);
 
 OPERATOR_SCHEMA(FC)
   .NumInputs(3)
