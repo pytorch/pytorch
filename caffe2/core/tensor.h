@@ -121,10 +121,7 @@ class Tensor {
       : meta_(TypeMeta::Make<T>()) {
     Resize(dims);
     CAFFE_ENFORCE_EQ(values.size(), size_);
-    T* data = mutable_data<T>();
-    for (TIndex i = 0; i < size_; ++i) {
-      data[i] = values[i];
-    }
+    context->template Copy<T, CPUContext, Context>(size_, values.data(), mutable_data<T>());
   }
 
   /**
@@ -134,10 +131,7 @@ class Tensor {
             typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   Tensor(const T& value, Context* context) {
     Resize(vector<TIndex>{});
-    T* data = mutable_data<T>();
-    for (TIndex i = 0; i < size_; ++i) {
-      data[i] = value;
-    }
+    context->template Copy<T, CPUContext, Context>(size_, &value, mutable_data<T>());
   }
 
   /**
