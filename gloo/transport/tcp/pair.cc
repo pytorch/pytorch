@@ -97,7 +97,8 @@ void Pair::setSync(bool sync, bool busyPoll) {
   // necessary, the connect path will timeout and signal this thread.
   waitUntilConnected(lock, false);
   if (state_ == CLOSED) {
-    signalIoFailure(GLOO_ERROR_MSG("Socket unexpectedly closed"));
+    signalIoFailure(
+        GLOO_ERROR_MSG("Socket unexpectedly closed ", peer_.str()));
   }
 
   if (!sync_) {
@@ -264,7 +265,7 @@ bool Pair::write(Op& op) {
       if (errno == EAGAIN) {
         if (sync_) {
           // Blocking call returning with EAGAIN indicates timeout
-          signalIoFailure(GLOO_ERROR_MSG("Write timeout"));
+          signalIoFailure(GLOO_ERROR_MSG("Write timeout ", peer_.str()));
         } else {
           // Async. This write is done.
           return false;
@@ -277,7 +278,8 @@ bool Pair::write(Op& op) {
       }
 
       // Unexpected error
-      signalIoFailure(GLOO_ERROR_MSG("writev: ", strerror(errno)));
+      signalIoFailure(
+          GLOO_ERROR_MSG("writev ", peer_.str(), ": ", strerror(errno)));
     }
     break;
   }
@@ -352,7 +354,8 @@ bool Pair::read(Op& op) {
             } else {
               // Either timeout on poll or blocking call returning with EAGAIN
               // indicates timeout
-              signalIoFailure(GLOO_ERROR_MSG("Read timeout"));
+              signalIoFailure(
+                  GLOO_ERROR_MSG("Read timeout ", peer_.str()));
             }
           } else {
             // Async. This read is done.
@@ -372,7 +375,7 @@ bool Pair::read(Op& op) {
 
         // Unexpected error
         signalIoFailure(GLOO_ERROR_MSG(
-            "reading from ", peer_.str(), ": ", strerror(errno)));
+            "Read error ", peer_.str(), ": ", strerror(errno)));
       }
       break;
     }
@@ -381,8 +384,8 @@ bool Pair::read(Op& op) {
     if (rv == 0) {
       changeState(CLOSED);
       if (sync_) {
-        signalIoFailure(
-            GLOO_ERROR_MSG("Remote socket closed during sync read"));
+        signalIoFailure(GLOO_ERROR_MSG(
+            "Remote socket closed during sync read ", peer_.str()));
       } else {
         return false;
       }
@@ -604,7 +607,7 @@ void Pair::waitUntilConnected(
   if (useTimeout && timeoutSet) {
     auto done = cv_.wait_for(lock, timeout_, pred);
     if (!done) {
-      signalIoFailure("Connect timeout");
+      signalIoFailure(GLOO_ERROR_MSG("Connect timeout ", peer_.str()));
     }
   } else {
     cv_.wait(lock, pred);
@@ -624,7 +627,7 @@ void Pair::verifyConnected() {
   // Check if the socket has been closed. We were unable to tell if this was an
   // error or normal tear down, but now throw since we are trying to do IO.
   if (state_ == CLOSED) {
-    signalIoFailure("Socket closed");
+    signalIoFailure(GLOO_ERROR_MSG("Socket closed ", peer_.str()));
   }
 }
 

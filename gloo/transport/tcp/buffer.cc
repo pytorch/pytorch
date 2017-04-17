@@ -66,7 +66,8 @@ void Buffer::waitRecv() {
         // Calling signalIoFailureExternal() will throw, so no need to
         // reacquire.
         lock.unlock();
-        pair_->signalIoFailureExternal(GLOO_ERROR_MSG("Read timeout"));
+        pair_->signalIoFailureExternal(
+            GLOO_ERROR_MSG("Read timeout ", pair_->peer().str()));
         GLOO_ENFORCE(false, "Unexpected code path");
       }
     }
@@ -106,7 +107,8 @@ void Buffer::waitSend() {
         // Calling signalIoFailureExternal() will throw, so no need to
         // reacquire.
         lock.unlock();
-        pair_->signalIoFailureExternal(GLOO_ERROR_MSG("Write timeout"));
+        pair_->signalIoFailureExternal(
+            GLOO_ERROR_MSG("Write timeout ", pair_->peer().str()));
         GLOO_ENFORCE(false, "Unexpected code path");
       }
     }

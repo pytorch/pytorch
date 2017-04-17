@@ -107,6 +107,10 @@ class Pair : public ::gloo::transport::Pair {
   void send(Op& op);
   void recv();
 
+  const Address& peer() {
+    return peer_;
+  }
+
   bool isSync() {
     return sync_;
   }
