@@ -32,13 +32,13 @@ class OptimizerTestBase(object):
         loss = model.AveragedLoss(sq, "avg_loss")
         grad_map = model.AddGradientOperators([loss])
         self.assertIsInstance(grad_map['fc_w'], core.BlobReference)
-        self.build_optimizer(model)
+        optimizer = self.build_optimizer(model)
 
         workspace.FeedBlob('data', data[0])
         workspace.FeedBlob('label', label[0])
         workspace.RunNetOnce(model.param_init_net)
         workspace.CreateNet(model.net)
-        for i in range(2000):
+        for _ in range(2000):
             idx = np.random.randint(data.shape[0])
             workspace.FeedBlob('data', data[idx])
             workspace.FeedBlob('label', label[idx])
@@ -49,6 +49,7 @@ class OptimizerTestBase(object):
             workspace.FetchBlob('fc_w'),
             atol=1e-2
         )
+        self.check_optimizer(optimizer)
 
     def testSparse(self):
         # to test duplicated indices we assign two indices to each weight and
@@ -73,7 +74,7 @@ class OptimizerTestBase(object):
         loss = model.AveragedLoss(sq, "avg_loss")
         grad_map = model.AddGradientOperators([loss])
         self.assertIsInstance(grad_map['w'], core.GradientSlice)
-        self.build_optimizer(model)
+        optimizer = self.build_optimizer(model)
 
         workspace.CreateBlob('indices')
         workspace.CreateBlob('label')
@@ -81,7 +82,7 @@ class OptimizerTestBase(object):
         for indices_type in [np.int32, np.int64]:
             workspace.RunNetOnce(model.param_init_net)
             workspace.CreateNet(model.net)
-            for i in range(2000):
+            for _ in range(2000):
                 idx = np.random.randint(data.shape[0])
                 # transform into indices of binary features
                 indices = np.repeat(np.arange(perfect_model.size),
@@ -101,3 +102,4 @@ class OptimizerTestBase(object):
                 workspace.FetchBlob('w'),
                 atol=1e-2
             )
+        self.check_optimizer(optimizer)
