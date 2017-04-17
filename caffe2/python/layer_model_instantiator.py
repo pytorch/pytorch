@@ -10,22 +10,28 @@ from caffe2.python.layers.layers import InstantiationContext
 from caffe2.python.layers.tags import Tags
 
 
-def generate_predict_net(model):
+def _filter_layers(layers, include_tags):
+    if include_tags is None:
+        return layers
+    include_tags = set(include_tags)
+    return filter(lambda l: not include_tags.isdisjoint(l.tags), layers)
+
+
+def generate_predict_net(model, include_tags=None):
     predict_net = core.Net('predict_net')
 
-    for layer in model.layers:
+    for layer in _filter_layers(model.layers, include_tags):
         if Tags.TRAIN_ONLY not in layer.tags:
             layer.add_operators(
                 predict_net, context=InstantiationContext.PREDICTION)
     return predict_net
 
 
-def generate_eval_net(model):
+def generate_eval_net(model, include_tags=None):
     eval_net = core.Net('eval_net')
 
-    for layer in model.layers:
-        layer.add_operators(
-            eval_net, context=InstantiationContext.EVAL)
+    for layer in _filter_layers(model.layers, include_tags):
+        layer.add_operators(eval_net, context=InstantiationContext.EVAL)
 
     input_schema = model.input_feature_schema + model.trainer_extra_schema
     output_schema = model.output_schema + model.metrics_schema
@@ -34,11 +40,11 @@ def generate_eval_net(model):
     return eval_net
 
 
-def _generate_training_net_only(model):
+def _generate_training_net_only(model, include_tags=None):
     train_net = core.Net('train_net')
     train_init_net = model.create_init_net('train_init_net')
 
-    for layer in model.layers:
+    for layer in _filter_layers(model.layers, include_tags):
         layer.add_operators(train_net, train_init_net)
 
     input_schema = model.input_feature_schema + model.trainer_extra_schema
@@ -48,13 +54,13 @@ def _generate_training_net_only(model):
     return train_init_net, train_net
 
 
-def generate_training_nets_forward_only(model):
-    train_init_net, train_net = _generate_training_net_only(model)
+def generate_training_nets_forward_only(model, include_tags=None):
+    train_init_net, train_net = _generate_training_net_only(model, include_tags)
     return train_init_net, train_net
 
 
-def generate_training_nets(model):
-    train_init_net, train_net = _generate_training_net_only(model)
+def generate_training_nets(model, include_tags=None):
+    train_init_net, train_net = _generate_training_net_only(model, include_tags)
 
     loss = model.loss
     grad_map = train_net.AddGradientOperators(loss.field_blobs())
