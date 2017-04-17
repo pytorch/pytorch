@@ -397,6 +397,18 @@ class CNNModelHelper(ModelHelperBase):
         print("DepthConcat is deprecated. use Concat instead.")
         return self.Concat(*args, **kwargs)
 
+    def Sum(self, *args, **kwargs):
+        return model_helpers.Sum(self, *args, **kwargs)
+
+    def Transpose(self, *args, **kwargs):
+        return model_helpers.Transpose(self, *args, use_cudnn=self.use_cudnn,
+                                       **kwargs)
+
+    def Iter(self, *args, **kwargs):
+        return model_helpers.Iter(self, *args, **kwargs)
+
+    def Accuracy(self, *args, **kwargs):
+        return model_helpers.Accuracy(self, *args, **kwargs)
 
     def MaxPool(self, *args, **kwargs):
         return model_helpers.MaxPool(self, *args, use_cudnn=self.use_cudnn,
@@ -405,43 +417,6 @@ class CNNModelHelper(ModelHelperBase):
     def AveragePool(self, *args, **kwargs):
         return model_helpers.AveragePool(self, *args, use_cudnn=self.use_cudnn,
                                          order=self.order, **kwargs)
-
-    def Transpose(self, blob_in, blob_out, **kwargs):
-        """Transpose."""
-        if self.use_cudnn:
-            kwargs['engine'] = 'CUDNN'
-        return self.net.Transpose(blob_in, blob_out, **kwargs)
-
-    def Sum(self, blob_in, blob_out, **kwargs):
-        """Sum"""
-        return self.net.Sum(blob_in, blob_out, **kwargs)
-
-    def Iter(self, blob_out, **kwargs):
-        if 'device_option' in kwargs:
-            del kwargs['device_option']
-        self.param_init_net.ConstantFill(
-            [], blob_out, shape=[1], value=0, dtype=core.DataType.INT64,
-            device_option=core.DeviceOption(caffe2_pb2.CPU, 0),
-            **kwargs)
-        return self.net.Iter(blob_out, blob_out, **kwargs)
-
-    def Accuracy(self, blob_in, blob_out, **kwargs):
-        dev = kwargs['device_option'] if 'device_option' in kwargs \
-            else scope.CurrentDeviceScope()
-        is_cpu = dev is None or dev.device_type == caffe2_pb2.CPU
-
-        # We support top_k > 1 only on CPU
-        if not is_cpu and 'top_k' in kwargs and kwargs['top_k'] > 1:
-            pred_host = self.net.CopyGPUToCPU(blob_in[0], blob_in[0] + "_host")
-            label_host = self.net.CopyGPUToCPU(blob_in[1], blob_in[1] + "_host")
-
-            # Now use the Host version of the accuracy op
-            self.net.Accuracy([pred_host, label_host],
-                              blob_out,
-                              device_option=core.DeviceOption(caffe2_pb2.CPU, 0),
-                              **kwargs)
-        else:
-            self.net.Accuracy(blob_in, blob_out)
 
     def PadImage(
         self, blob_in, blob_out, **kwargs
