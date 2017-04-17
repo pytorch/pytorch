@@ -13,3 +13,4 @@ from caffe2.python.helpers.dropout import *
 from caffe2.python.helpers.fc import *
 from caffe2.python.helpers.pooling import *
 from caffe2.python.helpers.normalization import *
+from caffe2.python.helpers.nonlinearity import *
