@@ -12,3 +12,4 @@ from __future__ import unicode_literals
 from caffe2.python.helpers.dropout import *
 from caffe2.python.helpers.fc import *
 from caffe2.python.helpers.pooling import *
+from caffe2.python.helpers.normalization import *
