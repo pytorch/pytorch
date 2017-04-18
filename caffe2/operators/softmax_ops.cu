@@ -648,8 +648,11 @@ bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
     math::Set<float, CUDAContext>(
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
-  if (scale_.size() != D) {
-    scale_.Resize(D);
+  if (scale_.size() != N) {
+    scale_.Resize(N);
+  }
+  if (rowmax_.size() != N) {
+    rowmax_.Resize(N);
   }
   Softmax(
       N,
@@ -657,7 +660,7 @@ bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
       X.data<float>(),
       sum_multiplier_.data<float>(),
       scale_.mutable_data<float>(),
-      scale_.mutable_data<float>(),
+      rowmax_.mutable_data<float>(),
       P->mutable_data<float>(),
       false,
       &context_);
