@@ -4,22 +4,27 @@
 #include <THC/THCApply.cuh>
 
 template <typename T>
-struct sigmoidupdateOutput_functor
-{
-  __device__ void operator()(T *output, const T *input) const
-  {
-    *output = ScalarConvert<double, T>::to(1./(1.+ exp(-*input)));
+struct SigmoidGradInputOp {
+  __device__ __forceinline__ void operator()(T* gradInput, const T *output, const T *gradOutput) const {
+    *gradInput = *gradOutput * (1.f - *output) * (*output);
   }
 };
 
-template <typename T>
-struct sigmoidupdateGradInput_functor
-{
-  __device__ void operator()(T *gradInput, const T *output, const T *gradOutput) const
-  {
-    *gradInput = ScalarConvert<double, T>::to(*gradOutput * (1.-*output) * (*output));
+#ifdef CUDA_HALF_TENSOR
+template <>
+struct SigmoidGradInputOp<half> {
+  __device__ __forceinline__ void operator()(half* gradInput, const half *output, const half *gradOutput) const {
+#ifdef CUDA_HALF_INSTRUCTIONS
+    half one = __float2half(1.f);
+    *gradInput = __hmul(*gradOutput, __hmul(__hadd(one, __hneg(*output)), *output));
+#else
+    float out = __half2float(*output);
+    float go = __half2float(*gradOutput);
+    *gradInput = __float2half(go * (1.f - out) * out);
+#endif
   }
 };
+#endif
 
 #include "generic/Sigmoid.cu"
 #include "THCGenerateFloatTypes.h"

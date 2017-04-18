@@ -11,7 +11,7 @@ void THNN_(Tanh_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resizeAs)(state, output, input);
-  THC_pointwiseApply2(state, output, input, tanhupdateOutput_functor<real>());
+  THCTensor_(tanh)(state, output, input);
 }
 
 void THNN_(Tanh_updateGradInput)(
@@ -24,7 +24,7 @@ void THNN_(Tanh_updateGradInput)(
   THCUNN_check_shape(state, output, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
   THCTensor_(resizeAs)(state, gradInput, output);
-  THC_pointwiseApply3(state, gradInput, output, gradOutput, tanhupdateGradInput_functor<real>());
+  THC_pointwiseApply3(state, gradInput, output, gradOutput, TanhGradInputOp<real>());
 }
 
 #endif
