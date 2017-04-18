@@ -329,34 +329,38 @@ def _AddDistributedParameterSync(
             engine=rendezvous['engine'],
         )
 
+    # Create a single common world for all broadcast operations.
+    # This is not a problem since they are executed sequentially.
+    comm_world = None
     for param_name in sorted(uniq_param_names):
         param = model._device_grouped_blobs[param_name][devices[0]]
 
-        def broadcast(param):
-            comm_world = init_net.CreateCommonWorld(
-                rendezvous['kv_handler'],
-                "{}_cw".format(param_name),
-                name=net.Proto().name + ".{}_cw_op".format(param_name),
-                size=rendezvous['num_shards'],
-                rank=rendezvous['shard_id'],
-                engine=rendezvous['engine'],
-            )
-
+        def broadcast(comm_world, param):
+            if comm_world is None:
+                comm_world = init_net.CreateCommonWorld(
+                    rendezvous['kv_handler'],
+                    "broadcast_cw",
+                    name=net.Proto().name + ".broadcast_cw_op",
+                    size=rendezvous['num_shards'],
+                    rank=rendezvous['shard_id'],
+                    engine=rendezvous['engine'],
+                )
             net.Broadcast(
                 inputs=[comm_world, param],
                 outputs=[param],
                 engine=rendezvous['engine'],
             )
+            return comm_world
 
         if rendezvous['engine'] == 'GLOO':
             with core.DeviceScope(device_opt):
-                broadcast(param)
+                comm_world = broadcast(comm_world, param)
         else:
             # Copy between GPU and CPU
             with core.DeviceScope(device_opt):
                 param_cpu = net.CopyGPUToCPU(param, str(param) + "cpu")
             with core.DeviceOption(caffe2_pb2.CPU):
-                broadcast(param_cpu)
+                comm_world = broadcast(comm_world, param_cpu)
             with core.DeviceScope(device_opt):
                 net.CopyCPUToGPU(param_cpu, param)
 
@@ -383,12 +387,17 @@ def _AllReduceGradientsDistributed(
     master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
     reducing_device_opt = master_device_opt
 
-    # We need to specify a partial order using control_input to
-    # ensure progress (since all machines need to do same all reduces
-    # in parallel)
+    # We need to specify a partial order using control_input to ensure
+    # progress (all machines need to do same allreduce in parallel)
     num_controls = min(4, num_workers - 1)
-
     cyclical_controls = []
+
+    # Since num_controls determines the partial ordering of
+    # allreduces, there is no need for more common world instances
+    # than there are parallel allreduce operations.
+    num_comm_worlds = num_controls
+    cyclical_comm_worlds = []
+
     counter = 0
     nccl_control_blob = None
 
@@ -406,28 +415,34 @@ def _AllReduceGradientsDistributed(
 
         control_input = None if len(cyclical_controls) < num_controls \
                         else cyclical_controls[counter % num_controls]
+        comm_world = None if len(cyclical_comm_worlds) < num_comm_worlds \
+                     else cyclical_comm_worlds[counter % num_comm_worlds]
 
-        def allreduce(grads):
+        def allreduce(comm_world, grads):
             with core.DeviceScope(reducing_device_opt):
-                comm_world = model.param_init_net.CreateCommonWorld(
-                    rendezvous['kv_handler'],
-                    "{}_cw".format(grad_name),
-                    name="{}_cw_op".format(grad_name),
-                    size=rendezvous['num_shards'],
-                    rank=rendezvous['shard_id'],
-                    engine=rendezvous['engine'],
-                )
+                if comm_world is None:
+                    comm_number = len(cyclical_comm_worlds)
+                    comm_world = model.param_init_net.CreateCommonWorld(
+                        rendezvous['kv_handler'],
+                        "allreduce_{}_cw".format(comm_number),
+                        name="allreduce_{}_cw_op".format(comm_number),
+                        size=rendezvous['num_shards'],
+                        rank=rendezvous['shard_id'],
+                        engine=rendezvous['engine'],
+                    )
                 model.net.Allreduce(
                     inputs=[comm_world] + grads,
                     outputs=grads,
                     engine=all_reduce_engine,
                     control_input=control_input,
                 )
+                return comm_world
 
         if rendezvous['engine'] == 'GLOO':
             # With Gloo cross GPU and cross machine allreduce
             # can be executed in a single operation
-            allreduce(grads_group)
+            comm_world = allreduce(comm_world, grads_group)
+            control_output = grads_group[0]
         else:
             # Step 1: sum gradients from local GPUs to master GPU
             with core.DeviceScope(master_device_opt):
@@ -443,7 +458,8 @@ def _AllReduceGradientsDistributed(
                 model.net.Copy(master_grad, reduced_grad)
 
             # Step 2: allreduce between all hosts, between master GPUs
-            allreduce([reduced_grad])
+            comm_world = allreduce(comm_world, [reduced_grad])
+            control_output = reduced_grad
 
             with core.DeviceScope(master_device_opt):
                 model.net.Copy(reduced_grad, master_grad)
@@ -452,9 +468,14 @@ def _AllReduceGradientsDistributed(
             _Broadcast(devices, model, model.net, grad_name)
 
         if len(cyclical_controls) < num_controls:
-            cyclical_controls.append(reduced_grad)
+            cyclical_controls.append(control_output)
         else:
-            cyclical_controls[counter % num_controls] = reduced_grad
+            cyclical_controls[counter % num_controls] = control_output
+
+        if len(cyclical_comm_worlds) < num_comm_worlds:
+            cyclical_comm_worlds.append(comm_world)
+        else:
+            assert cyclical_comm_worlds[counter % num_comm_worlds] == comm_world
 
         counter += 1
 
