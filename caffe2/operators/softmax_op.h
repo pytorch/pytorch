@@ -20,6 +20,7 @@ class SoftmaxOp final : public Operator<Context> {
  protected:
   int axis_;
   Tensor<Context> scale_;
+  Tensor<Context> rowmax_;
   Tensor<Context> sum_multiplier_;
 };
 

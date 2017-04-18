@@ -17,6 +17,9 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   if (scale_.size() != N) {
     scale_.Resize(N);
   }
+  if (rowmax_.size() != N) {
+    rowmax_.Resize(N);
+  }
   if (sum_multiplier_.size() != D) {
     sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
@@ -32,7 +35,7 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
       scale_.mutable_data<float>(),
       sum_multiplier_.data<float>(),
       false,
-      scale_.mutable_data<float>());
+      rowmax_.mutable_data<float>());
   return true;
 }
 
