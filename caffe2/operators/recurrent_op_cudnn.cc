@@ -295,7 +295,7 @@ template <typename T>
 bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
   if (Input(INPUT).dims() != cachedInputDims_) {
-    initialize(Input(INPUT));
+    initialize(Input(INPUT), Output(DROPOUT_STATES));
     cachedInputDims_ = Input(INPUT).dims();
   }
   CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
