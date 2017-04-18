@@ -756,6 +756,64 @@ class TestNN(NNTestCase):
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, input)
 
+    def _test_InstanceNorm(self, cls, input):
+        b, c = input.size(0), input.size(1)
+        input_var = Variable(input)
+
+        IN = cls(c, eps=0)
+
+        output = IN(input_var)
+        out_reshaped = output.transpose(1, 0).contiguous().view(c, -1)
+
+        mean = out_reshaped.mean(1)
+        var = out_reshaped.var(1, unbiased=False)
+
+        self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
+        self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
+
+
+        # If momentum==1 running_mean/var should be 
+        # equal to mean/var of the input 
+        IN = cls(c, momentum=1, eps=0)
+
+        output = IN(input_var)
+
+        input_reshaped = input_var.transpose(1, 0).contiguous().view(c, -1)
+        mean = input_reshaped.mean(1)
+
+        input_reshaped = input_var.transpose(1, 0).contiguous().view(c, b, -1)
+        var = input_reshaped.var(2, unbiased=True)[:, :]
+
+        self.assertAlmostEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, delta=1e-5)
+        self.assertAlmostEqual(torch.abs(var.data.mean(1) -  IN.running_var).mean(), 0, delta=1e-5)
+
+    def test_InstanceNorm2d(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
+        w = random.randint(2, 5)
+        h = random.randint(2, 5)
+
+        input = torch.Tensor(b, c, h, w).uniform_()
+        self._test_InstanceNorm(nn.InstanceNorm2d, input)
+
+    def test_InstanceNorm1d(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
+        d = random.randint(2, 5)
+
+        input = torch.Tensor(b, c, d).uniform_()
+        self._test_InstanceNorm(nn.InstanceNorm1d, input)
+
+    def test_InstanceNorm3d(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
+        w = random.randint(2, 5)
+        h = random.randint(2, 5)
+        d = random.randint(2, 5)
+
+        input = torch.Tensor(b, c, h, w, d).uniform_()
+        self._test_InstanceNorm(nn.InstanceNorm3d, input)
+
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,)))
