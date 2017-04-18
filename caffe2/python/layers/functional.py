@@ -21,6 +21,9 @@ class Functional(ModelLayer):
 
     def __init__(self, model, input_record, output_names_or_num, function,
                  name='functional', **kwargs):
+        # allow coercion
+        input_record = schema.as_record(input_record)
+
         super(Functional, self).__init__(model, name, input_record, **kwargs)
         self._function = function
 
