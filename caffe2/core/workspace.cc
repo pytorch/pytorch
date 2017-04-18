@@ -256,13 +256,20 @@ Blob* Workspace::GetBlob(const string& name) {
       static_cast<const Workspace*>(this)->GetBlob(name));
 }
 
-NetBase* Workspace::CreateNet(const NetDef& net_def) {
+NetBase* Workspace::CreateNet(const NetDef& net_def, bool overwrite) {
   CAFFE_ENFORCE(net_def.has_name(), "Net definition should have a name.");
   if (net_map_.count(net_def.name()) > 0) {
-    LOG(WARNING) << "Overwriting existing network of the same name.";
+    if (!overwrite) {
+      CAFFE_THROW(
+          "I respectfully refuse to overwrite an existing net of the same "
+          "name \"",
+          net_def.name(),
+          "\", unless you explicitly specify overwrite=true.");
+    }
+    VLOG(1) << "Deleting existing network of the same name.";
     // Note(Yangqing): Why do we explicitly erase it here? Some components of
-    // the old network, such as a opened LevelDB, may prevent us from creating a
-    // new network before the old one is deleted. Thus we will need to first
+    // the old network, such as an opened LevelDB, may prevent us from creating
+    // a new network before the old one is deleted. Thus we will need to first
     // erase the old one before the new one can be constructed.
     net_map_.erase(net_def.name());
   }
@@ -331,8 +338,21 @@ bool Workspace::RunPlan(const PlanDef& plan,
   }
   LOG(INFO) << "Initializing networks.";
 
+  std::set<string> seen_net_names_in_plan;
   for (const NetDef& net_def : plan.network()) {
-    if (!CreateNet(net_def)) {
+    CAFFE_ENFORCE(
+        seen_net_names_in_plan.count(net_def.name()) == 0,
+        "Your plan contains networks of the same name \"",
+        net_def.name(),
+        "\", which should not happen. Check your plan to see "
+        "if you made a programming error in creating the plan.");
+    seen_net_names_in_plan.insert(net_def.name());
+    // TODO(jiayq): consider if we want to override the default choice of
+    // overwriting the nets if exists. The rationale here is that, a plan
+    // is considered a big end-to-end thing (like a whole training run) and
+    // is similar to the old Caffe Solver. It is big enough that we want to
+    // give it a full control over the current workspace.
+    if (!CreateNet(net_def, true)) {
       LOG(ERROR) << "Failed initializing the networks.";
       return false;
     }

@@ -19,6 +19,10 @@
 namespace caffe2 {
 namespace python {
 
+// A dummy variable to overcome the pybind11 py::arg::operator= ambiguity
+// for some earlier versions of pybind11.
+constexpr bool kPyBindFalse = false;
+
 namespace py = pybind11;
 
 // gWorkspaces allows us to define and switch between multiple workspaces in
@@ -407,13 +411,15 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_create_net",
-          [](Workspace* self, py::bytes def) -> py::object {
+          [](Workspace* self, py::bytes def, bool overwrite) -> py::object {
             caffe2::NetDef proto;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
-            auto* net = self->CreateNet(proto);
+            auto* net = self->CreateNet(proto, overwrite);
             CAFFE_ENFORCE(net);
             return py::cast(net, py::return_value_policy::reference_internal);
-          })
+          },
+          py::arg("def"),
+          py::arg("overwrite") = kPyBindFalse)
       .def(
           "create_blob",
           [](Workspace* self, const std::string& name) -> py::object {
@@ -681,18 +687,22 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace);
     return gWorkspace->HasBlob(name);
   });
-  m.def("create_net", [](py::bytes net_def) {
-    caffe2::NetDef proto;
-    CAFFE_ENFORCE(
-        ParseProtobufFromLargeString(net_def, &proto),
-        "Can't parse net proto: ",
-        std::string(net_def));
-    CAFFE_ENFORCE(
-        gWorkspace->CreateNet(proto),
-        "Error creating net with proto: ",
-        std::string(net_def));
-    return true;
-  });
+  m.def(
+      "create_net",
+      [](py::bytes net_def, bool overwrite) {
+        caffe2::NetDef proto;
+        CAFFE_ENFORCE(
+            ParseProtobufFromLargeString(net_def, &proto),
+            "Can't parse net proto: ",
+            std::string(net_def));
+        CAFFE_ENFORCE(
+            gWorkspace->CreateNet(proto, overwrite),
+            "Error creating net with proto: ",
+            std::string(net_def));
+        return true;
+      },
+      py::arg("net_def"),
+      py::arg("overwrite") = kPyBindFalse);
   m.def("run_net", [](const std::string& name, int num_iter) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->GetNet(name), "Can't find net ", name);

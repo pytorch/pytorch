@@ -37,7 +37,7 @@ class OptimizerTestBase(object):
         workspace.FeedBlob('data', data[0])
         workspace.FeedBlob('label', label[0])
         workspace.RunNetOnce(model.param_init_net)
-        workspace.CreateNet(model.net)
+        workspace.CreateNet(model.net, True)
         for _ in range(2000):
             idx = np.random.randint(data.shape[0])
             workspace.FeedBlob('data', data[idx])
@@ -81,7 +81,7 @@ class OptimizerTestBase(object):
 
         for indices_type in [np.int32, np.int64]:
             workspace.RunNetOnce(model.param_init_net)
-            workspace.CreateNet(model.net)
+            workspace.CreateNet(model.net, True)
             for _ in range(2000):
                 idx = np.random.randint(data.shape[0])
                 # transform into indices of binary features

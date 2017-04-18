@@ -324,7 +324,7 @@ class TestShapeInference(test_util.TestCase):
 
         # .. Create net
         workspace.RunNetOnce(model.param_init_net)
-        workspace.CreateNet(model.net)
+        workspace.CreateNet(model.net, True)
         workspace.RunNet(model.Proto().name)
 
         # ... and then check the shapes mismatch

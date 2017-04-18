@@ -361,6 +361,13 @@ class TestCWorkspace(htu.HypothesisTestCase):
         net = core.Net("test-net")
         net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
         ws.create_net(net)
+        # If we do not specify overwrite, this should raise an error.
+        with self.assertRaises(RuntimeError):
+            ws.create_net(net)
+        # But, if we specify overwrite, this should pass.
+        ws.create_net(net, True)
+        # Overwrite can also be a kwarg.
+        ws.create_net(net, overwrite=True)
         self.assertIn("testblob", ws.blobs)
         self.assertEqual(len(ws.nets), 1)
         net_name = ws.nets.keys()[0]

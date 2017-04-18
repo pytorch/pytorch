@@ -75,6 +75,14 @@ CAFFE_DECLARE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
   CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
   CAFFE_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
+
+/**
+ * @brief Creates a network, accessing / creating blobs in the given workspace.
+ *
+ * Note that this is different from Workspace::CreateNet. The latter adds the
+ * created net object to the workspace's net map, while this function returns
+ * a standalone net object.
+ */
 unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
 
 // This is the very basic structure you need to run a network - all it
