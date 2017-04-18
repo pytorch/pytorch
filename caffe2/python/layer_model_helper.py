@@ -204,11 +204,18 @@ class LayerModelHelper(model_helper.ModelHelperBase):
         elif core.IsOperator(layer):
             def wrapper(*args, **kwargs):
                 def apply_operator(net, in_record, out_record):
+                    # core.Net will throw exception if output_dtypes is set
+                    # in Functional layer because MakeArgment() cannot recognize
+                    # it. Just remove it from kwargs.
+                    clean_kwargs = dict(kwargs)
+                    if 'output_dtypes' in clean_kwargs:
+                        del clean_kwargs['output_dtypes']
+
                     # TODO(amalevich): Switch to net.operator as soon as it gets
                     # landed
                     net.__getattr__(layer)(in_record.field_blobs(),
                                            out_record.field_blobs(),
-                                           **kwargs)
+                                           **clean_kwargs)
                 if 'name' not in kwargs:
                     kwargs['name'] = layer
                 return self.add_layer(

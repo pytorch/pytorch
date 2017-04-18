@@ -20,7 +20,8 @@ logger.setLevel(logging.INFO)
 class Functional(ModelLayer):
 
     def __init__(self, model, input_record, output_names_or_num, function,
-                 name='functional', **kwargs):
+                 name='functional', output_dtypes=None, **kwargs):
+
         # allow coercion
         input_record = schema.as_record(input_record)
 
@@ -39,6 +40,17 @@ class Functional(ModelLayer):
                     model.net, schema.Struct(*out_tuple))
 
         num_outputs = len(self.output_schema.field_blobs())
+
+        # If output_dtypes is provided, use it for output schema. Otherwise
+        # the shape and type will be inferred.
+        if output_dtypes is not None:
+            if not isinstance(output_dtypes, list):
+                output_dtypes = [output_dtypes] * num_outputs
+            assert len(output_dtypes) == num_outputs
+            for dtype, scalar in zip(output_dtypes,
+                                     self.output_schema.all_scalars()):
+                scalar.set_type(dtype)
+            return
 
         # Fake execution of the function to infer shapes and types automatically
         had_issues = False
