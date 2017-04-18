@@ -5,7 +5,6 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/elementwise_op.h"
-#include "caffe2/utils/conversions.h"
 
 namespace caffe2 {
 
@@ -63,6 +62,9 @@ REGISTER_CUDA_OPERATOR( \
     name, BinaryElementwiseOp< \
         input_type, CUDAContext, Cuda##name##Functor, output_type>)
 
+#define CUDA_ADD(x, y) ((x) + (y))
+CUDA_FUNCTOR(Add, CUDA_ADD, NumericTypes, SameTypeAsInput);
+#undef CUDA_ADD
 #define CUDA_SUB(x, y) ((x) - (y))
 CUDA_FUNCTOR(Sub, CUDA_SUB, NumericTypes, SameTypeAsInput);
 #undef CUDA_SUB
@@ -261,59 +263,5 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
 }
 
 REGISTER_CUDA_OPERATOR(SumReduceLike, SumReduceLikeOp<CUDAContext>);
-
-namespace {
-
-template <typename T, typename M>
-__global__ void binary_add_kernel(const int N, const T* a, const T* b, T* r){
-    CUDA_1D_KERNEL_LOOP(idx, N){
-        r[idx] = convert::To<M, T>(
-            convert::To<T, M>(a[idx]) + convert::To<T, M>(b[idx]));
-}
-};
-}
-; // namespace
-
-// Actual Add operator, because the above macros are read-only.
-class CUDAAddOp final : public Operator<CUDAContext> {
- public:
-  CUDAAddOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws){};
-  ~CUDAAddOp() {}
-
-  template <typename T, typename M>
-  bool DoRunWithType() {
-    auto& X0 = Input(0);
-    auto& X1 = Input(1);
-    auto* output = Output(0);
-
-    output->ResizeLike(X0);
-
-    binary_add_kernel<T, M><<<
-        CAFFE_GET_BLOCKS(X0.size()),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        X0.size(),
-        X0.template data<T>(),
-        X1.template data<T>(),
-        output->template mutable_data<T>());
-    return true;
-  }
-
-  bool RunOnDevice() override {
-    if (Input(0).IsType<float>()) {
-      return DoRunWithType<float, float>();
-    } else if (Input(0).IsType<float16>()) {
-      return DoRunWithType<float16, float>();
-    } else {
-      return false;
-    }
-  }
-};
-
-namespace {
-REGISTER_CUDA_OPERATOR(Add, CUDAAddOp);
-} // namespace
 
 }  // namespace caffe2

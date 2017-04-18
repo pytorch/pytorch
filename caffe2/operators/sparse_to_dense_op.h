@@ -50,6 +50,7 @@ class SparseToDenseOp final : public Operator<Context> {
     return DispatchHelper<
         TensorTypes2<
             float,
+            double,
             int32_t,
             int64_t,
             GenericTensorImplementation>,

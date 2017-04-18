@@ -58,18 +58,9 @@ namespace math {
 // CblasTrans, respectively, for each of A and B.
 template <>
 void Gemm<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
-    const int M,
-    const int N,
-    const int K,
-    const float alpha,
-    const float* A,
-    const float* B,
-    const float beta,
-    float* C,
-    CPUContext* context,
-    TensorProto::DataType math_type) {
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K, const float alpha, const float* A,
+    const float* B, const float beta, float* C, CPUContext* context) {
   auto C_mat = EigenMatrixMap<float>(C, N, M);
   if (beta == 0) {
     C_mat.setZero();
@@ -187,8 +178,7 @@ void Gemv<float, CPUContext>(
     const float* x,
     const float beta,
     float* y,
-    CPUContext* context,
-    TensorProto::DataType math_type) {
+    CPUContext* context) {
   EigenVectorMap<float> y_vec(y, TransA == CblasNoTrans ? M : N);
   if (beta == 0) {
     // In Caffe2 we often do a lazy initialization, which may contain NaNs in
@@ -215,22 +205,19 @@ void Gemv<float, CPUContext>(
   }
 }
 
-#define CAFFE2_SPECIALIZED_SCALE(T)                                            \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n, const float alpha, const T* x, T* y, CPUContext* context) { \
-    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * alpha;            \
-  }                                                                            \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n,                                                             \
-      const float* alpha,                                                      \
-      const T* x,                                                              \
-      T* y,                                                                    \
-      CPUContext* context) {                                                   \
-    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * (*alpha);         \
+#define CAFFE2_SPECIALIZED_SCALE(T)                                         \
+  template <>                                                               \
+  void Scale<T, CPUContext>(                                                \
+      const int n, const T alpha, const T* x, T* y, CPUContext* context) {  \
+    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * alpha;         \
+  }                                                                         \
+  template <>                                                               \
+  void Scale<T, CPUContext>(                                                \
+      const int n, const T* alpha, const T* x, T* y, CPUContext* context) { \
+    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * (*alpha);      \
   }
 CAFFE2_SPECIALIZED_SCALE(float)
+CAFFE2_SPECIALIZED_SCALE(double)
 #undef CAFFE2_SPECIALIZED_SCALE
 
 #define CAFFE2_SPECIALIZED_DOT(T)                                              \
@@ -241,6 +228,7 @@ void Dot<T, CPUContext>(                                                       \
   *y = ConstEigenVectorMap<T>(a, N).dot(ConstEigenVectorMap<T>(b, N));         \
 }
 CAFFE2_SPECIALIZED_DOT(float)
+CAFFE2_SPECIALIZED_DOT(double)
 #undef CAFFE2_SPECIALIZED_DOT
 
 #define CAFFE2_SPECIALIZED_AXPY(T)                                          \
@@ -255,6 +243,7 @@ CAFFE2_SPECIALIZED_DOT(float)
     EigenVectorMap<T>(Y, N) += ConstEigenVectorMap<T>(x, N) * (*alpha);     \
   }
 CAFFE2_SPECIALIZED_AXPY(float)
+CAFFE2_SPECIALIZED_AXPY(double)
 #undef CAFFE2_SPECIALIZED_AXPY
 
 #define CAFFE2_SPECIALIZED_AXPBY(T)                                            \
@@ -265,24 +254,16 @@ void Axpby<T, CPUContext>(const int N, const T alpha, const T* x,              \
   y_vec = y_vec * beta + ConstEigenVectorMap<T>(x, N) * alpha;                 \
 }
 CAFFE2_SPECIALIZED_AXPBY(float)
+CAFFE2_SPECIALIZED_AXPBY(double)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
 #else  // CAFFE2_USE_EIGEN_FOR_BLAS
 
 template <>
 void Gemm<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
-    const int M,
-    const int N,
-    const int K,
-    const float alpha,
-    const float* A,
-    const float* B,
-    const float beta,
-    float* C,
-    CPUContext* context,
-    TensorProto::DataType math_type) {
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K, const float alpha, const float* A,
+    const float* B, const float beta, float* C, CPUContext* context) {
   int lda = (TransA == CblasNoTrans) ? K : M;
   int ldb = (TransB == CblasNoTrans) ? N : K;
   cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
@@ -311,39 +292,29 @@ void GemmEx<float, CPUContext>(
 
 template <>
 void Gemv<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const int M,
-    const int N,
-    const float alpha,
-    const float* A,
-    const float* x,
-    const float beta,
-    float* y,
-    CPUContext* context,
-    TensorProto::DataType math_type) {
+    const CBLAS_TRANSPOSE TransA, const int M, const int N, const float alpha,
+    const float* A, const float* x, const float beta, float* y,
+    CPUContext* context) {
   cblas_sgemv(CblasRowMajor, TransA, M, N, alpha, A, N, x, 1, beta, y, 1);
 }
 
-#define CAFFE2_SPECIALIZED_SCALE(T, prefix)                                    \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n, const float alpha, const T* x, T* y, CPUContext* context) { \
-    if (y != x)                                                                \
-      cblas_##prefix##copy(n, x, 1, y, 1);                                     \
-    cblas_##prefix##scal(n, static_cast<float>(alpha), y, 1);                  \
-  }                                                                            \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n,                                                             \
-      const float* alpha,                                                      \
-      const T* x,                                                              \
-      T* y,                                                                    \
-      CPUContext* context) {                                                   \
-    if (y != x)                                                                \
-      cblas_##prefix##copy(n, x, 1, y, 1);                                     \
-    cblas_##prefix##scal(n, static_cast<float>(*alpha), y, 1);                 \
+#define CAFFE2_SPECIALIZED_SCALE(T, prefix)                                 \
+  template <>                                                               \
+  void Scale<T, CPUContext>(                                                \
+      const int n, const T alpha, const T* x, T* y, CPUContext* context) {  \
+    if (y != x)                                                             \
+      cblas_##prefix##copy(n, x, 1, y, 1);                                  \
+    cblas_##prefix##scal(n, alpha, y, 1);                                   \
+  }                                                                         \
+  template <>                                                               \
+  void Scale<T, CPUContext>(                                                \
+      const int n, const T* alpha, const T* x, T* y, CPUContext* context) { \
+    if (y != x)                                                             \
+      cblas_##prefix##copy(n, x, 1, y, 1);                                  \
+    cblas_##prefix##scal(n, *alpha, y, 1);                                  \
   }
 CAFFE2_SPECIALIZED_SCALE(float, s)
+CAFFE2_SPECIALIZED_SCALE(double, d)
 #undef CAFFE2_SPECIALIZED_SCALE
 
 #define CAFFE2_SPECIALIZED_DOT(T, prefix)                                      \
@@ -354,6 +325,7 @@ void Dot<T, CPUContext>(                                                       \
   *y = cblas_##prefix##dot(N, a, 1, b, 1);                                     \
 }
 CAFFE2_SPECIALIZED_DOT(float, s)
+CAFFE2_SPECIALIZED_DOT(double, d)
 #undef CAFFE2_SPECIALIZED_DOT
 
 #define CAFFE2_SPECIALIZED_AXPY(T, prefix)                                  \
@@ -368,6 +340,7 @@ CAFFE2_SPECIALIZED_DOT(float, s)
     cblas_##prefix##axpy(N, *alpha, x, 1, y, 1);                            \
   }
 CAFFE2_SPECIALIZED_AXPY(float, s)
+CAFFE2_SPECIALIZED_AXPY(double, d)
 #undef CAFFE2_SPECIALIZED_AXPY
 
 // cblas_[sd]axpby is not a standard blas function, and if MKL is not present,
@@ -389,6 +362,7 @@ void Axpby<T, CPUContext>(const int N, const T alpha, const T* x,              \
 }
 #endif  // CAFFE2_USE_MKL
 CAFFE2_SPECIALIZED_AXPBY(float, s)
+CAFFE2_SPECIALIZED_AXPBY(double, d)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
 #endif  // CAFFE2_USE_EIGEN_FOR_BLAS
@@ -462,8 +436,11 @@ void Funcname<T, CPUContext>(const int N, const T* x, T* y,                    \
   EigenVectorMap<T>(y, N) = ConstEigenVectorMap<T>(x, N).array().expr();       \
 }
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, exp)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, exp)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, log)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, log)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, square)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_POWX_FUNCTION(T)                                              \
@@ -473,6 +450,7 @@ void Powx<T, CPUContext>(                                                      \
   EigenVectorMap<T>(y, N) = ConstEigenVectorMap<T>(a, N).array().pow(b);       \
 }
 DELEGATE_POWX_FUNCTION(float)
+DELEGATE_POWX_FUNCTION(double)
 #undef DELEGATE_POWX_FUNCTION
 
 #endif  // CAFFE2_USE_MKL
@@ -498,6 +476,7 @@ EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
 
 #define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)                          \
 EIGEN_SIMPLE_BINARY_FUNCTION(float, Funcname, expr)                            \
+EIGEN_SIMPLE_BINARY_FUNCTION(double, Funcname, expr)                           \
 EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr)                          \
 EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
 
@@ -567,6 +546,7 @@ CAFFE2_SPECIALIZED_COLWISEMAX(float)
   DELEGATE_BROADCAST_BINARY_FUNCTION(int32_t, name, op)                  \
   DELEGATE_BROADCAST_BINARY_FUNCTION(int64_t, name, op)                  \
   DELEGATE_BROADCAST_BINARY_FUNCTION(float, name, op)                    \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(double, name, op)
 
 DEFINE_BROADCAST_BINARY_FUNCTION(Add, +)
 DEFINE_BROADCAST_BINARY_FUNCTION(Sub, -)
@@ -622,6 +602,7 @@ CAFFE2_SPECIALIZED_SET(uint16_t);
 
 #define CAFFE2_DEFINE_BINARY_OP(name, op)         \
   CAFFE2_INSTANTIATE_BINARY_OP(name, op, float)   \
+  CAFFE2_INSTANTIATE_BINARY_OP(name, op, double)  \
   CAFFE2_INSTANTIATE_BINARY_OP(name, op, int32_t) \
   CAFFE2_INSTANTIATE_BINARY_OP(name, op, int64_t)
 
@@ -663,6 +644,7 @@ void Not<bool, CPUContext>(
   }
 
 CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
+CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(double);
 #undef CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH
 
 template <>
@@ -735,6 +717,7 @@ void RandGaussian<float, CPUContext>(
   }
 
 CAFFE2_SPECIALIZED_SUM(float);
+CAFFE2_SPECIALIZED_SUM(double);
 CAFFE2_SPECIALIZED_SUM(int32_t);
 CAFFE2_SPECIALIZED_SUM(int64_t);
 
