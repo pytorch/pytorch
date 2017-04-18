@@ -7,11 +7,7 @@ void THNN_(Sigmoid_updateOutput)(
           THTensor *input,
           THTensor *output)
 {
-  THTensor_(resizeAs)(output, input);
-
-  TH_TENSOR_APPLY2(real, output, real, input,
-    *output_data = 1./(1.+ exp(- *input_data));
-  );
+  THTensor_(sigmoid)(output, input);
 }
 
 void THNN_(Sigmoid_updateGradInput)(
@@ -21,7 +17,7 @@ void THNN_(Sigmoid_updateGradInput)(
           THTensor *gradInput,
           THTensor *output)
 {
-  THNN_CHECK_NELEMENT(input, gradOutput);
+  THNN_CHECK_NELEMENT(output, gradOutput);
   THTensor_(resizeAs)(gradInput, output);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,
     real z = *output_data;
