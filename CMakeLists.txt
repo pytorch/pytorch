@@ -33,6 +33,7 @@ endfunction(prepend)
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
+set(CMAKE_MACOSX_RPATH 1)
 
 enable_testing()
 
