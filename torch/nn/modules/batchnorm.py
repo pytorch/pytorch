@@ -57,7 +57,7 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
-    of size N (where N is the input size).
+    of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
@@ -99,7 +99,7 @@ class BatchNorm2d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
-    of size N (where N is the input size).
+    of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
@@ -141,7 +141,7 @@ class BatchNorm3d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
-    of size N (where N is the input size).
+    of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
@@ -149,7 +149,7 @@ class BatchNorm3d(_BatchNorm):
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x height x width
+        num_features: num_features from an expected input of size batch_size x num_features x depth x height x width
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
