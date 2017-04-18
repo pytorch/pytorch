@@ -6,10 +6,10 @@ from torch._thnn import type2backend
 from . import _all_functions
 
 
-class _UpsamplingBase(Function):
-
+class UpsamplingNearest2d(Function):
+    
     def __init__(self, size=None, scale_factor=None):
-        super(_UpsamplingBase, self).__init__()
+        super(UpsamplingNearest2d, self).__init__()
         if size is None and scale_factor is None:
             raise ValueError('either size or scale_factor should be defined')
         if scale_factor is not None and not isinstance(scale_factor, Integral):
@@ -18,9 +18,6 @@ class _UpsamplingBase(Function):
             size = (size, size)
         self.size = size
         self.scale_factor = scale_factor
-
-
-class UpsamplingNearest2d(_UpsamplingBase):
 
     def forward(self, input):
         assert input.dim() == 4
@@ -62,15 +59,39 @@ class UpsamplingNearest2d(_UpsamplingBase):
         return grad_input
 
 
-class UpsamplingBilinear2d(_UpsamplingBase):
+class UpsamplingBilinear2d(Function):
+
+    def __init__(self, size=None, scale_factor=None):
+        super(UpsamplingBilinear2d, self).__init__()
+        if size is None and scale_factor is None:
+            raise ValueError('either size or scale_factor should be defined')
+        if scale_factor is not None:
+            if not isinstance(scale_factor, (Integral, tuple)):
+                raise ValueError('scale_factor must be a non-negative integer, or a tuple of non-negative integers')
+            if isinstance(scale_factor, tuple):
+                try:
+                    assert len(scale_factor) == 2
+                    for i in scale_factor:
+                        assert isinstance(i, (Integral, int))
+                        assert i >= 1
+                except AssertionError as e:
+                    raise ValueError('scale_factor must be a non-negative integer, or a tuple of non-negative integers')
+                
+        if size is not None and not isinstance(size, tuple):
+            size = (size, size)
+        if scale_factor is not None and not isinstance(scale_factor, tuple):
+            scale_factor = (scale_factor, scale_factor)
+
+        self.size = size
+        self.scale_factor = scale_factor
 
     def forward(self, input):
         assert input.dim() == 4
 
         if self.scale_factor:
             self.output_size = (
-                input.size(2) * self.scale_factor,
-                input.size(3) * self.scale_factor,
+                input.size(2) * self.scale_factor[0],
+                input.size(3) * self.scale_factor[1],
             )
         else:
             self.output_size = self.size
