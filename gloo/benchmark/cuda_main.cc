@@ -17,6 +17,7 @@
 #include "gloo/cuda_allreduce_halving_doubling_pipelined.h"
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_ring_chunked.h"
+#include "gloo/cuda_broadcast_one_to_all.h"
 #include "gloo/cuda_private.h"
 
 using namespace gloo;
@@ -84,6 +85,33 @@ class CudaAllreduceBenchmark : public CudaBenchmark {
   }
 };
 
+template <class T>
+class CudaBroadcastOneToAllBenchmark : public CudaBenchmark {
+  using CudaBenchmark::CudaBenchmark;
+
+ public:
+  virtual void initialize(int elements) override {
+    auto ptrs = allocate(options_.inputs, elements);
+    algorithm_.reset(new T(context_, ptrs, elements));
+  }
+
+  virtual void verify() override {
+    const auto rootOffset = rootRank_ * inputs_.size() + rootPointerRank_;
+    const auto stride = context_->size * inputs_.size();
+    for (const auto& input : inputs_) {
+      auto ptr = input.copyToHost();
+      for (int i = 0; i < input.elements; i++) {
+        auto offset = i * stride;
+        GLOO_ENFORCE_EQ(rootOffset + offset, ptr[i], "Mismatch at index: ", i);
+      }
+    }
+  }
+
+ protected:
+  const int rootRank_ = 0;
+  const int rootPointerRank_ = 0;
+};
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -123,6 +151,14 @@ int main(int argc, char** argv) {
           [&](std::shared_ptr<Context>& context) {
             using Algorithm = CudaAllreduceRingChunked<float>;
             using Benchmark = CudaAllreduceBenchmark<Algorithm>;
+            return gloo::make_unique<Benchmark>(context, x);
+          },
+      },
+      {
+          "cuda_broadcast_one_to_all",
+          [&](std::shared_ptr<Context>& context) {
+            using Algorithm = CudaBroadcastOneToAll<float>;
+            using Benchmark = CudaBroadcastOneToAllBenchmark<Algorithm>;
             return gloo::make_unique<Benchmark>(context, x);
           },
       },

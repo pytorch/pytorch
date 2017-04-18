@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "gloo/allgather_ring.h"
 #include "gloo/allreduce_halving_doubling.h"
 #include "gloo/allreduce_ring.h"
 #include "gloo/allreduce_ring_chunked.h"
@@ -26,6 +27,39 @@ using namespace gloo;
 using namespace gloo::benchmark;
 
 namespace {
+
+class AllgatherBenchmark : public Benchmark {
+  using Benchmark::Benchmark;
+
+ public:
+  virtual void initialize(int elements) override {
+    auto inPtrs = allocate(options_.inputs, elements);
+    outputs_.resize(options_.inputs * context_->size * elements);
+    algorithm_.reset(new AllgatherRing<float>(
+        context_, inPtrs, outputs_.data(), elements));
+  }
+
+  virtual void verify() override {
+    const auto stride = context_->size * inputs_.size();
+    const auto elements = inputs_[0].size();
+    for (int rank = 0; rank < context_->size; rank++) {
+      auto val = rank * inputs_.size();
+      for (int elem = 0; elem < elements; elem++) {
+        float exp = elem * stride + val;
+        for (int input = 0; input < inputs_.size(); input++) {
+          const auto rankOffset = rank * elements * inputs_.size();
+          const auto inputOffset = input * elements;
+          GLOO_ENFORCE_EQ(
+            outputs_[rankOffset + inputOffset + elem], exp + input,
+            "Mismatch at index: [", rank, ", ", input, ", ", elem, "]");
+        }
+      }
+    }
+  }
+
+ protected:
+  std::vector<float> outputs_;
+};
 
 template <class T>
 class AllreduceBenchmark : public Benchmark {
@@ -106,7 +140,11 @@ int main(int argc, char** argv) {
   auto x = benchmark::parseOptions(argc, argv);
 
   Runner::BenchmarkFn fn;
-  if (x.benchmark == "allreduce_ring") {
+  if (x.benchmark == "allgather_ring") {
+    fn = [&](std::shared_ptr<Context>& context) {
+      return gloo::make_unique<AllgatherBenchmark>(context, x);
+    };
+  } else if (x.benchmark == "allreduce_ring") {
     fn = [&](std::shared_ptr<Context>& context) {
       return gloo::make_unique<
         AllreduceBenchmark<
