@@ -433,6 +433,7 @@ def _AllReduceGradientsDistributed(
                 model.net.Allreduce(
                     inputs=[comm_world] + grads,
                     outputs=grads,
+                    name=grad_name,
                     engine=all_reduce_engine,
                     control_input=control_input,
                 )
