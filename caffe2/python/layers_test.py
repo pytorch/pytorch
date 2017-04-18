@@ -373,3 +373,13 @@ class TestLayers(LayersTestCase):
         self.assertEqual(np.int32, topk.field_types()[1].base)
         self.assertEqual((k,), topk.field_types()[1].shape)
         self.assertEqual(['TopK/values', 'TopK/indices'], topk.field_blobs())
+
+    def testFunctionalLayerWithOutputDtypes(self):
+        loss = self.model.AveragedLoss(
+            self.model.input_feature_schema,
+            1,
+            output_dtypes=(np.float32, (1,)),
+        )
+        self.assertEqual(1, len(loss.field_types()))
+        self.assertEqual(np.float32, loss.field_types()[0].base)
+        self.assertEqual((1,), loss.field_types()[0].shape)
