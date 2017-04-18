@@ -41,6 +41,22 @@ class TestFillerOperator(hu.HypothesisTestCase):
         self.assertEqual(workspace.FetchBlob('out'), [2.0])
 
     @given(**hu.gcs)
+    def test_uniform_int_fill_op_blob_input(self, gc, dc):
+        net = core.Net('test_net')
+        shape = net.Const([10], dtype=np.int64)
+        a = net.Const(0, dtype=np.int32)
+        b = net.Const(5, dtype=np.int32)
+        uniform_fill = net.UniformIntFill([shape, a, b], 1, input_as_shape=1)
+
+        for device_option in dc:
+            net._net.device_option.CopyFrom(device_option)
+            workspace.RunNetOnce(net)
+
+            blob_out = workspace.FetchBlob(uniform_fill)
+            self.assertTrue(all(blob_out >= 0))
+            self.assertTrue(all(blob_out <= 5))
+
+    @given(**hu.gcs)
     def test_gaussian_fill_op(self, gc, dc):
         op = core.CreateOperator(
             'GaussianFill',

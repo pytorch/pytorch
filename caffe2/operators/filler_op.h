@@ -90,14 +90,33 @@ class UniformFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws),
         min_(OperatorBase::template GetSingleArgument<T>("min", 0)),
         max_(OperatorBase::template GetSingleArgument<T>("max", 1)) {
-    DCHECK_LT(min_, max_) << "Max value should be bigger than min value.";
+    if (InputSize() == 3) {
+      CAFFE_ENFORCE(
+          !OperatorBase::HasSingleArgumentOfType<T>("min"),
+          "Cannot set both min arg and min input blob");
+      CAFFE_ENFORCE(
+          !OperatorBase::HasSingleArgumentOfType<T>("max"),
+          "Cannot set both max arg and max input blob");
+    } else {
+      CAFFE_ENFORCE_LT(
+          min_, max_, "Max value should be bigger than min value.");
+    }
   }
 
   bool Fill(Tensor<Context>* output) override {
+    T min = min_;
+    T max = max_;
+    if (InputSize() == 3) {
+      CAFFE_ENFORCE_EQ(1, Input(1).size(), "min blob must be scalar");
+      CAFFE_ENFORCE_EQ(1, Input(2).size(), "max blob must be scalar");
+      min = *Input(1).template data<T>();
+      max = *Input(2).template data<T>();
+      CAFFE_ENFORCE_LT(min, max, "Max value should be bigger than min value.");
+    }
     math::RandUniform<T, Context>(
         output->size(),
-        min_,
-        max_,
+        min,
+        max,
         output->template mutable_data<T>(),
         &context_);
     return true;
