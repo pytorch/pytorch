@@ -55,9 +55,9 @@ class InstanceNorm1d(_InstanceNorm):
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time, the default behaviour of the InstanceNorm module stays the same 
-    i.e. running mean/variance is NOT used for normalization. One can force using stored 
-    mean and variance with `.force_eval()` method. 
+    At evaluation time, the default behaviour of the InstanceNorm module stays the same
+    i.e. running mean/variance is NOT used for normalization. One can force using stored
+    mean and variance with `.force_eval()` method.
 
     Args:
         num_features: num_features from an expected input of size `batch_size x num_features x width`
@@ -96,9 +96,9 @@ class InstanceNorm2d(_InstanceNorm):
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time, the default behaviour of the InstanceNorm module stays the same 
-    i.e. running mean/variance is NOT used for normalization. One can force using stored 
-    mean and variance with `.force_eval()` method. 
+    At evaluation time, the default behaviour of the InstanceNorm module stays the same
+    i.e. running mean/variance is NOT used for normalization. One can force using stored
+    mean and variance with `.force_eval()` method.
 
     Args:
         num_features: num_features from an expected input of size batch_size x num_features x height x width
@@ -138,9 +138,9 @@ class InstanceNorm3d(_InstanceNorm):
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time, the default behaviour of the InstanceNorm module stays the same 
-    i.e. running mean/variance is NOT used for normalization. One can force using stored 
-    mean and variance with `.force_eval()` method. 
+    At evaluation time, the default behaviour of the InstanceNorm module stays the same
+    i.e. running mean/variance is NOT used for normalization. One can force using stored
+    mean and variance with `.force_eval()` method.
 
 
     Args:
