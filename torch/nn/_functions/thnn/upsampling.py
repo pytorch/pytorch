@@ -7,7 +7,7 @@ from . import _all_functions
 
 
 class UpsamplingNearest2d(Function):
-    
+
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingNearest2d, self).__init__()
         if size is None and scale_factor is None:
@@ -76,7 +76,7 @@ class UpsamplingBilinear2d(Function):
                         assert i >= 1
                 except AssertionError as e:
                     raise ValueError('scale_factor must be a non-negative integer, or a tuple of non-negative integers')
-                
+
         if size is not None and not isinstance(size, tuple):
             size = (size, size)
         if scale_factor is not None and not isinstance(scale_factor, tuple):
