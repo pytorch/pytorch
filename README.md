@@ -158,7 +158,7 @@ Once you have [anaconda](https://www.continuum.io/downloads) installed, here are
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x
+- [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
@@ -172,7 +172,7 @@ export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml mkl setuptools cmake gcc cffi
 
 # Add LAPACK support for the GPU
-conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
+conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
 On OSX
