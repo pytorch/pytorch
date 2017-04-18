@@ -4,7 +4,7 @@
 #include <THC/THCApply.cuh>
 
 template <typename T>
-struct TanhGradInputOp
+struct tanh_updateGradInput_functor
 {
   __device__ __forceinline__ void operator()(T *gradInput,
           const T *output, const T *gradOutput) const {
@@ -14,7 +14,7 @@ struct TanhGradInputOp
 
 #ifdef CUDA_HALF_TENSOR
 template <>
-struct TanhGradInputOp<half>
+struct tanh_updateGradInput_functor<half>
 {
   __device__ __forceinline__ void operator()(half *gradInput,
           const half *output, const half *gradOutput) const {
@@ -23,8 +23,8 @@ struct TanhGradInputOp<half>
     const half out_square = __hmul(*output, *output);
     *gradInput = __hmul(*gradOutput, __hadd(one, __hneg(out_square)));
 #else
-    float out = __half2float(*output);
-    float go = __half2float(*gradOutput);
+    const float out = __half2float(*output);
+    const float go = __half2float(*gradOutput);
     *gradInput = __float2half(go * (1.f - out * out));
 #endif
   }

@@ -20,10 +20,10 @@ void THNN_(Sigmoid_updateGradInput)(
            THCTensor *gradInput,
            THCTensor *output)
 {
-  THCUNN_check_nElement(state, input, gradOutput);
+  THCUNN_check_nElement(state, output, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
   THCTensor_(resizeAs)(state, gradInput, output);
-  THC_pointwiseApply3(state, gradInput, output, gradOutput, SigmoidGradInputOp<real>());
+  THC_pointwiseApply3(state, gradInput, output, gradOutput, sigmoid_updateGradInput_functor<real>());
 }
 
 #endif
