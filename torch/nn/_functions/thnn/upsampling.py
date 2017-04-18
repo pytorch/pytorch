@@ -72,7 +72,7 @@ class UpsamplingBilinear2d(Function):
                 try:
                     assert len(scale_factor) == 2
                     for i in scale_factor:
-                        assert isinstance(i, (Integral, int))
+                        assert isinstance(i, Integral)
                         assert i >= 1
                 except AssertionError as e:
                     raise ValueError('scale_factor must be a non-negative integer, or a tuple of non-negative integers')
