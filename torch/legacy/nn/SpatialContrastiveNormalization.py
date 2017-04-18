@@ -14,7 +14,8 @@ class SpatialContrastiveNormalization(Module):
         self.nInputPlane = nInputPlane
         if kernel is None:
             self.kernel = torch.Tensor(9, 9).fill_(1)
-        self.kernel = kernel
+        else:
+            self.kernel = kernel
         self.threshold = threshold
         self.thresval = thresval or threshold
         kdim = self.kernel.ndimension()
