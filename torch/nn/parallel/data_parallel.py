@@ -74,7 +74,7 @@ class DataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
 
-def data_parallel(module, inputs, device_ids, output_device=None, dim=0, module_kwargs=None):
+def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, module_kwargs=None):
     """Evaluates module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
@@ -91,6 +91,9 @@ def data_parallel(module, inputs, device_ids, output_device=None, dim=0, module_
     """
     if not isinstance(inputs, tuple):
         inputs = (inputs,)
+
+    if device_ids is None:
+        device_ids = list(range(torch.cuda.device_count()))
 
     if output_device is None:
         output_device = device_ids[0]

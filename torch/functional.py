@@ -45,7 +45,7 @@ def stack(sequence, dim=0):
     All tensors need to be of the same size.
 
     Arguments:
-        sqequence (Sequence): sequence of tensors to concatenate.
+        sequence (Sequence): sequence of tensors to concatenate.
         dim (int): dimension to insert. Has to be between 0 and the number
             of dimensions of concatenated tensors (inclusive).
     """

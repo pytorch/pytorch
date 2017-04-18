@@ -237,7 +237,8 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
   THCTensor *gradInput_n = THCTensor_(new)(state);
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
-  THCTensor_(transpose)(state, weight, weight, 1, 2);
+  THCTensor *tweight = THCTensor_(new)(state);
+  THCTensor_(transpose)(state, tweight, weight, 1, 2);
 
   for (int elt = 0; elt < batchSize; ++elt) {
     // Matrix multiply per sample:
@@ -251,7 +252,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
     // weight:          inputFrameSize x kW x 1
     // gradOutput3d:    inputFrameSize x 1 x nOutputFrame
     THCTensor_(baddbmm)(state, gradColumns, ScalarConvert<int, real>::to(0),
-                        gradColumns, ScalarConvert<int, real>::to(1), weight,
+                        gradColumns, ScalarConvert<int, real>::to(1), tweight,
                         gradOutput3d);
     // gradColumns:     inputFrameSize x kW x nOutputFrame
 
@@ -275,7 +276,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
     THCTensor_(resize2d)(state, gradInput, inputFrameSize, nInputFrame);
   }
 
-  THCTensor_(transpose)(state, weight, weight, 1, 2);
+  THCTensor_(free)(state, tweight);
 
   if (!featFirst) {
     THCTensor_(transpose)(state, gradInput, gradInput, ndim - 1, ndim - 2);
@@ -367,16 +368,16 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
             inputFrameSize, nInputFrame, kW, padW, dW, 1,
             THCTensor_(data)(state, columns));
 
-    THCTensor_(transpose)(state, columns, columns, 1, 2);
+    THCTensor *tcolumns = THCTensor_(new)(state);
+    THCTensor_(transpose)(state, tcolumns, columns, 1, 2);
 
     // gradOutput3d:  inputFrameSize x 1 x nOutputFrame
     // columns:       inputFrameSize x nOutputFrame x kW
     THCTensor_(baddbmm)(state, gradWeight, ScalarConvert<int, real>::to(1),
-                        gradWeight, scale, gradOutput3d, columns);
+                        gradWeight, scale, gradOutput3d, tcolumns);
     // gradWeight:    inputFrameSize x 1 x kW
 
-    THCTensor_(transpose)(state, columns, columns, 1, 2);
-
+    THCTensor_(free)(state, tcolumns);
     THCTensor_(free)(state, gradOutput3d);
 
     if (gradBias != NULL) {

@@ -691,8 +691,14 @@ template<>
 auto THCTensor<real>::cadd(const Tensor& src1, scalar_type value,
                            const Tensor& src2) -> THCTensor& {
   const THCTensor &src1_t = const_tensor_cast(src1);
-  const THCTensor &src2_t = const_tensor_cast(src2);
-  THCTensor_(cadd)(state, tensor, src1_t.tensor, cast_scalar(value), src2_t.tensor);
+
+  const THCSTensor<real>* src2_sparse;
+  if ((src2_sparse = dynamic_cast<const THCSTensor<real>*>(&src2))) {
+    THCSTensor_(spcadd)(state, tensor, src1_t.tensor, cast_scalar(value), src2_sparse->tensor);
+  } else {
+    const THCTensor &src2_t = const_tensor_cast(src2);
+    THCTensor_(cadd)(state, tensor, src1_t.tensor, cast_scalar(value), src2_t.tensor);
+  }
   return *this;
 }
 

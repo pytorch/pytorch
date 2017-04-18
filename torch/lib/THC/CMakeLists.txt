@@ -289,6 +289,7 @@ INSTALL(FILES
           THCNumerics.cuh
           THCTensorSort.cuh
           THCTensorInfo.cuh
+          THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
           THCTensorRandom.cuh
           THCTensorMathMagma.cuh

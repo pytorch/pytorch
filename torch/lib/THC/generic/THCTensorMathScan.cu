@@ -2,6 +2,27 @@
 #define THC_GENERIC_FILE "generic/THCTensorMathScan.cu"
 #else
 
+#ifndef THC_REAL_IS_HALF
+template<class BinaryFunction>
+__host__ void THCTensor_(scanThrust)(
+    THCState *state,
+    THCTensor *dst,
+    THCTensor *src,
+    BinaryFunction binary_op)
+{
+  THCThrustAllocator thrustAlloc(state);
+  thrust::device_ptr<real> src_data(THCTensor_(data)(state, src));
+  thrust::device_ptr<real> dst_data(THCTensor_(data)(state, dst));
+  ptrdiff_t size = THCTensor_(nElement)(state, src);
+  thrust::inclusive_scan(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#endif
+      src_data, src_data + size, dst_data,
+      binary_op);
+}
+#endif
+
 template<class BinaryOp>
 __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
                                        THCTensor *src, long dimension,
@@ -57,12 +78,22 @@ template<class BinaryFunction>
 void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
                          long dimension, real init, BinaryFunction binary_op)
 {
-  THCTensor_(resizeAs)(state, self_, src);
+  // "init" must be the identity element for binary_op
+  int ndim = THCTensor_(nDimension)(state, src);
+  THArgCheck(dimension >= 0 && dimension < ndim, 3, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
 
+  THCTensor_(resizeAs)(state, self_, src);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
 
-  if (dimension == THCTensor_(nDimension)(state, src) - 1) {
+#ifndef THC_REAL_IS_HALF
+  if (ndim == 1) {
+    // thrust does not take an "init"
+    THCTensor_(scanThrust)(state, self, src, binary_op);
+  } else
+#endif
+  if (dimension == ndim - 1) {
     THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
   } else {
     THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);

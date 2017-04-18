@@ -1590,7 +1590,7 @@ Args:
 
 Example::
 
-    >>> x = torch.range(1, 7)
+    >>> x = torch.arange(1, 8)
     >>> x
 
      1

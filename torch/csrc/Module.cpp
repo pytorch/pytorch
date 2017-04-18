@@ -266,13 +266,10 @@ IMPLEMENT_STATELESS(mm)
 IMPLEMENT_STATELESS(bmm)
 // TODO: this doesn't implement options that return numbers!
 IMPLEMENT_STATELESS(multinomial)
-IMPLEMENT_STATELESS(uniform)
 IMPLEMENT_STATELESS(normal)
-IMPLEMENT_STATELESS(cauchy)
-IMPLEMENT_STATELESS(log_normal)
-IMPLEMENT_STATELESS(random)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(range)
+IMPLEMENT_STATELESS(arange)
 IMPLEMENT_STATELESS(gather)
 IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
@@ -356,13 +353,19 @@ static PyObject * THPModule_randperm(PyObject *_unused, PyObject *args, PyObject
   return THPUtils_dispatchStateless(tensor, "randperm", args, kwargs);
 }
 
-static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
+static PyObject * THPModule_cat(PyObject *_unused, PyObject *args, PyObject *kwargs)
 {
   PyObject *tensor = THPDefaultTensorClass;
   THPObjectPtr iterator;
   THPObjectPtr item;
-  if (args && PyTuple_Size(args) > 0) {
-    PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
+  PyObject *first_arg=nullptr;
+  if (args && PyTuple_GET_SIZE(args) > 0) {
+    first_arg = PyTuple_GET_ITEM(args, 0);
+  } else if (kwargs && PyTuple_GET_ITEM(args, 0)) {
+    first_arg = PyDict_GetItemString(kwargs, "seq");
+  }
+
+  if (first_arg) {
     if (THPModule_isTensor(first_arg)) {
       tensor = first_arg;
     } else if (PySequence_Check(first_arg)) {
@@ -374,7 +377,7 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
     PyErr_Clear();
   }
 
-  return THPUtils_dispatchStateless(tensor, "cat", args, NULL);
+  return THPUtils_dispatchStateless(tensor, "cat", args, kwargs);
 }
 
 PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)
@@ -600,18 +603,15 @@ static PyMethodDef TorchMethods[] = {
   {"mm",              (PyCFunction)THPModule_mm,                METH_VARARGS | METH_KEYWORDS, NULL},
   {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS | METH_KEYWORDS, NULL},
-  {"uniform",         (PyCFunction)THPModule_uniform,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cauchy",          (PyCFunction)THPModule_cauchy,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"log_normal",      (PyCFunction)THPModule_log_normal,        METH_VARARGS | METH_KEYWORDS, NULL},
-  {"random",          (PyCFunction)THPModule_random,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"arange",          (PyCFunction)THPModule_arange,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
+  {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
   {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"gels",            (PyCFunction)THPModule_gels,              METH_VARARGS | METH_KEYWORDS, NULL},
@@ -635,6 +635,7 @@ static PyMethodDef TorchMethods[] = {
   {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
   {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
+  {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 

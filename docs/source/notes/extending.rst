@@ -96,7 +96,7 @@ numerical approximations using small finite differences::
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
     input = (Variable(torch.randn(20,20).double(), requires_grad=True),)
-    test = gradcheck.gradcheck(Linear(), input, eps=1e-6, atol=1e-4)
+    test = gradcheck(Linear(), input, eps=1e-6, atol=1e-4)
     print(test)
 
 Extending :mod:`torch.nn`
