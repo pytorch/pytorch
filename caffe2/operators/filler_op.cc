@@ -73,12 +73,12 @@ NOTE: Currently, it supports data type of float, int32, int64, and bool.
         "argument and its type is specified by the 'dtype' argument");
 
 OPERATOR_SCHEMA(UniformFill)
-    .NumInputs(0, 1)
+    .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference);
 OPERATOR_SCHEMA(UniformIntFill)
-    .NumInputs(0, 1)
+    .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference);
