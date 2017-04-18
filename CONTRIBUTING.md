@@ -70,6 +70,8 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+#### C++ Development tips
+
 When you are developing on the C++ side of things, the environment variables `DEBUG` and `NOCUDA` are helpful.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
