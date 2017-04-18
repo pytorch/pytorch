@@ -250,14 +250,13 @@ class ResizeLikeOp : public Operator<Context> {
   }
 };
 
-template <class Context>
+template <typename T, class Context>
 class SumOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SumOp);
 
-  template <typename T, typename M>
-  bool DoRunWithType() {
+  bool RunOnDevice() override {
     auto& input0 = Input(0);
     auto* output = Output(0);
     if (InputSize() == 1) {
@@ -298,16 +297,6 @@ class SumOp : public Operator<Context> {
     }
     return true;
   }
-
-  bool RunOnDevice() override {
-    if (Input(0).template IsType<float>()) {
-      return DoRunWithType<float, float>();
-    } else if (Input(0).template IsType<int>()) {
-      return DoRunWithType<int, int>();
-    } else {
-      return false;
-    }
-  }
 };
 
 // WeightedSumOp computes the weighted sum of several tensors. The input should
@@ -315,14 +304,13 @@ class SumOp : public Operator<Context> {
 // shape, and weight_i are size 1 tensors that specifies the weight of each
 // vector. Note that if one wants to do in-place computation, it could only be
 // done with X_0 also as the output, but not other X_i.
-template <class Context>
+template <typename T, class Context>
 class WeightedSumOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
-  template <typename DstType>
-  bool DoRunWithType() {
+  bool RunOnDevice() override {
     DCHECK_EQ(InputSize() % 2, 0);
     auto& X0 = Input(0);
     auto& weight0 = Input(1);
@@ -331,11 +319,11 @@ class WeightedSumOp : public Operator<Context> {
     int size = X0.size();
     auto* output = Output(0);
     output->ResizeLike(X0);
-    math::Scale<DstType, Context>(
+    math::Scale<T, Context>(
         size,
-        weight0.template data<float>(),
-        X0.template data<DstType>(),
-        output->template mutable_data<DstType>(),
+        weight0.template data<T>(),
+        X0.template data<T>(),
+        output->template mutable_data<T>(),
         &context_);
     for (int i = 2; i < InputSize(); i += 2) {
       auto& X = Input(i);
@@ -350,16 +338,15 @@ class WeightedSumOp : public Operator<Context> {
       auto& weight = Input(i + 1);
       DCHECK_EQ(X.size(), size);
       DCHECK_EQ(weight.size(), 1);
-      math::Axpy<DstType, Context>(
+      math::Axpy<T, Context>(
           size,
-          weight.template data<float>(),
-          X.template data<DstType>(),
-          output->template mutable_data<DstType>(),
+          weight.template data<T>(),
+          X.template data<T>(),
+          output->template mutable_data<T>(),
           &context_);
     }
     return true;
   }
-  bool RunOnDevice() override;
 };
 
 /**

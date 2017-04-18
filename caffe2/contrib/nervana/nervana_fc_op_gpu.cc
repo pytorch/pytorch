@@ -5,11 +5,8 @@
 
 namespace caffe2 {
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    FC,
-    NERVANA,
-    FullyConnectedOp<CUDAContext, NervanaEngine>);
+    FC, NERVANA, FullyConnectedOp<float, CUDAContext, NervanaEngine>);
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    FCGradient,
-    NERVANA,
-    FullyConnectedGradientOp<CUDAContext, NervanaEngine>);
+    FCGradient, NERVANA,
+    FullyConnectedGradientOp<float, CUDAContext, NervanaEngine>);
 }  // namespace caffe2

@@ -5,30 +5,6 @@
 namespace caffe2 {
 
 template <>
-bool WeightedSumOp<CUDAContext>::RunOnDevice() {
-  if (Input(0).IsType<float>()) {
-    return DoRunWithType<float>();
-  } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16>();
-  } else {
-    CAFFE_THROW("Unsupported inputs");
-  }
-  return false;
-}
-
-template <>
-bool SumOp<CUDAContext>::RunOnDevice() {
-  if (Input(0).IsType<float>()) {
-    return DoRunWithType<float, float>();
-  } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16, float16>();
-  } else {
-    CAFFE_THROW("Unsupported inputs");
-  }
-  return false;
-}
-
-template <>
 class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
     : public Operator<CUDAContext> {
  public:
@@ -59,7 +35,9 @@ REGISTER_CUDA_OPERATOR(Squeeze, SqueezeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ExpandDims, ExpandDimsOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Sum, SumOp<float, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(Shape, ShapeOp<CUDAContext>);
 // From whatever the current context, ensure the output is TensorCPU
 REGISTER_CUDA_OPERATOR(

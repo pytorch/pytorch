@@ -3,13 +3,12 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 // This is Caffe's InnerProductOp, with a name that fits its purpose better.
-template <class Context, class Engine = DefaultEngine>
+template <typename T, class Context, class Engine = DefaultEngine>
 class FullyConnectedOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -18,13 +17,7 @@ class FullyConnectedOp final : public Operator<Context> {
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {}
   ~FullyConnectedOp() {}
 
-  template <
-      typename T_X,
-      typename T_W,
-      typename T_B,
-      typename T_Y,
-      typename MATH>
-  bool DoRunWithType() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& b = Input(2);
@@ -70,51 +63,42 @@ class FullyConnectedOp final : public Operator<Context> {
     Y->Resize(Y_shape_cache_);
     CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
 
-    // W * x
-    math::Gemm<T_X, Context, Engine>(
+    // X * W^T
+    math::Gemm<T, Context, Engine>(
         CblasNoTrans,
         CblasTrans,
         M,
         N,
         K,
         1,
-        X.template data<T_X>(),
-        W.template data<T_W>(),
+        X.template data<T>(),
+        W.template data<T>(),
         0,
-        Y->template mutable_data<T_Y>(),
+        Y->template mutable_data<T>(),
         &context_);
     // Add bias term
     if (bias_multiplier_.size() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
-      math::Set<T_B, Context>(
+      math::Set<T, Context>(
           M,
-          convert::To<float, T_B>(1),
-          bias_multiplier_.template mutable_data<T_B>(),
+          static_cast<T>(1),
+          bias_multiplier_.template mutable_data<T>(),
           &context_);
     }
-    math::Gemm<T_B, Context, Engine>(
+    math::Gemm<T, Context, Engine>(
         CblasNoTrans,
         CblasNoTrans,
         M,
         N,
         1,
         1,
-        bias_multiplier_.template data<T_B>(),
-        b.template data<T_B>(),
+        bias_multiplier_.template data<T>(),
+        b.template data<T>(),
         1,
-        Y->template mutable_data<T_Y>(),
+        Y->template mutable_data<T>(),
         &context_);
     return true;
-  }
-
-  bool RunOnDevice() override {
-    return DoRunWithType<
-        float, // X
-        float, // W
-        float, // B
-        float, // Y
-        float>(); // Math
   }
 
  protected:
@@ -125,7 +109,7 @@ class FullyConnectedOp final : public Operator<Context> {
   Tensor<Context> bias_multiplier_;
 };
 
-template <class Context, class Engine = DefaultEngine>
+template <typename T, class Context, class Engine = DefaultEngine>
 class FullyConnectedGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -134,16 +118,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {}
   ~FullyConnectedGradientOp() {}
 
-  template <
-      typename T_X,
-      typename T_W,
-      typename T_DY,
-      typename T_B,
-      typename T_DX,
-      typename T_DW,
-      typename T_DB,
-      typename MATH>
-  bool DoRunWithType() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& dY = Input(2);
@@ -162,70 +137,58 @@ class FullyConnectedGradientOp : public Operator<Context> {
     db->Resize(N);
 
     // Compute dW
-    math::Gemm<T_DY, Context, Engine>(
+    math::Gemm<T, Context, Engine>(
         CblasTrans,
         CblasNoTrans,
         N,
         K,
         M,
-        convert::To<float, MATH>(1),
-        dY.template data<T_DY>(),
-        X.template data<T_X>(),
-        convert::To<float, MATH>(0),
-        dW->template mutable_data<T_DW>(),
+        1,
+        dY.template data<T>(),
+        X.template data<T>(),
+        0,
+        dW->template mutable_data<T>(),
         &context_);
     if (bias_multiplier_.size() != M) {
       // If the helper bias multiplier is not M, reshape and fill it
       // with one.
       bias_multiplier_.Resize(M);
-      math::Set<T_B, Context>(
+      math::Set<T, Context>(
           M,
-          convert::To<float, T_B>(1),
-          bias_multiplier_.template mutable_data<T_B>(),
+          static_cast<T>(1),
+          bias_multiplier_.template mutable_data<T>(),
           &context_);
     }
     // Compute dB
-    math::Gemv<T_DY, Context>(
+    math::Gemv<T, Context>(
         CblasTrans,
         M,
         N,
-        convert::To<float, MATH>(1),
-        dY.template data<T_DY>(),
-        bias_multiplier_.template data<T_B>(),
-        convert::To<float, MATH>(0),
-        db->template mutable_data<T_DB>(),
+        1,
+        dY.template data<T>(),
+        bias_multiplier_.template data<T>(),
+        0,
+        db->template mutable_data<T>(),
         &context_);
 
     // Compute dX
     if (OutputSize() == 3) {
       auto* dX = Output(2);
       dX->ResizeLike(X);
-      math::Gemm<T_DX, Context, Engine>(
+      math::Gemm<T, Context, Engine>(
           CblasNoTrans,
           CblasNoTrans,
           M,
           K,
           N,
-          convert::To<float, MATH>(1),
-          dY.template data<T_DY>(),
-          W.template data<T_W>(),
-          convert::To<float, MATH>(0),
-          dX->template mutable_data<T_DX>(),
+          1,
+          dY.template data<T>(),
+          W.template data<T>(),
+          0,
+          dX->template mutable_data<T>(),
           &context_);
     }
     return true;
-  }
-
-  bool RunOnDevice() override {
-    return DoRunWithType<
-        float, //  X
-        float, //  W
-        float, // dY
-        float, //  B
-        float, // dX
-        float, // dW
-        float, // dB
-        float>(); // Math
   }
 
  protected:
