@@ -4,6 +4,7 @@
 #include <limits>
 #include <mutex>
 
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
@@ -67,6 +68,24 @@ class AtomicIterOp final : public Operator<Context> {
     IncrementIter(OperatorBase::Output<TensorCPU>(0));
     return true;
   }
+};
+
+class MutexSerializer : public BlobSerializerBase {
+ public:
+  /**
+   * Serializes a std::unique_ptr<std::mutex>. Note that this blob has to
+   * contain std::unique_ptr<std::mutex>, otherwise this function produces a
+   * fatal error.
+   */
+  void Serialize(
+      const Blob& blob,
+      const string& name,
+      BlobSerializerBase::SerializationAcceptor acceptor) override;
+};
+
+class MutexDeserializer : public BlobDeserializerBase {
+ public:
+  void Deserialize(const BlobProto& proto, Blob* blob) override;
 };
 
 } // namespace caffe2
