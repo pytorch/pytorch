@@ -1165,11 +1165,8 @@ class GatherOp : public Operator<Context> {
     shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
     output->Resize(shape);
 
-    int block_size = data.size() / data.dim(0);
+    int block_size = data.size_from_dim(1);
     auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-    CAFFE_ENFORCE(
-        block_bytesize == data.nbytes() / data.dim(0),
-        "block_bytesize should be consistent with data dim");
     int N = indices.size();
 
     auto src_base = static_cast<const char*>(data.raw_data());
