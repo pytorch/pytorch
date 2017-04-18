@@ -137,12 +137,12 @@ def ResetWorkspace(root_folder=None):
         return C.reset_workspace(root_folder)
 
 
-def CreateNet(net, input_blobs=None):
+def CreateNet(net, overwrite=False, input_blobs=None):
     if input_blobs is None:
         input_blobs = []
     for input_blob in input_blobs:
         C.create_blob(input_blob)
-    return C.create_net(StringifyProto(net))
+    return C.create_net(StringifyProto(net), overwrite)
 
 
 def RunOperatorOnce(operator):
@@ -434,8 +434,8 @@ def FeedImmediate(*args, **kwargs):
 
 # CWorkspace utilities
 
-def _Workspace_create_net(ws, net):
-    return ws._create_net(StringifyProto(net))
+def _Workspace_create_net(ws, net, overwrite=False):
+    return ws._create_net(StringifyProto(net), overwrite)
 
 
 C.Workspace.create_net = _Workspace_create_net

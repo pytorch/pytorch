@@ -148,14 +148,16 @@ class Workspace {
    */
   Blob* GetBlob(const string& name);
 
-  // CreateNet creates a network in the current workspace. It can then
-  // be referred to by RunNet().
   /**
    * Creates a network with the given NetDef, and returns the pointer to the
    * network. If there is anything wrong during the creation of the network, a
    * nullptr is returned. The Workspace keeps ownership of the pointer.
+   *
+   * If there is already a net created in the workspace with the given name,
+   * CreateNet will overwrite it if overwrite=true is specified. Otherwise, an
+   * exception is thrown.
    */
-  NetBase* CreateNet(const NetDef& net_def);
+  NetBase* CreateNet(const NetDef& net_def, bool overwrite = false);
 
   /**
    * Gets the pointer to a created net. The workspace keeps ownership of the

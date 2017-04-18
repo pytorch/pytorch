@@ -192,7 +192,7 @@ class TestDatasetOps(TestCase):
         should_continue, batch = reader.read_record(read_next_net)
 
         workspace.RunNetOnce(read_init_net)
-        workspace.CreateNet(read_next_net)
+        workspace.CreateNet(read_next_net, True)
 
         for entry in entries:
             workspace.RunNet(str(read_next_net))
@@ -271,10 +271,10 @@ class TestDatasetOps(TestCase):
 
         should_continue, batch = reader.read_record(read_next_net)
 
-        workspace.CreateNet(read_init_net)
+        workspace.CreateNet(read_init_net, True)
         workspace.RunNetOnce(read_init_net)
 
-        workspace.CreateNet(read_next_net)
+        workspace.CreateNet(read_next_net, True)
 
         for i in range(len(entries)):
             k = idx[i] if i in idx else i
@@ -301,10 +301,10 @@ class TestDatasetOps(TestCase):
 
         should_continue, batch = reader.read_record(read_next_net)
 
-        workspace.CreateNet(read_init_net)
+        workspace.CreateNet(read_init_net, True)
         workspace.RunNetOnce(read_init_net)
 
-        workspace.CreateNet(read_next_net)
+        workspace.CreateNet(read_next_net, True)
 
         expected_idx = np.array([2, 1, 0])
         for i in range(len(entries)):
