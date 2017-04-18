@@ -25,6 +25,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
           a tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
         groups: split input into groups, in_channels should be divisible by
           the number of groups
 
@@ -51,6 +52,11 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         weight: filters of shape (out_channels, in_channels, kW)
         bias: optional bias of shape (out_channels)
         stride: the stride of the convolving kernel, default 1
+        padding: implicit zero padding on the input. Can be a single number or
+          a tuple. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
 
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
@@ -77,6 +83,9 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
           a tuple (st x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
 
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
