@@ -60,7 +60,7 @@ class SpatialDivisiveNormalization(Module):
             self.stdestimator.add(SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
         else:
             self.stdestimator.add(SpatialConvolutionMap(
-                SpatialContolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
+                SpatialConvolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
             self.stdestimator.add(SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
 
         self.stdestimator.add(Replicate(self.nInputPlane, 1))
