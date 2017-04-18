@@ -25,11 +25,13 @@ class LayersTestCase(test_util.TestCase):
 
     def setUp(self):
         super(LayersTestCase, self).setUp()
-        input_feature_schema = schema.Struct(
+        self.reset_model()
+
+    def reset_model(self, input_feature_schema=None, trainer_extra_schema=None):
+        input_feature_schema = input_feature_schema or schema.Struct(
             ('float_features', schema.Scalar((np.float32, (32,)))),
         )
-        trainer_extra_schema = schema.Struct()
-
+        trainer_extra_schema = trainer_extra_schema or schema.Struct()
         self.model = layer_model_helper.LayerModelHelper(
             'test_model',
             input_feature_schema=input_feature_schema,
@@ -58,6 +60,14 @@ class LayersTestCase(test_util.TestCase):
         self.model.output_schema = schema.Struct()
         train_init_net, train_net = \
             layer_model_instantiator.generate_training_nets(self.model)
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+
+    def run_train_net_forward_only(self):
+        self.model.output_schema = schema.Struct()
+        train_init_net, train_net = \
+            layer_model_instantiator.generate_training_nets_forward_only(
+                self.model)
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
 
