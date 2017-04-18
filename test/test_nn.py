@@ -2692,6 +2692,18 @@ new_module_tests = [
         desc='scale'
     ),
     dict(
+        module_name='UpsamplingBilinear2d',
+        constructor_args=(None, (2, 2)),
+        input_size=(1, 2, 4, 4),
+        desc='scale_tuple_shared'
+    ),
+    dict(
+        module_name='UpsamplingBilinear2d',
+        constructor_args=(None, (2, 1)),
+        input_size=(1, 2, 4, 4),
+        desc='scale_tuple_skewed'
+    ),
+    dict(
         module_name='AdaptiveMaxPool1d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5)
