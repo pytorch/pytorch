@@ -771,9 +771,8 @@ class TestNN(NNTestCase):
         self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
         self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
 
-
-        # If momentum==1 running_mean/var should be 
-        # equal to mean/var of the input 
+        # If momentum==1 running_mean/var should be
+        # equal to mean/var of the input
         IN = cls(c, momentum=1, eps=0)
 
         output = IN(input_var)
@@ -785,7 +784,7 @@ class TestNN(NNTestCase):
         var = input_reshaped.var(2, unbiased=True)[:, :]
 
         self.assertAlmostEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, delta=1e-5)
-        self.assertAlmostEqual(torch.abs(var.data.mean(1) -  IN.running_var).mean(), 0, delta=1e-5)
+        self.assertAlmostEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, delta=1e-5)
 
     def test_InstanceNorm2d(self):
         b = random.randint(3, 5)
