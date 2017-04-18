@@ -586,7 +586,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     Args:
         input (Variable): input
         size (int or Tuple[int, int]): output spatial size.
-        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
 
