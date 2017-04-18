@@ -7,7 +7,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import recurrent
+from caffe2.python import rnn_cell
 from caffe2.python.cnn import CNNModelHelper
 
 
@@ -66,7 +66,7 @@ def rnn_unidirectional_encoder(
 ):
     """ Unidirectional (forward pass) LSTM encoder."""
 
-    outputs, final_hidden_state, _, final_cell_state = recurrent.LSTM(
+    outputs, final_hidden_state, _, final_cell_state = rnn_cell.LSTM(
         model=model,
         input_blob=embedded_inputs,
         seq_lengths=input_lengths,
@@ -97,7 +97,7 @@ def rnn_bidirectional_encoder(
         final_hidden_state_fw,
         _,
         final_cell_state_fw,
-    ) = recurrent.LSTM(
+    ) = rnn_cell.LSTM(
         model=model,
         input_blob=embedded_inputs,
         seq_lengths=input_lengths,
@@ -119,7 +119,7 @@ def rnn_bidirectional_encoder(
         final_hidden_state_bw,
         _,
         final_cell_state_bw,
-    ) = recurrent.LSTM(
+    ) = rnn_cell.LSTM(
         model=model,
         input_blob=reversed_embedded_inputs,
         seq_lengths=input_lengths,

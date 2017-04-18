@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import cnn, workspace, core, recurrent
+from caffe2.python import cnn, workspace, core, rnn_cell
 from caffe2.proto import caffe2_pb2
 
 import numpy as np
@@ -48,7 +48,7 @@ class TestLSTMs(unittest.TestCase):
                 [1, batch_size, hidden_dim], dtype=np.float32
             ))
 
-            cudnn_output, cudnn_last_hidden, _, param_extract = recurrent.cudnn_LSTM(
+            cudnn_output, cudnn_last_hidden, _, param_extract = rnn_cell.cudnn_LSTM(
                 model=cudnn_model,
                 input_blob=input_blob,
                 initial_states=("hidden_init_cudnn", "hidden_init_cudnn"),
@@ -63,7 +63,7 @@ class TestLSTMs(unittest.TestCase):
                 ), "CUDNN/loss"
             )
 
-            own_output, own_last_hidden, _, last_state, own_params = recurrent.LSTM(
+            own_output, own_last_hidden, _, last_state, own_params = rnn_cell.LSTM(
                 model=own_model,
                 input_blob=input_blob,
                 seq_lengths="seq_lengths",
@@ -122,7 +122,7 @@ class TestLSTMs(unittest.TestCase):
             ##
             # Map the cuDNN parameters to our own
             workspace.RunNetOnce(own_model.param_init_net)
-            recurrent.InitFromLSTMParams(own_params, cudnn_lstm_params)
+            rnn_cell.InitFromLSTMParams(own_params, cudnn_lstm_params)
 
             # Run the model 3 times, so that some parameter updates are done
             workspace.CreateNet(own_model.net)

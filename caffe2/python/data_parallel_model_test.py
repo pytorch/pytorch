@@ -5,7 +5,7 @@ from __future__ import print_function
 import numpy as np
 import unittest
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, data_parallel_model, cnn, recurrent
+from caffe2.python import core, workspace, data_parallel_model, cnn, rnn_cell
 from caffe2.python.test_util import TestCase
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
@@ -133,7 +133,7 @@ class RecurrentNetworkParallelTest(TestCase):
                 shape=[1, self.batch_per_device, self.hidden_dim]
             )
 
-            output, _last_hidden, _, _last_state, = recurrent.LSTM(
+            output, _last_hidden, _, _last_state, = rnn_cell.LSTM(
                 model=model,
                 input_blob="data",
                 seq_lengths="seq_lengths",

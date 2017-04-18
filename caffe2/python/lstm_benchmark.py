@@ -6,7 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import cnn, workspace, core, utils, recurrent
+from caffe2.python import cnn, workspace, core, utils, rnn_cell
 
 import argparse
 import numpy as np
@@ -71,7 +71,7 @@ def create_model(args, queue, label_queue, input_shape):
     labels = model.DequeueBlobs(label_queue, "label")
 
     if args.implementation == "own":
-        output, last_hidden, _, last_state = recurrent.LSTM(
+        output, last_hidden, _, last_state = rnn_cell.LSTM(
             model=model,
             input_blob=input_blob,
             seq_lengths=seq_lengths,
@@ -85,7 +85,7 @@ def create_model(args, queue, label_queue, input_shape):
         # We need to feed a placeholder input so that RecurrentInitOp
         # can infer the dimensions.
         model.param_init_net.ConstantFill([], input_blob, shape=input_shape)
-        output, last_hidden, _ = recurrent.cudnn_LSTM(
+        output, last_hidden, _ = rnn_cell.cudnn_LSTM(
             model=model,
             input_blob=input_blob,
             initial_states=(hidden_init, cell_init),

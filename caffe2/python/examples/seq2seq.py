@@ -17,7 +17,7 @@ import sys
 from itertools import izip
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
-from caffe2.python import core, workspace, recurrent, data_parallel_model
+from caffe2.python import core, workspace, rnn_cell, data_parallel_model
 from caffe2.python.examples import seq2seq_util
 
 logger = logging.getLogger(__name__)
@@ -426,7 +426,7 @@ class Seq2SeqModelCaffe2:
 
         # seq_len x batch_size x decoder_embedding_size
         if attention_type == 'none':
-            decoder_outputs, _, _, _ = recurrent.LSTM(
+            decoder_outputs, _, _, _ = rnn_cell.LSTM(
                 model=model,
                 input_blob=embedded_decoder_inputs,
                 seq_lengths=decoder_lengths,
@@ -444,7 +444,7 @@ class Seq2SeqModelCaffe2:
             (
                 decoder_outputs, _, _, _,
                 attention_weighted_encoder_contexts, _
-            ) = recurrent.LSTMWithAttention(
+            ) = rnn_cell.LSTMWithAttention(
                 model=model,
                 decoder_inputs=embedded_decoder_inputs,
                 decoder_input_lengths=decoder_lengths,
