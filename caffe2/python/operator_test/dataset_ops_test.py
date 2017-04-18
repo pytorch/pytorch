@@ -6,9 +6,17 @@ import numpy as np
 from caffe2.python import core, workspace, dataset
 from caffe2.python.dataset import Const
 from caffe2.python.schema import (
-    List, Field, Struct, Scalar, Map,
-    from_blob_list, FetchRecord, NewRecord, FeedRecord)
+    List, Field, Struct, Scalar, Map, from_blob_list, FetchRecord, NewRecord,
+    FeedRecord
+)
 from caffe2.python.test_util import TestCase
+
+import numpy.testing as npt
+
+import string
+
+from hypothesis import given
+import hypothesis.strategies as st
 
 
 def _assert_arrays_equal(actual, ref, err_msg):
@@ -16,7 +24,9 @@ def _assert_arrays_equal(actual, ref, err_msg):
         np.testing.assert_array_equal(actual, ref, err_msg=err_msg)
     else:
         np.testing.assert_allclose(
-            actual, ref, atol=1e-4, rtol=1e-4, err_msg=err_msg)
+            actual, ref, atol=1e-4,
+            rtol=1e-4, err_msg=err_msg
+        )
 
 
 def _assert_records_equal(actual, ref):
@@ -24,13 +34,169 @@ def _assert_records_equal(actual, ref):
     assert isinstance(ref, Field)
     b1 = actual.field_blobs()
     b2 = ref.field_blobs()
-    assert(len(b1) == len(b2)), 'Records have different lengths: %d vs. %d' % (
-        len(b1), len(b2))
+    assert (len(b1) == len(b2)), 'Records have different lengths: %d vs. %d' % (
+        len(b1), len(b2)
+    )
     for name, d1, d2 in zip(ref.field_names(), b1, b2):
         _assert_arrays_equal(d1, d2, err_msg='Mismatch in field %s.' % name)
 
 
+@st.composite
+def _sparse_features_map(draw, num_records, **kwargs):
+    sparse_maps_lengths = draw(
+        st.lists(
+            st.integers(min_value=1, max_value=10),
+            min_size=num_records,
+            max_size=num_records
+        )
+    )
+
+    sparse_maps_total_length = sum(sparse_maps_lengths)
+
+    sparse_keys = draw(
+        st.lists(
+            st.integers(min_value=1, max_value=100),
+            min_size=sparse_maps_total_length,
+            max_size=sparse_maps_total_length,
+            unique=True
+        )
+    )
+
+    sparse_values_lengths = draw(
+        st.lists(
+            st.integers(min_value=1, max_value=10),
+            min_size=sparse_maps_total_length,
+            max_size=sparse_maps_total_length
+        )
+    )
+
+    total_sparse_values_lengths = sum(sparse_values_lengths)
+
+    sparse_values = draw(
+        # max_value is max int64
+        st.lists(
+            st.integers(min_value=1, max_value=9223372036854775807),
+            min_size=total_sparse_values_lengths,
+            max_size=total_sparse_values_lengths
+        )
+    )
+
+    return [
+        sparse_maps_lengths,
+        sparse_keys,
+        sparse_values_lengths,
+        sparse_values,
+    ]
+
+
+@st.composite
+def _dense_features_map(draw, num_records, **kwargs):
+    float_lengths = draw(
+        st.lists(
+            st.integers(min_value=1, max_value=10),
+            min_size=num_records,
+            max_size=num_records
+        )
+    )
+
+    total_length = sum(float_lengths)
+
+    float_keys = draw(
+        st.lists(
+            st.integers(min_value=1, max_value=100),
+            min_size=total_length,
+            max_size=total_length,
+            unique=True
+        )
+    )
+
+    float_values = draw(
+        st.lists(st.floats(),
+                 min_size=total_length,
+                 max_size=total_length)
+    )
+
+    return [float_lengths, float_keys, float_values]
+
+
+@st.composite
+def _dataset(draw, min_elements=3, max_elements=10, **kwargs):
+    schema = Struct(
+        # Dense Features Map
+        ('floats', Map(
+            Scalar(np.int32), Scalar(np.float32)
+        )),
+        # Sparse Features Map
+        ('int_lists', Map(
+            Scalar(np.int32),
+            List(Scalar(np.int64)),
+        )),
+        # Complex Type
+        ('text', Scalar(str)),
+    )
+
+    num_records = draw(
+        st.integers(min_value=min_elements,
+                    max_value=max_elements)
+    )
+
+    raw_dense_features_map_contents = draw(_dense_features_map(num_records))
+
+    raw_sparse_features_map_contents = draw(_sparse_features_map(num_records))
+
+    raw_text_contents = [
+        draw(
+            st.lists(
+                st.text(alphabet=string.ascii_lowercase),
+                min_size=num_records,
+                max_size=num_records
+            )
+        )
+    ]
+
+    # Concatenate all raw contents to a single one
+    contents_raw = raw_dense_features_map_contents + raw_sparse_features_map_contents + raw_text_contents
+
+    contents = from_blob_list(schema, contents_raw)
+
+    return (schema, contents, num_records)
+
+
 class TestDatasetOps(TestCase):
+    @given(_dataset())
+    def test_pack_unpack(self, input):
+        """
+        Tests if packing and unpacking of the whole dataset is an identity.
+        """
+        (schema, contents, num_records) = input
+
+        dataset_fields = schema.field_names()
+
+        net = core.Net('pack_unpack_net')
+
+        batch = NewRecord(net, contents)
+        FeedRecord(batch, contents)
+
+        packed = net.PackRecords(
+            batch.field_blobs(), 1,
+            fields=dataset_fields
+        )
+
+        unpacked = packed.UnPackRecords(
+            [], len(dataset_fields),
+            fields=dataset_fields
+        )
+
+        workspace.RunNetOnce(net)
+
+        for initial_tensor, unpacked_tensor in zip(
+            batch.field_blobs(), unpacked
+        ):
+            npt.assert_array_equal(
+                workspace.FetchBlob(initial_tensor),
+                workspace.FetchBlob(unpacked_tensor)
+            )
+
     def test_dataset_ops(self):
         """
         1. Defining the schema of our dataset.
@@ -42,30 +208,34 @@ class TestDatasetOps(TestCase):
             ('dense', Scalar((np.float32, 3))),
             # could represent a feature map from feature ID to float value
             ('floats', Map(
-                Scalar(np.int32),
-                Scalar(np.float32))),
+                Scalar(np.int32), Scalar(np.float32)
+            )),
             # could represent a multi-valued categorical feature map
             ('int_lists', Map(
                 Scalar(np.int32),
                 List(Scalar(np.int64)),
             )),
             # could represent a multi-valued, weighted categorical feature map
-            ('id_score_pairs', Map(
-                Scalar(np.int32),
-                Map(
-                    Scalar(np.int64),
-                    Scalar(np.float32),
-                    keys_name='ids',
-                    values_name='scores'),
-            )),
+            (
+                'id_score_pairs', Map(
+                    Scalar(np.int32),
+                    Map(
+                        Scalar(np.int64),
+                        Scalar(np.float32),
+                        keys_name='ids',
+                        values_name='scores'
+                    ),
+                )
+            ),
             # additional scalar information
-            ('metadata', Struct(
-                ('user_id', Scalar(np.int64)),
-                ('user_embed', Scalar((np.float32, 2))),
-                ('query', Scalar(str)),
-            )),
+            (
+                'metadata', Struct(
+                    ('user_id', Scalar(np.int64)),
+                    ('user_embed', Scalar((np.float32, 2))),
+                    ('query', Scalar(str)),
+                )
+            ),
         )
-
         """
         This is what the flattened fields for this schema look like, along
         with its type. Each one of these fields will be stored, read and
@@ -90,13 +260,11 @@ class TestDatasetOps(TestCase):
             ('metadata:query', str),
         ]
         zipped = zip(
-            expected_fields,
-            schema.field_names(),
-            schema.field_types())
+            expected_fields, schema.field_names(), schema.field_types()
+        )
         for (ref_name, ref_type), name, dtype in zipped:
             self.assertEquals(ref_name, name)
             self.assertEquals(np.dtype(ref_type), dtype)
-
         """
         2. The contents of our dataset.
 
@@ -129,7 +297,6 @@ class TestDatasetOps(TestCase):
         ]
         # convert the above content to ndarrays, checking against the schema
         contents = from_blob_list(schema, contents_raw)
-
         """
         3. Creating and appending to the dataset.
         We first create an empty dataset with the given schema.
@@ -145,7 +312,6 @@ class TestDatasetOps(TestCase):
             writer = ds.writer(init_net=net)
             writer.write_record(net, content_blobs)
         workspace.RunNetOnce(net)
-
         """
         4. Iterating through the dataset contents.
 
@@ -155,32 +321,63 @@ class TestDatasetOps(TestCase):
         entries_raw = [
             (
                 [[1.1, 1.2, 1.3]],  # dense
-                [1], [11], [1.1],  # floats
-                [2], [11, 12], [2, 4], [111, 112, 121, 122, 123, 124],  # intlst
-                [1], [11], [1], [111], [11.1],  # id score pairs
-                [123], [[0.2, 0.8]], ['dog posts'],  # metadata
+                [1],
+                [11],
+                [1.1],  # floats
+                [2],
+                [11, 12],
+                [2, 4],
+                [111, 112, 121, 122, 123, 124],  # intlst
+                [1],
+                [11],
+                [1],
+                [111],
+                [11.1],  # id score pairs
+                [123],
+                [[0.2, 0.8]],
+                ['dog posts'],  # metadata
             ),
             (
                 [[2.1, 2.2, 2.3]],  # dense
-                [2], [21, 22], [2.1, 2.2],  # floats
-                [0], [], [], [],  # int list
-                [2], [21, 22], [1, 2], [211, 221, 222], [21.1, 22.1, 22.2],
-                [234], [[0.5, 0.5]], ['friends who like to'],  # metadata
+                [2],
+                [21, 22],
+                [2.1, 2.2],  # floats
+                [0],
+                [],
+                [],
+                [],  # int list
+                [2],
+                [21, 22],
+                [1, 2],
+                [211, 221, 222],
+                [21.1, 22.1, 22.2],
+                [234],
+                [[0.5, 0.5]],
+                ['friends who like to'],  # metadata
             ),
             (
                 [[3.1, 3.2, 3.3]],  # dense
-                [3], [31, 32, 33], [3.1, 3.2, 3.3],  # floats
-                [1], [31], [3], [311, 312, 313],  # int lst
-                [2], [31, 32], [2, 3], [311, 312, 321, 322, 323],
+                [3],
+                [31, 32, 33],
+                [3.1, 3.2, 3.3],  # floats
+                [1],
+                [31],
+                [3],
+                [311, 312, 313],  # int lst
+                [2],
+                [31, 32],
+                [2, 3],
+                [311, 312, 321, 322, 323],
                 [31.1, 31.2, 32.1, 32.2, 32.3],  # id score list
-                [456], [[0.7, 0.3]], ['posts about ca'],  # metadata
+                [456],
+                [[0.7, 0.3]],
+                ['posts about ca'],  # metadata
             ),
             # after the end of the dataset, we will keep getting empty vectors
-            ([],) * 16,
-            ([],) * 16,
+            ([], ) * 16,
+            ([], ) * 16,
         ]
         entries = [from_blob_list(schema, e) for e in entries_raw]
-
         """
         Let's go ahead and create the reading nets.
         We will run `read` net multiple times and assert that we are reading the
@@ -198,7 +395,6 @@ class TestDatasetOps(TestCase):
             workspace.RunNet(str(read_next_net))
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
-
         """
         5. Reading/writing in a single plan
 
@@ -212,7 +408,6 @@ class TestDatasetOps(TestCase):
         reset_net = core.Net('reset_net')
         reader.reset(reset_net)
         read_step, batch = reader.execution_step()
-
         """ We will add the line number * 1000 to the feature ids. """
         process_net = core.Net('process')
         line_no = Const(process_net, 0, dtype=np.int32)
@@ -221,7 +416,6 @@ class TestDatasetOps(TestCase):
         field = batch.floats.keys.get()
         process_net.Print(field, [])
         process_net.Add([field, line_no], field, broadcast=1, axis=0)
-
         """ Lets create a second dataset and append to it. """
         ds2 = dataset.Dataset(schema, name='dataset2')
         ds2.init_empty(reset_net)
@@ -231,14 +425,12 @@ class TestDatasetOps(TestCase):
         # generality of the example
         commit_net = core.Net('commit')
         writer.commit(commit_net)
-
         """ Time to create and run a plan which will do the processing """
         plan = core.Plan('process')
         plan.AddStep(core.execution_step('reset', reset_net))
         plan.AddStep(read_step.AddNet(process_net))
         plan.AddStep(core.execution_step('commit', commit_net))
         workspace.RunPlan(plan)
-
         """
         Now we should have dataset2 populated.
         """
@@ -246,7 +438,6 @@ class TestDatasetOps(TestCase):
         field = ds2_data.floats.keys
         field.set(blob=field.get() - [1000, 2000, 2000, 3000, 3000, 3000])
         _assert_records_equal(contents, ds2_data)
-
         """
         6. Slicing a dataset
 
@@ -256,7 +447,6 @@ class TestDatasetOps(TestCase):
         subschema = Struct(('top_level', schema.int_lists.values))
         int_list_contents = contents.int_lists.values.field_names()
         self.assertEquals(len(subschema.field_names()), len(int_list_contents))
-
         """
         7. Random Access a dataset
 
@@ -282,8 +472,6 @@ class TestDatasetOps(TestCase):
             workspace.RunNet(str(read_next_net))
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
-
-
         """
         8. Sort and shuffle a dataset
 
@@ -328,31 +516,40 @@ class TestDatasetOps(TestCase):
             num_to_collect=7,
         )
         plan = core.Plan('collect_data')
-        plan.AddStep(core.execution_step('collect_data',
-                                         [collect_net], num_iter=1))
+        plan.AddStep(
+            core.execution_step('collect_data', [collect_net],
+                                num_iter=1)
+        )
         workspace.RunPlan(plan)
         reference_result = workspace.FetchBlob('output')
         self.assertSequenceEqual(
             [item for sublist in reference_result for item in sublist],
-            [1, 2, 3, 4, 5, 6])
+            [1, 2, 3, 4, 5, 6]
+        )
 
         plan = core.Plan('collect_data')
-        plan.AddStep(core.execution_step('collect_data',
-                                         [collect_net], num_iter=2))
+        plan.AddStep(
+            core.execution_step('collect_data', [collect_net],
+                                num_iter=2)
+        )
         workspace.RunPlan(plan)
         reference_result = workspace.FetchBlob('output')
         self.assertSequenceEqual(
             [item for sublist in reference_result for item in sublist],
-            [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6])
+            [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6]
+        )
 
         plan = core.Plan('collect_data')
-        plan.AddStep(core.execution_step('collect_data',
-                                         [collect_net], num_iter=3))
+        plan.AddStep(
+            core.execution_step('collect_data', [collect_net],
+                                num_iter=3)
+        )
         workspace.RunPlan(plan)
         reference_result = workspace.FetchBlob('output')
         self.assertSequenceEqual(
             [item for sublist in reference_result for item in sublist],
-            [3, 4, 5, 6, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2])
+            [3, 4, 5, 6, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2]
+        )
 
     def test_collect_tensor_ops(self):
         init_net = core.Net('init_net')
@@ -382,9 +579,12 @@ class TestDatasetOps(TestCase):
 
         plan = core.Plan('collect_data')
         plan.AddStep(core.execution_step('collect_init', init_net))
-        plan.AddStep(core.execution_step('collect_data',
-                                         [reader_net, collect_net],
-                                         num_iter=max_example_to_cover))
+        plan.AddStep(
+            core.execution_step(
+                'collect_data', [reader_net, collect_net],
+                num_iter=max_example_to_cover
+            )
+        )
         workspace.RunPlan(plan)
 
         # concat the collected tensors
@@ -401,20 +601,26 @@ class TestDatasetOps(TestCase):
 
         # check data
         reference_result = workspace.FetchBlob(bconcated_map[blobs[0]])
-        self.assertEqual(reference_result.shape,
-                         (min(num_to_collect, max_example_to_cover), 2))
+        self.assertEqual(
+            reference_result.shape,
+            (min(num_to_collect, max_example_to_cover), 2)
+        )
         size = workspace.FetchBlob(bsize_map[blobs[0]])
         self.assertEqual(tuple(), size.shape)
         self.assertEqual(min(num_to_collect, max_example_to_cover), size.item())
 
-        hist, _ = np.histogram(reference_result[:, 0], bins=10,
-                               range=(1, max_example_to_cover))
+        hist, _ = np.histogram(
+            reference_result[:, 0],
+            bins=10,
+            range=(1, max_example_to_cover)
+        )
         print('Sample histogram: {}'.format(hist))
 
         self.assertTrue(all(hist > 0.7 * (num_to_collect / 10)))
         for i in range(1, len(blobs)):
             result = workspace.FetchBlob(bconcated_map[blobs[i]])
             self.assertEqual(reference_result.tolist(), result.tolist())
+
 
 if __name__ == "__main__":
     import unittest
