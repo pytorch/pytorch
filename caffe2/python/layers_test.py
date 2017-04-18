@@ -352,6 +352,14 @@ class TestLayers(LayersTestCase):
         self.assertEqual(np.float32, loss.field_types()[0].base)
         self.assertEqual(tuple(), loss.field_types()[0].shape)
 
+    def testFunctionalLayerInputCoercion(self):
+        one = self.model.global_constants['ONE']
+        two = self.model.Add([one, one], 1)
+        self.model.loss = two
+        self.run_train_net()
+        data = workspace.FetchBlob(two.field_blobs()[0])
+        np.testing.assert_array_equal([2.0], data)
+
     def testFunctionalLayerWithOutputNames(self):
         k = 3
         topk = self.model.TopK(

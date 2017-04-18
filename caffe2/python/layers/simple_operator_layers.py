@@ -39,7 +39,7 @@ def simple_add_ops(self, net):
     )
 
 _simple_operators = ['Softmax', 'Relu', 'Sigmoid', 'Tanh']
-_first_field_schema_operators = ['Add', 'Sum']
+_first_field_schema_operators = ['Sum']
 
 # We need to store refs for all created types, to make sure that they won't be
 # GCed before we actually register them.
