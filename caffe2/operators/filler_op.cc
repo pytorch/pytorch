@@ -76,12 +76,39 @@ OPERATOR_SCHEMA(UniformFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(FillerTensorInference)
+    .SetDoc(R"DOC(
+Fill the output tensor with FLOAT samples from uniform distribution [min, max].
+
+The range can be defined either by arguments or input blobs. If the range is
+given by input blobs, you also need to give the shape as input. When the range
+is given as arguments, this operator enforces min <= max. When the range is
+given as inputs, the constraint is not enforced. When MAX < MIN, the first
+dimension of the output is set to 0. This behavior is allowed so that
+dynamically sampling indices into a dynamically sized tensor is possible.
+
+The shape of the output can be given as argument or input.
+)DOC")
+    .Arg("min", "minimum value, inclusive")
+    .Arg("max", "maximum value, inclusive")
+    .Arg("shape", "shape of the output, do not set when input_as_shape=1")
+    .Arg("input_as_shape", "set to 1 to use the first input as shape")
+    .Input(
+        0,
+        "SHAPE",
+        "1-D tensor of the shape of the output, "
+        "must be used with input_as_shape")
+    .Input(1, "MIN", "scalar blob of mininum value")
+    .Input(2, "MAX", "scalar blob of maximum value")
+    .Output(0, "OUTPUT", "output tensor");
 OPERATOR_SCHEMA(UniformIntFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(FillerTensorInference)
+    .SetDoc(R"DOC(
+Like `UniformFill` but fill with INT32.
+)DOC");
 OPERATOR_SCHEMA(UniqueUniformFill)
     .NumInputs(0, 2)
     .NumOutputs(1)

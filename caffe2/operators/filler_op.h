@@ -111,7 +111,13 @@ class UniformFillOp final : public FillerOp<Context> {
       CAFFE_ENFORCE_EQ(1, Input(2).size(), "max blob must be scalar");
       min = *Input(1).template data<T>();
       max = *Input(2).template data<T>();
-      CAFFE_ENFORCE_LT(min, max, "Max value should be bigger than min value.");
+      if (min > max) {
+        auto shape = output->dims();
+        shape[0] = 0;
+        output->Resize(shape);
+        output->template mutable_data<T>();
+        return true;
+      }
     }
     math::RandUniform<T, Context>(
         output->size(),
