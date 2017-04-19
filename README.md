@@ -38,7 +38,7 @@ Detailed build matrix (hit refresh if you see icons not showing up due to heroku
 This build is confirmed for:
 
 * Ubuntu 14.04
-* Ubuntu 16.06
+* Ubuntu 16.04
 
 #### Required Dependencies
 
