@@ -329,4 +329,5 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(
             workspace.FetchBlob(output_state_all),
             workspace.FetchBlob(output_states_2),
+            decimal=3,
         )
