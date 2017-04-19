@@ -299,6 +299,23 @@ class IndexSelect(Function):
         return grad_tensor, None
 
 
+class Split(Function):
+
+    def __init__(self, size, dim=0):
+        super(Split, self).__init__()
+        self.size = size
+        self.dim = dim
+
+    def forward(self, tensor):
+        self.input_size = tensor.size()
+        result = tensor.split(self.size, self.dim)
+        self.mark_shared_storage(*((tensor, chunk) for chunk in result))
+        return result
+
+    def backward(self, *grad_output):
+        return torch.cat(grad_output, self.dim)
+
+
 class Concat(Function):
 
     def __init__(self, dim):

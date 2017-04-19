@@ -675,6 +675,9 @@ class Variable(_C._VariableBase):
     def chunk(self, num_chunks, dim=0):
         return Chunk(num_chunks, dim)(self)
 
+    def split(self, size, dim=0):
+        return Split(size, dim)(self)
+
     def squeeze(self, dim=None):
         return Squeeze(dim)(self)
 
