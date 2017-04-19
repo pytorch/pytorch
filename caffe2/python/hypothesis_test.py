@@ -607,18 +607,18 @@ class TestOperators(hu.HypothesisTestCase):
     # Reference
     @staticmethod
     def _dense_adam(epsilon, beta1, beta2, w, m1, m2, grad, lr, iters):
-            lr = lr[0]
-            iters = iters[0]
-            t = iters + 1
-            corrected_local_rate = lr * np.sqrt(1. - np.power(beta2, t)) / \
-                (1. - np.power(beta1, t))
+        lr = lr[0]
+        iters = iters[0]
+        t = iters + 1
+        corrected_local_rate = lr * np.sqrt(1. - np.power(beta2, t)) / \
+            (1. - np.power(beta1, t))
 
-            m1_o = (beta1 * m1) + (1. - beta1) * grad
-            m2_o = (beta2 * m2) + (1. - beta2) * np.square(grad)
-            grad_o = corrected_local_rate * m1_o / \
-                (np.sqrt(m2_o) + epsilon)
-            w_o = w + grad_o
-            return (w_o, m1_o, m2_o)
+        m1_o = (beta1 * m1) + (1. - beta1) * grad
+        m2_o = (beta2 * m2) + (1. - beta2) * np.square(grad)
+        grad_o = corrected_local_rate * m1_o / \
+            (np.sqrt(m2_o) + epsilon)
+        w_o = w + grad_o
+        return (w_o, m1_o, m2_o)
 
     @given(inputs=hu.tensors(n=3),
            in_place=st.booleans(),
@@ -1316,42 +1316,130 @@ class TestOperators(hu.HypothesisTestCase):
             v += self.ws.blobs[str(counter)].fetch().tolist()
         self.assertEqual(v, truth)
 
+    @given(num_queues=st.integers(1, 5),
+           num_iter=st.integers(5, 10),
+           capacity=st.integers(1, 5),
+           num_blobs=st.integers(1, 3))
+    def test_weighted_sample_blobs_queue(
+        self, num_queues, num_iter, capacity, num_blobs
+    ):
+        # Create BlobsQueue for each input queue
+        print("num_queues", num_queues)
+        init_net = core.Net('init_net')
+        queues = [
+            init_net.CreateBlobsQueue(
+                [], 1, capacity=capacity, num_blobs=num_blobs
+            ) for _ in range(num_queues)
+        ]
+
+        # Create multiple producer nets and one producer exist net
+        producer_steps = []
+        producer_exit_nets = []
+        for i in range(num_queues):
+            name = 'producer_%d' % i
+            net = core.Net(name)
+            blobs = [net.ConstantFill([], 1, value=1.0, run_once=False)
+                     for _ in range(num_blobs)]
+            status = net.NextName()
+            net.SafeEnqueueBlobs([queues[i]] + blobs, blobs + [status])
+
+            exit_net = core.Net('producer_exit_%d' % i)
+            exit_net.CloseBlobsQueue(queues[i], 0)
+            producer_exit_nets.append(exit_net)
+
+            step = core.execution_step(
+                name, [
+                    core.execution_step(
+                        'producer_%d' % i, [net], num_iter=num_iter
+                    ),
+                    core.execution_step('producer_exit_%d' % i, [exit_net]),
+                ]
+            )
+            producer_steps.append(step)
+
+        producer_step = core.execution_step(
+            'producer', [
+                core.execution_step(
+                    'producers',
+                    producer_steps,
+                    concurrent_substeps=True,
+                ),
+            ]
+        )
+
+        status_lst = []
+
+        def append(ins, outs):
+            status_lst.append(ins)
+
+        # Create one consumer dequeue net and one consumer exist net
+        consumer_net = core.Net('weight_sample_dequeue_net')
+        blobs = consumer_net.WeightedSampleDequeueBlobs(
+            queues,
+            num_blobs + 1,
+            weights=np.random.uniform(low=0.0, high=1.0, size=(num_queues,))
+        )
+        status = blobs[-1]
+        consumer_net.Python(append)(status)
+
+        consumer_step = core.execution_step(
+            'consumer',
+            [
+                core.execution_step(
+                    'consumer', [consumer_net], should_stop_blob=status
+                ),
+                core.execution_step('producer_exit', producer_exit_nets)
+            ]
+        )
+
+        init_step = core.execution_step('init', init_net)
+        worker_step = core.execution_step(
+            'worker', [producer_step, consumer_step], concurrent_substeps=True)
+
+        plan = core.Plan('test')
+        plan.AddStep(init_step)
+        plan.AddStep(worker_step)
+
+        self.ws.run(plan)
+        assert len(status_lst) >= num_iter + 1
+        assert len(status_lst) <= num_iter * num_queues + 1
+
     @given(
         data=hu.tensor(),
         **hu.gcs_cpu_only)
     def test_squeeze_expand_dims(self, data, gc, dc):
-            dims = [0, 0]
-            if len(data.shape) > 2:
-                dims.append(2)
-            op = core.CreateOperator(
-                "ExpandDims",
-                ["data"],
-                ["expanded"],
-                dims=dims)
+        dims = [0, 0]
+        if len(data.shape) > 2:
+            dims.append(2)
+        op = core.CreateOperator(
+            "ExpandDims",
+            ["data"],
+            ["expanded"],
+            dims=dims)
 
-            def expand_dims_ref(data, *args, **kw):
-                inc_dims = list(set(dims))
-                inc_dims.sort()
-                r = data
-                for dim in inc_dims:
-                    r = np.expand_dims(r, axis=dim)
-                return (r, )
+        def expand_dims_ref(data, *args, **kw):
+            inc_dims = list(set(dims))
+            inc_dims.sort()
+            r = data
+            for dim in inc_dims:
+                r = np.expand_dims(r, axis=dim)
+            return (r, )
 
-            def squeeze_ref(data, *args, **kw):
-                dec_dims = list(set(dims))
-                dec_dims.sort(reverse=True)
-                r = data
-                for dim in dec_dims:
-                    r = np.squeeze(r, axis=dim)
-                return (r, )
+        def squeeze_ref(data, *args, **kw):
+            dec_dims = list(set(dims))
+            dec_dims.sort(reverse=True)
+            r = data
+            for dim in dec_dims:
+                r = np.squeeze(r, axis=dim)
+            return (r, )
 
-            self.assertReferenceChecks(
-                device_option=gc,
-                op=op,
-                inputs=[data],
-                reference=expand_dims_ref,
-                output_to_grad='expanded',
-                grad_reference=squeeze_ref)
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[data],
+            reference=expand_dims_ref,
+            output_to_grad='expanded',
+            grad_reference=squeeze_ref)
 
     @given(**hu.gcs_cpu_only)
     def test_tt_layer(self, gc, dc):
@@ -1732,11 +1820,11 @@ class TestOperators(hu.HypothesisTestCase):
                                          dtype=enum_type,
                                          value=value)
         else:
-                op = core.CreateOperator('ConstantFill', [], ["Y"],
-                                         dtype=enum_type,
-                                         value=value,
-                                         shape=list(gt_shape))
-                inputs = []
+            op = core.CreateOperator('ConstantFill', [], ["Y"],
+                                     dtype=enum_type,
+                                     value=value,
+                                     shape=list(gt_shape))
+            inputs = []
 
         def ref(inputs=None):
             outputs = np.full(shape=gt_shape, fill_value=value, dtype=dtype)
