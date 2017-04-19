@@ -23,7 +23,7 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   THLongStorage *size;
   THCTensor *dst;
 
-  THCSTensor_(contiguous)(state, self);
+  THCSTensor_(coalesce)(state, self);
 
   // set up the new tensor
   size = THCSTensor_(newSizeOf)(state, self);
@@ -61,7 +61,8 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   return dst;
 }
 
-void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
+void THCSTensor_(coalesce)(THCState *state, THCSTensor *self) {
+  if (self->coalesced) return;
   if (self->nnz < 2) return;
 #if CUDA_VERSION >= 7000
   THCThrustAllocator thrustAlloc(state);
@@ -80,7 +81,7 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   //   Multiple values in D1 can map to the same position in D2 if there are duplicate indices
   //   Values mapping to the same position are added together (which is what matrix multiplication does)
   //
-  // When constructing S, we must make sure that it is contiguous (otherwise this function will call itself when doing the multiplication)
+  // When constructing S, we must make sure that it is coalesced (otherwise this function will call itself when doing the multiplication)
   // To achieve this, we define the indices tensor of S as follows:
   // * the second row contains the permutation corresponding to a stable sort of the original indices
   // * the first row "maps" those indices to their final location after deduplication
@@ -142,7 +143,7 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
   // build S
   THCSTensor *S = THCSTensor_(newWithSize2d)(state, newNnz, self->nnz);
   THCSTensor_(_move)(state, S, sIndices, sValues);
-  S->contiguous = 1;
+  S->coalesced = 1;
 
   // build output indices tensor by doing an indexSelect over the sorted list of unique indices
   THCIndexTensor *newIndices = THCIndexTensor_(new)(state);
@@ -201,6 +202,8 @@ void THCSTensor_(reorder)(THCState *state, THCSTensor *self) {
     THCTensor_(free)(state, newValuesView);
   }
 
+self->coalesced = 1;
+
 #undef THRUST_EXEC
 }
 
@@ -220,7 +223,7 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   long i = self->size[d1];
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
-  self->contiguous = 0;
+  self->coalesced = 0;
   THCIndexTensor_(free)(state, indices);
   THCIndexTensor_(free)(state, buffer);
   THCIndexTensor_(free)(state, slice1);
