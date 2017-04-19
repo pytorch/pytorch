@@ -1,6 +1,12 @@
 ## @package gradient_checker
 # Module caffe2.python.gradient_checker
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import numpy as np
+
 from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
 
@@ -8,12 +14,17 @@ from caffe2.proto import caffe2_pb2
 class NetGradientChecker(object):
     @staticmethod
     def Check(net, outputs_with_grad, input_values,
-              input_to_check, step_size=0.0001, threshold=0.05):
+              input_to_check, step_size=0.0001,
+              threshold=0.05, print_net=True):
         assert input_to_check in input_values.keys()
 
         net_copy = net.Clone(net.Name() + "_copy")
 
         grad_map = net_copy.AddGradientOperators(outputs_with_grad)
+        assert input_to_check in grad_map, (
+            '{} has no gradient, cannot check net gradient.'.format(
+                input_to_check))
+
         for name, value in input_values.items():
             workspace.blobs[name] = value
 
@@ -31,7 +42,26 @@ class NetGradientChecker(object):
             return input_value
 
         workspace.RunNetOnce(net_copy)
-        analitic_grad = workspace.blobs[grad_map[input_to_check]]
+        grad_blob = grad_map[input_to_check]
+
+        def get_analytic_grad(grad_blob):
+            if isinstance(grad_blob, core.BlobReference):
+                return workspace.blobs[grad_blob]
+
+            # If grad_blob is not a single blob, it should be a gradient slice.
+            # To make it comparable with the estimiated gradient which is dense,
+            # we need to first convert grad_blob to dense gradient.
+            assert isinstance(grad_blob, core.GradientSlice)
+            dense_grad = 'tmp_dense_grad'
+            sparse_to_dense_op = core.CreateOperator(
+                'SparseToDense',
+                [grad_blob.indices, grad_blob.values, input_to_check],
+                dense_grad,
+            )
+            workspace.RunOperatorOnce(sparse_to_dense_op)
+            return workspace.blobs[dense_grad]
+
+        analytic_grad = get_analytic_grad(grad_blob)
 
         grad_estimate = np.zeros_like(input_values[input_to_check])
         for dim in range(input_values[input_to_check].size):
@@ -39,14 +69,19 @@ class NetGradientChecker(object):
             neg_loss = GetLoss(GetValue(dim, -step_size))
             grad_estimate.flat[dim] = (pos_loss - neg_loss) / step_size / 2
 
-        err_msg = "Error in gradient check for net_copy {}: {}".format(
-            net.Name(), net.Proto())
+        err_msg = "Error in gradient check for net_copy {}".format(
+            net.Name())
+        if print_net:
+            err_msg += ": {}".format(net.Proto())
 
         np.testing.assert_allclose(
-            analitic_grad, grad_estimate,
+            analytic_grad, grad_estimate,
             atol=threshold, rtol=threshold,
             err_msg=err_msg,
         )
+
+        delta = np.abs(grad_estimate - analytic_grad).flatten()
+        return np.mean(delta), max(delta)
 
 
 class GradientChecker:
