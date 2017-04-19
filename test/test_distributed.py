@@ -117,6 +117,7 @@ class _DistTestBase(object):
         self._barrier()
 
     # SEND RECV
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support send/recv")
     def test_send_recv(self):
         rank = dist.get_rank()
         tensor = _build_tensor(rank + 1)
@@ -158,6 +159,7 @@ class _DistTestBase(object):
         self._barrier()
 
     # ISEND
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support isend")
     def test_isend(self):
         rank = dist.get_rank()
         world_size = dist.get_num_processes()
@@ -177,6 +179,7 @@ class _DistTestBase(object):
         self._barrier()
 
     # IRECV
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support irecv")
     def test_irecv(self):
         rank = dist.get_rank()
         world_size = dist.get_num_processes()
@@ -504,6 +507,8 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()
+            if rank != 0:
+                time.sleep(0.2) # temporary fix for Gloo
             sys.exit(0)
 
         def _join_and_reduce(self):

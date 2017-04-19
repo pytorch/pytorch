@@ -12,7 +12,33 @@
 namespace thd {
 
 struct Store : public ::gloo::rendezvous::Store {
-  Store();
+private:
+  struct StoreDeamon {
+    StoreDeamon() = delete;
+    StoreDeamon(port_type port, rank_type world_size);
+    ~StoreDeamon();
+
+    void join();
+
+  private:
+    using store_type = std::unordered_map<std::string, std::vector<char>>;
+
+    void deamon();
+    bool query(rank_type rank);
+    bool checkAndUpdate(std::vector<std::string>& keys);
+
+    port_type _port;
+
+    std::thread _deamon;
+    store_type _store;
+    std::unordered_map<std::string, std::vector<rank_type>> _waiting;
+    std::vector<std::size_t> _keys_awaited;
+    std::vector<int> _sockets;
+  };
+
+public:
+  Store(rank_type rank, const std::string& addr,
+        port_type port, rank_type world_size);
   ~Store();
 
   void set(const std::string& key, const std::vector<char>& data) override;
@@ -24,7 +50,7 @@ private:
   int _socket;
   std::string _store_addr;
   port_type _store_port;
-  std::thread _store_thread; // it is initialised only in a selected process
+  std::unique_ptr<StoreDeamon> _store_thread; // it is initialised only in a selected process
 };
 
 } // namespace thd
