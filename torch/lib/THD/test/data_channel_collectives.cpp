@@ -28,8 +28,14 @@ constexpr int BARRIER_WAIT_TIME = 200; // milliseconds
 std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
 std::string g_data_channel_type;
+std::unique_ptr<Barrier> g_barrier;
+
 
 void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support send/recv
+  }
+
   if (data_channel->getRank() == 0) {
     auto float_tensor = buildTensor<float>({1, 2, 3}, 4.2);
     data_channel->send(*float_tensor, 1);
@@ -43,7 +49,7 @@ void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
 void test_send_recv_tensor_any_source(std::shared_ptr<thd::DataChannel> data_channel,
                                       int workers) {
   if (g_data_channel_type == "gloo") {
-    return; // XXX: Gloo does not support receiving from any source
+    return; // XXX: Gloo does not support send/recv from any source
   }
 
   if (data_channel->getRank() == 0) {
@@ -62,6 +68,10 @@ void test_send_recv_tensor_any_source(std::shared_ptr<thd::DataChannel> data_cha
 }
 
 void test_send_recv_scalar(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support send/recv
+  }
+
   if (data_channel->getRank() == 0) {
     thd::ScalarWrapper<int> scalar((int)1232);
     data_channel->send(scalar, 1);
@@ -207,6 +217,10 @@ void test_barrier(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void test_isend(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support isend
+  }
+
   if (data_channel->getRank() == 0) {
     std::vector<std::shared_ptr<thd::DataChannel::Request>> requests;
     for (std::size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
@@ -228,6 +242,10 @@ void test_isend(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void test_irecv(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support irecv
+  }
+
   if (data_channel->getRank() == 0) {
     std::vector<std::shared_ptr<thd::DataChannel::Request>> requests;
     std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
@@ -251,6 +269,10 @@ void test_irecv(std::shared_ptr<thd::DataChannel> data_channel) {
 
 
 void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support isend, irecv, send, recv
+  }
+
   if (data_channel->getRank() == 0) {
     std::vector<std::shared_ptr<thd::DataChannel::Request>> requests;
     for (std::size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
@@ -449,19 +471,25 @@ void test_barrier_group(std::shared_ptr<thd::DataChannel> data_channel,
 ////////////////
 
 void test_send_recv_invalid_rank(std::shared_ptr<thd::DataChannel> data_channel) {
+  if (g_data_channel_type == "gloo") {
+    return; // XXX: Gloo does not support send/recv
+  }
+
+  if (g_data_channel_type == "mpi") {
+    return; // XXX: MPI does not throw exceptions
+  }
+
   auto rank = data_channel->getRank();
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
 
-  if (g_data_channel_type == "tcp" || g_data_channel_type == "gloo") {
-    { // cannot send or receive to self
-      ASSERT_THROWS(std::logic_error, data_channel->send(*int_tensor, rank))
-      ASSERT_THROWS(std::logic_error, data_channel->receive(*int_tensor, rank))
-    }
+  { // cannot send or receive to self
+    ASSERT_THROWS(std::logic_error, data_channel->send(*int_tensor, rank))
+    ASSERT_THROWS(std::logic_error, data_channel->receive(*int_tensor, rank))
+  }
 
-    { // cannot send or receive to/from process with rank -1
-      ASSERT_THROWS(std::out_of_range, data_channel->send(*int_tensor, -1))
-      ASSERT_THROWS(std::out_of_range, data_channel->receive(*int_tensor, -1))
-    }
+  { // cannot send or receive to/from process with rank -1
+    ASSERT_THROWS(std::out_of_range, data_channel->send(*int_tensor, -1))
+    ASSERT_THROWS(std::out_of_range, data_channel->receive(*int_tensor, -1))
   }
 }
 
@@ -490,6 +518,10 @@ void test_process_not_in_group(std::shared_ptr<thd::DataChannel> data_channel) {
       std::logic_error,
       data_channel->broadcast(*int_tensor, 0, group)
     )
+
+    if (g_data_channel_type == "gloo") { 
+      return; // XXX: Gloo does not support scatter/gather/reduce
+    }
 
     ASSERT_THROWS(
       std::logic_error,
@@ -520,6 +552,15 @@ void test_tensors_do_not_match_group_size(std::shared_ptr<thd::DataChannel> data
   };
 
   if (data_channel->getRank() == 1 || data_channel->getRank() == 2) {
+    ASSERT_THROWS(
+      std::logic_error,
+      data_channel->allGather(raw_tensors, *int_tensor, group)
+    )
+    
+    if (g_data_channel_type == "gloo") {
+      return; // XXX: Gloo does not support scatter/gather
+    }
+
     if (data_channel->getRank() == 1) {
       ASSERT_THROWS(
         std::logic_error,
@@ -531,11 +572,6 @@ void test_tensors_do_not_match_group_size(std::shared_ptr<thd::DataChannel> data
         data_channel->gather(raw_tensors, *int_tensor, 1, group)
       )
     }
-
-    ASSERT_THROWS(
-      std::logic_error,
-      data_channel->allGather(raw_tensors, *int_tensor, group)
-    )
   }
 }
 
@@ -553,6 +589,15 @@ void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channe
   };
 
   if (data_channel->getRank() == 1 || data_channel->getRank() == 2) {
+    ASSERT_THROWS(
+      std::logic_error,
+      data_channel->allGather(raw_tensors, *int_tensor, group)
+    )
+    
+    if (g_data_channel_type == "gloo") {
+      return; // XXX: Gloo does not support scatter/gather
+    }
+
     if (data_channel->getRank() == 1) {
       ASSERT_THROWS(
         std::logic_error,
@@ -564,11 +609,6 @@ void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channe
         data_channel->gather(raw_tensors, *int_tensor, 1, group)
       )
     }
-
-    ASSERT_THROWS(
-      std::logic_error,
-      data_channel->allGather(raw_tensors, *int_tensor, group)
-    )
   }
 }
 
@@ -645,11 +685,7 @@ void init_gloo_master(int workers) {
 
   assert(masterChannel->init());
   run_all_tests(masterChannel, workers);
-
-  // wait for all workers to finish
-  for (auto& worker : g_all_workers) {
-    worker.join();
-  }
+  g_barrier->wait();
 }
 
 void init_gloo_worker(unsigned int id, int workers) {
@@ -661,6 +697,7 @@ void init_gloo_worker(unsigned int id, int workers) {
 
   assert(worker_channel->init());
   run_all_tests(worker_channel, workers);
+  g_barrier->wait();
 }
 #endif // WITH_GLOO
 
@@ -694,10 +731,12 @@ int main(int argc, char const *argv[]) {
       g_all_workers.clear();
 
       std::cout << "TCP - OK" << std::endl;
+    }
 
 #ifdef WITH_GLOO
     g_data_channel_type = "gloo";
     for (auto workers : WORKERS_NUM) {
+      g_barrier.reset(new Barrier(workers + 1));
       std::cout << "Gloo (workers: " << workers << "):" << std::endl;
       // start gloo master
       std::thread gloo_master_thread(init_gloo_master, workers);
@@ -707,12 +746,18 @@ int main(int argc, char const *argv[]) {
         g_all_workers.push_back(std::thread(init_gloo_worker, id, workers));
       }
 
+      // wait for all workers to finish
+      for (auto& worker : g_all_workers) {
+        worker.join();
+      }
+      
       gloo_master_thread.join();
       g_all_workers.clear();
 
       std::cout << "Gloo - OK" << std::endl;
-#endif // WITH_GLOO
     }
+#endif // WITH_GLOO
+
 #ifdef WITH_MPI
     std::cout << "--------------------------" << std::endl;
 

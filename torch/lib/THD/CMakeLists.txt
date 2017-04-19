@@ -86,6 +86,7 @@ ENDIF()
 IF(NOT GLOO_FOUND)
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelGloo.cpp")
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/Store.cpp")
+  LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_store.cpp")
 ENDIF()
 
 EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
@@ -127,7 +128,7 @@ ENDIF()
 
 IF(GLOO_FOUND)
   INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
-  TARGET_LINK_LIBRARIES(THD PRIVATE ${GLOO_LIBARIES})
+  TARGET_LINK_LIBRARIES(THD PRIVATE ${GLOO_LIBRARIES})
 ENDIF()
 
 # Test executables

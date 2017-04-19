@@ -32,14 +32,15 @@ struct hash<std::tuple<::thd::DataOperation, THDGroup>> {
 };
 
 template<>
-struct hash<std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t, THDReduceOp>> {
-  std::size_t operator()(const std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t, THDReduceOp>& k) const {
+struct hash<std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t, THDReduceOp, thd::rank_type>> {
+  std::size_t operator()(const std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t, THDReduceOp, thd::rank_type>& k) const {
     return (
       hash<::thd::DataOperation>()(std::get<0>(k)) ^
       hash<THDGroup>()(std::get<1>(k)) ^
       hash<std::size_t>()(std::get<2>(k)) ^
       hash<std::size_t>()(std::get<3>(k)) ^
-      hash<THDReduceOp>()(std::get<4>(k))
+      hash<THDReduceOp>()(std::get<4>(k)) ^
+      hash<thd::rank_type>()(std::get<5>(k))
     );
   }
 };
@@ -48,8 +49,10 @@ struct hash<std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t,
 
 namespace thd {
 
+struct GlooCache;
+
 struct DataChannelGloo : DataChannel {
-  using store_type = ::gloo::rendezvous::PrefixStore;
+  using store_type = ::gloo::rendezvous::Store;
 
 
   struct RequestGloo : DataChannel::Request {
@@ -109,19 +112,15 @@ private:
   void broadcastT(thpp::Tensor& data, rank_type src_rank,
                   THDGroup group_id = THDGroupWORLD);
 
-  template<DataOperation op, typename... Args>
-  store_type getStore(THDGroup group_id, Args... args);
-
-  void _send(const Scalar& data, rank_type dst_id);
-  void _send(thpp::Tensor& data, rank_type dst_id);
-  void _receive(Scalar& data, rank_type src_id);
-  void _receive(thpp::Tensor& data, rank_type src_id);
-
   rank_type _rank; // Current process' rank
+  std::string _addr;
+  port_type _port;
   rank_type _num_processes; // Number of processes in network
-  std::unique_ptr<::gloo::rendezvous::Store> _store;
+  std::shared_ptr<store_type> _store;
   std::shared_ptr<::gloo::transport::Device> _device;
   std::unordered_map<THDGroup, DataChannel::Group> _groups;
+  
+  std::unique_ptr<GlooCache> _cache;
 
   // Workers
   QueueWorker _send_worker, _receive_worker;
@@ -135,13 +134,15 @@ struct GlooCache {
   using buffer_type = char;
   using algorithm_type = ::gloo::Algorithm;
   using context_type = ::gloo::rendezvous::Context;
+  using store_type = ::gloo::rendezvous::PrefixStore;
 
   using key_type = std::tuple<
     DataOperation, // operation
     THDGroup,      // group
     std::size_t,   // input buffer bytes
     std::size_t,   // output buffer bytes
-    THDReduceOp    // reduce op
+    THDReduceOp,   // reduce op
+    rank_type      // src/dest rank
   >;
   using value_type = std::tuple<
     std::shared_ptr<algorithm_type>, // algorithm
@@ -149,68 +150,57 @@ struct GlooCache {
     std::shared_ptr<buffer_type>     // output buffer (nullptr if not used)
   >;
 
+  GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device,
+            std::shared_ptr<DataChannelGloo::store_type> store)
+   : _rank(rank)
+   , _device(device)
+   , _store(store)
+  {}
+
   GlooCache(GlooCache const&)      = delete;
   void operator=(GlooCache const&) = delete;
 
-  // singleton instance
-  static GlooCache& get() {
-    static GlooCache instance;
-    return instance;
-  }
-
-  // TODO: enforce setters to be the first thing called (maybe some kind of factory)
-  void setRank(rank_type rank) {
-    _rank = rank;
-  }
-
-  void setDevice(std::shared_ptr<::gloo::transport::Device> device) {
-    _device = device;
-  }
-
   std::shared_ptr<context_type> createContext(
     const DataChannel::Group& group,
-    DataChannelGloo::store_type& store
+    store_type& store
   ) {
     auto context = std::make_shared<context_type>(group.mustGetGroupRank(_rank), group.size());
     context->connectFullMesh(store, _device);
     return context;
   }
 
-  template<DataOperation op>
-  std::shared_ptr<context_type> getSharedContext(
-    const DataChannel::Group& group,
-    DataChannelGloo::store_type&& store
-  ) {
-    if (_shared_contexts.find(op) == _shared_contexts.end()) {
-      _shared_contexts[op] = createContext(group, store);
-    }
-
-    return _shared_contexts[op];
-  }
-
-  std::shared_ptr<buffer_type> createBuffer(std::size_t bytes) {
+  std::shared_ptr<buffer_type> createBuffer(std::size_t bytes) const {
     return std::shared_ptr<buffer_type>(new char[bytes],
                                         std::default_delete<char[]>());
   }
 
   template<DataOperation D, typename T, typename... Args>
   value_type getAlgorithm(THDGroup group_id, const DataChannel::Group& group,
-                          DataChannelGloo::store_type&& store, Args... args) {
+                          Args... args) {
     auto key = algorithm_spec<D, T>::key(group_id, args...);
     if (_algorithms.find(key) == _algorithms.end()) {
-      _algorithms[key] = algorithm_spec<D, T>::create(group, store, args...);
+      // create prefix store with unique prefix
+      store_type prefix_store(print_key(key), *_store);
+      _algorithms[key] = algorithm_spec<D, T>::create(*this, group, prefix_store, args...);
     }
 
     return _algorithms[key];
   }
 
 private:
-  GlooCache() {}
+  std::string print_key(const key_type& k) { // TODO: define aka `to_string` for tuples instead of this function
+    return std::to_string(static_cast<uint8_t>(std::get<0>(k))) + "-"
+      + std::to_string(std::get<1>(k)) + "-"
+      + std::to_string(std::get<2>(k)) + "-"
+      + std::to_string(std::get<3>(k)) + "-"
+      + std::to_string(std::get<4>(k)) + "-"
+      + std::to_string(std::get<5>(k));
+  }
 
   rank_type _rank;
   std::shared_ptr<::gloo::transport::Device> _device;
+  std::shared_ptr<DataChannelGloo::store_type> _store;
 
-  std::unordered_map<DataOperation, std::shared_ptr<context_type>> _shared_contexts;
   std::unordered_map<key_type, value_type> _algorithms;
 };
 
@@ -237,14 +227,13 @@ struct algorithm_spec<DataOperation::ALL_GATHER, T> {
     std::size_t unused_count
   ) {
     return std::make_tuple(DataOperation::ALL_GATHER, group_id,
-                           input_bytes, output_bytes, THDReduceMIN);
+                           input_bytes, output_bytes, THDReduceMIN, 0);
   }
 
-  static GlooCache::value_type create(
-    const DataChannel::Group& group, DataChannelGloo::store_type& store,
+  static GlooCache::value_type create(GlooCache& cache,
+    const DataChannel::Group& group, GlooCache::store_type& store,
     std::size_t input_bytes, std::size_t output_bytes, std::size_t count
   ) {
-    auto& cache = GlooCache::get();
     auto context = cache.createContext(group, store);
     auto input_buffer = cache.createBuffer(input_bytes);
     auto output_buffer = cache.createBuffer(output_bytes);
@@ -268,21 +257,21 @@ struct algorithm_spec<DataOperation::ALL_REDUCE, T> {
     std::size_t unused_count, THDReduceOp op
   ) {
     return std::make_tuple(DataOperation::ALL_REDUCE, group_id,
-                           input_bytes, input_bytes, op);
+                           input_bytes, input_bytes, op, 0);
   }
 
-  static GlooCache::value_type create(
-    const DataChannel::Group& group, DataChannelGloo::store_type& store,
+  static GlooCache::value_type create(GlooCache& cache, 
+    const DataChannel::Group& group, GlooCache::store_type& store,
     std::size_t input_bytes, std::size_t count, THDReduceOp op
   ) {
-    auto& cache = GlooCache::get();
     auto context = cache.createContext(group, store);
     auto input_buffer = cache.createBuffer(input_bytes);
     return std::make_tuple(
       std::make_shared<::gloo::AllreduceRing<T>>(
         context,
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
-        count, THDToGlooReduceOp<T>(op)),
+        count,
+        THDToGlooReduceOp<T>(op)),
       input_buffer,
       input_buffer // we get the result in same buffer
     );
@@ -293,24 +282,24 @@ template<typename T>
 struct algorithm_spec<DataOperation::BROADCAST, T> {
   static GlooCache::key_type key(
     THDGroup group_id, std::size_t input_bytes,
-    std::size_t unused_count, rank_type unused_src_rank
+    std::size_t unused_count, rank_type src_rank
   ) {
     return std::make_tuple(DataOperation::BROADCAST, group_id,
-                           input_bytes, input_bytes, THDReduceMIN);
+                           input_bytes, input_bytes, THDReduceMIN, src_rank);
   }
 
-  static GlooCache::value_type create(
-    const DataChannel::Group& group, DataChannelGloo::store_type& store,
+  static GlooCache::value_type create(GlooCache& cache,
+    const DataChannel::Group& group, GlooCache::store_type& store,
     std::size_t input_bytes, std::size_t count, rank_type src_rank
   ) {
-    auto& cache = GlooCache::get();
     auto context = cache.createContext(group, store);
     auto input_buffer = cache.createBuffer(input_bytes);
     return std::make_tuple(
       std::make_shared<::gloo::BroadcastOneToAll<T>>(
         context,
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
-        count, src_rank),
+        count,
+        src_rank),
       input_buffer,
       input_buffer // we get the result in same buffer
     );
@@ -320,14 +309,13 @@ struct algorithm_spec<DataOperation::BROADCAST, T> {
 template<typename T> // unused
 struct algorithm_spec<DataOperation::BARRIER, T> {
   static GlooCache::key_type key(THDGroup group_id) {
-    return std::make_tuple(DataOperation::BARRIER, group_id, 0, 0, THDReduceMIN);
+    return std::make_tuple(DataOperation::BARRIER, group_id, 0, 0, THDReduceMIN, 0);
   }
 
-  static GlooCache::value_type create(
-    const DataChannel::Group& group,
-    DataChannelGloo::store_type& store
+  static GlooCache::value_type create(GlooCache& cache,
+    const DataChannel::Group& group, GlooCache::store_type& store
   ) {
-    auto context = GlooCache::get().createContext(group, store);
+    auto context = cache.createContext(group, store);
     return std::make_tuple(
       std::make_shared<::gloo::BarrierAllToAll>(context),
       nullptr,
