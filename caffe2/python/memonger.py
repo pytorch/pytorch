@@ -312,8 +312,8 @@ def _sort_tree_leaves(g, root):
 
 def topological_sort_traversal_longest_path(g):
     ''' The graph 'g' may contain several source nodes (nodes without incoming
-        edge), which could have be in any order and still being a valid
-        topoligical sorting result. We would like to arrange these source nodes
+        edge), which could be in any order and still be a valid
+        topological sorting result. We would like to arrange these source nodes
         so that the average live spans of the computed blobs are shorter.
         The idea is to sort the source nodes based on the length of their path to
         the target node so that the one with longer path is used first.
@@ -591,7 +591,7 @@ def compute_assignments(ranges, static_blobs, algo):
     '''
     algo: Method used to find assignments (AssignmentAlgorithm.GREEDY or
           AssignmentAlgorithm.DYNAMIC_PROGRAMMING).
-          AssignmentAlgorithm.DYNAMIC_PROGRAMMING gives optimal soultion at the
+          AssignmentAlgorithm.DYNAMIC_PROGRAMMING gives optimal solution at the
           cost of more computation.
           AssignmentAlgorithm.GREEDY may be better in the case 'blob_sizes' is
           not provided.
@@ -708,7 +708,7 @@ def optimize_interference(net, static_blobs,
                        results but needs a bit more computation.
     algo: Method used to find assignments (AssignmentAlgorithm.GREEDY or
           AssignmentAlgorithm.DYNAMIC_PROGRAMMING).
-          AssignmentAlgorithm.DYNAMIC_PROGRAMMING gives optimal soultion at the
+          AssignmentAlgorithm.DYNAMIC_PROGRAMMING gives optimal solution at the
           cost of more computation.
           AssignmentAlgorithm.GREEDY may be better in the case 'blob_sizes' is
           not provided.
@@ -764,7 +764,7 @@ def compute_statistics(assignments):
 
 
 def collect_blob_sizes(net):
-    ''' College blob sizes from worksapce '''
+    ''' Collect blob sizes from workspace '''
     def blob_nbytes(blob):
         return workspace.FetchBlob(blob).nbytes
 
