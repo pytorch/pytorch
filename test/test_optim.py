@@ -97,6 +97,8 @@ class TestOptim(TestCase):
             optimizer_c.step(functools.partial(eval, params_c, False, w))
             self.assertEqual(params.data, params_c.data)
 
+        optimizer.flush()
+
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
     def _test_basic_cases_template(self, weight, bias, input, constructor):
@@ -155,6 +157,7 @@ class TestOptim(TestCase):
         self.assertEqual(state_dict, state_dict_c)
 
     def _test_basic_cases(self, constructor, ignore_multidevice=False):
+        # test saving/loading of state dict
         self._test_state_dict(
             torch.randn(10, 5),
             torch.randn(10),
@@ -214,6 +217,14 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.SGD(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
+        )
+
+    def test_sgd_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=1e-3)
+        )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=1e-3, weight_decay=1e-4)
         )
 
     def test_adam(self):

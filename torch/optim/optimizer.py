@@ -144,3 +144,9 @@ class Optimizer(object):
                 returns the loss. Optional for most optimizers.
         """
         raise NotImplementedError
+
+    def flush(self):
+        """Flush any pending updates to the parameters.  You should
+        call this at the end of optimization over sparse tensors.
+        """
+        pass
