@@ -58,6 +58,8 @@ void THNN_(TemporalConvolution_updateOutput)(
     dimF = 2;
   }
 
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
   THNN_(TemporalConvolution_shapeCheck)
        (state, input, kW, dW, &inputFrameSize);
   input = THTensor_(newContiguous)(input);
@@ -187,6 +189,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
     dimF = 2;
   }
 
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
   THNN_(TemporalConvolution_shapeCheck)(
         state, input, kW, dW, NULL);
   nInputFrame = input->size[dimS];

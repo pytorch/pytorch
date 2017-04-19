@@ -53,6 +53,19 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
   }
 }
 
+static THTensor* THNN_(view_weight_MM2d)(THTensor *weight) {
+  weight = THTensor_(newContiguous)(weight);
+  if (weight->nDimension == 4) {
+    long s1 = weight->size[0];
+    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
+    THTensor *old_weight = weight;
+    weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset,
+					 s1, -1, s2, -1);
+	THTensor_(free)(old_weight);
+  }
+  return weight;
+}
+
 static void THNN_(SpatialConvolutionMM_updateOutput_frame)(
           THTensor *input,
           THTensor *output,
@@ -111,15 +124,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
           int padW,
           int padH)
 {
-  int freeWeight = 0;
-
-  if (weight->nDimension == 4) {
-    long s1 = weight->size[0];
-    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset,
-					 s1, -1, s2, -1);
-    freeWeight = 1;
-  }
+  weight = THNN_(view_weight_MM2d)(weight);
 
   THNN_(SpatialConvolutionMM_shapeCheck)
     (input, NULL, weight, bias, kH, kW, dH, dW, padH, padW);
@@ -182,8 +187,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   }
 
   THTensor_(free)(input);
-  if (freeWeight)
-    THTensor_(free)(weight);
+  THTensor_(free)(weight);
 }
 
 static void THNN_(SpatialConvolutionMM_updateGradInput_frame)(
@@ -228,15 +232,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
           int padW,
           int padH)
 {
-  int freeWeight = 0;
-
-  if (weight->nDimension == 4) {
-    long s1 = weight->size[0];
-    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset,
-					 s1, -1, s2, -1);
-    freeWeight = 1;
-  }
+  weight = THNN_(view_weight_MM2d)(weight);
 
   THNN_(SpatialConvolutionMM_shapeCheck)
     (input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW);
@@ -285,8 +281,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   THTensor_(free)(tweight);
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
-  if (freeWeight)
-    THTensor_(free)(weight);
+  THTensor_(free)(weight);
 }
 
 static void THNN_(SpatialConvolutionMM_accGradParameters_frame)(
@@ -338,17 +333,11 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           int padH,
           accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-  int freeWeight = 0;
+  THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
+  THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
 
-  if (gradWeight->nDimension == 4) {
-    long s1 = gradWeight->size[0];
-    long s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
-    gradWeight = THTensor_(newWithStorage2d)(gradWeight->storage,
-					     gradWeight->storageOffset,
-					     s1, -1, s2, -1);
-    freeWeight = 1;
-  }
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  gradWeight = THNN_(view_weight_MM2d)(gradWeight);
 
   THNN_(SpatialConvolutionMM_shapeCheck)
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW);
@@ -381,8 +370,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
-  if (freeWeight)
-    THTensor_(free)(gradWeight);
+  THTensor_(free)(gradWeight);
 }
 
 #endif

@@ -20,6 +20,8 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
   THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 15,
              "dilation should be greater than zero, but got dilationT: %d, dilationH: %d, dilationW: %d",
              dilationT, dilationH, dilationW);
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
   if (bias != NULL) {
     THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);
   }

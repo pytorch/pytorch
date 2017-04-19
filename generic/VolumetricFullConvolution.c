@@ -172,6 +172,8 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   const int kW           = (int)weight->size[4];
 
   input = THTensor_(newContiguous)(input);
+  weight = THTensor_(newContiguous)(weight);
+  bias = bias ? THTensor_(newContiguous)(bias) : bias;
   int batch = 1;
   if (input->nDimension == 4)
   {
@@ -280,6 +282,8 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   }
 
   THTensor_(free)(input);
+  THTensor_(free)(weight);
+  if (bias) THTensor_(free)(bias);
 }
 
 void THNN_(VolumetricFullConvolution_updateGradInput)(
@@ -308,6 +312,7 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
   const int kW           = (int)weight->size[4];
 
   input = THTensor_(newContiguous)(input);
+  weight = THTensor_(newContiguous)(weight);
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
   int batch = 1;
@@ -391,6 +396,7 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
 
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
+  THTensor_(free)(weight);
 }
 
 void THNN_(VolumetricFullConvolution_accGradParameters)(
@@ -423,6 +429,8 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
+  THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
+  THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
 
   int batch = 1;
   if (input->nDimension == 4)

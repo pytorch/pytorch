@@ -131,6 +131,8 @@ void THNN_(SpatialFullConvolution_updateOutput)(
   int nOutputPlane = THTensor_(size)(weight,1);
 
   input = THTensor_(newContiguous)(input);
+  weight = THTensor_(newContiguous)(weight);
+  bias = bias ? THTensor_(newContiguous)(bias) : bias;
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -230,6 +232,8 @@ void THNN_(SpatialFullConvolution_updateOutput)(
   }
 
   THTensor_(free)(input);
+  THTensor_(free)(weight);
+  if (bias) THTensor_(free)(bias);
 }
 
 void THNN_(SpatialFullConvolution_updateGradInput)(
@@ -252,6 +256,7 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
+  weight = THTensor_(newContiguous)(weight);
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -327,6 +332,7 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
 
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
+  THTensor_(free)(weight);
 }
 
 
@@ -353,6 +359,8 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
+  THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
+  THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
