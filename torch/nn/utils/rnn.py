@@ -89,7 +89,7 @@ def pad_packed_sequence(sequence, batch_first=False):
     It is an inverse operation to :func:`pack_padded_sequence`.
 
     The returned Variable's data will be of size TxBx*, where T is the length
-    of the longest sequence and B is the batch size. If ``batch_size`` is True,
+    of the longest sequence and B is the batch size. If ``batch_first`` is True,
     the data will be transposed into BxTx* format.
 
     Batch elements will be ordered decreasingly by their length.
