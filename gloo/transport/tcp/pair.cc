@@ -344,7 +344,7 @@ bool Pair::read(Op& op) {
         if (errno == EAGAIN) {
           if (sync_) {
             auto hasTimedOut = [&]{
-              return (timeout_ != Device::kNoTimeout) &&
+              return (timeout_ != kNoTimeout) &&
                 ((std::chrono::steady_clock::now() - start) >= timeout_);
             };
             if (busyPoll_ && !hasTimedOut()) {
@@ -611,7 +611,7 @@ void Pair::waitUntilConnected(
     checkErrorState();
     return state_ >= CONNECTED;
   };
-  auto timeoutSet = timeout_ != Device::kNoTimeout;
+  auto timeoutSet = timeout_ != kNoTimeout;
   if (useTimeout && timeoutSet) {
     auto done = cv_.wait_for(lock, timeout_, pred);
     if (!done) {

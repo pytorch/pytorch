@@ -18,12 +18,12 @@
 #include <unistd.h>
 
 #include <array>
-#include <chrono>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <thread>
 
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 
 namespace gloo {
@@ -128,10 +128,19 @@ bool FileStore::check(const std::vector<std::string>& keys) {
   return true;
 }
 
-void FileStore::wait(const std::vector<std::string>& keys) {
+void FileStore::wait(
+    const std::vector<std::string>& keys,
+    const std::chrono::milliseconds& timeout) {
   // Not using inotify because it doesn't work on many
   // shared filesystems (such as NFS).
+  const auto start = std::chrono::steady_clock::now();
   while (!check(keys)) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start);
+    if (timeout != kNoTimeout && elapsed > timeout) {
+      GLOO_THROW_IO_EXCEPTION(GLOO_ERROR_MSG(
+          "Wait timeout for key(s): ", ::gloo::MakeString(keys)));
+    }
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }

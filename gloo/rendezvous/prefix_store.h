@@ -27,7 +27,13 @@ class PrefixStore : public Store {
 
   virtual std::vector<char> get(const std::string& key) override;
 
-  virtual void wait(const std::vector<std::string>& keys) override;
+  virtual void wait(const std::vector<std::string>& keys) override {
+    wait(keys, Store::kDefaultTimeout);
+  }
+
+  virtual void wait(
+      const std::vector<std::string>& keys,
+      const std::chrono::milliseconds& timeout) override;
 
  protected:
   const std::string prefix_;

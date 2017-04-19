@@ -9,6 +9,7 @@
 
 #include "gloo/rendezvous/hash_store.h"
 
+#include "gloo/common/error.h"
 #include "gloo/common/logging.h"
 
 namespace gloo {
@@ -31,22 +32,29 @@ std::vector<char> HashStore::get(const std::string& key) {
   return it->second;
 }
 
-void HashStore::wait(const std::vector<std::string>& keys) {
-  std::unique_lock<std::mutex> lock(m_);
-  for (;;) {
-    auto wait = false;
+void HashStore::wait(
+    const std::vector<std::string>& keys,
+    const std::chrono::milliseconds& timeout) {
+  const auto end = std::chrono::steady_clock::now() + timeout;
+  auto pred = [&](){
+    auto done = true;
     for (const auto& key : keys) {
       if (map_.find(key) == map_.end()) {
-        wait = true;
+        done = false;
         break;
       }
     }
+    return done;
+  };
 
-    if (!wait) {
-      return;
+  std::unique_lock<std::mutex> lock(m_);
+  if (timeout == kNoTimeout) {
+    cv_.wait(lock, pred);
+  } else {
+    if (!cv_.wait_until(lock, end, pred)) {
+      GLOO_THROW_IO_EXCEPTION(GLOO_ERROR_MSG(
+          "Wait timeout for key(s): ", ::gloo::MakeString(keys)));
     }
-
-    cv_.wait(lock);
   }
 }
 

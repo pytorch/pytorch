@@ -33,13 +33,15 @@ std::vector<char> PrefixStore::get(const std::string& key) {
   return store_.get(joinKey(key));
 }
 
-void PrefixStore::wait(const std::vector<std::string>& keys) {
+void PrefixStore::wait(
+    const std::vector<std::string>& keys,
+    const std::chrono::milliseconds& timeout) {
   std::vector<std::string> joinedKeys;
   joinedKeys.reserve(keys.size());
   for (const auto& key : keys) {
     joinedKeys.push_back(joinKey(key));
   }
-  store_.wait(joinedKeys);
+  store_.wait(joinedKeys, timeout);
 }
 
 } // namespace rendezvous

@@ -9,21 +9,35 @@
 
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <vector>
+
+#include "gloo/common/logging.h"
 
 namespace gloo {
 namespace rendezvous {
 
 class Store {
  public:
+  static constexpr std::chrono::milliseconds kDefaultTimeout =
+      std::chrono::seconds(30);
+
   virtual ~Store();
 
   virtual void set(const std::string& key, const std::vector<char>& data) = 0;
 
   virtual std::vector<char> get(const std::string& key) = 0;
 
-  virtual void wait(const std::vector<std::string>& keys) = 0;
+  virtual void wait(
+      const std::vector<std::string>& keys) = 0;
+
+  virtual void wait(
+      const std::vector<std::string>& /*keys*/,
+      const std::chrono::milliseconds& /*timeout*/) {
+    GLOO_ENFORCE(false, "Store::wait() does not support timeout");
+  }
+
 };
 
 } // namespace rendezvous

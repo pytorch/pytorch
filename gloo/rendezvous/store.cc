@@ -12,6 +12,8 @@
 namespace gloo {
 namespace rendezvous {
 
+constexpr std::chrono::milliseconds Store::kDefaultTimeout;
+
 // Have to provide implementation for pure virtual destructor.
 Store::~Store() {}
 

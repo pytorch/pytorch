@@ -65,7 +65,6 @@ class Device : public ::gloo::transport::Device,
  protected:
   void loop();
 
-  static const std::chrono::milliseconds kNoTimeout;
   std::chrono::milliseconds getTimeout();
   void registerDescriptor(int fd, int events, Pair* p);
   void unregisterDescriptor(int fd);

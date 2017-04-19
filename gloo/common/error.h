@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <exception>
 
 #include "gloo/common/string.h"
@@ -17,6 +18,8 @@
   ::gloo::MakeString("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__)
 
 namespace gloo {
+
+const std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds::zero();
 
 // A base class for all gloo runtime errors
 struct Exception : public std::runtime_error {

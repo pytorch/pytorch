@@ -28,8 +28,6 @@ namespace transport {
 namespace tcp {
 
 static const std::chrono::seconds kTimeoutDefault = std::chrono::seconds(30);
-const std::chrono::milliseconds Device::kNoTimeout =
-    std::chrono::milliseconds::zero();
 
 std::shared_ptr<transport::Device> CreateDevice(const struct attr& src) {
   struct attr attr = src;

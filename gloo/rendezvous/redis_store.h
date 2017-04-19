@@ -35,7 +35,13 @@ class RedisStore : public Store {
 
   bool check(const std::vector<std::string>& keys);
 
-  virtual void wait(const std::vector<std::string>& keys) override;
+  virtual void wait(const std::vector<std::string>& keys) override {
+    wait(keys, Store::kDefaultTimeout);
+  }
+
+  virtual void wait(
+      const std::vector<std::string>& keys,
+      const std::chrono::milliseconds& timeout) override;
 
  protected:
   redisContext* redis_;

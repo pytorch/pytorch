@@ -56,7 +56,7 @@ void Buffer::waitRecv() {
       return recvCompletions_ > 0;
     };
     std::unique_lock<std::mutex> lock(m_);
-    if (timeout == Device::kNoTimeout) {
+    if (timeout == kNoTimeout) {
       // No timeout set. Wait for read to complete.
       recvCv_.wait(lock, pred);
     } else {
@@ -97,7 +97,7 @@ void Buffer::waitSend() {
       return sendCompletions_ > 0;
     };
     std::unique_lock<std::mutex> lock(m_);
-    if (timeout == Device::kNoTimeout) {
+    if (timeout == kNoTimeout) {
       // No timeout set. Wait for write to complete.
       sendCv_.wait(lock, pred);
     } else {
