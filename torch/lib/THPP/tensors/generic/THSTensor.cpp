@@ -40,7 +40,7 @@ auto THSTensor<real>::clone_shallow() -> THSTensor* {
 
 template<>
 auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
-  return std::unique_ptr<Tensor>(new THSTensor(THSTensor_(newContiguous)(tensor)));
+  throw std::runtime_error("THCSTensor::rawStrides() not supported");
 }
 
 template<>

@@ -67,7 +67,7 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   THArgCheck(THCTensor_(size)(state, dense, 0) == k, 3,
       "Expected dim 0 size %d, got %d", k, THCTensor_(size)(state, dense, 0));
 
-  THCSTensor_(contiguous)(state, sparse);
+  THCSTensor_(coalesce)(state, sparse);
 
   long nnz = THCSTensor_(nnz)(state, sparse);
   indices = THCSTensor_(newIndices)(state, sparse);
@@ -182,7 +182,7 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
   long size[2] = {m, n};
   THCSTensor_(rawResize)(state, r_, 1, 1, size);
 
-  THCSTensor_(contiguous)(state, sparse);
+  THCSTensor_(coalesce)(state, sparse);
 
   long nnz = THCSTensor_(nnz)(state, sparse);
   THCIndexTensor *indices = THCIndexTensor_(newWithSize2d)(state, 1, nnz);
@@ -213,7 +213,7 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
 void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real value, THCSTensor *sparse) {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
   THCTensor_(resizeAs)(state, r_, dense);
-  THCSTensor_(contiguous)(state, sparse);
+  THCSTensor_(coalesce)(state, sparse);
 
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, sparse);
   THCTensor *values = THCSTensor_(newValues)(state, sparse);
@@ -274,7 +274,7 @@ void THCSTensor_(mul)(THCState *state, THCSTensor *r_, THCSTensor *t, real value
     THCIndexTensor_(copy)(state, r_indices_, t_indices_);
     THCTensor_(mul)(state, r_values_, t_values_, value);
     r_->nnz = t->nnz;
-    r_->contiguous = t->contiguous;
+    r_->coalesced = t->coalesced;
 
     THCIndexTensor_(free)(state, r_indices_);
     THCTensor_(free)(state, r_values_);
@@ -300,7 +300,7 @@ void THCSTensor_(div)(THCState *state, THCSTensor *r_, THCSTensor *t, real value
     THCIndexTensor_(copy)(state, r_indices_, t_indices_);
     THCTensor_(div)(state, r_values_, t_values_, value);
     r_->nnz = t->nnz;
-    r_->contiguous = t->contiguous;
+    r_->coalesced = t->coalesced;
 
     THCIndexTensor_(free)(state, r_indices_);
     THCTensor_(free)(state, r_values_);
@@ -314,8 +314,8 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   if(!THCSTensor_(isSameSizeAs)(state, t, src)) {
     THError("cadd operands have incompatible sizes or dimension types");
   }
-  THCSTensor_(contiguous)(state, t);
-  THCSTensor_(contiguous)(state, src);
+  THCSTensor_(coalesce)(state, t);
+  THCSTensor_(coalesce)(state, src);
 
   if (src->nnz == 0) {
     THCSTensor_(copy)(state, r_, t);
@@ -328,7 +328,7 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
 
   // We deliberately choose to simply concat the indices and values tensors
   // rather than merging them. This removes the need to synchronously fetch nnz
-  // at the end of the operation, at the cost of having a non-contiguous result.
+  // at the end of the operation, at the cost of having a non-coalesced result.
   // This trade-off is preferable for the common use-case of gradient accumulation.
   // TODO have two distinct functions? The other option is commented out below
   THCIndexTensor *t_indices_ = THCSTensor_(newIndices)(state, t);
@@ -392,7 +392,7 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   // unsigned long nnzOut;
   // THCudaCheck(cudaMemcpy(&nnzOut, scratchSpace, sizeof(unsigned long), cudaMemcpyDeviceToHost));
   // r_->nnz = nnzOut;
-  // r_->contiguous = 1;
+  // r_->coalesced = 1;
   // if (freeScratchSpace) {
   //   THCudaCheck(THCudaFree(state, scratchSpace));
   // }
@@ -412,8 +412,8 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t, THCSTenso
   if(!THCSTensor_(isSameSizeAs)(state, t, src)) {
     THError("cmul operands have incompatible sizes or dimension types");
   }
-  THCSTensor_(contiguous)(state, t);
-  THCSTensor_(contiguous)(state, src);
+  THCSTensor_(coalesce)(state, t);
+  THCSTensor_(coalesce)(state, src);
 
   if (t->nnz == 0 || src->nnz == 0) {
     THCSTensor_(zero)(state, r_);
@@ -455,7 +455,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t, THCSTenso
   THCudaCheck(cudaGetLastError());
   r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);
-  r_->contiguous = 1;
+  r_->coalesced = 1;
 
   THCIndexTensor_(free)(state, t_indices_);
   THCTensor_(free)(state, t_values_);

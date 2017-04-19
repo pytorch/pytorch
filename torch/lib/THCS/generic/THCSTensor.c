@@ -71,7 +71,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->values = THCTensor_(new)(state);
   self->nDimensionI = 0;
   self->nDimensionV = 0;
-  self->contiguous = 0;
+  self->coalesced = 0;
   self->nnz = 0;
   // self->flag = TH_TENSOR_REFCOUNTED;
   self->refcount = 1;
@@ -86,7 +86,7 @@ void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nD
   }
   self->nDimensionI = nDimI;
   self->nDimensionV = nDimV;
-  self->contiguous = 0;
+  self->coalesced = 0;
 }
 
 // directly assign without cloning or retaining (internal method)
@@ -110,7 +110,7 @@ THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor
   self->indices = indices;
   self->values = values;
   self->nnz = empty ? 0 : THCTensor_(size)(state, values, 0);
-  self->contiguous = 0;
+  self->coalesced = 0;
 
   return self;
 }
@@ -236,13 +236,7 @@ THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self) {
   THCSTensor_(_set)(state, other, self->indices, self->values);
 
   other->nnz = self->nnz;
-  other->contiguous = self->contiguous;
-  return other;
-}
-
-THCSTensor *THCSTensor_(newContiguous)(THCState *state, THCSTensor *self) {
-  THCSTensor *other = THCSTensor_(newClone)(state, self);
-  THCSTensor_(contiguous)(state, other);
+  other->coalesced = self->coalesced;
   return other;
 }
 
@@ -340,11 +334,11 @@ void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src) {
   THCSTensor_(rawResize)(state, self, src->nDimensionI, src->nDimensionV, src->size);
   THCSTensor_(_set)(state, self, src->indices, src->values);
   self->nnz = src->nnz;
-  self->contiguous = src->contiguous;
+  self->coalesced = src->coalesced;
 }
 
-int THCSTensor_(isContiguous)(THCState *state, const THCSTensor *self) {
-  return self->contiguous;
+int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self) {
+  return self->coalesced;
 }
 
 void THCSTensor_(free)(THCState *state, THCSTensor *self)
@@ -363,12 +357,6 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
 void THCSTensor_(retain)(THCState *state, THCSTensor *self)
 {
   THAtomicIncrementRef(&self->refcount);
-}
-
-void THCSTensor_(contiguous)(THCState *state, THCSTensor *self) {
-  if (self->contiguous) return;
-  THCSTensor_(reorder)(state, self);
-  self->contiguous = 1;
 }
 
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)
@@ -446,7 +434,7 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCTensor *rValues = THCTensor_(new)(state);
   THCTensor_(resizeAs)(state, rValues, maskValues);
   THCSTensor_(_move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
-  r_->contiguous = mask->contiguous;
+  r_->coalesced = mask->coalesced;
   r_->nnz = mask->nnz;
 
   THCudaLongTensor *indices = THCudaLongTensor_newWithSize1d(state, mask->nnz);

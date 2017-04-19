@@ -41,7 +41,7 @@ auto THCSTensor<real>::clone_shallow() -> THCSTensor* {
 
 template<>
 auto THCSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
-  return std::unique_ptr<Tensor>(new THCSTensor(state, THCSTensor_(newContiguous)(state, tensor)));
+  throw std::runtime_error("THCSTensor::contiguous() not supported");
 }
 
 template<>

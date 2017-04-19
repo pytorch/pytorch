@@ -71,7 +71,7 @@ static void THSTensor_(rawInit)(THSTensor *self)
   self->values = THTensor_(new)();
   self->nDimensionI = 0;
   self->nDimensionV = 0;
-  self->contiguous = 0;
+  self->coalesced = 0;
   self->nnz = 0;
   // self->flag = TH_TENSOR_REFCOUNTED;
 }
@@ -85,7 +85,7 @@ static void THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, long *s
   }
   self->nDimensionI = nDimI;
   self->nDimensionV = nDimV;
-  self->contiguous = 0;
+  self->coalesced = 0;
 }
 
 // directly assign without cloning or retaining (internal method)
@@ -109,7 +109,7 @@ THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *v
   self->indices = indices;
   self->values = values;
   self->nnz = empty ? 0 : THTensor_(size)(values, 0);
-  self->contiguous = 0;
+  self->coalesced = 0;
 
   return self;
 }
@@ -237,12 +237,6 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
   return other;
 }
 
-THSTensor *THSTensor_(newContiguous)(THSTensor *self) {
-  THSTensor *other = THSTensor_(newClone)(self);
-  THSTensor_(contiguous)(other);
-  return other;
-}
-
 THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
   THSTensor *other = THSTensor_(newClone)(self);
   THSTensor_(transpose)(other, d1, d2);
@@ -320,7 +314,7 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
   THLongTensor *indices_;
   long *indices;
 
-  THSTensor_(contiguous)(self);
+  THSTensor_(coalesce)(self);
 
   // set up the new tensor
   storage = THSTensor_(newSizeOf)(self);
@@ -368,7 +362,7 @@ void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
   THSTensor_(rawResize)(self, src->nDimensionI, src->nDimensionV, src->size);
   THSTensor_(_set)(self, src->indices, src->values);
   self->nnz = src->nnz;
-  self->contiguous = src->contiguous;
+  self->coalesced = src->coalesced;
 }
 
 // In place transpose
@@ -387,12 +381,12 @@ void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   i = self->size[d1];
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
-  self->contiguous = 0;
+  self->coalesced = 0;
   THLongTensor_free(indices);
 }
 
-int THSTensor_(isContiguous)(const THSTensor *self) {
-  return self->contiguous;
+int THSTensor_(isCoalesced)(const THSTensor *self) {
+  return self->coalesced;
 }
 
 /* Internal slice operations. Buffers can be reused across calls to avoid
@@ -439,7 +433,8 @@ THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, long nnz) {
   return new_values;
 }
 
-void THSTensor_(reorder)(THSTensor *self) {
+void THSTensor_(coalesce)(THSTensor *self) {
+  if (self->coalesced) return;
   if (self->nnz < 2) return;
   THLongTensor *indices_ = THSTensor_(newIndices)(self);
   THTensor *values_ = THSTensor_(newValues)(self);
@@ -491,7 +486,7 @@ void THSTensor_(reorder)(THSTensor *self) {
     prev = curr;
   }
   self->nnz = i + 1;
-
+  self->coalesced = 1;
   THLongTensor_free(indicesScalar);
   THLongTensor_free(indicesBuffer);
   THLongTensor_free(indicesPermutation);
@@ -499,12 +494,6 @@ void THSTensor_(reorder)(THSTensor *self) {
   THLongTensor_free(indices_);
   THTensor_(free)(values_);
   THTensor_(free)(contiguousValues);
-}
-
-void THSTensor_(contiguous)(THSTensor *self) {
-  if (self->contiguous) return;
-  THSTensor_(reorder)(self);
-  self->contiguous = 1;
 }
 
 void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
@@ -521,7 +510,7 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THTensor *r_values_ = THTensor_(new)();
   THTensor_(resizeAs)(r_values_, mask_values_);
   THSTensor_(_move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
-  r_->contiguous = mask->contiguous;
+  r_->coalesced = mask->coalesced;
   r_->nnz = mask->nnz;
 
   if (nDim > nDimI) {

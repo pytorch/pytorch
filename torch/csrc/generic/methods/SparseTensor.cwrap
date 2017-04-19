@@ -62,9 +62,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: isContiguous
+  name: isCoalesced
   sparse: yes
-  python_name: is_contiguous
+  python_name: is_coalesced
   return: bool
   arguments:
   - THSTensor* self
@@ -89,7 +89,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: contiguous
+  name: coalesce
+  python_name: coalesce_
   sparse: yes
   return: argument 0
   arguments:
