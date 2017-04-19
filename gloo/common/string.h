@@ -41,6 +41,18 @@ std::string MakeString(const Args&... args) {
   return std::string(ss.str());
 }
 
+template <typename T>
+std::string MakeString(const std::vector<T>& v, const std::string& delim=" ") {
+  std::stringstream ss;
+  for (auto it = v.begin(); it < v.end(); it++) {
+    if (it != v.begin()) {
+      MakeStringInternal(ss, delim);
+    }
+    MakeStringInternal(ss, *it);
+  }
+  return std::string(ss.str());
+}
+
 // Specializations for already-a-string types.
 template <>
 inline std::string MakeString(const std::string& str) {

@@ -14,9 +14,12 @@
 
 #include "gloo/common/error.h"
 #include "gloo/common/logging.h"
+#include "gloo/common/string.h"
 
 namespace gloo {
 namespace rendezvous {
+
+static const std::chrono::seconds kWaitTimeout = std::chrono::seconds(60);
 
 RedisStore::RedisStore(const std::string& host, int port) {
   struct timeval timeout = {.tv_sec = 2};
@@ -104,7 +107,14 @@ bool RedisStore::check(const std::vector<std::string>& keys) {
 void RedisStore::wait(const std::vector<std::string>& keys) {
   // Polling is fine for the typical rendezvous use case, as it is
   // only done at initialization time and  not at run time.
+  auto start = std::chrono::steady_clock::now();
   while (!check(keys)) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start);
+    if (elapsed > kWaitTimeout) {
+      GLOO_THROW_IO_EXCEPTION(GLOO_ERROR_MSG(
+          "Wait timeout for key(s): ", ::gloo::MakeString(keys)));
+    }
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
