@@ -345,16 +345,16 @@ class Variable(_C._VariableBase):
         return Negate.apply(self, True)
 
     def tanh(self):
-        return Tanh()(self)
+        return Tanh.apply(self, False)
 
     def tanh_(self):
-        return Tanh(True)(self)
+        return Tanh.apply(self, True)
 
     def sigmoid(self):
-        return Sigmoid()(self)
+        return Sigmoid.apply(self, False)
 
     def sigmoid_(self):
-        return Sigmoid(True)(self)
+        return Sigmoid.apply(self, True)
 
     def sin(self):
         return Sin()(self)
@@ -381,7 +381,7 @@ class Variable(_C._VariableBase):
         return Cosh()(self)
 
     def abs(self):
-        return Abs()(self)
+        return Abs.apply(self)
 
     def clamp(self, min=None, max=None):
         if min is None and max is None:
@@ -431,13 +431,13 @@ class Variable(_C._VariableBase):
         return Rsqrt()(self)
 
     def sum(self, dim=None):
-        return Sum(dim)(self)
+        return Sum.apply(self, dim)
 
     def prod(self, dim=None):
-        return Prod(dim)(self)
+        return Prod.apply(self, dim)
 
     def mean(self, dim=None):
-        return Mean(dim)(self)
+        return Mean.apply(self, dim)
 
     def max(self, dim=None):
         if isinstance(dim, Variable):
@@ -514,7 +514,7 @@ class Variable(_C._VariableBase):
             alpha, beta = args[1:3]
         if num_args == 4:
             alpha = args[1]
-        return cls(alpha, beta, inplace)(*(args[:1] + args[-2:]))
+        return cls.apply(*(args[:1] + args[-2:] + (alpha, beta, inplace)))
 
     def _blas(self, cls, args, inplace):
         return self._static_blas(cls, (self,) + args, inplace)
@@ -573,7 +573,7 @@ class Variable(_C._VariableBase):
         return self._blas(Addr, args, True)
 
     def dot(self, other):
-        return Dot()(self, other)
+        return Dot.apply(self, other)
 
     def _addcop(self, op, args):
         if len(args) == 3:

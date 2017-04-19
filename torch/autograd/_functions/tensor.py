@@ -482,21 +482,14 @@ class Chunk(Function):
 
     @staticmethod
     def forward(ctx, i, num_chunks, dim=0):
-        ctx.input_size = i.size()
         ctx.dim = dim
         result = i.chunk(num_chunks, dim)
         ctx.mark_shared_storage(*((i, chunk) for chunk in result))
         return result
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, *grad_output):
-        grad_input = grad_output[0].new(ctx.input_size)
-        offset = 0
-        for grad in grad_output:
-            grad_size = grad.size(ctx.dim)
-            grad_input.narrow(ctx.dim, offset, grad_size).copy_(grad)
-            offset += grad_size
+        grad_input = torch.cat(grad_output, ctx.dim)
         return grad_input, None, None
 
 

@@ -3,70 +3,67 @@ from functools import reduce
 from ..function import Function
 
 
-class _DimReduceFunction(Function):
+class Sum(Function):
 
-    def __init__(self, dim=None):
-        super(_DimReduceFunction, self).__init__()
-        self.dim = dim
-
-    def forward(self, input):
-        self.input_size = input.size()
-        fn = getattr(input, self.fn_name)
-        if self.dim is None:
-            return input.new((fn(),))
+    @staticmethod
+    def forward(ctx, input, dim=None):
+        ctx.dim = dim
+        ctx.input_size = input.size()
+        if dim is None:
+            return input.new((input.sum(),))
         else:
-            return fn(self.dim)
+            return input.sum(dim)
 
-
-class Sum(_DimReduceFunction):
-    fn_name = 'sum'
-
-    def backward(self, grad_output):
-        if self.dim is None:
-            return grad_output.new(self.input_size).fill_(grad_output[0])
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.dim is None:
+            return grad_output[0].expand(ctx.input_size), None
         else:
-            repeats = [1 for _ in self.input_size]
-            repeats[self.dim] = self.input_size[self.dim]
-            return grad_output.repeat(*repeats),
+            repeats = [1 for _ in ctx.input_size]
+            repeats[ctx.dim] = ctx.input_size[ctx.dim]
+            return grad_output.repeat(*repeats), None
 
 
-class Prod(_DimReduceFunction):
+class Prod(Function):
 
-    def forward(self, input):
-        self.input_size = input.size()
-        if self.dim is None:
-            self.result = input.prod()
-            self.save_for_backward(input)
-            return input.new((self.result,))
+    @staticmethod
+    def forward(ctx, input, dim=None):
+        ctx.dim = dim
+        ctx.input_size = input.size()
+        if dim is None:
+            ctx.result = input.prod()
+            ctx.save_for_backward(input)
+            return input.new((ctx.result,))
         else:
-            output = input.prod(self.dim)
-            self.save_for_backward(input, output)
+            output = input.prod(dim)
+            ctx.save_for_backward(input, output)
             return output
 
-    def backward(self, grad_output):
-        if self.dim is None:
-            input, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.dim is None:
+            input, = ctx.saved_variables
             zero_idx = (input == 0).nonzero()
             if zero_idx.dim() == 0:
-                return grad_output.mul(self.result).expand_as(input).div(input)
+                return grad_output.mul(ctx.result).expand_as(input).div(input), None
             elif zero_idx.size(0) > 1:
-                return grad_output.new(self.input_size).zero_()
+                return grad_output.new(ctx.input_size).zero_(), None
             else:
-                grad_input = grad_output.new(self.input_size).zero_()
+                grad_input = grad_output.new(ctx.input_size).zero_()
                 zero_idx = tuple(zero_idx[0].cpu())
                 input_copy = input.clone()
                 input_copy[zero_idx] = 1.
                 grad_input[zero_idx] = grad_output[0] * input_copy.prod()
-                return grad_input
+                return grad_input, None
         else:
-            input, output = self.saved_tensors
-            dim = self.dim if self.dim >= 0 else self.dim + input.dim()
+            input, output = ctx.saved_variables
+            dim = ctx.dim if ctx.dim >= 0 else ctx.dim + input.dim()
             zero_mask = input == 0
             slice_zero_count = zero_mask.sum(dim)
             total_zeros = slice_zero_count.sum()
             grad_input = grad_output.mul(output).expand_as(input).div(input)
             if total_zeros == 0:
-                return grad_input
+                return grad_input, None
 
             some_zeros = slice_zero_count.gt(0).expand_as(grad_input)
             grad_input[some_zeros] = 0
@@ -74,7 +71,7 @@ class Prod(_DimReduceFunction):
             single_zero_idx = slice_zero_count.eq(1).nonzero()
 
             if len(single_zero_idx) == 0:
-                return grad_input
+                return grad_input, None
 
             for idx in single_zero_idx:
                 idx_tuple = tuple(idx.cpu())
@@ -89,22 +86,31 @@ class Prod(_DimReduceFunction):
                 grad_idx_tuple = idx_tuple[:dim] + (zero_idx,) + idx_tuple[dim + 1:]
                 grad_input[grad_idx_tuple] = grad_output[idx_tuple] * input_copy.prod()
 
-            return grad_input
+            return grad_input, None
 
 
-class Mean(_DimReduceFunction):
-    fn_name = 'mean'
+class Mean(Function):
 
-    def backward(self, grad_output):
-        if self.dim is None:
-            grad_input_val = grad_output[0]
-            grad_input_val /= reduce(lambda x, y: x * y, self.input_size, 1)
-            return grad_output.new(*self.input_size).fill_(grad_input_val)
+    @staticmethod
+    def forward(ctx, input, dim=None):
+        ctx.dim = dim
+        ctx.input_size = input.size()
+        if dim is None:
+            return input.new((input.mean(),))
         else:
-            repeats = [1 for _ in self.input_size]
-            dim_size = self.input_size[self.dim]
-            repeats[self.dim] = dim_size
-            return grad_output.repeat(*repeats).div_(dim_size)
+            return input.mean(dim)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.dim is None:
+            grad_input_val = grad_output[0]
+            grad_input_val /= reduce(lambda x, y: x * y, ctx.input_size, 1)
+            return grad_output.new(*ctx.input_size).fill_(grad_input_val), None
+        else:
+            repeats = [1 for _ in ctx.input_size]
+            dim_size = ctx.input_size[ctx.dim]
+            repeats[ctx.dim] = dim_size
+            return grad_output.repeat(*repeats).div_(dim_size), None
 
 
 class _SelectionFunction(Function):
