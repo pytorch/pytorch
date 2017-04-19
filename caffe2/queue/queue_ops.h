@@ -120,10 +120,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
                      ->template Get<std::shared_ptr<BlobsQueue>>();
     CAFFE_ENFORCE(queue);
     auto size = queue->getNumBlobs();
-    CAFFE_ENFORCE(
-        OutputSize() == size + 1,
-        "Expected " + caffe2::to_string(size + 1) + ", " + " got: " +
-            caffe2::to_string(size));
+    CAFFE_ENFORCE_EQ(OutputSize(), size + 1);
     bool status = queue->blockingRead(this->Outputs());
     Output(size)->Resize();
     math::Set<bool, Context>(
@@ -132,5 +129,57 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
   }
 
  private:
+};
+
+template <typename Context>
+class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  WeightedSampleDequeueBlobsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {
+    vector<float> weights = OperatorBase::GetRepeatedArgument<float>("weights");
+    if (weights.empty()) {
+      weights.resize(InputSize(), 1.0f);
+    }
+    CAFFE_ENFORCE_EQ(InputSize(), weights.size());
+
+    float sum = accumulate(weights.begin(), weights.end(), 0.0f);
+    CAFFE_ENFORCE(sum > 0.0f, "Sum of weights must be positive");
+    cumProbs_.resize(weights.size());
+    for (int i = 0; i < weights.size(); i++) {
+      cumProbs_[i] = weights[i] / sum;
+      CAFFE_ENFORCE_GE(
+          cumProbs_[i], 0.0f, "Each probability must be non-negative");
+    }
+    std::partial_sum(cumProbs_.begin(), cumProbs_.end(), cumProbs_.begin());
+    // Put last value to be 1.0001 to avoid numerical issues.
+    cumProbs_.back() = 1.0001;
+
+    LOG(INFO) << "Dequeue weights: " << weights;
+    LOG(INFO) << "cumProbs: " << cumProbs_;
+  }
+
+  bool RunOnDevice() override {
+    float r;
+    math::RandUniform<float, Context>(1, 0.0f, 1.0f, &r, &context_);
+    auto lb = lower_bound(cumProbs_.begin(), cumProbs_.end(), r);
+    CAFFE_ENFORCE(lb != cumProbs_.end(), "Cannot find ", r, " in cumProbs_.");
+
+    auto queue = Operator<Context>::Inputs()[lb - cumProbs_.begin()]
+                     ->template Get<std::shared_ptr<BlobsQueue>>();
+
+    CAFFE_ENFORCE(queue);
+    auto size = queue->getNumBlobs();
+    CAFFE_ENFORCE_EQ(OutputSize(), size + 1);
+    bool status = queue->blockingRead(this->Outputs());
+    Output(size)->Resize();
+    math::Set<bool, Context>(
+        1, !status, Output(size)->template mutable_data<bool>(), &context_);
+    return true;
+  }
+
+ private:
+  vector<float> cumProbs_;
 };
 }

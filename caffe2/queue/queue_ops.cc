@@ -14,6 +14,9 @@ REGISTER_CPU_OPERATOR(CloseBlobsQueue, CloseBlobsQueueOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(SafeEnqueueBlobs, SafeEnqueueBlobsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SafeDequeueBlobs, SafeDequeueBlobsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(
+    WeightedSampleDequeueBlobs,
+    WeightedSampleDequeueBlobsOp<CPUContext>);
 
 OPERATOR_SCHEMA(CreateBlobsQueue).NumInputs(0).NumOutputs(1);
 OPERATOR_SCHEMA(EnqueueBlobs)
@@ -53,13 +56,26 @@ data blobs.
 )DOC")
     .Input(0, "queue", "The shared pointer for the BlobsQueue");
 
+OPERATOR_SCHEMA(WeightedSampleDequeueBlobs)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(2, INT_MAX)
+    .SetDoc(R"DOC(
+Dequeue the blobs from multiple queues. When one of queues is closed and empty,
+the output status will be set to true which can be used as exit criteria for
+execution step.
+The 1st input is the queue and the last output is the status. The rest are
+data blobs.
+)DOC")
+    .Input(0, "weights", "Weights for sampling from multiple queues");
+
 NO_GRADIENT(CreateBlobsQueue);
 NO_GRADIENT(EnqueueBlobs);
 NO_GRADIENT(DequeueBlobs);
 NO_GRADIENT(CloseBlobsQueue);
 
-NO_GRADIENT(SafeEnqueueBlobsQueue);
-NO_GRADIENT(SafeDequeueBlobsQueue);
+NO_GRADIENT(SafeEnqueueBlobs);
+NO_GRADIENT(SafeDequeueBlobs);
+NO_GRADIENT(WeightedSampleDequeueBlobs);
 }
 
 }
