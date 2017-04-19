@@ -584,8 +584,16 @@ void Pair::changeState(state nextState) {
       }
       close(fd_);
       fd_ = FD_INVALID;
+    } else if (state_ == LISTENING) {
+      // The pair may be in the LISTENING state when it is destructed,
+      // for example when the pair was created but left unused.
+      if (fd_ != FD_INVALID) {
+        dev_->unregisterDescriptor(fd_);
+        close(fd_);
+        fd_ = FD_INVALID;
+      }
     } else {
-      // The LISTENING and CONNECTING states ensures the file descriptor is
+      // The CONNECTING states ensures the file descriptor is
       // unregistered and closed before throwing exceptions that may result in
       // destruction of the pair.
       GLOO_ENFORCE_EQ(fd_, FD_INVALID, "File descriptor not closed");
