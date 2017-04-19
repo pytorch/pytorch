@@ -36,7 +36,7 @@ class AllreduceHalvingDoubling : public Algorithm {
         chunkBytes_(chunkSize_ * sizeof(T)),
         steps_(log2(this->contextSize_)),
         fn_(fn),
-        recvBuf_(count_),
+        recvBuf_(chunkSize_ << steps_),
         sendOffsets_(steps_),
         recvOffsets_(steps_),
         sendDataBufs_(steps_),
@@ -60,14 +60,10 @@ class AllreduceHalvingDoubling : public Algorithm {
       sendOffsets_[i] = sendOffset + ((destRank & bitmask) ? stepChunkSize : 0);
       recvOffsets_[i] =
         recvOffset + ((this->context_->rank & bitmask) ? stepChunkSize : 0);
-      if (sendOffsets_[i] < count_) {
-        sendDataBufs_[i] =
-          commPairs_[i].get()->createSendBuffer(slot, ptrs_[0], bytes_);
-      }
-      if (recvOffsets_[i] < count_) {
-        recvDataBufs_[i] = commPairs_[i].get()->createRecvBuffer(
-          slot, &recvBuf_[bufferOffset], stepChunkBytes);
-      }
+      sendDataBufs_[i] =
+        commPairs_[i].get()->createSendBuffer(slot, ptrs_[0], bytes_);
+      recvDataBufs_[i] = commPairs_[i].get()->createRecvBuffer(
+        slot, &recvBuf_[bufferOffset], stepChunkBytes);
       bufferOffset += stepChunkSize;
       if (this->context_->rank & bitmask) {
         sendOffset += stepChunkSize;

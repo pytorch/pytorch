@@ -168,7 +168,7 @@ INSTANTIATE_TEST_CASE_P(
     CudaAllreduceTest,
     ::testing::Combine(
       ::testing::ValuesIn(std::vector<int>({8, 16, 32})),
-      ::testing::ValuesIn(std::vector<int>({64, 128, 1000})),
+      ::testing::ValuesIn(std::vector<int>({1, 9, 64, 1000})),
       ::testing::Values(allreduceHalvingDoubling)));
 
 static std::function<Func> allreduceHalvingDoublingPipelined = [](
@@ -185,8 +185,8 @@ INSTANTIATE_TEST_CASE_P(
     AllreduceHalvingDoublingPipelined,
     CudaAllreduceTest,
     ::testing::Combine(
-      ::testing::ValuesIn(std::vector<int>({8, 16, 32})),
-      ::testing::ValuesIn(std::vector<int>({64, 128, 1000})),
+      ::testing::ValuesIn(std::vector<int>({2, 8, 16, 32})),
+      ::testing::ValuesIn(std::vector<int>({1, 9, 64, 1000})),
       ::testing::Values(allreduceHalvingDoublingPipelined)));
 
 } // namespace

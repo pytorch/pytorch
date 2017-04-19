@@ -74,17 +74,17 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
       sendCounts_[i] = sendOffsets_[i] + stepChunkSize > count_
           ? count_ - sendOffsets_[i]
           : stepChunkSize;
-      sendDataBufs_[i] =
-          commPairs_[i].get()->createSendBuffer(slot, *scratch_, bytes_);
     }
+    sendDataBufs_[i] =
+      commPairs_[i].get()->createSendBuffer(slot, *scratch_, bytes_);
     if (recvOffsets_[i] < count_) {
       // specifies number of elements received in each step
       recvCounts_[i] = recvOffsets_[i] + stepChunkSize > count_
           ? count_ - recvOffsets_[i]
           : stepChunkSize;
-      recvDataBufs_[i] = commPairs_[i].get()->createRecvBuffer(
-          slot, &recvBuf_[bufferOffset], stepChunkBytes);
     }
+    recvDataBufs_[i] = commPairs_[i].get()->createRecvBuffer(
+        slot, &recvBuf_[bufferOffset], stepChunkBytes);
     bufferOffset += stepChunkSize;
     if (this->context_->rank & bitmask) {
       sendOffset += stepChunkSize;
@@ -115,7 +115,7 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
   size_t bufferOffset = 0;
   size_t numItems = chunkSize_ << (steps_ - 1);
 
-  if (pipelined_) {
+  if (pipelined_ && reduceBeforeFirstSend_) {
     reduceBeforeFirstSend_->run();
   } else if (localReduceOp_) {
     localReduceOp_->run();
@@ -128,11 +128,11 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
           sendOffsets_[i] * sizeof(T), sendCounts_[i] * sizeof(T));
     }
     if (recvOffsets_[i] < count_) {
-      if (pipelined_ && i == 0) {
+      if (pipelined_ && i == 0 && reduceBeforeFirstRecv_) {
           reduceBeforeFirstRecv_->runAsync();
       }
       recvDataBufs_[i]->waitRecv();
-      if (pipelined_ && i == 0) {
+      if (pipelined_ && i == 0 && reduceBeforeFirstRecv_) {
         reduceBeforeFirstRecv_->wait();
       }
       auto recvBufAtOffset = recvBuf_.range(bufferOffset, recvCounts_[i]);
@@ -163,19 +163,20 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
       auto scratchAtOffset = scratch_.range(sendOffsets_[i], sendCounts_[i]);
       stream.copyAsync(scratchAtOffset, recvBufAtOffset);
       stream.wait();
-      if (pipelined_) {
-        broadcastOps_[i]->runAsync();
-      }
+    }
+    if (pipelined_ && broadcastOps_[i]) {
+      broadcastOps_[i]->runAsync();
     }
     numItems <<= 1;
   }
 
   if (pipelined_) {
-    for (int i = 0; i < steps_; i++) {
-      broadcastOps_[i]->wait();
+    for (int i = steps_ - 1; i >= 0; i--) {
+      if (broadcastOps_[i]) {
+        broadcastOps_[i]->wait();
+      }
     }
   } else {
-    stream.wait();
     if (localBroadcastOp_) {
       localBroadcastOp_->runAsync();
       localBroadcastOp_->wait();
@@ -185,38 +186,45 @@ void CudaAllreduceHalvingDoubling<T, W>::run() {
 
 template <typename T, typename W>
 void CudaAllreduceHalvingDoubling<T, W>::devicePointerInit() {
+  size_t offset, numElements;
+
   for (int i = 0; i < steps_; i++) {
     // in the first broadcast (with step 'steps_ - 1'), include both the local
     // chunk result from reduce-scatter and the first received chunk
-    if (i == steps_ - 1) {
-      scratchPtrForBroadcast_.push_back(scratch_.range(
-          std::min(recvOffsets_[i], sendOffsets_[i]),
-          recvCounts_[i] + sendCounts_[i]));
-    } else {
-      scratchPtrForBroadcast_.push_back(
-        scratch_.range(sendOffsets_[i], sendCounts_[i]));
+    offset = i == steps_ - 1 ? std::min(recvOffsets_[i], sendOffsets_[i])
+                             : sendOffsets_[i];
+    numElements =
+        i == steps_ - 1 ? recvCounts_[i] + sendCounts_[i] : sendCounts_[i];
+    if (offset > count_) {
+      scratchPtrForBroadcast_.push_back(typename W::Pointer());
+      continue;
+    }
+    if (offset + numElements > count_) {
+      numElements = count_ - offset;
     }
 
+    scratchPtrForBroadcast_.push_back(scratch_.range(offset, numElements));
     for (int j = 0; j < devicePtrs_.size(); j++) {
-      if (i == steps_ - 1) {
-        devicePtrsForBroadcast_[i].push_back(devicePtrs_[j].range(
-            std::min(recvOffsets_[i], sendOffsets_[i]),
-            sendCounts_[i] + recvCounts_[i]));
-      } else {
-        devicePtrsForBroadcast_[i].push_back(
-            devicePtrs_[j].range(sendOffsets_[i], sendCounts_[i]));
-      }
+      devicePtrsForBroadcast_[i].push_back(
+          devicePtrs_[j].range(offset, numElements));
     }
   }
-
-  scratchPtrForFirstSend_ = scratch_.range(sendOffsets_[0], sendCounts_[0]);
-  scratchPtrForFirstRecv_ = scratch_.range(recvOffsets_[0], recvCounts_[0]);
+  if (sendOffsets_[0] < count_) {
+    scratchPtrForFirstSend_ = scratch_.range(sendOffsets_[0], sendCounts_[0]);
+  }
+  if (recvOffsets_[0] < count_) {
+    scratchPtrForFirstRecv_ = scratch_.range(recvOffsets_[0], recvCounts_[0]);
+  }
 
   for (int i = 0; i < devicePtrs_.size(); i++) {
-    devicePtrsForFirstSend_.push_back(
-        devicePtrs_[i].range(sendOffsets_[0], sendCounts_[0]));
-    devicePtrsForFirstRecv_.push_back(
-        devicePtrs_[i].range(recvOffsets_[0], recvCounts_[0]));
+    if (sendOffsets_[0] < count_) {
+      devicePtrsForFirstSend_.push_back(
+          devicePtrs_[i].range(sendOffsets_[0], sendCounts_[0]));
+    }
+    if (recvOffsets_[0] < count_) {
+      devicePtrsForFirstRecv_.push_back(
+          devicePtrs_[i].range(recvOffsets_[0], recvCounts_[0]));
+    }
   }
 }
 
@@ -230,7 +238,7 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
   // where they are accumulated is a new host side buffer.
   scratch_ = W::Pointer::alloc(count_);
 
-  // Execute local reduction and broadcast.
+  // Execute reduction and broadcast.
   // If devicePtrs_.size() == 1 these functions construct an op that
   // executes a memcpy such that scratch_ always holds the result.
 
@@ -243,7 +251,8 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
     localBroadcastOp_ =
       cudaDeviceBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
   }
-  recvBuf_ = W::Pointer::alloc(count_);
+  // pad receive buffer size to nearest power of 2 to ensure sufficient space
+  recvBuf_ = W::Pointer::alloc(chunkSize_ << steps_);
 }
 
 template <typename T, typename W>
@@ -258,7 +267,7 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
   auto count = ptr.getCount();
   scratch_ = CudaDevicePointer<T>::create(*ptr, count);
 
-  // Run local reduction and broadcast on device.
+  // Run reduction and broadcast on device.
   // When running with a device workspace we intend to never leave the device.
   if (devicePtrs_.size() > 1) {
     localReduceOp_ =
@@ -271,7 +280,8 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
   // cross device copies while accumulating the reduction.
   {
     CudaDeviceScope scope(scratch_.getDeviceID());
-    recvBuf_ = W::Pointer::alloc(count);
+    // pad receive buffer size to nearest power of 2 to ensure sufficient space
+    recvBuf_ = W::Pointer::alloc(chunkSize_ << steps_);
   }
 }
 
@@ -282,27 +292,39 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
         std::is_same<U, CudaHostWorkspace<T>>::value,
         typename U::Pointer>::type*) {
   if (sendCounts_[0] * sizeof(T) < kOnDeviceThreshold) {
-    reduceBeforeFirstSend_ = cudaHostReduce(
-        streams_, devicePtrsForFirstSend_, scratchPtrForFirstSend_, fn_);
-    reduceBeforeFirstRecv_ = cudaHostReduce(
-        streams_, devicePtrsForFirstRecv_, scratchPtrForFirstRecv_, fn_);
+    if (!devicePtrsForFirstSend_.empty()) {
+      reduceBeforeFirstSend_ = cudaHostReduce(
+          streams_, devicePtrsForFirstSend_, scratchPtrForFirstSend_, fn_);
+    }
+    if (!devicePtrsForFirstRecv_.empty()) {
+      reduceBeforeFirstRecv_ = cudaHostReduce(
+          streams_, devicePtrsForFirstRecv_, scratchPtrForFirstRecv_, fn_);
+    }
   } else {
-    reduceBeforeFirstSend_ = cudaDeviceReduce(
+    if (!devicePtrsForFirstSend_.empty()) {
+      reduceBeforeFirstSend_ = cudaDeviceReduce(
         streams_,
         devicePtrsForFirstSend_,
         scratchPtrForFirstSend_,
         fn_,
         0,
         sendCounts_[0]);
-    reduceBeforeFirstRecv_ = cudaDeviceReduce(
+    }
+    if (!devicePtrsForFirstRecv_.empty()) {
+      reduceBeforeFirstRecv_ = cudaDeviceReduce(
         streams_,
         devicePtrsForFirstRecv_,
         scratchPtrForFirstRecv_,
         fn_,
         0,
         recvCounts_[0]);
+    }
   }
   for (int i = 0; i < steps_; i++) {
+    if (devicePtrsForBroadcast_[i].empty()) {
+      broadcastOps_.push_back(nullptr);
+      continue;
+     }
     const size_t numElementsInBcast =
         i == steps_ - 1 ? sendCounts_[i] + recvCounts_[i] : sendCounts_[i];
     if (numElementsInBcast * sizeof(T) < kOnDeviceThreshold) {
@@ -325,21 +347,29 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
     typename std::enable_if<
         std::is_same<U, CudaDeviceWorkspace<T>>::value,
         typename U::Pointer>::type*) {
-  reduceBeforeFirstSend_ = cudaDeviceReduce(
-      streams_,
-      devicePtrsForFirstSend_,
-      scratchPtrForFirstSend_,
-      fn_,
-      0,
-      sendCounts_[0]);
-  reduceBeforeFirstRecv_ = cudaDeviceReduce(
-      streams_,
-      devicePtrsForFirstRecv_,
-      scratchPtrForFirstRecv_,
-      fn_,
-      0,
-      recvCounts_[0]);
+  if (!devicePtrsForFirstSend_.empty()) {
+    reduceBeforeFirstSend_ = cudaDeviceReduce(
+        streams_,
+        devicePtrsForFirstSend_,
+        scratchPtrForFirstSend_,
+        fn_,
+        0,
+        sendCounts_[0]);
+  }
+  if (!devicePtrsForFirstRecv_.empty()) {
+    reduceBeforeFirstRecv_ = cudaDeviceReduce(
+        streams_,
+        devicePtrsForFirstRecv_,
+        scratchPtrForFirstRecv_,
+        fn_,
+        0,
+        recvCounts_[0]);
+  }
   for (int i = 0; i < steps_; i++) {
+    if (devicePtrsForBroadcast_[i].empty()) {
+      broadcastOps_.push_back(nullptr);
+      continue;
+    }
     broadcastOps_.push_back(cudaDeviceBroadcast(
         streams_,
         devicePtrsForBroadcast_[i],
