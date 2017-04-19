@@ -2,6 +2,7 @@
 #include <future>
 #include <random>
 #include <thread>
+#include <array>
 
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/context_gpu.h"
