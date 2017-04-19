@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "core.h"
+#include "common_coll.h"
 #include "enqueue.h"
 #include "primitives.h"
 
@@ -74,11 +75,13 @@ __global__ void AllReduceKernel(const KernelArgs<T> args) {
     int offset;
     int maxOffset;
     int slice;
+    int chunkSize = min(sliceSize, DIVUP(size-chunkOffset,nranks));
+    ALIGN_SIZE(chunkSize, THREADS*UNROLL);
 
     // step 0: push data to next GPU
     slice = ring.userRank[nranks-1];
-    offset = chunkOffset + slice * sliceSize;
-    maxOffset = size-offset;
+    offset = chunkOffset + slice * chunkSize;
+    maxOffset = min(chunkSize, size-offset);
 
     Prims::Copy(
         thisInput  + offset,
@@ -93,8 +96,8 @@ __global__ void AllReduceKernel(const KernelArgs<T> args) {
     // k-2 steps: reduce and copy to next GPU
     for (int j=2; j<nranks; ++j) {
       slice = ring.userRank[nranks-j];
-      offset = chunkOffset + slice * sliceSize;
-      maxOffset = size-offset;
+      offset = chunkOffset + slice * chunkSize;
+      maxOffset = min(chunkSize, size-offset);
 
       Prims::Reduce(
           prevInput  + poffset,
@@ -108,11 +111,11 @@ __global__ void AllReduceKernel(const KernelArgs<T> args) {
       NEXT_STEP;
     }
 
-    // step k - 1: reduce this buffer and data, which will produce the final
+    // step k-1: reduce this buffer and data, which will produce the final
     // result that we store in this data and push to the next GPU
     slice = ring.userRank[0];
-    offset = chunkOffset + slice * sliceSize;
-    maxOffset = size-offset;
+    offset = chunkOffset + slice * chunkSize;
+    maxOffset = min(chunkSize, size-offset);
 
     Prims::ReduceCopy(
         prevInput  + poffset,
@@ -130,8 +133,8 @@ __global__ void AllReduceKernel(const KernelArgs<T> args) {
       // k-2 steps: copy result to next GPU
       for (int j=1; j<nranks-1; ++j) {
         slice = ring.userRank[nranks - j];
-        offset = chunkOffset + slice * sliceSize;
-	maxOffset = size-offset;
+        offset = chunkOffset + slice * chunkSize;
+        maxOffset = min(chunkSize, size-offset);
 
         Prims::Copy(
             thisOutput + offset,
@@ -147,8 +150,8 @@ __global__ void AllReduceKernel(const KernelArgs<T> args) {
       // k-2 steps: copy result to next GPU
       for (int j=1; j<nranks-1; ++j) {
         slice = ring.userRank[nranks - j];
-        offset = chunkOffset + slice * sliceSize;
-	maxOffset = size-offset;
+        offset = chunkOffset + slice * chunkSize;
+        maxOffset = min(chunkSize, size-offset);
 
         Prims::DoubleCopy(
             prevInput + poffset,
@@ -164,8 +167,8 @@ __global__ void AllReduceKernel(const KernelArgs<T> args) {
 
       // Make final copy from buffer to dest.
       slice = ring.userRank[1];
-      offset = chunkOffset + slice * sliceSize;
-      maxOffset = size-offset;
+      offset = chunkOffset + slice * chunkSize;
+      maxOffset = min(chunkSize, size-offset);
 
       // Here we need to copy from buffer to this output.
       Prims::Copy(
@@ -200,12 +203,9 @@ __global__ void AllReduceKernel(const KernelArgs<T> args) {
 template<class FUNC, typename T>
 ncclResult_t RingAllReduce(const void* sendbuff, void* recvbuff,
     const int count, ncclComm* comm, cudaStream_t stream) {
-  if (count == 0)
-    return ncclSuccess;
-
   if (comm->nRanks == 1) {
     if (sendbuff != recvbuff)
-      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream));
+      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream), ncclUnhandledCudaError);
   } else {
     KernelArgs<T> args;
     ArgsSetup(&args, sendbuff, recvbuff, 0, count, comm);
@@ -228,6 +228,7 @@ NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, int 
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, int count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream) {
+  NCCLCHECK(ArgsCheck(sendbuff, recvbuff, count, datatype, op, 0, comm, "AllReduce"));
   return enqueue<AllReduce>(sendbuff, recvbuff, count, datatype, op, 0, comm, stream);
 }
 

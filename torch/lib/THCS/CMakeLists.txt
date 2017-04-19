@@ -106,6 +106,7 @@ SET(src
 
 SET(src-cuda
   THCSTensor.cu
+  THCSparse.cu
   )
 
 MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
@@ -149,6 +150,7 @@ INSTALL(FILES
           THCSGenerateFloatType.h
           THCSGenerateFloatTypes.h
           THCSGenerateDoubleType.h
+          THCSparse.h
           DESTINATION "${THCS_INSTALL_INCLUDE_SUBDIR}/THCS")
 
 INSTALL(FILES

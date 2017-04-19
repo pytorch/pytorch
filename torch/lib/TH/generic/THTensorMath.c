@@ -715,7 +715,10 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
           rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
 #else
-          rp[i] = tp[i] - value * (tp[i] / value); // There is no NAN for integers
+          // There is no NAN for integers
+          rp[i] = tp[i] % value;
+          if (rp[i] * value < 0)
+            rp[i] += value;
 #endif
       }
   } else {
@@ -723,7 +726,8 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
 #else
        // There is no NAN for integers
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data - value * (*t_data / value););
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
+                                          if (*r__data * value < 0) *r__data += value;);
 #endif
   }
 }
@@ -991,7 +995,10 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
           rp[i] = (sp[i] == 0)? NAN : tp[i] - sp[i] * floor(tp[i] / sp[i]);
 #else
-          rp[i] = tp[i] - sp[i] * (tp[i] / sp[i]); // There is no NAN for integers
+          // There is no NAN for integers
+          rp[i] = tp[i] % sp[i];
+          if (rp[i] * sp[i] < 0)
+            rp[i] += sp[i];
 #endif
       }
   } else {
@@ -999,7 +1006,8 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
 #else
       // There is no NAN for integers
-      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data - *src_data * (*t_data / *src_data););
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data % *src_data;
+                                                     if (*r__data * *src_data < 0) *r__data += *src_data;);
 #endif
 
   }
@@ -1357,7 +1365,10 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
     THTensor_(copy)(r_, t);
   }
 
-  if(beta != 1)
+  if(beta == 0) {
+    THTensor_(zero)(r_);
+  }
+  else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
   if(r_->stride[0] == 1)
@@ -2686,7 +2697,7 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
 

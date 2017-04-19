@@ -85,6 +85,8 @@ THStorage * THPStorage_(readFileRaw)(int fd, THStorage *_storage)
   real *data;
   int64_t size;
   ssize_t result = read(fd, &size, sizeof(int64_t));
+  if (result == 0)
+    throw std::runtime_error("unexpected EOF. The file might be corrupted.");
   if (result != sizeof(int64_t))
     throw std::system_error(result, std::system_category());
   THStoragePtr storage;
@@ -111,7 +113,9 @@ THStorage * THPStorage_(readFileRaw)(int fd, THStorage *_storage)
     while (remaining > 0) {
       // we write and read in 1GB blocks to avoid bugs on some OSes
       ssize_t result = read(fd, bytes, THMin(remaining, 1073741824));
-      if (result <= 0) // 0 means EOF, which is also an error
+      if (result == 0) // 0 means EOF, which is also an error
+        throw std::runtime_error("unexpected EOF. The file might be corrupted.");
+      if (result < 0)
         throw std::system_error(result, std::system_category());
       bytes += result;
       remaining -= result;

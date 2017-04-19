@@ -5,36 +5,50 @@ import itertools
 import random
 import unittest
 from common import TestCase, run_tests
+from common_nn import TEST_CUDA
 from numbers import Number
 
-SparseTensor = sparse.DoubleTensor
+# triplet := (index type, value type, sparse type)
+cpu_triplet = (
+    torch.LongTensor,
+    torch.DoubleTensor,
+    torch.sparse.DoubleTensor)
+
+if TEST_CUDA:
+    cuda_triplet = (
+        torch.cuda.LongTensor,
+        torch.cuda.DoubleTensor,
+        torch.cuda.sparse.DoubleTensor)
 
 
 class TestSparse(TestCase):
 
     @staticmethod
-    def _gen_sparse(d, nnz, with_size):
+    def _gen_sparse(d, nnz, with_size, is_cuda=False):
         if isinstance(with_size, Number):
             v = torch.randn(nnz)
             i = (torch.rand(d, nnz) * with_size).type(torch.LongTensor)
-            x = SparseTensor(i, v)
+            x = torch.sparse.DoubleTensor(i, v)
         else:
             v_size = [nnz] + list(with_size[d:])
             v = torch.randn(*v_size)
             i = torch.rand(d, nnz) * \
                 torch.Tensor(with_size[:d]).repeat(nnz, 1).transpose(0, 1)
             i = i.type(torch.LongTensor)
-            x = SparseTensor(i, v, torch.Size(with_size))
+            x = torch.sparse.DoubleTensor(i, v, torch.Size(with_size))
 
-        return x, i, v
+        if is_cuda:
+            return x.cuda(), i.cuda(), v.cuda()
+        else:
+            return x, i.clone(), v.clone()
 
-    def test_basic(self):
-        x, i, v = self._gen_sparse(3, 10, 100)
+    def _test_basic(self, is_cuda):
+        x, i, v = self._gen_sparse(3, 10, 100, is_cuda)
 
         self.assertEqual(i, x.indices())
         self.assertEqual(v, x.values())
 
-        x, i, v = self._gen_sparse(3, 10, [100, 100, 100])
+        x, i, v = self._gen_sparse(3, 10, [100, 100, 100], is_cuda)
         self.assertEqual(i, x.indices())
         self.assertEqual(v, x.values())
         self.assertEqual(x.ndimension(), 3)
@@ -42,20 +56,30 @@ class TestSparse(TestCase):
         for i in range(3):
             self.assertEqual(x.size(i), 100)
 
+        SparseTensor = (cuda_triplet if is_cuda else cpu_triplet)[2]
         # Make sure we can access empty indices / values
         x = SparseTensor()
         self.assertEqual(x.indices().numel(), 0)
         self.assertEqual(x.values().numel(), 0)
 
-    def test_to_dense(self):
-        i = torch.LongTensor([
+    def test_basic(self):
+        self._test_basic(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_basic_cuda(self):
+        self._test_basic(True)
+
+    def _test_to_dense(self, is_cuda):
+        IndexTensor, ValueTensor, SparseTensor = \
+            cuda_triplet if is_cuda else cpu_triplet
+        i = IndexTensor([
             [0, 1, 2, 2],
             [0, 0, 0, 3],
             [0, 0, 1, 4],
         ])
-        v = torch.Tensor([2, 1, 3, 4])
+        v = ValueTensor([2, 1, 3, 4])
         x = SparseTensor(i, v, torch.Size([3, 4, 5]))
-        res = torch.Tensor([
+        res = ValueTensor([
             [[2, 0, 0, 0, 0],
              [0, 0, 0, 0, 0],
              [0, 0, 0, 0, 0],
@@ -75,14 +99,23 @@ class TestSparse(TestCase):
         x.to_dense()
         self.assertEqual(res, x.to_dense())
 
-    def test_to_dense_hybrid(self):
-        i = torch.LongTensor([
+    def test_to_dense(self):
+        self._test_to_dense(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_to_dense_cuda(self):
+        self._test_to_dense(True)
+
+    def _test_to_dense_hybrid(self, is_cuda):
+        IndexTensor, ValueTensor, SparseTensor = \
+            cuda_triplet if is_cuda else cpu_triplet
+        i = IndexTensor([
             [0, 1, 2, 2],
             [0, 0, 0, 3],
         ])
-        v = torch.Tensor([[2, 3], [1, 2], [3, 4], [4, 5]])
+        v = ValueTensor([[2, 3], [1, 2], [3, 4], [4, 5]])
         x = SparseTensor(i, v, torch.Size([3, 4, 2]))
-        res = torch.Tensor([
+        res = ValueTensor([
             [[2, 3],
              [0, 0],
              [0, 0],
@@ -102,74 +135,92 @@ class TestSparse(TestCase):
         x.to_dense()
         self.assertEqual(res, x.to_dense())
 
-    def test_contig(self):
-        i = torch.LongTensor([
+    def test_to_dense_hybrid(self):
+        self._test_to_dense_hybrid(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_to_dense_hybrid_cuda(self):
+        self._test_to_dense_hybrid(True)
+
+    def _test_contig(self, is_cuda):
+        IndexTensor, ValueTensor, SparseTensor = \
+            cuda_triplet if is_cuda else cpu_triplet
+        i = IndexTensor([
             [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
             [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
         ])
-        v = torch.Tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        v = ValueTensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         x = SparseTensor(i, v, torch.Size([100, 100]))
-        exp_i = torch.LongTensor([
+        exp_i = IndexTensor([
             [0, 1, 6, 14, 27, 35, 39, 40, 66, 71],
             [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
         ])
-        exp_v = torch.Tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
+        exp_v = ValueTensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
         x.contiguous()
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
-        i = torch.LongTensor([
+        i = IndexTensor([
             [2, 0, 2, 1],
             [0, 0, 3, 0],
             [1, 0, 4, 0],
         ])
-        v = torch.Tensor([3, 2, 4, 1])
+        v = ValueTensor([3, 2, 4, 1])
         x = SparseTensor(i, v, torch.Size([3, 4, 5]))
-        exp_i = torch.LongTensor([
+        exp_i = IndexTensor([
             [0, 1, 2, 2],
             [0, 0, 0, 3],
             [0, 0, 1, 4],
         ])
-        exp_v = torch.Tensor([2, 1, 3, 4])
+        exp_v = ValueTensor([2, 1, 3, 4])
 
         x.contiguous()
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
         # Duplicate indices
-        i = torch.LongTensor([
+        i = IndexTensor([
             [0, 0, 2, 0],
             [0, 0, 3, 0],
             [0, 0, 4, 0],
         ])
-        v = torch.Tensor([3, 2, 4, 1])
+        v = ValueTensor([3, 2, 4, 1])
         x = SparseTensor(i, v, torch.Size([3, 4, 5]))
-        exp_i = torch.LongTensor([
+        exp_i = IndexTensor([
             [0, 2],
             [0, 3],
             [0, 4],
         ])
-        exp_v = torch.Tensor([6, 4])
+        exp_v = ValueTensor([6, 4])
 
         x.contiguous()
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
-    def test_contig_hybrid(self):
-        i = torch.LongTensor([
+    def test_contig(self):
+        self._test_contig(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_contig_cuda(self):
+        self._test_contig(True)
+
+    def _test_contig_hybrid(self, is_cuda):
+        IndexTensor, ValueTensor, SparseTensor = \
+            cuda_triplet if is_cuda else cpu_triplet
+        i = IndexTensor([
             [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
             [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
         ])
-        v = torch.Tensor([
+        v = ValueTensor([
             [1, 2], [2, 3], [3, 4], [4, 5], [5, 6],
             [6, 7], [7, 8], [8, 9], [9, 10], [10, 11],
         ])
         x = SparseTensor(i, v, torch.Size([100, 100, 2]))
-        exp_i = torch.LongTensor([
+        exp_i = IndexTensor([
             [0, 1, 6, 14, 27, 35, 39, 40, 66, 71],
             [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
         ])
-        exp_v = torch.Tensor([
+        exp_v = ValueTensor([
             [2, 3], [1, 2], [6, 7], [4, 5], [10, 11],
             [3, 4], [5, 6], [9, 10], [8, 9], [7, 8],
         ])
@@ -177,45 +228,52 @@ class TestSparse(TestCase):
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
-        i = torch.LongTensor([
+        i = IndexTensor([
             [2, 0, 2, 1],
             [0, 0, 3, 0],
             [1, 0, 4, 0],
         ])
-        v = torch.Tensor([[3, 3, 3], [2, 2, 2], [4, 4, 4], [1, 1, 1]])
+        v = ValueTensor([[3, 3, 3], [2, 2, 2], [4, 4, 4], [1, 1, 1]])
         x = SparseTensor(i, v, torch.Size([3, 4, 5, 3]))
-        exp_i = torch.LongTensor([
+        exp_i = IndexTensor([
             [0, 1, 2, 2],
             [0, 0, 0, 3],
             [0, 0, 1, 4],
         ])
-        exp_v = torch.Tensor([[2, 2, 2], [1, 1, 1], [3, 3, 3], [4, 4, 4]])
+        exp_v = ValueTensor([[2, 2, 2], [1, 1, 1], [3, 3, 3], [4, 4, 4]])
 
         x.contiguous()
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
         # Duplicate indices
-        i = torch.LongTensor([
+        i = IndexTensor([
             [0, 0, 2, 0],
             [0, 0, 3, 0],
             [0, 0, 4, 0],
         ])
-        v = torch.Tensor([[3, 2, 3], [2, 1, 1], [4, 3, 4], [1, 1, 1]])
+        v = ValueTensor([[3, 2, 3], [2, 1, 1], [4, 3, 4], [1, 1, 1]])
         x = SparseTensor(i, v, torch.Size([3, 4, 5, 3]))
-        exp_i = torch.LongTensor([
+        exp_i = IndexTensor([
             [0, 2],
             [0, 3],
             [0, 4],
         ])
-        exp_v = torch.Tensor([[6, 4, 5], [4, 3, 4]])
+        exp_v = ValueTensor([[6, 4, 5], [4, 3, 4]])
 
         x.contiguous()
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
-    def test_transpose(self):
-        x = self._gen_sparse(4, 20, 5)[0]
+    def test_contig_hybrid(self):
+        self._test_contig_hybrid(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_contig_hybrid_cuda(self):
+        self._test_contig_hybrid(True)
+
+    def _test_transpose(self, is_cuda):
+        x = self._gen_sparse(4, 20, 5, is_cuda=is_cuda)[0]
         y = x.to_dense()
 
         for i, j in itertools.combinations(range(4), 2):
@@ -227,6 +285,13 @@ class TestSparse(TestCase):
             y = y.transpose(i, j)
             self.assertEqual(x.to_dense(), y)
 
+    def test_transpose(self):
+        self._test_transpose(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_transpose_cuda(self):
+        self._test_transpose(True)
+
     def test_mm(self):
         def test_shape(di, dj, dk):
             x, _, _ = self._gen_sparse(2, 20, [di, dj])
@@ -235,16 +300,16 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            expected = torch.addmm(alpha, t, beta, x.to_dense(), y)
             res = torch.addmm(alpha, t, beta, x, y)
+            expected = torch.addmm(alpha, t, beta, x.to_dense(), y)
             self.assertEqual(res, expected)
 
-            expected = torch.addmm(t, x.to_dense(), y)
             res = torch.addmm(t, x, y)
+            expected = torch.addmm(t, x.to_dense(), y)
             self.assertEqual(res, expected)
 
-            expected = torch.mm(x.to_dense(), y)
             res = torch.mm(x, y)
+            expected = torch.mm(x.to_dense(), y)
             self.assertEqual(res, expected)
 
         test_shape(10, 100, 100)
@@ -259,30 +324,76 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            expected = torch.addmm(alpha, t.to_dense(), beta, x.to_dense(), y)
             res = torch.saddmm(alpha, t, beta, x, y)
+            expected = torch.addmm(alpha, t.to_dense(), beta, x.to_dense(), y)
             self.assertEqual(res.to_dense(), expected)
 
-            expected = torch.addmm(t.to_dense(), x.to_dense(), y)
             res = torch.saddmm(t, x, y)
+            expected = torch.addmm(t.to_dense(), x.to_dense(), y)
             self.assertEqual(res.to_dense(), expected)
 
-            expected = torch.mm(x.to_dense(), y)
             res = torch.smm(x, y)
+            expected = torch.mm(x.to_dense(), y)
             self.assertEqual(res.to_dense(), expected)
 
         test_shape(7, 5, 3)
         test_shape(1000, 100, 100)
         test_shape(3000, 64, 300)
 
-    def _test_spadd_shape(self, shape_i, shape_v=None):
+    def _test_dsmm(self, is_cuda):
+        def test_shape(di, dj, dk):
+            x = self._gen_sparse(2, 20, [di, dj], is_cuda)[0]
+            y = torch.randn(dj, dk)
+            if is_cuda:
+                y = y.cuda()
+
+            res = torch.dsmm(x, y)
+            expected = torch.mm(x.to_dense(), y)
+            self.assertEqual(res, expected)
+
+        test_shape(7, 5, 3)
+        test_shape(1000, 100, 100)
+        test_shape(3000, 64, 300)
+
+    def test_dsmm(self):
+        self._test_dsmm(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_dsmm_cuda(self):
+        self._test_dsmm(True)
+
+    def _test_hsmm(self, is_cuda):
+        def test_shape(di, dj, dk):
+            x = self._gen_sparse(2, 20, [di, dj], is_cuda)[0]
+            y = torch.randn(dj, dk)
+            if is_cuda:
+                y = y.cuda()
+
+            res = torch.hsmm(x, y)
+            expected = torch.mm(x.to_dense(), y)
+            self.assertEqual(res.to_dense(), expected)
+
+        test_shape(7, 5, 3)
+        test_shape(1000, 100, 100)
+        test_shape(3000, 64, 300)
+
+    def test_hsmm(self):
+        self._test_hsmm(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_hsmm_cuda(self):
+        self._test_hsmm(True)
+
+    def _test_spadd_shape(self, is_cuda, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
-        x, _, _ = self._gen_sparse(len(shape_i), 10, shape)
+        x, _, _ = self._gen_sparse(len(shape_i), 10, shape, is_cuda)
         y = torch.randn(*shape)
+        if is_cuda:
+            y = y.cuda()
         r = random.random()
 
-        expected = y + r * x.to_dense()
         res = torch.add(y, r, x)
+        expected = y + r * x.to_dense()
 
         self.assertEqual(res, expected)
 
@@ -290,30 +401,47 @@ class TestSparse(TestCase):
         s = list(shape)
         s[0] = shape[-1]
         s[-1] = shape[0]
-        y = torch.randn(*s).transpose_(0, len(s) - 1)
+        y = torch.randn(*s)
+        if is_cuda:
+            y = y.cuda()
+        y.transpose_(0, len(s) - 1)
         r = random.random()
 
-        expected = y + r * x.to_dense()
         res = torch.add(y, r, x)
+        expected = y + r * x.to_dense()
 
         self.assertEqual(res, expected)
 
+    def _test_spadd(self, is_cuda):
+        self._test_spadd_shape(is_cuda, [5, 6])
+        self._test_spadd_shape(is_cuda, [10, 10, 10])
+        self._test_spadd_shape(is_cuda, [50, 30, 20])
+        self._test_spadd_shape(is_cuda, [5, 5, 5, 5, 5, 5])
+
     def test_spadd(self):
-        self._test_spadd_shape([5, 6])
-        self._test_spadd_shape([10, 10, 10])
-        self._test_spadd_shape([50, 30, 20])
-        self._test_spadd_shape([5, 5, 5, 5, 5, 5])
+        self._test_spadd(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_spadd_cuda(self):
+        self._test_spadd(True)
+
+    def _test_spadd_hybrid(self, is_cuda):
+        self._test_spadd_shape(is_cuda, [5, 6], [2, 3])
+        self._test_spadd_shape(is_cuda, [10, 10, 10], [3])
+        self._test_spadd_shape(is_cuda, [50, 30, 20], [2])
+        self._test_spadd_shape(is_cuda, [5, 5, 5, 5, 5, 5], [2])
 
     def test_spadd_hybrid(self):
-        self._test_spadd_shape([5, 6], [2, 3])
-        self._test_spadd_shape([10, 10, 10], [3])
-        self._test_spadd_shape([50, 30, 20], [2])
-        self._test_spadd_shape([5, 5, 5, 5, 5, 5], [2])
+        self._test_spadd_hybrid(False)
 
-    def _test_basic_ops_shape(self, shape_i, shape_v=None):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_spadd_hybrid_cuda(self):
+        self._test_spadd_hybrid(True)
+
+    def _test_basic_ops_shape(self, is_cuda, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
-        x1, _, _ = self._gen_sparse(len(shape_i), 9, shape)
-        x2, _, _ = self._gen_sparse(len(shape_i), 12, shape)
+        x1, _, _ = self._gen_sparse(len(shape_i), 9, shape, is_cuda)
+        x2, _, _ = self._gen_sparse(len(shape_i), 12, shape, is_cuda)
 
         y1 = x1 + x2
         y2 = x1.clone()
@@ -355,17 +483,115 @@ class TestSparse(TestCase):
         expected = torch.zeros(x1.size())
         self.assertEqual(y.to_dense(), expected)
 
+    def _test_basic_ops(self, is_cuda):
+        self._test_basic_ops_shape(is_cuda, [5, 6])
+        self._test_basic_ops_shape(is_cuda, [10, 10, 10])
+        self._test_basic_ops_shape(is_cuda, [50, 30, 20])
+        self._test_basic_ops_shape(is_cuda, [5, 5, 5, 5, 5, 5])
+
     def test_basic_ops(self):
-        self._test_basic_ops_shape([5, 6])
-        self._test_basic_ops_shape([10, 10, 10])
-        self._test_basic_ops_shape([50, 30, 20])
-        self._test_basic_ops_shape([5, 5, 5, 5, 5, 5])
+        self._test_basic_ops(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_basic_ops_cuda(self):
+        self._test_basic_ops(True)
+
+    def _test_basic_ops_hybrid(self, is_cuda):
+        self._test_basic_ops_shape(is_cuda, [5, 6], [2, 3])
+        self._test_basic_ops_shape(is_cuda, [10, 10, 10], [3])
+        self._test_basic_ops_shape(is_cuda, [50, 30, 20], [2])
+        self._test_basic_ops_shape(is_cuda, [5, 5, 5, 5, 5, 5], [2])
 
     def test_basic_ops_hybrid(self):
-        self._test_basic_ops_shape([5, 6], [2, 3])
-        self._test_basic_ops_shape([10, 10, 10], [3])
-        self._test_basic_ops_shape([50, 30, 20], [2])
-        self._test_basic_ops_shape([5, 5, 5, 5, 5, 5], [2])
+        self._test_basic_ops_hybrid(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_basic_ops_hybrid_cuda(self):
+        self._test_basic_ops_hybrid(True)
+
+    def _test_sparse_mask_shape(self, is_cuda, shape_i, shape_v=None):
+        shape = shape_i + (shape_v or [])
+        x1, _, _ = self._gen_sparse(len(shape_i), 9, shape, is_cuda)
+        x2, _, _ = self._gen_sparse(len(shape_i), 12, shape, is_cuda)
+
+        y1 = x1 + x2
+        y2 = x1.clone()
+        y2.add_(x2)
+        expected = x1.to_dense() + x2.to_dense()
+        self.assertEqual(y1.to_dense(), expected)
+        self.assertEqual(y2.to_dense(), expected)
+
+    def _test_sparse_mask_fixed(self, is_cuda):
+        IndexTensor, ValueTensor, SparseTensor = \
+            cuda_triplet if is_cuda else cpu_triplet
+        i = IndexTensor([
+            [1, 3, 3, 0, 4],
+            [2, 1, 1, 2, 3],
+        ])
+        v = ValueTensor([1, 2, 3, 4, 5])
+        x = SparseTensor(i, v, torch.Size([5, 4]))
+        dense = ValueTensor([
+            [1, 2, 3, 4],
+            [5, 6, 7, 8],
+            [9, 10, 11, 12],
+            [13, 14, 15, 16],
+            [17, 18, 19, 20],
+        ])
+        exp_v = ValueTensor([7, 14, 14, 3, 20])
+        res = dense.sparse_mask(x)
+        expected = SparseTensor(i, exp_v, torch.Size([5, 4]))
+        self.assertEqual(res, expected)
+
+    def _test_sparse_mask(self, is_cuda):
+        self._test_sparse_mask_fixed(is_cuda)
+
+        self._test_sparse_mask_shape(is_cuda, [5, 6])
+        self._test_sparse_mask_shape(is_cuda, [10, 10, 10])
+        self._test_sparse_mask_shape(is_cuda, [50, 30, 20])
+        self._test_sparse_mask_shape(is_cuda, [5, 5, 5, 5, 5, 5])
+
+    def test_sparse_mask(self):
+        self._test_sparse_mask(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_sparse_mask_cuda(self):
+        self._test_sparse_mask(True)
+
+    def _test_sparse_mask_hybrid_fixed(self, is_cuda):
+        IndexTensor, ValueTensor, SparseTensor = \
+            cuda_triplet if is_cuda else cpu_triplet
+        i = IndexTensor([
+            [1, 3, 3, 0, 4],
+            [2, 1, 1, 2, 3],
+        ])
+        v = ValueTensor([[1, 2], [2, 3], [3, 4], [4, 5], [5, 6]])
+        x = SparseTensor(i, v, torch.Size([5, 4, 2]))
+        dense = ValueTensor([
+            [[1, 3], [2, 2], [3, 3], [4, 2]],
+            [[5, 7], [6, 7], [7, 9], [8, 9]],
+            [[9, 2], [10, 4], [11, 1], [12, 3]],
+            [[13, 5], [14, 1], [15, 1], [16, 6]],
+            [[17, 7], [18, 2], [19, 7], [20, 1]],
+        ])
+        res = dense.sparse_mask(x)
+        exp_v = ValueTensor([[7, 9], [14, 1], [14, 1], [3, 3], [20, 1]])
+        expected = SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
+        self.assertEqual(res, expected)
+
+    def _test_sparse_mask_hybrid(self, is_cuda):
+        self._test_sparse_mask_hybrid_fixed(is_cuda)
+
+        self._test_sparse_mask_shape(is_cuda, [5, 6], [2, 3])
+        self._test_sparse_mask_shape(is_cuda, [10, 10, 10], [3])
+        self._test_sparse_mask_shape(is_cuda, [50, 30, 20], [2])
+        self._test_sparse_mask_shape(is_cuda, [5, 5, 5, 5, 5, 5], [2])
+
+    def test_sparse_mask_hybrid(self):
+        self._test_sparse_mask_hybrid(False)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_sparse_mask_hybrid_cuda(self):
+        self._test_sparse_mask_hybrid(True)
 
 
 if __name__ == '__main__':

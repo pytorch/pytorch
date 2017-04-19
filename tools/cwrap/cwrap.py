@@ -198,7 +198,7 @@ class cwrap(object):
         arguments = self.get_assign_args(arguments)
         for arg, unpack in zip(arguments, arg_unpack):
             if arg['type'] == 'CONSTANT':
-                call_arg.append(str(arg['name']))
+                call_arg.append(unpack)
             else:
                 var_name = "arg_" + str(arg.get('assign_name', arg['name']))
                 res = self.ARG_ASSIGN_TEMPLATE.substitute(

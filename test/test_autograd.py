@@ -6,6 +6,7 @@ import torch
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
+from itertools import product
 from torch.autograd import gradcheck
 
 from common import TestCase, run_tests
@@ -944,11 +945,12 @@ def gather_variable(shape, index_dim, max_indices):
     return Variable(index, requires_grad=False)
 
 
-def prod_zeros(dim_size):
+def prod_zeros(dim_size, dim_select):
+    assert len(dim_select) == 2
     result = torch.randn(dim_size, dim_size, dim_size)
-    result[0, 1] = 0
-    result[2, 3] = 0
-    result[4, 3] = 0
+    result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+    result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+    result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
     return Variable(result, requires_grad=True)
 
 
@@ -974,8 +976,8 @@ function_tests = [
     (DivConstant, (3.14, True), (torch.rand(L, L) + 1e-1,), 'by_tensor'),
     (PowConstant, (3.14,), (torch.rand(L, L),)),
     (PowConstant, (3.14, True), (torch.rand(L, L),), 'tensor_power'),
-    (Transpose, (0, 1), (torch.rand(L, L),)),
-    (Transpose, (2, 0), (torch.rand(S, S, S),), '3d'),
+    (Transpose, (0, 1), (torch.rand(L, L),), '2d', [0, 1]),
+    (Transpose, (2, 0), (torch.rand(S, S, S),), '3d', [0, 1]),
     (Permute, ((0, 4, 3, 5, 1, 2),), ((1, 2, 3, 4, 5, 6),)),
     (Index, ((1, 2),), (torch.rand(S, S, S),)),
     (Index, (slice(0, 3),), (torch.rand(S, S, S),), 'slice'),
@@ -1017,14 +1019,18 @@ function_tests = [
     (CmaxConstant, (0.5,), ((S, S, S),)),
     (CminConstant, (0.5,), ((S, S, S),)),
     (Mean, (), ((S, S, S),)),
-    (Mean, (1,), ((S, S, S),), 'dim'),
+    (Mean, (1,), ((S, S, S),), 'dim', [0]),
     (Sum, (), ((S, S, S),)),
-    (Sum, (1,), ((S, S, S),), 'dim'),
+    (Sum, (1,), ((S, S, S),), 'dim', [0]),
     (Prod, (), ((S, S, S),)),
-    (Prod, (), (prod_zeros(S),), 'zeros'),
+    (Prod, (), (prod_zeros(S, [0, 1]),), 'zerosdim2'),
+    (Prod, (), (prod_zeros(S, [0, 2]),), 'zerosdim1'),
+    (Prod, (), (prod_zeros(S, [1, 2]),), 'zerosdim0'),
     (Prod, (), (prod_single_zero(S),), 'single_zero'),
-    (Prod, (1,), ((S, S, S),), 'dim'),
-    (Prod, (1,), (prod_zeros(S),), 'zeros_dim'),
+    (Prod, (1,), ((S, S, S),), 'dim', [0]),
+    (Prod, (1,), (prod_zeros(S, [0, 1]),), 'zeros_dim2', [0]),
+    (Prod, (1,), (prod_zeros(S, [0, 2]),), 'zeros_dim1', [0]),
+    (Prod, (1,), (prod_zeros(S, [1, 2]),), 'zeros_dim0', [0]),
     (Addmm, (), ((S, M), (S, S), (S, M)),),
     (Addmm, (0.1, 1), ((S, M), (S, S), (S, M)), 'coef'),
     (Addbmm, (), ((S, M), (S, S, S), (S, S, M)),),
@@ -1042,17 +1048,17 @@ function_tests = [
     (Cumsum, (1,), ((S, S, S),), 'dim1'),
     (Cumsum, (0,), ((S,),), '1d'),
     (Min, (), ((S, S, S),),),
-    (Max, (0,), ((S, S, S),), 'dim'),
-    (Min, (0,), ((S, S, S),), 'dim'),
-    (Mode, (0,), ((S, S, S),),),
+    (Max, (1,), ((S, S, S),), 'dim', [0]),
+    (Min, (1,), ((S, S, S),), 'dim', [0]),
+    (Mode, (1,), ((S, S, S),), 'dim', [0]),
     (Kthvalue, (2, 0), ((S, S, S),),),
     (Median, (0,), ((S, S, S),),),
     (Norm, (1.5,), (torch.rand(S, S, S),), '1_5'),
     (Norm, (), ((S, S, S),), '2'),
     (Norm, (3,), ((S, S, S),), '3'),
-    (Norm, (1.5, 0), (torch.rand(S, S, S),), '1_5_dim'),
-    (Norm, (2, 0), ((S, S, S),), '2_dim'),
-    (Norm, (3, 0), ((S, S, S),), '3_dim'),
+    (Norm, (1.5, 1), (torch.rand(S, S, S),), '1_5_dim', [1]),
+    (Norm, (2, 1), ((S, S, S),), '2_dim', [1]),
+    (Norm, (3, 1), ((S, S, S),), '3_dim', [1]),
     (Addcmul, (), ((S, S), (S, S), (S, S))),
     (Addcmul, (0.6,), ((S, S), (S, S), (S, S)), 'scale'),
     (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2)),
@@ -1062,13 +1068,17 @@ function_tests = [
     (IndexFill, (0, 2), ((S, S), index_variable(2, S))),
     (IndexSelect, (0,), ((S, S), index_variable(2, S))),
     (Gather, (0,), ((M, S), gather_variable((S, S), 1, M))),
-    (Gather, (1,), ((M, S), gather_variable((M, S // 2), 0, S)), 'dim1'),
+    (Gather, (1,), ((M, S), gather_variable((M, S // 2), 0, S)), 'dim1', [0]),
     (Scatter, (0,), ((M, S), gather_variable((S, S), 1, M), (S, S))),
-    (Scatter, (1,), ((M, S), gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
+    (Scatter, (1,), ((M, S), gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
     (Concat, (0,), ((1, S, S), (2, S, S), (3, S, S))),
+    (Concat, (-1,), ((S, S, 1), (S, S, 2), (S, S, 3)), 'negdim-1'),
+    (Concat, (-2,), ((S, 1, S), (S, 2, S), (S, 3, S)), 'negdim-2'),
     (Resize, (S * S, S), ((S, S, S),)),
     (Diag, (), ((S, S),), '2d'),
     (Diag, (), ((S,),), '1d'),
+    (Diag, (1,), ((S, S),), '2d_1'),
+    (Diag, (2,), ((S, S),), '2d_2'),
     (Tril, (), ((S, S),)),
     (Tril, (2,), ((S, S),), 'idx'),
     (Triu, (), ((S, S),)),
@@ -1078,19 +1088,20 @@ function_tests = [
     (Cross, (1,), ((S, 3, S), (S, 3, S)), 'dim'),
     (Clone, (), ((S, M, S),)),
     (Squeeze, (), ((S, 1, M, 1),)),
-    (Squeeze, (1,), ((S, 1, M, 1),), 'dim'),
+    (Squeeze, (1,), ((S, 1, M, 1),), 'dim', [0]),
     (Unsqueeze, (0,), ((S, M, S),), '0'),
-    (Unsqueeze, (1,), ((S, M, S),), '1'),
+    (Unsqueeze, (1,), ((S, M, S),), '1', [0]),
+    (Unsqueeze, (2,), ((S, M, S),), '2', [0]),
     # (MaskedCopy,    (),                 ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), (S, S),)),
     (MaskedFill, (10,), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
     (MaskedSelect, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
     (Sort, (), ((S, M, S),)),
-    (Sort, (1,), ((S, M, S),), 'dim'),
-    (Sort, (1, True), ((S, M, S),), 'dim_desc'),
+    (Sort, (1,), ((S, M, S),), 'dim', [0]),
+    (Sort, (1, True), ((S, M, S),), 'dim_desc', [0]),
     (Topk, (3,), ((S, M, S),)),
-    (Topk, (3, 1), ((S, M, S),), 'dim'),
-    (Topk, (3, 1, True), ((S, M, S),), 'dim_desc'),
-    (Topk, (3, 1, True, True), ((S, M, S),), 'dim_desc_sort'),
+    (Topk, (3, 1), ((S, M, S),), 'dim', [1]),
+    (Topk, (3, 1, True), ((S, M, S),), 'dim_desc', [1]),
+    (Topk, (3, 1, True, True), ((S, M, S),), 'dim_desc_sort', [1]),
 ]
 
 
@@ -1105,7 +1116,7 @@ method_tests = [
     ('div', (S, S, S), (3.14,), 'constant'),
     ('pow', (S, S, S), ((S, S, S),)),
     ('pow', (S, S, S), (3.14,), 'constant'),
-    ('transpose', (1, 2, 3), (1, 2)),
+    ('transpose', (1, 2, 3), (1, 2), 'dim', [0, 1]),
     ('t', (1, 2), ()),
     ('view', (S, S, S), (S * S, S),),
     ('view_as', (S, S, S), ((S * S, S),)),
@@ -1140,20 +1151,22 @@ method_tests = [
     ('remainder', (S, S, S), (1.5,)),
     ('lerp', (S, S, S), ((S, S, S), 0.4)),
     ('max', (S, S, S), ()),
+    ('max', (S, S, S), (1,), 'dim', [0]),
     ('max', (S, S, S), ((S, S, S),), 'elementwise'),
     ('min', (S, S, S), ()),
+    ('min', (S, S, S), (1,), 'dim', [0]),
     ('min', (S, S, S), ((S, S, S),), 'elementwise'),
     ('mean', (S, S, S), ()),
-    ('mean', (S, S, S), (1,), 'dim'),
+    ('mean', (S, S, S), (1,), 'dim', [0]),
     ('sum', (S, S, S), ()),
-    ('sum', (S, S, S), (1,), 'dim'),
+    ('sum', (S, S, S), (1,), 'dim', [0]),
     ('prod', (S, S, S), ()),
-    ('prod', (S, S, S), (1,), 'dim'),
+    ('prod', (S, S, S), (1,), 'dim', [0]),
     ('var', (S, S, S), ()),
-    ('var', (S, S, S), (1,), 'dim'),
+    ('var', (S, S, S), (1,), 'dim', [0]),
     ('std', (S, S, S), ()),
-    ('std', (S, S, S), (1,), 'dim'),
-    ('renorm', (S, S, S), (2, 1, 0.5)),
+    ('std', (S, S, S), (1,), 'dim', [0]),
+    ('renorm', (S, S, S), (2, 1, 0.5), 'dim', [1]),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
     ('cumsum', (S, S, S), (1,)),
@@ -1174,10 +1187,10 @@ method_tests = [
     ('addcdiv', (S, S), ((S, S), (S, S))),
     ('addcdiv', (S, S), (0.5, (S, S), (S, S)), 'scale'),
     ('norm', (S, S, S), (2,)),
-    ('norm', (S, S, S), (2, 1), 'dim'),
+    ('norm', (S, S, S), (2, 1), 'dim', [1]),
     ('dist', (S, S, S), ((S, S, S),)),
     ('dist', (S, S, S), ((S, S, S), 4), '4'),
-    ('index_select', (S, S, S), (0, index_variable(2, S))),
+    ('index_select', (S, S, S), (0, index_variable(2, S)), 'dim', [0]),
     ('diag', (M, M), (), '2d'),
     ('diag', (M,), (), '1d'),
     ('tril', (M, M), ()),
@@ -1199,14 +1212,14 @@ method_tests = [
     ('lt', (S, S, S), (0,), 'scalar'),
     ('le', (S, S, S), (0,), 'scalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
-    ('select', (S, S, S), (1, 2)),
-    ('narrow', (S, S, S), (1, 2, 2)),
+    ('select', (S, S, S), (1, 2), 'dim', [0]),
+    ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
     ('squeeze', (S, 1, S, 1), ()),
-    ('squeeze', (S, 1, S, 1), (1,), '1_dim'),
-    ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim'),
-    ('unsqueeze', (S, S, S), (0,), 'first'),
-    ('unsqueeze', (S, S, S), (1,), 'middle'),
-    ('unsqueeze', (S, S, S), (3,), 'last'),
+    ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
+    ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
+    ('unsqueeze', (S, S, S), (0,), 'first', [0]),
+    ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
+    ('unsqueeze', (S, S, S), (3,), 'last', [0]),
     ('masked_select', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),)),
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
     ('masked_copy_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
@@ -1252,41 +1265,50 @@ ignore_inplace = set((
 
 for test in function_tests:
     cls, constructor_args, call_args = test[:3]
-    test_name = 'test_{}Function'.format(cls.__name__)
-    if len(test) == 4:
-        test_name += '_' + test[3]
+    basic_test_name = 'test_{}Function'.format(cls.__name__)
+    if len(test) >= 4:
+        basic_test_name += '_' + test[3]
 
-    def do_test(self, cls=cls, constructor_args=constructor_args,
-                call_args=call_args, test_name=test_name):
-        input = create_input(call_args)
-        self.assertEqual(gradcheck(cls(*constructor_args), input, eps=1e-6, atol=PRECISION), True)
+    dim_args_idx = test[4] if len(test) == 5 else []
 
-        if test_name not in ignore_inplace and issubclass(cls, InplaceFunction):
-            output = cls(*constructor_args)(*input)
-            if not isinstance(output, tuple):
-                output = (output,)
-            inplace_input = deepcopy(input)
-            inplace_input_copy = tuple(i + 0 for i in inplace_input)
-            fn = cls(*constructor_args, inplace=True)
-            inplace_output = fn(*inplace_input_copy)
-            if not isinstance(inplace_output, tuple):
-                inplace_output = (inplace_output,)
-            self.assertEqual(inplace_output, output)
-            # Check that gradient is the same
-            for inp_i, i in zip(inplace_input, input):
-                if inp_i.grad is not None:
-                    inp_i.grad.data.zero_()
-                if i.grad is not None:
-                    i.grad.data.zero_()
-            for io, o in zip(inplace_output, output):
-                grad = torch.randn(*io.size()).double()
-                io.backward(grad)
-                o.backward(grad)
-            for inp_i, i in zip(inplace_input, input):
-                self.assertEqual(inp_i.grad, i.grad)
+    for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
+        test_name = basic_test_name
+        new_constructor_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg
+                                for i, arg in enumerate(constructor_args)]
+        test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
+        new_constructor_args = tuple(new_constructor_args)
 
-    assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
-    setattr(TestAutograd, test_name, do_test)
+        def do_test(self, cls=cls, constructor_args=new_constructor_args,
+                    call_args=call_args, test_name=test_name):
+            input = create_input(call_args)
+            self.assertEqual(gradcheck(cls(*constructor_args), input, eps=1e-6, atol=PRECISION), True)
+
+            if test_name not in ignore_inplace and issubclass(cls, InplaceFunction):
+                output = cls(*constructor_args)(*input)
+                if not isinstance(output, tuple):
+                    output = (output,)
+                inplace_input = deepcopy(input)
+                inplace_input_copy = tuple(i + 0 for i in inplace_input)
+                fn = cls(*constructor_args, inplace=True)
+                inplace_output = fn(*inplace_input_copy)
+                if not isinstance(inplace_output, tuple):
+                    inplace_output = (inplace_output,)
+                self.assertEqual(inplace_output, output)
+                # Check that gradient is the same
+                for inp_i, i in zip(inplace_input, input):
+                    if inp_i.grad is not None:
+                        inp_i.grad.data.zero_()
+                    if i.grad is not None:
+                        i.grad.data.zero_()
+                for io, o in zip(inplace_output, output):
+                    grad = torch.randn(*io.size()).double()
+                    io.backward(grad)
+                    o.backward(grad)
+                for inp_i, i in zip(inplace_input, input):
+                    self.assertEqual(inp_i.grad, i.grad)
+
+        assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
+        setattr(TestAutograd, test_name, do_test)
 
 
 EXCLUDE_FUNCTIONAL = {
@@ -1298,42 +1320,50 @@ EXCLUDE_FUNCTIONAL = {
 }
 for test in method_tests:
     name, self_size, args = test[:3]
-    test_name = 'test_' + name + ('_' + test[3] if len(test) == 4 else '')
+    basic_test_name = 'test_' + name + ('_' + test[3] if len(test) >= 4 else '')
 
-    def do_test(self, name=name, self_size=self_size, args=args, test_name=test_name):
-        def check(name):
-            self_variable = create_input((self_size,), requires_grad=False)[0]
-            args_variable = create_input(args, requires_grad=False)
-            self_tensor = deepcopy(self_variable.data)
-            args_tensor = deepcopy(unpack_variables(args_variable))
-            output_variable = getattr(self_variable, name)(*args_variable)
-            output_tensor = getattr(self_tensor, name)(*args_tensor)
-            if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
-                output_tensor = torch.DoubleTensor((output_tensor,))
-            self.assertEqual(unpack_variables(output_variable), output_tensor)
-            # TODO: check that both have changed after adding all inplace ops
+    dim_args_idx = test[4] if len(test) == 5 else []
 
-            # functional interface tests
-            if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
-                f_args_variable = (self_variable,) + args_variable
-                f_args_tensor = (self_tensor,) + args_tensor
-                output_variable = getattr(torch, name)(*f_args_variable)
-                output_tensor = getattr(torch, name)(*f_args_tensor)
+    for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
+        test_name = basic_test_name
+        new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
+        test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
+        new_args = tuple(new_args)
+
+        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name):
+            def check(name):
+                self_variable = create_input((self_size,), requires_grad=False)[0]
+                args_variable = create_input(args, requires_grad=False)
+                self_tensor = deepcopy(self_variable.data)
+                args_tensor = deepcopy(unpack_variables(args_variable))
+                output_variable = getattr(self_variable, name)(*args_variable)
+                output_tensor = getattr(self_tensor, name)(*args_tensor)
                 if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                     output_tensor = torch.DoubleTensor((output_tensor,))
                 self.assertEqual(unpack_variables(output_variable), output_tensor)
+                # TODO: check that both have changed after adding all inplace ops
 
-        check(name)
-        inplace_name = name + '_'
-        if hasattr(Variable(torch.ones(1)), inplace_name):
-            try:
-                check(inplace_name)
-            except Exception as e:
-                if 'only supports scalar' not in e.args[0]:
-                    raise
+                # functional interface tests
+                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                    f_args_variable = (self_variable,) + args_variable
+                    f_args_tensor = (self_tensor,) + args_tensor
+                    output_variable = getattr(torch, name)(*f_args_variable)
+                    output_tensor = getattr(torch, name)(*f_args_tensor)
+                    if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
+                        output_tensor = torch.DoubleTensor((output_tensor,))
+                    self.assertEqual(unpack_variables(output_variable), output_tensor)
 
-    assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
-    setattr(TestAutograd, test_name, do_test)
+            check(name)
+            inplace_name = name + '_'
+            if hasattr(Variable(torch.ones(1)), inplace_name):
+                try:
+                    check(inplace_name)
+                except Exception as e:
+                    if 'only supports scalar' not in e.args[0]:
+                        raise
+
+        assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
+        setattr(TestAutograd, test_name, do_test)
 
 
 if __name__ == '__main__':

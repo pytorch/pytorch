@@ -88,7 +88,7 @@ def is_tensor(obj):
     Args:
         obj (Object): Object to test
     """
-    return obj.__class__ in _tensor_classes
+    return type(obj) in _tensor_classes
 
 
 def is_storage(obj):
@@ -97,7 +97,7 @@ def is_storage(obj):
     Args:
         obj (Object): Object to test
     """
-    return obj.__class__ in _storage_classes
+    return type(obj) in _storage_classes
 
 
 def set_default_tensor_type(t):

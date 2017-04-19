@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "core.h"
+#include "common_coll.h"
 #include "enqueue.h"
 #include "primitives.h"
 
@@ -96,7 +97,7 @@ __global__ void ReduceScatterKernel(const KernelArgs<T> args) {
       NEXT_STEP;
     }
 
-    // step k - 1: reduce this buffer and data, which will produce the final
+    // step k-1: reduce this buffer and data, which will produce the final
     // result that we store in this data and push to the next GPU
     rankDest = ring.userRank[0];
     offset = chunkOffset + rankDest * size;
@@ -133,12 +134,9 @@ __global__ void ReduceScatterKernel(const KernelArgs<T> args) {
 template<class FUNC, typename T>
 ncclResult_t RingReduceScatter(const void* sendbuff, void* recvbuff,
     const int count, ncclComm* comm, cudaStream_t stream) {
-  if (count == 0)
-    return ncclSuccess;
-
   if (comm->nRanks == 1) {
     if (sendbuff != recvbuff)
-      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream));
+      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream), ncclUnhandledCudaError);
   } else {
     KernelArgs<T> args;
     ArgsSetup(&args, sendbuff, recvbuff, 0, count, comm);
@@ -161,6 +159,7 @@ NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, 
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclReduceScatter(const void* sendbuff, void* recvbuff, int recvcount,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+  NCCLCHECK(ArgsCheck(sendbuff, recvbuff, recvcount, datatype, op, 0, comm, "ReduceScatter"));
   return enqueue<ReduceScatter>(sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream);
 }
 
