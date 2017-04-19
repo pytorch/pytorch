@@ -364,7 +364,7 @@ class CosineEmbeddingLoss(Module):
 
 class MarginRankingLoss(Module):
     r"""Creates a criterion that measures the loss given
-    inputs `x1`, `x2`, two 1D min-batch `Tensor`s,
+    inputs `x1`, `x2`, two 1D mini-batch `Tensor`s,
     and a label 1D mini-batch tensor `y` with values (`1` or `-1`).
 
     If `y == 1` then it assumed the first input should be ranked higher
