@@ -25,6 +25,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
           a tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
         groups: split input into groups, in_channels should be divisible by
           the number of groups
 
@@ -51,6 +52,11 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         weight: filters of shape (out_channels, in_channels, kW)
         bias: optional bias of shape (out_channels)
         stride: the stride of the convolving kernel, default 1
+        padding: implicit zero padding on the input. Can be a single number or
+          a tuple. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
 
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
@@ -77,6 +83,9 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
           a tuple (st x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
 
     Examples:
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
@@ -89,14 +98,15 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
-                     output_padding=0, groups=1):
-    f = ConvNd(_single(stride), _single(padding), _single(1), True,
-               _single(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
+                     output_padding=0, groups=1, dilation=1):
+    f = ConvNd(_single(stride), _single(padding), _single(dilation), True,
+               _single(output_padding),
+               groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
 def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
-                     output_padding=0, groups=1):
+                     output_padding=0, groups=1, dilation=1):
     """Applies a 2D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution".
 
@@ -114,14 +124,15 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           the number of groups
         output_padding: A zero-padding of 0 <= padding < stride that should be
           added to the output. Can be a single number or a tuple. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
     """
-    f = ConvNd(_pair(stride), _pair(padding), _pair(1), True,
+    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
                _pair(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
 def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
-                     output_padding=0, groups=1):
+                     output_padding=0, groups=1, dilation=1):
     """Applies a 3D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution"
 
@@ -135,8 +146,13 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input, a single number or a
           tuple (padh x padw). Default: 0
+        output_padding: A zero-padding of 0 <= padding < stride that should be
+          added to the output. Can be a single number or a tuple. Default: 0
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
+        dilation: the spacing between kernel elements. Default: 1
     """
-    f = ConvNd(_triple(stride), _triple(padding), _triple(1), True,
+    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
                _triple(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
