@@ -32,7 +32,11 @@ class InstantiationContext(object):
     """
     List of contexts where layer could be instantitated
     """
-    CALIBRATION = 'calibration'
+    # The layers support this context will accumulates predictions, labels,
+    # weights. The accumulated data can later be used to compute
+    # calibration or for other
+    # purpose.
+    ACCUMULATE_PRED = 'accumulate_pred'
     EVAL = 'eval'
     PREDICTION = 'prediction'
     TRAINING = 'training'
@@ -186,7 +190,7 @@ class ModelLayer(object):
         with scope.NameScope(self.name):
             if context not in {InstantiationContext.PREDICTION,
                                InstantiationContext.EVAL,
-                               InstantiationContext.CALIBRATION}:
+                               InstantiationContext.ACCUMULATE_PRED}:
                 assert init_net, (
                     "Only prediction and eval context don't need init_net")
             if init_net:
@@ -200,8 +204,8 @@ class ModelLayer(object):
                 self.add_train_ops(net)
             elif context == InstantiationContext.EVAL:
                 self.add_eval_ops(net)
-            elif context == InstantiationContext.CALIBRATION:
-                self.add_calibration_ops(net)
+            elif context == InstantiationContext.ACCUMULATE_PRED:
+                self.add_ops_to_accumulate_pred(net)
             else:
                 self.add_ops(net)
 
@@ -218,7 +222,9 @@ class ModelLayer(object):
         # layer implementation.
         self.add_eval_ops(net)
 
-    def add_calibration_ops(self, net):
-        # Default calibration layer implementation is completely matching eval
+    def add_ops_to_accumulate_pred(self, net):
+        # This adds operators to accumulate predictions/labels/weights. The
+        # accumulated data can later be used to compute calibration or for other
+        # purpose. Default layer implementation is completely matching eval
         # layer implementation.
         self.add_eval_ops(net)
