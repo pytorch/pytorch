@@ -141,10 +141,20 @@ void ColwiseMax(const int N, const int D, const T* x, T* y,
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
-template <typename T, class Context, class Engine=DefaultEngine>
-void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K, const T alpha, const T* A,
-    const T* B, const T beta, T* C, Context* context);
+template <typename T, class Context, class Engine = DefaultEngine>
+void Gemm(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const T* A,
+    const T* B,
+    const float beta,
+    T* C,
+    Context* context,
+    TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 // We also provide a gemm that has explicit lda, ldb and ldc specified.
 // In most cases you probably want to use the function above, though.
@@ -169,10 +179,18 @@ void GemmEx(
 // to Trans, the output is:
 // CblasNoTrans: x is an N dim vector and y is an M dim vector.
 // CblasTrans:   x is an M dim vector and y is an N dim vector.
-template <typename T, class Context, class Engine=DefaultEngine>
-void Gemv(const CBLAS_TRANSPOSE TransA, const int M, const int N,
-    const T alpha, const T* A, const T* x, const T beta,
-    T* y, Context* context);
+template <typename T, class Context, class Engine = DefaultEngine>
+void Gemv(
+    const CBLAS_TRANSPOSE TransA,
+    const int M,
+    const int N,
+    const float alpha,
+    const T* A,
+    const T* x,
+    const float beta,
+    T* y,
+    Context* context,
+    TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 template <typename T, class Context>
 void Set(const TIndex N, const T alpha, T* X, Context* context);
@@ -218,28 +236,31 @@ void Select(const int N, const int D, const T* x, const int* idx, T* y,
             Context* context);
 
 template <typename T, class Context>
-void Scale(const int N, const T alpha, const T* x, T* y, Context* context);
+void Scale(const int N, const float alpha, const T* x, T* y, Context* context);
 
 // Different from the Scale function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,
 // for example on GPU.
 template <typename T, class Context>
-void Scale(const int N, const T* alpha, const T* x, T* y,
-           Context* context);
+void Scale(const int N, const float* alpha, const T* x, T* y, Context* context);
 
 template <typename T, class Context>
-void Axpy(const int N, const T alpha, const T* x, T* y, Context* context);
+void Axpy(const int N, const float alpha, const T* x, T* y, Context* context);
 
 // Different from the Axpy function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,
 // for example on GPU.
 template <typename T, class Context>
-void Axpy(const int N, const T* alpha, const T* x, T* y,
-          Context* context);
+void Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
 
 template <typename T, class Context>
-void Axpby(const int N, const T alpha, const T* x, const T b, T* y,
-           Context* context);
+void Axpby(
+    const int N,
+    const float alpha,
+    const T* x,
+    const T b,
+    T* y,
+    Context* context);
 
 template <typename T, class Context, int order>
 void Im2colNd(

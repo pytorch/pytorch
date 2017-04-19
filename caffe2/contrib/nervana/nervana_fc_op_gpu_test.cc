@@ -49,7 +49,7 @@ TEST(NervanaFullyConnectedTest, Test) {
   AddConstInput(std::vector<int>{6, 10}, 1., "W", &ws);
   AddConstInput(std::vector<int>{6}, 0.1, "B", &ws);
   unique_ptr<OperatorBase> op(
-      new FullyConnectedOp<float, CUDAContext, NervanaEngine>(def, &ws));
+      new FullyConnectedOp<CUDAContext, NervanaEngine>(def, &ws));
   EXPECT_NE(nullptr, op.get());
   EXPECT_TRUE(op->Run());
   Blob* Yblob = ws.GetBlob("Y");
