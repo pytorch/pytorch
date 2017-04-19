@@ -5,6 +5,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/elementwise_op.h"
+#include "caffe2/utils/conversions.h"
 
 namespace caffe2 {
 
@@ -62,9 +63,6 @@ REGISTER_CUDA_OPERATOR( \
     name, BinaryElementwiseOp< \
         input_type, CUDAContext, Cuda##name##Functor, output_type>)
 
-#define CUDA_ADD(x, y) ((x) + (y))
-CUDA_FUNCTOR(Add, CUDA_ADD, NumericTypes, SameTypeAsInput);
-#undef CUDA_ADD
 #define CUDA_SUB(x, y) ((x) - (y))
 CUDA_FUNCTOR(Sub, CUDA_SUB, NumericTypes, SameTypeAsInput);
 #undef CUDA_SUB
@@ -263,5 +261,166 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
 }
 
 REGISTER_CUDA_OPERATOR(SumReduceLike, SumReduceLikeOp<CUDAContext>);
+
+namespace {
+
+template <bool is_scaler, typename T, typename M>
+__global__ void binary_add_kernel(const int N, const T* a, const T* b, T* r) {
+  CUDA_1D_KERNEL_LOOP(idx, N) {
+    r[idx] = convert::To<M, T>(
+        convert::To<T, M>(a[idx]) +
+        convert::To<T, M>(is_scaler ? b[0] : b[idx]));
+  }
+}
+
+template <bool no_post, typename T, typename M>
+__global__ void binary_add_kernel_broadcast(
+    const T* a,
+    const T* b,
+    T* r,
+    const int pre,
+    const int post,
+    const int n) {
+  CUDA_1D_KERNEL_LOOP(idx, no_post ? pre * n : pre * post * n) {
+    r[idx] = convert::To<M, T>(
+        convert::To<T, M>(a[idx]) +
+        convert::To<T, M>(no_post ? b[idx % n] : b[(idx / post) % n]));
+  }
+}
+} // namespace
+
+// Actual Add operator, because the above macros are read-only.
+class CUDAAddOp final : public Operator<CUDAContext> {
+ public:
+  CUDAAddOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws),
+        OP_SINGLE_ARG(bool, "broadcast", enable_broadcast_, 0),
+        OP_SINGLE_ARG(int, "axis", axis_, -1),
+        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
+        OP_SINGLE_ARG(string, "order", order_, "NCHW") {
+    // Figure out the correct axis to use.
+    if (enable_broadcast_) {
+      if (axis_ != -1) {
+        // Get axis from an explicit axis argument.
+        CAFFE_ENFORCE_EQ(
+            axis_str_.size(),
+            0,
+            "Args axis and axis_str cannot be used simultaneously.");
+      } else if (axis_str_.size()) {
+        // Get the axis index semantically.
+        CAFFE_ENFORCE_EQ(
+            axis_str_.size(), 1, "Unsupported axis string", axis_str_);
+        size_t semantic_axis_ = order_.find(axis_str_);
+        CAFFE_ENFORCE_NE(
+            semantic_axis_,
+            string::npos,
+            "Unrecognizable axis string ",
+            axis_str_,
+            " from order string ",
+            order_);
+        axis_ = semantic_axis_;
+      }
+    } else {
+      CAFFE_ENFORCE(
+          axis_ == -1 && axis_str_.size() == 0,
+          "Do not specify axis or axis_str if broadcast is not enabled.");
+    }
+  }
+
+  ~CUDAAddOp() {}
+
+  template <typename T, typename M>
+  bool DoRunWithType() {
+    auto& X0 = Input(0);
+    auto& X1 = Input(1);
+    auto* output = Output(0);
+
+    output->ResizeLike(X0);
+
+    const T* X0data = X0.template data<T>();
+    const T* X1data = X1.template data<T>();
+    T* outputData = output->template mutable_data<T>();
+
+    if (!enable_broadcast_) {
+      CAFFE_ENFORCE_EQ(
+          X0.dims(),
+          X1.dims(),
+          "Dimension mismatch - did you forget to set broadcast=1?");
+      binary_add_kernel<false, T, M><<<
+          CAFFE_GET_BLOCKS(X0.size()),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(X0.size(), X0data, X1data, outputData);
+    } else if (X1.size() == 1) {
+      binary_add_kernel<true, T, M><<<
+          CAFFE_GET_BLOCKS(X0.size()),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(X0.size(), X0data, X1data, outputData);
+    } else {
+      CAFFE_ENFORCE_GT(
+          X0.ndim(),
+          X1.ndim(),
+          "If you are doing broadcasting, input1 should have "
+          "a smaller number of dimensions.");
+      const int axis = (axis_ == -1 ? X0.ndim() - X1.ndim() : axis_);
+      CAFFE_ENFORCE(
+          axis >= 0 && axis < X0.ndim(),
+          "Broadcast axis should be in the range of the number "
+          "of dimensions of the first input.");
+      size_t pre = 1, n = 1, post = 1;
+      for (int i = 0; i < axis; ++i) {
+        pre *= X0.dim(i);
+      }
+      for (int i = 0; i < X1.ndim(); ++i) {
+        CAFFE_ENFORCE_EQ(
+            X0.dim(i + axis), X1.dim(i), "Broadcast dimension mismatch.");
+        n *= X1.dim(i);
+      }
+      for (int i = axis + X1.ndim(); i < X0.ndim(); ++i) {
+        post *= X0.dim(i);
+      }
+
+      if (post == 1) {
+        binary_add_kernel_broadcast<true, T, M><<<
+            CAFFE_GET_BLOCKS(pre * n),
+            CAFFE_CUDA_NUM_THREADS,
+            0,
+            context_.cuda_stream()>>>(X0data, X1data, outputData, pre, post, n);
+      } else {
+        binary_add_kernel_broadcast<false, T, M><<<
+            CAFFE_GET_BLOCKS(pre * post * n),
+            CAFFE_CUDA_NUM_THREADS,
+            0,
+            context_.cuda_stream()>>>(X0data, X1data, outputData, pre, post, n);
+      }
+    }
+    return true;
+  }
+
+  bool RunOnDevice() override {
+    if (Input(0).IsType<float>()) {
+      return DoRunWithType<float, float>();
+    } else if (Input(0).IsType<float16>()) {
+      return DoRunWithType<float16, float>();
+    } else if (Input(0).IsType<int32_t>()) {
+      return DoRunWithType<int32_t, int32_t>();
+    } else if (Input(0).IsType<int64_t>()) {
+      return DoRunWithType<int64_t, int64_t>();
+    } else {
+      return false;
+    }
+  }
+
+ private:
+  bool enable_broadcast_;
+  int axis_;
+  string axis_str_;
+  string order_;
+};
+
+namespace {
+REGISTER_CUDA_OPERATOR(Add, CUDAAddOp);
+} // namespace
 
 }  // namespace caffe2
