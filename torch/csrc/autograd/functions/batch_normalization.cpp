@@ -84,6 +84,11 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 
 auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_list {
   auto& input = this->input.unpack();
+
+  if (!input) throw std::runtime_error("Trying to backward through the "
+      "graph second time, but the buffers have already been freed. Please "
+      "specify retain_variables=True when calling backward for the first time.");
+
   auto& weight = this->weight.unpack();
   auto& bias = this->bias.unpack();
   AutoGPU guard(input->getDevice());
