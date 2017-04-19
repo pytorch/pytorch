@@ -10,6 +10,7 @@
 #include "gloo/mpi/context.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "gloo/common/error.h"
 #include "gloo/common/logging.h"
