@@ -75,7 +75,6 @@ class Embedding(Function):
                     _count = torch.IntTensor()
                     _sorted = _indices = None
 
-            # TODO: sparse updates...
             grad_weight = grad_output.new(self._weight_size).zero_()
             self._backend.LookupTable_accGradParameters(
                 self._backend.library_state,
