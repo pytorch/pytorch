@@ -46,6 +46,15 @@ CAFFE2_DEFINE_int(caffe2_cub_max_bin, 16,
              "If using cub as the memory allocator, sets the max number of "
              "bins.");
 
+CAFFE2_DEFINE_bool(
+    caffe2_gpu_memory_tracking,
+    false,
+    "If set, logs changes in GPU memory allocations");
+CAFFE2_DEFINE_int(
+    caffe2_gpu_memory_report_interval_mb,
+    128,
+    "The threshold in MB on how frequently to report memory changes");
+
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(Tensor<CUDAContext>);
@@ -77,6 +86,15 @@ unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 // long as we are using UVA (as of CUDA 5 and later) so the addresses are
 // unique.
 static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
+
+// Data structures for optional memory tracking. Access to these structures
+// is garded by the CUDAContext::mutex.
+static std::unordered_map<void*, long> g_size_map;
+static std::vector<long> g_total_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_max_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
+
+static long g_total_mem = 0;
+static long g_last_rep = 0;
 
 CudaMemoryPoolType GetCudaMemoryPoolType() {
   return g_cuda_memory_pool_type;
@@ -322,15 +340,66 @@ std::mutex& CUDAContext::mutex() {
   return m;
 }
 
+std::vector<long> CUDAContext::TotalMemoryByGpu() {
+  std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+  CAFFE_ENFORCE(
+      FLAGS_caffe2_gpu_memory_tracking,
+      "Pass --caffe2_gpu_memory_tracking to enable memory stats");
+  return g_total_by_gpu_map;
+}
+
+std::vector<long> CUDAContext::MaxMemoryByGpu() {
+  std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+  CAFFE_ENFORCE(
+      FLAGS_caffe2_gpu_memory_tracking,
+      "Pass --caffe2_gpu_memory_tracking to enable memory stats");
+  return g_max_by_gpu_map;
+}
+
+namespace {
+void TrackMemoryAlloc(size_t nbytes) {
+  int this_gpu = GetCurrentGPUID();
+  g_total_by_gpu_map[this_gpu] += nbytes;
+  g_max_by_gpu_map[this_gpu] =
+      max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
+  g_total_mem += nbytes;
+  if (g_total_mem - g_last_rep >
+      FLAGS_caffe2_gpu_memory_report_interval_mb * 1024 * 1024) {
+    for (int gpu = 0; gpu < g_total_by_gpu_map.size(); gpu++) {
+      long t = g_total_by_gpu_map[gpu];
+      long max_t = g_max_by_gpu_map[gpu];
+      if (max_t > 0) {
+        if (max_t != t) {
+          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
+                    << " (max: " << max_t / 1024 / 1024 << " MB)";
+        } else {
+          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
+        }
+      }
+    }
+    LOG(INFO) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
+    g_last_rep = g_total_mem;
+  }
+}
+}
+
 void* CUDAContext::New(size_t nbytes) {
   // Lock the mutex
   std::lock_guard<std::mutex> lock(CUDAContext::mutex());
   // A one-time caffe2 cuda initializer.
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
   void* ptr = nullptr;
+
+  if (FLAGS_caffe2_gpu_memory_tracking) {
+    TrackMemoryAlloc(nbytes);
+  }
   switch (g_cuda_memory_pool_type) {
   case CudaMemoryPoolType::NONE:
     CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      g_size_map[ptr] = nbytes;
+      g_cuda_device_affiliation[ptr] = GetCurrentGPUID();
+    }
     return ptr;
   case CudaMemoryPoolType::CNMEM: {
 #ifdef CAFFE2_USE_CNMEM
@@ -345,6 +414,9 @@ void* CUDAContext::New(size_t nbytes) {
     g_cuda_device_affiliation[ptr] = GetCurrentGPUID();
     VLOG(2) << "CNMEM allocating pointer " << ptr << " on device "
             << GetCurrentGPUID();
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      g_size_map[ptr] = nbytes;
+    }
     return ptr;
 #else
     CAFFE_THROW("This caffe2 is not built with cnmem support, so you should "
@@ -356,6 +428,9 @@ void* CUDAContext::New(size_t nbytes) {
     g_cuda_device_affiliation[ptr] = GetCurrentGPUID();
     VLOG(2) << "CUB allocating pointer " << ptr << " on device "
             << GetCurrentGPUID();
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      g_size_map[ptr] = nbytes;
+    }
     return ptr;
   }
   return nullptr;
@@ -364,6 +439,16 @@ void* CUDAContext::New(size_t nbytes) {
 void CUDAContext::Delete(void* ptr) {
   // lock the mutex
   std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+
+  if (FLAGS_caffe2_gpu_memory_tracking) {
+    auto sz_it = g_size_map.find(ptr);
+    DCHECK(sz_it != g_size_map.end());
+    auto aff_it = g_cuda_device_affiliation.find(ptr);
+    DCHECK(aff_it != g_cuda_device_affiliation.end());
+    g_total_mem -= sz_it->second;
+    g_total_by_gpu_map[aff_it->second] -= sz_it->second;
+    g_size_map.erase(sz_it);
+  }
 
   switch (g_cuda_memory_pool_type) {
   case CudaMemoryPoolType::NONE: {
@@ -379,6 +464,11 @@ void CUDAContext::Delete(void* ptr) {
       LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
                  << cudaGetErrorString(error);
     }
+
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
+    }
+
     break; }
   case CudaMemoryPoolType::CNMEM: {
 #ifdef CAFFE2_USE_CNMEM

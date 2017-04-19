@@ -170,6 +170,11 @@ class CUDAContext final {
   // deadlocks
   static std::mutex& mutex();
 
+  // Functions to query memory stats. Only available if flag
+  // --caffe2_gpu_memory_tracking is enabled.
+  static std::vector<long> TotalMemoryByGpu();
+  static std::vector<long> MaxMemoryByGpu();
+
   template <class SrcContext, class DstContext>
   inline void CopyBytes(size_t nbytes, const void* src, void* dst) {
     CUDA_ENFORCE(cudaMemcpyAsync(

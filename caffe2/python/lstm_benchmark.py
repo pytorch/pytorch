@@ -159,6 +159,17 @@ def Caffe2LSTM(args):
         entries_per_iter * num_iters / (time.time() - start_time) // 1000,
     ))
 
+    if (args.gpu):
+        log.info("Memory stats:")
+        stats = utils.GetGPUMemoryUsageStats()
+        log.info("GPU memory:\t{} MB".format(stats['max_total'] / 1024 / 1024))
+        if (stats['max_total'] != stats['total']):
+            log.warning(
+                "Max usage differs from current total usage: {} > {}".
+                format(stats['max_total'], stats['total'])
+            )
+            log.warning("This means that costly deallocations occured.")
+
 
 @utils.debug
 def Benchmark(args):
@@ -230,7 +241,8 @@ if __name__ == '__main__':
     workspace.GlobalInit([
         'caffe2',
         '--caffe2_log_level=0',
-        '--caffe2_print_blob_sizes_at_exit=0'])
+        '--caffe2_print_blob_sizes_at_exit=0',
+        '--caffe2_gpu_memory_tracking=1'])
 
     device = core.DeviceOption(
         caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 0)
