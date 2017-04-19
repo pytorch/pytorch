@@ -118,7 +118,7 @@ class CharRNN(object):
 
         workspace.RunNetOnce(self.model.param_init_net)
 
-        # As though we predict the same probablity for each character
+        # As though we predict the same probability for each character
         smooth_loss = -np.log(1.0 / self.D) * self.seq_length
         last_n_iter = 0
         last_n_loss = 0.0
@@ -255,7 +255,7 @@ def main():
     parser.add_argument("--iters_to_report", type=int, default=500,
                         help="How often to report loss and generate text")
     parser.add_argument("--hidden_size", type=int, default=100,
-                        help="Dimention of the hidden representation")
+                        help="Dimension of the hidden representation")
     parser.add_argument("--gpu", action="store_true",
                         help="If set, training is going to use GPU 0")
 
