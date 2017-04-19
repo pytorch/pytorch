@@ -33,9 +33,11 @@ class Store {
       const std::vector<std::string>& keys) = 0;
 
   virtual void wait(
-      const std::vector<std::string>& /*keys*/,
+      const std::vector<std::string>& keys,
       const std::chrono::milliseconds& /*timeout*/) {
-    GLOO_ENFORCE(false, "Store::wait() does not support timeout");
+    // Base implementation ignores the timeout for backward compatibility.
+    // Derived Store implementations should override this function.
+    wait(keys);
   }
 
 };
