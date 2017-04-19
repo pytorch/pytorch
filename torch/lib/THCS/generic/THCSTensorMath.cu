@@ -212,44 +212,78 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
 
 void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real value, THCSTensor *sparse) {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
-  THCTensor_(resizeAs)(state, r_, dense);
-  THCSTensor_(coalesce)(state, sparse);
+
+  THCTensor *r = r_;
+  if (r != dense) {
+    THCTensor_(retain)(state, r);
+    THCTensor_(resizeAs)(state, r, dense);
+    THCTensor_(copy)(state, r, dense);
+  } else {
+    r = THCTensor_(newContiguous)(state, r_);
+  }
+
+  const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
+  if (nnz == 0) {
+    THCTensor_(freeCopyTo)(state, r, r_);
+    return;
+  }
 
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, sparse);
   THCTensor *values = THCSTensor_(newValues)(state, sparse);
   long nDim = THCTensor_(nDimension)(state, dense);
   long nDimI = THCSTensor_(nDimensionI)(state, sparse);
 
-  if (r_ != dense) {
-    THCTensor_(resizeAs)(state, r_, dense);
-    THCTensor_(copy)(state, r_, dense);
-  } else {
-    if(!THCTensor_(isContiguous)(state, r_)) {
-      THCTensor* r_contiguous = THCTensor_(newContiguous)(state, r_);
-      THCTensor_(copy)(state, r_, r_contiguous);
-      THCTensor_(free)(state, r_contiguous);
+ if (THCSTensor_(isCoalesced)(state, sparse)) {
+    // TODO benchmark to decide whether to remove this special case
+    const dim3 block = getApplyBlock();
+    dim3 grid;
+    if (sparse->nDimensionV == 0) {
+      THArgCheck(getApplyGrid(state, nnz, grid), 1, CUTORCH_DIM_WARNING);
+
+      THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, unsigned long, real>
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          TensorCAddOp<real>(value),
+          V_INFO(r_), I_INFO(indices), V_INFO(values),
+          (unsigned long) nnz);
+    } else {
+      THArgCheck(getApplyGrid(state, nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
+
+      THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, unsigned long, real>
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          TensorCAddOp<real>(value),
+          V_INFO(r_), I_INFO(indices), V_INFO(values),
+          (unsigned long) nnz);
     }
-  }
-
-  // TODO more benchmarking
-  const dim3 block = getApplyBlock();
-  dim3 grid;
-  if (sparse->nDimensionV == 0) {
-    THArgCheck(getApplyGrid(state, sparse->nnz, grid), 1, CUTORCH_DIM_WARNING);
-
-    THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, unsigned long, real>
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-        TensorCAddOp<real>(value),
-        V_INFO(r_), I_INFO(indices), V_INFO(values),
-        (unsigned long)sparse->nnz);
   } else {
-    THArgCheck(getApplyGrid(state, sparse->nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
+    THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse);
+    THCIndexTensor_(resize1d)(state, indices1D, nnz);
 
-    THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, unsigned long, real>
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-        TensorCAddOp<real>(value),
-        V_INFO(r_), I_INFO(indices), V_INFO(values),
-        (unsigned long)sparse->nnz);
+    if (value != ScalarConvert<int, real>::to(1)) {
+      // FIXME: at some point we can wrap the scale into indexAdd
+      THCTensor *scaled = THCTensor_(new)(state);
+      THCTensor_(mul)(state, scaled, values, value);
+      THCTensor_(free)(state, values);
+      values = scaled;
+    }
+
+    long view_rows = 1;
+    long view_columns = 1;
+    THLongStorage *r_size = THCTensor_(newSizeOf)(state, r);
+    for (int i = 0; i < nDimI; i++)
+      view_rows *= r_size->data[i];
+    for (int i = nDimI; i < nDim; i++)
+      view_columns *= r_size->data[i];
+
+    THLongStorage *r_view_size = THLongStorage_newWithSize2(view_rows, view_columns);
+    THCTensor *r_view = THCTensor_(newView)(state, r, r_view_size);
+    THCTensor_(resize2d)(state, values, nnz, view_columns);
+
+    THCTensor_(indexAdd)(state, r_view, 0, indices1D, values);
+
+    THCIndexTensor_(free)(state, indices1D);
+    THLongStorage_free(r_size);
+    THLongStorage_free(r_view_size);
+    THCTensor_(free)(state, r_view);
   }
   THCudaCheck(cudaGetLastError());
 
@@ -330,7 +364,6 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   // rather than merging them. This removes the need to synchronously fetch nnz
   // at the end of the operation, at the cost of having a non-coalesced result.
   // This trade-off is preferable for the common use-case of gradient accumulation.
-  // TODO have two distinct functions? The other option is commented out below
   THCIndexTensor *t_indices_ = THCSTensor_(newIndices)(state, t);
   THCTensor *t_values_ = THCSTensor_(newValues)(state, t);
   THCIndexTensor *s_indices_ = THCSTensor_(newIndices)(state, src);
@@ -348,54 +381,13 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   THCSTensor_(resizeAs)(state, r_, src);
   THCSTensor_(_move)(state, r_, r_indices_, r_values_);
 
-  // // saving those because they can be overwritten when doing in-place operations
-  // ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
-  // long nDimI = src->nDimensionI;
-  // THCIndexTensor *t_indices_ = THCSTensor_(newIndices)(state, t);
-  // THCTensor *t_values_ = THCSTensor_(newValues)(state, t);
-  // THCIndexTensor *s_indices_ = THCSTensor_(newIndices)(state, src);
-  // THCTensor *s_values_ = THCSTensor_(newValues)(state, src);
-  // THCIndexTensor *r_indices_ = THCIndexTensor_(newWithSize2d)(state, nDimI, max_nnz);
-  // THCTensor *r_values_ = THCSTensor_(newValuesWithSizeOf)(state, s_values_, max_nnz);
-  // THCTensor_(zero)(state, r_values_);
-  // THCSTensor_(resizeAs)(state, r_, src);
-  // THCSTensor_(_move)(state, r_, r_indices_, r_values_);
-  //
-  // long valueSize = t_values_->stride[0];
-  // const dim3 block = dim3(min((long) getApplyBlock().x, valueSize));
-  // dim3 grid;
-  // THArgCheck(getApplyGrid(state, valueSize, grid), 1, CUTORCH_DIM_WARNING);
-  //
-  // THCSTensor_valueSparseUnionKernel<TensorCAddOp<real>, TensorAddOp<real>, TensorCAddOp<real>, unsigned long, real>
-  //   <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-  //     TensorCAddOp<real>(value),
-  //     TensorAddOp<real>(),
-  //     TensorCAddOp<real>(value),
-  //     I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-  //     V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
-  //     (unsigned long)t_nnz, (unsigned long)s_nnz);
-  // THCudaCheck(cudaGetLastError());
-  //
-  // bool freeScratchSpace = false;
-  // void* scratchSpace = THCState_getCurrentDeviceScratchSpace(state);
-  // if (!scratchSpace) {
-  //   THCudaCheck(THCudaMalloc(state, &scratchSpace,
-  //       THCState_getCurrentDeviceScratchSpaceSize(state)));
-  //   freeScratchSpace = true;
-  // }
-  // THCSTensor_indexSparseUnionKernel<unsigned long, real>
-  //   <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
-  //     I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-  //     (unsigned long)t_nnz, (unsigned long)s_nnz, (unsigned long*)scratchSpace);
-  // THCudaCheck(cudaGetLastError());
-  // // Synchronous!
-  // unsigned long nnzOut;
-  // THCudaCheck(cudaMemcpy(&nnzOut, scratchSpace, sizeof(unsigned long), cudaMemcpyDeviceToHost));
-  // r_->nnz = nnzOut;
-  // r_->coalesced = 1;
-  // if (freeScratchSpace) {
-  //   THCudaCheck(THCudaFree(state, scratchSpace));
-  // }
+  // FIXME: add some heuristic about when to call coalesce() here, so that
+  // tensors don't totally blow up in size by concatenation; e.g.
+  //   r->minUnique = max(a->minUnique + b->minUnique);
+  //   if (r->nnz / r->minUnique > COMPACTION_THRESHOLD) {
+  //     THCSTensor_(contiguous)(r);
+  //     r->minUnique = r->nnz;
+  //   }
 
   THCIndexTensor_(free)(state, t_indices_);
   THCTensor_(free)(state, t_values_);

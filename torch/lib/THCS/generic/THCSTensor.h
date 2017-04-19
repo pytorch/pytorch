@@ -13,7 +13,7 @@ typedef struct THCSTensor
     // as buffer, so we keep track of both
     THCIndexTensor *indices;
     THCTensor *values;
-    // Math operations can only be performed on ordered sparse tensors
+    // Some math operations can only be performed on ordered sparse tensors
     int coalesced;
     int refcount;
 
@@ -74,5 +74,6 @@ TH_API void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI,
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, long nnz);
 TH_API THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
+TH_API THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self);
 
 #endif
