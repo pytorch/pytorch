@@ -25,6 +25,14 @@ class LayersTestCase(test_util.TestCase):
 
     def setUp(self):
         super(LayersTestCase, self).setUp()
+        self.setup_example()
+
+    def setup_example(self):
+        """
+        This is undocumented feature in hypothesis,
+        https://github.com/HypothesisWorks/hypothesis-python/issues/59
+        """
+        workspace.ResetWorkspace()
         self.reset_model()
 
     def reset_model(self, input_feature_schema=None, trainer_extra_schema=None):
