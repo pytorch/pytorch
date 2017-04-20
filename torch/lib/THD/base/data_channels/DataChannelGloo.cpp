@@ -15,11 +15,10 @@
 
 
 
-#define RETURN_IF_NOT_IN_GROUP(name)                                          \
-  rank_type name;                                                             \
+#define RETURN_IF_NOT_IN_GROUP                                                \
   {                                                                           \
     bool exists;                                                              \
-    std::tie(name, exists) = _groups.at(group_id).getGroupRank(_rank);        \
+    std::tie(std::ignore, exists) = _groups.at(group_id).getGroupRank(_rank); \
     if (!exists) return;                                                      \
   }
 
@@ -150,7 +149,7 @@ void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
 
 void DataChannelGloo::allGather(std::vector<thpp::Tensor*>& output,
                                 thpp::Tensor& input, THDGroup group_id) {
-  RETURN_IF_NOT_IN_GROUP(_)
+  RETURN_IF_NOT_IN_GROUP
 
   if (output.size() != _groups.at(group_id).size())
     throw std::logic_error("allGather: number of output tensors and group size does not match");
@@ -192,7 +191,7 @@ void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
 
 void DataChannelGloo::allReduce(thpp::Tensor& data, THDReduceOp operation,
                                 THDGroup group_id) {
-  RETURN_IF_NOT_IN_GROUP(_)
+  RETURN_IF_NOT_IN_GROUP
   GENERATE_ALL_TYPES(data.type(), allReduceT, data, operation, group_id)
 }
 
@@ -224,7 +223,7 @@ void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
 
 void DataChannelGloo::broadcast(thpp::Tensor& data, rank_type src_rank,
                                 THDGroup group_id) {
-  RETURN_IF_NOT_IN_GROUP(_)
+  RETURN_IF_NOT_IN_GROUP
   GENERATE_ALL_TYPES(data.type(), broadcastT, data, src_rank, group_id)
 }
 
@@ -265,8 +264,7 @@ auto DataChannelGloo::ireceive(thpp::Tensor& data, rank_type src_rank) -> Reques
 
 
 void DataChannelGloo::barrier(THDGroup group_id) {
-  RETURN_IF_NOT_IN_GROUP(_)
-
+  RETURN_IF_NOT_IN_GROUP
   auto ret = _cache->getAlgorithm<CollectiveType::BARRIER, void>(
     group_id, _groups.at(group_id));
   std::get<0>(ret)->run();
