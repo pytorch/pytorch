@@ -4,7 +4,7 @@
 #include <mutex>
 #include <stack>
 
-#if !defined(_MSC_VER)
+#if !defined(_MSC_VER) && !defined(__APPLE__)
 #include <sched.h>
 #endif
 
@@ -264,7 +264,7 @@ void GPUExecutor::set_affinity() {
 // TODO: find a Windows-compatible affinity setting approach.
 // Currently, set_affinity has no effect in Windows. The code is still
 // correct with possible slowdowns.
-#if !defined(_MSC_VER)
+#if !defined(_MSC_VER) && !defined(__APPLE__)
   /* Set CPU affinity */
   int num_cores = std::thread::hardware_concurrency();
   if (num_cores > 0) {
