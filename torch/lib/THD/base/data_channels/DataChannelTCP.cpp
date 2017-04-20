@@ -304,7 +304,7 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertTensorEqual(*out_tensor, input, "allGather");
+    assertSameSizeAndType(*out_tensor, input, "allGather");
 
   rank_type left = (group.size() + group_rank - 1) % group.size();
   rank_type right = (group_rank + 1) % group.size();
@@ -341,7 +341,7 @@ void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
       throw std::logic_error("gather: number of output tensors and group size does not match");
 
     for (auto out_tensor : output)
-      assertTensorEqual(*out_tensor, input, "gather");
+      assertSameSizeAndType(*out_tensor, input, "gather");
 
     for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
@@ -374,7 +374,7 @@ void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
       throw std::logic_error("scatter: number of input tensors and group size does not match");
 
     for (auto in_tensor : input)
-      assertTensorEqual(*in_tensor, output, "scatter");
+      assertSameSizeAndType(*in_tensor, output, "scatter");
 
     for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
@@ -794,7 +794,7 @@ void DataChannelTCP::_receive(thpp::Tensor& data, rank_type src_rank) {
 
 void DataChannelTCP::_reduce(thpp::Tensor& result, thpp::Tensor& data,
                              THDReduceOp operation) const {
-  assertTensorEqual(result, data, "reduce");
+  assertSameSizeAndType(result, data, "reduce");
 
   if (operation == THDReduceOp::THDReduceMIN) {
     result.cmin(result, data);

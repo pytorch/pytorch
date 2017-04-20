@@ -24,7 +24,7 @@ private:
     using store_type = std::unordered_map<std::string, std::vector<char>>;
 
     void deamon();
-    bool query(rank_type rank);
+    void query(rank_type rank);
     bool checkAndUpdate(std::vector<std::string>& keys) const;
 
     port_type _port;

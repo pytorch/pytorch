@@ -135,7 +135,7 @@ void DataChannelMPI::allGather(std::vector<thpp::Tensor*>& output,
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertTensorEqual(*out_tensor, input, "allGather");
+    assertSameSizeAndType(*out_tensor, input, "allGather");
 
   std::uint64_t tensor_bytes = input.elementSize() * input.numel();
   std::uint64_t all_tensors_bytes = tensor_bytes * output.size();
@@ -172,7 +172,7 @@ void DataChannelMPI::gather(std::vector<thpp::Tensor*>& output,
       throw std::logic_error("gather: number of output tensors and group size does not match");
 
     for (auto out_tensor : output)
-      assertTensorEqual(*out_tensor, input, "gather");
+      assertSameSizeAndType(*out_tensor, input, "gather");
   }
 
   rank_type group_dst_rank = group_pair.second.mustGetGroupRank(dst_rank);
@@ -211,7 +211,7 @@ void DataChannelMPI::scatter(std::vector<thpp::Tensor*>& input,
       throw std::logic_error("scatter: number of input tensors and group size does not match");
 
     for (auto in_tensor : input)
-      assertTensorEqual(*in_tensor, output, "scatter");
+      assertSameSizeAndType(*in_tensor, output, "scatter");
   }
 
   rank_type group_src_rank = group_pair.second.mustGetGroupRank(src_rank);

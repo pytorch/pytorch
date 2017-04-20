@@ -13,7 +13,6 @@ enum class QueryType : std::uint8_t {
   SET,
   GET,
   WAIT,
-  FINISH,
   STOP_WAITING
 };
 
@@ -72,15 +71,13 @@ void Store::StoreDeamon::deamon() {
         throw std::system_error(ECONNABORTED, std::system_category());
       
       try {
-        finished = query(rank);
-        if (finished)
-          break;
+        query(rank);
       } catch (...) {
-        // There was an error when processing query. Probably exception occured in
+        // There was an error when processing query. Probably an exception occured in
         // recv/send what would indicate that socket on the other side has been closed.
-        // If the closing was due to normal exit this indicates that store should
-        // exit too. Otherwise, when closing was due to unexpected behaviour,
-        // other processes will get exception when trying to use store.
+        // If the closing was due to normal exit, then the store should exit too.
+        // Otherwise, if it was different exception, other processes will get
+        // an exception once they try to use the store.
         finished = true;
         break;
       }
@@ -95,7 +92,7 @@ void Store::StoreDeamon::deamon() {
  * or, in the case of wait
  * type of query | number of args | size of arg1 | arg1 | ...
  */
-bool Store::StoreDeamon::query(rank_type rank) {
+void Store::StoreDeamon::query(rank_type rank) {
   int socket = _sockets[rank];
   QueryType qt;
   recv_bytes<QueryType>(socket, &qt, 1);
@@ -112,12 +109,10 @@ bool Store::StoreDeamon::query(rank_type rank) {
       }
       _waiting.erase(to_wake);
     }
-    return false;
   } else if (qt == QueryType::GET) {
     std::string key = recv_string(socket);
     std::vector<char> data = _store.at(key);
     send_vector(socket, data);
-    return false;
   } else if (qt == QueryType::WAIT) {
     size_type nargs;
     recv_bytes<size_type>(socket, &nargs, 1);
@@ -133,9 +128,6 @@ bool Store::StoreDeamon::query(rank_type rank) {
       }
       _keys_awaited[rank] = keys.size();
     }
-    return false;
-  } else if (qt == QueryType::FINISH) {
-    return true;
   } else {
     throw std::runtime_error("expected a query type");
   }
@@ -164,7 +156,7 @@ Store::Store(rank_type rank, const std::string& addr,
  , _socket(-1)
  , _store_thread(nullptr)
 {
-  // only one process starts store
+  // Only one process (rank 0) starts a store
   if (_rank == 0) {
     _store_thread = std::unique_ptr<StoreDeamon>(
       new StoreDeamon(port, world_size)
@@ -175,13 +167,13 @@ Store::Store(rank_type rank, const std::string& addr,
 }
 
 Store::~Store() {
-  // the 0 process has to stop the daemon
+  ::close(_socket);
+
+  // The rank 0 process has to wait for deamon.
+  // Store deamon should end because of closed connection.
   if (_rank == 0) {
-    send_value<QueryType>(_socket, QueryType::FINISH);
     _store_thread->join();
   }
-
-  ::close(_socket);
 }
 
 void Store::set(const std::string& key, const std::vector<char>& data) {

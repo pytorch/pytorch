@@ -10,6 +10,48 @@
 #include <tuple>
 #include <vector>
 
+
+inline void hash_combine(std::size_t& seed) { }
+
+template <typename T, typename... Rest>
+inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
+  std::hash<T> hasher;
+  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  hash_combine(seed, rest...);
+}
+
+#define SINGLE_ARG(...) __VA_ARGS__
+#define MAKE_HASHABLE(type, ...)                                              \
+  namespace std {                                                             \
+    template<> struct hash<type> {                                            \
+      std::size_t operator()(const type &t) const {                           \
+        std::size_t ret = 0;                                                  \
+        hash_combine(ret, __VA_ARGS__);                                       \
+        return ret;                                                           \
+      }                                                                       \
+    };                                                                        \
+  }
+
+
+namespace thd {
+
+enum class CollectiveType : std::uint8_t {
+  ALL_GATHER = 0,
+  GATHER,
+  SCATTER,
+  ALL_REDUCE,
+  REDUCE,
+  BROADCAST,
+  SEND,
+  BARRIER,
+  LAST
+};
+
+} // namespace thd
+
+MAKE_HASHABLE(::thd::CollectiveType, static_cast<std::uint8_t>(t));
+
+
 namespace thd {
 
 using rank_type = std::uint32_t;
@@ -139,28 +181,4 @@ void send_value(int socket, T&& value, bool more_data = false) {
   send_bytes<T>(socket, &value, 1, more_data);
 }
 
-enum class DataOperation : uint8_t {
-  ALL_GATHER = 0,
-  GATHER,
-  SCATTER,
-  ALL_REDUCE,
-  REDUCE,
-  BROADCAST,
-  SEND,
-  BARRIER,
-  LAST
-};
-
 } // namespace thd
-
-
-namespace std {
-
-template<>
-struct hash<::thd::DataOperation> {
-  std::size_t operator()(const ::thd::DataOperation& op) const {
-    return hash<uint8_t>()(static_cast<uint8_t>(op));
-  }
-};
-
-} // namespace std
