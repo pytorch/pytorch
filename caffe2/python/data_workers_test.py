@@ -28,6 +28,7 @@ class DataWorkersTest(unittest.TestCase):
 
     def testNonParallelModel(self):
         model = cnn.CNNModelHelper(name="test")
+        old_seq_id = data_workers.global_coordinator._fetcher_id_seq
         coordinator = data_workers.init_data_input_workers(
             model,
             ["data", "label"],
@@ -35,7 +36,9 @@ class DataWorkersTest(unittest.TestCase):
             32,
             2,
         )
-        self.assertEqual(coordinator._fetcher_id_seq, 2)
+        new_seq_id = data_workers.global_coordinator._fetcher_id_seq
+        self.assertEqual(new_seq_id, old_seq_id + 2)
+
         coordinator.start()
 
         workspace.RunNetOnce(model.param_init_net)
@@ -60,6 +63,7 @@ class DataWorkersTest(unittest.TestCase):
 
     def testGracefulShutdown(self):
         model = cnn.CNNModelHelper(name="test")
+        old_seq_id = data_workers.global_coordinator._fetcher_id_seq
         coordinator = data_workers.init_data_input_workers(
             model,
             ["data", "label"],
@@ -67,7 +71,9 @@ class DataWorkersTest(unittest.TestCase):
             32,
             2,
         )
-        self.assertEqual(coordinator._fetcher_id_seq, 2)
+        new_seq_id = data_workers.global_coordinator._fetcher_id_seq
+        self.assertEqual(new_seq_id, old_seq_id + 2)
+
         coordinator.start()
 
         workspace.RunNetOnce(model.param_init_net)
