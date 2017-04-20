@@ -309,7 +309,8 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
-  THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
+  if (gradBias)
+    THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch

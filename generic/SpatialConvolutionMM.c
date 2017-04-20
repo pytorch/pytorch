@@ -334,7 +334,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           accreal scale_)
 {
   THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
-  THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
+  if (gradBias)
+    THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
 
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   gradWeight = THNN_(view_weight_MM2d)(gradWeight);
