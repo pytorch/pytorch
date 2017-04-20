@@ -95,17 +95,21 @@ void RecurrentBaseOp<T>::initialize(
   {
     if (dropoutStates) {
       size_t stateSize;
-      CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
-          cudnn_wrapper_.inline_cudnn_handle(), &stateSize));
-      dropoutStates->Resize(std::vector<int>{static_cast<int>(
-          stateSize / 4 /* sizeof(T) - workaround clang bug */)});
-      CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
-          dropoutDesc_,
-          cudnn_wrapper_.inline_cudnn_handle(),
-          OperatorBase::GetSingleArgument<float>("dropout", 1.0),
-          dropoutStates->template mutable_data<T>(),
-          stateSize,
-          OperatorBase::GetSingleArgument<int>("seed", 0)));
+      float dropout_param =
+          OperatorBase::GetSingleArgument<float>("dropout", 1.0);
+      if (dropout_param < 1.0) {
+        CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
+            cudnn_wrapper_.inline_cudnn_handle(), &stateSize));
+        dropoutStates->Resize(std::vector<int>{static_cast<int>(
+            stateSize / 4 /* sizeof(T) - workaround clang bug */)});
+        CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
+            dropoutDesc_,
+            cudnn_wrapper_.inline_cudnn_handle(),
+            dropout_param,
+            dropoutStates->template mutable_data<T>(),
+            stateSize,
+            OperatorBase::GetSingleArgument<int>("seed", 0)));
+      }
     }
   }
 
