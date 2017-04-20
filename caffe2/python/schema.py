@@ -393,7 +393,7 @@ class Struct(Field):
             return self.fields.values()[item]
         else:
             field = self._get_field_by_nested_name(item)
-            if not field:
+            if field is None:
                 raise KeyError('field "%s" not found' % (item))
             return field
 

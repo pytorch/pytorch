@@ -205,6 +205,7 @@ class TestLayers(LayersTestCase):
                 ('list', schema.List(np.int64)),
                 ('list_of_list', schema.List(schema.List(np.int64))),
             )),
+            ('empty_struct', schema.Struct())
         ))
         indices_record = self.new_record(schema.Scalar(np.int32))
         input_record = schema.Struct(
@@ -218,10 +219,7 @@ class TestLayers(LayersTestCase):
         gathered_record = self.model.GatherRecord(input_record)
         self.assertTrue(schema.equal_schemas(gathered_record, record))
 
-        # just to make run_train_net works
-        self.model.loss = self.model.StopGradient(gathered_record.dense, 1)
-
-        self.run_train_net()
+        self.run_train_net_forward_only()
         gathered_dense = workspace.FetchBlob(gathered_record.dense())
         np.testing.assert_array_equal(
             np.concatenate([dense[i:i + 1] for i in indices]), gathered_dense)
