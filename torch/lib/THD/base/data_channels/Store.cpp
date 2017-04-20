@@ -136,7 +136,7 @@ void Store::StoreDeamon::query(rank_type rank) {
 bool Store::StoreDeamon::checkAndUpdate(std::vector<std::string>& keys) const {
   bool ret = true;
   for (auto it = keys.begin(); it != keys.end();) {
-    if (_store.find(*it) == _store.end()) {
+    if (_store.count(*it) == 0) {
       ret = false;
       it++;
     } else {
