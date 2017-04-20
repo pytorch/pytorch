@@ -52,6 +52,8 @@ void THNN_(TemporalSubSampling_updateOutput)(
   int nInputFrame, nOutputFrame;
   long k;
 
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THTensor_(isContiguous)(bias), 4, "bias must be contiguous");
   THNN_(TemporalSubSampling_shapeCheck)(state, input, NULL, kW, dW, &inputFrameSize);
 
   outputFrame = THTensor_(new)();
@@ -91,6 +93,7 @@ void THNN_(TemporalSubSampling_updateGradInput)(
   THTensor *gradInputWindow, *buffer, *kwunit;
   long k;
 
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
   THNN_(TemporalSubSampling_shapeCheck)(state, input, gradOutput, kW, dW, NULL);
 
   gradOutputFrame = THTensor_(new)();
