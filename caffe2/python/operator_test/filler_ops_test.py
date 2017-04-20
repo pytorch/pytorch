@@ -51,7 +51,7 @@ class TestFillerOperator(hu.HypothesisTestCase):
         ),
         a=st.integers(min_value=0, max_value=100),
         b=st.integers(min_value=0, max_value=100),
-        **hu.gcs
+        **hu.gcs_cpu_only
     )
     def test_uniform_int_fill_op_blob_input(self, shape, a, b, gc, dc):
         net = core.Net('test_net')
