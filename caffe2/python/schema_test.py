@@ -69,10 +69,12 @@ class TestDB(unittest.TestCase):
     def testStructIndexing(self):
         s = schema.Struct(
             ('field1', schema.Scalar(dtype=np.int32)),
-            ('field2', schema.List(schema.Scalar(dtype=str)))
+            ('field2', schema.List(schema.Scalar(dtype=str))),
+            ('field3', schema.Struct()),
         )
         self.assertEquals(s['field2'], s.field2)
         self.assertEquals(s['field2'], schema.List(schema.Scalar(dtype=str)))
+        self.assertEquals(s['field3'], schema.Struct())
         self.assertEquals(
             s['field2', 'field1'],
             schema.Struct(
