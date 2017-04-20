@@ -13,11 +13,6 @@ __device__ Dtype cuda_sigmoid(const Dtype x) {
   return Dtype(1) / (Dtype(1) + exp(-x));
 }
 
-template <typename Dtype>
-__device__ Dtype cuda_tanh(const Dtype x) {
-  return Dtype(2) * cuda_sigmoid(Dtype(2) * x) - Dtype(1);
-}
-
 template <typename T>
 __global__ void LSTMUnitKernel(
     const int nthreads,
@@ -42,11 +37,11 @@ __global__ void LSTMUnitKernel(
       const T i = cuda_sigmoid(X_offset[d]);
       const T f = cuda_sigmoid(X_offset[1 * dim + d] + forget_bias);
       const T o = cuda_sigmoid(X_offset[2 * dim + d]);
-      const T g = cuda_tanh(X_offset[3 * dim + d]);
+      const T g = tanh(X_offset[3 * dim + d]);
       const T c_prev = C_prev[index];
       const T c = f * c_prev + i * g;
       C[index] = c;
-      const T tanh_c = cuda_tanh(c);
+      const T tanh_c = tanh(c);
       H[index] = o * tanh_c;
     }
   }
@@ -91,10 +86,10 @@ __global__ void LSTMUnitGradientKernel(
       const T i = cuda_sigmoid(X_offset[d]);
       const T f = cuda_sigmoid(X_offset[1 * dim + d] + forget_bias);
       const T o = cuda_sigmoid(X_offset[2 * dim + d]);
-      const T g = cuda_tanh(X_offset[3 * dim + d]);
+      const T g = tanh(X_offset[3 * dim + d]);
       const T c_prev = C_prev[index];
       const T c = C[index];
-      const T tanh_c = cuda_tanh(c);
+      const T tanh_c = tanh(c);
       const T c_term_diff =
           C_diff[index] + H_diff[index] * o * (1 - tanh_c * tanh_c);
       *c_prev_diff = c_term_diff * f;
