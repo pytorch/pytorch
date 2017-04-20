@@ -20,7 +20,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
       mode_ = CUDNN_POOLING_MAX;
 #endif
     } else if (def().type().substr(0, 11) == "AveragePool") {
-      mode_ = CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING;
+      mode_ = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << def().type();
     }
@@ -137,7 +137,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     if (def().type() == "MaxPoolGradient") {
       mode_ = CUDNN_POOLING_MAX;
     } else if (def().type() == "AveragePoolGradient") {
-      mode_ = CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING;
+      mode_ = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << def().type();
     }
