@@ -3,6 +3,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/autograd/functions/errors.h"
 
 #ifdef WITH_CUDNN
 #include "torch/csrc/cudnn/Conv.h"
@@ -192,9 +193,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
-  if (!input_.data) throw std::runtime_error("Trying to backward through the "
-      "graph second time, but the buffers have already been freed. Please "
-      "specify retain_variables=True when calling backward for the first time.");
+  if (!input_.data) throw std::runtime_error(PT_ERR_BACKWARD_TWICE);
 
   AutoGPU guard(input_.data->getDevice());
 

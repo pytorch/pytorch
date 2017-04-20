@@ -10,6 +10,7 @@
 #include "THP.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/autograd/functions/errors.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
@@ -661,9 +662,7 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
-  THPUtils_assert(!self->has_freed_buffers, "Trying to backward through the "
-      "graph second time, but the buffers have already been freed. Please "
-      "specify retain_variables=True when calling backward for the first time.");
+  THPUtils_assert(!self->has_freed_buffers, PT_ERR_BACKWARD_TWICE);
   if (!self->saved_variables)
     return PyTuple_New(0);
 

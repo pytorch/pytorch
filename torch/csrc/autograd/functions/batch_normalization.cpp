@@ -3,6 +3,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/autograd/functions/errors.h"
 
 #ifdef WITH_CUDNN
 #include "torch/csrc/cudnn/BatchNorm.h"
@@ -85,9 +86,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_list {
   auto& input = this->input.unpack();
 
-  if (!input) throw std::runtime_error("Trying to backward through the "
-      "graph second time, but the buffers have already been freed. Please "
-      "specify retain_variables=True when calling backward for the first time.");
+  if (!input) throw std::runtime_error(PT_ERR_BACKWARD_TWICE);
 
   auto& weight = this->weight.unpack();
   auto& bias = this->bias.unpack();
