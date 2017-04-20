@@ -20,7 +20,6 @@ inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
   hash_combine(seed, rest...);
 }
 
-#define SINGLE_ARG(...) __VA_ARGS__
 #define MAKE_HASHABLE(type, ...)                                              \
   namespace std {                                                             \
     template<> struct hash<type> {                                            \

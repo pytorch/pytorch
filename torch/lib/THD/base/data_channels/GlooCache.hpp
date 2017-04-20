@@ -18,9 +18,24 @@
 #include <vector>
 
 
+namespace thd {
+namespace gloo_cache {
+
+using key_type = std::tuple<
+  CollectiveType, // operation
+  THDGroup,       // group
+  std::size_t,    // input buffer bytes
+  std::size_t,    // output buffer bytes
+  THDReduceOp,    // reduce op
+  rank_type       // src/dest rank
+>;
+
+} // namespace gloo_cache
+} // namespace thd
+
+
 MAKE_HASHABLE(
-  SINGLE_ARG(std::tuple<thd::CollectiveType, THDGroup, std::size_t, std::size_t,
-                        THDReduceOp, thd::rank_type>),
+  thd::gloo_cache::key_type,
   std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t),
   std::get<4>(t), std::get<5>(t)
 );
@@ -28,6 +43,7 @@ MAKE_HASHABLE(
 
 namespace thd {
 
+// Forward declaration
 template<CollectiveType D, typename T>
 struct algorithm_spec;
 
@@ -38,14 +54,7 @@ struct GlooCache {
   using prefix_store_type = ::gloo::rendezvous::PrefixStore;
   using store_type = ::gloo::rendezvous::Store;
 
-  using key_type = std::tuple<
-    CollectiveType, // operation
-    THDGroup,      // group
-    std::size_t,   // input buffer bytes
-    std::size_t,   // output buffer bytes
-    THDReduceOp,   // reduce op
-    rank_type      // src/dest rank
-  >;
+  using key_type = gloo_cache::key_type;
   using value_type = std::tuple<
     std::shared_ptr<algorithm_type>, // algorithm
     std::shared_ptr<buffer_type>,    // input buffer (nullptr if not used)
