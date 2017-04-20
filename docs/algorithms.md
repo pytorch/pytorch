@@ -23,7 +23,7 @@ Compute sum of N arrays per process across P processes. This
 computation happens in place; all input arrays contain the resulting
 sum after the algorithm completes.
 
-There's 3 phases to each implementation of this algorithm:
+There are 3 phases to each implementation of this algorithm:
 1. Local reduction of N buffers
 2. Allreduce between processes
 3. Broadcast result back to N buffers
