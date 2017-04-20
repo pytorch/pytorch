@@ -316,13 +316,16 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
         bias_params = GetLSTMParamNames()['biases']
 
         input_weight_size = dim_out * dim_in
+        upper_layer_input_weight_size = dim_out * dim_out
         recurrent_weight_size = dim_out * dim_out
         input_bias_size = dim_out
         recurrent_bias_size = dim_out
 
         def init(layer, pname, input_type):
+            input_weight_size_for_layer = input_weight_size if layer == 0 else \
+                upper_layer_input_weight_size
             if pname in weight_params:
-                sz = input_weight_size if input_type == 'input' \
+                sz = input_weight_size_for_layer if input_type == 'input' \
                     else recurrent_weight_size
             elif pname in bias_params:
                 sz = input_bias_size if input_type == 'input' \
@@ -335,10 +338,12 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
                 shape=[sz])
 
         # Multiply by 4 since we have 4 gates per LSTM unit
-        total_sz = 4 * num_layers * (
-            input_weight_size + recurrent_weight_size + input_bias_size +
-            recurrent_bias_size
-        )
+        first_layer_sz = input_weight_size + recurrent_weight_size + \
+                         input_bias_size + recurrent_bias_size
+        upper_layer_sz = upper_layer_input_weight_size + \
+                         recurrent_weight_size + input_bias_size + \
+                         recurrent_bias_size
+        total_sz = 4 * (first_layer_sz + (num_layers - 1) * upper_layer_sz)
 
         weights = model.param_init_net.UniformFill(
             [], "lstm_weight", shape=[total_sz])
