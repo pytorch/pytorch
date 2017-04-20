@@ -92,6 +92,7 @@ def create_model(args, queue, label_queue, input_shape):
             dim_in=args.input_dim,
             dim_out=args.hidden_dim,
             scope="cudnnlstm",
+            num_layers=1,
         )
 
     else:
