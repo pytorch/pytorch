@@ -65,7 +65,7 @@ def downloadFromURLToFile(url, filename):
                 if not data_chunk:
                     break
                 local_file.write(data_chunk)
-                downloaded_size += chunk
+                downloaded_size += len(data_chunk)
                 progressBar(int(100 * downloaded_size / size))
         print("")  # New line to fix for progress bar
     except HTTPError as e:
