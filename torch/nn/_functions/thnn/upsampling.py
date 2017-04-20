@@ -4,20 +4,28 @@ from torch.autograd import Function
 from torch._thnn import type2backend
 
 from . import _all_functions
+from ...modules.utils import _pair
 
 
-class UpsamplingNearest2d(Function):
+class _UpsamplingBase(Function):
 
     def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingNearest2d, self).__init__()
+        super(_UpsamplingBase, self).__init__()
         if size is None and scale_factor is None:
             raise ValueError('either size or scale_factor should be defined')
-        if scale_factor is not None and not isinstance(scale_factor, Integral):
-            raise ValueError('scale_factor must be of integer type')
-        if size is not None and not isinstance(size, tuple):
-            size = (size, size)
-        self.size = size
+        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
+            raise ValueError('scale_factor must be of integer type or tuple of integer types')
+        self.size = _pair(size)
         self.scale_factor = scale_factor
+
+
+class UpsamplingNearest2d(_UpsamplingBase):
+
+    def __init__(self, size=None, scale_factor=None):
+        super(UpsamplingNearest2d, self).__init__(size, scale_factor)
+        
+        if self.scale_factor is not None and not isinstance(scale_factor, Integral):
+            raise ValueError('scale_factor must be of integer type for nearest neighbor sampling')
 
     def forward(self, input):
         assert input.dim() == 4
@@ -59,36 +67,28 @@ class UpsamplingNearest2d(Function):
         return grad_input
 
 
-class UpsamplingBilinear2d(Function):
+class UpsamplingBilinear2d(_UpsamplingBase):
 
     def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingBilinear2d, self).__init__()
-        if size is None and scale_factor is None:
-            raise ValueError('either size or scale_factor should be defined')
-        if scale_factor is not None:
-            if not isinstance(scale_factor, (Integral, tuple)):
-                raise ValueError('scale_factor must be a non-negative integer, or a tuple of non-negative integers')
-            if isinstance(scale_factor, tuple):
-                try:
-                    assert len(scale_factor) == 2
-                    for i in scale_factor:
-                        assert isinstance(i, Integral)
-                        assert i >= 1
-                except AssertionError as e:
-                    raise ValueError('scale_factor must be a non-negative integer, or a tuple of non-negative integers')
+        super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
 
-        if size is not None and not isinstance(size, tuple):
-            size = (size, size)
-        if scale_factor is not None and not isinstance(scale_factor, tuple):
-            scale_factor = (scale_factor, scale_factor)
-
-        self.size = size
-        self.scale_factor = scale_factor
+        if self.scale_factor is not None:
+            self.scale_factor = _pair(self.scale_factor)
+            # we have to be a tuple at this point
+            try:
+                assert len(self.scale_factor) == 2
+                for i in self.scale_factor:
+                    assert isinstance(i, Integral)
+                    assert i >= 1
+            except AssertionError as e:
+                raise ValueError('scale_factor must be a non-negative integer, '
+                                 'or a tuple of non-negative integers for bilinear upsamplings, but got: '
+                                 '{}'.format(self.scale_factor))
 
     def forward(self, input):
         assert input.dim() == 4
 
-        if self.scale_factor:
+        if self.scale_factor is not None:
             self.output_size = (
                 input.size(2) * self.scale_factor[0],
                 input.size(3) * self.scale_factor[1],
