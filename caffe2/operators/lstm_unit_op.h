@@ -13,7 +13,7 @@ inline T sigmoid(T x) {
 }
 
 template <typename T>
-inline T tanh(T x) {
+inline T host_tanh(T x) {
   return 2. * sigmoid(2. * x) - 1.;
 }
 
@@ -40,12 +40,12 @@ void LSTMUnit(
         const T i = sigmoid(X[d]);
         const T f = sigmoid(X[1 * D + d] + forget_bias);
         const T o = sigmoid(X[2 * D + d]);
-        const T g = tanh(X[3 * D + d]);
+        const T g = host_tanh(X[3 * D + d]);
         const T c_prev = C_prev[d];
         const T c = f * c_prev + i * g;
         C[d] = c;
-        const T tanh_c = tanh(c);
-        H[d] = o * tanh_c;
+        const T host_tanh_c = host_tanh(c);
+        H[d] = o * host_tanh_c;
       }
     }
     H_prev += D;
@@ -93,16 +93,16 @@ void LSTMUnitGradient(
         const T i = sigmoid(X[d]);
         const T f = sigmoid(X[1 * D + d] + forget_bias);
         const T o = sigmoid(X[2 * D + d]);
-        const T g = tanh(X[3 * D + d]);
+        const T g = host_tanh(X[3 * D + d]);
         const T c_prev = C_prev[d];
         const T c = C[d];
-        const T tanh_c = tanh(c);
-        const T c_term_diff = C_diff[d] + H_diff[d] * o * (1 - tanh_c * tanh_c);
+        const T host_tanh_c = host_tanh(c);
+        const T c_term_diff = C_diff[d] + H_diff[d] * o * (1 - host_tanh_c * host_tanh_c);
         *c_prev_diff = c_term_diff * f;
         *h_prev_diff = 0; // gradient passed back through X_diff
         *i_diff = c_term_diff * g * i * (1 - i);
         *f_diff = c_term_diff * c_prev * f * (1 - f);
-        *o_diff = H_diff[d] * tanh_c * o * (1 - o);
+        *o_diff = H_diff[d] * host_tanh_c * o * (1 - o);
         *g_diff = c_term_diff * i * (1 - g * g);
       }
     }
