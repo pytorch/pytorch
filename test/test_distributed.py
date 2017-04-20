@@ -507,8 +507,6 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()
-            if rank != 0:
-                time.sleep(0.2) # temporary fix for Gloo
             sys.exit(0)
 
         def _join_and_reduce(self):

@@ -65,6 +65,8 @@ void DataChannelGloo::RequestGloo::wait() {
 
 DataChannelGloo::DataChannelGloo()
   : _rank(load_rank_env())
+  , _store(nullptr)
+  , _cache(nullptr)
 {
   if (_rank == 0) {
     _num_processes = load_world_size_env();
@@ -73,7 +75,6 @@ DataChannelGloo::DataChannelGloo()
   ::gloo::transport::tcp::attr attr("localhost"); // default options listen on host
   _device = ::gloo::transport::tcp::CreateDevice(attr);
 
-  // Master runs the store_thread
   if (_rank == 0) {
     std::tie(_port, std::ignore) = load_master_env();
     _addr = "localhost";

@@ -35,17 +35,14 @@ Store::StoreDeamon::~StoreDeamon()
   }
 }
 
-
 void Store::StoreDeamon::join() {
   _deamon.join();
 }
-
 
 void Store::StoreDeamon::deamon() {
   int socket;
 
   std::tie(socket, std::ignore) = listen(_port);
-  // accept WORLD_SIZE connections
   for (auto& p_socket : _sockets) {
     std::tie(p_socket, std::ignore) = accept(socket);
   }
@@ -74,9 +71,19 @@ void Store::StoreDeamon::deamon() {
       if (fds[rank].revents ^ POLLIN)
         throw std::system_error(ECONNABORTED, std::system_category());
       
-      finished = query(rank);
-      if (finished)
+      try {
+        finished = query(rank);
+        if (finished)
+          break;
+      } catch (...) {
+        // There was an error when processing query. Probably exception occured in
+        // recv/send what would indicate that socket on the other side has been closed.
+        // If the closing was due to normal exit this indicates that store should
+        // exit too. Otherwise, when closing was due to unexpected behaviour,
+        // other processes will get exception when trying to use store.
+        finished = true;
         break;
+      }
     }
   }
 }
@@ -128,16 +135,13 @@ bool Store::StoreDeamon::query(rank_type rank) {
     }
     return false;
   } else if (qt == QueryType::FINISH) {
-    for (auto socket : _sockets) {
-      send_value<std::uint8_t>(socket, 1);
-    }
     return true;
   } else {
     throw std::runtime_error("expected a query type");
   }
 }
 
-bool Store::StoreDeamon::checkAndUpdate(std::vector<std::string>& keys) {
+bool Store::StoreDeamon::checkAndUpdate(std::vector<std::string>& keys) const {
   bool ret = true;
   for (auto it = keys.begin(); it != keys.end();) {
     if (_store.find(*it) == _store.end()) {
@@ -160,7 +164,7 @@ Store::Store(rank_type rank, const std::string& addr,
  , _socket(-1)
  , _store_thread(nullptr)
 {
-  // Master runs the store_thread
+  // only one process starts store
   if (_rank == 0) {
     _store_thread = std::unique_ptr<StoreDeamon>(
       new StoreDeamon(port, world_size)
@@ -177,8 +181,6 @@ Store::~Store() {
     _store_thread->join();
   }
 
-  std::uint8_t barrier_byte;
-  recv_bytes<std::uint8_t>(_socket, &barrier_byte, 1);
   ::close(_socket);
 }
 

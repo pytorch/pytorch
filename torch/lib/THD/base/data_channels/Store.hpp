@@ -25,7 +25,7 @@ private:
 
     void deamon();
     bool query(rank_type rank);
-    bool checkAndUpdate(std::vector<std::string>& keys);
+    bool checkAndUpdate(std::vector<std::string>& keys) const;
 
     port_type _port;
 

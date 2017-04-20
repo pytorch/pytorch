@@ -32,8 +32,11 @@ struct hash<std::tuple<::thd::DataOperation, THDGroup>> {
 };
 
 template<>
-struct hash<std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t, THDReduceOp, thd::rank_type>> {
-  std::size_t operator()(const std::tuple<::thd::DataOperation, THDGroup, std::size_t, std::size_t, THDReduceOp, thd::rank_type>& k) const {
+struct hash<std::tuple<::thd::DataOperation, THDGroup, std::size_t,
+                       std::size_t, THDReduceOp, thd::rank_type>> {
+  std::size_t operator()(const std::tuple<::thd::DataOperation, THDGroup,
+                                          std::size_t, std::size_t, THDReduceOp,
+                                          thd::rank_type>& k) const {
     return (
       hash<::thd::DataOperation>()(std::get<0>(k)) ^
       hash<THDGroup>()(std::get<1>(k)) ^
@@ -260,7 +263,7 @@ struct algorithm_spec<DataOperation::ALL_REDUCE, T> {
                            input_bytes, input_bytes, op, 0);
   }
 
-  static GlooCache::value_type create(GlooCache& cache, 
+  static GlooCache::value_type create(GlooCache& cache,
     const DataChannel::Group& group, GlooCache::store_type& store,
     std::size_t input_bytes, std::size_t count, THDReduceOp op
   ) {
