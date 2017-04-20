@@ -28,7 +28,6 @@ constexpr int BARRIER_WAIT_TIME = 200; // milliseconds
 std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
 std::string g_data_channel_type;
-std::unique_ptr<Barrier> g_barrier;
 
 
 void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
@@ -685,7 +684,6 @@ void init_gloo_master(int workers) {
 
   assert(masterChannel->init());
   run_all_tests(masterChannel, workers);
-  g_barrier->wait();
 }
 
 void init_gloo_worker(unsigned int id, int workers) {
@@ -697,7 +695,6 @@ void init_gloo_worker(unsigned int id, int workers) {
 
   assert(worker_channel->init());
   run_all_tests(worker_channel, workers);
-  g_barrier->wait();
 }
 #endif // WITH_GLOO
 
@@ -736,7 +733,6 @@ int main(int argc, char const *argv[]) {
 #ifdef WITH_GLOO
     g_data_channel_type = "gloo";
     for (auto workers : WORKERS_NUM) {
-      g_barrier.reset(new Barrier(workers + 1));
       std::cout << "Gloo (workers: " << workers << "):" << std::endl;
       // start gloo master
       std::thread gloo_master_thread(init_gloo_master, workers);

@@ -45,7 +45,7 @@ void send_bytes(int socket, const T* buffer, std::size_t length, bool more_data 
     ssize_t bytes_sent;
     SYSCHECK(bytes_sent = ::send(socket, current_bytes, bytes_to_send, flags))
     if (bytes_sent == 0)
-      throw std::system_error(EBADMSG, std::system_category());
+      throw std::system_error(ECONNRESET, std::system_category());
 
     bytes_to_send -= bytes_sent;
     current_bytes += bytes_sent;
@@ -67,7 +67,7 @@ void recv_bytes(int socket, T* buffer, std::size_t length)
     ssize_t bytes_received;
     SYSCHECK(bytes_received = ::recv(socket, current_bytes, bytes_to_receive, 0))
     if (bytes_received == 0)
-      throw std::system_error(EBADMSG, std::system_category());
+      throw std::system_error(ECONNRESET, std::system_category());
 
     bytes_to_receive -= bytes_received;
     current_bytes += bytes_received;

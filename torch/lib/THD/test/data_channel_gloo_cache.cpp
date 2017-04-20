@@ -35,7 +35,8 @@ void test(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
-  // NOTE: without store this test would create about (1000 * WORKERS ^ 3) connections 
+  // NOTE: without properly working GlooCache this test would create
+  // about (1000 * WORKERS ^ 3) connections what is over 'normal' system configuration
   for (std::size_t i = 0; i < 1000; ++i) {
     test(data_channel);
   }
