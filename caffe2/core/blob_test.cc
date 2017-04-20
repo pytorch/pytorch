@@ -371,6 +371,25 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   EXPECT_EQ(larger_ptr, new_ptr);
 }
 
+TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
+  FLAGS_caffe2_keep_on_shrink = true;
+  FLAGS_caffe2_max_keep_on_shrink_memory = 50;
+  vector<int> dims{1, 8, 8};
+  TensorCPU tensor(dims);
+  TypeParam* ptr = tensor.mutable_data<TypeParam>();
+  EXPECT_TRUE(ptr != nullptr);
+  // Shrinking - will not reallocate
+  tensor.Resize(1, 7, 8);
+  TypeParam* smaller_ptr = tensor.mutable_data<TypeParam>();
+  EXPECT_TRUE(smaller_ptr != nullptr);
+  EXPECT_EQ(ptr, smaller_ptr);
+  // Resize to more than maximum shrink, should reallocate
+  tensor.Resize(1, 1, 8);
+  TypeParam* new_ptr = tensor.mutable_data<TypeParam>();
+  EXPECT_TRUE(new_ptr != nullptr);
+  EXPECT_NE(ptr, new_ptr);
+}
+
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
   TensorCPU tensor;
   EXPECT_EQ(tensor.ndim(), 0);

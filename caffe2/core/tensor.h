@@ -20,6 +20,11 @@
 // keep the memory allocated for its maximum capacity reshaped to so far.
 CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 
+// Since we can have high variance in blob memory allocated across different
+// inputs in the same run, we will shrink the blob only if the memory gain
+// is larger than this flag in bytes.
+CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
+
 namespace caffe2 {
 
 /**
@@ -225,6 +230,7 @@ class Tensor {
         meta_, oldSize, oldData.get(), newData);
     dims_ = oldDims;
     size_ = oldSize;
+    reserved_ = true;
   }
 
   /**
@@ -262,12 +268,29 @@ class Tensor {
   template <typename... Ts>
   void Resize(Ts... dim_source) {
     bool size_changed = SetDims(dim_source...);
-    // If needed, we will free the data. the next mutable_data() call
-    // will create the data storage.
-    if (size_changed && (capacity_ < size_ * meta_.itemsize() ||
-                         !FLAGS_caffe2_keep_on_shrink)) {
-      data_.reset();
-      capacity_ = 0;
+    if (size_changed) {
+      // If needed, we will free the data. the next mutable_data() call
+      // will create the data storage.
+      int64_t new_size = size_ * meta_.itemsize();
+      bool reset_tensor = false;
+      if (reserved_) {
+        // If tensor is reserved then don't claim its memeory unless capacity_
+        // is smaller than new size
+        reset_tensor = capacity_ < new_size;
+      } else {
+        reset_tensor = capacity_ < new_size || !FLAGS_caffe2_keep_on_shrink ||
+            capacity_ - new_size > FLAGS_caffe2_max_keep_on_shrink_memory;
+      }
+
+      if (reset_tensor) {
+        data_.reset();
+        capacity_ = 0;
+        // If reserved is true and we changed tensor memory then it is fine
+        // to switch it to false, if Resize is called from Reserve then
+        // reserved_
+        // will be set to true at end of Reserve()
+        reserved_ = false;
+      }
     }
   }
 
@@ -616,6 +639,7 @@ class Tensor {
   std::shared_ptr<void> data_;
   bool shares_data_ = false;
   size_t capacity_ = 0;
+  bool reserved_ = false;
   // In case of chunk load we store how much data was already loaded
 
  private:
