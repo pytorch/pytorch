@@ -1,5 +1,6 @@
 #include "DataChannelGloo.hpp"
 #include "DataChannelUtils.hpp"
+#include "GlooCache.hpp"
 #include "Store.hpp"
 
 #include "gloo/transport/tcp/device.h"
@@ -72,7 +73,10 @@ DataChannelGloo::DataChannelGloo()
     _num_processes = load_world_size_env();
   }
 
-  ::gloo::transport::tcp::attr attr("localhost"); // default options listen on host
+  // Default options listen on this host's name.
+  // NOTE: when hostname has bad configuration in `/etc/hosts` processes
+  // will not connect to each other.
+  ::gloo::transport::tcp::attr attr;
   _device = ::gloo::transport::tcp::CreateDevice(attr);
 
   if (_rank == 0) {
@@ -131,7 +135,7 @@ void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
                                  thpp::Tensor& input, THDGroup group_id) {
   std::uint64_t tensor_bytes = input.elementSize() * input.numel();
   std::uint64_t all_tensor_bytes = tensor_bytes * output.size();
-  auto ret = _cache->getAlgorithm<DataOperation::ALL_GATHER, T>(
+  auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
     group_id, _groups.at(group_id), tensor_bytes, all_tensor_bytes, input.numel());
 
   std::memcpy(std::get<1>(ret).get(), input.data(), tensor_bytes);
@@ -152,7 +156,7 @@ void DataChannelGloo::allGather(std::vector<thpp::Tensor*>& output,
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertTensorEqual(*out_tensor, input, "allGather");
+    assertSameSizeAndType(*out_tensor, input, "allGather");
 
   GENERATE_ALL_TYPES(input.type(), allGatherT, output, input, group_id)
 }
@@ -178,7 +182,7 @@ template<typename T>
 void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
                                  THDGroup group_id) {
   std::uint64_t tensor_bytes = t.elementSize() * t.numel();
-  auto ret = _cache->getAlgorithm<DataOperation::ALL_REDUCE, T>(
+  auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
     group_id, _groups.at(group_id), tensor_bytes, t.numel(), operation);
 
   std::memcpy(std::get<1>(ret).get(), t.data(), tensor_bytes);
@@ -203,10 +207,8 @@ void DataChannelGloo::reduce(thpp::Tensor& data, THDReduceOp operation,
 template<typename T>
 void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
                                  THDGroup group_id) {
-  RETURN_IF_NOT_IN_GROUP(group_rank)
-
   std::uint64_t tensor_bytes = data.elementSize() * data.numel();
-  auto ret = _cache->getAlgorithm<DataOperation::BROADCAST, T>(
+  auto ret = _cache->getAlgorithm<CollectiveType::BROADCAST, T>(
     group_id, _groups.at(group_id), tensor_bytes, data.numel(),
     _groups.at(group_id).mustGetGroupRank(src_rank));
 
@@ -222,6 +224,7 @@ void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
 
 void DataChannelGloo::broadcast(thpp::Tensor& data, rank_type src_rank,
                                 THDGroup group_id) {
+  RETURN_IF_NOT_IN_GROUP(_)
   GENERATE_ALL_TYPES(data.type(), broadcastT, data, src_rank, group_id)
 }
 
@@ -242,7 +245,7 @@ void DataChannelGloo::receive(Scalar& data, rank_type src_rank) {
 
 
 void DataChannelGloo::receive(thpp::Tensor& data) {
-  throw std::runtime_error("DataChannelGloo does not support anonymous receive");
+  throw std::runtime_error("DataChannelGloo does not support receive from any source");
 }
 
 
@@ -264,7 +267,7 @@ auto DataChannelGloo::ireceive(thpp::Tensor& data, rank_type src_rank) -> Reques
 void DataChannelGloo::barrier(THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP(_)
 
-  auto ret = _cache->getAlgorithm<DataOperation::BARRIER, void>(
+  auto ret = _cache->getAlgorithm<CollectiveType::BARRIER, void>(
     group_id, _groups.at(group_id));
   std::get<0>(ret)->run();
 }

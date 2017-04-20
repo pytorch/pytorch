@@ -19,7 +19,6 @@ constexpr int MASTER_PORT = 45678;
 
 std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
-std::unique_ptr<Barrier> g_barrier;
 
 void test(std::shared_ptr<thd::DataChannel> data_channel) {
   for (std::size_t dest = 0; dest < data_channel->getNumProcesses(); ++dest) {
@@ -40,7 +39,6 @@ void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) 
   for (std::size_t i = 0; i < 1000; ++i) {
     test(data_channel);
   }
-  g_barrier->wait();
 }
 
 
@@ -71,7 +69,6 @@ void init_gloo_worker(unsigned int id, int workers) {
 int main(void)
 { 
   for (auto workers : WORKERS_NUM) {
-    g_barrier.reset(new Barrier(workers + 1));
     std::cout << "Gloo (workers: " << workers << "):" << std::endl;
     // start gloo master
     std::thread gloo_master_thread(init_gloo_master, workers);
