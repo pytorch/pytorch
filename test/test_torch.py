@@ -63,6 +63,9 @@ class TestTorch(TestCase):
     def test_sinh(self):
         self._testMathByName('sinh')
 
+    def test_lgamma(self):
+        self._testMathByName('lgamma')
+
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
 

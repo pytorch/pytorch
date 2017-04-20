@@ -189,6 +189,8 @@ class TestCase(unittest.TestCase):
                 assertTensorsEqual(x, y)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertEqual(x, y)
+        elif type(x) == set and type(y) == set:
+            super(TestCase, self).assertEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
