@@ -1,0 +1,26 @@
+syntax = "proto2";
+
+package caffe2;
+
+// A few notes about the Caffe2's protobuffer convention:
+// (1) Most objects are registered by their types, such as operators and nets.
+//     For these, we have a string-type field "type" for registration purposes.
+// (2) We do not use extension because that used to create quite some conflicts
+//     in Caffe's protobuf design.
+// (3) We have not used any proto3 specific features, such as Any or Map. This
+//     is mainly for backward compability purposes but we may consider using
+//     those in the future.
+
+// Protobuf format to serialize profiler data
+message ProfDAGProto {
+  // The name for the operator
+  required string name = 1;
+  // The mean execution time
+  required float mean = 2;
+  // The standard deviation
+  required float stddev = 3;
+}
+
+message ProfDAGProtos {
+  repeated ProfDAGProto stats = 1;
+}
