@@ -1,6 +1,6 @@
 #!/bin/bash
 ##############################################################################
-# Example command to build the android target.
+# Example command to build the iOS target.
 ##############################################################################
 # 
 # This script shows how one can build a Caffe2 binary for the iOS platform
@@ -9,7 +9,7 @@
 
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 echo "Caffe2 codebase root is: $CAFFE2_ROOT"
-# We are going to build the target into build_android.
+# We are going to build the target into build_ios.
 BUILD_ROOT=$CAFFE2_ROOT/build_ios
 mkdir -p $BUILD_ROOT
 echo "Build Caffe2 ios into: $BUILD_ROOT"
@@ -18,7 +18,7 @@ echo "Build Caffe2 ios into: $BUILD_ROOT"
 echo "Building protoc"
 $CAFFE2_ROOT/scripts/build_host_protoc.sh || exit 1
 
-# Now, actually build the android target.
+# Now, actually build the iOS target.
 echo "Building caffe2"
 cd $BUILD_ROOT
 
