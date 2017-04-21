@@ -14,6 +14,10 @@ else:
     string_classes = (str, bytes)
 
 
+_use_shared_memory = False
+"""Whether to use shared memory in default_collate"""
+
+
 class ExceptionWrapper(object):
     "Wraps an exception plus traceback to communicate across threads"
 
@@ -23,6 +27,9 @@ class ExceptionWrapper(object):
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn):
+    global _use_shared_memory
+    _use_shared_memory = True
+
     torch.set_num_threads(1)
     while True:
         r = index_queue.get()
@@ -75,7 +82,14 @@ numpy_type_map = {
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
     if torch.is_tensor(batch[0]):
-        return torch.stack(batch, 0)
+        out = None
+        if _use_shared_memory:
+            # If we're in a background process, concatenate directly into a
+            # shared memory tensor to avoid an extra copy
+            numel = sum([x.numel() for x in batch])
+            storage = batch[0].storage()._new_shared(numel)
+            out = batch[0].new(storage)
+        return torch.stack(batch, 0, out=out)
     elif type(batch[0]).__module__ == 'numpy':
         elem = batch[0]
         if type(elem).__name__ == 'ndarray':
