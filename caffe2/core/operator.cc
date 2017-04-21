@@ -54,10 +54,12 @@ unique_ptr<OperatorBase> TryCreateOperator(
     return nullptr;
   }
 }
+
 }  // namespace
 
 unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def, Workspace* ws) {
+  static StaticLinkingProtector g_protector;
   // first, check with OpSchema if the operator is legal.
   auto* schema = OpSchemaRegistry::Schema(operator_def.type());
   if (schema) {
