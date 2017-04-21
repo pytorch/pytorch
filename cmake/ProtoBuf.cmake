@@ -28,8 +28,15 @@ function(custom_protobuf_find)
   set(Protobuf_FOUND TRUE PARENT_SCOPE)
 endfunction()
 
-if (ANDROID OR IOS OR WIN32)
+if (WIN32)
   custom_protobuf_find()
+elseif (ANDROID OR IOS)
+  custom_protobuf_find()
+  # For Androd or iOS, we won't need to build the libprotoc and protoc binaries
+  # because we will use the host protoc to build the proto files.
+  set_target_properties(
+      libprotoc protoc PROPERTIES
+      EXCLUDE_FROM_ALL 1 EXCLUDE_FROM_DEFAULT_BUILD 1)
 else()
   find_package( Protobuf )
   if ( NOT (Protobuf_FOUND OR PROTOBUF_FOUND) )

@@ -22,11 +22,17 @@ $CAFFE2_ROOT/scripts/build_host_protoc.sh || exit 1
 echo "Building caffe2"
 cd $BUILD_ROOT
 
+if [ -z ${IOS_PLATFORM+x} ]; then
+    # IOS_PLATFORM is not set, in which case we will default to OS, which
+    # builds iOS.
+    IOS_PLATFORM=OS
+fi
+
 cmake .. \
     -DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/third_party/ios-cmake/toolchain/iOS.cmake\
     -DCMAKE_INSTALL_PREFIX=../install \
     -DCMAKE_BUILD_TYPE=Release \
-    -DIOS_PLATFORM=OS \
+    -DIOS_PLATFORM=${IOS_PLATFORM} \
     -DUSE_CUDA=OFF \
     -DBUILD_TEST=OFF \
     -DBUILD_BINARY=OFF \
