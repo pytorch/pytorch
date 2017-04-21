@@ -125,7 +125,9 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
+  cudaDeviceProp* prop =
+    THCState_getCurrentDeviceProperties(state);
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000) && (!is_dilated() || prop->major >= 5) ) && cudnn_enabled;
 #endif
 
   std::unique_ptr<Tensor> output;
@@ -212,7 +214,9 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
+  cudaDeviceProp* prop =
+    THCState_getCurrentDeviceProperties(state);
+  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000) && (!is_dilated() || prop->major >= 5) ) && cudnn_enabled;
 #endif
 
   std::unique_ptr<Tensor> grad_input;
