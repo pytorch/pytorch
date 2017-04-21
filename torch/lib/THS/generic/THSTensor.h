@@ -57,7 +57,7 @@ TH_API void THSTensor_(copy)(THSTensor *self, THSTensor *src);
 TH_API void THSTensor_(transpose)(THSTensor *self, int dimension1_, int dimension2_);
 TH_API int THSTensor_(isCoalesced)(const THSTensor *self);
 TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src);
-TH_API void THSTensor_(coalesce)(THSTensor *self);
+TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self);
 
 TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask);
 

@@ -40,22 +40,22 @@ void THCTensor_(spaddcdiv)(THCState *state, THCTensor *r_, THCTensor *t, real va
   THError("WARNING: Sparse Cuda Tensor op spaddcdiv is not implemented");
 }
 
-void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real alpha, THCSTensor *sparse, THCTensor *dense) {
+void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real alpha, THCSTensor *sparse_, THCTensor *dense) {
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 4, sparse, r_, t, dense));
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 4, sparse_, r_, t, dense));
   THCudaIntTensor *csr;
   THCIndexTensor *indices;
   THCTensor *values, *r__, *dense_;
 
-  THArgCheck(sparse->nDimensionI == 2, 2,
-      "matrices expected, got %dD tensor", sparse->nDimensionI);
-  THArgCheck(sparse->nDimensionV == 0, 2,
-      "scalar values expected, got %dD values", sparse->nDimensionV);
+  THArgCheck(sparse_->nDimensionI == 2, 2,
+      "matrices expected, got %dD tensor", sparse_->nDimensionI);
+  THArgCheck(sparse_->nDimensionV == 0, 2,
+      "scalar values expected, got %dD values", sparse_->nDimensionV);
   THArgCheck(dense->nDimension == 2, 2,
       "matrices expected, got %dD tensor", dense->nDimension);
 
-  long m = THCSTensor_(size)(state, sparse, 0);
-  long k = THCSTensor_(size)(state, sparse, 1);
+  long m = THCSTensor_(size)(state, sparse_, 0);
+  long k = THCSTensor_(size)(state, sparse_, 1);
   long n = THCTensor_(size)(state, dense, 1);
 
   THCTensor_(resize2d)(state, r_, m, n);
@@ -67,7 +67,7 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   THArgCheck(THCTensor_(size)(state, dense, 0) == k, 3,
       "Expected dim 0 size %d, got %d", k, THCTensor_(size)(state, dense, 0));
 
-  THCSTensor_(coalesce)(state, sparse);
+  THCSTensor *sparse = THCSTensor_(newCoalesce)(state, sparse_);
 
   long nnz = THCSTensor_(nnz)(state, sparse);
   indices = THCSTensor_(newIndices)(state, sparse);
@@ -146,6 +146,7 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   THCIndexTensor_(free)(state, rowIndices);
   THCIndexTensor_(free)(state, colIndices);
   THCTensor_(free)(state, values);
+  THCSTensor_(free)(state, sparse);
 #else
   THError("unimplemented data type");
 #endif
@@ -156,7 +157,7 @@ void THCSTensor_(sspaddmm)(THCState *state, THCSTensor *r_, real beta, THCSTenso
   // TODO Write some kernels
 }
 
-void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor *sparse, THCTensor *dense) {
+void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor *sparse_, THCTensor *dense) {
 #if CUDA_VERSION >= 7000
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
@@ -164,17 +165,17 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
 #define THRUST_EXEC(fn, ...) fn(##__VA_ARGS__)
 #endif
 
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, sparse, dense));
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, sparse_, dense));
 
-  THArgCheck(sparse->nDimensionI == 2, 3,
-      "matrices expected, got %dD tensor", sparse->nDimensionI);
-  THArgCheck(sparse->nDimensionV == 0, 3,
-      "scalar values expected, got %dD values", sparse->nDimensionV);
+  THArgCheck(sparse_->nDimensionI == 2, 3,
+      "matrices expected, got %dD tensor", sparse_->nDimensionI);
+  THArgCheck(sparse_->nDimensionV == 0, 3,
+      "scalar values expected, got %dD values", sparse_->nDimensionV);
   THArgCheck(dense->nDimension == 2, 4,
       "matrices expected, got %dD tensor", dense->nDimension);
 
-  long m = THCSTensor_(size)(state, sparse, 0);
-  long k = THCSTensor_(size)(state, sparse, 1);
+  long m = THCSTensor_(size)(state, sparse_, 0);
+  long k = THCSTensor_(size)(state, sparse_, 1);
   long n = THCTensor_(size)(state, dense, 1);
 
   THArgCheck(THCTensor_(size)(state, dense, 0) == k, 4,
@@ -182,7 +183,7 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
   long size[2] = {m, n};
   THCSTensor_(rawResize)(state, r_, 1, 1, size);
 
-  THCSTensor_(coalesce)(state, sparse);
+  THCSTensor *sparse = THCSTensor_(newCoalesce)(state, sparse_);
 
   long nnz = THCSTensor_(nnz)(state, sparse);
   THCIndexTensor *indices = THCIndexTensor_(newWithSize2d)(state, 1, nnz);
@@ -190,6 +191,8 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
   THCTensor *values = THCTensor_(newWithSize2d)(state, n, nnz);
   THCTensor_(transpose)(state, values, NULL, 0, 1);
 
+  // why does sparse need to be cloned? If this is really necessary maybe we
+  // need to fuse this with newCoalesce
   THCSTensor *newSparse = THCSTensor_(newClone)(state, sparse);
   THCIndexTensor *spIndices = THCSTensor_(newIndices)(state, newSparse);
   THCIndexTensor *dstIndices = THCIndexTensor_(newSelect)(state, spIndices, 0, 0);
@@ -206,6 +209,7 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
   THCSTensor_(free)(state, newSparse);
   THCIndexTensor_(free)(state, spIndices);
   THCIndexTensor_(free)(state, dstIndices);
+  THCSTensor_(free)(state, sparse);
 
 #undef THRUST_EXEC
 }
@@ -348,8 +352,6 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   if(!THCSTensor_(isSameSizeAs)(state, t, src)) {
     THError("cadd operands have incompatible sizes or dimension types");
   }
-  THCSTensor_(coalesce)(state, t);
-  THCSTensor_(coalesce)(state, src);
 
   if (src->nnz == 0) {
     THCSTensor_(copy)(state, r_, t);
@@ -399,13 +401,13 @@ void THCSTensor_(csub)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   THCSTensor_(cadd)(state, r_, t, ScalarNegate<real>::to(value), src);
 }
 
-void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t, THCSTensor *src) {
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 3, 3, r_, t, src));
-  if(!THCSTensor_(isSameSizeAs)(state, t, src)) {
+void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTensor *src_) {
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 3, 3, r_, t_, src_));
+  if(!THCSTensor_(isSameSizeAs)(state, t_, src_)) {
     THError("cmul operands have incompatible sizes or dimension types");
   }
-  THCSTensor_(coalesce)(state, t);
-  THCSTensor_(coalesce)(state, src);
+  THCSTensor *t = THCSTensor_(newCoalesce)(state, t_);
+  THCSTensor *src = THCSTensor_(newCoalesce)(state, src_);
 
   if (t->nnz == 0 || src->nnz == 0) {
     THCSTensor_(zero)(state, r_);
@@ -453,6 +455,8 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t, THCSTenso
   THCTensor_(free)(state, t_values_);
   THCIndexTensor_(free)(state, s_indices_);
   THCTensor_(free)(state, s_values_);
+  THCSTensor_(free)(state, t);
+  THCSTensor_(free)(state, src);
 }
 
 #undef ROW_PTR2

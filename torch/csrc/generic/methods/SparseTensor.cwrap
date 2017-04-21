@@ -90,9 +90,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: coalesce
-  python_name: coalesce_
+  cname: newCoalesce
   sparse: yes
-  return: argument 0
+  return: THSTensor*
   arguments:
   - THSTensor* self
 ]]
