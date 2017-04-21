@@ -1765,7 +1765,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(a=hu.tensor(),
            eps=st.floats(min_value=1e-4, max_value=1e-2),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_logit(self, a, eps, gc, dc):
         def ref(data):
             data = np.clip(data, eps, 1.0 - eps)
@@ -1777,7 +1777,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(a=hu.tensor(elements=st.floats(allow_nan=True)),
            value=st.floats(min_value=-10, max_value=10),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_replace_nan(self, a, value, gc, dc):
         def ref(data):
             out = np.copy(data)
