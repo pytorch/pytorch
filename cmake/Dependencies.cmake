@@ -182,6 +182,7 @@ add_definitions(-DEIGEN_MPL2_ONLY)
 
 # ---[ Python + Numpy
 if (BUILD_PYTHON)
+  set(Python_ADDITIONAL_VERSIONS 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
