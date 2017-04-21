@@ -6,7 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace, cnn, utils
-from caffe2.python.recurrent import LSTM
+from caffe2.python.rnn_cell import LSTM
 from caffe2.proto import caffe2_pb2
 
 
@@ -27,7 +27,7 @@ log.setLevel(logging.DEBUG)
 
 # Default set() here is intentional as it would accumulate values like a global
 # variable
-def CreateNetOnce(net, created_names=set()):
+def CreateNetOnce(net, created_names=set()): # noqa
     name = net.Name()
     if name not in created_names:
         created_names.add(name)
@@ -220,7 +220,7 @@ class CharRNN(object):
         CreateNetOnce(self.forward_net)
 
         text = '' + ch
-        for i in range(num_characters):
+        for _i in range(num_characters):
             workspace.FeedBlob(
                 "seq_lengths", np.array([1] * self.batch_size, dtype=np.int32))
             workspace.RunNet(self.prepare_state.Name())
