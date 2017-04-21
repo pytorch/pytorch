@@ -15,8 +15,10 @@ std::vector<char> StoreHandlerWrapper::get(const std::string& key) {
   return std::vector<char>(str.begin(), str.end());
 }
 
-void StoreHandlerWrapper::wait(const std::vector<std::string>& keys) {
-  handler_.wait(keys);
+void StoreHandlerWrapper::wait(
+    const std::vector<std::string>& keys,
+    const std::chrono::milliseconds& timeout) {
+  handler_.wait(keys, timeout);
 }
 
 } // namespace gloo

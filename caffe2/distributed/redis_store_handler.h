@@ -23,7 +23,9 @@ class RedisStoreHandler : public StoreHandler {
 
   virtual bool check(const std::vector<std::string>& names) override;
 
-  virtual void wait(const std::vector<std::string>& names) override;
+  virtual void wait(
+      const std::vector<std::string>& names,
+      const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
 
  private:
   std::string host_;
