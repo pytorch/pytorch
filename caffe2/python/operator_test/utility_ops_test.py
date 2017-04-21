@@ -3,23 +3,21 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
+from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 
-import unittest
 
 class TestUtilityOps(hu.HypothesisTestCase):
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @given(dtype=st.sampled_from([np.float32, np.int32, np.int64]),
            ndims=st.integers(min_value=1, max_value=5),
            seed=st.integers(min_value=0, max_value=65536),
            null_axes=st.booleans(),
            engine=st.sampled_from(['CUDNN', None]),
-           **hu.gcs_gpu_only)
+           **hu.gcs)
     def test_transpose(self, dtype, ndims, seed, null_axes, engine, gc, dc):
         dims = (np.random.rand(ndims) * 16 + 1).astype(np.int32)
         X = (np.random.rand(*dims) * 16).astype(dtype)

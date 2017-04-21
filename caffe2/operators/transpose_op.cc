@@ -7,27 +7,89 @@ namespace caffe2 {
 template <>
 template <typename T>
 bool TransposeOp<CPUContext>::DoRunWithType() {
-  int from_inds[COMPILE_TIME_MAX_TRANSPOSE_DIMS] = {0};
   const auto& input = Input(0);
   auto* output = Output(0);
   size_t count = input.size();
-  const auto& from_counts = input.dims();
-  const auto& to_counts = output->dims();
-  int num_axes = from_counts.size();
+  int num_axes = axes_.size();
   const T* from_data = input.template data<T>();
   T* to_data = output->template mutable_data<T>();
-  for (size_t index = 0; index < count; index++) {
-    size_t from_index = index, to_index = 0;
-    for (int i = num_axes - 1; i >= 0; --i) {
-      from_inds[i] = from_index % from_counts[i];
-      from_index = from_index / from_counts[i];
+  auto in_dims = input.dims();
+  auto out_dims = output->dims();
+
+  // Measure amount of contiguous data we can copy at once
+  TIndex blocksize = 1;
+  int n_shared_idxs = 0;
+  for (int i = num_axes - 1; i >= 0; --i) {
+    if (axes_[i] == i) {
+      blocksize *= new_dims_[i];
+      ++n_shared_idxs;
+    } else {
+      break;
     }
-    for (int i = 0; i < num_axes - 1; ++i) {
-      to_index = (to_index + from_inds[axes_[i]]) * to_counts[i + 1];
-    }
-    to_index += from_inds[axes_[num_axes - 1]];
-    *(to_data + to_index) = *(from_data + index);
   }
+
+  if (num_axes < 2 || n_shared_idxs == num_axes) {
+    memcpy(to_data, from_data, count * sizeof(T));
+    return true;
+  }
+
+  int itr_axes = num_axes - n_shared_idxs;
+
+  // Calculate strides
+  TIndex stride_x[COMPILE_TIME_MAX_TRANSPOSE_DIMS] = {0};
+  for (size_t i = 0; i < itr_axes; i++) {
+    stride_x[i] = 1;
+    for (size_t j = axes_[i] + 1; j < itr_axes; j++) {
+      stride_x[i] *= in_dims[j];
+    }
+  }
+
+  TIndex itr_idxs[COMPILE_TIME_MAX_TRANSPOSE_DIMS] = {0};
+
+  // Branch here to avoid branching within the loop
+  if (blocksize > 1) {
+    for (size_t index = 0; index < (count / blocksize); index++) {
+      TIndex from_index = 0;
+      for (int i = 0; i < itr_axes; ++i) {
+        from_index += stride_x[i] * itr_idxs[i];
+      }
+
+      memcpy(
+          to_data + blocksize * index,
+          from_data + blocksize * from_index,
+          blocksize * sizeof(T));
+
+      ++itr_idxs[itr_axes - 1];
+      for (int i = itr_axes - 1; i >= 1; --i) {
+        auto expected_dim = out_dims[i];
+        if (itr_idxs[i] < expected_dim) {
+          break;
+        }
+        itr_idxs[i] %= expected_dim;
+        ++itr_idxs[i - 1];
+      }
+    }
+  } else {
+    for (size_t index = 0; index < count; index++) {
+      TIndex from_index = 0;
+      for (int i = 0; i < itr_axes; ++i) {
+        from_index += stride_x[i] * itr_idxs[i];
+      }
+
+      *(to_data + index) = *(from_data + from_index);
+
+      ++itr_idxs[itr_axes - 1];
+      for (int i = itr_axes - 1; i >= 1; --i) {
+        auto expected_dim = out_dims[i];
+        if (itr_idxs[i] < expected_dim) {
+          break;
+        }
+        itr_idxs[i] %= expected_dim;
+        ++itr_idxs[i - 1];
+      }
+    }
+  }
+
   return true;
 }
 
