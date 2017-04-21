@@ -1983,7 +1983,7 @@ class TestNN(NNTestCase):
         input3 = Variable(torch.randn(4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
             x1, x2, x3, swap=True), (input1, input2, input3)))
-    
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
         module2 = legacy.Bilinear(10, 10, 8)
