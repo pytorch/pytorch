@@ -119,10 +119,18 @@ bool FileStoreHandler::check(const std::vector<std::string>& names) {
   return true;
 }
 
-void FileStoreHandler::wait(const std::vector<std::string>& names) {
+void FileStoreHandler::wait(
+    const std::vector<std::string>& names,
+    const std::chrono::milliseconds& timeout) {
   // Not using inotify because it doesn't work on many
   // shared filesystems (such as NFS).
+  const auto start = std::chrono::steady_clock::now();
   while (!check(names)) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start);
+    if (timeout != kNoTimeout && elapsed > timeout) {
+      CAFFE_ENFORCE(false, "Wait timeout for name(s): ", Join(" ", names));
+    }
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }

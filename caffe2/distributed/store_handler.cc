@@ -6,6 +6,9 @@
 
 namespace caffe2 {
 
+constexpr std::chrono::milliseconds StoreHandler::kDefaultTimeout;
+constexpr std::chrono::milliseconds StoreHandler::kNoTimeout;
+
 StoreHandler::~StoreHandler() {
   // NOP; definition is here to make sure library contains
   // symbols for this abstract class.
