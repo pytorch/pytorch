@@ -48,7 +48,7 @@ struct THCNumerics<char> {
   static inline __host__ __device__  char mul(char a, char b) { return a * b; }
   static inline __host__ __device__  char sub(char a, char b) { return a - b; }
   static inline __host__ __device__  char div(char a, char b) { return a / b; }
-  static inline __host__ __device__  char abs(char a) { return abs(a); }
+  static inline __host__ __device__  char abs(char a) { return ::abs((int)a); }
 };
 
 template <>
@@ -67,7 +67,7 @@ struct THCNumerics<short> {
   static inline __host__ __device__  short mul(short a, short b) { return a * b; }
   static inline __host__ __device__  short sub(short a, short b) { return a - b; }
   static inline __host__ __device__  short div(short a, short b) { return a / b; }
-  static inline __host__ __device__  short abs(short a) { return abs(a); }
+  static inline __host__ __device__  short abs(short a) { return ::abs((int)a); }
 };
 
 template <>

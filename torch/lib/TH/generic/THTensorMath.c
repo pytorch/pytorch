@@ -1365,7 +1365,10 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
     THTensor_(copy)(r_, t);
   }
 
-  if(beta != 1)
+  if(beta == 0) {
+    THTensor_(zero)(r_);
+  }
+  else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
   if(r_->stride[0] == 1)
@@ -2694,7 +2697,7 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
 

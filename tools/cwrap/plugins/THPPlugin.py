@@ -19,6 +19,7 @@ class THPPlugin(CWrapPlugin):
 
         'THCudaTensor*': Template('((THCPFloatTensor*)$arg)->cdata'),
         'THCudaDoubleTensor*': Template('((THCPDoubleTensor*)$arg)->cdata'),
+        'THCudaIntTensor*': Template('((THCPIntTensor*)$arg)->cdata'),
         'THCudaLongTensor*': Template('((THCPLongTensor*)$arg)->cdata'),
 
         'THSFloatTensor*': Template('((THSPFloatTensor*)$arg)->cdata'),
@@ -56,6 +57,7 @@ class THPPlugin(CWrapPlugin):
 
         'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPDoubleTensorClass'),
+        'THCudaIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPIntTensorClass'),
         'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
 
         'THSDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPDoubleTensorClass'),
@@ -86,8 +88,10 @@ class THPPlugin(CWrapPlugin):
     RETURN_WRAPPER = {
         'THTensor*': Template('return THPTensor_(New)($result);'),
         'THSTensor*': Template('return THSPTensor_(New)($result);'),
+        'THIndexTensor*': Template('return THPIndexTensor_(New)($result);'),
         'THLongTensor*': Template('return THPLongTensor_New($result);'),
         'THLongStorage*': Template('return THPLongStorage_New($result);'),
+        'THCudaIntTensor*': Template('return THCPIntTensor_New($result);'),
         'THCudaLongTensor*': Template('return THCPLongTensor_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long': Template('return PyInt_FromLong($result);'),
@@ -174,6 +178,7 @@ ${cpu}
         'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
         'THCudaTensor*': 'torch.cuda.FloatTensor',
         'THCudaDoubleTensor*': 'torch.cuda.DoubleTensor',
+        'THCudaIntTensor*': 'torch.cuda.IntTensor',
         'THCudaLongTensor*': 'torch.cuda.LongTensor',
         'THSize*': 'torch.Size',
         'THStride*': 'tuple',

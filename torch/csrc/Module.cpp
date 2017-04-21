@@ -358,7 +358,7 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args, PyObject *kwa
   PyObject *tensor = THPDefaultTensorClass;
   THPObjectPtr iterator;
   THPObjectPtr item;
-  PyObject *first_arg;
+  PyObject *first_arg=nullptr;
   if (args && PyTuple_GET_SIZE(args) > 0) {
     first_arg = PyTuple_GET_ITEM(args, 0);
   } else if (kwargs && PyTuple_GET_ITEM(args, 0)) {
@@ -635,6 +635,7 @@ static PyMethodDef TorchMethods[] = {
   {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
   {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
+  {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 

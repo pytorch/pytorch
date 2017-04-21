@@ -222,10 +222,10 @@ IF ("$ENV{STATIC_TH}" STREQUAL "YES")
 ELSE()
   CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
   CUDA_ADD_CUBLAS_TO_TARGET(THC)
-  TARGET_LINK_LIBRARIES(THC ${TH_LIBRARIES} ${CUDA_curand_LIBRARY})
+  TARGET_LINK_LIBRARIES(THC ${TH_LIBRARIES} ${CUDA_curand_LIBRARY} ${CUDA_cusparse_LIBRARY})
 
   IF(USE_MAGMA)
-    TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES} ${CUDA_cusparse_LIBRARY})
+    TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES})
   ENDIF(USE_MAGMA)
 
   IF(NOT THC_SO_VERSION)
@@ -289,6 +289,7 @@ INSTALL(FILES
           THCNumerics.cuh
           THCTensorSort.cuh
           THCTensorInfo.cuh
+          THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
           THCTensorRandom.cuh
           THCTensorMathMagma.cuh

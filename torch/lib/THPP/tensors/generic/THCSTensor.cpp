@@ -637,7 +637,7 @@ thpp::Type THCSTensor<real>::type() const {
 
 template<>
 bool THCSTensor<real>::isCuda() const {
-  return false;
+  return true;
 }
 
 template<>
@@ -647,7 +647,7 @@ bool THCSTensor<real>::isSparse() const {
 
 template<>
 int THCSTensor<real>::getDevice() const {
-  return -1;
+  return tensor->values->storage->device;
 }
 
 template<>

@@ -10,10 +10,10 @@ class Diag(Function):
         self.diagonal_idx = diagonal_idx
 
     def forward(self, input):
-        return input.diag()
+        return input.diag(self.diagonal_idx)
 
     def backward(self, grad_output):
-        return grad_output.diag()
+        return grad_output.diag(self.diagonal_idx)
 
 
 class Tril(Function):

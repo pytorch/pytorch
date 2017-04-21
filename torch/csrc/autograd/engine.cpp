@@ -85,11 +85,12 @@ auto ReadyQueue::pop_back() -> FunctionTask {
 Engine::Engine() : ready_queues() {
 }
 
+// This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
-auto Engine::thread_main(ReadyQueue& queue) -> void {
+auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
   while (1) {
-    FunctionTask task = queue.pop_back();
+    FunctionTask task = queue->pop_back();
     if (!task.base->has_error.load()) {
       try {
         evaluate_function(task);
@@ -359,10 +360,10 @@ auto Engine::start_threads() -> void {
     THCudaCheck(err);
   }
 #endif
-  ready_queues = std::vector<std::unique_ptr<ReadyQueue>>(num_devices + 1);
+  ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_devices + 1);
   for (auto& queue : ready_queues) {
     queue.reset(new ReadyQueue());
-    std::thread t(&Engine::thread_main, this, std::ref(*queue));
+    std::thread t(&Engine::thread_main, this, queue);
     t.detach();
   }
 }

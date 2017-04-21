@@ -439,66 +439,8 @@ __global__ void
   }
 }
 
-// *********** START Generate specializations *************** //
-#define EXPAND_FUNCTION(ITYPE, DIM)                                     \
-  template __global__ void THNN_(GRUForward)<DATATYPE, ITYPE, DIM>      \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> bias1I,                                \
-     TensorInfo<DATATYPE, ITYPE> bias2I,                                \
-     TensorInfo<DATATYPE, ITYPE> hxI,                                   \
-     TensorInfo<DATATYPE, ITYPE> hyI,                                   \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
-                                                                        \
-  template void __global__ THNN_(GRUBackward)<DATATYPE, ITYPE, DIM>     \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> gradoutputI,                           \
-     TensorInfo<DATATYPE, ITYPE> gradinputI,                            \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
-                                                                        \
-  template void __global__ THNN_(LSTMForward)<DATATYPE, ITYPE, DIM>     \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> bias1I,                                \
-     TensorInfo<DATATYPE, ITYPE> bias2I,                                \
-     TensorInfo<DATATYPE, ITYPE> cxI,                                   \
-     TensorInfo<DATATYPE, ITYPE> hyI,                                   \
-     TensorInfo<DATATYPE, ITYPE> cyI,                                   \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
-                                                                        \
-  template void __global__ THNN_(LSTMBackward)<DATATYPE, ITYPE, DIM>    \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> cxI,                                   \
-     TensorInfo<DATATYPE, ITYPE> cyI,                                   \
-     TensorInfo<DATATYPE, ITYPE> gradoutputI,                           \
-     TensorInfo<DATATYPE, ITYPE> gradoutputcellI,                       \
-     TensorInfo<DATATYPE, ITYPE> gradinputI,                            \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
 
-
-#define EXPAND_DIM(ITYPE)                            \
-  EXPAND_FUNCTION(ITYPE, -2)                         \
-  EXPAND_FUNCTION(ITYPE, -1)                         \
-  EXPAND_FUNCTION(ITYPE, 1)                          \
-  EXPAND_FUNCTION(ITYPE, 2)                          \
-
-
-#define EXPAND_TYPE                        \
-  EXPAND_DIM(unsigned int)                 \
-  EXPAND_DIM(unsigned long)                \
-
-
-EXPAND_TYPE
-
-// ************ END generating specializations ************** //
-
-// ************ START Create actual function calls ********** //
+// ************ START Create function calls ********** //
 #define FILL_FUNCTION(ITYPE, DIM, FUNCTION) FUNCTION(ITYPE, DIM)
 
 #define FILL_DIM(ITYPE, DIM, FUNCTION)          \
