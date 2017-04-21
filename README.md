@@ -56,7 +56,7 @@ Detailed build matrix (hit refresh if you see icons not showing up due to heroku
 
 #### Android and iOS
 
-We use CMake's Android and iOS ports to build native binaries that you can then integrate into your Android or XCode projects. See scripts/build_android.sh and scripts/build_ios.sh for more details.
+We use CMake's Android and iOS ports to build native binaries that you can then integrate into your Android or Xcode projects. See scripts/build_android.sh and scripts/build_ios.sh for more details.
 
 For Android, one can also use gradle to build Caffe2 directly with Android Studio. An example project can be found [here](https://github.com/bwasti/AICamera). Note that you may need to configure Android Studio so that it has the right SDK and NDK versions to build the code.
 
