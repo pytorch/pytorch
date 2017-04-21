@@ -1,4 +1,5 @@
 #include "caffe2/core/init.h"
+#include "caffe2/core/operator.h" // for StaticLinkingProtector
 
 #ifndef CAFFE2_BUILD_STRING
 #define CAFFE2_BUILD_STRING "build_version_not_set"
@@ -14,6 +15,7 @@ Caffe2InitializeRegistry* Caffe2InitializeRegistry::Registry() {
 
 bool GlobalInit(int* pargc, char*** pargv) {
   static bool global_init_was_already_run = false;
+  static StaticLinkingProtector g_protector;
   if (global_init_was_already_run) {
     VLOG(1) << "GlobalInit has already been called: did you double-call?";
     return true;
