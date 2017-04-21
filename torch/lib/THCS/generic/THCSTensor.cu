@@ -35,10 +35,16 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   return dst;
 }
 
-void THCSTensor_(coalesce)(THCState *state, THCSTensor *self) {
-  if (self->coalesced) return;
-  int nnz = self->nnz;
-  if (nnz < 2) return;
+THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
+  ptrdiff_t nnz = self->nnz;
+  if (nnz < 2) {
+    self->coalesced = 1;
+  }
+  if (self->coalesced) {
+    THCSTensor_(retain)(state, self);
+    return self;
+  }
+
 #if CUDA_VERSION >= 7000
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
@@ -93,10 +99,10 @@ void THCSTensor_(coalesce)(THCState *state, THCSTensor *self) {
   long newNnz = newEnd.first - indicesIter;
 
   THCIndexTensor_(resize2d)(state, indices1D, 1, newNnz);
-  THLongStorage *newValuesSize = THCTensor_(newSizeOf)(state, values);
-  newValuesSize->data[0] = newNnz;
-  THCTensor *newValues = THCTensor_(newWithSize)(state, newValuesSize, NULL);
-  THLongStorage_free(newValuesSize);
+  THCTensor *newValues = THCTensor_(new)(state);
+  THCTensor_(resizeNd)(state, newValues, values->nDimension, values->size, NULL);
+  newValues->size[0] = newNnz;
+
 
   dim3 grid(THCCeilDiv(newNnz, (long) 4), THCCeilDiv(stride, (long) 128));
   dim3 block(32, 4);
@@ -152,16 +158,16 @@ void THCSTensor_(coalesce)(THCState *state, THCSTensor *self) {
     THCIndexTensor_(free)(state, indicesSlice);
   }
   ////////////////////////////////////////////////////////////
-  self->nnz = newNnz;
-  THCIndexTensor_(free)(state, self->indices);
-  self->indices = newIndices;
+  THLongStorage *size = THCSTensor_(newSizeOf)(state, self);
+  THCSTensor *dst = THCSTensor_(newWithTensorAndSize)(state, newIndices, newValues, size);
+  THLongStorage_free(size);
 
+  THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
-  THCTensor_(free)(state, self->values);
-  self->values = newValues;
 
-  self->coalesced = 1;
+  dst->coalesced = 1;
   THCudaCheck(cudaGetLastError());
+  return dst;
 #undef THRUST_EXEC
 }
 

@@ -127,7 +127,6 @@ class _SparseBase(object):
         raise NotImplementedError
 
     def __str__(self):
-        self.coalesce_()  # to make sure the output is consistent
         return '{} with indices:\n{}and values:\n{}'.format(
             self.__class__.__name__, self.indices(), self.values())
 
