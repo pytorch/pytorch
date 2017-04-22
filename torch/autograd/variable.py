@@ -857,7 +857,7 @@ class Variable(_C._VariableBase):
                 tensors = args[1:]
             else:
                 tensors = args
-            return cls(alpha, beta, inplace)(*tensors)
+            return cls.apply(*(tensors + (alpha, beta, inplace)))
 
         @classmethod
         def addmm(cls, *args):

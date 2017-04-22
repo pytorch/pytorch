@@ -1,6 +1,7 @@
 from functools import reduce
 
 from ..function import Function
+from ..variable import Variable
 
 
 class Sum(Function):
@@ -43,17 +44,17 @@ class Prod(Function):
     def backward(ctx, grad_output):
         if ctx.dim is None:
             input, = ctx.saved_variables
-            zero_idx = (input == 0).nonzero()
+            zero_idx = (input.data == 0).nonzero()
             if zero_idx.dim() == 0:
                 return grad_output.mul(ctx.result).expand_as(input).div(input), None
             elif zero_idx.size(0) > 1:
-                return grad_output.new(ctx.input_size).zero_(), None
+                return Variable(grad_output.data.new(ctx.input_size).zero_()), None
             else:
-                grad_input = grad_output.new(ctx.input_size).zero_()
+                grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
                 zero_idx = tuple(zero_idx[0].cpu())
-                input_copy = input.clone()
-                input_copy[zero_idx] = 1.
-                grad_input[zero_idx] = grad_output[0] * input_copy.prod()
+                to_add = input.data.new(ctx.input_size).zero_()
+                to_add[zero_idx] = 1.
+                grad_input[zero_idx] = grad_output * (input + Variable(to_add)).prod()
                 return grad_input, None
         else:
             input, output = ctx.saved_variables
@@ -103,9 +104,8 @@ class Mean(Function):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.dim is None:
-            grad_input_val = grad_output[0]
-            grad_input_val /= reduce(lambda x, y: x * y, ctx.input_size, 1)
-            return grad_output.new(*ctx.input_size).fill_(grad_input_val), None
+            grad_input_val = grad_output / reduce(lambda x, y: x * y, ctx.input_size, 1)
+            return grad_input_val.expand(ctx.input_size), None
         else:
             repeats = [1 for _ in ctx.input_size]
             dim_size = ctx.input_size[ctx.dim]
