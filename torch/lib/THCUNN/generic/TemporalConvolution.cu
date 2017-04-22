@@ -53,6 +53,8 @@ void THNN_(TemporalConvolution_updateOutput)(
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THNN_(TemporalConvolution_shapeCheck)
        (state, input, kW, dW, &inputFrameSize);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5, "bias must be contiguous");
 
   if (input->nDimension == 3)
   {
@@ -180,6 +182,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   int dimS = 0; // sequence dimension
 
   THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
