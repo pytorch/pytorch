@@ -52,7 +52,7 @@ static THCTensor* THNN_(view_weight_local)(
                  THCState *state,
                  THCTensor *_weight)
 {
-  THTensor *weight = THCTensor_(newContiguous)(state, _weight);
+  THCTensor *weight = THCTensor_(newContiguous)(state, _weight);
   THArgCheck(weight->nDimension == 3 || weight->nDimension == 6, 4,
             "weight tensor should be 3D or 6D - got %dD", weight->nDimension);
   if (weight->nDimension == 6) {
