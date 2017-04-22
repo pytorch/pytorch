@@ -137,7 +137,7 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
   return outputs;
 }
 
-static std::pair<bool, variable_list> call_function(FunctionTask& task) {
+static variable_list call_function(FunctionTask& task) {
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
@@ -145,18 +145,15 @@ static std::pair<bool, variable_list> call_function(FunctionTask& task) {
   auto callback_it = function_callbacks.find(&fn);
   if (callback_it != function_callbacks.end()) {
     auto& callback = callback_it->second;
-    if (!callback(&fn, inputs)) return std::make_pair(false, variable_list());
+    if (!callback(&fn, inputs)) return variable_list(fn.next_functions.size());
   }
 
   auto fn_outputs = fn.apply(inputs);
-  auto outputs = call_post_hooks(fn, std::move(fn_outputs), std::move(inputs));
-  return std::make_pair(true, std::move(outputs));
+  return call_post_hooks(fn, std::move(fn_outputs), std::move(inputs));
 }
 
 auto Engine::evaluate_function(FunctionTask& task) -> void {
-  auto call_result = call_function(task);
-  if (!call_result.first) return;
-  auto outputs = call_result.second;
+  auto outputs = call_function(task);
 
   auto& fn = *task.fn;
   if (!task.base->keep_graph) {
