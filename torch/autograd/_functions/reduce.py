@@ -17,7 +17,7 @@ class Sum(Function):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.dim is None:
-            return grad_output[0].expand(ctx.input_size), None
+            return grad_output.expand(ctx.input_size), None
         else:
             repeats = [1 for _ in ctx.input_size]
             repeats[ctx.dim] = ctx.input_size[ctx.dim]
