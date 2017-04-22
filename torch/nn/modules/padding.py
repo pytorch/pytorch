@@ -1,5 +1,6 @@
 from .module import Module
 from .utils import _quadruple, _ntuple
+from .._functions.padding import ConstantPad2d
 
 # TODO: grad_output size asserts in THNN
 
@@ -42,4 +43,15 @@ class ReplicationPad3d(Module):
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
 
-# TODO: ZeroPad2d
+
+class ZeroPad2d(Module):
+
+    def __init__(self, padding):
+        super(ZeroPad2d, self).__init__()
+        self.padding = _quadruple(padding)
+
+    def forward(self, input):
+        return ConstantPad2d(pad=self.padding, value=0)(input)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ' + str(self.padding)
