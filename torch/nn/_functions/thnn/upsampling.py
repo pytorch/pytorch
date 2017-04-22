@@ -5,6 +5,7 @@ from torch._thnn import type2backend
 
 from . import _all_functions
 from ...modules.utils import _pair
+from ...functional import _check_bilinear_scale_factor
 
 
 class _UpsamplingBase(Function):
@@ -73,17 +74,7 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
 
         if self.scale_factor is not None:
-            self.scale_factor = _pair(self.scale_factor)
-            # we have to be a tuple at this point
-            try:
-                assert len(self.scale_factor) == 2
-                for i in self.scale_factor:
-                    assert isinstance(i, Integral)
-                    assert i >= 1
-            except AssertionError as e:
-                raise ValueError('scale_factor must be a non-negative integer, '
-                                 'or a tuple of non-negative integers for bilinear upsamplings, but got: '
-                                 '{}'.format(self.scale_factor))
+            self.scale_factor = _check_bilinear_scale_factor(self.scale_factor)
 
     def forward(self, input):
         assert input.dim() == 4

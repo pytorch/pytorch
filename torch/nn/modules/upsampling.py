@@ -119,17 +119,7 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
 
         if self.scale_factor is not None:
-            self.scale_factor = _pair(self.scale_factor)
-            # we have to be a tuple at this point
-            try:
-                assert len(self.scale_factor) == 2
-                for i in self.scale_factor:
-                    assert isinstance(i, Integral)
-                    assert i >= 1
-            except AssertionError as e:
-                raise ValueError('scale_factor must be a non-negative integer, '
-                                 'or a tuple of non-negative integers for bilinear upsamplings, but got: '
-                                 '{}'.format(self.scale_factor))
+            self.scale_factor = F._check_bilinear_scale_factor(self.scale_factor)
 
     def forward(self, input):
         return F.upsample_bilinear(input, self.size, self.scale_factor)
