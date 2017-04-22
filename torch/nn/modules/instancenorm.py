@@ -50,7 +50,7 @@ class InstanceNorm1d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size С (where С is the input size).
+    of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
@@ -91,7 +91,7 @@ class InstanceNorm2d(_InstanceNorm):
         y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size С (where С is the input size).
+    of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
@@ -133,7 +133,7 @@ class InstanceNorm3d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately for each object in a mini-batch.
     Gamma and beta are learnable parameter vectors
-    of size С (where С is the input size).
+    of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
