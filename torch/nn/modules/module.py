@@ -113,6 +113,12 @@ class Module(object):
                 torch.typename(module)))
         self._modules[name] = module
 
+    def remove_module(self, name):
+        module = self._modules.get(name)
+        if module is None or not isinstance(module, Module):
+            raise KeyError("no module named '{}'".format(name))
+        del self._modules[name]
+
     def _apply(self, fn):
         for module in self.children():
             module._apply(fn)

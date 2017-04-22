@@ -566,6 +566,26 @@ class TestNN(NNTestCase):
         self.assertEqual(n[2], l3)
         self.assertEqual(n[3], l4)
 
+    def test_Sequential_insert_remove(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        n = nn.Sequential()
+        n.insert_module(l2)
+        n.insert_module(l3, 0)
+        n.insert_module(l1, -1, 'l1')
+        self.assertEqual(n[0], l3)
+        self.assertEqual(n[1], l1)
+        self.assertEqual(n[2], l2)
+        self.assertRaises(IndexError, lambda: n.insert_module(l1, -42))
+
+        n.remove_module('l1')
+        self.assertEqual(n[1], l2)
+        n.remove_module(0)
+        self.assertEqual(n[0], l2)
+        self.assertRaises(IndexError, lambda: n[1])
+        self.assertRaises(IndexError, lambda: n.remove_module(-42))
+
     def test_ListModule(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
@@ -634,7 +654,7 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             param_list.extend(make_param())
 
-    def test_add_module(self):
+    def test_add_remove_module(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
         net.l = l
@@ -647,6 +667,12 @@ class TestNN(NNTestCase):
         self.assertEqual(net.l3, l)
         self.assertRaises(KeyError, lambda: net.add_module('l', l))
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
+
+        net.remove_module('l2')
+        self.assertRaises(AttributeError, lambda: net.l2)
+        self.assertEqual(net.l, l)
+        self.assertEqual(net.l3, l)
+        self.assertRaises(KeyError, lambda: net.remove_module('x'))
 
     def test_type(self):
         l = nn.Linear(10, 20)

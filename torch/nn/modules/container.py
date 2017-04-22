@@ -59,6 +59,47 @@ class Sequential(Module):
             next(it)
         return next(it)
 
+    def insert_module(self, module, idx=None, name=None):
+        if idx is None or idx == len(self._modules):
+            name = str(len(self._modules)) if name is None else name
+            return super(Sequential, self).add_module(name, module)
+        idx = idx + len(self._modules) if idx < 0 else idx
+        if idx > len(self._modules) or idx < 0:
+            raise IndexError('index {} is out of range'.format(idx))
+        # get the modules out and then shift them over (items() returns a view)
+        displaced = list(self._modules.items())[idx:]
+        for i, (k, m) in enumerate(displaced):
+            ii = i + idx
+            del self._modules[k]
+            if i == 0:
+                name = str(ii) if name is None else name
+                super(Sequential, self).add_module(name, module)
+            k = str(ii + 1) if k == str(ii) else k
+            self._modules[k] = m
+
+    def remove_module(self, idx=-1):
+        if not isinstance(idx, int):
+            return super(Sequential, self).remove_module(idx)
+        idx = idx + len(self._modules) if idx < 0 else idx
+        if idx >= len(self._modules) - 1 or idx < 0:
+            raise IndexError('index {} is out of range'.format(idx))
+        displaced = []
+        needs_rekey = False
+        for i, (k, m) in enumerate(self._modules.items()):
+            needs_rekey = needs_rekey or k == str(i)
+            if i == idx:
+                del_key = k
+            elif i > idx:
+                displaced.append((k, m))
+        del self._modules[del_key]
+        if not needs_rekey:
+            return
+        for i, (k, m) in enumerate(displaced):
+            ii = i + idx
+            del self._modules[k]
+            k = str(ii + 1) if k == str(ii) else k
+            self._modules[k] = m
+
     def forward(self, input):
         for module in self._modules.values():
             input = module(input)
