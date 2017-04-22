@@ -580,7 +580,7 @@ class Repeat(Function):
         self.repeats = repeats
 
     def forward(self, input):
-        return input.repeat(self.repeats)
+        return input.repeat(*self.repeats)
 
     def backward(self, grad_output):
         grad_input = grad_output
