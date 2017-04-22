@@ -192,7 +192,6 @@ def once_differentiable(fn):
         if volatile:
             kwargs = {'volatile': True}
         else:
-            # FIXME This silently adds an error node, and .backward succeeds.
             kwargs = {'_grad_fn': Error()}
         if not isinstance(outputs, tuple):
             return Variable(outputs, **kwargs) if outputs is not None else None
