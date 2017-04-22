@@ -117,7 +117,10 @@ class UpsamplingBilinear2d(_UpsamplingBase):
             self.output_size[1],
         )
         return grad_input
-
+    
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.scale_factor = _tuple(self.scale_factor)
 
 _all_functions.append(UpsamplingNearest2d)
 _all_functions.append(UpsamplingBilinear2d)
