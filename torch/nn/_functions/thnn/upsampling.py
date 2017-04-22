@@ -16,7 +16,7 @@ class _UpsamplingBase(Function):
             raise ValueError('either size or scale_factor should be defined')
         if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
             raise ValueError('scale_factor must be of integer type or tuple of integer types')
-        self.size = _pair(size)
+        self.size = _pair(size) if size is not None else None
         self.scale_factor = scale_factor
 
 
