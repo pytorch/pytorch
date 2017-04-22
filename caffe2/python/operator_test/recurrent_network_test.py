@@ -13,7 +13,6 @@ import numpy as np
 
 
 class RecurrentNetworkTest(hu.HypothesisTestCase):
-
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
@@ -56,7 +55,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
 
         input = np.random.randn(T, n, d).astype(np.float32)
         initial_input = np.random.randn(1, n, d).astype(np.float32)
-
+        print(locals())
         recurrent.recurrent_net(
             net=model.net,
             cell_net=step.net,
