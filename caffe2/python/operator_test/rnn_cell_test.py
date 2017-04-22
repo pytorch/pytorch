@@ -10,6 +10,7 @@ from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 from functools import partial
 import hypothesis.strategies as st
+from hypothesis import settings as ht_settings
 import numpy as np
 
 
@@ -324,6 +325,24 @@ def milstm_reference(
     )
 
 
+def lstm_input():
+    '''
+    Create input tensor where each dimension is from 1 to 4, ndim=3 and
+    last dimension size is a factor of 4
+    '''
+    dims_ = st.tuples(
+        st.integers(min_value=1, max_value=4),  # t
+        st.integers(min_value=1, max_value=4),  # n
+        st.integers(min_value=1, max_value=4),  # d
+    )
+
+    def create_input(dims):
+        dims = list(dims)
+        dims[2] *= 4
+        return hu.arrays(dims)
+
+    return dims_.flatmap(create_input)
+
 class RNNCellTest(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 10),
@@ -359,33 +378,30 @@ class RNNCellTest(hu.HypothesisTestCase):
                 gc, op, inputs, i, [0, 1],
                 input_device_options=input_device_options)
 
-    @given(t=st.integers(1, 4),
-           n=st.integers(1, 5),
-           d=st.integers(1, 5),
-           memory_optim=st.booleans(),)
-    def test_lstm(self, t, n, d, memory_optim):
-        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
-            def ref(*args):
-                return lstm_reference(*args, forget_bias=0)
-            self.lstm(
-                rnn_cell.LSTM, t, n, d,
-                ref, outputs_with_grads, memory_optim, 0)
 
-    @given(t=st.integers(1, 4),
-           n=st.integers(1, 5),
-           d=st.integers(1, 5),
-           memory_optim=st.booleans(),
-           forget_bias=st.floats(-10.0, 10.0))
-    def test_lstm_forget_bias(self, t, n, d, memory_optim, forget_bias):
-        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
-            def ref(*args):
-                return lstm_reference(*args, forget_bias=forget_bias)
-            self.lstm(
-                rnn_cell.LSTM, t, n, d, ref, outputs_with_grads,
-                memory_optim, forget_bias)
+    @given(
+        input_tensor=lstm_input(),
+        forget_bias=st.floats(-10.0, 10.0),
+    )
+    @ht_settings(max_examples=25)
+    def test_lstm_main(self, **kwargs):
+        for lstm_type in [(rnn_cell.LSTM, lstm_reference),
+                          (rnn_cell.MILSTM, milstm_reference)]:
+            for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+                for memory_optim in [False, True]:
+                    self.lstm_base(lstm_type, outputs_with_grads, memory_optim,
+                                   **kwargs)
 
-    def lstm(self, create_lstm, t, n, d, ref,
-             outputs_with_grads, memory_optim, forget_bias):
+    def lstm_base(self, lstm_type, outputs_with_grads, memory_optim,
+                  input_tensor, forget_bias):
+        print("LSTM test parameters: ", locals())
+        create_lstm, ref = lstm_type
+        t, n, d = input_tensor.shape
+        assert d % 4 == 0
+        d = d // 4
+        print("Dims: ", t, n, d)
+        ref = partial(ref, forget_bias=forget_bias)
+
         model = CNNModelHelper(name='external')
         input_blob, seq_lengths, hidden_init, cell_init = (
             model.net.AddExternalInputs(
@@ -618,28 +634,3 @@ class RNNCellTest(hu.HypothesisTestCase):
                 threshold=0.01,
                 stepsize=0.001,
             )
-
-    @given(t=st.integers(1, 4),
-           n=st.integers(1, 5),
-           d=st.integers(1, 5),
-           memory_optim=st.booleans())
-    def test_milstm(self, t, n, d, memory_optim):
-        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
-            def ref(*args):
-                return milstm_reference(*args, forget_bias=0.0)
-            self.lstm(
-                rnn_cell.MILSTM, t, n, d, ref,
-                outputs_with_grads, memory_optim, 0)
-
-    @given(t=st.integers(1, 4),
-           n=st.integers(1, 5),
-           d=st.integers(1, 5),
-           memory_optim=st.booleans(),
-           forget_bias=st.floats(-10.0, 10.0))
-    def test_milstm_forget_bias(self, t, n, d, memory_optim, forget_bias):
-        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
-            def ref(*args):
-                return milstm_reference(*args, forget_bias=forget_bias)
-            self.lstm(
-                rnn_cell.MILSTM, t, n, d, ref,
-                outputs_with_grads, memory_optim, forget_bias)
