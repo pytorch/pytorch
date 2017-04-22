@@ -43,9 +43,9 @@ class TestActivations(hu.HypothesisTestCase):
            inplace=st.booleans(),
            shared=st.booleans(),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_prelu(self, X, alpha, inplace, shared, order, gc, dc):
-        np.random.seed(20)
+        #np.random.seed(20)
         W = np.random.randn(
             X.shape[1] if order == "NCHW" else X.shape[3]).astype(np.float32)
 
