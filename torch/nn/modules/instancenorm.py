@@ -22,7 +22,7 @@ class _InstanceNorm(_BatchNorm):
             bias = self.bias.repeat(b)
 
         # Apply instance norm
-        input_reshaped = input.view(1, b * c, *input.size()[2:])
+        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
 
         out = F.batch_norm(
             input_reshaped, running_mean, running_var, weight, bias,
@@ -34,11 +34,8 @@ class _InstanceNorm(_BatchNorm):
 
         return out.view(b, c, *input.size()[2:])
 
-    def force_eval(self):
-        self.training = False
-
     def eval(self):
-        pass
+        return self
 
 
 class InstanceNorm1d(_InstanceNorm):
@@ -55,9 +52,9 @@ class InstanceNorm1d(_InstanceNorm):
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time, the default behaviour of the InstanceNorm module stays the same
+    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
     i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.force_eval()` method.
+    mean and variance with `.train(False)` method.
 
     Args:
         num_features: num_features from an expected input of size `batch_size x num_features x width`
@@ -96,9 +93,9 @@ class InstanceNorm2d(_InstanceNorm):
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time, the default behaviour of the InstanceNorm module stays the same
+    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
     i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.force_eval()` method.
+    mean and variance with `.train(False)` method.
 
     Args:
         num_features: num_features from an expected input of size batch_size x num_features x height x width
@@ -138,9 +135,9 @@ class InstanceNorm3d(_InstanceNorm):
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time, the default behaviour of the InstanceNorm module stays the same
+    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
     i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.force_eval()` method.
+    mean and variance with `.train(False)` method.
 
 
     Args:
