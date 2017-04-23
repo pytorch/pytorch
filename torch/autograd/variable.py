@@ -837,8 +837,8 @@ class Variable(_C._VariableBase):
     class _torch(object):
 
         @staticmethod
-        def cat(iterable, dim=0):
-            return Concat(dim)(*iterable)
+        def cat(iterable, dim=0, out=None):
+            return Concat(dim, out)(*iterable)
 
         @staticmethod
         def normal(means, std=1):
