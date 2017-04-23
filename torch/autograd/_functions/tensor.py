@@ -301,13 +301,14 @@ class IndexSelect(Function):
 
 class Concat(Function):
 
-    def __init__(self, dim):
+    def __init__(self, dim, out=None):
         super(Concat, self).__init__()
         self.dim = dim
+        self.out = out
 
     def forward(self, *inputs):
         self.input_sizes = [i.size(self.dim) for i in inputs]
-        return torch.cat(inputs, self.dim)
+        return torch.cat(inputs, self.dim, out=self.out)
 
     def backward(self, grad_output):
         return tuple(grad_output.narrow(self.dim, end - size, size) for size, end
