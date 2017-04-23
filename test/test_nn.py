@@ -1029,6 +1029,23 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_getattr(self):
+        class FooModule(nn.Module):
+            foo = 'foo'
+
+        fm_net = FooModule().cuda()
+        dp_net = nn.DataParallel(fm_net)
+
+        self.assertEqual(fm_net.foo, 'foo')
+        self.assertEqual(dp_net.foo, 'foo')
+
+        with self.assertRaises(AttributeError):
+            _ = fm_net.bar_does_not_exist
+
+        with self.assertRaises(AttributeError):
+            _ = dp_net.bar_does_not_exist
+
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
