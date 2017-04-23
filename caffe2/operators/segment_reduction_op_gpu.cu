@@ -77,6 +77,17 @@ class ReduceDimsOp : public Operator<CUDAContext> {
   int num_reduce_dims_;
 };
 
+namespace {
+template <typename T>
+__global__ void
+StripedScaleKernel(const int N, const int M, const T* alpha, const T* x, T* y) {
+  CUDA_1D_KERNEL_LOOP(i, M * N) {
+    int k = i / N;
+    y[i] = x[i] * alpha[k];
+  }
+}
+}
+
 template <
     typename T,
     class Context = CUDAContext,
@@ -126,8 +137,8 @@ class ReduceDimsGradientOp : public Operator<CUDAContext> {
         out_grad->template mutable_data<T>(),
         &context_);
 
-    for (int i = 0; i < M; ++i) {
-      if (FIRSTDIMS) {
+    if (FIRSTDIMS) {
+      for (int i = 0; i < M; ++i) {
         math::Axpby<T, CUDAContext>(
             N,
             alpha,
@@ -135,14 +146,18 @@ class ReduceDimsGradientOp : public Operator<CUDAContext> {
             static_cast<T>(0),
             out_grad->template mutable_data<T>() + i * N,
             &context_);
-      } else {
-        math::Scale<T, CUDAContext>(
-            N,
-            grad_in.template data<T>() + i,
-            out_grad->template data<T>() + i * N,
-            out_grad->template mutable_data<T>() + i * N,
-            &context_);
       }
+    } else {
+      StripedScaleKernel<T><<<
+          CAFFE_GET_BLOCKS(N * M),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          N,
+          M,
+          grad_in.template data<T>(),
+          out_grad->template data<T>(),
+          out_grad->template mutable_data<T>());
     }
 
     return true;
