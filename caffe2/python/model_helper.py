@@ -61,7 +61,7 @@ class ModelHelper(object):
         b = model.param_init_net.ConstantFill(...)
         fc1 = model.FC([input, w, b], output, **kwargs)
 
-    or you can use helper functions in model_helpers module without manually
+    or you can use helper functions in brew module without manually
     defining parameter initializations and operators.
 
         model = model_helper.ModelHelper(name="train_net")

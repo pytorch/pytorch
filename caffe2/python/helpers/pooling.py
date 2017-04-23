@@ -6,15 +6,15 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-def MaxPool(model, blob_in, blob_out, use_cudnn=False, order="NCHW", **kwargs):
+def max_pool(model, blob_in, blob_out, use_cudnn=False, order="NCHW", **kwargs):
     """Max pooling"""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
     return model.net.MaxPool(blob_in, blob_out, order=order, **kwargs)
 
 
-def AveragePool(model, blob_in, blob_out, use_cudnn=False, order="NCHW",
-                **kwargs):
+def average_pool(model, blob_in, blob_out, use_cudnn=False, order="NCHW",
+                 **kwargs):
     """Average pooling"""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'

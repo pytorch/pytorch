@@ -8,7 +8,7 @@ from __future__ import unicode_literals
 from caffe2.python import core
 
 
-def LRN(model, blob_in, blob_out, **kwargs):
+def lrn(model, blob_in, blob_out, **kwargs):
     """LRN"""
     return model.net.LRN(
         blob_in,
@@ -18,7 +18,7 @@ def LRN(model, blob_in, blob_out, **kwargs):
     )[0]
 
 
-def Softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
+def softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
     """Softmax."""
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
@@ -28,7 +28,7 @@ def Softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
         return model.net.Softmax(blob_in, **kwargs)
 
 
-def InstanceNorm(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
+def instance_norm(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
     blob_out = blob_out or model.net.NextName()
     # Input: input, scale, bias
     # Output: output, saved_mean, saved_inv_std
@@ -57,7 +57,7 @@ def InstanceNorm(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
         return blob_outputs[0]
 
 
-def SpatialBN(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
+def spatial_bn(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
     blob_out = blob_out or model.net.NextName()
     # Input: input, scale, bias, est_mean, est_inv_var
     # Output: output, running_mean, running_inv_var, saved_mean,
