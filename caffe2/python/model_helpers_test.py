@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python import workspace, model_helpers
-from caffe2.python.model_helper import ModelHelperBase
+from caffe2.python.model_helper import ModelHelper
 
 import unittest
 import numpy as np
@@ -30,7 +30,7 @@ class ModelHelpersTest(unittest.TestCase):
         p = 0.2
         X = np.ones((100, 100)).astype(np.float32) - p
         workspace.FeedBlob("x", X)
-        model = ModelHelperBase(name="test_model")
+        model = ModelHelper(name="test_model")
         model_helpers.Dropout(model, "x", "out")
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
@@ -42,7 +42,7 @@ class ModelHelpersTest(unittest.TestCase):
         X = np.random.rand(m, k).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)
-        model = ModelHelperBase(name="test_model")
+        model = ModelHelper(name="test_model")
         out = model_helpers.FC(model, "x", "out_1", k, n)
         out = model_helpers.PackedFC(model, out, "out_2", n, n)
         out = model_helpers.FC_Decomp(model, out, "out_3", n, n)
@@ -68,7 +68,7 @@ class ModelHelpersTest(unittest.TestCase):
         X = np.random.rand(64, 3, 32, 32).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)
-        model = ModelHelperBase(name="test_model")
+        model = ModelHelper(name="test_model")
         with model_helpers.arg_scope(
             model_helpers.Conv,
             stride=2,
