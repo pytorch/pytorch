@@ -1074,7 +1074,6 @@ function_tests = [
     (Concat, (0,), ((1, S, S), (2, S, S), (3, S, S))),
     (Concat, (-1,), ((S, S, 1), (S, S, 2), (S, S, 3)), 'negdim-1'),
     (Concat, (-2,), ((S, 1, S), (S, 2, S), (S, 3, S)), 'negdim-2'),
-    (Concat, (0, None), ((1, S, S), (2, S, S), (3, S, S)), 'out'),
     (Resize, (S * S, S), ((S, S, S),)),
     (Diag, (), ((S, S),), '2d'),
     (Diag, (), ((S,),), '1d'),
