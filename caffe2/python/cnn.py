@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import scope, model_helpers
+from caffe2.python import scope, brew
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 
@@ -80,81 +80,101 @@ class CNNModelHelper(ModelHelper):
         self.net.PadImage(blob_in, blob_out, **kwargs)
 
     def ConvNd(self, *args, **kwargs):
-        return model_helpers.ConvNd(self, *args, use_cudnn=self.use_cudnn,
-                                    order=self.order,
-                                    cudnn_exhaustive_search=self.cudnn_exhaustive_search,
-                                    ws_nbytes_limit=self.ws_nbytes_limit,
-                                    **kwargs)
+        return brew.conv_nd(
+            self,
+            *args,
+            use_cudnn=self.use_cudnn,
+            order=self.order,
+            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            ws_nbytes_limit=self.ws_nbytes_limit,
+            **kwargs
+        )
 
     def Conv(self, *args, **kwargs):
-        return model_helpers.Conv(self, *args, use_cudnn=self.use_cudnn,
-                                  order=self.order,
-                                  cudnn_exhaustive_search=self.cudnn_exhaustive_search,
-                                  ws_nbytes_limit=self.ws_nbytes_limit,
-                                  **kwargs)
+        return brew.conv(
+            self,
+            *args,
+            use_cudnn=self.use_cudnn,
+            order=self.order,
+            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            ws_nbytes_limit=self.ws_nbytes_limit,
+            **kwargs
+        )
 
     def ConvTranspose(self, *args, **kwargs):
-        return model_helpers.ConvTranspose(self, *args, use_cudnn=self.use_cudnn,
-                                           order=self.order,
-                                           cudnn_exhaustive_search=self.cudnn_exhaustive_search,
-                                           ws_nbytes_limit=self.ws_nbytes_limit,
-                                           **kwargs)
+        return brew.conv_transpose(
+            self,
+            *args,
+            use_cudnn=self.use_cudnn,
+            order=self.order,
+            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            ws_nbytes_limit=self.ws_nbytes_limit,
+            **kwargs
+        )
 
     def GroupConv(self, *args, **kwargs):
-        return model_helpers.GroupConv(self, *args, use_cudnn=self.use_cudnn,
-                                       order=self.order,
-                                       cudnn_exhaustive_search=self.cudnn_exhaustive_search,
-                                       ws_nbytes_limit=self.ws_nbytes_limit,
-                                       **kwargs)
+        return brew.group_conv(
+            self,
+            *args,
+            use_cudnn=self.use_cudnn,
+            order=self.order,
+            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            ws_nbytes_limit=self.ws_nbytes_limit,
+            **kwargs
+        )
 
     def GroupConv_Deprecated(self, *args, **kwargs):
-        return model_helpers.GroupConv_Deprecated(self, *args, use_cudnn=self.use_cudnn,
-                                                  order=self.order,
-                                                  cudnn_exhaustive_search=self.cudnn_exhaustive_search,
-                                                  ws_nbytes_limit=self.ws_nbytes_limit,
-                                                  **kwargs)
+        return brew.group_conv_deprecated(
+            self,
+            *args,
+            use_cudnn=self.use_cudnn,
+            order=self.order,
+            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            ws_nbytes_limit=self.ws_nbytes_limit,
+            **kwargs
+        )
 
     def FC(self, *args, **kwargs):
-        return model_helpers.FC(self, *args, **kwargs)
+        return brew.fc(self, *args, **kwargs)
 
     def PackedFC(self, *args, **kwargs):
-        return model_helpers.PackedFC(self, *args, **kwargs)
+        return brew.packed_fc(self, *args, **kwargs)
 
     def FC_Prune(self, *args, **kwargs):
-        return model_helpers.FC_Prune(self, *args, **kwargs)
+        return brew.fc_prune(self, *args, **kwargs)
 
     def FC_Decomp(self, *args, **kwargs):
-        return model_helpers.FC_Decomp(self, *args, **kwargs)
+        return brew.fc_decomp(self, *args, **kwargs)
 
     def FC_Sparse(self, *args, **kwargs):
-        return model_helpers.FC_Sparse(self, *args, **kwargs)
+        return brew.fc_sparse(self, *args, **kwargs)
 
     def Dropout(self, *args, **kwargs):
-        return model_helpers.Dropout(self, *args, **kwargs)
+        return brew.dropout(self, *args, **kwargs)
 
     def LRN(self, *args, **kwargs):
-        return model_helpers.LRN(self, *args, **kwargs)
+        return brew.lrn(self, *args, **kwargs)
 
     def Softmax(self, *args, **kwargs):
-        return model_helpers.Softmax(self, *args, use_cudnn=self.use_cudnn,
+        return brew.softmax(self, *args, use_cudnn=self.use_cudnn,
                                      **kwargs)
 
     def SpatialBN(self, *args, **kwargs):
-        return model_helpers.SpatialBN(self, *args, order=self.order, **kwargs)
+        return brew.spatial_bn(self, *args, order=self.order, **kwargs)
 
     def InstanceNorm(self, *args, **kwargs):
-        return model_helpers.InstanceNorm(self, *args, order=self.order,
+        return brew.instance_norm(self, *args, order=self.order,
                                           **kwargs)
 
     def Relu(self, *args, **kwargs):
-        return model_helpers.Relu(self, *args, order=self.order,
+        return brew.relu(self, *args, order=self.order,
                                   use_cudnn=self.use_cudnn, **kwargs)
 
     def PRelu(self, *args, **kwargs):
-        return model_helpers.PRelu(self, *args, **kwargs)
+        return brew.prelu(self, *args, **kwargs)
 
     def Concat(self, *args, **kwargs):
-        return model_helpers.Concat(self, *args, order=self.order, **kwargs)
+        return brew.concat(self, *args, order=self.order, **kwargs)
 
     def DepthConcat(self, *args, **kwargs):
         """The old depth concat function - we should move to use concat."""
@@ -162,24 +182,24 @@ class CNNModelHelper(ModelHelper):
         return self.Concat(*args, **kwargs)
 
     def Sum(self, *args, **kwargs):
-        return model_helpers.Sum(self, *args, **kwargs)
+        return brew.sum(self, *args, **kwargs)
 
     def Transpose(self, *args, **kwargs):
-        return model_helpers.Transpose(self, *args, use_cudnn=self.use_cudnn,
+        return brew.transpose(self, *args, use_cudnn=self.use_cudnn,
                                        **kwargs)
 
     def Iter(self, *args, **kwargs):
-        return model_helpers.Iter(self, *args, **kwargs)
+        return brew.iter(self, *args, **kwargs)
 
     def Accuracy(self, *args, **kwargs):
-        return model_helpers.Accuracy(self, *args, **kwargs)
+        return brew.accuracy(self, *args, **kwargs)
 
     def MaxPool(self, *args, **kwargs):
-        return model_helpers.MaxPool(self, *args, use_cudnn=self.use_cudnn,
+        return brew.max_pool(self, *args, use_cudnn=self.use_cudnn,
                                      order=self.order, **kwargs)
 
     def AveragePool(self, *args, **kwargs):
-        return model_helpers.AveragePool(self, *args, use_cudnn=self.use_cudnn,
+        return brew.average_pool(self, *args, use_cudnn=self.use_cudnn,
                                          order=self.order, **kwargs)
 
     @property

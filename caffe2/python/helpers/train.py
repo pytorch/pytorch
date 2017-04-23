@@ -9,7 +9,7 @@ from caffe2.python import core, scope
 from caffe2.proto import caffe2_pb2
 
 
-def Iter(model, blob_out, **kwargs):
+def iter(model, blob_out, **kwargs):
     if 'device_option' in kwargs:
         del kwargs['device_option']
     model.param_init_net.ConstantFill(
@@ -19,7 +19,7 @@ def Iter(model, blob_out, **kwargs):
     return model.net.Iter(blob_out, blob_out, **kwargs)
 
 
-def Accuracy(model, blob_in, blob_out, **kwargs):
+def accuracy(model, blob_in, blob_out, **kwargs):
     dev = kwargs['device_option'] if 'device_option' in kwargs \
         else scope.CurrentDeviceScope()
     is_cpu = dev is None or dev.device_type == caffe2_pb2.CPU

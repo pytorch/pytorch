@@ -6,7 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-def Dropout(model, blob_in, blob_out, **kwargs):
-    """Dropout"""
+def dropout(model, blob_in, blob_out, **kwargs):
+    """dropout"""
     return model.net.Dropout(
         blob_in, [blob_out, "_" + blob_out + "_mask"], **kwargs)[0]

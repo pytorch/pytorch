@@ -45,15 +45,15 @@ def _FC_or_packed_FC(
     return op_call([blob_in, weight, bias], blob_out, **kwargs)
 
 
-def FC(model, *args, **kwargs):
+def fc(model, *args, **kwargs):
     return _FC_or_packed_FC(model, model.net.FC, *args, **kwargs)
 
 
-def PackedFC(model, *args, **kwargs):
+def packed_fc(model, *args, **kwargs):
     return _FC_or_packed_FC(model, model.net.PackedFC, *args, **kwargs)
 
 
-def FC_Decomp(
+def fc_decomp(
     model, blob_in, blob_out, dim_in, dim_out,
     rank_approx=5, weight_init=None,
     bias_init=None, **kwargs
@@ -86,7 +86,7 @@ def FC_Decomp(
     return model.net.FC_Decomp([blob_in, u, v, bias], blob_out, **kwargs)
 
 
-def FC_Prune(
+def fc_prune(
     model, blob_in, blob_out, dim_in, dim_out,
     weight_init=None, bias_init=None, mask_init=None,
     threshold=0.00001, need_compress_rate=False,
@@ -172,7 +172,7 @@ def FC_Prune(
                                   blob_out, **kwargs)
 
 
-def FC_Sparse(
+def fc_sparse(
     model, blob_in, blob_out, w_csr, iw, jw, bias,
     **kwargs
 ):

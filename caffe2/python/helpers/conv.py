@@ -8,10 +8,24 @@ from __future__ import unicode_literals
 from caffe2.python import core
 
 
-def _ConvBase(model, is_nd, blob_in, blob_out, dim_in, dim_out, kernel,
-              weight_init=None, bias_init=None, group=1, transform_inputs=None,
-              use_cudnn=False, order="NCHW", cudnn_exhaustive_search=False,
-              ws_nbytes_limit=None, **kwargs):
+def _ConvBase(
+    model,
+    is_nd,
+    blob_in,
+    blob_out,
+    dim_in,
+    dim_out,
+    kernel,
+    weight_init=None,
+    bias_init=None,
+    group=1,
+    transform_inputs=None,
+    use_cudnn=False,
+    order="NCHW",
+    cudnn_exhaustive_search=False,
+    ws_nbytes_limit=None,
+    **kwargs
+):
     kernels = []
     if is_nd:
         if not isinstance(kernel, list):
@@ -101,9 +115,20 @@ def _ConvBase(model, is_nd, blob_in, blob_out, dim_in, dim_out, kernel,
             **kwargs)
 
 
-def ConvNd(model, blob_in, blob_out, dim_in, dim_out, kernel,
-           weight_init=None, bias_init=None, group=1, transform_inputs=None,
-           order="NCHW", **kwargs):
+def conv_nd(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    dim_out,
+    kernel,
+    weight_init=None,
+    bias_init=None,
+    group=1,
+    transform_inputs=None,
+    order="NCHW",
+    **kwargs
+):
     """N-dimensional convolution for inputs with NCHW storage order.
     """
     assert order == "NCHW", "ConvNd only supported for NCHW storage."
@@ -112,18 +137,39 @@ def ConvNd(model, blob_in, blob_out, dim_in, dim_out, kernel,
                      order=order, **kwargs)
 
 
-def Conv(model, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-         bias_init=None, group=1, transform_inputs=None, **kwargs):
+def conv(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    dim_out,
+    kernel,
+    weight_init=None,
+    bias_init=None,
+    group=1,
+    transform_inputs=None,
+    **kwargs
+):
     """2-dimensional convolution.
     """
     return _ConvBase(model, False, blob_in, blob_out, dim_in, dim_out, kernel,
                      weight_init, bias_init, group, transform_inputs, **kwargs)
 
 
-def ConvTranspose(
-    model, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
-    bias_init=None, use_cudnn=False, order="NCHW",
-    cudnn_exhaustive_search=False, ws_nbytes_limit=None, **kwargs
+def conv_transpose(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    dim_out,
+    kernel,
+    weight_init=None,
+    bias_init=None,
+    use_cudnn=False,
+    order="NCHW",
+    cudnn_exhaustive_search=False,
+    ws_nbytes_limit=None,
+    **kwargs
 ):
     """ConvTranspose.
     """
@@ -169,7 +215,7 @@ def ConvTranspose(
     )
 
 
-def GroupConv(
+def group_conv(
     model,
     blob_in,
     blob_out,
@@ -186,25 +232,27 @@ def GroupConv(
     This is essentially the same as Conv with a group argument passed in.
     We specialize this for backward interface compatibility.
     """
-    return Conv(model, blob_in, blob_out, dim_in, dim_out, kernel,
+    return conv(model, blob_in, blob_out, dim_in, dim_out, kernel,
                 weight_init=weight_init, bias_init=bias_init,
                 group=group, **kwargs)
 
 
-def GroupConv_Deprecated(model,
-                         blob_in,
-                         blob_out,
-                         dim_in,
-                         dim_out,
-                         kernel,
-                         weight_init=None,
-                         bias_init=None,
-                         group=1,
-                         use_cudnn=False,
-                         order="NCHW",
-                         cudnn_exhaustive_search=False,
-                         ws_nbytes_limit=None,
-                         **kwargs):
+def group_conv_deprecated(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    dim_out,
+    kernel,
+    weight_init=None,
+    bias_init=None,
+    group=1,
+    use_cudnn=False,
+    order="NCHW",
+    cudnn_exhaustive_search=False,
+    ws_nbytes_limit=None,
+    **kwargs
+):
     """GroupConvolution's deprecated interface.
 
     This is used to simulate a group convolution via split and concat. You
