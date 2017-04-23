@@ -32,7 +32,7 @@ def Parallelize_GPU(
 ):
     '''
     Function to create a model that can run on many GPUs.
-      model_helper_obj: an object of ModelHelperBase, such as CNNModelHelper
+      model_helper_obj: an object of ModelHelper, such as CNNModelHelper
       input_builder_fun:
                          Function that adds the input operators
                          Note: Remember to instantiate reader outside of this
@@ -67,7 +67,7 @@ def Parallelize_GPU(
     model_helper_obj._rendezvous = rendezvous
     model_helper_obj._grad_names = []
 
-    assert isinstance(model_helper_obj, model_helper.ModelHelperBase)
+    assert isinstance(model_helper_obj, model_helper.ModelHelper)
 
     # Keep track of params that were in the model before: they are not
     # data parallel, so we need to handle them separately

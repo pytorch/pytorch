@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import recurrent, workspace
 from caffe2.python.cnn import CNNModelHelper
-from caffe2.python.model_helper import ModelHelperBase
+from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -17,12 +17,12 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
            n=st.integers(1, 5),
            d=st.integers(1, 5))
     def test_sum_mul(self, T, n, d):
-        model = ModelHelperBase(name='external')
+        model = ModelHelper(name='external')
 
         input_blob, initial_input_blob = model.net.AddExternalInputs(
             'input', 'initial_input')
 
-        step = ModelHelperBase(name='step', param_model=model)
+        step = ModelHelper(name='step', param_model=model)
         input_t, output_t_prev = step.net.AddExternalInput(
             'input_t', 'output_t_prev')
         output_t_internal = step.net.Sum([input_t, output_t_prev])
@@ -36,12 +36,12 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
            n=st.integers(1, 5),
            d=st.integers(1, 5))
     def test_mul(self, T, n, d):
-        model = ModelHelperBase(name='external')
+        model = ModelHelper(name='external')
 
         input_blob, initial_input_blob = model.net.AddExternalInputs(
             'input', 'initial_input')
 
-        step = ModelHelperBase(name='step', param_model=model)
+        step = ModelHelper(name='step', param_model=model)
         input_t, output_t_prev = step.net.AddExternalInput(
             'input_t', 'output_t_prev')
         output_t = step.net.Mul([input_t, output_t_prev])

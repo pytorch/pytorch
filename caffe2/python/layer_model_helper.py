@@ -13,7 +13,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-class LayerModelHelper(model_helper.ModelHelperBase):
+class LayerModelHelper(model_helper.ModelHelper):
     """
     Model helper for building models on top of layers abstractions.
 

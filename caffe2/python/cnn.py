@@ -6,11 +6,11 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import scope, model_helpers
-from caffe2.python.model_helper import ModelHelperBase
+from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 
 
-class CNNModelHelper(ModelHelperBase):
+class CNNModelHelper(ModelHelper):
     """A helper model so we can write CNN models more easily, without having to
     manually define parameter initializations and operators separately.
     """

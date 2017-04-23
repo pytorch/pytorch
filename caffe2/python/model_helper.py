@@ -51,12 +51,22 @@ class ParameterInfo(object):
         return self.name
 
 
-class ModelHelperBase(object):
-    """A helper model so we can write models more easily, without having to
-    manually define parameter initializations and operators separately.
-    In order to add support for specific operators, inherit from this class
-    and add corresponding methods. Operator representing methods should
-    take care of adding their parameters to params
+class ModelHelper(object):
+    """A helper model so we can manange models more easily. It contains net def
+    and parameter storages. You can add an Operator yourself, e.g.
+
+        model = model_helper.ModelHelper(name="train_net")
+        # init your weight and bias as w and b
+        w = model.param_init_net.XavierFill(...)
+        b = model.param_init_net.ConstantFill(...)
+        fc1 = model.FC([input, w, b], output, **kwargs)
+
+    or you can use helper functions in model_helpers module without manually
+    defining parameter initializations and operators.
+
+        model = model_helper.ModelHelper(name="train_net")
+        fc1 = brew.fc(model, input, output, dim_in, dim_out, **kwargs)
+
     """
 
     def __init__(self, name=None, init_params=True, allow_not_known_ops=True,
@@ -340,7 +350,7 @@ class ModelHelperBase(object):
                 raise RuntimeError(
                     "Operator {} is not known to be safe".format(op_type))
 
-            logging.warning("You are creating an op that the ModelHelperBase "
+            logging.warning("You are creating an op that the ModelHelper "
                             "does not recognize: {}.".format(op_type))
         return self.net.__getattr__(op_type)
 
