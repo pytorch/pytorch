@@ -80,6 +80,7 @@ def create_model(args, queue, label_queue, input_shape):
             dim_out=args.hidden_dim,
             scope="lstm1",
             memory_optimization=args.memory_optimization,
+            forward_only=args.forward_only,
         )
     elif args.implementation == "cudnn":
         # We need to feed a placeholder input so that RecurrentInitOp
@@ -104,7 +105,8 @@ def create_model(args, queue, label_queue, input_shape):
         ['softmax', 'loss'],
     )
 
-    model.AddGradientOperators([loss])
+    if not args.forward_only:
+        model.AddGradientOperators([loss])
 
     # carry states over
     model.net.Copy(last_hidden, hidden_init)
@@ -231,6 +233,11 @@ def GetArgumentParser():
         "--memory_optimization",
         action="store_true",
         help="Whether to use memory optimized LSTM or not",
+    )
+    parser.add_argument(
+        "--forward_only",
+        action="store_true",
+        help="Whether to run only forward pass"
     )
 
     return parser

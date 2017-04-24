@@ -257,6 +257,13 @@ class RecurrentNetworkOp final : public Operator<Context> {
           ri, seqLen, batchSize, sharedWs_, &context_);
     }
 
+    // If we don't have a backward step net, this operator is forward_only
+    // and we can avoid creating multiple workspaces.
+
+    bool has_backward_pass =
+        OperatorBase::GetSingleArgument<string>("backward_step_net", "") != "";
+
+    // With backward pass: we need to create workspace for each timestep
     detail::ScratchWorkspaces* scratch =
         OperatorBase::Output<detail::ScratchWorkspaces>(OutputSize() - 1);
     std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
@@ -271,13 +278,15 @@ class RecurrentNetworkOp final : public Operator<Context> {
     // have to be stored in step workspaces but can be shared.
     initializeBlobsToRecomputeOnBackward(forwardSharedWs.get());
 
-    if (seqLen > stepWorkspaces.size()) {
+    if (has_backward_pass && seqLen > stepWorkspaces.size()) {
       stepWorkspaces.resize(seqLen);
     }
 
     for (auto t = 0; t < seqLen; ++t) {
-      auto& currentStepWorkspace = stepWorkspaces[t];
+      auto& currentStepWorkspace =
+          (has_backward_pass ? stepWorkspaces[t] : forwardSharedWs);
       if (!currentStepWorkspace) {
+        CHECK(has_backward_pass);
         currentStepWorkspace =
             std::make_shared<Workspace>(forwardSharedWs.get());
       }
