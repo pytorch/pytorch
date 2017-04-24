@@ -1,5 +1,7 @@
 """Functional interface"""
 
+from numbers import Integral
+
 import torch
 from . import _functions
 from .modules import utils
