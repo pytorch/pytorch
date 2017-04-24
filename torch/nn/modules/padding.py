@@ -62,7 +62,7 @@ class ConstantPad2d(Module):
     def __init__(self, padding, value):
         super(ConstantPad2d, self).__init__()
         self.padding = _quadruple(padding)
-        self.valud = value
+        self.value = value
 
     def forward(self, input):
         return F_ConstantPad2d(pad=self.padding, value=self.value)(input)
