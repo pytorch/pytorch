@@ -618,6 +618,7 @@ def _check_bilinear_scale_factor(scale_factor):
         raise ValueError('scale_factor must be a non-negative integer, '
                          'or a tuple of non-negative integers for bilinear upsamplings, but got: '
                          '{}'.format(scale_factor))
+    return scale_factor
 
 
 def pad(input, pad, mode='constant', value=0):
