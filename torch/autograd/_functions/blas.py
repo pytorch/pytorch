@@ -202,9 +202,9 @@ class Dot(Function):
         grad_vector1 = grad_vector2 = None
 
         if ctx.needs_input_grad[0]:
-            grad_vector1 = vector2.mul(grad_output.expand(ctx.sizes[0]))
+            grad_vector1 = vector2.mul(grad_output.expand(ctx.sizes[1])).view(ctx.sizes[0])
 
         if ctx.needs_input_grad[1]:
-            grad_vector2 = vector1.mul(grad_output.expand(ctx.sizes[1]))
+            grad_vector2 = vector1.mul(grad_output.expand(ctx.sizes[0])).view(ctx.sizes[1])
 
         return grad_vector1, grad_vector2
