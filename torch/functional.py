@@ -50,10 +50,14 @@ def stack(sequence, dim=0, out=None):
             of dimensions of concatenated tensors (inclusive).
     """
     if len(sequence) == 0:
-        raise TypeError("stack expects a non-empty sequence of tensors")
+        raise ValueError("stack expects a non-empty sequence of tensors")
     if dim < 0:
         dim += sequence[0].dim()
-    return torch.cat(list(t.unsqueeze(dim) for t in sequence), dim, out=out)
+    inputs = [t.unsqueeze(dim) for t in sequence]
+    if out is None:
+        return torch.cat(inputs, dim)
+    else:
+        return torch.cat(inputs, dim, out=out)
 
 
 def unbind(tensor, dim=0):
