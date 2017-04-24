@@ -24,7 +24,7 @@ from .rnn import RNNBase, RNN, LSTM, GRU, \
 from .pixelshuffle import PixelShuffle
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d
 from .distance import PairwiseDistance
-
+from .bilinear import Bilinear
 
 __all__ = [
     'Module', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
@@ -43,5 +43,5 @@ __all__ = [
     'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
-    'TripletMarginLoss'
+    'TripletMarginLoss', 'Bilinear'
 ]

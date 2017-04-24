@@ -28,6 +28,7 @@ def _initialize_backend():
     from .._functions.activation import Softsign
     from .._functions.loss import CosineEmbeddingLoss, \
         HingeEmbeddingLoss, MarginRankingLoss
+    from .._functions.bilinear import Bilinear
 
     backend.register_function('Linear', Linear)
     backend.register_function('ConvNd', ConvNd)
@@ -43,6 +44,7 @@ def _initialize_backend():
     backend.register_function('HingeEmbeddingLoss', HingeEmbeddingLoss)
     backend.register_function('MarginRankingLoss', MarginRankingLoss)
     backend.register_function('Softsign', Softsign)
+    backend.register_function('Bilinear', Bilinear)
     for cls in _thnn_functions:
         name = cls.__name__
         backend.register_function(name, cls)
