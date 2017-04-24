@@ -1,5 +1,3 @@
-## @package model_helpers
-# Module caffe2.python.model_helpers
 ## @package model_helper_api
 # Module caffe2.python.model_helper_api
 from __future__ import absolute_import

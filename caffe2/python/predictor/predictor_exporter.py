@@ -1,5 +1,3 @@
-## @package predictor_exporter
-# Module caffe2.python.predictor.predictor_exporter
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

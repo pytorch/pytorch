@@ -1,5 +1,3 @@
-## @package diagnose_protobuf
-# Module scripts.diagnose_protobuf
 """Diagnoses the current protobuf situation.
 
 Protocol buffer needs to be properly installed for Caffe2 to work, and
