@@ -25,9 +25,10 @@ class RNNCell(object):
     As a result base class will provice apply_over_sequence method, which
     allows you to apply recurrent operations over a sequence of any length.
     '''
-    def __init__(self, name):
+    def __init__(self, name, forward_only=False):
         self.name = name
         self.recompute_blobs = []
+        self.forward_only = forward_only
 
     def scope(self, name):
         return self.name + '/' + name if self.name is not None else name
@@ -70,6 +71,7 @@ class RNNCell(object):
                 else self.get_outputs_with_grads()
             ),
             recompute_blobs_on_backward=self.recompute_blobs,
+            forward_only=self.forward_only,
         )
 
     def apply(self, model, input_t, seq_lengths, states, timestep):
@@ -126,8 +128,9 @@ class LSTMCell(RNNCell):
         forget_bias,
         memory_optimization,
         name,
+        forward_only=False,
     ):
-        super(LSTMCell, self).__init__(name)
+        super(LSTMCell, self).__init__(name, forward_only)
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.forget_bias = float(forget_bias)
@@ -199,7 +202,7 @@ class LSTMCell(RNNCell):
 
 def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
          scope, outputs_with_grads=(0,), return_params=False,
-         memory_optimization=False, forget_bias=0.0):
+         memory_optimization=False, forget_bias=0.0, forward_only=False):
     '''
     Adds a standard LSTM recurrent network operator to a model.
 
@@ -226,6 +229,10 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     memory_optimization: if enabled, the LSTM step is recomputed on backward step
                    so that we don't need to store forward activations for each
                    timestep. Saves memory with cost of computation.
+
+    forget_bias: forget gate bias (default 0.0)
+
+    forward_only: whether to create a backward pass
     '''
     cell = LSTMCell(
         input_size=dim_in,
@@ -233,6 +240,7 @@ def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         forget_bias=forget_bias,
         memory_optimization=memory_optimization,
         name=scope,
+        forward_only=forward_only,
     )
     result = cell.apply_over_sequence(
         model=model,
@@ -431,8 +439,9 @@ class LSTMWithAttentionCell(RNNCell):
         forget_bias,
         lstm_memory_optimization,
         attention_memory_optimization,
+        forward_only=False,
     ):
-        super(LSTMWithAttentionCell, self).__init__(name)
+        super(LSTMWithAttentionCell, self).__init__(name, forward_only)
         self.encoder_output_dim = encoder_output_dim
         self.encoder_outputs = encoder_outputs
         self.decoder_input_dim = decoder_input_dim
@@ -592,6 +601,7 @@ def LSTMWithAttention(
     lstm_memory_optimization=False,
     attention_memory_optimization=False,
     forget_bias=0.0,
+    forward_only=False,
 ):
     '''
     Adds a LSTM with attention mechanism to a model.
@@ -644,6 +654,8 @@ def LSTMWithAttention(
                  we don't need to store their values in forward passes
 
     attention_memory_optimization: recompute attention for backward pass
+
+    forward_only: whether to create only forward pass
     '''
     cell = LSTMWithAttentionCell(
         encoder_output_dim=encoder_output_dim,
@@ -656,6 +668,7 @@ def LSTMWithAttention(
         forget_bias=forget_bias,
         lstm_memory_optimization=lstm_memory_optimization,
         attention_memory_optimization=attention_memory_optimization,
+        forward_only=forward_only,
     )
     return cell.apply_over_sequence(
         model=model,
@@ -795,7 +808,7 @@ class MILSTMCell(LSTMCell):
 
 def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
            scope, outputs_with_grads=(0,), memory_optimization=False,
-           forget_bias=0.0):
+           forget_bias=0.0, forward_only=False):
     '''
     Adds MI flavor of standard LSTM recurrent network operator to a model.
     See https://arxiv.org/pdf/1606.06630.pdf
@@ -821,6 +834,8 @@ def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
     memory_optimization: if enabled, the LSTM step is recomputed on backward step
                    so that we don't need to store forward activations for each
                    timestep. Saves memory with cost of computation.
+
+    forward_only run only forward pass
     '''
     cell = MILSTMCell(
         input_size=dim_in,
@@ -828,6 +843,7 @@ def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
         forget_bias=forget_bias,
         memory_optimization=memory_optimization,
         name=scope,
+        forward_only=forward_only,
     )
     result = cell.apply_over_sequence(
         model=model,

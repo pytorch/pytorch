@@ -378,10 +378,10 @@ class RNNCellTest(hu.HypothesisTestCase):
                 gc, op, inputs, i, [0, 1],
                 input_device_options=input_device_options)
 
-
     @given(
         input_tensor=lstm_input(),
         forget_bias=st.floats(-10.0, 10.0),
+        fwd_only=st.booleans(),
     )
     @ht_settings(max_examples=25)
     def test_lstm_main(self, **kwargs):
@@ -393,7 +393,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                                    **kwargs)
 
     def lstm_base(self, lstm_type, outputs_with_grads, memory_optim,
-                  input_tensor, forget_bias):
+                  input_tensor, forget_bias, fwd_only):
         print("LSTM test parameters: ", locals())
         create_lstm, ref = lstm_type
         t, n, d = input_tensor.shape
@@ -412,7 +412,8 @@ class RNNCellTest(hu.HypothesisTestCase):
             d, d, scope="external/recurrent",
             outputs_with_grads=outputs_with_grads,
             memory_optimization=memory_optim,
-            forget_bias=forget_bias)
+            forget_bias=forget_bias,
+            forward_only=fwd_only)
 
         op = model.net._net.op[-1]
 
@@ -447,16 +448,17 @@ class RNNCellTest(hu.HypothesisTestCase):
         )
 
         # Checking for input, gates_t_w and gates_t_b gradients
-        for param in range(5):
-            self.assertGradientChecks(
-                device_option=hu.cpu_do,
-                op=op,
-                inputs=inputs,
-                outputs_to_check=param,
-                outputs_with_grads=outputs_with_grads,
-                threshold=0.01,
-                stepsize=0.005,
-            )
+        if not fwd_only:
+            for param in range(5):
+                self.assertGradientChecks(
+                    device_option=hu.cpu_do,
+                    op=op,
+                    inputs=inputs,
+                    outputs_to_check=param,
+                    outputs_with_grads=outputs_with_grads,
+                    threshold=0.01,
+                    stepsize=0.005,
+                )
 
     @given(encoder_output_length=st.integers(1, 3),
            encoder_output_dim=st.integers(1, 3),
