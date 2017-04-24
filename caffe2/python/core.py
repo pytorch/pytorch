@@ -300,11 +300,18 @@ def CreateOperator(
     return operator
 
 
-def _RegisterPythonImpl(f, grad_f=None, pass_workspace=False):
-    if isinstance(f, tuple):
-        f = f[0](*f[1], **f[2])
-    if isinstance(grad_f, tuple):
-        grad_f = grad_f[0](*grad_f[1], **grad_f[2])
+def _RegisterPythonImpl(
+    f, grad_f=None, python_func_type=None, pass_workspace=False
+):
+    if python_func_type:
+        func = python_func_type(f)
+        f = func.forward
+        grad_f = func.backward
+    else:
+        if isinstance(f, tuple):
+            f = f[0](*f[1], **f[2])
+        if isinstance(grad_f, tuple):
+            grad_f = grad_f[0](*grad_f[1], **grad_f[2])
 
     token = C.register_python_op(f, pass_workspace)
     if grad_f:
@@ -317,6 +324,7 @@ def CreatePythonOperator(
     outputs,
     grad_f=None,
     pass_workspace=False,
+    python_func_type=None,
     *args,
     **kwargs
 ):
@@ -329,7 +337,7 @@ def CreatePythonOperator(
     the workspace directly), use on your own risk.
     """
     kwargs["token"] = _RegisterPythonImpl(
-        f, grad_f, pass_workspace=pass_workspace
+        f, grad_f, python_func_type, pass_workspace=pass_workspace
     )
     return CreateOperator("Python", inputs, outputs, *args, **kwargs)
 
@@ -1723,7 +1731,9 @@ class Net(object):
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             op_type, *args, **kwargs)
 
-    def Python(self, f, grad_f=None, pass_workspace=False):
+    def Python(
+        self, f, grad_f=None, python_func_type=None, pass_workspace=False,
+    ):
         """
         Registers and returns a python operator.
 
@@ -1741,6 +1751,11 @@ class Net(object):
               context, and allows to create and keep local python state across
               calls to the operator.
 
+        `python_func_type` is a type of an object that constructed as
+        python_func_type(f) and provides an implementation to forward and
+        backward functions. Its useful in such a case where users needs
+        a statefull PythonOp (ex: use autograd for computing grad_f).
+
         If `pass_workspace` is True, the signature is changed to
         (inputs, outputs, workspace) where `workspace` is the workspace the op
         is going to run on. This is potentially dangerous (as the op can
@@ -1754,7 +1769,10 @@ class Net(object):
             registry = worker_init_func(_RegisterPythonImpl)
         else:
             registry = _RegisterPythonImpl
-        token = registry(f, grad_f, pass_workspace=pass_workspace)
+
+        token = registry(
+            f, grad_f, python_func_type, pass_workspace=pass_workspace
+        )
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             'Python', token=token, *args, **kwargs)
 
