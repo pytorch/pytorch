@@ -56,7 +56,7 @@ class ZeroPad2d(Module):
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
 
-   
+  
 class ConstantPad2d(Module):
 
     def __init__(self, padding, value):
