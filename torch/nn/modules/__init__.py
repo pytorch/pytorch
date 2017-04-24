@@ -15,7 +15,7 @@ from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxP
     AdaptiveMaxPool2d, AdaptiveAvgPool1d, AdaptiveAvgPool2d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d
 from .dropout import Dropout, Dropout2d, Dropout3d
-from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d, ZeroPad2d
+from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d, ZeroPad2d, ConstantPad2d
 from .normalization import CrossMapLRN2d
 from .sparse import Embedding
 from .rnn import RNNBase, RNN, LSTM, GRU, \
