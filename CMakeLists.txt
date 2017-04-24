@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
 
 project(gloo CXX C)
 
+# Gloo assumes 64-bit and doesn't run builds/tests for anything else.
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "Gloo can only be built on 64-bit systems.")
+endif()
+
 # We want CMake to glob everything every time.
 execute_process(COMMAND
   find "${PROJECT_SOURCE_DIR}" -name "CMakeLists.txt" -exec touch {} \;)
