@@ -18,6 +18,8 @@ struct ReadyQueue;
 struct FunctionTask;
 struct GraphTask;
 
+// A single instance of this struct should be created through the whole process lifetime.
+// The worker thread creation logic and Engine's destructor rely on this.
 struct Engine {
   Engine();
   virtual ~Engine();
@@ -47,11 +49,11 @@ protected:
   void evaluate_function(FunctionTask& task);
   ReadyQueue& ready_queue(int device);
   void start_threads();
-  virtual void thread_main(ReadyQueue& queue);
+  virtual void thread_main(std::shared_ptr<ReadyQueue> queue);
   virtual void thread_on_exception(FunctionTask& task, std::exception& e);
 
   std::once_flag start_threads_flag;
-  std::vector<std::unique_ptr<ReadyQueue>> ready_queues;
+  std::vector<std::shared_ptr<ReadyQueue>> ready_queues;
 };
 
 }} // namespace torch::autograd

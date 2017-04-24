@@ -95,11 +95,12 @@ auto ReadyQueue::pop_back() -> FunctionTask {
 Engine::Engine() : ready_queues() {
 }
 
+// This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
-auto Engine::thread_main(ReadyQueue& queue) -> void {
+auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
   while (1) {
-    FunctionTask task = queue.pop_back();
+    FunctionTask task = queue->pop_back();
     if (!task.base->has_error.load()) {
       try {
         evaluate_function(task);
@@ -136,7 +137,7 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
   return outputs;
 }
 
-static std::pair<bool, variable_list> call_function(FunctionTask& task) {
+static variable_list call_function(FunctionTask& task) {
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
@@ -144,18 +145,15 @@ static std::pair<bool, variable_list> call_function(FunctionTask& task) {
   auto callback_it = function_callbacks.find(&fn);
   if (callback_it != function_callbacks.end()) {
     auto& callback = callback_it->second;
-    if (!callback(&fn, inputs)) return std::make_pair(false, variable_list());
+    if (!callback(&fn, inputs)) return variable_list(fn.next_functions.size());
   }
 
   auto fn_outputs = fn.apply(inputs);
-  auto outputs = call_post_hooks(fn, std::move(fn_outputs), std::move(inputs));
-  return std::make_pair(true, std::move(outputs));
+  return call_post_hooks(fn, std::move(fn_outputs), std::move(inputs));
 }
 
 auto Engine::evaluate_function(FunctionTask& task) -> void {
-  auto call_result = call_function(task);
-  if (!call_result.first) return;
-  auto outputs = call_result.second;
+  auto outputs = call_function(task);
 
   auto& fn = *task.fn;
   if (!task.base->keep_graph) {
@@ -358,10 +356,10 @@ auto Engine::start_threads() -> void {
     THCudaCheck(err);
   }
 #endif
-  ready_queues = std::vector<std::unique_ptr<ReadyQueue>>(num_devices + 1);
+  ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_devices + 1);
   for (auto& queue : ready_queues) {
     queue.reset(new ReadyQueue());
-    std::thread t(&Engine::thread_main, this, std::ref(*queue));
+    std::thread t(&Engine::thread_main, this, queue);
     t.detach();
   }
 }

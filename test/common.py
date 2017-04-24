@@ -118,6 +118,13 @@ def is_iterable(obj):
 class TestCase(unittest.TestCase):
     precision = 1e-5
 
+    def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
+        max_err = 0
+        self.assertEqual(x.size(), y.size())
+        for index in iter_indices(x):
+            max_err = max(max_err, abs(x[index] - y[index]))
+        self.assertLessEqual(max_err, prec, message)
+
     def assertEqual(self, x, y, prec=None, message=''):
         if prec is None:
             prec = self.precision
@@ -128,13 +135,23 @@ class TestCase(unittest.TestCase):
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
-                max_err = 0
                 super(TestCase, self).assertEqual(a.size(), b.size())
-                for index in iter_indices(a):
-                    max_err = max(max_err, abs(a[index] - b[index]))
-                self.assertLessEqual(max_err, prec, message)
+                if a.numel() > 0:
+                    b = b.type_as(a)
+                    b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
+                    # check that NaNs are in the same locations
+                    nan_mask = a != a
+                    self.assertTrue(torch.equal(nan_mask, b != b))
+                    diff = a - b
+                    diff[nan_mask] = 0
+                    if diff.is_signed():
+                        diff = diff.abs()
+                    max_err = diff.max()
+                    self.assertLessEqual(max_err, prec, message)
             self.assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
+                x = x.clone().contiguous()
+                y = y.clone().contiguous()
                 assertTensorsEqual(x.indices(), y.indices())
                 assertTensorsEqual(x.values(), y.values())
             else:
@@ -161,12 +178,19 @@ class TestCase(unittest.TestCase):
             y = y.data
 
         if torch.is_tensor(x) and torch.is_tensor(y):
-            max_err = 0
             if x.size() != y.size():
                 super(TestCase, self).assertNotEqual(x.size(), y.size())
-            for index in iter_indices(x):
-                max_err = max(max_err, abs(x[index] - y[index]))
-            self.assertGreaterEqual(max_err, prec, message)
+            self.assertGreater(x.numel(), 0)
+            y = y.type_as(x)
+            y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
+            nan_mask = x != x
+            if torch.equal(nan_mask, y != y):
+                diff = x - y
+                if diff.is_signed():
+                    diff = diff.abs()
+                diff[nan_mask] = 0
+                max_err = diff.max()
+                self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertNotEqual(x, y)
         elif is_iterable(x) and is_iterable(y):

@@ -55,8 +55,9 @@ void unregister_fd(int fd) {
 
 
 void print_init_message(const char *message) {
-  write(1, message, strlen(message));
-  write(1, "\n", 1);
+  size_t unused;
+  unused = write(1, message, strlen(message));
+  unused = write(1, "\n", 1);
 }
 
 bool object_exists(const char *name) {
@@ -109,7 +110,7 @@ int main(int argc, char *argv[]) {
     if (nevents == 0 && client_sessions.size() == 0)
       break;
 
-    for (struct pollfd &pfd: pollfds) {
+    for (auto &pfd: pollfds) {
       if (pfd.revents & (POLLERR | POLLHUP)) {
         // some process died
         DEBUG("detaching process");

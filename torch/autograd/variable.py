@@ -459,10 +459,10 @@ class Variable(_C._VariableBase):
         return Kthvalue(dim)(self)
 
     def sort(self, dim=None, descending=False):
-        return Sort(dim, descending)(self)
+        return Sort.apply(self, dim, descending, True)
 
     def topk(self, k, dim=None, largest=True, sorted=True):
-        return Topk(k, dim, largest, sorted)(self)
+        return Topk.apply(self, k, dim, largest, sorted, True)
 
     def view(self, *sizes):
         return View.apply(self, sizes)

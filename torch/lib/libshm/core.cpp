@@ -104,7 +104,7 @@ AllocInfo get_alloc_info(libshm_context *ctx) {
   return info;
 }
 
-void * libshm_alloc(void *_ctx, long size) {
+void * libshm_alloc(void *_ctx, ptrdiff_t size) {
   // TODO: unlock GIL when contacting the manager
   auto *ctx = (libshm_context*)_ctx;
   try {
@@ -127,7 +127,7 @@ void * libshm_alloc(void *_ctx, long size) {
   return THRefcountedMapAllocator.malloc(ctx->th_context, size);
 }
 
-void * libshm_realloc(void *_ctx, void *data, long size) {
+void * libshm_realloc(void *_ctx, void *data, ptrdiff_t size) {
   THError("cannot realloc shared memory");
   return NULL;
 }

@@ -1225,6 +1225,8 @@ function_tests = [
     (Resize, (), ((S, S, S), torch.Size([S * S, S]))),
     (Diag, (), ((S, S),), '2d'),
     (Diag, (), ((S,),), '1d'),
+    (Diag, (1,), ((S, S),), '2d_1'),
+    (Diag, (2,), ((S, S),), '2d_2'),
     (Tril, (), ((S, S),)),
     (Tril, (2,), ((S, S),), 'idx'),
     (Triu, (), ((S, S),)),

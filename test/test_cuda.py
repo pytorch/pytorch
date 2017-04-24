@@ -463,6 +463,32 @@ class TestCuda(TestCase):
         self._test_broadcast(torch.randn(5, 5))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_broadcast_coalesced(self):
+        numel = 5
+        num_bytes = numel * 8
+        tensors = [
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).cuda(),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
+            torch.randn(numel).cuda(),
+        ]
+
+        b_tensors = [comm.broadcast(t, (0, 1)) for t in tensors]
+        for (_, bt), t in zip(b_tensors, tensors):
+            self.assertEqual(bt.get_device(), 1)
+            self.assertEqual(bt, t)
+            self.assertIsInstance(bt, type(t))
+
+        bc_tensors = comm.broadcast_coalesced(tensors, (0, 1), buffer_size=num_bytes * 5 // 2)
+        bc_tensors_t = list(zip(*bc_tensors))
+        self.assertEqual(b_tensors, bc_tensors_t)
+        for (_, bt), (_, bct) in zip(b_tensors, bc_tensors_t):
+            self.assertEqual(bt.get_device(), bct.get_device())
+            self.assertIsInstance(bct, type(bt))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_reduce_add(self):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5)
@@ -471,6 +497,32 @@ class TestCuda(TestCase):
         result = comm.reduce_add((x_cuda, y_cuda))
         self.assertEqual(result.get_device(), 0)
         self.assertEqual(result.cpu(), x + y)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_reduce_add_coalesced(self):
+        numel = 5
+        num_bytes = numel * 8
+        tensors = [
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).cuda(),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
+            torch.randn(numel).cuda(),
+        ]
+        dup_tensors = [tensors, list(map(lambda t: t.cuda(1), tensors))]
+
+        r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
+        for r, t in zip(r_tensors, tensors):
+            self.assertEqual(r.get_device(), t.get_device())
+            self.assertEqual(r, t * 2)
+            self.assertIsInstance(r, type(t))
+
+        rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=num_bytes * 5 // 2)
+        self.assertEqual(r_tensors, rc_tensors)
+        for r, rc in zip(r_tensors, rc_tensors):
+            self.assertEqual(rc.get_device(), r.get_device())
+            self.assertIsInstance(rc, type(r))
 
     def _test_scatter(self, input, chunk_sizes=None, dim=0):
         if torch.cuda.device_count() < 2:

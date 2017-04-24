@@ -1,7 +1,7 @@
 [[
   name: abs
   return: argument 0
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_INT || CUDA_LONG
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
   with_stateless: True
   arguments:
     - arg: THTensor* destination
@@ -13,7 +13,7 @@
   name: abs_
   cname: abs
   return: self
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_INT || CUDA_LONG
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
   arguments:
     - THTensor* self
     - THTensor* self
@@ -1412,9 +1412,6 @@
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
     THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
-    #if !IS_CUDA
-    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
-    #endif
   arguments:
     - arg: THTensor* result
       output: True

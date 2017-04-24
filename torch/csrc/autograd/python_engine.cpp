@@ -14,7 +14,7 @@ struct THPEngine {
 };
 
 struct PythonEngine : public Engine {
-  virtual void thread_main(ReadyQueue& queue) override {
+  virtual void thread_main(std::shared_ptr<ReadyQueue> queue) override {
     // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
     // inside thread_main acquire the GIL without having to create a new
     // PyThreadState each time.

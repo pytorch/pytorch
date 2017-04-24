@@ -60,12 +60,29 @@ def _pin_memory_loop(in_queue, out_queue, done_event):
             out_queue.put((idx, batch))
 
 
+numpy_type_map = {
+    'float64': torch.DoubleTensor,
+    'float32': torch.FloatTensor,
+    'float16': torch.HalfTensor,
+    'int64': torch.LongTensor,
+    'int32': torch.IntTensor,
+    'int16': torch.ShortTensor,
+    'int8': torch.CharTensor,
+    'uint8': torch.ByteTensor,
+}
+
+
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
     if torch.is_tensor(batch[0]):
         return torch.stack(batch, 0)
-    elif type(batch[0]).__module__ == 'numpy' and type(batch[0]).__name__ == 'ndarray':
-        return torch.stack([torch.from_numpy(b) for b in batch], 0)
+    elif type(batch[0]).__module__ == 'numpy':
+        elem = batch[0]
+        if type(elem).__name__ == 'ndarray':
+            return torch.stack([torch.from_numpy(b) for b in batch], 0)
+        if elem.shape == ():  # scalars
+            py_type = float if elem.dtype.name.startswith('float') else int
+            return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
     elif isinstance(batch[0], int):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):

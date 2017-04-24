@@ -108,7 +108,7 @@ struct algorithm_search {
 
 template<>
 struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
-  static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+  static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
   static BenchmarkCache<cudnnConvolutionFwdAlgo_t>& cache() {
     return fwd_algos;
   }

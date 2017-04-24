@@ -1,4 +1,7 @@
+#include <THCS/THCS.h>
+
 #include "THCTensor.hpp"
+#include "THCSTensor.hpp"
 #include "THCHalf.h"
 #include "../TraitsCuda.hpp"
 
