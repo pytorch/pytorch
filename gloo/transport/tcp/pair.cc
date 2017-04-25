@@ -34,16 +34,6 @@ namespace gloo {
 namespace transport {
 namespace tcp {
 
-// One-time init to use EPIPE errors instead of SIGPIPE
-namespace {
-struct Initializer {
-  Initializer() {
-    signal(SIGPIPE, SIG_IGN);
-  }
-};
-Initializer initializer;
-}
-
 Pair::Pair(const std::shared_ptr<Device>& dev)
     : dev_(dev),
       state_(INITIALIZING),
