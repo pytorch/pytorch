@@ -61,11 +61,14 @@ void SmartTensorPrinter::Print(const Tensor<CPUContext>& tensor) {
 }
 
 SmartTensorPrinter& SmartTensorPrinter::DefaultTensorPrinter() {
-  // TODO(janusz): thread_local does not work under mac, but a member variable
-  // may be inefficient. Benchmark and select a better option maybe.
-  // static thread_local SmartTensorPrinter printer;
-  SmartTensorPrinter printer;
+// TODO(janusz): thread_local does not work under mac.
+#if __APPLE__
+  CAFFE_THROW(
+      "SmartTensorPrinter does not work on mac yet due to thread_local.");
+#else
+  static thread_local SmartTensorPrinter printer;
   return printer;
+#endif
 }
 
 void SmartTensorPrinter::PrintTensor(const Tensor<CPUContext>& tensor) {
