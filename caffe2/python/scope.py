@@ -48,10 +48,13 @@ def NameScope(prefix, reset=False):
         _threadlocal_scope.namescope = prefix
     else:
         _threadlocal_scope.namescope = _threadlocal_scope.namescope + prefix
-    yield
-    assert _threadlocal_scope.namescope.endswith(prefix), \
-        "The namescope variable is changed from outside NameScope() calls."
-    _threadlocal_scope.namescope = old_scope
+
+    try:
+        yield
+    finally:
+        assert _threadlocal_scope.namescope.endswith(prefix), \
+            "The namescope variable is changed from outside NameScope() calls."
+        _threadlocal_scope.namescope = old_scope
 
 
 @contextlib.contextmanager
@@ -61,7 +64,9 @@ def DeviceScope(scope):
     global _threadlocal_scope
     old_scope = CurrentDeviceScope()
     _threadlocal_scope.devicescope = scope
-    yield
-    assert _threadlocal_scope.devicescope == scope, \
-        "The device scope is changed from outside DeviceScope() calls."
-    _threadlocal_scope.devicescope = old_scope
+    try:
+        yield
+    finally:
+        assert _threadlocal_scope.devicescope == scope, \
+            "The device scope is changed from outside DeviceScope() calls."
+        _threadlocal_scope.devicescope = old_scope
