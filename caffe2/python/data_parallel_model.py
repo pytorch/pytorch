@@ -55,6 +55,8 @@ def Parallelize_GPU(
                         then only one node is used. To create rendezvous,
                         use <TBD>.
       net_type:         Network type
+      optimize_gradient_memory: whether to apply 'memonger' to share blobs
+                        in gradient computation to reduce memory footprint
 
     '''
     log.info("Parallelizing model for devices: {}".format(devices))
@@ -134,6 +136,7 @@ def Parallelize_GPU(
     )
     model_helper_obj._device_grouped_blobs.update(gradients_grouped)
     model_helper_obj._grad_names = gradients_grouped.keys()
+    model_helper_obj._losses_by_gpu = losses_by_gpu
 
     _InferBlobDevice(model_helper_obj)
 
@@ -182,7 +185,7 @@ def Parallelize_GPU(
     _SyncParams(devices, model_helper_obj, model_helper_obj.param_init_net)
 
     if optimize_gradient_memory:
-        _OptimizeGradientMemory(model_helper_obj, losses_by_gpu, devices)
+        _OptimizeGradientMemoryDEPRECATED(model_helper_obj, losses_by_gpu, devices)
 
 
 def _AddGradientOperators(devices, model, losses_by_gpu):
@@ -718,7 +721,9 @@ def _ValidateParams(params):
             "Duplicate entries in params: {}".format(dupes)
 
 
-def _OptimizeGradientMemory(model, losses_by_gpu, devices):
+def _OptimizeGradientMemoryDEPRECATED(model, losses_by_gpu, devices):
+    log.warning("------- DEPRECATED API, please use " +
+                   "data_parallel_model.OptimizeGradientMemory() ----- ")
     for device in devices:
         namescope = "gpu_{}/".format(device)
         model.net._net = memonger.share_grad_blobs(
@@ -726,4 +731,42 @@ def _OptimizeGradientMemory(model, losses_by_gpu, devices):
             losses_by_gpu[device],
             set(model.param_to_grad.values()),
             namescope,
+            share_activations=False,
+        )
+
+
+def OptimizeGradientMemory(model,
+                           input_shapes,
+                           excluded_blobs,
+                           recycle_activations):
+    """
+    Optimize memory usage of the backward pass by recycling blobs for gradient
+    inputs that have been 'used'.
+    input_shapes:  dict of blob name to shape for the inputs of the model.
+                   Pass empty dictionary if not known.
+    excluded_blobs: list of blobs that cannot be recycled. These are blobs
+                   that you will access externally.
+    recycle_activations: whether to also recycle forward pass activations
+    """
+    input_shapes_all_devices = {}
+    for b, shp in input_shapes.items():
+        for d in model._devices:
+            input_shapes_all_devices["gpu_{}/{}".format(d, b)] = shp
+
+    (shapes, types) = workspace.InferShapesAndTypes(
+        [model.param_init_net, model.net],
+        input_shapes_all_devices,
+    )
+
+    for device in model._devices:
+        namescope = "gpu_{}/".format(device)
+        excluded_blobs_by_device = set([namescope + b for b in excluded_blobs])
+        model.net._net = memonger.share_grad_blobs(
+            model.net,
+            model._losses_by_gpu[device],
+            set(model.param_to_grad.values()),
+            namescope,
+            dont_share_blobs=excluded_blobs_by_device,
+            share_activations=recycle_activations,
+            blob_shapes=shapes,
         )

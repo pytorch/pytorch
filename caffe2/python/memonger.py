@@ -8,18 +8,28 @@ from __future__ import unicode_literals
 import networkx as nx
 import collections
 import time
+import heapq
 import copy
 from caffe2.python import workspace
 from caffe2.proto import caffe2_pb2
 import enum
 import logging
+import numpy as np
 
 log = logging.getLogger("memonger")
 log.setLevel(logging.INFO)
 LiveRange = collections.namedtuple('LiveRange', ["defined", "used", "size"])
 
 
-def share_grad_blobs(net, losses, param_grads, namescope):
+def share_grad_blobs(
+    net,
+    losses,
+    param_grads,
+    namescope,
+    dont_share_blobs=None,
+    share_activations=True,
+    blob_shapes=None,
+):
     '''
     Implements similar optimization as Torch's shareGradInput():
     for the gradients that are passed between layers, share blobs between
@@ -49,9 +59,28 @@ def share_grad_blobs(net, losses, param_grads, namescope):
         namescope += "/"
 
     netproto = copy.deepcopy(net.Proto())
+    activations = []
+    external_output = set(net.Proto().external_output)
+
+    # Hacky way to get activations, think of a better way
+    for op in net.Proto().op:
+        for b in op.output:
+            if b + "_w" in op.input and b not in external_output:
+                activations.append(b)
+
+    # Remove last activations, as they are usually accessed externally
+    activations = set(activations[:-2])
+
+    # Gradient ops
     grad_ops = [op for op in netproto.op if is_grad_op(op)]
     return _compute_blob_recycling_for_dag(
-        netproto, losses, grad_ops, is_grad_blob, namescope
+        netproto,
+        losses,
+        grad_ops,
+        lambda b: is_grad_blob(b) or (share_activations and b in activations),
+        namescope,
+        {} if dont_share_blobs is None else dont_share_blobs,
+        blob_shapes
     )
 
 
@@ -77,12 +106,14 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
             "You can only pass inference-only nets to optimize_inference_for_dag"
 
     return _compute_blob_recycling_for_dag(
-        netproto, input_blobs, ops, is_activation_blob, namescope
+        netproto, input_blobs, ops, is_activation_blob,
+        namescope, set(), None,
     )
 
 
 def _compute_blob_recycling_for_dag(
-    netproto, heads, ops, is_shareable, namescope
+    netproto, heads, ops, is_shareable,
+    namescope, dont_share_blobs, blob_shapes=None,
 ):
     '''
     Computes a blob recycling by traversing the computation DAG. The resulting
@@ -95,14 +126,31 @@ def _compute_blob_recycling_for_dag(
     blob_input_count = collections.defaultdict(lambda: 0)
     op_inputs = collections.defaultdict(lambda: 0)
     op_visit_count = collections.defaultdict(lambda: 0)
+    share_counts = collections.defaultdict(lambda: 0)
+
+    blob_sizes = {} if blob_shapes is not None else None
+
+    # First figure out which of the shareable blobs
+    # are 'internal' to the optimization. For example, if optimizing
+    # only gradient ops, then activation blobs will be 'external' as they
+    # are not output by these ops.
+    optim_op_outputs = set()
+    for op in ops:
+        optim_op_outputs.update(set(op.output))
 
     for i, op in enumerate(ops):
         for inp in op.input:
             if is_shareable(inp) or inp in heads:
-                # Ignore in-place transformation ops (self-cycles)
-                if inp not in op.output:
+                if inp in optim_op_outputs:
+                    # Ignore in-place transformation ops (self-cycles)
+                    if inp not in op.output:
+                        blobs_to_ops[inp].append(i)
+                        op_inputs[i] += 1
+                else:
+                    # For external blobs, we don't increase the op_inputs
+                    # count.
                     blobs_to_ops[inp].append(i)
-                    op_inputs[i] += 1
+                    share_counts[inp] = 1
 
     # Traverse operators starting from the heads' blobs.
     # Keep tabs on when blobs are seen first and last, and also
@@ -110,51 +158,107 @@ def _compute_blob_recycling_for_dag(
     # under same branch, avoiding problems with parallel workers.
     output_blobs = set()
     mapping = {}
+    unknown_shapes = set()
+
+    def infer_blob_size(b):
+        if b in blob_shapes:
+            return np.prod(blob_shapes[b])
+        else:
+            unknown_shapes.add(b)
+        return 0
+
+    saved_count = 0
 
     def descend(op_idx, free_blobs):
         cur_op = ops[op_idx]
         new_free_blobs = set()
+        unused_free_blobs = set(free_blobs)
+        saved = 0
+
         for inp in cur_op.input:
             if is_shareable(inp):
                 blob_input_count[inp] += 1
                 if blob_input_count[inp] == len(blobs_to_ops[inp]):
                     actual_blob = inp if inp not in mapping else mapping[inp]
-                    new_free_blobs.add(actual_blob)
+                    if actual_blob not in dont_share_blobs:
+                        new_free_blobs.add(
+                            (-share_counts[actual_blob], actual_blob),
+                        )
 
         for outp in cur_op.output:
             if is_shareable(outp):
                 if outp not in output_blobs:
                     # First seen this blob as output, can assign to a free blob
-                    for freeb in free_blobs:
+                    if len(free_blobs) > 0:
+                        if blob_sizes is None:
+                            (negcnt, freeb) = heapq.heappop(free_blobs)
+                        else:
+                            bsize = infer_blob_size(outp)
+                            best_blob = None
+                            best_size = -1
+
+                            # Heuristic to choose the most suitably sized blob
+                            for b in free_blobs:
+                                sz = blob_sizes[b]
+                                if sz >= best_size:
+                                    if best_size < bsize or best_size >= sz:
+                                        best_size = sz
+                                        best_blob = b
+
+                            assert best_blob is not None
+                            freeb = best_blob
+                            # blob_sizes[freeb] = max(best_size, bsize)
+                            free_blobs.remove(freeb)
+                            saved += bsize
+
                         mapping[outp] = freeb
-                        free_blobs.remove(freeb)
-                        break
+                        if freeb in unused_free_blobs:
+                            unused_free_blobs.remove(freeb)
+                        share_counts[freeb] += 1
 
                 output_blobs.add(outp)
 
-        free_blobs.update(new_free_blobs)
+        for (cnt, nf) in new_free_blobs:
+            if blob_sizes is None:
+                heapq.heappush(free_blobs, (cnt, nf))
+            else:
+                if nf not in blob_sizes:
+                    blob_sizes[nf] = infer_blob_size(outp)
 
-        first_branch = True
+                free_blobs.append(nf)
+
+        free_blobs_fwd = free_blobs
         for outp in cur_op.output:
             for inp_op_idx in blobs_to_ops[outp]:
                 op_visit_count[inp_op_idx] += 1
 
                 # Descend only if we have satisfied all inputs
                 if op_visit_count[inp_op_idx] == op_inputs[inp_op_idx]:
-                    free_blobs_fwd = free_blobs if first_branch else set()
-                    first_branch = False
-                    descend(inp_op_idx, free_blobs_fwd)
+                    (unused, saved_desc) = descend(inp_op_idx, free_blobs_fwd)
+                    saved += saved_desc
+                    unused_free_blobs = unused.intersection(unused_free_blobs)
+
+                    # We can pass unused free blobs to other branch
+                    free_blobs_fwd = list(
+                        unused.intersection(set(free_blobs_fwd))
+                    )
+
+        return (unused_free_blobs, saved)
 
     # Start DFS from the heads' (losses or inputs)
     for head_blob in heads:
         for op_idx in blobs_to_ops[head_blob]:
-            descend(op_idx, set())
+            (_, saved) = descend(op_idx, [])
+            saved_count += saved
 
     # Rename the shared blobs
     shared_blobs = set(mapping.values())
     renamed = {}
     for j, b in enumerate(shared_blobs):
-        renamed[b] = namescope + "__m{}_".format(j)
+        if b in optim_op_outputs:
+            renamed[b] = namescope + "__m{}_shared".format(j)
+        else:
+            renamed[b] = b
 
     # Final mapping
     for k, v in mapping.items():
@@ -162,13 +266,19 @@ def _compute_blob_recycling_for_dag(
 
     # Add the originators
     mapping.update(renamed)
-    log.info("Remapping {} blobs, using {} shared".format(
-        len(mapping), len(renamed),
-    ))
-    log.debug("Assignments: {}".format(mapping))
+
+    if saved_count > 0:
+        log.info("Remapping {} blobs, using {} shared; saved apprx {} MB".format(
+            len(mapping), len(renamed), int(saved_count * 4 / 1024 / 1024),
+        ))
+        log.info("Could not infer sizes for: {}".format(unknown_shapes))
+    else:
+        log.info("Remapping {} blobs, using {} shared".format(
+            len(mapping), len(renamed),
+        ))
 
     apply_assignments(netproto, mapping)
-    log.info("Memonger optimization took {} secs".format(
+    log.info("Memonger memory optimization took {} secs".format(
         time.time() - start_time),
     )
     return netproto
