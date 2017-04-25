@@ -61,7 +61,10 @@ void SmartTensorPrinter::Print(const Tensor<CPUContext>& tensor) {
 }
 
 SmartTensorPrinter& SmartTensorPrinter::DefaultTensorPrinter() {
-  static thread_local SmartTensorPrinter printer;
+  // TODO(janusz): thread_local does not work under mac, but a member variable
+  // may be inefficient. Benchmark and select a better option maybe.
+  // static thread_local SmartTensorPrinter printer;
+  SmartTensorPrinter printer;
   return printer;
 }
 
