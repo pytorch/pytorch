@@ -220,6 +220,10 @@ class List(Field):
             _normalize_field(self.lengths, keep_blobs=keep_blobs)
         )
 
+    def __repr__(self):
+        return "List(lengths={!r}, _items={!r})".format(
+            self.lengths, self._items)
+
     def __getattr__(self, item):
         """If the value of this list is a struct,
         allow to instrospect directly into its fields."""
@@ -365,6 +369,12 @@ class Struct(Field):
             return field[names[1]]
         except (KeyError, TypeError):
             return None
+
+    def __repr__(self):
+        return "Struct({})".format(
+            ', '.join(["{}={!r}".format(name, field)
+                       for name, field in self.fields.items()])
+        )
 
     def __contains__(self, item):
         field = self._get_field_by_nested_name(item)
@@ -554,8 +564,12 @@ class Scalar(Field):
                 "`categorical_limit` can be specified only in integral " + \
                 "fields but got {}".format(self.dtype)
 
-    def set_value(self, blob):
+    def set_value(self, blob, throw_on_type_mismatch=False):
         """Sets only the blob field still validating the existing dtype"""
+        if self.dtype.base != np.void and throw_on_type_mismatch:
+            assert isinstance(blob, np.ndarray)
+            assert blob.dtype.base == self.dtype.base, (
+                "Expected {}, got {}".format(blob.dtype.base, blob.dtype.base))
         self.set(dtype=self._original_dtype, blob=blob)
 
     def set(self, dtype=None, blob=None, metadata=None):
@@ -586,10 +600,11 @@ class Scalar(Field):
         # If blob is not None and it is not a BlobReference, we assume that
         # it is actual tensor data, so we will try to cast it to an numpy array.
         if blob is not None and not isinstance(blob, BlobReference):
+            preserve_shape = isinstance(blob, np.ndarray)
             if dtype is not None and dtype != np.void:
                 blob = np.array(blob, dtype=dtype.base)
                 # if array is empty we may need to reshape a little
-                if blob.size == 0:
+                if blob.size == 0 and not preserve_shape:
                     blob = blob.reshape((0, ) + dtype.shape)
             else:
                 assert isinstance(blob, np.ndarray), (
@@ -597,7 +612,7 @@ class Scalar(Field):
 
             # reshape scalars into 1D arrays
             # TODO(azzolini): figure out better way of representing this
-            if len(blob.shape) == 0:
+            if len(blob.shape) == 0 and not preserve_shape:
                 blob = blob.reshape((1, ))
 
             # infer inner shape from the blob given
@@ -625,6 +640,10 @@ class Scalar(Field):
         else:
             self.dtype = np.dtype(np.void)
         self._validate_metadata()
+
+    def __repr__(self):
+        return 'Scalar({!r}, {!r}, {!r})'.format(
+            self.dtype, self._blob, self._metadata)
 
     def id(self):
         """
@@ -823,7 +842,7 @@ def from_column_list(
     return root.get_field()
 
 
-def from_blob_list(schema, values):
+def from_blob_list(schema, values, throw_on_type_mismatch=False):
     """
     Create a schema that clones the given schema, but containing the given
     list of values.
@@ -837,7 +856,7 @@ def from_blob_list(schema, values):
         'Values must have %d elements, got %d.' % (len(scalars), len(values))
     )
     for scalar, value in zip(scalars, values):
-        scalar.set_value(value)
+        scalar.set_value(value, throw_on_type_mismatch)
     return record
 
 
@@ -859,7 +878,7 @@ def as_record(value):
         return _normalize_field(value)
 
 
-def FetchRecord(blob_record, ws=None):
+def FetchRecord(blob_record, ws=None, throw_on_type_mismatch=False):
     """
     Given a record containing BlobReferences, return a new record with same
     schema, containing numpy arrays, fetched from the current active workspace.
@@ -875,7 +894,7 @@ def FetchRecord(blob_record, ws=None):
     field_blobs = blob_record.field_blobs()
     assert all(isinstance(v, BlobReference) for v in field_blobs)
     field_arrays = [fetch(value) for value in field_blobs]
-    return from_blob_list(blob_record, field_arrays)
+    return from_blob_list(blob_record, field_arrays, throw_on_type_mismatch)
 
 
 def FeedRecord(blob_record, arrays, ws=None):
