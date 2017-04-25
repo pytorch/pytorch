@@ -7,6 +7,7 @@ from .. import functional as F
 class _CropBase(Module):
 
     def __init__(self, size, mode):
+        super(Module, self).__init__()
         self.size = size
         self.mode = mode
         if self.mode != 'center':
@@ -31,8 +32,9 @@ class Crop1d(_CropBase):
         super(Crop1d, self).__init__(size, mode)
 
     def forward(self, x):
-        start, stop = self._offset(x.size()[2], self.size[0])
-        return x[start:stop]
+        length = x.size()[2]
+        start, stop = self._offset(length, self.size[0])
+        return x[:, :, -start:length+stop]
 
 
 class Crop2d(_CropBase):
@@ -44,7 +46,7 @@ class Crop2d(_CropBase):
         super(Crop2d, self).__init__(size, mode)
 
     def forward(self, x):
-        height, width = x.size()[-2:]
+        height, width = x.size()[:2]
         return F.pad(x, [
             *self._offset(height, self.size[0]),
             *self._offset(width, self.size[1]),
@@ -60,7 +62,7 @@ class Crop3d(_CropBase):
         super(Crop3d, self).__init__(size, mode)
 
     def forward(self, x):
-        height, width, depth = x.size()[-2]
+        height, width, depth = x.size()[:2]
         return F.pad(x, [
             *self._offset(height, self.size[0]),
             *self._offset(width, self.size[1]),
