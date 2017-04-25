@@ -1,6 +1,9 @@
 #ifndef CAFFE2_CUDA_RTC_COMMON_RTC_H_
 #define CAFFE2_CUDA_RTC_COMMON_RTC_H_
 
+#include <sstream>
+#include <string>
+
 #include <cuda.h>
 #include <nvrtc.h>
 
@@ -99,7 +102,7 @@ class CudaRTCFunction {
 };
 
 // TODO: this is in no way unique and is just a hack right now.
-inline string GetUniqueName() {
+inline std::string GetUniqueName() {
   static constexpr int len = 20;
   static const char alpha[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
