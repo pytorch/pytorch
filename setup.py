@@ -205,7 +205,7 @@ class clean(distutils.command.clean.clean):
 include_dirs = []
 library_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11', '-Wno-write-strings', '-fexceptions']
+extra_compile_args = ['-std=c++11', '-Wno-write-strings']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     extra_compile_args += ['-static-libstdc++']
@@ -366,6 +366,10 @@ def make_relative_rpath(path):
 # Declare extensions and package
 ################################################################################
 
+#nvcc does not support '-fexceptions'
+nvcc_extra_compile_args=extra_compile_args
+extra_compile_args+=['-fexceptions']
+
 extensions = []
 packages = find_packages(exclude=('tools.*',))
 
@@ -403,7 +407,7 @@ if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
                        sources=['torch/csrc/nn/THCUNN.cpp'],
                        language='c++',
-                       extra_compile_args=extra_compile_args,
+                       extra_compile_args=nvcc_extra_compile_args,
                        include_dirs=include_dirs,
                        extra_link_args=extra_link_args + [
                            TH_LIB,
