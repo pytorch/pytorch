@@ -37,11 +37,9 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
     CAFFE_ENFORCE(4 == filter.ndim());
     const int M = filter.dim32(0);
 
-    if (cached_input_dims_ != X.dims() ||
-        cached_filter_dims_ != filter.dims()) {
-      cached_input_dims_ = X.dims();
-      cached_filter_dims_ = filter.dims();
-
+    bool dims_changed;
+    CHECK_INPUT_FILTER_DIMS(dims_changed);
+    if (dims_changed) {
       CAFFE_ENFORCE(
           C == filter.dim32(1),
           "Convolution op: # of input channels ",
