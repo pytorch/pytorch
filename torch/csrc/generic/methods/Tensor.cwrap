@@ -526,6 +526,16 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: expand
+  cname: newExpand
+  return: THTensor*
+  arguments:
+    - THTensor* self
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
   name: resizeAs_
   python_name: resize_as_
   cname: resizeAs

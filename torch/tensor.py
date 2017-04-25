@@ -205,65 +205,6 @@ class _TensorBase(object):
                 perm[j] = -1
         return tensor
 
-    def expand(self, *sizes):
-        """Returns a new view of the tensor with singleton dimensions expanded
-        to a larger size.
-
-        Tensor can be also expanded to a larger number of dimensions, and the
-        new ones will be appended at the front.
-
-        Expanding a tensor does not allocate new memory, but only creates a
-        new view on the existing tensor where a dimension of size one is
-        expanded to a larger size by setting the ``stride`` to 0. Any dimension
-        of size 1 can be expanded to an arbitrary value without allocating new
-        memory.
-
-        Args:
-            *sizes (torch.Size or int...): The desired expanded size
-
-        Example:
-            >>> x = torch.Tensor([[1], [2], [3]])
-            >>> x.size()
-            torch.Size([3, 1])
-            >>> x.expand(3, 4)
-             1  1  1  1
-             2  2  2  2
-             3  3  3  3
-            [torch.FloatTensor of size 3x4]
-        """
-        result = self.new()
-        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
-            sizes = sizes[0]
-        else:
-            sizes = torch.Size(sizes)
-        src = self
-
-        num_unsqueezed = len(sizes) - src.dim()
-        if src.dim() == 0:
-            raise ValueError('can\'t expand an empty tensor')
-        if num_unsqueezed < 0:
-            raise ValueError('the number of dimensions provided must be greater or equal tensor.dim()')
-
-        src_stride = [0] * num_unsqueezed + list(src.stride())
-        src_size = [1] * num_unsqueezed + list(src.size())
-        for i in range(num_unsqueezed - 1, -1, -1):
-            # to be consistent with .unsqueeze()
-            src_stride[i] = src_size[i + 1] * src_stride[i + 1]
-
-        # create a new geometry for tensor:
-        for i, (size, target_size) in enumerate(zip(src_size, sizes)):
-            if size == 1:
-                if target_size == 1:
-                    continue
-                src_size[i] = target_size
-                src_stride[i] = 0
-            elif size != target_size:
-                raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
-
-        result.set_(src.storage(), src.storage_offset(), torch.Size(src_size),
-                    tuple(src_stride))
-        return result
-
     def expand_as(self, tensor):
         """Expands this tensor to the size of the specified tensor.
 
