@@ -639,6 +639,15 @@ def pad(input, pad, mode='constant', value=0):
     else:
         raise NotImplementedError("Only 4D and 5D padding is supported for now")
 
+def center_crop(x, *args):
+    ndim = len(x.size()[2:])
+    if ndim == 1:
+        return Crop1d(args)(x)
+    if ndim == 2:
+        return Crop2d(args)(x)
+    if ndim == 3:
+        return Crop3d(args)(x)
+    raise NotImplementedError("Only 1D, 2D and 3D cropping is supported for now")
 
 # distance
 
