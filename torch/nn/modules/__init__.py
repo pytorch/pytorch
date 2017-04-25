@@ -24,6 +24,7 @@ from .rnn import RNNBase, RNN, LSTM, GRU, \
 from .pixelshuffle import PixelShuffle
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d
 from .distance import PairwiseDistance
+from .crop import Crop1d, Crop2d, Crop3d
 
 
 __all__ = [
@@ -43,5 +44,5 @@ __all__ = [
     'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
-    'TripletMarginLoss'
+    'TripletMarginLoss', 'Crop1d', 'Crop2d', 'Crop3d',
 ]
