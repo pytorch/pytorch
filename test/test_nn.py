@@ -2600,6 +2600,16 @@ new_module_tests = [
         input_size=(2, 3, 4, 4)
     ),
     dict(
+        module_name='ZeroPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        input_size=(2, 3, 4, 4)
+    ),
+    dict(
+        module_name='ConstantPad2d',
+        constructor_args=((1, 2, 3, 4), 2),
+        input_size=(2, 3, 4, 4)
+    ),
+    dict(
         module_name='Conv3d',
         constructor_args=(3, 4, (2, 3, 4)),
         input_size=(2, 3, 3, 4, 5),
