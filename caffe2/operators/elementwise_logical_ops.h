@@ -44,6 +44,95 @@ class WhereOp final : public Operator<Context> {
   }
 };
 
+class IsMemberOfValueHolder {
+  std::unordered_set<int32_t> int32_values_;
+  std::unordered_set<int64_t> int64_values_;
+  std::unordered_set<bool> bool_values_;
+  std::unordered_set<std::string> string_values_;
+  bool has_values_ = false;
+
+ public:
+  template <typename T>
+  std::unordered_set<T>& get();
+
+  template <typename T>
+  void set(const std::vector<T>& args) {
+    has_values_ = true;
+    auto& values = get<T>();
+    values.insert(args.begin(), args.end());
+  }
+
+  bool has_values() {
+    return has_values_;
+  }
+};
+
+template <class Context>
+class IsMemberOfOp final : public Operator<Context> {
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_DISPATCH_HELPER;
+
+  static constexpr const char* VALUE_TAG = "value";
+
+ public:
+  using TestableTypes = TensorTypes<int32_t, int64_t, bool, std::string>;
+
+  IsMemberOfOp(const OperatorDef& op, Workspace* ws)
+      : Operator<Context>(op, ws) {
+    auto dtype =
+        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+            "dtype", TensorProto_DataType_UNDEFINED));
+    switch (dtype) {
+      case TensorProto_DataType_INT32:
+        values_.set(OperatorBase::GetRepeatedArgument<int32_t>(VALUE_TAG));
+        break;
+      case TensorProto_DataType_INT64:
+        values_.set(OperatorBase::GetRepeatedArgument<int64_t>(VALUE_TAG));
+        break;
+      case TensorProto_DataType_BOOL:
+        values_.set(OperatorBase::GetRepeatedArgument<bool>(VALUE_TAG));
+        break;
+      case TensorProto_DataType_STRING:
+        values_.set(OperatorBase::GetRepeatedArgument<std::string>(VALUE_TAG));
+        break;
+      case TensorProto_DataType_UNDEFINED:
+        // If dtype is not provided, values_ will be filled the first time that
+        // DoRunWithType is called.
+        break;
+      default:
+        CAFFE_THROW("Unexpected 'dtype' argument value: ", dtype);
+    }
+  }
+  virtual ~IsMemberOfOp() noexcept {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<
+        TensorTypes<int32_t, int64_t, bool, std::string>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto& input = Input(0);
+    auto* output = Output(0);
+    output->ResizeLike(input);
+
+    if (!values_.has_values()) {
+      values_.set(OperatorBase::GetRepeatedArgument<T>(VALUE_TAG));
+    }
+    const auto& values = values_.get<T>();
+
+    const T* input_data = input.template data<T>();
+    bool* output_data = output->template mutable_data<bool>();
+    for (int i = 0; i < input.size(); ++i) {
+      output_data[i] = values.find(input_data[i]) != values.end();
+    }
+    return true;
+  }
+
+ protected:
+  IsMemberOfValueHolder values_;
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_ELEMENTWISE_LOGICAL_OPS_H_
