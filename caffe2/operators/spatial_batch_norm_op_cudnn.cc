@@ -36,7 +36,6 @@ class CudnnSpatialBNOp final : public SpatialBNOp<CUDAContext> {
 
   template <typename T, typename M>
   bool DoRunWithType();
-
   bool RunOnDevice() override;
 
  protected:
@@ -94,11 +93,18 @@ bool CudnnSpatialBNOp::DoRunWithType() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
 
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_GE(X.ndim(), 3);
   const int N = X.dim32(0);
-  const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
+  const int C = X.ndim() > 3
+      ? (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(X.ndim() - 1))
+      : (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(2));
   const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
-  const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
+  const int W = X.ndim() > 3
+      ? (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2))
+      : 1;
+  const int D = X.ndim() > 4
+      ? (order_ == StorageOrder::NCHW ? X.dim32(4) : X.dim32(3))
+      : 1;
   DCHECK_EQ(scale.ndim(), 1);
   DCHECK_EQ(bias.ndim(), 1);
   DCHECK_EQ(scale.dim32(0), C);
@@ -107,14 +113,25 @@ bool CudnnSpatialBNOp::DoRunWithType() {
   if (X.dims() != cudnn_input_dims_) {
     VLOG(1) << "Setting descriptors.";
     cudnn_input_dims_ = X.dims();
-    CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
-        data_desc_,
-        GetCudnnTensorFormat(order_),
-        cudnnTypeWrapper<T>::type,
-        N,
-        C,
-        H,
-        W));
+    if (order_ == StorageOrder::NCHW) {
+      vector<int> dims = {N, C, H, W, D};
+      vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
+      CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+          data_desc_,
+          cudnnTypeWrapper<T>::type,
+          X.ndim() > 3 ? X.ndim() : 4,
+          dims.data(),
+          strides.data()));
+    } else {
+      vector<int> dims = {N, C, H, W, D};
+      vector<int> strides = {H * W * D * C, 1, W * D * C, D * C, C};
+      CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+          data_desc_,
+          cudnnTypeWrapper<T>::type,
+          X.ndim() > 3 ? X.ndim() : 4,
+          dims.data(),
+          strides.data()));
+    }
     CUDNN_ENFORCE(cudnnDeriveBNTensorDescriptor(
         bn_param_desc_, data_desc_, kSpatialBNMode));
   }
@@ -231,24 +248,41 @@ bool CudnnSpatialBNGradientOp::DoRunWithType() {
   const auto& scale = Input(SCALE);
   const auto& dY = Input(OUTPUT_GRAD);
 
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_GE(X.ndim(), 3);
   const int N = X.dim32(0);
-  const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
+  const int C = X.ndim() > 3
+      ? (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(X.ndim() - 1))
+      : (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(2));
   const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
-  const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
+  const int W = X.ndim() > 3
+      ? (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2))
+      : 1;
+  const int D = X.ndim() > 4
+      ? (order_ == StorageOrder::NCHW ? X.dim32(4) : X.dim32(3))
+      : 1;
   DCHECK_EQ(scale.ndim(), 1);
   DCHECK_EQ(scale.dim32(0), C);
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
-    cudnn_input_dims_ = X.dims();
-    CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
-        data_desc_,
-        GetCudnnTensorFormat(order_),
-        cudnnTypeWrapper<T>::type,
-        N,
-        C,
-        H,
-        W));
+    if (order_ == StorageOrder::NCHW) {
+      vector<int> dims = {N, C, H, W, D};
+      vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
+      CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+          data_desc_,
+          cudnnTypeWrapper<T>::type,
+          X.ndim() > 3 ? X.ndim() : 4,
+          dims.data(),
+          strides.data()));
+    } else {
+      vector<int> dims = {N, C, H, W, D};
+      vector<int> strides = {H * W * C * D, 1, W * D * C, D * C, C};
+      CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+          data_desc_,
+          cudnnTypeWrapper<T>::type,
+          X.ndim() > 3 ? X.ndim() : 4,
+          dims.data(),
+          strides.data()));
+    }
     CUDNN_ENFORCE(cudnnDeriveBNTensorDescriptor(
         bn_param_desc_, data_desc_, kSpatialBNMode));
   }
