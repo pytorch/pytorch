@@ -682,6 +682,18 @@ class TestNN(NNTestCase):
         # This should work though
         l2.weight = Parameter(torch.randn(10, 10))
 
+    def test_crop(self):
+        c1 = nn.Crop1d(4)
+        c2 = nn.Crop2d((6, 10))
+        c3 = nn.Crop3d((6, 10, 10))
+        t1 = torch.randn(1, 1, 10)
+        t2 = torch.randn(1, 1, 10, 20)
+        t3 = torch.randn(1, 1, 10, 20, 30)
+
+        self.assertEqual(c1(t1).sum(), t1[:, :, 3:7].sum())
+        self.assertEqual(c2(t2).sum(), t2[:, :, 2:8, 5:15].sum())
+        self.assertEqual(c3(t3).sum(), t3[:, :, 2:8, 5:15, 10:20].sum())
+
     def test_clip_grad_norm(self):
         l = nn.Linear(10, 10)
         max_norm = 2
