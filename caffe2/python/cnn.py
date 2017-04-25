@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import scope, brew
+from caffe2.python import brew
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 
@@ -37,46 +37,18 @@ class CNNModelHelper(ModelHelper):
                 "Cannot understand the CNN storage order %s." % self.order
             )
 
-    def GetWeights(self, namescope=None):
-        if namescope is None:
-            namescope = scope.CurrentNameScope()
-
-        if namescope == '':
-            return self.weights[:]
-        else:
-            return [w for w in self.weights if w.GetNameScope() == namescope]
-
-    def GetBiases(self, namescope=None):
-        if namescope is None:
-            namescope = scope.CurrentNameScope()
-
-        if namescope == '':
-            return self.biases[:]
-        else:
-            return [b for b in self.biases if b.GetNameScope() == namescope]
-
-    def ImageInput(
-            self, blob_in, blob_out, use_gpu_transform=False, **kwargs
-    ):
-        """Image Input."""
-        if self.order == "NCHW":
-            if (use_gpu_transform):
-                kwargs['use_gpu_transform'] = 1 if use_gpu_transform else 0
-                # GPU transform will handle NHWC -> NCHW
-                data, label = self.net.ImageInput(
-                    blob_in, [blob_out[0], blob_out[1]], **kwargs)
-                # data = self.net.Transform(data, blob_out[0], **kwargs)
-                pass
-            else:
-                data, label = self.net.ImageInput(
-                    blob_in, [blob_out[0] + '_nhwc', blob_out[1]], **kwargs)
-                data = self.net.NHWC2NCHW(data, blob_out[0])
-        else:
-            data, label = self.net.ImageInput(
-                blob_in, blob_out, **kwargs)
-        return data, label
+    def ImageInput(self, blob_in, blob_out, use_gpu_transform=False, **kwargs):
+        return brew.image_input(
+            self,
+            blob_in,
+            blob_out,
+            order=self.order,
+            use_gpu_transform=use_gpu_transform,
+            **kwargs
+        )
 
     def PadImage(self, blob_in, blob_out, **kwargs):
+        # TODO(wyiming): remove this dummy helper later
         self.net.PadImage(blob_in, blob_out, **kwargs)
 
     def ConvNd(self, *args, **kwargs):
@@ -156,19 +128,18 @@ class CNNModelHelper(ModelHelper):
         return brew.lrn(self, *args, **kwargs)
 
     def Softmax(self, *args, **kwargs):
-        return brew.softmax(self, *args, use_cudnn=self.use_cudnn,
-                                     **kwargs)
+        return brew.softmax(self, *args, use_cudnn=self.use_cudnn, **kwargs)
 
     def SpatialBN(self, *args, **kwargs):
         return brew.spatial_bn(self, *args, order=self.order, **kwargs)
 
     def InstanceNorm(self, *args, **kwargs):
-        return brew.instance_norm(self, *args, order=self.order,
-                                          **kwargs)
+        return brew.instance_norm(self, *args, order=self.order, **kwargs)
 
     def Relu(self, *args, **kwargs):
-        return brew.relu(self, *args, order=self.order,
-                                  use_cudnn=self.use_cudnn, **kwargs)
+        return brew.relu(
+            self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
+        )
 
     def PRelu(self, *args, **kwargs):
         return brew.prelu(self, *args, **kwargs)
@@ -185,8 +156,7 @@ class CNNModelHelper(ModelHelper):
         return brew.sum(self, *args, **kwargs)
 
     def Transpose(self, *args, **kwargs):
-        return brew.transpose(self, *args, use_cudnn=self.use_cudnn,
-                                       **kwargs)
+        return brew.transpose(self, *args, use_cudnn=self.use_cudnn, **kwargs)
 
     def Iter(self, *args, **kwargs):
         return brew.iter(self, *args, **kwargs)
@@ -195,12 +165,14 @@ class CNNModelHelper(ModelHelper):
         return brew.accuracy(self, *args, **kwargs)
 
     def MaxPool(self, *args, **kwargs):
-        return brew.max_pool(self, *args, use_cudnn=self.use_cudnn,
-                                     order=self.order, **kwargs)
+        return brew.max_pool(
+            self, *args, use_cudnn=self.use_cudnn, order=self.order, **kwargs
+        )
 
     def AveragePool(self, *args, **kwargs):
-        return brew.average_pool(self, *args, use_cudnn=self.use_cudnn,
-                                         order=self.order, **kwargs)
+        return brew.average_pool(
+            self, *args, use_cudnn=self.use_cudnn, order=self.order, **kwargs
+        )
 
     @property
     def XavierInit(self):
@@ -218,25 +190,7 @@ class CNNModelHelper(ModelHelper):
         return ('ConstantFill', {})
 
     def AddWeightDecay(self, weight_decay):
-        """Adds a decay to weights in the model.
-
-        This is a form of L2 regularization.
-
-        Args:
-            weight_decay: strength of the regularization
-        """
-        if weight_decay <= 0.0:
-            return
-        wd = self.param_init_net.ConstantFill([], 'wd', shape=[1],
-                                              value=weight_decay)
-        ONE = self.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
-        for param in self.GetWeights():
-            #  Equivalent to: grad += wd * param
-            grad = self.param_to_grad[param]
-            self.net.WeightedSum(
-                [grad, ONE, param, wd],
-                grad,
-            )
+        return brew.add_weight_decay(self, weight_decay)
 
     @property
     def CPU(self):

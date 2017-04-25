@@ -19,6 +19,7 @@ from caffe2.python.helpers.array_helpers import *
 from caffe2.python.helpers.algebra import *
 from caffe2.python.helpers.train import *
 from caffe2.python.helpers.conv import *
+from caffe2.python.helpers.tools import *
 
 
 class HelperWrapper(object):
@@ -49,6 +50,8 @@ class HelperWrapper(object):
         'conv_transpose': conv_transpose,
         'group_conv': group_conv,
         'group_conv_deprecated': group_conv_deprecated,
+        'image_input': image_input,
+        'add_weight_decay': add_weight_decay,
     }
 
     def __init__(self, wrapped):
