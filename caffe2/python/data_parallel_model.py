@@ -141,9 +141,11 @@ def Parallelize_GPU(
     if broadcast_computed_params:
         _BroadcastComputedParams(devices, model_helper_obj, rendezvous)
 
-    _AllReduceGradients(
-        devices, model_helper_obj, rendezvous
-    )
+    if len(model_helper_obj._grad_names) > 0:
+        _AllReduceGradients(devices, model_helper_obj, rendezvous)
+    else:
+        log.info("NOTE: Param builder function did not create any parameters.")
+
 
     log.info("Post-iteration operators for updating params")
     num_shards = 1 if rendezvous is None else rendezvous['num_shards']
