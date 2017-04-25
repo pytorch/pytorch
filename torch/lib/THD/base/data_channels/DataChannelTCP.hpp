@@ -87,6 +87,8 @@ private:
   std::vector<Process> _processes; // Other processes in network
   std::unique_ptr<struct pollfd[]> _poll_events; // Events array for `poll`
 
+  std::mutex _mutex; // General mutex for methods - to make methods run atomically.
+
   // Existing groups of processes and corresponding group ids
   std::unordered_map<THDGroup, DataChannel::Group> _groups;
 

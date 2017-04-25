@@ -92,7 +92,13 @@ DataChannelMPI::~DataChannelMPI() {
 
 
 bool DataChannelMPI::init() {
-  MPI_Init(NULL, NULL);
+  int* provided = NULL;
+  MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, provided);
+  if (*provided != MPI_THREAD_MULTIPLE) {
+    std::cerr << "MPI implementation does not support multiple threads."
+              << "Using same data channel in multiple thread can result in"
+              << "wrong results or errors." << std::endl;
+  }
 
   int rank, num_processes;
   MPI_Comm_size(MPI_COMM_WORLD, &num_processes);
