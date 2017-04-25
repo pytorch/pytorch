@@ -600,7 +600,7 @@ class AvgPool3d(Module):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
-        self.padding = padding
+        self.padding = padding 
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
 
