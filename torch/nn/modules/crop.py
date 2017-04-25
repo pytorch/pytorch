@@ -31,8 +31,8 @@ class Crop1d(_CropBase):
         super(Crop1d, self).__init__(size, mode)
 
     def forward(self, x):
-        length = x.size()[2]
-        return F.pad(x, [*self._offset(length, self.size[0])])
+        start, stop = self._offset(x.size()[2], self.size[0])
+        return x[start:stop]
 
 
 class Crop2d(_CropBase):
@@ -44,7 +44,7 @@ class Crop2d(_CropBase):
         super(Crop2d, self).__init__(size, mode)
 
     def forward(self, x):
-        height, width = x.size()[:2]
+        height, width = x.size()[-2:]
         return F.pad(x, [
             *self._offset(height, self.size[0]),
             *self._offset(width, self.size[1]),
@@ -60,7 +60,7 @@ class Crop3d(_CropBase):
         super(Crop3d, self).__init__(size, mode)
 
     def forward(self, x):
-        height, width, depth = x.size()[:2]
+        height, width, depth = x.size()[-2]
         return F.pad(x, [
             *self._offset(height, self.size[0]),
             *self._offset(width, self.size[1]),
