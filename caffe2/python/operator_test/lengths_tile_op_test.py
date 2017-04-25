@@ -41,3 +41,11 @@ class TestLengthsTileOp(hu.HypothesisTestCase):
             inputs=[data, lengths],
             reference=lengths_tile_op,
         )
+
+        self.assertGradientChecks(
+            device_option=gc,
+            op=op,
+            inputs=[data, lengths],
+            outputs_to_check=0,
+            outputs_with_grads=[0]
+        )
