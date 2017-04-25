@@ -366,9 +366,9 @@ def make_relative_rpath(path):
 # Declare extensions and package
 ################################################################################
 
-#nvcc does not support '-fexceptions'
-nvcc_extra_compile_args=extra_compile_args
-extra_compile_args+=['-fexceptions']
+# nvcc does not support '-fexceptions'
+nvcc_extra_compile_args = extra_compile_args
+extra_compile_args += ['-fexceptions']
 
 extensions = []
 packages = find_packages(exclude=('tools.*',))
