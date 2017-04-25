@@ -271,6 +271,74 @@ class TestLayers(LayersTestCase):
             gathered_items_items
         )
 
+    def testMapToRange(self):
+        input_record = self.new_record(schema.Scalar(np.int32))
+        map_to_range_output = self.model.MapToRange(input_record,
+                                                    max_index=100)
+        self.model.output_schema = schema.Struct()
+
+        train_init_net, train_net = self.get_training_nets()
+
+        schema.FeedRecord(
+            input_record,
+            [np.array([10, 3, 20, 99, 15, 11, 3, 11], dtype=np.int32)]
+        )
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        indices = workspace.FetchBlob(map_to_range_output())
+        np.testing.assert_array_equal(
+            np.array([1, 2, 3, 4, 5, 6, 2, 6], dtype=np.int32),
+            indices
+        )
+
+        schema.FeedRecord(
+            input_record,
+            [np.array([10, 3, 23, 35, 60, 15, 10, 15], dtype=np.int32)]
+        )
+        workspace.RunNetOnce(train_net)
+        indices = workspace.FetchBlob(map_to_range_output())
+        np.testing.assert_array_equal(
+            np.array([1, 2, 7, 8, 9, 5, 1, 5], dtype=np.int32),
+            indices
+        )
+
+        eval_net = self.get_eval_net()
+
+        schema.FeedRecord(
+            input_record,
+            [np.array([10, 3, 23, 35, 60, 15, 200], dtype=np.int32)]
+        )
+        workspace.RunNetOnce(eval_net)
+        indices = workspace.FetchBlob(map_to_range_output())
+        np.testing.assert_array_equal(
+            np.array([1, 2, 7, 8, 9, 5, 0], dtype=np.int32),
+            indices
+        )
+
+        schema.FeedRecord(
+            input_record,
+            [np.array([10, 3, 23, 15, 101, 115], dtype=np.int32)]
+        )
+        workspace.RunNetOnce(eval_net)
+        indices = workspace.FetchBlob(map_to_range_output())
+        np.testing.assert_array_equal(
+            np.array([1, 2, 7, 5, 0, 0], dtype=np.int32),
+            indices
+        )
+
+        predict_net = self.get_predict_net()
+
+        schema.FeedRecord(
+            input_record,
+            [np.array([3, 3, 20, 23, 151, 35, 60, 15, 200], dtype=np.int32)]
+        )
+        workspace.RunNetOnce(predict_net)
+        indices = workspace.FetchBlob(map_to_range_output())
+        np.testing.assert_array_equal(
+            np.array([2, 2, 3, 7, 0, 8, 9, 5, 0], dtype=np.int32),
+            indices
+        )
+
     def testFunctionalLayer(self):
         def normalize(net, in_record, out_record):
             mean = net.ReduceFrontMean(in_record(), 1)
