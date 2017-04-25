@@ -111,6 +111,11 @@ def RunEpoch(
 
         fmt = "Finished iteration {}/{} of epoch {} ({:.2f} images/sec)"
         log.info(fmt.format(i + 1, epoch_iters, epoch, total_batch_size / dt))
+        prefix = "gpu_{}".format(train_model._devices[0])
+        accuracy = workspace.FetchBlob(prefix + '/accuracy')
+        loss = workspace.FetchBlob(prefix + '/loss')
+        train_fmt = "Training loss: {}, accuracy: {}"
+        log.info(train_fmt.format(loss, accuracy))
 
     num_images = epoch * epoch_iters * total_batch_size
     prefix = "gpu_{}".format(train_model._devices[0])
