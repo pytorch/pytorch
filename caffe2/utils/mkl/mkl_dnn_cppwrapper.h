@@ -1086,6 +1086,179 @@ dnnBatchNormalizationCreateBackwardScaleShift<double>(
       pBatchNormalization, attributes, dataLayout, eps);
 }
 
+C2_MKL_TEMPLATE_PREFIX dnnError_t dnnBatchNormalizationCreateForward_v2(
+    dnnPrimitive_t* pBatchNormalization,
+    dnnPrimitiveAttributes_t attributes,
+    const dnnLayout_t dataLayout,
+    float eps,
+    unsigned int flags);
+C2_MKL_SPEC_PREFIX dnnError_t dnnBatchNormalizationCreateForward_v2<float>(
+    dnnPrimitive_t* pBatchNormalization,
+    dnnPrimitiveAttributes_t attributes,
+    const dnnLayout_t dataLayout,
+    float eps,
+    unsigned int flags) {
+  return dnnBatchNormalizationCreateForward_v2_F32(
+      pBatchNormalization, attributes, dataLayout, eps, flags);
+}
+C2_MKL_SPEC_PREFIX dnnError_t dnnBatchNormalizationCreateForward_v2<double>(
+    dnnPrimitive_t* pBatchNormalization,
+    dnnPrimitiveAttributes_t attributes,
+    const dnnLayout_t dataLayout,
+    float eps,
+    unsigned int flags) {
+  return dnnBatchNormalizationCreateForward_v2_F64(
+      pBatchNormalization, attributes, dataLayout, eps, flags);
+}
+
+C2_MKL_TEMPLATE_PREFIX dnnError_t dnnBatchNormalizationCreateBackward_v2(
+    dnnPrimitive_t* pBatchNormalization,
+    dnnPrimitiveAttributes_t attributes,
+    const dnnLayout_t dataLayout,
+    float eps,
+    unsigned int flags);
+C2_MKL_SPEC_PREFIX dnnError_t dnnBatchNormalizationCreateBackward_v2<float>(
+    dnnPrimitive_t* pBatchNormalization,
+    dnnPrimitiveAttributes_t attributes,
+    const dnnLayout_t dataLayout,
+    float eps,
+    unsigned int flags) {
+  return dnnBatchNormalizationCreateBackward_v2_F32(
+      pBatchNormalization, attributes, dataLayout, eps, flags);
+}
+
+C2_MKL_SPEC_PREFIX dnnError_t dnnBatchNormalizationCreateBackward_v2<double>(
+    dnnPrimitive_t* pBatchNormalization,
+    dnnPrimitiveAttributes_t attributes,
+    const dnnLayout_t dataLayout,
+    float eps,
+    unsigned int flags) {
+  return dnnBatchNormalizationCreateBackward_v2_F64(
+      pBatchNormalization, attributes, dataLayout, eps, flags);
+}
+
+C2_MKL_TEMPLATE_PREFIX dnnError_t dnnInnerProductCreateForward(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels);
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateForward<float>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateForward_F32(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateForward<double>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateForward_F64(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+
+C2_MKL_TEMPLATE_PREFIX dnnError_t dnnInnerProductCreateForwardBias(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels);
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateForwardBias<float>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateForwardBias_F32(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateForwardBias<double>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateForwardBias_F64(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+
+C2_MKL_TEMPLATE_PREFIX dnnError_t dnnInnerProductCreateBackwardData(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels);
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateBackwardData<float>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateBackwardData_F32(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateBackwardData<double>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateBackwardData_F64(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+
+C2_MKL_TEMPLATE_PREFIX dnnError_t dnnInnerProductCreateBackwardFilter(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels);
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateBackwardFilter<float>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateBackwardFilter_F32(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateBackwardFilter<double>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[],
+    size_t outputChannels) {
+  return dnnInnerProductCreateBackwardFilter_F64(
+      pInnerProduct, attributes, dimensions, srcSize, outputChannels);
+}
+
+C2_MKL_TEMPLATE_PREFIX dnnError_t dnnInnerProductCreateBackwardBias(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[]);
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateBackwardBias<float>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[]) {
+  return dnnInnerProductCreateBackwardBias_F32(
+      pInnerProduct, attributes, dimensions, srcSize);
+}
+C2_MKL_SPEC_PREFIX dnnError_t dnnInnerProductCreateBackwardBias<double>(
+    dnnPrimitive_t* pInnerProduct,
+    dnnPrimitiveAttributes_t attributes,
+    size_t dimensions,
+    const size_t srcSize[]) {
+  return dnnInnerProductCreateBackwardBias_F64(
+      pInnerProduct, attributes, dimensions, srcSize);
+}
+
 } // namespace mkl
 } // namespace caffe2
 
