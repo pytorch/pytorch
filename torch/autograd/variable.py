@@ -520,20 +520,20 @@ class Variable(_C._VariableBase):
         return self._static_blas(cls, (self,) + args, inplace)
 
     def mm(self, matrix):
-        output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)).zero_())
+        output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
         return self._static_blas(Addmm, (output, 0, 1, self, matrix), False)
 
     def bmm(self, batch):
         output = Variable(self.data.new(self.data.size(0), self.data.size(1),
-                                        batch.data.size(2)).zero_())
+                                        batch.data.size(2)))
         return self._static_blas(Baddbmm, (output, 0, 1, self, batch), False)
 
     def mv(self, vector):
-        output = Variable(self.data.new(self.data.size(0)).zero_())
+        output = Variable(self.data.new(self.data.size(0)))
         return self._static_blas(Addmv, (output, 0, 1, self, vector), False)
 
     def ger(self, vector):
-        output = Variable(self.data.new(self.data.size(0), vector.data.size(0)).zero_())
+        output = Variable(self.data.new(self.data.size(0), vector.data.size(0)))
         return self._static_blas(Addr, (output, 0, 1, self, vector), False)
 
     def resize(self, *sizes):
