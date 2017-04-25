@@ -456,6 +456,11 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
 
   THCudaCheck(THCudaFree(state, ipiv_gpu));
   THCudaCheck(THCudaFree(state, info_gpu));
+
+  THCudaCheck(THCudaFree(state, d_matrices1));
+  THCudaCheck(THCudaFree(state, d_matrices1_const));
+  THCudaCheck(THCudaFree(state, d_matrices2));
+
   THCTensor_(freeCopyTo)(state, output, input);
 #endif
 }

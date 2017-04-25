@@ -84,6 +84,8 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   int nOutputPlane = weight->size[0];
 
   input = THTensor_(newContiguous)(input);
+  weight = THTensor_(newContiguous)(weight);
+  bias = bias ? THTensor_(newContiguous)(bias) : bias;
   int batch = 1;
   if (input->nDimension == 4) {
     // Force batch
@@ -186,6 +188,8 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   }
 
   THTensor_(free)(input);
+  THTensor_(free)(weight);
+  if (bias) THTensor_(free)(bias);  
 }
 
 void THNN_(VolumetricDilatedConvolution_updateGradInput)(
@@ -211,6 +215,8 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
+  weight = THTensor_(newContiguous)(weight);
+  
   int batch = 1;
   if (input->nDimension == 4) {
     // Force batch
@@ -285,6 +291,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
 
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
+  THTensor_(free)(weight);
 }
 
 void THNN_(VolumetricDilatedConvolution_accGradParameters)(
@@ -313,6 +320,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
+  
   int batch = 1;
   if (input->nDimension == 4) {
     // Force batch

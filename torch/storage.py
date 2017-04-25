@@ -101,6 +101,17 @@ class _StorageBase(object):
             self._share_fd_()
         return self
 
+    @classmethod
+    def _new_shared(cls, size):
+        """Creates a new storage in shared memory with the same data type"""
+        from torch.multiprocessing import get_sharing_strategy
+        if cls.is_cuda:
+            return cls(size)
+        elif get_sharing_strategy() == 'file_system':
+            return cls._new_using_filename(size)
+        else:
+            return cls._new_using_fd(size)
+
 
 _StorageBase.type = _type
 _StorageBase.cuda = _cuda

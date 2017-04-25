@@ -234,7 +234,8 @@ class Module(object):
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        return object.__getattr__(self, name)
+        raise AttributeError("'{}' object has no attribute '{}'".format(
+            type(self).__name__, name))
 
     def __setattr__(self, name, value):
         def remove_from(*dicts):
@@ -348,15 +349,28 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L,)
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
         """
+        for name, param in self.named_parameters():
+            yield param
+
+    def named_parameters(self, memo=None, prefix=''):
+        """Returns an iterator over module parameters, yielding both the
+        name of the parameter as well as the parameter itself
+
+        Example:
+            >>> for name, param in self.named_parameters():
+            >>>    if name in ['bias']:
+            >>>        print(param.size())
+        """
         if memo is None:
             memo = set()
-        for p in self._parameters.values():
+        for name, p in self._parameters.items():
             if p is not None and p not in memo:
                 memo.add(p)
-                yield p
-        for module in self.children():
-            for p in module.parameters(memo):
-                yield p
+                yield prefix + ('.' if prefix else '') + name, p
+        for mname, module in self.named_children():
+            submodule_prefix = prefix + ('.' if prefix else '') + mname
+            for name, p in module.named_parameters(memo, submodule_prefix):
+                yield name, p
 
     def children(self):
         """Returns an iterator over immediate children modules."""
@@ -461,3 +475,12 @@ class Module(object):
             tmpstr = tmpstr + '  (' + key + '): ' + modstr + '\n'
         tmpstr = tmpstr + ')'
         return tmpstr
+
+    def __dir__(self):
+        module_attrs = dir(self.__class__)
+        attrs = list(self.__dict__.keys())
+        parameters = list(self._parameters.keys())
+        modules = list(self._modules.keys())
+        buffers = list(self._buffers.keys())
+        keys = module_attrs + attrs + parameters + modules + buffers
+        return sorted(keys)

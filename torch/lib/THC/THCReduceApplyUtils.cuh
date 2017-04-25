@@ -19,6 +19,80 @@ __device__ __forceinline__ IndexType getLinearBlockId() {
     blockIdx.x;
 }
 
+// Reduce N values concurrently, i.e. suppose N = 2, and there are 4 threads:
+// (1, 2), (3, 4), (5, 6), (7, 8), then the return in threadVals for thread 0
+// is (1 + 3 + 5 + 7, 2 + 4 + 6 + 8) = (16, 20)
+template <typename T, typename ReduceOp, int N>
+__device__ void reduceNValuesInBlock(T *smem,
+                             T threadVals[N],
+                             int numVals,
+                             ReduceOp reduceOp,
+                             T init) {
+  if (numVals == 0) {
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+      threadVals[i] = init;
+    }
+    return;
+  }
+
+  // We store each of the N values contiguously, so if N = 2, all values for
+  // the first threadVal for each thread in the block are stored followed by
+  // all of the values for the second threadVal for each thread in the block
+  if (threadIdx.x < numVals) {
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+      smem[i * numVals + threadIdx.x] = threadVals[i];
+    }
+  }
+  __syncthreads();
+
+  // Number of lanes in the final reduction --> this is used to determine
+  // where to put the outputs of each of the n things we are reducing. If
+  // nLP = 32, then we have the 32 outputs for the first threadVal,
+  // followed by the 32 outputs for the second threadVal, etc.
+  int numLanesParticipating = min(numVals, warpSize);
+
+  if (numVals > warpSize && ((threadIdx.x / warpSize) == 0 )) {
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+      threadVals[i] = threadIdx.x < numVals ? threadVals[i] : init;
+    }
+
+    for (int i = warpSize + threadIdx.x; i < numVals; i += warpSize) {
+#pragma unroll
+      for (int j = 0; j < N; ++j) {
+        threadVals[j] = reduceOp(threadVals[j], smem[j * numVals + i]);
+      }
+    }
+
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+      smem[i * numLanesParticipating + threadIdx.x] = threadVals[i];
+    }
+  }
+  __syncthreads();
+
+  if (threadIdx.x == 0) {
+    if (numLanesParticipating == 32) {
+#pragma unroll
+      for (int i = 0; i < N; ++i) {
+#pragma unroll
+        for (int j = 1; j < 32; ++j) {
+          threadVals[i] = reduceOp(threadVals[i], smem[i * 32 + j]);
+        }
+      }
+    } else {
+#pragma unroll
+      for (int i = 0; i < N; ++i) {
+        for (int j = 1; j < numLanesParticipating; ++j) {
+          threadVals[i] = reduceOp(threadVals[i], smem[i * numVals + j]);
+        }
+      }
+    }
+  }
+}
+
 // Block-wide reduction in shared memory helper; only threadIdx.x == 0 will
 // return the reduced value
 template <typename T, typename ReduceOp>
@@ -27,56 +101,16 @@ __device__ T reduceBlock(T* smem,
                          T threadVal,
                          ReduceOp reduceOp,
                          T init) {
-  if (numVals == 0) {
-    return init;
-  }
-
-  if (threadIdx.x < numVals) {
-    smem[threadIdx.x] = threadVal;
-  }
-
-  // First warp will perform reductions across warps
-  __syncthreads();
-  if ((threadIdx.x / warpSize) == 0) {
-    T r = threadIdx.x < numVals ? smem[threadIdx.x] : init;
-
-    for (int i = warpSize + threadIdx.x; i < numVals; i += warpSize) {
-      r = reduceOp(r, smem[i]);
-    }
-
-    smem[threadIdx.x] = r;
-  }
-
-  // First thread will perform reductions across the block
-  __syncthreads();
-
-  T r = init;
-  if (threadIdx.x == 0) {
-    r = smem[0];
-
-    int numLanesParticipating = min(numVals, warpSize);
-
-    if (numLanesParticipating == 32) {
-      // Unroll for warpSize == 32 and numVals >= 32
-#pragma unroll
-      for (int i = 1; i < 32; ++i) {
-        r = reduceOp(r, smem[i]);
-      }
-    } else {
-      for (int i = 1; i < numLanesParticipating; ++i) {
-        r = reduceOp(r, smem[i]);
-      }
-    }
-  }
-
-  return r;
+  reduceNValuesInBlock<T, ReduceOp, 1>(smem, &threadVal, numVals, reduceOp, init);
+  return threadVal;
 }
+
 
 // Block-wide reduction where each thread locally reduces N
 // values before letting a single warp take over - assumes
 // threadVals is in registers, not shared memory
 template <typename T, typename ReduceOp, int N>
-__device__ T reduceBlockN(T *smem,
+__device__ T reduceBlockWithNThreadLocalReductions(T *smem,
                          T threadVals[N],
                          int numVals,
                          ReduceOp reduceOp,

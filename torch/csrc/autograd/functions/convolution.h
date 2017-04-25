@@ -31,11 +31,11 @@ struct ConvParams {
   bool is_output_padding_neg() const;
   bool is_padding_neg() const;
   void view1d_as_2d();
-
+  bool use_cudnn(const thpp::Tensor& input) const;
 };
 
 struct ConvForward : public Function, public ConvParams {
-  ConvForward(ConvParams params) : ConvParams(std::move(params)) {}
+  explicit ConvForward(ConvParams params) : ConvParams(std::move(params)) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
 

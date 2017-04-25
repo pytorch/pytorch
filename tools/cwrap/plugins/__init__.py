@@ -65,3 +65,4 @@ from .GILRelease import GILRelease
 from .AutoGPU import AutoGPU
 from .CuDNNPlugin import CuDNNPlugin
 from .GenericNN import GenericNN
+from .WrapDim import WrapDim

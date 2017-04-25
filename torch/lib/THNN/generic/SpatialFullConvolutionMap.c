@@ -7,6 +7,8 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   THTensor *connTable, int nInputPlane, int nOutputPlane,
   int dW, int dH)
 {
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
   THArgCheck(
     weight != NULL && weight->nDimension == 3
     && connTable != NULL && connTable->size[0] == weight->size[0], 4,

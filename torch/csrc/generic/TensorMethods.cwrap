@@ -31,11 +31,13 @@
 #define THIndexTensor THCudaLongTensor
 #define THIndexTensor_(NAME) TH_CONCAT_2(THCudaLongTensor_,NAME)
 #define THPIndexTensor THCPLongTensor
+#define THPIndexTensor_(NAME) TH_CONCAT_2(THCPLongTensor_,NAME)
 #define THPIndexTensorClass THCPLongTensorClass
 #else
 #define THIndexTensor THLongTensor
 #define THIndexTensor_(NAME) TH_CONCAT_2(THLongTensor_,NAME)
 #define THPIndexTensor THPLongTensor
+#define THPIndexTensor_(NAME) TH_CONCAT_2(THPLongTensor_,NAME)
 #define THPIndexTensorClass THPLongTensorClass
 #endif
 

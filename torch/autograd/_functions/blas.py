@@ -179,6 +179,7 @@ class Dot(Function):
 
     def forward(self, vector1, vector2):
         self.save_for_backward(vector1, vector2)
+        self.sizes = (vector1.size(), vector2.size())
         return vector1.new((vector1.dot(vector2),))
 
     def backward(self, grad_output):
@@ -186,9 +187,9 @@ class Dot(Function):
         grad_vector1 = grad_vector2 = None
 
         if self.needs_input_grad[0]:
-            grad_vector1 = vector2.mul(grad_output[0])
+            grad_vector1 = vector2.mul(grad_output[0]).view(self.sizes[0])
 
         if self.needs_input_grad[1]:
-            grad_vector2 = vector1.mul(grad_output[0])
+            grad_vector2 = vector1.mul(grad_output[0]).view(self.sizes[1])
 
         return grad_vector1, grad_vector2

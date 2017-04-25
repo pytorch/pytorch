@@ -36,7 +36,7 @@ class PartialLinear(Module):
         # set partition:
         self.inputsize = inputsize
         self.outputsize = outputsize
-        self.allcolumns = torch.range(0, self.outputsize - 1).long()
+        self.allcolumns = torch.arange(0, self.outputsize).long()
         self.resetPartition()
         self.addBuffer = None
         self.buffer = None

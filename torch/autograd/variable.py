@@ -232,6 +232,9 @@ class Variable(_C._VariableBase):
             return Type(t)(self)
         return self
 
+    def type_as(self, t):
+        return self.type(type(t.data))
+
     def _get_type(self, name):
         module = torch._import_dotted_name(self.data.__module__)
         return getattr(module, name)
@@ -496,10 +499,10 @@ class Variable(_C._VariableBase):
     def std(self, dim=None, unbiased=True):
         return self.var(dim, unbiased).sqrt()
 
-    def renorm(self, norm_type, dim, maxnorm):
+    def renorm(self, p, dim, maxnorm):
         t = self.transpose(dim, 0)
         flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(norm_type, 1)
+        norms = flat.norm(p, 1)
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
@@ -589,11 +592,11 @@ class Variable(_C._VariableBase):
     def addcdiv(self, *args):
         return self._addcop(Addcdiv, args)
 
-    def norm(self, norm_type=2, dim=None):
-        return Norm(norm_type, dim)(self)
+    def norm(self, p=2, dim=None):
+        return Norm(p, dim)(self)
 
-    def dist(self, tensor, norm_type=2):
-        return Norm(norm_type)(self - tensor)
+    def dist(self, tensor, p=2):
+        return Norm(p)(self - tensor)
 
     def index_add(self, dim, index, tensor):
         return IndexAdd(dim)(self, index, tensor)
@@ -658,10 +661,12 @@ class Variable(_C._VariableBase):
         return Transpose(dim1, dim2)(self)
 
     def select(self, dim, _index):
+        dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
         return Index(index)(self)
 
     def narrow(self, dim, start_index, length):
+        dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + \
             (slice(start_index, start_index + length),)
 

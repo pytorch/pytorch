@@ -82,6 +82,7 @@ void THNN_(PReLU_updateGradInput)(
   {
     input = THTensor_(newContiguous)(input);
     gradOutput = THTensor_(newContiguous)(gradOutput);
+    weight = THTensor_(newContiguous)(weight);
     const real *input_data = THTensor_(data)(input);
     const real *gradOutput_data = THTensor_(data)(gradOutput);
     const real *weight_data = THTensor_(data)(weight);
@@ -126,6 +127,7 @@ void THNN_(PReLU_updateGradInput)(
     }
     THTensor_(free)(input);
     THTensor_(free)(gradOutput);
+    THTensor_(free)(weight);
   }
 }
 
@@ -143,10 +145,10 @@ void THNN_(PReLU_accGradParameters)(
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_CHECK_NELEMENT(input, gradOutput);
-  real *gradWeight_data = THTensor_(data)(gradWeight);
 
   if (nOutputPlane == 0)
   {
+    real *gradWeight_data = THTensor_(data)(gradWeight);
     real sum = 0;
     TH_TENSOR_APPLY2(real, input, real, gradOutput,
       if ((*input_data) <= 0)
@@ -156,8 +158,10 @@ void THNN_(PReLU_accGradParameters)(
   }
   else
   {
+    THArgCheck(THTensor_(isContiguous)(gradWeight), 6, "gradWeight needs to be contiguous");
     input = THTensor_(newContiguous)(input);
     gradOutput = THTensor_(newContiguous)(gradOutput);
+    weight = THTensor_(newContiguous)(weight);
     long bs = 1, ks = 1;
     {
       long input_ndim = THTensor_(nDimension)(input);
@@ -196,6 +200,7 @@ void THNN_(PReLU_accGradParameters)(
     }
     THTensor_(free)(input);
     THTensor_(free)(gradOutput);
+    THTensor_(free)(weight);
   }
 }
 

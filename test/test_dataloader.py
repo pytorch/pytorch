@@ -173,6 +173,36 @@ class TestDataLoader(TestCase):
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_numpy_scalars(self):
+        import numpy as np
+
+        class ScalarDataset(torch.utils.data.Dataset):
+            def __init__(self, dtype):
+                self.dtype = dtype
+
+            def __getitem__(self, i):
+                return self.dtype()
+
+            def __len__(self):
+                return 4
+
+        dtypes = {
+            np.float64: torch.DoubleTensor,
+            np.float32: torch.FloatTensor,
+            np.float16: torch.HalfTensor,
+            np.int64: torch.LongTensor,
+            np.int32: torch.IntTensor,
+            np.int16: torch.ShortTensor,
+            np.int8: torch.CharTensor,
+            np.uint8: torch.ByteTensor,
+        }
+        for dt, tt in dtypes.items():
+            dset = ScalarDataset(dt)
+            loader = DataLoader(dset, batch_size=2)
+            batch = next(iter(loader))
+            self.assertIsInstance(batch, tt)
+
 
 class StringDataset(Dataset):
     def __init__(self):

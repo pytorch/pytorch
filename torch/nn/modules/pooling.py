@@ -549,6 +549,14 @@ class MaxPool3d(Module):
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) \
+            + ', dilation=' + str(self.dilation) \
+            + ', ceil_mode=' + str(self.ceil_mode) + ')'
+
 
 class AvgPool3d(Module):
     r"""Applies a 3D average pooling over an input signal composed of several input
