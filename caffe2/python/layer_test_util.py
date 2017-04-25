@@ -59,6 +59,9 @@ class LayersTestCase(test_util.TestCase):
             layer.add_operators(train_net, train_init_net)
         return train_init_net, train_net
 
+    def get_eval_net(self):
+        return layer_model_instantiator.generate_eval_net(self.model)
+
     def get_predict_net(self):
         return layer_model_instantiator.generate_predict_net(self.model)
 
