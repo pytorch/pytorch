@@ -58,7 +58,8 @@ struct GlooCache {
   using value_type = std::tuple<
     std::shared_ptr<algorithm_type>, // algorithm
     std::shared_ptr<buffer_type>,    // input buffer (nullptr if not used)
-    std::shared_ptr<buffer_type>     // output buffer (nullptr if not used)
+    std::shared_ptr<buffer_type>,    // output buffer (nullptr if not used)
+    std::shared_ptr<std::mutex>      // mutex to make algorithms run atomically
   >;
 
   GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device,
@@ -88,6 +89,10 @@ struct GlooCache {
   template<CollectiveType D, typename T, typename... Args>
   value_type getAlgorithm(THDGroup group_id, const DataChannel::Group& group,
                           Args... args) {
+    // We need to protect from race when two (or more) threads are trying to
+    // create same algorithm simultaneously.
+    std::lock_guard<std::mutex> lock(_mutex);
+    
     auto key = algorithm_spec<D, T>::key(group_id, args...);
     auto it = _algorithms.find(key);
     if (it == _algorithms.end()) {
@@ -115,6 +120,8 @@ private:
   rank_type _rank;
   std::shared_ptr<::gloo::transport::Device> _device;
   std::shared_ptr<store_type> _store;
+
+  std::mutex _mutex;
 
   std::unordered_map<key_type, value_type> _algorithms;
 };
@@ -164,7 +171,8 @@ struct algorithm_spec<CollectiveType::ALL_GATHER, T> {
         reinterpret_cast<T*>(output_buffer.get()),
         count),
       input_buffer,
-      output_buffer
+      output_buffer,
+      std::make_shared<std::mutex>()
     );
   }
 };
@@ -192,7 +200,8 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
         count,
         THDToGlooReduceOp<T>(op)),
       input_buffer,
-      input_buffer // we get the result in same buffer
+      input_buffer, // we get the result in same buffer
+      std::make_shared<std::mutex>()
     );
   }
 };
@@ -220,7 +229,8 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
         count,
         src_rank),
       input_buffer,
-      input_buffer // we get the result in same buffer
+      input_buffer, // we get the result in same buffer
+      std::make_shared<std::mutex>()
     );
   }
 };
@@ -239,7 +249,8 @@ struct algorithm_spec<CollectiveType::BARRIER, T> {
     return std::make_tuple(
       std::make_shared<::gloo::BarrierAllToAll>(context),
       nullptr,
-      nullptr
+      nullptr,
+      std::make_shared<std::mutex>()
     );
   }
 };

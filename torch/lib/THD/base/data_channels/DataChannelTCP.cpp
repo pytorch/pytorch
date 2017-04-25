@@ -293,6 +293,8 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
    * efficient also for small data (< 512 KB).
    */
 
+  std::lock_guard<std::mutex> lock(_mutex);
+
   const auto& group = _groups.at(group_id);
   rank_type group_rank;
   bool exists;
@@ -325,6 +327,8 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
 
 void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
                             thpp::Tensor& input, rank_type dst_rank, THDGroup group_id) {
+  std::lock_guard<std::mutex> lock(_mutex);
+
   const auto& group = _groups.at(group_id);
   bool exists;
 
@@ -358,6 +362,8 @@ void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
 void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
                              thpp::Tensor& output, rank_type src_rank,
                              THDGroup group_id) {
+  std::lock_guard<std::mutex> lock(_mutex);
+
   const auto& group = _groups.at(group_id);
   bool exists;
 
@@ -403,6 +409,8 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
    * Implementation is based on:
    *   > https://github.com/pmodels/mpich/blob/master/src/mpi/coll/allreduce.c
    */
+
+  std::lock_guard<std::mutex> lock(_mutex);
 
   const auto& group = _groups.at(group_id);
   rank_type group_rank;
@@ -471,6 +479,8 @@ void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
    * order and direction of communication.
    */
 
+  std::lock_guard<std::mutex> lock(_mutex);
+
   const auto& group = _groups.at(group_id);
   rank_type group_rank;
   bool exists;
@@ -517,6 +527,8 @@ void DataChannelTCP::broadcast(thpp::Tensor& data, rank_type src_rank,
    * we have to create `virtual_rank` which converts regular ranks to
    * virtual ones where `virtual_rank` for `src_rank` is 0.
    */
+
+  std::lock_guard<std::mutex> lock(_mutex);
 
   const auto& group = _groups.at(group_id);
   rank_type group_rank;
@@ -643,6 +655,8 @@ void DataChannelTCP::barrier(THDGroup group_id) {
    * with wrap-around. Since we cannot do recv and send at the same time
    * we do recv asynchronously (thread), send byte and then wait for recv to complete.
    */
+
+  std::lock_guard<std::mutex> lock(_mutex);
 
   const auto& group = _groups.at(group_id);
   rank_type group_rank;
