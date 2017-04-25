@@ -140,6 +140,7 @@ REGISTER_CUDA_OPERATOR(NCCLAllreduce, NCCLAllreduceOp);
 OPERATOR_SCHEMA(NCCLAllreduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .IdenticalTypeAndShape()
     .AllowOneToOneInplace();
 SHOULD_NOT_DO_GRADIENT(NCCLAllreduce);
 
@@ -147,6 +148,7 @@ REGISTER_CUDA_OPERATOR(NCCLBroadcast, NCCLBroadcastOp);
 OPERATOR_SCHEMA(NCCLBroadcast)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .IdenticalTypeAndShape()
     .EnforceOneToOneInplace();
 SHOULD_NOT_DO_GRADIENT(NCCLBroadcast);
 
@@ -154,6 +156,7 @@ REGISTER_CUDA_OPERATOR(NCCLReduce, NCCLReduceOp);
 OPERATOR_SCHEMA(NCCLReduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
     .AllowInplace({{0, 0}});
 SHOULD_NOT_DO_GRADIENT(NCCLReduce);
 

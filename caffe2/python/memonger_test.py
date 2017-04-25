@@ -11,6 +11,17 @@ import hypothesis.strategies as st
 from hypothesis import given
 
 
+def has_blob(proto, needle):
+    for op in proto.op:
+        for inp in op.input:
+            if inp == needle:
+                return True
+        for outp in op.output:
+            if outp == needle:
+                return True
+    return False
+
+
 def count_blobs(proto):
     blobs = set()
     for op in proto.op:
@@ -95,9 +106,27 @@ class MemongerTest(hu.HypothesisTestCase):
             ["name_x/loss"],
             set(m.param_to_grad.values()),
             "name_x/",
+            share_activations=False,
         )
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
+
+        optim_proto_wacts = memonger.share_grad_blobs(
+            m.net,
+            ["name_x/loss"],
+            set(m.param_to_grad.values()),
+            "name_x/",
+            share_activations=True,
+        )
+        blobs_wact_optim = count_blobs(optim_proto_wacts)
+        self.assertLessEqual(blobs_wact_optim, blobs_after)
+
+        # Check that the last activations are not shared
+        self.assertTrue(has_blob(optim_proto, "name_x/fc5"))
+        self.assertTrue(
+            has_blob(optim_proto_wacts, "name_x/fc5"),
+            "Dont remap final activation",
+        )
 
         # Test networks produce exactly same gradients
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
@@ -110,6 +139,13 @@ class MemongerTest(hu.HypothesisTestCase):
         loss = workspace.FetchBlob("name_x/loss")
         grad = workspace.FetchBlob(str(input_to_grad["name_x/fc1_w"]))
         workspace.RunNetOnce(optim_proto)
+        optimized_loss = workspace.FetchBlob("name_x/loss")
+        optimized_grad = workspace.FetchBlob(str(input_to_grad["name_x/fc1_w"]))
+        np.testing.assert_almost_equal(loss, optimized_loss)
+        np.testing.assert_almost_equal(grad, optimized_grad)
+
+        # Run with the forward optimization
+        workspace.RunNetOnce(optim_proto_wacts)
         optimized_loss = workspace.FetchBlob("name_x/loss")
         optimized_grad = workspace.FetchBlob(str(input_to_grad["name_x/fc1_w"]))
         np.testing.assert_almost_equal(loss, optimized_loss)
@@ -143,11 +179,12 @@ class MemongerTest(hu.HypothesisTestCase):
             ["name_x/loss1", "name_x/loss2"],
             set(m.param_to_grad.values()),
             "name_x",  # "name_x//shared_gradinp_0_shared" if using "name_x/"
+            share_activations=True,
+            dont_share_blobs=set(['name_x/fc6', 'name_x/fc5']),
         )
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
-
-        print(str(optim_proto))
+        self.assertTrue(has_blob(optim_proto, "name_x/fc6"))
 
         # Test networks produce exactly same gradients
         data = np.random.randn(batch_size, input_dim).astype(np.float32)

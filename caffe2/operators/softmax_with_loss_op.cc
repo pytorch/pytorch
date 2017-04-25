@@ -20,7 +20,7 @@ OPERATOR_SCHEMA(SoftmaxWithLoss)
           vector<TensorShape> out(2);
 
           auto logits = in[0]; // Tensor with Shape [batch_size, num_classes]
-          auto labels = in[1]; // Tensor with same shape as logits
+          auto labels = in[1]; // Tensor with shape [batch_size, ]
 
           auto batch_size = logits.dims().Get(0);
           auto num_classes = logits.dims().Get(1);
@@ -28,9 +28,6 @@ OPERATOR_SCHEMA(SoftmaxWithLoss)
           if (!spatial_mode) {
             // Labels must only be 1D or 2D
             CAFFE_ENFORCE(labels.dims().size() <= 2);
-
-            // Labels must have the same amount of elements as batch_size
-            CAFFE_ENFORCE(batch_size == labels.dims().Get(0));
 
             out[0].set_data_type(logits.data_type());
             out[0].add_dims(batch_size);

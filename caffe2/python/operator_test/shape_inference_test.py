@@ -75,6 +75,10 @@ class TestShapeInference(test_util.TestCase):
             "label",
             (100 * np.random.rand(16)).astype(np.int32),
         )
+        workspace.FeedBlob(
+            "label",
+            (100 * np.random.rand(16)).astype(np.int32),
+        )
         # Then do automatic comparison test: run the next once to
         # initialize everything
         self.InferTensorRunAndCompare(model)
