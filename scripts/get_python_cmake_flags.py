@@ -35,7 +35,9 @@ lib = sysconfig.get_config_var("LIBDIR")
 if sys.platform == "darwin":
     lib = os.path.dirname(lib) + '/Python'
     if os.path.isfile(lib):
-        flags += '-DPYTHON_LIBRARY={lib}'.format(lib=lib)
+        flags += '-DPYTHON_LIBRARY={lib} '.format(lib=lib)
 
 if os.path.isfile(inc + '/Python.h'):
-    flags += '-DPYTHON_INCLUDE_DIR={inc}'.format(inc=inc)
+    flags += '-DPYTHON_INCLUDE_DIR={inc} '.format(inc=inc)
+
+print(flags, end='')
