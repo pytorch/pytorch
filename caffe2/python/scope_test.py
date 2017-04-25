@@ -43,12 +43,38 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentNameScope(), "")
 
+    def testNamescopeAssertion(self):
+        self.assertEquals(scope.CurrentNameScope(), "")
+
+        try:
+            with scope.NameScope("test_scope"):
+                self.assertEquals(scope.CurrentNameScope(), "test_scope/")
+                raise Exception()
+        except Exception:
+            pass
+
+        self.assertEquals(scope.CurrentNameScope(), "")
+
     def testDevicescopeBasic(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
         dsc = core.DeviceOption(caffe2_pb2.CUDA, 9)
         with scope.DeviceScope(dsc):
             self.assertEquals(scope.CurrentDeviceScope(), dsc)
+
+        self.assertEquals(scope.CurrentDeviceScope(), None)
+
+    def testDevicescopeAssertion(self):
+        self.assertEquals(scope.CurrentDeviceScope(), None)
+
+        dsc = core.DeviceOption(caffe2_pb2.CUDA, 9)
+
+        try:
+            with scope.DeviceScope(dsc):
+                self.assertEquals(scope.CurrentDeviceScope(), dsc)
+                raise Exception()
+        except Exception:
+            pass
 
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
