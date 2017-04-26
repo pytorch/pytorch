@@ -3,6 +3,7 @@
 --------------------------------------------------------------------------------
 
 This branch realizes some learning rate schedulers with a unified interfere.
+Each scheduler should contains: __init__(), reset(), step().
 
 Currently supports:
  - ReduceLROnPlateau (ported from [Keras](https://keras.io/))
@@ -16,6 +17,8 @@ Currently supports:
 	    val_acc, val_loss = validate(...)
 	    scheduler.step(val_loss, epoch) # update lr if needed
 
+TODO:
+ - LambdaLRScheduler
 --------------------------------------------------------------------------------
 
 PyTorch is a python package that provides two high-level features:
