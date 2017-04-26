@@ -58,6 +58,8 @@ void THNN_(TemporalConvolution_updateOutput)(
     dimF = 2;
   }
 
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
   THNN_(TemporalConvolution_shapeCheck)
        (state, input, kW, dW, &inputFrameSize);
   input = THTensor_(newContiguous)(input);
@@ -98,9 +100,10 @@ void THNN_(TemporalConvolution_updateOutput)(
                               nFrame, outputFrameStride*output->size[1],
                               output->size[1], 1);
 
-      THTensor_(transpose)(weight, NULL, 0, 1);
-      THTensor_(addmm)(outputWindow, 1, outputWindow, 1, inputWindow, weight);
-      THTensor_(transpose)(weight, NULL, 0, 1);
+      THTensor *tweight = THTensor_(new)();
+      THTensor_(transpose)(tweight, weight, 0, 1);
+      THTensor_(addmm)(outputWindow, 1, outputWindow, 1, inputWindow, tweight);
+      THTensor_(free)(tweight);
     }
   }
   else
@@ -145,9 +148,10 @@ void THNN_(TemporalConvolution_updateOutput)(
                                 nFrame, outputFrameStride*outputSample->size[1],
                                 outputSample->size[1], 1);
 
-        THTensor_(transpose)(weight, NULL, 0, 1);
-        THTensor_(addmm)(outputWindow, 1, outputWindow, 1, inputWindow, weight);
-        THTensor_(transpose)(weight, NULL, 0, 1);
+        THTensor *tweight = THTensor_(new)();
+        THTensor_(transpose)(tweight, weight, 0, 1);
+        THTensor_(addmm)(outputWindow, 1, outputWindow, 1, inputWindow, tweight);
+        THTensor_(free)(tweight);
       }
     }
     THTensor_(free)(outputSample);
@@ -185,6 +189,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
     dimF = 2;
   }
 
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
   THNN_(TemporalConvolution_shapeCheck)(
         state, input, kW, dW, NULL);
   nInputFrame = input->size[dimS];
@@ -330,9 +335,10 @@ void THNN_(TemporalConvolution_accGradParameters)(
                               nFrame, outputFrameStride*gradOutput->size[1],
                               gradOutput->size[1], 1);
 
-      THTensor_(transpose)(gradOutputWindow, NULL, 0, 1);
-      THTensor_(addmm)(gradWeight, 1, gradWeight, scale, gradOutputWindow, inputWindow);
-      THTensor_(transpose)(gradOutputWindow, NULL, 0, 1);
+      THTensor *tgradOutputWindow = THTensor_(new)();
+      THTensor_(transpose)(tgradOutputWindow, gradOutputWindow, 0, 1);
+      THTensor_(addmm)(gradWeight, 1, gradWeight, scale, tgradOutputWindow, inputWindow);
+      THTensor_(free)(tgradOutputWindow);
     }
   }
   else
@@ -372,9 +378,10 @@ void THNN_(TemporalConvolution_accGradParameters)(
                                 nFrame, outputFrameStride*gradOutputSample->size[1],
                                 gradOutputSample->size[1], 1);
 
-        THTensor_(transpose)(gradOutputWindow, NULL, 0, 1);
-        THTensor_(addmm)(gradWeight, 1, gradWeight, scale, gradOutputWindow, inputWindow);
-        THTensor_(transpose)(gradOutputWindow, NULL, 0, 1);
+        THTensor *tgradOutputWindow = THTensor_(new)();
+        THTensor_(transpose)(tgradOutputWindow, gradOutputWindow, 0, 1);
+        THTensor_(addmm)(gradWeight, 1, gradWeight, scale, tgradOutputWindow, inputWindow);
+        THTensor_(free)(tgradOutputWindow);
       }
     }
     THTensor_(free)(gradOutputSample);

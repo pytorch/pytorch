@@ -62,5 +62,8 @@ PyObject * THCSPModule_initExtension(PyObject *self)
     THPUtils_setError("class loader couldn't access torch.cuda.sparse module");
     return NULL;
   }
-  return PyBool_FromLong(THCSPModule_initCudaSparse(module));
+  if (!THCSPModule_initCudaSparse(module)) {
+    return NULL;
+  }
+  Py_RETURN_NONE;
 }

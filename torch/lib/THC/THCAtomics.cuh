@@ -2,6 +2,7 @@
 #define THC_ATOMICS_INC
 
 #include "THCHalf.h"
+#include "THCNumerics.cuh"
 
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;

@@ -75,7 +75,7 @@ def autograd_sharing(queue, ready, master_modified):
     ready.set()
     master_modified.wait()
 
-    expected_var = torch.range(1, 25).view(5, 5)
+    expected_var = torch.arange(1, 26).view(5, 5)
     expected_var[0, 0] = 1000
     is_ok = var.data.equal(expected_var)
     var.data[:] = torch.ones(5, 5)
@@ -296,7 +296,7 @@ class TestMultiprocessing(TestCase):
         ctx = mp.get_context('spawn')
         tensors = []
         for i in range(5):
-            tensors += [torch.range(i * 5, (i * 5) + 4).cuda()]
+            tensors += [torch.arange(i * 5, (i + 1) * 5).cuda()]
 
         inq = ctx.Queue()
         outq = ctx.Queue()
@@ -311,7 +311,7 @@ class TestMultiprocessing(TestCase):
 
         for i, tensor in enumerate(tensors):
             v, device, tensor_size, storage_size = results[i]
-            self.assertEqual(v, torch.range(i * 5, (i * 5) + 4).sum())
+            self.assertEqual(v, torch.arange(i * 5, (i + 1) * 5).sum())
             self.assertEqual(device, 0)
             self.assertEqual(tensor_size, 5)
             self.assertEqual(storage_size, 5)
@@ -382,13 +382,13 @@ class TestMultiprocessing(TestCase):
             (False, True),
         ]
         for requires_grad, volatile in configs:
-            var = Variable(torch.range(1, 25).view(5, 5),
+            var = Variable(torch.arange(1, 26).view(5, 5),
                            requires_grad=requires_grad,
                            volatile=volatile)
             self._test_autograd_sharing(var)
 
     def test_parameter_sharing(self):
-        param = Parameter(torch.range(1, 25).view(5, 5))
+        param = Parameter(torch.arange(1, 26).view(5, 5))
         self._test_autograd_sharing(param)
 
     def _test_is_shared(self):

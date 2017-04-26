@@ -152,7 +152,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
         - THTensor* self
         - CONSTANT NULL, 0, NULL, NULL
     - cname: setStorage
-      before_call: THLongStoragePtr __storage_size = THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE ((THPStorage*)$arg1)->cdata));
+      before_call: THLongStoragePtr __storage_size = THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE arg_storage));
       arguments:
         - THTensor* self
         - THStorage* storage
@@ -191,6 +191,12 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
     return NULL;
 
   int ndim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
+
+  THPUtils_assert(dim >= -(ndim) && dim < (ndim),
+    "dimension out of range (expected to be in range of [%d, %d], but got %d)",
+    -(ndim), (ndim)-1, dim);
+  if (dim<0) dim += ndim;
+
   if(ndim > 1) {
     THTensorPtr selected = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
     THTensor_(select)(LIBRARY_STATE selected.get(), NULL, dim, idx);
@@ -358,50 +364,34 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - THBoolTensor* mask
 ]]
 
-#if IS_CUDA
-THTensor* THTensor_(transpose_neg)(THCState* state, THTensor *self, THTensor *src, int dim0, int dim1)
-#else
-THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int dim1)
-#endif
-{
-  int ndim = self->nDimension;
-  if (dim0 < 0)
-    dim0 += ndim;
-  if (dim1 < 0)
-    dim1 += ndim;
-  if (src != NULL) {
-    THTensor_(transpose)(LIBRARY_STATE self, src, dim0, dim1);
-    return NULL;
-  } else {
-    return THTensor_(newTranspose)(LIBRARY_STATE self, dim0, dim1);
-  }
-}
-
 [[
   name: transpose
   with_stateless: True
-  cname: transpose_neg
+  cname: newTranspose
   cpu_half: True
   auto_gpu: False
   return: THTensor*
   arguments:
     - THTensor* self
-    - CONSTANT NULL
-    - long dim0
-    - long dim1
+    - arg: long dim0
+      wrap_dim: self
+    - arg: long dim1
+      wrap_dim: self
 ]]
 
 [[
   name: transpose_
-  cname: transpose_neg
+  cname: transpose
   cpu_half: True
   auto_gpu: False
   return: self
   arguments:
     - THTensor* self
     - THTensor* self
-    - long dim0
-    - long dim1
+    - arg: long dim0
+      wrap_dim: self
+    - arg: long dim1
+      wrap_dim: self
 ]]
 
 [[
@@ -411,7 +401,7 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   cname: newTranspose
   return: THTensor*
   before_call: |
-    long ndim = ((THPTensor*)${arg0})->cdata->nDimension;
+    long ndim = arg_self->nDimension;
     THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
@@ -425,7 +415,7 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   auto_gpu: False
   return: self
   before_call: |
-    long ndim = ((THPTensor*)${arg0})->cdata->nDimension;
+    long ndim = arg_self->nDimension;
     THPUtils_assert(ndim == 2, "t_() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
@@ -449,7 +439,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -465,7 +456,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
       arguments:
         - THTensor* self
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
 ]]
 
 [[
@@ -479,7 +471,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self+1
 ]]
 
 [[
@@ -491,7 +484,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   arguments:
     - THTensor* self
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self+1
 ]]
 
 [[
@@ -550,7 +544,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
     - THIndexTensor* index
 ]]
 
@@ -561,7 +556,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   return: argument 0
   arguments:
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
     - THIndexTensor* index
     - THTensor* source
 ]]
@@ -573,7 +569,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   return: argument 0
   arguments:
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
     - THIndexTensor* index
     - THTensor* source
 ]]
@@ -585,7 +582,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   return: argument 0
   arguments:
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
     - THIndexTensor* index
     - real value
 ]]
@@ -599,7 +597,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dimension
+    - arg: long dimension
+      wrap_dim: self
     - long start
     - long length
 ]]
@@ -613,7 +612,8 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dimension
+    - arg: long dimension
+      wrap_dim: self
     - long size
     - long step
 ]]
@@ -623,6 +623,10 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   only_stateless: True
   defined_if: "!IS_CUDA"
   return: argument 0
+  before_arg_assign: |
+    PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
+        "and will be removed in 0.3. Note that arange generates values in [start; end), "
+        "not [start; end].", 1);
   arguments:
     - arg: THTensor* result
       output: True
@@ -633,19 +637,50 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
 ]]
 
 [[
+  name: arange
+  cname: range
+  only_stateless: True
+  defined_if: "!IS_CUDA"
+  return: argument 0
+  options:
+    - before_call: |
+        if (mod_traits<accreal>::mod(arg_end - arg_start, arg_step) == 0) {
+          arg_end -= arg_step;
+        }
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - accreal start
+        - accreal end
+        - accreal step
+    - before_call: |
+        if (mod_traits<accreal>::mod(arg_end - arg_start, 1) == 0) {
+          arg_end -= 1;
+        }
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - accreal start
+        - accreal end
+        - CONSTANT 1
+]]
+
+[[
   name: scatter_
   return: argument 0
   options:
     - cname: scatter
       arguments:
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - THIndexTensor* index
         - THTensor* src
     - cname: scatterFill
       arguments:
         - THTensor* self
-        - long dim
+        - arg: long dim
+          wrap_dim: self
         - THIndexTensor* index
         - real value
 ]]
@@ -655,87 +690,94 @@ THTensor* THTensor_(transpose_neg)(THTensor *self, THTensor *src, int dim0, int 
   with_stateless: True
   return: argument 0
   before_call: |
-    THLongStoragePtr _size = THIndexTensor_(newSizeOf)(LIBRARY_STATE ((THPIndexTensor*)$arg3)->cdata);
-    THTensor_(resize)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, _size, NULL);
+    THLongStoragePtr _size = THIndexTensor_(newSizeOf)(LIBRARY_STATE arg_index);
+    THTensor_(resize)(LIBRARY_STATE arg_result, _size, NULL);
   arguments:
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - long dim
+    - arg: long dim
+      wrap_dim: self
     - THIndexTensor* index
 ]]
 
 [[
   name: THPTensor_stateless_(cat)
   python_name: cat
+  method_flags: METH_KEYWORDS
   only_register: True
   only_stateless: True
 ]]
 #ifndef TH_REAL_IS_HALF
-static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
+static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
 #if IS_CUDA
   THCPAutoGPU __autogpu_guard(-1);
 #endif
-  Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
-  std::vector<THPObjectPtr> items;
-  std::vector<THTensor *> item_tensors;
-  PyObject *sequence;
-  Py_ssize_t seq_length;
+  static char* argnames[] = { "seq", "dim", "out", NULL };
+  PyObject *_seq = NULL;
+  long dim = 0;
+  PyObject *__out = NULL;
+
+  THPObjectPtr sequence;
+  std::vector<THTensor *> tensors;
   THPTensorPtr result;
-  long dimension = -1;
+  Py_ssize_t len;
 
-  if (_argcount == 0 || _argcount > 2 || !PySequence_Check(PyTuple_GET_ITEM(args, 0)))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|lO", argnames, &_seq, &dim, &__out)) {
     goto invalid_arguments;
-  sequence = PyTuple_GET_ITEM(args, 0);
-  seq_length = PySequence_Length(sequence);
-  THPUtils_assert(seq_length > 0, "sequence length has to be positive, but is %lld",
-                  (long long)seq_length);
-
-  items.reserve(seq_length);
-  item_tensors.reserve(seq_length);
-  for (int i = 0; i < seq_length; i++) {
-    items.push_back(PySequence_ITEM(sequence, i));
-    if (!THPTensor_(Check)(items[i].get()))
-      goto invalid_arguments;
-    item_tensors.push_back(((THPTensor*)items[i].get())->cdata);
   }
 
-  if (_argcount == 2) {
-    if (!THPUtils_checkLong(PyTuple_GET_ITEM(args, 1)))
+  sequence = PySequence_Fast(_seq, "seq must be a sequence");
+  if (!sequence) {
+    // NOTE: we use the error message from invalidArguments when _seq is not a sequence
+    goto invalid_arguments;
+  }
+
+  len = PySequence_Fast_GET_SIZE(sequence.get());
+  THPUtils_assert(len > 0, "seq can't be empty");
+
+  if (__out && __out != Py_None) {
+    if (!THPTensor_(Check)(__out)) {
       goto invalid_arguments;
-    dimension = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
+    }
+    Py_INCREF(__out);
+    result = (THPTensor *)__out;
   } else {
-    dimension = 0;
+    result = (THPTensor *)THPTensor_(NewEmpty)();
+    if (!result) return NULL;
   }
 
-  for (THTensor *t : item_tensors) {
+  for (int i = 0; i < len; i++) {
+    PyObject *item = PySequence_Fast_GET_ITEM(sequence.get(), i);
+    if (!THPTensor_(Check)(item))
+      goto invalid_arguments;
+    tensors.push_back(((THPTensor*)item)->cdata);
+  }
+
+  for (THTensor *t : tensors) {
     auto ndim = THTensor_(nDimension)(LIBRARY_STATE t);
     if (ndim > 0) {
-      THPUtils_assert(dimension > 0 ? dimension < ndim : ndim + dimension >= 0,
-                      "dimension out of range - got %d but the tensor is only %dD",
-                      dimension, ndim);
-      if (dimension < 0) dimension += ndim;
+      THPUtils_assert(dim > 0 ? dim < ndim : ndim + dim >= 0,
+                      "dim out of range - got %d but the tensor is only %dD",
+                      dim, ndim);
+      if (dim < 0) dim += ndim;
       break;
     }
   }
 
 #if IS_CUDA
-  __autogpu_guard.setDevice(THTensor_(getDevice)(LIBRARY_STATE item_tensors[0]));
+  __autogpu_guard.setDevice(THTensor_(getDevice)(LIBRARY_STATE tensors[0]));
 #endif
 
-  result = (THPTensor *)THPTensor_(NewEmpty)();
-  if (!result) return NULL;
-
-  THTensor_(catArray)(LIBRARY_STATE result->cdata, item_tensors.data(),
-      items.size(), dimension);
+  THTensor_(catArray)(LIBRARY_STATE result->cdata, tensors.data(), tensors.size(), dim);
   return (PyObject*)result.release();
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "cat", 2,
-      "(sequence[" THPTensorStr "] tensors)",
-      "(sequence[" THPTensorStr "] tensors, int dim)");
+  THPUtils_invalidArguments(args, kwargs, "cat", 2,
+      "(sequence[" THPTensorStr "] seq)",
+      "(sequence[" THPTensorStr "] seq, int dim)");
   return NULL;
   END_HANDLE_TH_ERRORS
 }

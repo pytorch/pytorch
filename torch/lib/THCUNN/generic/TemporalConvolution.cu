@@ -53,6 +53,8 @@ void THNN_(TemporalConvolution_updateOutput)(
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THNN_(TemporalConvolution_shapeCheck)
        (state, input, kW, dW, &inputFrameSize);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5, "bias must be contiguous");
 
   if (input->nDimension == 3)
   {
@@ -98,9 +100,10 @@ void THNN_(TemporalConvolution_updateOutput)(
                               nFrame, outputFrameStride*output->size[1],
                               output->size[1], 1);
 
-      THCTensor_(transpose)(state, weight, NULL, 0, 1);
-      THCTensor_(addmm)(state, outputWindow, ScalarConvert<int, real>::to(1), outputWindow, ScalarConvert<int, real>::to(1), inputWindow, weight);
-      THCTensor_(transpose)(state, weight, NULL, 0, 1);
+      THCTensor *tweight = THCTensor_(new)(state);
+      THCTensor_(transpose)(state, tweight, weight, 0, 1);
+      THCTensor_(addmm)(state, outputWindow, ScalarConvert<int, real>::to(1), outputWindow, ScalarConvert<int, real>::to(1), inputWindow, tweight);
+      THCTensor_(free)(state, tweight);
     }
   }
   else
@@ -145,9 +148,10 @@ void THNN_(TemporalConvolution_updateOutput)(
                                 nFrame, outputFrameStride*outputSample->size[1],
                                 outputSample->size[1], 1);
 
-        THCTensor_(transpose)(state, weight, NULL, 0, 1);
-        THCTensor_(addmm)(state, outputWindow, ScalarConvert<int, real>::to(1), outputWindow, ScalarConvert<int, real>::to(1), inputWindow, weight);
-        THCTensor_(transpose)(state, weight, NULL, 0, 1);
+        THCTensor *tweight = THCTensor_(new)(state);
+        THCTensor_(transpose)(state, tweight, weight, 0, 1);
+        THCTensor_(addmm)(state, outputWindow, ScalarConvert<int, real>::to(1), outputWindow, ScalarConvert<int, real>::to(1), inputWindow, tweight);
+        THCTensor_(free)(state, tweight);
       }
     }
     THCTensor_(free)(state, outputSample);
@@ -178,6 +182,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   int dimS = 0; // sequence dimension
 
   THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
@@ -329,9 +334,10 @@ void THNN_(TemporalConvolution_accGradParameters)(
                               nFrame, outputFrameStride*gradOutput->size[1],
                               gradOutput->size[1], 1);
 
-      THCTensor_(transpose)(state, gradOutputWindow, NULL, 0, 1);
-      THCTensor_(addmm)(state, gradWeight, ScalarConvert<int, real>::to(1), gradWeight, scale, gradOutputWindow, inputWindow);
-      THCTensor_(transpose)(state, gradOutputWindow, NULL, 0, 1);
+      THCTensor *tgradOutputWindow = THCTensor_(new)(state);
+      THCTensor_(transpose)(state, tgradOutputWindow, gradOutputWindow, 0, 1);
+      THCTensor_(addmm)(state, gradWeight, ScalarConvert<int, real>::to(1), gradWeight, scale, tgradOutputWindow, inputWindow);
+      THCTensor_(free)(state, tgradOutputWindow);
     }
   }
   else
@@ -371,9 +377,10 @@ void THNN_(TemporalConvolution_accGradParameters)(
                                 nFrame, outputFrameStride*gradOutputSample->size[1],
                                 gradOutputSample->size[1], 1);
 
-        THCTensor_(transpose)(state, gradOutputWindow, NULL, 0, 1);
-        THCTensor_(addmm)(state, gradWeight, ScalarConvert<int, real>::to(1), gradWeight, scale, gradOutputWindow, inputWindow);
-        THCTensor_(transpose)(state, gradOutputWindow, NULL, 0, 1);
+        THCTensor *tgradOutputWindow = THCTensor_(new)(state);
+        THCTensor_(transpose)(state, tgradOutputWindow, gradOutputWindow, 0, 1);
+        THCTensor_(addmm)(state, gradWeight, ScalarConvert<int, real>::to(1), gradWeight, scale, tgradOutputWindow, inputWindow);
+        THCTensor_(free)(state, tgradOutputWindow);
       }
     }
     THCTensor_(free)(state, gradOutputSample);

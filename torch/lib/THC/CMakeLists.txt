@@ -188,6 +188,8 @@ SET(src-cuda
   THCTensorTopK.cu
   THCTensorSort.cu
   THCTensorTypeUtils.cu
+  THCSortUtils.cu
+  THCTensorMode.cu
   )
 
 # loop over all types
@@ -220,10 +222,10 @@ IF ("$ENV{STATIC_TH}" STREQUAL "YES")
 ELSE()
   CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
   CUDA_ADD_CUBLAS_TO_TARGET(THC)
-  TARGET_LINK_LIBRARIES(THC ${TH_LIBRARIES} ${CUDA_curand_LIBRARY})
+  TARGET_LINK_LIBRARIES(THC ${TH_LIBRARIES} ${CUDA_curand_LIBRARY} ${CUDA_cusparse_LIBRARY})
 
   IF(USE_MAGMA)
-    TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES} ${CUDA_cusparse_LIBRARY})
+    TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES})
   ENDIF(USE_MAGMA)
 
   IF(NOT THC_SO_VERSION)
@@ -287,10 +289,12 @@ INSTALL(FILES
           THCNumerics.cuh
           THCTensorSort.cuh
           THCTensorInfo.cuh
+          THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
           THCTensorRandom.cuh
           THCTensorMathMagma.cuh
           THCThrustAllocator.cuh
+          THCTensorMode.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
@@ -335,4 +339,6 @@ INSTALL(FILES
           generic/THCDeviceTensorUtils.cu
           generic/THCTensorRandom.h
           generic/THCTensorRandom.cu
+          generic/THCTensorMode.h
+          generic/THCTensorMode.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

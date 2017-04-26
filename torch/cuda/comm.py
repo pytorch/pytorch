@@ -108,7 +108,8 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     of synchronizations.
 
     Arguments:
-        inputs (Iterable[Tensor]): an iterable of tensors to add.
+        inputs (Iterable[Iterable[Tensor]]): iterable of iterables that
+            contain tensors from a single device.
         destination (int, optional): a device on which the output will be
             placed (default: current device).
         buffer_size (int): maximum size of the buffer used for coalescing
@@ -235,10 +236,13 @@ def _take_tensors(tensors, size_limit):
     """Groups tensors into lists of up to size_limit bytes"""
     buf = []
     size = 0
+    last_type = type(tensors[0]) if len(tensors) > 0 else None
     for tensor in tensors:
+        t = type(tensor)
         param_size = tensor.numel() * tensor.element_size()
-        if size + param_size > size_limit and size > 0:
+        if t is not last_type or (size + param_size > size_limit and size > 0):
             yield buf
+            last_type = t
             size = 0
             buf = []
         buf.append(tensor)

@@ -85,11 +85,12 @@ auto ReadyQueue::pop_back() -> FunctionTask {
 Engine::Engine() : ready_queues() {
 }
 
+// This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
-auto Engine::thread_main(ReadyQueue& queue) -> void {
+auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
   while (1) {
-    FunctionTask task = queue.pop_back();
+    FunctionTask task = queue->pop_back();
     if (!task.base->has_error.load()) {
       try {
         evaluate_function(task);
@@ -98,6 +99,7 @@ auto Engine::thread_main(ReadyQueue& queue) -> void {
       }
     }
     if (--task.base->outstanding_tasks == 0) {
+      std::lock_guard<std::mutex> lock(task.base->mutex);
       task.base->not_done.notify_all();
     }
   }
@@ -349,12 +351,16 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 auto Engine::start_threads() -> void {
   int num_devices = 0;
 #ifdef WITH_CUDA
-  THCudaCheck(cudaGetDeviceCount(&num_devices));
+  // check for case of compiled with CUDA but no available devices
+  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
+    cudaGetLastError();
+    num_devices = 0;
+  }
 #endif
-  ready_queues = std::vector<std::unique_ptr<ReadyQueue>>(num_devices + 1);
+  ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_devices + 1);
   for (auto& queue : ready_queues) {
     queue.reset(new ReadyQueue());
-    std::thread t(&Engine::thread_main, this, std::ref(*queue));
+    std::thread t(&Engine::thread_main, this, queue);
     t.detach();
   }
 }

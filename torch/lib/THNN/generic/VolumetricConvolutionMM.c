@@ -495,12 +495,13 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
   // be left uninitialized on zero alpha, which might lead to weird behavior
   // hence, to be safe, zero it
   THTensor_(zero)(fgradInput);
-  THTensor_(transpose)(weight, weight, 0, 1);
+  THTensor *tweight = THTensor_(new)();
+  THTensor_(transpose)(tweight, weight, 0, 1);
 
   if (input->nDimension == 4)
   {
     THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
-      gradInput, gradOutput, weight, fgradInput,
+      gradInput, gradOutput, tweight, fgradInput,
       kT, kW, kH,
       dT, dW, dH,
       pT, pW, pH
@@ -519,7 +520,7 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
       THTensor *fgradInput_t = THTensor_(newSelect)(fgradInput, 0, t);
 
       THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
-        gradInput_t, gradOutput_t, weight, fgradInput_t,
+        gradInput_t, gradOutput_t, tweight, fgradInput_t,
         kT, kW, kH,
         dT, dW, dH,
         pT, pW, pH
@@ -531,8 +532,7 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
     }
   }
 
-  THTensor_(transpose)(weight, weight, 0, 1);
-
+  THTensor_(free)(tweight);
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
   if (freeWeight)
@@ -553,9 +553,10 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
     gradOutput->size[1]*gradOutput->size[2]*gradOutput->size[3], -1
   );
 
-  THTensor_(transpose)(finput, finput, 0, 1);
-  THTensor_(addmm)(gradWeight, 1, gradWeight, scale, gradOutput2d, finput);
-  THTensor_(transpose)(finput, finput, 0, 1);
+  THTensor *tfinput = THTensor_(new)();
+  THTensor_(transpose)(tfinput, finput, 0, 1);
+  THTensor_(addmm)(gradWeight, 1, gradWeight, scale, gradOutput2d, tfinput);
+  THTensor_(free)(tfinput);
 
   if (gradBias) {
     for (i = 0; i < gradBias->size[0]; i++)

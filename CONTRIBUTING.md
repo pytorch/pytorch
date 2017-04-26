@@ -26,8 +26,8 @@ To locally develop with PyTorch, here are some tips:
 1. Uninstall all existing pytorch installs
 ```
 conda uninstall pytorch
-pip uninstall pytorch
-pip uninstall pytorch # run this command twice
+pip uninstall torch
+pip uninstall torch # run this command twice
 ```
 
 2. Locally clone a copy of PyTorch from source:
@@ -69,6 +69,52 @@ For example:
 - test functionality
 
 You do not need to repeatedly install after modifying python files.
+
+#### C++ Development tips
+
+When you are developing on the C++ side of things, the environment variables `DEBUG` and `NOCUDA` are helpful.
+
+- `DEBUG=1` will enable debug builds (-g -O0)
+- `NOCUDA=1` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+
+For example:
+```
+NO_CUDA=1 DEBUG=1 python setup.py build develop
+```
+
+Also, if you are developing a lot, using ccache is a real time-saver. By default, ccache does not properly support CUDA stuff, so here are the instructions for installing a custom `ccache` fork that has CUDA support:
+```
+# install and export ccache
+if ! ls ~/ccache/bin/ccache
+then
+    sudo apt-get update
+    sudo apt-get install -y automake autoconf
+    sudo apt-get install -y asciidoc
+    mkdir -p ~/ccache
+    pushd /tmp
+    rm -rf ccache
+    git clone https://github.com/colesbury/ccache -b ccbin
+    pushd ccache
+    ./autogen.sh
+    ./configure
+    make install prefix=~/ccache
+    popd
+    popd
+
+    mkdir -p ~/ccache/lib
+    mkdir -p ~/ccache/cuda
+    ln -s ~/ccache/bin/ccache ~/ccache/lib/cc
+    ln -s ~/ccache/bin/ccache ~/ccache/lib/c++
+    ln -s ~/ccache/bin/ccache ~/ccache/lib/gcc
+    ln -s ~/ccache/bin/ccache ~/ccache/lib/g++
+    ln -s ~/ccache/bin/ccache ~/ccache/cuda/nvcc
+
+    ~/ccache/bin/ccache -M 25Gi
+fi
+
+export PATH=~/ccache/lib:$PATH
+export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
+```
 
 
 Hope this helps, and thanks for considering to contribute.

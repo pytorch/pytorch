@@ -671,7 +671,6 @@ auto THTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& s
   const THSTensor<real>* src2_sparse;
   if ((src2_sparse = dynamic_cast<const THSTensor<real>*>(&src2))) {
     THSTensor_(spcadd)(tensor, src1_t.tensor, value, src2_sparse->tensor);
-    return *this;
   } else {
     const THTensor &src2_t = const_tensor_cast(src2);
     THTensor_(cadd)(tensor, src1_t.tensor, value, src2_t.tensor);
