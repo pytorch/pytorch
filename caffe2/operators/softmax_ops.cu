@@ -1,4 +1,5 @@
 #include <cfloat>
+#include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "softmax_op.h"
@@ -96,58 +97,26 @@ __global__ void ProbCrossEntropyGradientKernel(
   }
 }
 
-#define REDUCTION_KERNEL_THREADS_X 128
-#define REDUCTION_KERNEL_THREADS_Y 4
-#define REDUCTION_THREADS \
-  (REDUCTION_KERNEL_THREADS_X * REDUCTION_KERNEL_THREADS_Y)
-
 __global__ void
-RowMaxKernelLargeD(const int num, const int D, const float* data, float* out) {
-  __shared__ float
-      max_buffer[REDUCTION_KERNEL_THREADS_Y * REDUCTION_KERNEL_THREADS_X];
-  const int threadId = threadIdx.y * REDUCTION_KERNEL_THREADS_X + threadIdx.x;
-
-  for (int index = blockIdx.y * blockDim.y + threadIdx.y; index < num;
-       index += blockDim.y * gridDim.y) {
+RowMaxKernel(const int rows, const int cols, const float* data, float* out) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  for (int rowIndex = blockIdx.x; rowIndex < rows; rowIndex += gridDim.x) {
     float maxval = -FLT_MAX;
-    for (int x = blockIdx.x * blockDim.x + threadIdx.x; x < D;
-         x += blockDim.x * gridDim.x) {
-      maxval = fmaxf(data[index * D + x], maxval);
+    // NB: The memory accesses here are sequentialized; without unrolling
+    // the loop, there will not be any ILP.  However, because we are running
+    // this kernel with a lot of threads, this should not be a big problem.
+    // However, if we reduce the number of threads to take advantage of
+    // warp-wide
+    // synchronization, this may become a problem again.
+    for (int colIndex = threadIdx.x; colIndex < cols; colIndex += blockDim.x) {
+      maxval = max(data[rowIndex * cols + colIndex], maxval);
     }
-    max_buffer[threadId] = maxval;
-
-    __syncthreads();
-
-    if (threadIdx.x < 32) {
-      maxval = fmaxf(
-          fmaxf(
-              fmaxf(maxval, max_buffer[threadId + 32]),
-              max_buffer[threadId + 64]),
-          max_buffer[threadId + 96]);
-      max_buffer[threadId] = maxval;
-    }
-
-    __syncthreads();
-
+    maxval = BlockReduce(temp_storage).Reduce(maxval, cub::Max());
     if (threadIdx.x == 0) {
-#pragma unroll
-      for (int j = 1; j < 32; j++) {
-        maxval = max(max_buffer[threadId + j], maxval);
-      }
-      out[index] = maxval;
+      out[rowIndex] = maxval;
     }
     __syncthreads();
-  }
-}
-
-__global__ void RowMaxKernel(const int num, const int D, const float* data,
-    float* out) {
-  CUDA_1D_KERNEL_LOOP(index, num) {
-    float maxval = -FLT_MAX;
-    for (int d = 0; d < D; ++d) {
-      maxval = max(data[index * D + d], maxval);
-    }
-    out[index] = maxval;
   }
 }
 
@@ -278,22 +247,11 @@ void Softmax(
     CUDAContext* context) {
   const int size = N * D;
 
-  if (D > 512) {
-    dim3 threadsPerBlock(
-        REDUCTION_KERNEL_THREADS_X, REDUCTION_KERNEL_THREADS_Y);
-    dim3 numBlocks(1, max(1, N / 32));
-    RowMaxKernelLargeD<<<
-        numBlocks,
-        threadsPerBlock,
-        0,
-        context->cuda_stream()>>>(N, D, logits, rowmax);
-  } else {
-    RowMaxKernel<<<
-        CAFFE_GET_BLOCKS(N),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context->cuda_stream()>>>(N, D, logits, rowmax);
-  }
+  RowMaxKernel<<<
+      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context->cuda_stream()>>>(N, D, logits, rowmax);
   // Put the intermediate result X - max(X) into Y
   context->Copy<float, CUDAContext, CUDAContext>(size, logits, probs);
   // Subtract the scale
