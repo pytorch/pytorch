@@ -33,15 +33,27 @@ class BatchMSELoss(ModelLayer):
             np.float32,
             model.net.NextScopedBlob(name + '_output'))
 
-    def add_ops(self, net):
+    def add_train_ops(self, net):
         prediction = net.Squeeze(
             self.input_record.prediction(),
             net.NextScopedBlob('squeezed_prediction'),
             dims=[1]
         )
 
+        label = self.input_record.label.field_blobs()
+        if self.input_record.label.field_type().base != (
+                self.input_record.prediction.field_type().base):
+
+            label = net.Cast(
+                label,
+                net.NextScopedBlob('cast_label'),
+                to=schema.data_type_for_dtype(
+                    self.input_record.prediction.field_type()
+                )
+            )
+
         label = net.StopGradient(
-            self.input_record.label(),
+            label,
             net.NextScopedBlob('stopped_label')
         )
 
@@ -51,3 +63,6 @@ class BatchMSELoss(ModelLayer):
         )
 
         net.AveragedLoss(l2dist, self.output_schema.field_blobs())
+
+    def add_ops(self, net):
+        pass
