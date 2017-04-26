@@ -50,6 +50,9 @@ void checkTypes(bool isCuda, thpp::Type type, ...) {
     if (tensor->isCuda() != isCuda) {
       throw invalid_tensor(isCuda ? "CUDA" : "CPU", tensor->isCuda() ? "CUDA" : "CPU");
     }
+    if (tensor->type() != type) {
+      throw invalid_tensor(thpp::toString(type), thpp::toString(tensor->type()));
+    }
   }
 }
 
