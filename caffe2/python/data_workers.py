@@ -140,6 +140,7 @@ class DataInputCoordinator(object):
         self._started = False
         self._workers = []
         self._input_source_name = input_source_name
+        self._c2_queue_capacity = 4
         self._create_caffe2_queues_and_ops()
         self._inputs = 0
         self._prev_seconds = 0
@@ -182,7 +183,7 @@ class DataInputCoordinator(object):
             self._log_inputs_per_interval(0, force=True)
 
     def _wait_finish(self):
-        print("Wait for workers to die")
+        print("Wait for workers to die: {}".format(self._input_source_name))
         for w in self._workers:
             if w != threading.current_thread():
                 w.join(5.0)  # don't wait forever, thread may be blocked in i/o
@@ -298,7 +299,9 @@ class DataInputCoordinator(object):
 
         for blob_name in self._input_blob_names:
             qname = blob_name + "_c2queue" + "_" + self._input_source_name
-            q = create_queue(qname, num_blobs=1, capacity=4)
+            q = create_queue(
+                qname, num_blobs=1, capacity=self._c2_queue_capacity
+            )
             self._queues.append(q)
             print("Created queue: {}".format(q))
 
@@ -386,6 +389,20 @@ class GlobalCoordinator(object):
             all_success = all_success and success
         self._coordinators = []
         return all_success
+
+    def stop_coordinator(self, input_source_name):
+        '''
+        Stop a specific coordinator
+        '''
+        for c in self._coordinators:
+            if c._input_source_name == input_source_name:
+                c._stop()
+                c._wait_finish()
+        self._coordinators = [
+            c for c in self._coordinators
+            if c._input_source_name != input_source_name
+        ]
+
 
     def register_shutdown_handler(self):
         def cleanup():
