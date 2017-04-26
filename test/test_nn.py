@@ -1299,6 +1299,14 @@ class TestNN(NNTestCase):
         self.assertIn('buf', l.state_dict())
         self.assertIs(l.state_dict()['buf'], buf)
 
+    def test_Conv2d_inconsistent_types(self):
+        inputs = Variable(torch.randn(4, 1, 7, 7).float())
+        weights = Variable(torch.randn(1, 1, 3, 3).double())
+        # inconsistent types should raise an exception
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        # but it should work with the same type
+        nn.functional.conv2d(inputs.float(), weights.float())
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_large_workspace(self):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
