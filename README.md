@@ -12,6 +12,7 @@ Currently supports:
  - ReduceLROnPlateau (ported from [Keras](https://keras.io/))
  - LambdaLR (Need testing)
  - StepLR (Need testing)
+ - MultiStepLR (Need testing)
  - ExponentialLR (Need testing)
  - GroupLambdaLR (Need testing)
  
