@@ -361,6 +361,8 @@ class ConvPoolOpBase : public Operator<Context> {
       const vector<TensorShape>& in,
       int output_channel) {
     ArgumentHelper helper(def);
+    CAFFE_ENFORCE_GT(in.size(), 0);
+    CAFFE_ENFORCE_GT(in[0].dims_size(), 0);
     int N = in[0].dims(0);
     bool channel_first;
 
