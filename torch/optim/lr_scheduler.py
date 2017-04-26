@@ -25,19 +25,20 @@ class GroupLambdaLR(object):
 
 
 class StepLR(LambdaLR):
-    """Sets the learning rate to the base_lr decayed by gamma 
-    every step_size epochs
+    """Set the learning rate to the base_lr decayed by gamma 
+    every step_size epochs.
     
     
     Example:
         >>> # lr = 0.05     if epoch < 30
         >>> # lr = 0.005    if 30 <= epoch < 60
-        >>> # lr = 0.0005   if epoch >= 90
+        >>> # lr = 0.0005   if 60 <= epoch < 90
+        >>> # ...
         >>> scheduler = StepLR(optimizer, base_lr=0.05, gamma=0.1, step_size=30)
-        >>> for epoch in range(10):
+        >>> for epoch in range(100):
+        >>>     scheduler.step(epoch)
         >>>     train(...)
         >>>     validate(...)
-        >>>     scheduler.step(epoch)
     """
 
     def __init__(self, optimizer, base_lr=0.1, gamma=0.1, step_size=30):
@@ -46,7 +47,7 @@ class StepLR(LambdaLR):
 
 
 class MultiStepLR(LambdaLR):
-    """Sets the learning rate to the base_lr decayed by gamma 
+    """Set the learning rate to the base_lr decayed by gamma 
     once the number of epoch reaches one of the milestones.
     
     
@@ -55,20 +56,21 @@ class MultiStepLR(LambdaLR):
         >>> # lr = 0.005    if 30 <= epoch < 80
         >>> # lr = 0.0005   if epoch >=80
         >>> scheduler = MultiStepLR(optimizer, base_lr=0.05, gamma=0.1, milestones=[30,80])
-        >>> for epoch in range(10):
+        >>> for epoch in range(100):
+        >>>     scheduler.step(epoch)
         >>>     train(...)
         >>>     validate(...)
-        >>>     scheduler.step(epoch)
     """
 
     def __init__(self, optimizer, base_lr=0.1, gamma=0.1, milestones=(10, 20, 30)):
+        milestones = sorted(milestones)
         super(MultiStepLR, self).__init__(optimizer, base_lr,
                                           lambda epoch: gamma ** bisect_right(milestones, epoch))
 
 
 class ExponentialLR(LambdaLR):
-    """Sets the learning rate to the initial LR decayed by gamma 
-    every step_size epochs"""
+    """Set the learning rate to the initial LR decayed by gamma in
+    every epoch."""
 
     def __init__(self, optimizer, base_lr, gamma):
         super(ExponentialLR, self).__init__(optimizer, base_lr,
@@ -105,8 +107,9 @@ class ReduceLROnPlateau(object):
         >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
         >>> for epoch in range(10):
         >>>     train(...)
-        >>>     val_acc, val_loss = validate(...)
-        >>>     scheduler.step(epoch, val_loss)
+        >>>     val_loss = validate(...)
+        >>>     # different from LambdaLR, step should be called after validate()
+        >>>     scheduler.step(epoch, val_loss) 
     """
 
     def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
