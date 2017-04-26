@@ -485,7 +485,10 @@ void Pair::handleConnecting() {
   // Verify that connecting was successful
   rv = getsockopt(fd_, SOL_SOCKET, SO_ERROR, &optval, &optlen);
   GLOO_ENFORCE_NE(rv, -1);
-  GLOO_ENFORCE_EQ(optval, 0, "SO_ERROR: ", strerror(optval));
+  if (optval != 0) {
+    signalIoFailure(
+        GLOO_ERROR_MSG("connect ", peer_.str(), ": ", strerror(optval)));
+  }
 
   // Common connection-made code
   handleConnected();
