@@ -335,6 +335,8 @@ import torch.autograd
 import torch.nn
 import torch.optim
 import torch.multiprocessing
+import torch.sparse
+_C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs
