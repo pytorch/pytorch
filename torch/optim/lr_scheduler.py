@@ -24,8 +24,8 @@ class GroupLambdaLR(object):
 
 
 class StepLR(LambdaLR):
-    """Sets the learning rate to the initial LR decayed by gamma 
-    every step_size epochs"""
+    """Set the learning rate to the initial LR decayed by gamma 
+    every step_size epochs."""
 
     def __init__(self, optimizer, base_lr=0.1, gamma=0.1, step_size=30):
         super(StepLR, self).__init__(optimizer, base_lr,
@@ -33,8 +33,8 @@ class StepLR(LambdaLR):
 
 
 class ExponentialLR(LambdaLR):
-    """Sets the learning rate to the initial LR decayed by gamma 
-    every step_size epochs"""
+    """Set the learning rate to the initial LR decayed by gamma 
+    every epoch."""
 
     def __init__(self, optimizer, base_lr, gamma):
         super(ExponentialLR, self).__init__(optimizer, base_lr,
