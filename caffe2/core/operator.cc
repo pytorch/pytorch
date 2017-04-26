@@ -250,28 +250,37 @@ static TensorShapes InferBlobShapesAndTypes(
         }
       }
 
-      std::vector<TensorShape> out = op_schema->InferTensor(op, input_desc);
-      if (op.is_gradient_op() && out.size()) {
-        // Special handling for gradient ops. We can assume gradients
-        // are of same size as the corresponding variables. This is bit
-        // ugly to base on string matching, but we don't have the connection
-        // between variable and its gradient specified
+      std::vector<TensorShape> out;
+      try {
+        out = op_schema->InferTensor(op, input_desc);
+        if (op.is_gradient_op() && out.size()) {
+          // Special handling for gradient ops. We can assume gradients
+          // are of same size as the corresponding variables. This is bit
+          // ugly to base on string matching, but we don't have the connection
+          // between variable and its gradient specified
 
-        CaffeMap<string, string> grads_to_params =
-            GradientMakerBase::MatchGradsToParams(op);
+          CaffeMap<string, string> grads_to_params =
+              GradientMakerBase::MatchGradsToParams(op);
 
-        for (int i = 0; i < out.size(); i++) {
-          if (out[i].unknown_shape()) {
-            std::string gradout = op.output(i);
+          for (int i = 0; i < out.size(); i++) {
+            if (out[i].unknown_shape()) {
+              std::string gradout = op.output(i);
 
-            if (grads_to_params.find(gradout) != grads_to_params.end()) {
-              std::string var = grads_to_params[gradout];
-              if (blob_desc.find(var) != blob_desc.end()) {
-                out[i] = blob_desc[var];
+              if (grads_to_params.find(gradout) != grads_to_params.end()) {
+                std::string var = grads_to_params[gradout];
+                if (blob_desc.find(var) != blob_desc.end()) {
+                  out[i] = blob_desc[var];
+                }
               }
             }
           }
         }
+      } catch (::caffe2::EnforceNotMet& enf) {
+        LOG(ERROR) << "Shape inference error: " << enf.msg();
+        LOG(ERROR) << "Operator: " << ProtoDebugString(op) << std::endl;
+        LOG(ERROR) << "Returning empty results.";
+        TensorShapes tps;
+        return tps;
       }
 
       if (out.size() != op.output_size()) {
