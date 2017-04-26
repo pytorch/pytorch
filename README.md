@@ -5,7 +5,7 @@
 This branch realizes some learning rate schedulers with a unified interfere.
 
 Each scheduler should contains three methods: 
- - __init__() 
+ - \_\_init\_\_() 
  - reset()
  - step()
 
