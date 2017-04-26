@@ -95,9 +95,9 @@ bool DataChannelMPI::init() {
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
   if (provided != MPI_THREAD_MULTIPLE) {
-    std::cerr << "WARNING: MPI implementation does not support multiple threads. "
-              << "Using same data channel in multiple thread can result in "
-              << "wrong results or errors." << std::endl;
+    std::cerr << "WARNING: Used MPI implementation doesn't support multithreading, "
+              << "so distributed functions might not work properly."
+              << std::endl;
   }
 
   int rank, num_processes;
