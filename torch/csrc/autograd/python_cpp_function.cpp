@@ -26,11 +26,17 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
     return PyErr_Format(PyExc_TypeError, "keyword arguments are not supported");
   }
 
+  auto& fn = *((THPCppFunction*)self);
   int num_inputs = PyTuple_GET_SIZE(args);
+  if (num_inputs != fn.num_args) {
+    return PyErr_Format(PyExc_TypeError, "expect %d arguments (got %d)",
+        fn.num_args, num_inputs);
+  }
+
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
-    if (arg == Py_None) {
+    if (i >= fn.num_required_args && arg == Py_None) {
       continue;
     }
     if (!THPVariable_Check(arg)) {
@@ -43,7 +49,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
 
   HANDLE_TH_ERRORS {
     AutoNoGIL nogil;
-    output = ((THPCppFunction*)self)->cdata->apply(vars);
+    output = fn.cdata->apply(vars);
   }
   END_HANDLE_TH_ERRORS
 
