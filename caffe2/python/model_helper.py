@@ -109,7 +109,7 @@ class ModelHelper(object):
         assert len(self._param_info) <= len(self.params)
         for param in self.params[len(self._param_info):]:
             if not isinstance(param, core.BlobReference):
-                param = core.BlobReference(str(param), net=self._param_init_net)
+                raise ValueError("Param %s must be a BlobReference!" % str(param))
             self._param_info.append(ParameterInfo(
                 param_id=len(self._param_info),
                 param=param,
@@ -125,7 +125,7 @@ class ModelHelper(object):
         shape = shape if shape is not None else self._infer_param_shape(param)
         self.params.append(param)
         if not isinstance(param, core.BlobReference):
-            param = core.BlobReference(str(param), net=self._param_init_net)
+            raise ValueError("Param %s must be a BlobReference!" % str(param))
         self._param_info.append(ParameterInfo(
             param_id=len(self._param_info),
             param=param,
