@@ -12,8 +12,8 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  int D = X.size() / N;
   distance->Resize(N);
+  int D = N > 0 ? X.size() / N : 0;
   float* distance_data = distance->mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
