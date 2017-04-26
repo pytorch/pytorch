@@ -127,8 +127,10 @@ class _SparseBase(object):
         raise NotImplementedError
 
     def __str__(self):
-        return '{} with indices:\n{}and values:\n{}'.format(
-            self.__class__.__name__, self._indices(), self._values())
+        # NB: modest duplication with _tensor_str
+        size_str = 'x'.join(str(size) for size in self.size())
+        return '{} of size {} with indices:\n{}and values:\n{}'.format(
+            self.__class__.__name__, size_str, self._indices(), self._values())
 
 
 class DoubleTensor(_SparseBase, _C.SparseDoubleTensorBase, _TensorBase):
