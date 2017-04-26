@@ -29,7 +29,7 @@
 // as a track point for bugs, until we find a proper versioning cycle.
 
 #define CAFFE2_VERSION_MAJOR 0
-#define CAFFE2_VERSION_MINOR 5
+#define CAFFE2_VERSION_MINOR 6
 #define CAFFE2_VERSION_PATCH 0
 #define CAFFE2_VERSION                                         \
   (CAFFE2_VERSION_MAJOR * 10000 + CAFFE2_VERSION_MINOR * 100 + \

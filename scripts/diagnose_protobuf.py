@@ -1,3 +1,5 @@
+## @package diagnose_protobuf
+# Module scripts.diagnose_protobuf
 """Diagnoses the current protobuf situation.
 
 Protocol buffer needs to be properly installed for Caffe2 to work, and
@@ -11,6 +13,10 @@ Usage:
     python scripts/diagnose_protobuf.py
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
 import os
 import re
 from subprocess import Popen, PIPE

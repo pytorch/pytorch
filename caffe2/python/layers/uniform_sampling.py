@@ -1,3 +1,5 @@
+## @package uniform_sampling
+# Module caffe2.python.layers.uniform_sampling
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
