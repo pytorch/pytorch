@@ -14,6 +14,7 @@ struct Param {
   std::string param;
   std::string grad;
   std::string accGrad;
+  std::string cellGradient;
 };
 
 struct RecurrentInput {
@@ -370,12 +371,20 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   std::vector<detail::Param> constructParams() {
     std::vector<detail::Param> params;
     const auto& param = OperatorBase::GetRepeatedArgument<int32_t>("param");
+    const auto& param_grads =
+        OperatorBase::GetRepeatedArgument<string>("param_grads");
+    CAFFE_ENFORCE(
+        param_grads.empty() || param_grads.size() == param.size(),
+        param.size(),
+        " != ",
+        param_grads.size());
     for (int i = 0; i < param.size(); ++i) {
       detail::Param p;
       // Forward inputs come after [outputs_with_grads] gradient inputs
       p.param = def().input(param[i] + gradInputs_.size());
       // See GetRecurrentNetworkGradient to understand offseting here
       p.grad = def().output(i + numSequences_);
+      p.cellGradient = param_grads.empty() ? "" : param_grads[i];
       p.accGrad = p.grad + "_acc";
       params.push_back(p);
     }
@@ -509,7 +518,14 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
     auto accumulateParameterGradients = [&]() {
       for (const auto& param : params_) {
-        auto gBlob = sharedWs_->GetBlob(param.grad);
+        // If a user passes in param_grads mapping, we can copy dirrectly
+        // form a blob where backward cell net written data to.
+        // This becomes handy in a case where gradient from the cell net
+        // is an internal blob of the backward cell. This happens, for example,
+        // when SumOp is the first op of the cell
+        auto gBlob = param.cellGradient.empty()
+            ? sharedWs_->GetBlob(param.grad)
+            : localWs_.GetBlob(param.cellGradient);
         CAFFE_ENFORCE(gBlob);
         const auto& g = gBlob->template Get<Tensor<Context>>();
 

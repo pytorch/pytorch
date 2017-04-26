@@ -184,23 +184,6 @@ def recurrent_net(
         forward_links.append((str(input_t), str(input_blob), 0))
 
     if backward_cell_net is not None:
-        for reference in references:
-            # Similar to above, in a case of a SumOp we need to write our parameter
-            # gradient to an external blob. In this case we can be sure that
-            # reference + "_grad" is a correct parameter name as we know how
-            # RecurrentNetworkOp gradient schema looks like.
-            reference_grad = reference + "_grad"
-            if (reference in backward_mapping and
-                    reference_grad != str(backward_mapping[reference])):
-                # We can use an Alias because after each timestep
-                # RNN op adds value from reference_grad into and _acc blob
-                # which accumulates gradients for corresponding parameter accross
-                # timesteps. Then in the end of RNN op these two are being
-                # swaped and reference_grad blob becomes a real blob instead of
-                # being an alias
-                backward_cell_net.Alias(
-                    backward_mapping[reference], reference_grad)
-
         for input_t, input_blob in inputs:
             backward_links.append((
                 backward_mapping[str(input_t)], str(input_blob) + "_grad", 0
@@ -228,6 +211,9 @@ def recurrent_net(
         backward_link_internal, backward_link_external, backward_link_offset = \
             unpack_triple(backward_links)
         params = [x for x in references if x in backward_mapping.keys()]
+        param_grads = [str(backward_mapping[x])
+                       for x in references
+                       if x in backward_mapping.keys()]
         backward_args = {
             'param': map(all_inputs.index, params),
             'backward_link_internal': map(str, backward_link_internal),
@@ -235,7 +221,9 @@ def recurrent_net(
             'backward_link_offset': backward_link_offset,
             'backward_step_net': str(backward_cell_net.Proto()),
             'outputs_with_grads': outputs_with_grads,
-            'recompute_blobs_on_backward': map(str, recompute_blobs_on_backward)
+            'recompute_blobs_on_backward': map(
+                str, recompute_blobs_on_backward),
+            'param_grads': param_grads,
         }
 
     results = net.RecurrentNetwork(
