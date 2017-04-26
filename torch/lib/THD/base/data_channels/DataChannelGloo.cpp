@@ -137,16 +137,16 @@ void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
     group_id, _groups.at(group_id), tensor_bytes, all_tensor_bytes, input.numel());
 
-  std::memcpy(std::get<1>(ret).get(), input.data(), tensor_bytes);
+  std::memcpy(GlooCache::input_buffer(ret).get(), input.data(), tensor_bytes);
 
   {
-    std::lock_guard<std::mutex> lock(*std::get<3>(ret));
-    std::get<0>(ret)->run();
+    std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
+    GlooCache::algorithm(ret)->run();
   }
 
   for (std::size_t i = 0; i < output.size(); i++) {
     std::memcpy(output.at(i)->data(),
-                std::get<2>(ret).get() + (i * tensor_bytes),
+                GlooCache::output_buffer(ret).get() + (i * tensor_bytes),
                 tensor_bytes);
   }
 }
@@ -188,12 +188,12 @@ void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
     group_id, _groups.at(group_id), tensor_bytes, t.numel(), operation);
 
-  std::memcpy(std::get<1>(ret).get(), t.data(), tensor_bytes);
+  std::memcpy(GlooCache::input_buffer(ret).get(), t.data(), tensor_bytes);
   {
-    std::lock_guard<std::mutex> lock(*std::get<3>(ret));
-    std::get<0>(ret)->run();
+    std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
+    GlooCache::algorithm(ret)->run();
   }
-  std::memcpy(t.data(), std::get<2>(ret).get(), tensor_bytes);
+  std::memcpy(t.data(), GlooCache::output_buffer(ret).get(), tensor_bytes);
 }
 
 void DataChannelGloo::allReduce(thpp::Tensor& data, THDReduceOp operation,
@@ -219,15 +219,15 @@ void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
     _groups.at(group_id).mustGetGroupRank(src_rank));
 
   if (_rank == src_rank)
-    std::memcpy(std::get<1>(ret).get(), data.data(), tensor_bytes);
+    std::memcpy(GlooCache::input_buffer(ret).get(), data.data(), tensor_bytes);
 
   {
-    std::lock_guard<std::mutex> lock(*std::get<3>(ret));
-    std::get<0>(ret)->run();
+    std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
+    GlooCache::algorithm(ret)->run();
   }
 
   if (_rank != src_rank)
-    std::memcpy(data.data(), std::get<2>(ret).get(), tensor_bytes);
+    std::memcpy(data.data(), GlooCache::output_buffer(ret).get(), tensor_bytes);
 }
 
 
@@ -278,8 +278,8 @@ void DataChannelGloo::barrier(THDGroup group_id) {
   auto ret = _cache->getAlgorithm<CollectiveType::BARRIER, void>(
     group_id, _groups.at(group_id));
   {
-    std::lock_guard<std::mutex> lock(*std::get<3>(ret));
-    std::get<0>(ret)->run();
+    std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
+    GlooCache::algorithm(ret)->run();
   }
 }
 
