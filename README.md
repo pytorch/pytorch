@@ -2,7 +2,7 @@
 
 --------------------------------------------------------------------------------
 
-This branch realizes some learning rate schedulers with a unified interfere. The source file is located in `/torch/optim/lr_scheduler.py`.
+This branch realizes some learning rate schedulers with an unified interface. The source file is located in `/torch/optim/lr_scheduler.py`.
 
 Each scheduler should contain two methods: 
  - \_\_init\_\_() 
