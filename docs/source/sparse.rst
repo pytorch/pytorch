@@ -3,6 +3,10 @@
 Sparse tensors
 ==============
 
+.. warning::
+
+    This API is currently experimental and may change in the near future.
+
 Torch supports sparse tensors in COO(rdinate) format, which can
 efficiently store and process tensors for which the majority of elements
 are zeros.
@@ -35,8 +39,6 @@ coalescing (or converting to another representation).  Some operations
 (for example, :func:`torch.FloatTensor.add`) produce duplicate entries;
 if you repeatedly perform these operations, you should coalesce your
 sparse tensors to prevent them from growing too large.
-
-This API is currently experimental and may change in the near future.
 
 .. class:: FloatTensor()
 
