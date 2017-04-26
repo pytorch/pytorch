@@ -10,10 +10,10 @@ Each scheduler should contain two methods:
 
 Currently supports:
  - ReduceLROnPlateau (ported from [Keras](https://keras.io/))
- - LambdaLR (Need testing)
- - StepLR (Need testing)
- - MultiStepLR (Need testing)
- - ExponentialLR (Need testing)
+ - LambdaLR
+ - StepLR
+ - MultiStepLR
+ - ExponentialLR
  - GroupLambdaLR (Need testing)
  
  Demo of ReduceLROnPlateau: 
