@@ -4,9 +4,8 @@
 
 This branch realizes some learning rate schedulers with a unified interfere. The source file is located in `/torch/optim/lr_scheduler.py`.
 
-Each scheduler should contain three methods: 
+Each scheduler should contain two methods: 
  - \_\_init\_\_() 
- - reset()
  - step()
 
 Currently supports:
