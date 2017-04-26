@@ -34,7 +34,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
     auto* dX = Output(0);
     auto* dY = Output(1);
     int N = X.ndim() > 0 ? X.dim32(0) : 1;
-    int D = X.size() / N;
+    int D = N > 0 ? X.size() / N : 0;
     CAFFE_ENFORCE(X.ndim() == Y.ndim());
     for (int i = 0; i < X.ndim(); ++i) {
       CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
