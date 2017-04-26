@@ -37,6 +37,7 @@ __global__ void ElementwiseLinearGradientKernel(const int N, const int D,
   __shared__ typename BlockReduce::TempStorage temp_storage;
 
   float g_a_sum_tot = BlockReduce(temp_storage).Sum(g_a_sum);
+  __syncthreads();
   float g_b_sum_tot = BlockReduce(temp_storage).Sum(g_b_sum);
 
   if (threadIdx.x == 0) {
