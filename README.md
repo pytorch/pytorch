@@ -10,6 +10,10 @@ Each scheduler should contain two methods:
 
 Currently supports:
  - ReduceLROnPlateau (ported from [Keras](https://keras.io/))
+ - LambdaLR (Need testing)
+ - StepLR (Need testing)
+ - ExponentialLR (Need testing)
+ - GroupLambdaLR (Need testing)
  
  Demo of ReduceLROnPlateau: 
  
@@ -18,10 +22,8 @@ Currently supports:
 	for epoch in range(10):
 	    train(...)
 	    val_acc, val_loss = validate(...)
-	    scheduler.step(val_loss, epoch) # update lr if needed
+	    scheduler.step(epoch, val_loss) # update lr if needed
 
-TODO:
- - LambdaLRScheduler
 --------------------------------------------------------------------------------
 
 PyTorch is a python package that provides two high-level features:
