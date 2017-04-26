@@ -59,7 +59,7 @@ struct GlooCache {
     std::shared_ptr<algorithm_type>, // algorithm
     std::shared_ptr<buffer_type>,    // input buffer (nullptr if not used)
     std::shared_ptr<buffer_type>,    // output buffer (nullptr if not used)
-    std::shared_ptr<std::mutex>      // mutex to make algorithms run atomically
+    std::shared_ptr<std::mutex>      // mutex to protect same algorithm from running concurrently
   >;
 
   GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device,
@@ -71,6 +71,25 @@ struct GlooCache {
 
   GlooCache(GlooCache const&)      = delete;
   void operator=(GlooCache const&) = delete;
+
+
+  // Accessors for value_type tuple
+  static inline std::shared_ptr<algorithm_type> algorithm(const value_type& t) {
+    return std::get<0>(t);
+  }
+
+  static inline std::shared_ptr<buffer_type> input_buffer(const value_type& t) {
+    return std::get<1>(t);
+  }
+
+  static inline std::shared_ptr<buffer_type> output_buffer(const value_type& t) {
+    return std::get<2>(t);
+  }
+
+  static inline std::shared_ptr<std::mutex> mutex(const value_type& t) {
+    return std::get<3>(t);
+  }
+
 
   std::shared_ptr<context_type> createContext(
     const DataChannel::Group& group,
