@@ -35,6 +35,7 @@ class DataWorkersTest(unittest.TestCase):
             dummy_fetcher,
             32,
             2,
+            input_source_name="unittest"
         )
         new_seq_id = data_workers.global_coordinator._fetcher_id_seq
         self.assertEqual(new_seq_id, old_seq_id + 2)
@@ -44,7 +45,7 @@ class DataWorkersTest(unittest.TestCase):
         workspace.RunNetOnce(model.param_init_net)
         workspace.CreateNet(model.net)
 
-        for i in range(500):
+        for _i in range(500):
             with timeout_guard.CompleteInTimeOrDie(5):
                 workspace.RunNet(model.net.Proto().name)
 
@@ -59,7 +60,9 @@ class DataWorkersTest(unittest.TestCase):
                 self.assertEqual(labels[j], data[j, 1])
                 self.assertEqual(labels[j], data[j, 2])
 
-        coordinator.stop()
+        coordinator.stop_coordinator("unittest")
+        self.assertEqual(coordinator._coordinators, [])
+
 
     def testGracefulShutdown(self):
         model = cnn.CNNModelHelper(name="test")
