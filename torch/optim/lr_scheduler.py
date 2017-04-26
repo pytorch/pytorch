@@ -1,5 +1,6 @@
 import numpy as np
 import warnings
+from bisect import bisect_right
 from torch.optim.optimizer import Optimizer
 
 
@@ -24,17 +25,50 @@ class GroupLambdaLR(object):
 
 
 class StepLR(LambdaLR):
-    """Set the learning rate to the initial LR decayed by gamma 
-    every step_size epochs."""
+    """Sets the learning rate to the base_lr decayed by gamma 
+    every step_size epochs
+    
+    
+    Example:
+        >>> # lr = 0.05     if epoch < 30
+        >>> # lr = 0.005    if 30 <= epoch < 60
+        >>> # lr = 0.0005   if epoch >= 90
+        >>> scheduler = StepLR(optimizer, base_lr=0.05, gamma=0.1, step_size=30)
+        >>> for epoch in range(10):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step(epoch)
+    """
 
     def __init__(self, optimizer, base_lr=0.1, gamma=0.1, step_size=30):
         super(StepLR, self).__init__(optimizer, base_lr,
                                      lambda epoch: gamma ** (epoch // step_size))
 
 
+class MultiStepLR(LambdaLR):
+    """Sets the learning rate to the base_lr decayed by gamma 
+    once the number of epoch reaches one of the milestones.
+    
+    
+    Example:
+        >>> # lr = 0.05     if epoch < 30
+        >>> # lr = 0.005    if 30 <= epoch < 80
+        >>> # lr = 0.0005   if epoch >=80
+        >>> scheduler = MultiStepLR(optimizer, base_lr=0.05, gamma=0.1, milestones=[30,80])
+        >>> for epoch in range(10):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step(epoch)
+    """
+
+    def __init__(self, optimizer, base_lr=0.1, gamma=0.1, milestones=(10, 20, 30)):
+        super(MultiStepLR, self).__init__(optimizer, base_lr,
+                                          lambda epoch: gamma ** bisect_right(milestones, epoch))
+
+
 class ExponentialLR(LambdaLR):
-    """Set the learning rate to the initial LR decayed by gamma 
-    every epoch."""
+    """Sets the learning rate to the initial LR decayed by gamma 
+    every step_size epochs"""
 
     def __init__(self, optimizer, base_lr, gamma):
         super(ExponentialLR, self).__init__(optimizer, base_lr,
