@@ -60,7 +60,7 @@ import numpy as np
 import time
 import collections
 
-from caffe2.python import workspace, core, scope
+from caffe2.python import workspace, core, scope, utils
 from caffe2.proto import caffe2_pb2
 
 log = logging.getLogger("data_workers")
@@ -133,6 +133,7 @@ class DataInputCoordinator(object):
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
         self._internal_queue = queue
+        self._scratch_blobs = set()
         self._queues = []
         self._device_option = device_option
         self._namescope = namescope
@@ -178,6 +179,9 @@ class DataInputCoordinator(object):
                 workspace.RunOperatorOnce(
                     core.CreateOperator("CloseBlobsQueue", [q], [])
                 )
+
+            # Release memory for the scratch blobs
+            utils.ResetBlobs(self._scratch_blobs)
             self._started = False
         finally:
             self._log_inputs_per_interval(0, force=True)
@@ -274,6 +278,8 @@ class DataInputCoordinator(object):
             data_arr,
             device_option=self._device_option
         )
+        self._scratch_blobs.add(blob)
+        self._scratch_blobs.add(status)
 
         op = core.CreateOperator(
             "SafeEnqueueBlobs",
