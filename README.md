@@ -3,7 +3,11 @@
 --------------------------------------------------------------------------------
 
 This branch realizes some learning rate schedulers with a unified interfere.
-Each scheduler should contains: __init__(), reset(), step().
+
+Each scheduler should contains three methods: 
+ - __init__() 
+ - reset()
+ - step()
 
 Currently supports:
  - ReduceLROnPlateau (ported from [Keras](https://keras.io/))
