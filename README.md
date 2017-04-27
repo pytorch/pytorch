@@ -2,6 +2,31 @@
 
 --------------------------------------------------------------------------------
 
+This branch realizes some learning rate schedulers with an unified interface. The source file is located in `/torch/optim/lr_scheduler.py`.
+
+Each scheduler should contain two methods: 
+ - \_\_init\_\_() 
+ - step()
+
+Currently supports:
+ - ReduceLROnPlateau (ported from [Keras](https://keras.io/))
+ - LambdaLR
+ - StepLR
+ - MultiStepLR
+ - ExponentialLR
+ - GroupLambdaLR (Need testing)
+ 
+ Demo of ReduceLROnPlateau: 
+ 
+     optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+	scheduler = ReduceLROnPlateau(optimizer, 'min') # set up scheduler
+	for epoch in range(10):
+	    train(...)
+	    val_acc, val_loss = validate(...)
+	    scheduler.step(epoch, val_loss) # update lr if needed
+
+--------------------------------------------------------------------------------
+
 PyTorch is a python package that provides two high-level features:
 - Tensor computation (like numpy) with strong GPU acceleration
 - Deep Neural Networks built on a tape-based autograd system
