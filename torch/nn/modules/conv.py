@@ -521,7 +521,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose2d(
             input, self.weight, self.bias, self.stride, self.padding,
-            output_padding, self.groups)
+            output_padding, self.groups, self.dilation)
 
 
 class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
@@ -612,7 +612,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
-            output_padding, self.groups)
+            output_padding, self.groups, self.dilation)
 
 
 # TODO: Conv2dLocal
