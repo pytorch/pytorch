@@ -25,10 +25,10 @@ class GroupLambdaLR(object):
 
 
 class StepLR(LambdaLR):
-    """Set the learning rate to the base_lr decayed by gamma 
+    """Set the learning rate to the base_lr decayed by gamma
     every step_size epochs.
-    
-    
+
+
     Example:
         >>> # lr = 0.05     if epoch < 30
         >>> # lr = 0.005    if 30 <= epoch < 60
@@ -47,10 +47,10 @@ class StepLR(LambdaLR):
 
 
 class MultiStepLR(LambdaLR):
-    """Set the learning rate to the base_lr decayed by gamma 
+    """Set the learning rate to the base_lr decayed by gamma
     once the number of epoch reaches one of the milestones.
-    
-    
+
+
     Example:
         >>> # lr = 0.05     if epoch < 30
         >>> # lr = 0.005    if 30 <= epoch < 80
@@ -83,7 +83,7 @@ class ReduceLROnPlateau(object):
     of 2-10 once learning stagnates. This scheduler reads a metrics
     quantity and if no improvement is seen for a 'patience' number
     of epochs, the learning rate is reduced.
-    
+
     Args:
         factor: factor by which the learning rate will
             be reduced. new_lr = lr * factor
@@ -100,8 +100,8 @@ class ReduceLROnPlateau(object):
         cooldown: number of epochs to wait before resuming
             normal operation after lr has been reduced.
         min_lr: lower bound on the learning rate.
-        
-        
+
+
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
@@ -109,7 +109,7 @@ class ReduceLROnPlateau(object):
         >>>     train(...)
         >>>     val_loss = validate(...)
         >>>     # different from LambdaLR, step should be called after validate()
-        >>>     scheduler.step(epoch, val_loss) 
+        >>>     scheduler.step(epoch, val_loss)
     """
 
     def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
