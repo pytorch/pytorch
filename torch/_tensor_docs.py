@@ -1420,6 +1420,10 @@ sub(value, other) -> Tensor
 Subtracts a scalar or tensor from this tensor. If both :attr:`value` and
 :attr:`other` are specified, each element of :attr:`other` is scaled by
 :attr:`value` before being used.
+
+When :attr:`other` is a tensor, the shape of :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`
+with the shape of the underlying tensor.
+
 """)
 
 add_docstr(torch._C.FloatTensorBase.sub_,
