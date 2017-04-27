@@ -41,6 +41,39 @@ void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value) {
   }
 }
 
+/* floating point only, because that is what TH supports */
+#if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
+void THSTensor_(pow)(THSTensor *r_, THSTensor *t, real value) {
+  if (value == 0) {
+    THError("cannot raise to zeroth power on sparse tensor");
+  }
+  THSTensor_(contiguous)(t);
+  if (r_ == t) {
+    THTensor *r_values_ = THSTensor_(newValues)(r_);
+    THTensor_(pow)(r_values_, r_values_, value);
+    THTensor_(free)(r_values_);
+  } else {
+    THSTensor_(resizeAs)(r_, t);
+
+    THLongTensor *r_indices_ = THSTensor_(newIndices)(r_);
+    THTensor *r_values_ = THSTensor_(newValues)(r_);
+    THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
+    THTensor *t_values_ = THSTensor_(newValues)(t);
+
+    THLongTensor_resizeAs(r_indices_, t_indices_);
+    THLongTensor_copy(r_indices_, t_indices_);
+    THTensor_(pow)(r_values_, t_values_, value);
+    r_->nnz = t->nnz;
+    r_->contiguous = t->contiguous;
+
+    THLongTensor_free(r_indices_);
+    THTensor_(free)(r_values_);
+    THLongTensor_free(t_indices_);
+    THTensor_(free)(t_values_);
+  }
+}
+#endif
+
 void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value) {
   if (r_ == t) {
     THTensor *r_values_ = THSTensor_(newValues)(r_);

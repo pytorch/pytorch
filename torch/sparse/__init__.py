@@ -78,12 +78,6 @@ class _SparseBase(object):
     def __matmul__(self, other):
         raise NotImplementedError
 
-    def __pow__(self, other):
-        raise NotImplementedError
-
-    def __ipow__(self, other):
-        raise NotImplementedError
-
     def __rdiv__(self, other):
         raise NotImplementedError
 
