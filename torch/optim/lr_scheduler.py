@@ -137,7 +137,7 @@ class ReduceLROnPlateau(object):
     def _reset(self):
         """Resets wait counter and cooldown counter.
         """
-        self.best = self.monitor_op.best
+        self.best = self.monitor_op.worse
         self.cooldown_counter = 0
         self.wait = 0
         self.lr_epsilon = self.min_lr * 1e-4
@@ -180,10 +180,10 @@ class _MonitorOp(object):
             raise RuntimeError('Learning Rate Plateau Reducing mode %s is unknown!')
         if mode == 'min':
             self.monitor_op = lambda a, b: np.less(a, b - epsilon)
-            self.best = np.Inf
+            self.worse = np.Inf
         else:
             self.monitor_op = lambda a, b: np.greater(a, b + epsilon)
-            self.best = -np.Inf
+            self.worse = -np.Inf
 
     def __call__(self, a, b):
         return self.monitor_op(a, b)
