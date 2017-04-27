@@ -8,12 +8,12 @@ from __future__ import unicode_literals
 from caffe2.python import core
 
 
-def lrn(model, blob_in, blob_out, **kwargs):
+def lrn(model, blob_in, blob_out, order="NCHW", **kwargs):
     """LRN"""
     return model.net.LRN(
         blob_in,
         [blob_out, "_" + blob_out + "_scale"],
-        order=model.order,
+        order=order,
         **kwargs
     )[0]
 
