@@ -609,7 +609,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
 
 
-def _check_bilinear_scale_factor(scale_factor):
+def _check_bilinear_2d_scale_factor(scale_factor):
     scale_factor = _pair(scale_factor)
     try:
         assert len(scale_factor) == 2

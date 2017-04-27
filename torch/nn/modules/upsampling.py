@@ -13,7 +13,7 @@ class _UpsamplingBase(Module):
             raise ValueError('either size or scale_factor should be defined')
         if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
             raise ValueError('scale_factor must be of integer type or tuple of integer types')
-        self.size = _pair(size) if size is not None else None
+        self.size = size
         self.scale_factor = scale_factor
 
     def __repr__(self):
@@ -69,6 +69,7 @@ class UpsamplingNearest2d(_UpsamplingBase):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor)
         if self.scale_factor is not None and not isinstance(scale_factor, Integral):
             raise ValueError('scale_factor must be of integer type for neighest neighbor sampling')
+        self.size = _pair(self.size) if self.size is not None else None
 
     def forward(self, input):
         return F.upsample_nearest(input, self.size, self.scale_factor)
@@ -119,7 +120,8 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
 
         if self.scale_factor is not None:
-            self.scale_factor = F._check_bilinear_scale_factor(self.scale_factor)
+            self.scale_factor = F._check_bilinear_2d_scale_factor(self.scale_factor)
+        self.size = _pair(self.size) if self.size is not None else None
 
     def forward(self, input):
         return F.upsample_bilinear(input, self.size, self.scale_factor)

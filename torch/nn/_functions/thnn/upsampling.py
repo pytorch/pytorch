@@ -5,7 +5,7 @@ from torch._thnn import type2backend
 
 from . import _all_functions
 from ...modules.utils import _pair
-from ...functional import _check_bilinear_scale_factor
+from ...functional import _check_bilinear_2d_scale_factor
 
 
 class _UpsamplingBase(Function):
@@ -16,7 +16,7 @@ class _UpsamplingBase(Function):
             raise ValueError('either size or scale_factor should be defined')
         if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
             raise ValueError('scale_factor must be of integer type or tuple of integer types')
-        self.size = _pair(size) if size is not None else None
+        self.size = size
         self.scale_factor = scale_factor
 
 
@@ -27,6 +27,8 @@ class UpsamplingNearest2d(_UpsamplingBase):
 
         if self.scale_factor is not None and not isinstance(scale_factor, Integral):
             raise ValueError('scale_factor must be of integer type for nearest neighbor sampling')
+
+        self.size = _pair(self.size) if self.size is not None else None
 
     def forward(self, input):
         assert input.dim() == 4
@@ -74,7 +76,9 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
 
         if self.scale_factor is not None:
-            self.scale_factor = _check_bilinear_scale_factor(self.scale_factor)
+            self.scale_factor = _check_bilinear_2d_scale_factor(self.scale_factor)
+
+        self.size = _pair(self.size) if self.size is not None else None
 
     def forward(self, input):
         assert input.dim() == 4
