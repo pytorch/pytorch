@@ -1,14 +1,12 @@
 #include "lstm_unit_op.h"
 
 namespace caffe2 {
-
 namespace {
 REGISTER_CPU_OPERATOR(LSTMUnit, LSTMUnitOp<float, CPUContext>);
 OPERATOR_SCHEMA(LSTMUnit)
     .NumInputs(5)
     .NumOutputs(2)
     .SetDoc(R"DOC(
-
 LSTMUnit computes the activations of a standard LSTM (without peephole
 connections), in a sequence-length aware fashion.
 

@@ -9,6 +9,7 @@ from caffe2.python import core
 from caffe2.python.scope import CurrentNameScope
 
 
+
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
         links, timestep=None, scope=None, outputs_with_grads=(0,),

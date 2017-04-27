@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, rnn_cell, workspace
+from caffe2.python import core, rnn_cell, workspace, utils
 from caffe2.python.attention import AttentionType
 from caffe2.python.cnn import CNNModelHelper
 from hypothesis import given
@@ -23,7 +23,7 @@ def tanh(x):
 
 
 def lstm_unit(hidden_t_prev, cell_t_prev, gates,
-              seq_lengths, timestep, forget_bias=0.0):
+              seq_lengths, timestep, forget_bias=0.0, drop_states=False):
     D = cell_t_prev.shape[2]
     G = gates.shape[2]
     N = gates.shape[1]
@@ -47,16 +47,18 @@ def lstm_unit(hidden_t_prev, cell_t_prev, gates,
     valid = (t < seq_lengths).astype(np.int32)
     assert valid.shape == (N, D)
     cell_t = ((f_t * cell_t_prev) + (i_t * g_t)) * (valid) + \
-        (1 - valid) * cell_t_prev
+        (1 - valid) * cell_t_prev * (1 - drop_states)
     assert cell_t.shape == (N, D)
-    hidden_t = (o_t * tanh(cell_t)) * valid + hidden_t_prev * (1 - valid)
+    hidden_t = (o_t * tanh(cell_t)) * valid + hidden_t_prev * (
+        1 - valid) * (1 - drop_states)
     hidden_t = hidden_t.reshape(1, N, D)
     cell_t = cell_t.reshape(1, N, D)
     return hidden_t, cell_t
 
 
 def lstm_reference(input, hidden_input, cell_input,
-                   gates_w, gates_b, seq_lengths, forget_bias):
+                   gates_w, gates_b, seq_lengths, forget_bias,
+                   drop_states=False):
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
@@ -82,6 +84,7 @@ def lstm_reference(input, hidden_input, cell_input,
             seq_lengths,
             t,
             forget_bias,
+            drop_states=drop_states,
         )
         hidden[t + 1] = hidden_t
         cell[t + 1] = cell_t
@@ -285,7 +288,8 @@ def milstm_reference(
         beta2,
         b,
         seq_lengths,
-        forget_bias):
+        forget_bias,
+        drop_states=False):
     T = input.shape[0]
     N = input.shape[1]
     G = input.shape[2]
@@ -314,6 +318,7 @@ def milstm_reference(
             seq_lengths,
             t,
             forget_bias,
+            drop_states=drop_states,
         )
         hidden[t + 1] = hidden_t
         cell[t + 1] = cell_t
@@ -382,8 +387,10 @@ class RNNCellTest(hu.HypothesisTestCase):
         input_tensor=lstm_input(),
         forget_bias=st.floats(-10.0, 10.0),
         fwd_only=st.booleans(),
+        drop_states=st.booleans(),
     )
     @ht_settings(max_examples=25)
+    @utils.debug
     def test_lstm_main(self, **kwargs):
         for lstm_type in [(rnn_cell.LSTM, lstm_reference),
                           (rnn_cell.MILSTM, milstm_reference)]:
@@ -393,14 +400,14 @@ class RNNCellTest(hu.HypothesisTestCase):
                                    **kwargs)
 
     def lstm_base(self, lstm_type, outputs_with_grads, memory_optim,
-                  input_tensor, forget_bias, fwd_only):
+                  input_tensor, forget_bias, fwd_only, drop_states):
         print("LSTM test parameters: ", locals())
         create_lstm, ref = lstm_type
         t, n, d = input_tensor.shape
         assert d % 4 == 0
         d = d // 4
         print("Dims: ", t, n, d)
-        ref = partial(ref, forget_bias=forget_bias)
+        ref = partial(ref, forget_bias=forget_bias, drop_states=drop_states)
 
         model = CNNModelHelper(name='external')
         input_blob, seq_lengths, hidden_init, cell_init = (
@@ -413,7 +420,9 @@ class RNNCellTest(hu.HypothesisTestCase):
             outputs_with_grads=outputs_with_grads,
             memory_optimization=memory_optim,
             forget_bias=forget_bias,
-            forward_only=fwd_only)
+            forward_only=fwd_only,
+            drop_states=drop_states,
+        )
 
         op = model.net._net.op[-1]
 
