@@ -125,7 +125,7 @@ class CNNModelHelper(ModelHelper):
         return brew.dropout(self, *args, **kwargs)
 
     def LRN(self, *args, **kwargs):
-        return brew.lrn(self, *args, **kwargs)
+        return brew.lrn(self, order=self.order, *args, **kwargs)
 
     def Softmax(self, *args, **kwargs):
         return brew.softmax(self, *args, use_cudnn=self.use_cudnn, **kwargs)
