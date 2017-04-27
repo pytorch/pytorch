@@ -91,6 +91,37 @@ Example::
             return loss
         optimizer.step(closure)
 
+Sparse gradients
+^^^^^^^^^^^^^^^^
+
+When your gradient is sparse, you may be able to achieve a substantial
+speed up in model training if the resulting parameter updates are also
+sparse.  While a few optimizers have this property out-of-the-box (e.g.,
+vanilla SGD and Adagrad), other optimizers have features like weight
+decay and momentum which, if naively applied, would required dense
+parameter updates on all iterations.  Rather than degrade the
+performance of these optimizers on sparse gradients, we have instead
+added approximations to them in order to preserve the sparsity of
+parameter updates.
+
+Although these approximations are applied on a per-optimizer basis,
+there are some overall themes which guided our approximations:
+
+* Weight decay for a particular parameter is deferred until the
+  gradient says we should update this parameter, at which point
+  we apply *all* of the weight decay which had accumulated up
+  until that point.  This is an approximation because the
+  weight decay is applied after computing the gradient, not
+  before the forward pass (as it would be ordinarily).
+
+* Unlike weight decay, momentum is only applied and updated when the
+  gradient for the parameter is non-zero; furthermore, only
+  a single step of momentum is applied.  Intuitively, momentum
+  is intended to apply an extra force until the gradient tells
+  us to stop; on a sparse data set, if we continuously apply momentum,
+  we could easily shoot past the optimal point before we encountered
+  a sample which updated the gradient.
+
 Algorithms
 ----------
 
