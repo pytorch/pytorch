@@ -9,6 +9,17 @@ namespace caffe2 {
 
 namespace {
 
+template <typename T>
+struct ValueCmp {
+  bool operator()(
+      const std::pair<T, TIndex>& lhs,
+      const std::pair<T, TIndex>& rhs) {
+    return (
+        lhs.first > rhs.first ||
+        (lhs.first == rhs.first && lhs.second < rhs.second));
+  }
+};
+
 // Define these two names to allow lookup into the 2d tensors like
 // mytensor(i, j)
 template <typename T>
@@ -61,22 +72,31 @@ class TopKOp : public Operator<Context> {
         indices->template mutable_data<TIndex>(), linear_shape[0], k_);
 
     // Sort preserving indices
-    vector<TIndex> idxs(linear_shape[1]);
     for (TIndex i = 0; i < linear_shape[0]; ++i) {
-      std::iota(idxs.begin(), idxs.end(), 0);
-      std::partial_sort(
-          idxs.begin(), idxs.begin() + k_, idxs.end(), [&](TIndex a, TIndex b) {
-            if (input_map(i, a) > input_map(i, b)) {
-              return true;
-            } else if (input_map(i, a) == input_map(i, b)) {
-              return a < b;
-            } else {
-              return false;
-            }
-          });
+      // Build a min-heap, the heap element is pair of (value, idx)
+      // the top of the heap is the smallest value
+      std::priority_queue<
+          std::pair<T, TIndex>,
+          std::vector<std::pair<T, TIndex>>,
+          ValueCmp<T>>
+          PQ;
+
+      // Maintain the size of heap to be less or equal to k_, so the
+      // heap will hold the k_ largest values
+      for (TIndex j = 0; j < linear_shape[1]; ++j) {
+        const auto value = input_map(i, j);
+        if (PQ.size() < k_ || value > PQ.top().first) {
+          PQ.push(std::make_pair(value, j));
+        }
+        if (PQ.size() > k_) {
+          PQ.pop();
+        }
+      }
       for (TIndex j = 0; j < k_; ++j) {
-        values_map(i, j) = input_map(i, idxs[j]);
-        indices_map(i, j) = idxs[j];
+        auto& pqElem = PQ.top();
+        values_map(i, k_ - j - 1) = pqElem.first;
+        indices_map(i, k_ - j - 1) = pqElem.second;
+        PQ.pop();
       }
     }
 
