@@ -1,5 +1,4 @@
 import numpy as np
-import warnings
 from bisect import bisect_right
 from torch.optim.optimizer import Optimizer
 
@@ -124,15 +123,13 @@ class ReduceLROnPlateau(object):
                              'does not support a factor >= 1.0.')
         self.factor = factor
         self.min_lr = min_lr
-        self.epsilon = epsilon
         self.patience = patience
         self.verbose = verbose
         self.cooldown = cooldown
         self.cooldown_counter = 0  # Cooldown counter.
-        self.monitor_op = None
+        self.monitor_op = _MonitorOp(mode=mode, epsilon=epsilon)
         self.wait = 0
         self.best = 0
-        self.mode = mode
         assert isinstance(optimizer, Optimizer)
         self.optimizer = optimizer
         self._reset()
@@ -140,43 +137,53 @@ class ReduceLROnPlateau(object):
     def _reset(self):
         """Resets wait counter and cooldown counter.
         """
-        if self.mode not in ['min', 'max']:
-            raise RuntimeError('Learning Rate Plateau Reducing mode %s is unknown!')
-        if self.mode == 'min':
-            self.monitor_op = lambda a, b: np.less(a, b - self.epsilon)
-            self.best = np.Inf
-        else:
-            self.monitor_op = lambda a, b: np.greater(a, b + self.epsilon)
-            self.best = -np.Inf
+        self.best = self.monitor_op.best
         self.cooldown_counter = 0
         self.wait = 0
         self.lr_epsilon = self.min_lr * 1e-4
 
     def step(self, epoch, metrics):
         current = metrics
-        if current is None:
-            warnings.warn('Learning Rate Plateau Reducing requires metrics available!', RuntimeWarning)
-        else:
-            if self.in_cooldown():
-                self.cooldown_counter -= 1
-                self.wait = 0
 
-            if self.monitor_op(current, self.best):
-                self.best = current
+        if self.in_cooldown():
+            self.cooldown_counter -= 1
+            self.wait = 0
+
+        if self.monitor_op(current, self.best):
+            self.best = current
+            self.wait = 0
+        elif not self.in_cooldown():
+            if self.wait >= self.patience:
+                self._reduce_lr(epoch)
+            self.wait += 1
+
+    def _reduce_lr(self, epoch):
+        for param_group in self.optimizer.param_groups:
+            old_lr = float(param_group['lr'])
+            if old_lr > self.min_lr + self.lr_epsilon:
+                new_lr = old_lr * self.factor
+                new_lr = max(new_lr, self.min_lr)
+                param_group['lr'] = new_lr
+                if self.verbose > 0:
+                    print('\nEpoch %05d: reducing learning rate to %s.' % (epoch, new_lr))
+                self.cooldown_counter = self.cooldown
                 self.wait = 0
-            elif not self.in_cooldown():
-                if self.wait >= self.patience:
-                    for param_group in self.optimizer.param_groups:
-                        old_lr = float(param_group['lr'])
-                        if old_lr > self.min_lr + self.lr_epsilon:
-                            new_lr = old_lr * self.factor
-                            new_lr = max(new_lr, self.min_lr)
-                            param_group['lr'] = new_lr
-                            if self.verbose > 0:
-                                print('\nEpoch %05d: reducing learning rate to %s.' % (epoch, new_lr))
-                            self.cooldown_counter = self.cooldown
-                            self.wait = 0
-                self.wait += 1
 
     def in_cooldown(self):
         return self.cooldown_counter > 0
+
+
+class _MonitorOp(object):
+
+    def __init__(self, mode, epsilon):
+        if mode not in ['min', 'max']:
+            raise RuntimeError('Learning Rate Plateau Reducing mode %s is unknown!')
+        if mode == 'min':
+            self.monitor_op = lambda a, b: np.less(a, b - epsilon)
+            self.best = np.Inf
+        else:
+            self.monitor_op = lambda a, b: np.greater(a, b + epsilon)
+            self.best = -np.Inf
+
+    def __call__(self, a, b):
+        return self.monitor_op(a, b)
