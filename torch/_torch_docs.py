@@ -86,11 +86,7 @@ Each element of the Tensor :attr:`other` is multiplied by the scalar
 :attr:`value` and added to each element of the Tensor :attr:`input`.
 The resulting Tensor is returned.
 
-The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
-
-.. note:: When the shapes do not match, the shape of :attr:`input`
-          is used as the shape for the returned output Tensor
+The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 :math:`out = input + (other * value)`
 
@@ -415,6 +411,8 @@ atan2(input1, input2, out=None) -> Tensor
 
 Returns a new `Tensor` with the arctangent of the elements of :attr:`input1`
 and :attr:`input2`.
+
+The shapes of :attr:`input1` and :attr:`input2` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input1 (Tensor): the first input `Tensor`
@@ -1064,6 +1062,8 @@ dist(input, other, p=2) -> float
 
 Returns the p-norm of (:attr:`input` - :attr:`other`)
 
+The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+
 Args:
     input (Tensor): the input `Tensor`
     other (Tensor): the Right-hand-side input `Tensor`
@@ -1142,10 +1142,7 @@ Example::
 .. function:: div(input, other, out=None)
 
 Each element of the Tensor :attr:`input` is divided by each element of the Tensor :attr:`other`.
-The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
-
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 :math:`out_i = input_i / other_i`
 
@@ -1336,6 +1333,9 @@ Computes the element-wise remainder of division.
 
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the dividend `tensor`.
+
+When :attr:`divisor` is a Tensor, the shapes of :attr:`input` and :attr:`divisor`
+must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input (Tensor): The dividend
@@ -1856,6 +1856,8 @@ Does a linear interpolation of two tensors :attr:`start` and :attr:`end` based
 on a scalar :attr:`weight`: and returns the resulting :attr:`out` Tensor.
 
 :math:`out_i = start_i + weight * (end_i - start_i)`
+
+The shapes of :attr:`start` and :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     start (Tensor): the `Tensor` with the starting points
@@ -2585,10 +2587,9 @@ Example::
 .. function:: mul(input, other, out=None)
 
 Each element of the Tensor :attr:`input` is multiplied by each element of the Tensor :attr:`other`.
-The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
+The resulting Tensor is returned.
 
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 :math:`out_i = input_i * other_i`
 
@@ -3036,6 +3037,9 @@ When :attr:`exponent` is a Tensor, the operation applied is:
 
 :math:`out_i = x_i ^ {exponent_i}`
 
+When :attr:`exponent` is a Tensor, the shapes of :attr:`input`
+and :attr:`exponent` must be :ref:`broadcastable <broadcasting-semantics>`.
+
 Args:
     input (Tensor): the input `Tensor`
     exponent (float or Tensor): the exponent value
@@ -3396,6 +3400,9 @@ Computes the element-wise remainder of division.
 
 The divisor and dividend may contain both for integer and floating point
 numbers. The remainder has the same sign as the divisor.
+
+When :attr:`divisor` is a Tensor, the shapes of :attr:`input` and :attr:`divisor`
+must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input (Tensor): The dividend
