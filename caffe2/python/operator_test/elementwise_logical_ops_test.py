@@ -16,6 +16,11 @@ def mux(select, left, right):
     return [np.vectorize(lambda c, x, y: x if c else y)(select, left, right)]
 
 
+def rowmux(select_vec, left, right):
+    select = [[s] * len(left) for s in select_vec]
+    return mux(select, left, right)
+
+
 class TestWhere(hu.HypothesisTestCase):
 
     def test_reference(self):
@@ -51,6 +56,55 @@ class TestWhere(hu.HypothesisTestCase):
         op = core.CreateOperator("Where", ["C", "X", "Y"], ["Z"], engine=engine)
         self.assertDeviceChecks(dc, op, [C, X, Y], [0])
         self.assertReferenceChecks(gc, op, [C, X, Y], mux)
+
+
+class TestRowWhere(hu.HypothesisTestCase):
+
+    def test_reference(self):
+        self.assertTrue((
+            np.array([1, 2]) == rowmux([True],
+                                       [1, 2],
+                                       [3, 4])[0]
+        ).all())
+        self.assertTrue((
+            np.array([[1, 2], [7, 8]]) == rowmux([True, False],
+                                                 [[1, 2], [3, 4]],
+                                                 [[5, 6], [7, 8]])[0]
+        ).all())
+
+    @given(N=st.integers(min_value=1, max_value=10),
+           engine=st.sampled_from(["", "CUDNN"]),
+           **hu.gcs)
+    def test_rowwhere(self, N, gc, dc, engine):
+        C = np.random.rand(N).astype(bool)
+        X = np.random.rand(N).astype(np.float32)
+        Y = np.random.rand(N).astype(np.float32)
+        op = core.CreateOperator(
+            "Where",
+            ["C", "X", "Y"],
+            ["Z"],
+            broadcast_on_rows=True,
+            engine=engine,
+        )
+        self.assertDeviceChecks(dc, op, [C, X, Y], [0])
+        self.assertReferenceChecks(gc, op, [C, X, Y], mux)
+
+    @given(N=st.integers(min_value=1, max_value=10),
+           engine=st.sampled_from(["", "CUDNN"]),
+           **hu.gcs)
+    def test_rowwhere_dim2(self, N, gc, dc, engine):
+        C = np.random.rand(N).astype(bool)
+        X = np.random.rand(N, N).astype(np.float32)
+        Y = np.random.rand(N, N).astype(np.float32)
+        op = core.CreateOperator(
+            "Where",
+            ["C", "X", "Y"],
+            ["Z"],
+            broadcast_on_rows=True,
+            engine=engine,
+        )
+        self.assertDeviceChecks(dc, op, [C, X, Y], [0])
+        self.assertReferenceChecks(gc, op, [C, X, Y], rowmux)
 
 
 class TestIsMemberOf(hu.HypothesisTestCase):

@@ -34,9 +34,9 @@ class RowMulOp : public Operator<Context> {
 
     auto block_size = mat.size_from_dim(1);
     for (int i = 0; i < w.size(); i++) {
+      size_t offset = i * block_size;
       for (int j = 0; j < block_size; j++) {
-        output_data[i * block_size + j] =
-            mat_data[i * block_size + j] * w_data[i];
+        output_data[offset + j] = mat_data[offset + j] * w_data[i];
       }
     }
 
@@ -64,8 +64,9 @@ class ReduceTailSumOp : public Operator<Context> {
 
     for (int i = 0; i < N; i++) {
       output_data[i] = 0;
+      size_t offset = i * block_size;
       for (int j = 0; j < block_size; j++) {
-        output_data[i] += mat_data[i * block_size + j];
+        output_data[i] += mat_data[offset + j];
       }
     }
     return true;

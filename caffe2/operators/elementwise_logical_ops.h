@@ -14,9 +14,12 @@ namespace caffe2 {
 template <class Context>
 class WhereOp final : public Operator<Context> {
  public:
-  USE_SIMPLE_CTOR_DTOR(WhereOp);
   USE_OPERATOR_FUNCTIONS(Context);
   USE_DISPATCH_HELPER;
+
+  WhereOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        OP_SINGLE_ARG(bool, "broadcast_on_rows", enable_broadcast_, 0) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, double, int, long, std::string>>::
@@ -29,19 +32,49 @@ class WhereOp final : public Operator<Context> {
     auto& left = Input(1);
     auto& right = Input(2);
     auto* output = Output(0);
-    CAFFE_ENFORCE_EQ(select.dims(), left.dims());
-    CAFFE_ENFORCE_EQ(select.dims(), right.dims());
+    if (enable_broadcast_) {
+      CAFFE_ENFORCE_EQ(select.ndim(), 1);
+      CAFFE_ENFORCE_EQ(select.dim(0), right.dim(0));
+      CAFFE_ENFORCE_EQ(left.dims(), right.dims());
+    } else {
+      CAFFE_ENFORCE_EQ(select.dims(), left.dims());
+      CAFFE_ENFORCE_EQ(select.dims(), right.dims());
+    }
     output->ResizeLike(left);
 
     const bool* select_data = select.template data<bool>();
     const T* left_data = left.template data<T>();
     const T* right_data = right.template data<T>();
     T* output_data = output->template mutable_data<T>();
-    for (int i = 0; i < select.size(); ++i) {
-      output_data[i] = select_data[i] ? left_data[i] : right_data[i];
+
+    if (enable_broadcast_) {
+      size_t block_size = left.size_from_dim(1);
+      for (int i = 0; i < select.size(); i++) {
+        size_t offset = i * block_size;
+        if (select_data[i]) {
+          context_.template CopyItems<Context, Context>(
+              output->meta(),
+              block_size,
+              left_data + offset,
+              output_data + offset);
+        } else {
+          context_.template CopyItems<Context, Context>(
+              output->meta(),
+              block_size,
+              right_data + offset,
+              output_data + offset);
+        }
+      }
+    } else {
+      for (int i = 0; i < select.size(); ++i) {
+        output_data[i] = select_data[i] ? left_data[i] : right_data[i];
+      }
     }
     return true;
   }
+
+ private:
+  bool enable_broadcast_;
 };
 
 class IsMemberOfValueHolder {
