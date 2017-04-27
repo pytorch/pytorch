@@ -91,18 +91,33 @@ class LoadOp final : public Operator<Context> {
         keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
         load_all_(OperatorBase::GetSingleArgument<int>("load_all", 0)),
         allow_incomplete_(
-            OperatorBase::GetSingleArgument<bool>("allow_incomplete", false)) {
+            OperatorBase::GetSingleArgument<bool>("allow_incomplete", false)),
+        blob_names_(OperatorBase::GetRepeatedArgument<string>(
+            "source_blob_names")) {
     if (InputSize() == 0) {
       CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
       CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
     }
+    CAFFE_ENFORCE(blob_names_.empty() || blob_names_.size() == OutputSize(),
+      "Number of output blobs and source_blob_names mismatch.");
+    CAFFE_ENFORCE(blob_names_.empty() || strip_prefix_.empty(),
+        "strip_prefix and source_blob_names are mutually exclusive.");
+    CAFFE_ENFORCE(blob_names_.empty() || !load_all_,
+        "cannot load_all_ while using source_blob_names.");
     if (!load_all_) {
+      // blob_names_ will be filled with ''source blob names'' in file/db
+      // if argument source_blob_names is not given, then blob_names_ is
+      // inferred from operator output
+      if(blob_names_.empty()) {
+        for (const string& name : this->def().output()) {
+          blob_names_.push_back(name);
+        }
+      }
       int idx = 0;
-      std::set<std::string> input_names;
-      for (const string& output_name : this->def().output()) {
-        std::string name = output_name;
-        CAFFE_ENFORCE(
-            input_names.insert(name).second, "Duplicated input: ", name);
+      std::set<std::string> name_set;
+      for (const string& name : blob_names_) {
+        CAFFE_ENFORCE(name_set.insert(name).second,
+            "Duplicated source blob name: ", name);
         output_indices_[name] = idx++;
       }
     }
@@ -313,6 +328,7 @@ class LoadOp final : public Operator<Context> {
   bool load_all_;
   bool allow_incomplete_;
   std::map<string, int> output_indices_;
+  std::vector<std::string> blob_names_;
 };
 
 template <class Context>

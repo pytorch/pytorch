@@ -274,6 +274,41 @@ class TestLoadSave(TestLoadSaveBase):
             for i, name in enumerate(new_names):
                 self.assertTrue(workspace.HasBlob(name))
                 self.assertTrue((workspace.FetchBlob(name) == blobs[i]).all())
+            # moved here per @cxj's suggestion
+            load_new_names = ['blob_x', 'blob_y', 'blob_z']
+            # load 'x' into 'blob_x'
+            self.assertTrue(
+                workspace.RunOperatorOnce(
+                    core.CreateOperator(
+                        "Load", [], load_new_names[0:1],
+                        absolute_path=1,
+                        db=os.path.join(tmp_folder, "db"),
+                        db_type=self._db_type,
+                        source_blob_names=new_names[0:1]
+                    )
+                )
+            )
+            # we should have 'blob_a/b/c/' and 'blob_x' now
+            self.assertEqual(len(workspace.Blobs()), 4)
+            for i, name in enumerate(load_new_names[0:1]):
+                self.assertTrue(workspace.HasBlob(name))
+                self.assertTrue((workspace.FetchBlob(name) == blobs[i]).all())
+            self.assertTrue(
+                workspace.RunOperatorOnce(
+                    core.CreateOperator(
+                        "Load", [], load_new_names[0:3],
+                        absolute_path=1,
+                        db=os.path.join(tmp_folder, "db"),
+                        db_type=self._db_type,
+                        source_blob_names=new_names[0:3]
+                    )
+                )
+            )
+            # we should have 'blob_a/b/c/' and 'blob_x/y/z' now
+            self.assertEqual(len(workspace.Blobs()), 6)
+            for i, name in enumerate(load_new_names[0:3]):
+                self.assertTrue(workspace.HasBlob(name))
+                self.assertTrue((workspace.FetchBlob(name) == blobs[i]).all())
         finally:
             # clean up temp folder.
             try:
