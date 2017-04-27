@@ -829,6 +829,15 @@ class TestCuda(TestCase):
     def test_btrisolve(self):
         TestTorch._test_btrisolve(self, lambda t: t.cuda())
 
+    def test_tensor_gather(self):
+        TestTorch._test_gather(self, lambda t: t.cuda(), False)
+
+    def test_tensor_scatter(self):
+        TestTorch._test_scatter(self, lambda t: t.cuda(), False)
+
+    def test_tensor_scatterFill(self):
+        TestTorch._test_scatterFill(self, lambda t: t.cuda(), False)
+
 
 if HAS_CUDA:
     for decl in tests:
