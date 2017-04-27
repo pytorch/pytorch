@@ -6,6 +6,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
 #include <THPP/THPP.h>
 
@@ -184,15 +185,8 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
 
 static std::string hook_name(PyObject* hook) {
   THPObjectPtr name = PyObject_GetAttrString(hook, "__name__");
-#if PY_MAJOR_VERSION == 2
-  if (name && PyString_Check(name.get())) {
-    return std::string(PyString_AS_STRING(name.get()));
+  if (name && THPUtils_checkString(name.get())) {
+    return THPUtils_unpackString(name.get());
   }
-#else
-  if (name && PyUnicode_Check(name.get())) {
-    THPObjectPtr tmp = PyUnicode_AsASCIIString(name.get());
-    return std::string(PyBytes_AS_STRING(tmp.get()));
-  }
-#endif
   return "<unknown>";
 }

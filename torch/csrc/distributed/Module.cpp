@@ -42,29 +42,13 @@ static bool THDPModule_loadClasses(PyObject *module_dict)
 static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;
 static std::unordered_map<PyObject*, THDGroup> obj2group;
 
-static THPObjectPtr _ensureBytes(PyObject *obj)
-{
-#if PY_MAJOR_VERSION == 2
-  if (PyString_Check(obj)) {
-#elif PY_MAJOR_VERSION == 3
-  if (PyBytes_Check(obj)) {
-#endif
-    Py_INCREF(obj);
-    return obj;
-  }
-  if (PyUnicode_Check(obj)) {
-    return PyUnicode_AsASCIIString(obj);
-  }
-  return NULL;
-}
-
-PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *_backend)
+PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *backend)
 {
   HANDLE_TH_ERRORS
-  THPObjectPtr backend_bytes = _ensureBytes(_backend);
-  THPUtils_assert(backend_bytes, "backend argument has to be a string/bytes "
-      "object, but got %s", THPUtils_typename(_backend));
-  char *backend_name = THPUtils_bytesAsString(backend_bytes.get());
+  THPUtils_assert(THPUtils_checkString(backend),
+      "backend argument has to be a string/bytes object, but got %s",
+      THPUtils_typename(backend));
+  std::string backend_name = THPUtils_unpackString(backend);
   THDChannelType channel_type = name2channel_type.at(backend_name);
   THPUtils_assert(THDProcessGroupInit(channel_type), "failed to initialize "
       "distributed library (THD)");
@@ -72,13 +56,13 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *_backend)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *_backend)
+PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *backend)
 {
   HANDLE_TH_ERRORS
-  THPObjectPtr backend_bytes = _ensureBytes(_backend);
-  THPUtils_assert(backend_bytes, "backend argument has to be a string/bytes "
-      "object, but got %s", THPUtils_typename(_backend));
-  char *backend_name = THPUtils_bytesAsString(backend_bytes.get());
+  THPUtils_assert(THPUtils_checkString(backend),
+      "backend argument has to be a string/bytes object, but got %s",
+      THPUtils_typename(backend));
+  std::string backend_name = THPUtils_unpackString(backend);
   THDChannelType channel_type = name2channel_type.at(backend_name);
   THPUtils_assert(THDMasterWorkerInit(channel_type), "failed to initialize "
       "distributed library (THD)");
