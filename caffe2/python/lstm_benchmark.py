@@ -81,6 +81,7 @@ def create_model(args, queue, label_queue, input_shape):
             scope="lstm1",
             memory_optimization=args.memory_optimization,
             forward_only=args.forward_only,
+            drop_states=True,
         )
     elif args.implementation == "cudnn":
         # We need to feed a placeholder input so that RecurrentInitOp
@@ -131,7 +132,7 @@ def Caffe2LSTM(args):
 
     workspace.FeedBlob(
         "seq_lengths",
-        np.array([args.seq_length] * args.batch_size, dtype=np.int32)
+        np.array([args.seq_length // 2] * args.batch_size, dtype=np.int32)
     )
 
     model, output = create_model(args, queue, label_queue, input_blob_shape)
@@ -185,7 +186,7 @@ def GetArgumentParser():
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=40,
+        default=800,
         help="Hidden dimension",
     )
     parser.add_argument(
