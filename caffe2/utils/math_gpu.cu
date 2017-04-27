@@ -445,8 +445,7 @@ int HandleOddLengthRandGaussian(
     std::default_random_engine generator;
     std::normal_distribution<T> distribution(mean, std);
     const T random_value = distribution(generator);
-    math::Set<T, CUDAContext>(
-        1, random_value, r + sizeof(T) * (n - 1), context);
+    math::Set<T, CUDAContext>(1, random_value, r + (n - 1), context);
     return n - 1;
   }
   return n;
