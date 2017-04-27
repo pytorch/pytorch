@@ -17,10 +17,14 @@ class LambdaLR(object):
 
 class GroupLambdaLR(object):
     def __init__(self, optimizer, base_lrs, lr_lambdas):
-        self.zip = zip(optimizer.param_groups, base_lrs, lr_lambdas)
+        self.optimizer = optimizer
+        self.base_lrs = base_lrs
+        self.lr_lambdas = lr_lambdas
 
     def step(self, epoch):
-        for param_group, base_lr, lr_lambda in self.zip:
+        for param_group, base_lr, lr_lambda in zip(
+                self.optimizer.param_groups,
+                self.base_lrs, self.lr_lambdas):
             param_group['lr'] = base_lr * lr_lambda(epoch)
 
 
