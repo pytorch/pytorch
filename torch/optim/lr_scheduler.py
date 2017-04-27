@@ -7,8 +7,8 @@ from torch.optim.optimizer import Optimizer
 class LambdaLR(object):
     def __init__(self, optimizer, base_lr, lr_lambda):
         self.optimizer = optimizer
-        self.lr_lambda = lr_lambda
         self.base_lr = base_lr
+        self.lr_lambda = lr_lambda
 
     def step(self, epoch):
         for param_group in self.optimizer.param_groups:
@@ -151,9 +151,6 @@ class ReduceLROnPlateau(object):
         self.cooldown_counter = 0
         self.wait = 0
         self.lr_epsilon = self.min_lr * 1e-4
-
-    def reset(self):
-        self._reset()
 
     def step(self, epoch, metrics):
         current = metrics
