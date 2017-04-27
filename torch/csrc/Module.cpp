@@ -34,7 +34,7 @@ static bool THPModule_loadClasses(PyObject *self)
     return false;
   }
 
-  ASSERT_NOT_NULL(tensor_classes = PyObject_GetAttrString(torch_module, (char*)"_tensor_classes"));
+  ASSERT_NOT_NULL(tensor_classes = PyObject_GetAttrString(torch_module, "_tensor_classes"));
   if (!THPDoubleTensor_postInit(torch_module)) return false;
   if (!THPFloatTensor_postInit(torch_module)) return false;
   if (!THPHalfTensor_postInit(torch_module)) return false;
@@ -55,6 +55,35 @@ static bool THPModule_loadClasses(PyObject *self)
 
   return true;
 #undef ASSERT_NOT_NULL
+}
+
+static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
+{
+  static std::vector<std::string> names;
+
+  THPObjectPtr types = PySequence_Fast(arg, "expected a sequence");
+  if (!types) return NULL;
+
+  int num_classes = PySequence_Fast_GET_SIZE(types.get());
+  names.reserve(names.size() + num_classes);
+  for (int i = 0; i < num_classes; i++) {
+    PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
+    THPUtils_assert(PyType_Check(obj), "expected a PyTypeObject");
+    PyTypeObject* type = (PyTypeObject*)obj;
+
+    THPObjectPtr module_name = PyObject_GetAttrString(obj, "__module__");
+    if (!module_name) return NULL;
+#if PY_MAJOR_VERSION == 2
+    THPUtils_assert(PyString_Check(module_name.get()), "expected __module__ to be a string");
+    std::string name = PyString_AS_STRING(module_name.get());
+#else
+    THPUtils_assert(PyUnicode_Check(module_name.get()), "expected __module__ to be a string");
+    std::string name = PyUnicode_AsUTF8(module_name.get());
+#endif
+    names.push_back(name + "." + type->tp_name);
+    type->tp_name = names.back().c_str();
+  }
+  Py_RETURN_NONE;
 }
 
 static bool THPModule_assignStateless(PyObject *self)
@@ -482,7 +511,8 @@ static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
-  {"_sparse_init",    (PyCFunction)THSPModule_initExtension,    METH_NOARGS,  NULL},
+  {"_sparse_init",    (PyCFunction)THSPModule_initExtension,  METH_NOARGS,  NULL},
+  {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
 #ifdef WITH_CUDA
   {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},

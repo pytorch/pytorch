@@ -153,33 +153,9 @@ PyObject * THPUtils_dispatchStateless(
   return PyObject_Call(method.get(), args, kwargs);
 }
 
-std::string _THPUtils_typename(PyObject *object)
+static inline std::string _THPUtils_typename(PyObject *object)
 {
-  std::string type_name = Py_TYPE(object)->tp_name;
-  std::string result;
-  if (type_name.find("Storage") != std::string::npos ||
-          type_name.find("Tensor") != std::string::npos) {
-    PyObject *module_name = PyObject_GetAttrString(object, "__module__");
-#if PY_MAJOR_VERSION == 2
-    if (module_name && PyString_Check(module_name)) {
-      result = PyString_AS_STRING(module_name);
-    }
-#else
-    if (module_name && PyUnicode_Check(module_name)) {
-      PyObject *module_name_bytes = PyUnicode_AsASCIIString(module_name);
-      if (module_name_bytes) {
-        result = PyBytes_AS_STRING(module_name_bytes);
-        Py_DECREF(module_name_bytes);
-      }
-    }
-#endif
-    Py_XDECREF(module_name);
-    result += ".";
-    result += type_name;
-  } else {
-    result = std::move(type_name);
-  }
-  return result;
+  return Py_TYPE(object)->tp_name;
 }
 
 
