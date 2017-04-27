@@ -1,6 +1,7 @@
 #include "Size.h"
 
 #include <string>
+#include "torch/csrc/utils/python_strings.h"
 #include "THP.h"
 
 PyObject* THPSizeClass = NULL;
@@ -47,11 +48,7 @@ static PyObject * THPSize_repr(THPSize *self)
     repr += std::to_string(PyLong_AsLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
-#if PY_MAJOR_VERSION == 2
-  return PyString_FromString(repr.c_str());
-#else
-  return PyUnicode_FromString(repr.c_str());
-#endif
+  return THPUtils_packString(repr);
 }
 
 extern PyTypeObject THPSizeType;

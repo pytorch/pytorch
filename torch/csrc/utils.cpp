@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include "THP.h"
+#include "torch/csrc/utils/python_strings.h"
 
 #include "generic/utils.cpp"
 #include <TH/THGenerateAllTypes.h>
@@ -457,15 +458,6 @@ std::vector<std::string> _tryMatchKwargs(const Option& option,
   return unmatched;
 }
 
-std::string _parseDictKey(PyObject *key_str) {
-#if PY_MAJOR_VERSION == 3
-  THPObjectPtr ascii = PyUnicode_AsASCIIString(key_str);
-  return std::string(PyBytes_AS_STRING(ascii.get()));
-#else
-  return std::string(PyString_AS_STRING(key_str));
-#endif
-}
-
 void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...) {
   std::vector<std::string> option_strings;
@@ -493,7 +485,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
     Py_ssize_t pos = 0;
 
     while (PyDict_Next(given_kwargs, &pos, &key, &value)) {
-      kwargs.emplace(_parseDictKey(key), value);
+      kwargs.emplace(THPUtils_unpackString(key), value);
     }
   }
 
