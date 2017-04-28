@@ -44,6 +44,17 @@ struct ConvCtor {
   }
 };
 
+struct DelayedErrorCtor {
+  DelayedError* operator()(PyObject* args) {
+    std::string msg;
+
+    TupleParser parser(args, 1);
+    parser.parse(msg);
+
+    return new DelayedError(msg);
+  }
+};
+
 struct NoCtor {
   Function* operator()(PyObject* args) {
     throw std::runtime_error("Cannot construct");
@@ -82,6 +93,9 @@ bool THPAutograd_initFunctions(PyObject* _unused)
 
   static PyTypeObject ErrorClass;
   addClass<Error, NoCtor>(module, ErrorClass, "Error");
+
+  static PyTypeObject DelayedErrorClass;
+  addClass<DelayedError, DelayedErrorCtor>(module, DelayedErrorClass, "DelayedError");
 
   static PyTypeObject CloneClass;
   addClass<Clone, NoCtor>(module, CloneClass, "Clone");

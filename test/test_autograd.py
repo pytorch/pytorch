@@ -119,8 +119,34 @@ class TestAutograd(TestCase):
         x, y = self._function_test(MyFunction)
         x_grad_desc = graph_desc(x.grad.grad_fn)
         y_grad_desc = graph_desc(y.grad.grad_fn)
-        self.assertEqual(graph_desc(x.grad.grad_fn), 'Identity(Error())')
-        self.assertEqual(graph_desc(y.grad.grad_fn), 'Identity(Error())')
+        self.assertEqual(graph_desc(x.grad.grad_fn),
+                         'Identity(Error(AccumulateGrad(), None, AccumulateGrad()))')
+        self.assertEqual(graph_desc(y.grad.grad_fn),
+                         'Identity(Error(AccumulateGrad(), None, AccumulateGrad()))')
+
+    def test_accumulate_grad(self):
+        import sys
+
+        grad_output = Variable(torch.ones(5, 5))
+        for start_volatile, end_volatile in product((True, False), repeat=2):
+            go1 = grad_output.data if start_volatile else grad_output
+            go2 = grad_output.data if end_volatile else grad_output
+
+            x = Variable(torch.randn(5, 5), requires_grad=True)
+            y = x + 2
+            y.backward(go1, retain_variables=True)
+            x_grad = x.grad
+            x_grad_clone = x.grad.data.clone()
+
+            del x
+            y.backward(go2)
+
+            # That's the only case when we can accumulate in-place
+            if start_volatile and end_volatile:
+                expected_grad = x_grad_clone * 2
+            else:
+                expected_grad = x_grad_clone
+            self.assertEqual(x_grad.data, expected_grad)
 
     def test_hessian_vector(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
@@ -141,7 +167,7 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, x_grad + x_hv)
         self.assertEqual(y.grad.data, y_grad + y_hv)
 
-    def test_differentiate(self):
+    def test_grad(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         y = Variable(torch.randn(2, 2), requires_grad=True)
         z = x ** 2 + y * x + y ** 2
@@ -153,9 +179,9 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, y_grad)
 
         grad_sum = 2 * x.grad + y.grad
-        x_hv = torch.autograd.differentiate(
+        x_hv = torch.autograd.grad(
             outputs=[grad_sum], grad_outputs=[torch.ones(2, 2)],
-            inputs=[x], only_inputs=True, retain_variables=True)
+            inputs=[x], create_graph=True, only_inputs=True)
         expected_x_hv = torch.ones(2, 2) * 5
         expected_y_hv = torch.ones(2, 2) * 4
 
@@ -164,13 +190,63 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, y_grad)
 
         grad_sum = 2 * x.grad + y.grad
-        x_hv = torch.autograd.differentiate(
-            outputs=[grad_sum], grad_outputs=[torch.ones(2, 2)],
-            inputs=[x], only_inputs=False)
+        x_hv = torch.autograd.grad(
+            outputs=grad_sum, inputs=x,
+            grad_outputs=torch.ones(2, 2),
+            only_inputs=False)
 
         self.assertEqual(x_hv, expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad + expected_y_hv)
+
+    def test_grad_nonleaf(self):
+        x_init = Variable(torch.randn(2, 2), requires_grad=True)
+        x = x_init
+        y = Variable(torch.randn(2, 2), requires_grad=True)
+        grad_output = torch.ones(2, 2)
+
+        def fn(x):
+            return x ** 2 + y * x + y ** 2
+
+        for i in range(5):
+            grad_x, = torch.autograd.grad(
+                fn(x), x, grad_outputs=grad_output, create_graph=True)
+
+            grad_x_expected = 2 * x.data + y.data
+            self.assertIsNone(y.grad)
+            self.assertIsNone(x.grad)
+            self.assertEqual(grad_x, grad_x_expected)
+
+            x = x + 0.05 * grad_x
+
+        val_init = fn(x_init).data.sum()
+        val_final = fn(x).data.sum()
+        self.assertGreater(val_final, val_init)
+
+        x.backward(grad_output)
+        self.assertIsNotNone(y.grad)
+        self.assertIsNotNone(x_init.grad)
+
+    def test_grad_nonleaf_many_outputs(self):
+        # This checks an edge case for function callbacks
+        # We want to capture two grads of a function, but can only
+        # register a single callback.
+        x = Variable(torch.randn(4, 2), requires_grad=True)
+        a, b = x.chunk(2)
+
+        def hook(*grads):
+            hook_called[0] = True
+        hook_called = [False]
+        x.register_hook(hook)
+
+        go = torch.randn(2, 2)
+        grad_a, grad_b = torch.autograd.grad(
+            (a + 2 * b), [a, b], grad_outputs=go, create_graph=True)
+
+        self.assertEqual(grad_a, go)
+        self.assertEqual(grad_b, go * 2)
+        self.assertFalse(hook_called[0])
+        self.assertIsNone(x.grad)
 
     def test_hooks(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)

@@ -10,6 +10,17 @@ auto Error::apply(const variable_list& grad_outputs) -> variable_list {
   throw std::runtime_error(msg);
 };
 
+auto DelayedError::apply(const variable_list& inputs) -> variable_list {
+  tensor_list outputs;
+  outputs.reserve(inputs.size());
+  for (auto& var : inputs) {
+    outputs.emplace_back(var ? var->data->clone_shallow() : nullptr);
+  }
+  return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<Error>(msg, std::move(f));
+  });
+};
+
 auto Add::apply(const variable_list& inputs) -> variable_list {
   if (inputs.size() != 2) throw std::runtime_error("Add expects exactly 2 inputs");
   auto& input1 = inputs[0]->data;

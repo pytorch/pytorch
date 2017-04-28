@@ -99,6 +99,12 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
     }
   }
 
+  // XXX: this might get requires_grad wrong - there's no way to figure out
+  // if _do_backward didn't use ctx.saved_variables and as a result some
+  // Variables might require grad, even if no args do. Unfortunately, this
+  // leads to unexpected error messages ("no nodes require computing gradients"),
+  // but I don't have a better idea. These functions would raise an error
+  // in backward anyway.
   return wrap_outputs(inputs, std::move(tensor_results), [this](FunctionFlags &&f) {
     return std::make_shared<Error>(name() + " is not differentiable twice", std::move(f));
   });
@@ -585,10 +591,9 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
     _mark_dirty(grad_fn, t2var, dirty_inputs);
     _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs);
     _join_version_counters(grad_fn, t2var);
-    // TODO: is this stochastic check needed here?
-    if (grad_fn->cdata.is_executable || grad_fn->cdata.is_stochastic) {
-      _save_variables(grad_fn, t2var);
+    if (grad_fn->cdata.is_executable) {
       _mark_non_differentiable(grad_fn, t2var);
+      _save_variables(grad_fn, t2var);
     } else {
       // Remove unnecessary attributes
       Py_XDECREF(grad_fn->to_save);
