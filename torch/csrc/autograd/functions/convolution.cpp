@@ -60,7 +60,7 @@ auto ConvParams::use_cudnn(const Tensor& input) const -> bool {
   }
   if (is_dilated()) {
     cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
-    return CUDNN_VERSION >= 6000 && prop->major >= 5 && !transposed;
+    return ((CUDNN_VERSION >=6021) || (CUDNN_VERSION >= 6000 && prop->major >= 5 )) && !transposed;
   }
   return true;
 #endif
