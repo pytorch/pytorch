@@ -25,7 +25,7 @@ class TestTorch(TestCase):
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
         }
-        for tname, prec in types.items():
+        for tname, _prec in types.items():
             v1 = torch.randn(100).type(tname)
             v2 = torch.randn(100).type(tname)
             res1 = torch.dot(v1, v2)
@@ -1036,8 +1036,8 @@ class TestTorch(TestCase):
                        random.randint(1, SIZE),
                        random.randint(1, SIZE))
 
-        for kTries in range(3):
-            for dimTries in range(3):
+        for _kTries in range(3):
+            for _dimTries in range(3):
                 for transpose in (True, False):
                     for dir in (True, False):
                         testTensor = t
@@ -2055,7 +2055,7 @@ class TestTorch(TestCase):
 
         lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
         tensor = torch.DoubleTensor(lst)
-        for i in range(100):
+        for _i in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
             idx1_step = random.randrange(1, 8)
@@ -2169,6 +2169,7 @@ class TestTorch(TestCase):
         self.assertEqual(dest, dest2)
 
     # Fill idx with valid indices.
+    @staticmethod
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o):
         for i in range(1 if dim == 0 else m):
             for j in range(1 if dim == 1 else n):
@@ -2177,7 +2178,8 @@ class TestTorch(TestCase):
                     ii[dim] = slice(0, idx.size(dim) + 1)
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
-    def test_gather(self):
+    @staticmethod
+    def _test_gather(self, cast, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
@@ -2186,10 +2188,13 @@ class TestTorch(TestCase):
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
         idx = torch.LongTensor().resize_(*idx_size)
-        self._fill_indices(idx, dim, src.size(dim), elems_per_row, m, n, o)
+        TestTorch._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
+
+        src = cast(src)
+        idx = cast(idx)
 
         actual = torch.gather(src, dim, idx)
-        expected = torch.Tensor().resize_(*idx_size)
+        expected = cast(torch.Tensor().resize_(*idx_size))
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
@@ -2198,15 +2203,22 @@ class TestTorch(TestCase):
                     expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, 0)
 
-        idx[0][0][0] = 23
-        self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
+        if test_bounds:
+            idx[0][0][0] = 23
+            self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
 
-        src = torch.randn(3, 4, 5)
+        src = cast(torch.randn(3, 4, 5))
         expected, idx = src.max(2)
+        expected = cast(expected)
+        idx = cast(idx)
         actual = torch.gather(src, 2, idx)
         self.assertEqual(actual, expected, 0)
 
-    def test_scatter(self):
+    def test_gather(self):
+        self._test_gather(self, lambda t: t)
+
+    @staticmethod
+    def _test_scatter(self, cast, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
@@ -2214,11 +2226,14 @@ class TestTorch(TestCase):
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
         idx = torch.LongTensor().resize_(*idx_size)
-        self._fill_indices(idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
+        TestTorch._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
         src = torch.Tensor().resize_(*idx_size).normal_()
 
-        actual = torch.zeros(m, n, o).scatter_(dim, idx, src)
-        expected = torch.zeros(m, n, o)
+        src = cast(src)
+        idx = cast(idx)
+
+        actual = cast(torch.zeros(m, n, o)).scatter_(dim, idx, src)
+        expected = cast(torch.zeros(m, n, o))
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
@@ -2227,10 +2242,15 @@ class TestTorch(TestCase):
                     expected[tuple(ii)] = src[i, j, k]
         self.assertEqual(actual, expected, 0)
 
-        idx[0][0][0] = 34
-        self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, src))
+        if test_bounds:
+            idx[0][0][0] = 34
+            self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, src))
 
-    def test_scatterFill(self):
+    def test_scatter(self):
+        self._test_scatter(self, lambda t: t)
+
+    @staticmethod
+    def _test_scatterFill(self, cast, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
@@ -2239,10 +2259,12 @@ class TestTorch(TestCase):
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
         idx = torch.LongTensor().resize_(*idx_size)
-        self._fill_indices(idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
+        TestTorch._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
-        actual = torch.zeros(m, n, o).scatter_(dim, idx, val)
-        expected = torch.zeros(m, n, o)
+        idx = cast(idx)
+
+        actual = cast(torch.zeros(m, n, o)).scatter_(dim, idx, val)
+        expected = cast(torch.zeros(m, n, o))
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
@@ -2251,8 +2273,12 @@ class TestTorch(TestCase):
                     expected[tuple(ii)] = val
         self.assertEqual(actual, expected, 0)
 
-        idx[0][0][0] = 28
-        self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, val))
+        if test_bounds:
+            idx[0][0][0] = 28
+            self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, val))
+
+    def test_scatterFill(self):
+        self._test_scatterFill(self, lambda t: t)
 
     def test_masked_copy(self):
         num_copy, num_dest = 3, 10
