@@ -6,11 +6,12 @@ from __future__ import unicode_literals
 from caffe2.python import core, rnn_cell, workspace, utils
 from caffe2.python.attention import AttentionType
 from caffe2.python.cnn import CNNModelHelper
-from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+
 from functools import partial
-import hypothesis.strategies as st
+from hypothesis import given
 from hypothesis import settings as ht_settings
+import hypothesis.strategies as st
 import numpy as np
 
 
@@ -348,40 +349,69 @@ def lstm_input():
 
     return dims_.flatmap(create_input)
 
+
+def _prepare_lstm(t, n, d, create_lstm, outputs_with_grads,
+                  memory_optim, forget_bias, forward_only, drop_states):
+    print("Dims: ", t, n, d)
+
+    model = CNNModelHelper(name='external')
+    input_blob, seq_lengths, hidden_init, cell_init = (
+        model.net.AddExternalInputs(
+            'input_blob', 'seq_lengths', 'hidden_init', 'cell_init'))
+
+    create_lstm(
+        model, input_blob, seq_lengths, (hidden_init, cell_init),
+        d, d, scope="external/recurrent",
+        outputs_with_grads=outputs_with_grads,
+        memory_optimization=memory_optim,
+        forget_bias=forget_bias,
+        forward_only=forward_only,
+        drop_states=drop_states,
+    )
+
+    workspace.RunNetOnce(model.param_init_net)
+
+    def generate_random_state(n, d):
+        ndim = int(np.random.choice(3, 1)) + 1
+        if ndim == 1:
+            return np.random.randn(1, n, d).astype(np.float32)
+        random_state = np.random.randn(n, d).astype(np.float32)
+        if ndim == 3:
+            random_state = random_state.reshape([1, n, d])
+        return random_state
+
+    workspace.FeedBlob("hidden_init", generate_random_state(n, d))
+    workspace.FeedBlob("cell_init", generate_random_state(n, d))
+    workspace.FeedBlob(
+        "seq_lengths",
+        np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
+    )
+
+    return model.net
+
+
 class RNNCellTest(hu.HypothesisTestCase):
 
-    @given(n=st.integers(1, 10),
-           d=st.integers(1, 10),
-           t=st.integers(1, 10),
-           **hu.gcs)
-    def test_lstm_unit_recurrent_network(self, n, d, t, dc, gc):
-        op = core.CreateOperator(
-            'LSTMUnit',
-            [
-                'hidden_t_prev',
-                'cell_t_prev',
-                'gates_t',
-                'seq_lengths',
-                'timestep',
-            ],
-            ['hidden_t', 'cell_t'])
-        cell_t_prev = np.random.randn(1, n, d).astype(np.float32)
-        hidden_t_prev = np.random.randn(1, n, d).astype(np.float32)
-        gates = np.random.randn(1, n, 4 * d).astype(np.float32)
-        seq_lengths = np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
-        timestep = np.random.randint(0, t, size=(1,)).astype(np.int32)
-        inputs = [hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep]
-        input_device_options = {'timestep': hu.cpu_do}
-        self.assertDeviceChecks(
-            dc, op, inputs, [0],
-            input_device_options=input_device_options)
-        self.assertReferenceChecks(
-            gc, op, inputs, lstm_unit,
-            input_device_options=input_device_options)
-        for i in range(2):
-            self.assertGradientChecks(
-                gc, op, inputs, i, [0, 1],
-                input_device_options=input_device_options)
+    @given(
+        input_tensor=hu.tensor(min_dim=3, max_dim=3),
+        forget_bias=st.floats(-10.0, 10.0),
+        forward_only=st.booleans(),
+        drop_states=st.booleans(),
+    )
+    @ht_settings(max_examples=5)
+    def test_layered_lstm(self, input_tensor, **kwargs):
+        for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
+            for memory_optim in [False, True]:
+                net = _prepare_lstm(
+                    *input_tensor.shape,
+                    create_lstm=rnn_cell.layered_LSTM,
+                    outputs_with_grads=outputs_with_grads,
+                    memory_optim=memory_optim,
+                    **kwargs
+                )
+                workspace.FeedBlob("input_blob", input_tensor)
+                workspace.RunNetOnce(net)
+                workspace.ResetWorkspace()
 
     @given(
         input_tensor=lstm_input(),
@@ -389,63 +419,37 @@ class RNNCellTest(hu.HypothesisTestCase):
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
     )
-    @ht_settings(max_examples=25)
-    @utils.debug
+    @ht_settings(max_examples=15)
     def test_lstm_main(self, **kwargs):
         for lstm_type in [(rnn_cell.LSTM, lstm_reference),
                           (rnn_cell.MILSTM, milstm_reference)]:
             for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
                 for memory_optim in [False, True]:
-                    self.lstm_base(lstm_type, outputs_with_grads, memory_optim,
+                    self.lstm_base(lstm_type,
+                                   outputs_with_grads=outputs_with_grads,
+                                   memory_optim=memory_optim,
                                    **kwargs)
 
     def lstm_base(self, lstm_type, outputs_with_grads, memory_optim,
                   input_tensor, forget_bias, fwd_only, drop_states):
         print("LSTM test parameters: ", locals())
         create_lstm, ref = lstm_type
+        ref = partial(ref, forget_bias=forget_bias)
+
         t, n, d = input_tensor.shape
         assert d % 4 == 0
         d = d // 4
-        print("Dims: ", t, n, d)
         ref = partial(ref, forget_bias=forget_bias, drop_states=drop_states)
 
-        model = CNNModelHelper(name='external')
-        input_blob, seq_lengths, hidden_init, cell_init = (
-            model.net.AddExternalInputs(
-                'input_blob', 'seq_lengths', 'hidden_init', 'cell_init'))
-
-        create_lstm(
-            model, input_blob, seq_lengths, (hidden_init, cell_init),
-            d, d, scope="external/recurrent",
-            outputs_with_grads=outputs_with_grads,
-            memory_optimization=memory_optim,
-            forget_bias=forget_bias,
-            forward_only=fwd_only,
-            drop_states=drop_states,
+        net = _prepare_lstm(t, n, d, create_lstm,
+                            outputs_with_grads=outputs_with_grads,
+                            memory_optim=memory_optim,
+                            forget_bias=forget_bias,
+                            forward_only=fwd_only,
+                            drop_states=drop_states,
         )
-
-        op = model.net._net.op[-1]
-
-        workspace.RunNetOnce(model.param_init_net)
-        input_blob = op.input[0]
-
-        def generate_random_state(n, d):
-            ndim = int(np.random.choice(3, 1)) + 1
-            if ndim == 1:
-                return np.random.randn(1, n, d).astype(np.float32)
-            random_state = np.random.randn(n, d).astype(np.float32)
-            if ndim == 3:
-                random_state = random_state.reshape([1, n, d])
-            return random_state
-
-        workspace.FeedBlob(
-            str(input_blob), np.random.randn(t, n, d * 4).astype(np.float32))
-        workspace.FeedBlob("hidden_init", generate_random_state(n, d))
-        workspace.FeedBlob("cell_init", generate_random_state(n, d))
-        workspace.FeedBlob(
-            "seq_lengths",
-            np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
-        )
+        workspace.FeedBlob("external/recurrent/i2h", input_tensor)
+        op = net._net.op[-1]
         inputs = [workspace.FetchBlob(name) for name in op.input]
 
         self.assertReferenceChecks(
@@ -645,3 +649,36 @@ class RNNCellTest(hu.HypothesisTestCase):
                 threshold=0.01,
                 stepsize=0.001,
             )
+
+    @given(n=st.integers(1, 10),
+           d=st.integers(1, 10),
+           t=st.integers(1, 10),
+           **hu.gcs)
+    def test_lstm_unit_recurrent_network(self, n, d, t, dc, gc):
+        op = core.CreateOperator(
+            'LSTMUnit',
+            [
+                'hidden_t_prev',
+                'cell_t_prev',
+                'gates_t',
+                'seq_lengths',
+                'timestep',
+            ],
+            ['hidden_t', 'cell_t'])
+        cell_t_prev = np.random.randn(1, n, d).astype(np.float32)
+        hidden_t_prev = np.random.randn(1, n, d).astype(np.float32)
+        gates = np.random.randn(1, n, 4 * d).astype(np.float32)
+        seq_lengths = np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
+        timestep = np.random.randint(0, t, size=(1,)).astype(np.int32)
+        inputs = [hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep]
+        input_device_options = {'timestep': hu.cpu_do}
+        self.assertDeviceChecks(
+            dc, op, inputs, [0],
+            input_device_options=input_device_options)
+        self.assertReferenceChecks(
+            gc, op, inputs, lstm_unit,
+            input_device_options=input_device_options)
+        for i in range(2):
+            self.assertGradientChecks(
+                gc, op, inputs, i, [0, 1],
+                input_device_options=input_device_options)
