@@ -59,22 +59,22 @@ auto THCTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 template<>
 auto THCTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCTensor* {
   throw std::runtime_error("newSelect is not yet available for CUDA tensors");
-} 
+}
 
 template<>
 auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCTensor* {
   throw std::runtime_error("newNarrow is not yet available for CUDA tensors");
-} 
+}
 
 template<>
 auto THCTensor<real>::newTranspose(int dimension1, int dimension2) const -> THCTensor* {
   throw std::runtime_error("newTranspose is not yet available for CUDA tensors");
-} 
+}
 
 template<>
 auto THCTensor<real>::newUnfold(int dimension, long size, long step) const -> THCTensor* {
   throw std::runtime_error("newUnfold is not yet available for CUDA tensors");
-} 
+}
 
 template<>
 int THCTensor<real>::nDim() const {
@@ -272,7 +272,7 @@ auto THCTensor<real>::squeeze(const Tensor& src) -> THCTensor& {
 }
 
 template<>
-auto THCTensor<real>::squeeze1d(const Tensor& src, int dimension) -> THCTensor& {
+auto THCTensor<real>::squeeze(const Tensor& src, int dimension) -> THCTensor& {
   auto src_raw = (dynamic_cast<const THCTensor<real>&>(src)).tensor;
   THCTensor_(squeeze1d)(state, tensor, src_raw, dimension);
   return *this;

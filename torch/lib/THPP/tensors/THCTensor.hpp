@@ -42,10 +42,10 @@ public:
   virtual THCTensor* clone() const override;
   virtual THCTensor* clone_shallow() override;
   virtual std::unique_ptr<Tensor> contiguous() const override;
-  virtual THCTensor* newSelect(int dimension, long sliceIndex) const override; 
-  virtual THCTensor* newNarrow(int dimension, long firstIndex, long size) const override; 
-  virtual THCTensor* newTranspose(int dimension1, int dimension2) const override; 
-  virtual THCTensor* newUnfold(int dimension, long size, long step) const override; 
+  virtual THCTensor* newSelect(int dimension, long sliceIndex) const override;
+  virtual THCTensor* newNarrow(int dimension, long firstIndex, long size) const override;
+  virtual THCTensor* newTranspose(int dimension1, int dimension2) const override;
+  virtual THCTensor* newUnfold(int dimension, long size, long step) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -87,7 +87,7 @@ public:
   virtual THCTensor& unfold(const Tensor& src, int dimension,
                            long size, long step) override;
   virtual THCTensor& squeeze(const Tensor& src) override;
-  virtual THCTensor& squeeze1d(const Tensor& src, int dimension) override;
+  virtual THCTensor& squeeze(const Tensor& src, int dimension) override;
   virtual THCTensor& unsqueeze(const Tensor& src, int dimension) override;
 
   virtual THCTensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a) override;

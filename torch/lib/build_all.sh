@@ -114,7 +114,7 @@ CPP_FLAGS=" -std=c++11 "
 build libshm
 
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
-    build gloo "-DBUILD_SHARED=1"
+    build gloo
     build THD
 fi
 

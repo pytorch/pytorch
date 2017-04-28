@@ -296,7 +296,7 @@ static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->squeeze1d(*src, dimension);
+  tensor->squeeze(*src, dimension);
 }
 
 static void tensorFree(rpc::RPCMessage& raw_message) {

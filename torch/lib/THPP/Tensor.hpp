@@ -69,7 +69,7 @@ struct Tensor {
   virtual Tensor& transpose(const Tensor& src, int dimension1, int dimension2) = 0;
   virtual Tensor& unfold(const Tensor& src, int dimension, long size, long step) = 0;
   virtual Tensor& squeeze(const Tensor& src) = 0;
-  virtual Tensor& squeeze1d(const Tensor& src, int dimension) = 0;
+  virtual Tensor& squeeze(const Tensor& src, int dimension) = 0;
   virtual Tensor& unsqueeze(const Tensor& src, int dimension) = 0;
 
   virtual Tensor& copy(const Tensor& src) = 0;
