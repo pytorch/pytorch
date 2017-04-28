@@ -103,6 +103,8 @@ def default_collate(batch):
         return torch.DoubleTensor(batch)
     elif isinstance(batch[0], string_classes):
         return batch
+    elif isinstance(batch[0], collections.Mapping):
+        return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
     elif isinstance(batch[0], collections.Iterable):
         # if each batch element is not a tensor, then it should be a tuple
         # of tensors; in that case we collate each element in the tuple
@@ -118,6 +120,8 @@ def pin_memory_batch(batch):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
         return batch
+    elif isinstance(batch, collections.Mapping):
+        return {k: pin_memory_batch(sample) for k, sample in batch.items()}
     elif isinstance(batch, collections.Iterable):
         return [pin_memory_batch(sample) for sample in batch]
     else:
