@@ -40,10 +40,16 @@ struct CallbackContext {
   std::mutex mutex;
   std::string error;
   THPObjectPtr outputs;
+  // Used to determine which callback arguments should be used to
+  // fill outputs.
+  // Function -> ([grad_nr, outputs_idx], is_leaf)
+  std::unordered_map<
+    std::shared_ptr<Function>,
+    std::pair<std::vector<std::pair<int, int>>, bool>> output_map;
 };
 
 void compute_partial_exec_callbacks(const function_list& roots,
-                                    const std::vector<Function*> inputs,
+                                    const CallbackContext& ctx,
                                     Engine::callback_map& map) {
   static Engine::callback_type abort_callback(
       [](Function* fn, variable_list &vars) { return false; });
@@ -57,8 +63,9 @@ void compute_partial_exec_callbacks(const function_list& roots,
   queue.reserve(roots.size());
   for (auto& root : roots) {
     auto ptr = root.first.get();
-    queue.emplace_back(ptr);
-    seen.insert(ptr);
+    bool unseen;
+    std::tie(std::ignore, unseen) = seen.insert(ptr);
+    if (unseen) queue.emplace_back(ptr);
   }
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
@@ -75,13 +82,13 @@ void compute_partial_exec_callbacks(const function_list& roots,
 
   // Find all functions we need to compute
   queue.clear();
-  for (auto input: inputs) {
+  for (auto input_info: ctx.output_map) {
+    auto input = input_info.first.get();
     auto& rev_edges = rev_graph[input];
-    if (rev_edges.size() == 0) throw std::runtime_error("unreachable input");
+    if (rev_edges.size() == 0) throw std::runtime_error("differentiated input is unreachable");
     queue.emplace_back(input);
     needed.insert(input);
   }
-
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
     for (auto rev_next_fn : rev_graph[fn]) {
@@ -149,30 +156,41 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(PyTuple_Check(inputs), "outputs argument has to be a tuple");
     int num_inputs = PyTuple_GET_SIZE(inputs);
     ctx.outputs = PyTuple_New(num_inputs);
-    std::vector<Function*> grad_accumulators;
+    // First, find all relevant functions and fill ctx.output_map
     for (int i = 0; i < num_inputs; ++i) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Variables, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
-      auto grad_acc = input_var->cdata->grad_accumulator.lock();
-      // TODO: maybe just return a zero tensor?
-      THPUtils_assert(grad_acc, "One of the differentiated Variables appears to not have "
-          "been used in any computation");
-      grad_accumulators.push_back(grad_acc.get());
-      callbacks.emplace(grad_acc.get(), [&ctx, i](Function* _unused, variable_list& grads) {
+      auto grad_fn = input_var->cdata->grad_fn;
+      int output_nr = input_var->cdata->output_nr;
+      bool is_leaf = !grad_fn;
+      if (is_leaf) {
+          grad_fn = input_var->cdata->grad_accumulator.lock();
+      }
+      THPUtils_assert(grad_fn, "One of the differentiated Variables appears to not have "
+          "been used in the graph");
+      auto& fn_info = ctx.output_map[grad_fn];
+      fn_info.first.emplace_back(output_nr, i);
+      fn_info.second = is_leaf;
+    }
+    // Register callbacks that will gather the outputs
+    for (auto& entry : ctx.output_map) {
+      auto& fn_info = entry.second;
+      callbacks.emplace(entry.first.get(), [&ctx, &fn_info](Function* _unused, variable_list& grads) {
+        auto& saved_outputs = fn_info.first;
+        bool is_leaf = fn_info.second;
         std::lock_guard<std::mutex> guard(ctx.mutex);
-        if (grads.size() != 1) {
-          ctx.error = "expected to get a single gradient, but got ";
-          ctx.error += std::to_string(grads.size());
+        for (auto& saved_out : saved_outputs) {
+          PyTuple_SET_ITEM(ctx.outputs.get(), saved_out.second,
+            THPVariable_Wrap(grads[saved_out.first]));
         }
-        PyTuple_SET_ITEM(ctx.outputs.get(), i, THPVariable_Wrap(grads[0]));
-        return false;
+        return !is_leaf; // suppress grad accumulation
       });
     }
     // Disable execution for all unneeded functions
     if (only_inputs) {
-      compute_partial_exec_callbacks(roots, grad_accumulators, callbacks);
+      compute_partial_exec_callbacks(roots, ctx, callbacks);
     }
   }
 
