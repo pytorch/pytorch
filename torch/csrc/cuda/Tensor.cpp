@@ -6,14 +6,13 @@
 #include <vector>
 #include <stack>
 #include <tuple>
-#include "THCP.h"
+#include "torch/csrc/cuda/THCP.h"
 
-#include "override_macros.h"
+#include "torch/csrc/cuda/override_macros.h"
 #include "torch/csrc/copy_utils.h"
 #include "DynamicTypes.h"
 
-#define THC_GENERIC_FILE "torch/csrc/generic/Tensor.cpp"
-#include <THC/THCGenerateAllTypes.h>
+//generic_include THC torch/csrc/generic/Tensor.cpp
 
-#include "undef_macros.h"
-#include "restore_macros.h"
+#include "torch/csrc/cuda/undef_macros.h"
+#include "torch/csrc/cuda/restore_macros.h"
