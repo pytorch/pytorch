@@ -414,18 +414,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: pow_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  sparse: yes
-  cname: pow
-  return: argument 0
-  arguments:
-    - THSTensor* self
-    - THSTensor* self
-    - real value
-]]
-
-[[
   name: sparse_mask
   cname: sparseMask
   return: argument 0
