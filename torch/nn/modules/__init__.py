@@ -23,7 +23,7 @@ from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d
-from .distance import PairwiseDistance
+from .distance import PairwiseDistance, CosineSimilarity
 
 
 __all__ = [

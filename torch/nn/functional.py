@@ -669,6 +669,13 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
     out = torch.pow(diff + eps, p).sum(dim=1)
     return torch.pow(out, 1. / p)
 
+def cosine_similarity(x1, x2, eps=1e-12):
+    r"""Returns cosine similarity between two vectors ( here batches of vectors )
+    Examples: F.cosine_similarity(Variable(torch.randn(2,5,7)))
+    Args: 
+        x1 (Variable): Tensor with size (batch, dim)
+        x2 (Variable): Tensor with size (batch,dim), identical to x1
+        eps  (int, default=1e-12): Epsilon to avoid division by zero
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False):
     r"""Creates a criterion that measures the triplet loss given an input tensors x1, x2, x3
