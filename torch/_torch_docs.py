@@ -1397,9 +1397,9 @@ Gathers values along an axis specified by `dim`.
 
 For a 3-D tensor the output is specified by::
 
-    out[i][j][k] = tensor[index[i][j][k]][j][k]  # dim=0
-    out[i][j][k] = tensor[i][index[i][j][k]][k]  # dim=1
-    out[i][j][k] = tensor[i][j][index[i][j][k]]  # dim=3
+    out[i][j][k] = input[index[i][j][k]][j][k]  # dim=0
+    out[i][j][k] = input[i][index[i][j][k]][k]  # dim=1
+    out[i][j][k] = input[i][j][index[i][j][k]]  # dim=2
 
 Args:
     input (Tensor): The source tensor
