@@ -916,3 +916,20 @@ void THCHeapUpdate(THCState *state, ptrdiff_t size) {
 
 #include "THCStorage.c"
 #include "THCAllocator.c"
+
+/* from THCHalf.h */
+
+half THC_float2half(float f)
+{
+  half h;
+  TH_float2halfbits(&f, &h.x);
+  return h;
+}
+
+float  THC_half2float(half h)
+{
+  float f;
+  TH_halfbits2float(&h.x, &f);
+  return f;
+}
+
