@@ -46,22 +46,22 @@ auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 template<>
 auto THSTensor<real>::newSelect(int dimension, long sliceIndex) const -> THSTensor* {
   throw std::runtime_error("newSelect is not yet available for sparse tensors");
-} 
+}
 
 template<>
 auto THSTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THSTensor* {
   throw std::runtime_error("newNarrow is not yet available for sparse tensors");
-} 
+}
 
 template<>
 auto THSTensor<real>::newTranspose(int dimension1, int dimension2) const -> THSTensor* {
   throw std::runtime_error("newTranspose is not yet available for sparse tensors");
-} 
+}
 
 template<>
 auto THSTensor<real>::newUnfold(int dimension, long size, long step) const -> THSTensor* {
   throw std::runtime_error("newUnfold is not yet available for sparse tensors");
-} 
+}
 
 template<>
 int THSTensor<real>::nDim() const {
@@ -208,7 +208,7 @@ auto THSTensor<real>::squeeze(const Tensor& src) -> THSTensor& {
 }
 
 template<>
-auto THSTensor<real>::squeeze1d(const Tensor& src, int dimension) -> THSTensor& {
+auto THSTensor<real>::squeeze(const Tensor& src, int dimension) -> THSTensor& {
   throw std::runtime_error("THSTensor::squeeze1d not supported");
 }
 

@@ -43,10 +43,10 @@ public:
   virtual THSTensor* clone() const override;
   virtual THSTensor* clone_shallow() override;
   virtual std::unique_ptr<Tensor> contiguous() const override;
-  virtual THSTensor* newSelect(int dimension, long sliceIndex) const override; 
-  virtual THSTensor* newNarrow(int dimension, long firstIndex, long size) const override; 
-  virtual THSTensor* newTranspose(int dimension1, int dimension2) const override; 
-  virtual THSTensor* newUnfold(int dimension, long size, long step) const override; 
+  virtual THSTensor* newSelect(int dimension, long sliceIndex) const override;
+  virtual THSTensor* newNarrow(int dimension, long firstIndex, long size) const override;
+  virtual THSTensor* newTranspose(int dimension1, int dimension2) const override;
+  virtual THSTensor* newUnfold(int dimension, long size, long step) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -88,7 +88,7 @@ public:
   virtual THSTensor& unfold(const Tensor& src, int dimension,
                             long size, long step) override;
   virtual THSTensor& squeeze(const Tensor& src) override;
-  virtual THSTensor& squeeze1d(const Tensor& src, int dimension) override;
+  virtual THSTensor& squeeze(const Tensor& src, int dimension) override;
   virtual THSTensor& unsqueeze(const Tensor& src, int dimension) override;
 
   virtual THSTensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a) override;

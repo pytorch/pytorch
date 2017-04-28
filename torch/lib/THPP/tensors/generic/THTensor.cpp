@@ -71,22 +71,22 @@ auto THTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 template<>
 auto THTensor<real>::newSelect(int dimension, long sliceIndex) const -> THTensor* {
   return new THTensor(THTensor_(newSelect)(tensor, dimension, sliceIndex));
-} 
+}
 
 template<>
 auto THTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THTensor* {
   return new THTensor(THTensor_(newNarrow)(tensor, dimension, firstIndex, size));
-} 
+}
 
 template<>
 auto THTensor<real>::newTranspose(int dimension1, int dimension2) const -> THTensor* {
   return new THTensor(THTensor_(newTranspose)(tensor, dimension1, dimension2));
-} 
+}
 
 template<>
 auto THTensor<real>::newUnfold(int dimension, long size, long step) const -> THTensor* {
   return new THTensor(THTensor_(newUnfold)(tensor, dimension, size, step));
-} 
+}
 
 template<>
 int THTensor<real>::nDim() const {
@@ -281,7 +281,7 @@ auto THTensor<real>::squeeze(const Tensor& src) -> THTensor& {
 }
 
 template<>
-auto THTensor<real>::squeeze1d(const Tensor& src, int dimension) -> THTensor& {
+auto THTensor<real>::squeeze(const Tensor& src, int dimension) -> THTensor& {
   auto src_raw = (dynamic_cast<const THTensor<real>&>(src)).tensor;
   THTensor_(squeeze1d)(tensor, src_raw, dimension);
   return *this;

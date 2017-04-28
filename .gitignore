@@ -5,6 +5,7 @@ torch.egg-info/
 torch/version.py
 torch/csrc/generic/TensorMethods.cpp
 torch/lib/*.so*
+torch/lib/*.a*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/build
