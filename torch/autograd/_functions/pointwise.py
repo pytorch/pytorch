@@ -40,34 +40,38 @@ class Log1p(Function):
 
 class Tanh(InplaceFunction):
 
-    def forward(self, i):
-        if self.inplace:
-            self.mark_dirty(i)
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
             result = i.tanh_()
         else:
             result = i.tanh()
-        self.save_for_backward(result)
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        result, = self.saved_tensors
-        return grad_output * (1 - result * result)
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
+        return grad_output * (1 - result * result), None
 
 
 class Sigmoid(InplaceFunction):
 
-    def forward(self, i):
-        if self.inplace:
-            self.mark_dirty(i)
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
             result = i.sigmoid_()
         else:
             result = i.sigmoid()
-        self.save_for_backward(result)
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        result, = self.saved_tensors
-        return grad_output * ((1 - result) * result)
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
+        return grad_output * ((1 - result) * result), None
 
 
 class Sinh(Function):
@@ -94,12 +98,14 @@ class Cosh(Function):
 
 class Abs(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.abs()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output * i.sign()
 
 

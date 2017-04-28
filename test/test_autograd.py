@@ -89,11 +89,12 @@ class TestAutograd(TestCase):
         y_grad_desc = graph_desc(y.grad.grad_fn)
         self.assertEqual(
             x_grad_desc,
-            'Identity(AddBackward(Error(AccumulateGrad()), MulBackward(Error(AccumulateGrad()), AccumulateGrad())))')
+            'Identity(AddBackward(ExpandBackward(AccumulateGrad()), '
+            'MulBackward(ExpandBackward(AccumulateGrad()), AccumulateGrad())))')
         self.assertEqual(
             y_grad_desc,
-            'Identity(AddBackward(MulConstantBackward(Error(AccumulateGrad())), '
-            'MulBackward(Error(AccumulateGrad()), AccumulateGrad())))')
+            'Identity(AddBackward(MulConstantBackward(ExpandBackward(AccumulateGrad())), '
+            'MulBackward(ExpandBackward(AccumulateGrad()), AccumulateGrad())))')
 
     def test_once_differentiable(self):
         class MyFunction(Function):
