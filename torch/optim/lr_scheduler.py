@@ -168,7 +168,7 @@ class ReduceLROnPlateau(object):
             self.wait += 1
 
     def _reduce_lr(self, epoch):
-        for inx_group, param_group in enumerate(self.optimizer.param_groups,0):
+        for inx_group, param_group in enumerate(self.optimizer.param_groups, 0):
             old_lr = float(param_group['lr'])
             if old_lr > self.min_lr + self.lr_epsilon:
                 new_lr = old_lr * self.factor
