@@ -460,34 +460,29 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
 }
 
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
-void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t, real value) {
+void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real value) {
   if (value == 0) {
     THError("cannot raise to zeroth power on sparse tensor");
   }
-  THCSTensor_(contiguous)(state, t);
-  if (r_ == t) {
-    THCTensor *r_values_ = THCSTensor_(newValues)(state, r_);
-    THCTensor_(pow)(state, r_values_, r_values_, value);
-    THCTensor_(free)(state, r_values_);
-  } else {
-    THCSTensor_(resizeAs)(state, r_, t);
+  THCSTensor *t = THCSTensor_(newCoalesce)(state, t_);
+  THCSTensor_(resizeAs)(state, r_, t);
 
-    THCIndexTensor *r_indices_ = THCSTensor_(newIndices)(state, r_);
-    THCTensor *r_values_ = THCSTensor_(newValues)(state, r_);
-    THCIndexTensor *t_indices_ = THCSTensor_(newIndices)(state, t);
-    THCTensor *t_values_ = THCSTensor_(newValues)(state, t);
+  THCIndexTensor *r_indices_ = THCSTensor_(newIndices)(state, r_);
+  THCTensor *r_values_ = THCSTensor_(newValues)(state, r_);
+  THCIndexTensor *t_indices_ = THCSTensor_(newIndices)(state, t);
+  THCTensor *t_values_ = THCSTensor_(newValues)(state, t);
 
-    THCIndexTensor_(resizeAs)(state, r_indices_, t_indices_);
-    THCIndexTensor_(copy)(state, r_indices_, t_indices_);
-    THCTensor_(pow)(state, r_values_, t_values_, value);
-    r_->nnz = t->nnz;
-    r_->contiguous = t->contiguous;
+  THCIndexTensor_(resizeAs)(state, r_indices_, t_indices_);
+  THCIndexTensor_(copy)(state, r_indices_, t_indices_);
+  THCTensor_(pow)(state, r_values_, t_values_, value);
+  r_->nnz = t->nnz;
+  r_->coalesced = t->coalesced;
 
-    THCIndexTensor_(free)(state, r_indices_);
-    THCTensor_(free)(state, r_values_);
-    THCIndexTensor_(free)(state, t_indices_);
-    THCTensor_(free)(state, t_values_);
-  }
+  THCIndexTensor_(free)(state, r_indices_);
+  THCTensor_(free)(state, r_values_);
+  THCIndexTensor_(free)(state, t_indices_);
+  THCTensor_(free)(state, t_values_);
+  THCSTensor_(free)(state, t);
 }
 #endif
 
