@@ -421,7 +421,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
-            output_padding, self.groups)
+            output_padding, self.groups, self.dilation)
 
 
 class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
