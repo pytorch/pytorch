@@ -9,8 +9,12 @@
 #include <tuple>
 #include <TH/THMath.h>
 
-#include "torch/csrc/THP.h"
-#include "torch/csrc/copy_utils.h"
-#include "torch/csrc/DynamicTypes.h"
+#include "THP.h"
+#include "copy_utils.h"
+#include "DynamicTypes.h"
 
-//generic_include TH torch/csrc/generic/Tensor.cpp
+#include "generic/Tensor.cpp"
+#include <TH/THGenerateAllTypes.h>
+
+#include "generic/Tensor.cpp"
+#include <TH/THGenerateHalfType.h>
