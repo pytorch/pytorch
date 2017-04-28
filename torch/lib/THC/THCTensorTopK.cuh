@@ -112,21 +112,33 @@ struct TopKTypeConfig<double> {
   }
 };
 
+#ifdef CUDA_HALF_TENSOR
 template <>
 struct TopKTypeConfig<half> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(half v) {
+#if defined(__CUDACC_VER__) && __CUDACC_VER__ >= 80000
     RadixType x = __half_as_ushort(v);
     RadixType mask = -((x >> 15)) | 0x8000;
     return (x ^ mask);
+#else
+    assert(false);
+    return 0u;
+#endif
   }
 
   static inline __device__ half deconvert(RadixType v) {
+#if defined(__CUDACC_VER__) && __CUDACC_VER__ >= 80000
     RadixType mask = ((v >> 15) - 1) | 0x8000;
     return __ushort_as_half(v ^ mask);
+#else
+    assert(false);
+    return ScalarConvert<int, half>::to(0);
+#endif
   }
 };
+#endif // CUDA_HALF_TENSOR
 
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only
