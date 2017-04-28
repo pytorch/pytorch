@@ -122,7 +122,8 @@ class ReduceLROnPlateau(object):
     """
 
     def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
-                 verbose=0, threshold=1e-4, threshold_mode='rel', cooldown=0, min_lr=0):
+                 verbose=0, threshold=1e-4, threshold_mode='rel',
+                 cooldown=0, min_lr=0):
 
         if factor >= 1.0:
             raise ValueError('ReduceLROnPlateau '
@@ -162,19 +163,19 @@ class ReduceLROnPlateau(object):
         elif not self.in_cooldown():
             if self.wait >= self.patience:
                 self._reduce_lr(epoch)
+                self.cooldown_counter = self.cooldown
+                self.wait = 0
             self.wait += 1
 
     def _reduce_lr(self, epoch):
-        for param_group in self.optimizer.param_groups:
+        for inx_group, param_group in enumerate(self.optimizer.param_groups,0):
             old_lr = float(param_group['lr'])
             if old_lr > self.min_lr + self.lr_epsilon:
                 new_lr = old_lr * self.factor
                 new_lr = max(new_lr, self.min_lr)
                 param_group['lr'] = new_lr
                 if self.verbose > 0:
-                    print('\nEpoch %05d: reducing learning rate to %s.' % (epoch, new_lr))
-                self.cooldown_counter = self.cooldown
-                self.wait = 0
+                    print('Epoch %05d: reducing learning rate of group %d to %s.' % (epoch, inx_group, new_lr))
 
     def in_cooldown(self):
         return self.cooldown_counter > 0
@@ -188,18 +189,18 @@ class _MonitorOp(object):
             raise RuntimeError('Learning Rate Plateau threshold mode %s is unknown!')
         if mode == 'min' and threshold_mode == 'rel':
             rel_epsilon = 1. - threshold
-            self.monitor_op = lambda a, b: np.less(a, b * rel_epsilon)
+            self.monitor_op = lambda a, best: np.less(a, best * rel_epsilon)
             self.worse = np.Inf
         elif mode == 'min' and threshold_mode == 'abs':
-            self.monitor_op = lambda a, b: np.less(a, b - threshold)
+            self.monitor_op = lambda a, best: np.less(a, best - threshold)
             self.worse = np.Inf
         elif mode == 'max' and threshold_mode == 'rel':
             rel_epsilon = threshold + 1.
-            self.monitor_op = lambda a, b: np.greater(a, b * rel_epsilon)
+            self.monitor_op = lambda a, best: np.greater(a, best * rel_epsilon)
             self.worse = -np.Inf
         else:  # mode == 'max' and epsilon_mode == 'abs':
-            self.monitor_op = lambda a, b: np.greater(a, b + threshold)
+            self.monitor_op = lambda a, best: np.greater(a, best + threshold)
             self.worse = -np.Inf
 
-    def __call__(self, a, b):
-        return self.monitor_op(a, b)
+    def __call__(self, current, best):
+        return self.monitor_op(current, best)
