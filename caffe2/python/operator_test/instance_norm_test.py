@@ -87,7 +87,8 @@ class TestInstanceNorm(hu.HypothesisTestCase):
         # The gradient only flows from output #0 since the other two only
         # store the temporary mean and inv_stdev buffers.
         # Check dl/dinput
-        self.assertGradientChecks(gc, op, input_blobs, 0, [0])
+        self.assertGradientChecks(gc, op, input_blobs, 0, [0], stepsize=0.005,
+                                  threshold=0.01)
         # Check dl/dscale
         self.assertGradientChecks(gc, op, input_blobs, 1, [0])
         # Check dl/dbias
