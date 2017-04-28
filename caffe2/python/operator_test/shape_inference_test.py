@@ -308,14 +308,28 @@ class TestShapeInference(test_util.TestCase):
             #('string', None, caffe2_pb2.TensorProto.STRING),
         ]
 
-        for (xstr, xnp, xc2) in types:
+        for (xstr, xnp, _) in types:
             xname = 'X%s' % xstr
             workspace.FeedBlob(xname, np.random.rand(1).astype(xnp))
-            for (ystr, ynp, yc2) in types:
+            for (ystr, _, yc2) in types:
                 yname = 'Y%s_to_%s' % (xstr, ystr)
                 model.Cast(xname, yname, to=yc2)
 
         self.InferTensorRunAndCompare(model)
+
+    def testShapeInferenceRoiPool(self):
+        for is_test in [True, False]:
+            model = cnn.CNNModelHelper()
+            outputs = ['Y'] if is_test else ['Y', 'argmaxes']
+            model.net.RoIPool(
+                ['X', 'R'], outputs, pooled_h=4, pooled_w=5, is_test=is_test)
+            workspace.FeedBlob(
+                "X",
+                np.random.rand(100, 3, 4, 5).astype(np.float32))
+            workspace.FeedBlob(
+                "R",
+                np.random.rand(2, 5).astype(np.float32))
+            self.InferTensorRunAndCompare(model)
 
     def InferTensorRunAndCompare(self, model):
         '''
