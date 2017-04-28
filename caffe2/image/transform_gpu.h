@@ -31,7 +31,7 @@
 namespace caffe2 {
 
 template <typename T_IN, typename T_OUT, class Context>
-bool TransformOnGPU(Tensor<Context>& X, Tensor<Context> *Y, T_OUT mean, T_OUT std, Context *context);
+bool TransformOnGPU(Tensor<Context>& X, Tensor<Context> *Y, float mean, float std, Context *context);
 
 }  // namespace caffe2
 
