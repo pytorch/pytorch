@@ -15,7 +15,6 @@ import os
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
-from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = check_env_flag('WITH_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
@@ -260,6 +259,7 @@ main_sources = [
     "torch/csrc/Generator.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/byte_order.cpp",
@@ -282,7 +282,6 @@ main_sources = [
     "torch/csrc/autograd/functions/convolution.cpp",
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN_generic.cpp",
-    *split_types("torch/csrc/Tensor.cpp")
 ]
 
 try:
@@ -326,10 +325,10 @@ if WITH_CUDA:
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
         "torch/csrc/cuda/Stream.cpp",
+        "torch/csrc/cuda/Tensor.cpp",
         "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
-        *split_types("torch/csrc/cuda/Tensor.cpp"),
     ]
 
 if WITH_NCCL:
