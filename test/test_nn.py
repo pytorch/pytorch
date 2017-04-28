@@ -2074,9 +2074,7 @@ class TestNN(NNTestCase):
         self.assertEqual(output.data, output2)
         self.assertEqual([gi1, gi2], output3)
 
-        def forward(x1, x2):
-            F.bilinear(x1, x2, module.weight, module.bias)
-        self.assertTrue(gradcheck(forward, (input1_1, input2_1)))
+        self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
 
 
 class TestNNInit(TestCase):
