@@ -15,9 +15,28 @@ bool LeakyReluOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+template <>
+bool LeakyReluGradientOp<float, CPUContext>::RunOnDevice() {
+  const auto& X = Input(0);
+  const auto& dY = Input(1);
+  auto* dX = Output(0);
+  dX->ResizeLike(X);
+  CAFFE_ENFORCE_EQ(X.size(), dY.size());
+  ConstEigenVectorMap<float> Xvec(X.template data<float>(), X.size());
+  ConstEigenVectorMap<float> dYvec(dY.template data<float>(), dY.size());
+  EigenVectorMap<float> dXvec(dX->template mutable_data<float>(), dX->size());
+  Eigen::VectorXf gtZero = (Xvec.array() >= 0.0f).cast<float>();
+  dXvec = dYvec.array() * gtZero.array() -
+      dYvec.array() * (gtZero.array() - 1.0f) * alpha_;
+  return true;
+}
+
 namespace {
 
 REGISTER_CPU_OPERATOR(LeakyRelu, LeakyReluOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    LeakyReluGradient,
+    LeakyReluGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LeakyRelu)
     .NumInputs(1)
@@ -32,6 +51,24 @@ output data (Tensor<T>) where the function `f(x) = alpha * x for x < 0`,
 )DOC")
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D input tensor");
+OPERATOR_SCHEMA(LeakyReluGradient)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .AllowInplace({{1, 0}})
+    .Arg("alpha", "Coefficient of leakage");
+
+class GetLeakyReluGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "LeakyReluGradient",
+        "",
+        vector<string>{I(0), GO(0)},
+        vector<string>{GI(0)});
+  }
+};
+
+REGISTER_GRADIENT(LeakyRelu, GetLeakyReluGradient);
 
 } // namespace
 } // namespace caffe2
