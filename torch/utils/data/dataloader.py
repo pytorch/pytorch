@@ -103,13 +103,19 @@ def default_collate(batch):
         return torch.DoubleTensor(batch)
     elif isinstance(batch[0], string_classes):
         return batch
-    elif isinstance(batch[0], collections.Iterable):
-        # if each batch element is not a tensor, then it should be a tuple
-        # of tensors; in that case we collate each element in the tuple
+    elif isinstance(batch[0], collections.Sequence):
+        # if each batch element is not a tensor, then it should be a list
+        # of tensors; in that case we collate each element in the list
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
-    raise TypeError(("batch must contain tensors, numbers, or lists; found {}"
+    elif isinstance(batch[0], collections.Mapping):
+        # if each batch element is a dict, we collate each element in the dict
+        keys = batch[0].keys()
+        transposed = {k: [elem[k] for elem in batch] for k in keys}
+        return {k: default_collate(elems) for k, elems in transposed.items()}
+
+    raise TypeError(("batch must contain tensors, numbers, lists or dicts; found {}"
                      .format(type(batch[0]))))
 
 
