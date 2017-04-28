@@ -16,6 +16,7 @@ struct TupleParser {
   void parse(std::unique_ptr<thpp::Tensor>& x);
   void parse(std::shared_ptr<thpp::Tensor>& x);
   void parse(std::vector<int>& x);
+  void parse(std::string& x);
 
 protected:
   std::runtime_error invalid_type(const char* expected);

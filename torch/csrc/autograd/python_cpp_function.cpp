@@ -111,7 +111,7 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   auto& next_functions = self->cdata->next_functions;
   auto num_next = next_functions.size();
   THPObjectPtr py_functions = PyTuple_New(num_next);
-  if (!py_functions) throw python_error();
+  if (!py_functions) return NULL;
   for (size_t i = 0; i < num_next; ++i) {
     auto& c_tuple = next_functions[i];
     THPObjectPtr tuple = PyTuple_New(2);
