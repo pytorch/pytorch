@@ -17,6 +17,7 @@ bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
   // Each ROI is of the form [batch_index x1 y1 x2 y2]
   CAFFE_ENFORCE_EQ(R.dim32(1), 5);
 
+  // TODO: Handle the storage_order properly to get the NCWH.
   int batch_size = X.dim32(0);
   int channels = X.dim32(1);
   int height = X.dim32(2);
@@ -123,7 +124,31 @@ REGISTER_CPU_OPERATOR(RoIPoolGradient, RoIPoolGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(RoIPool)
     .NumInputs(2)
     .NumOutputs({1, 2})
-    // TODO: add Shape inference function (bootcamp)
+    .TensorInferenceFunction(
+      [](const OperatorDef& def, const vector<TensorShape>& in) {
+        ArgumentHelper helper(def);
+        const StorageOrder order = StringToStorageOrder(
+            helper.GetSingleArgument<string>("order", "NCHW"));
+        const TensorShape &X = in[0];
+        const int num_channels =
+            (order == StorageOrder::NCHW ? X.dims(1) : X.dims(3));
+        const TensorShape &R = in[1];
+        const int num_rois = R.dims(0);
+        const int pooled_height = helper.GetSingleArgument<int>("pooled_h", 1);
+        const int pooled_width = helper.GetSingleArgument<int>("pooled_w", 1);
+        TensorShape Y = CreateTensorShape(
+            vector<int>({num_rois, num_channels, pooled_height, pooled_width}),
+            X.data_type());
+
+        bool is_test = helper.GetSingleArgument<int>("is_test", 0);
+        if (!is_test) {
+          TensorShape argmaxes = Y;
+          argmaxes.set_data_type(TensorProto_DataType_INT32);
+          return vector<TensorShape>({Y, argmaxes});
+        } else {
+          return vector<TensorShape>({Y});
+        }
+      })
     .SetDoc(R"DOC(
 Carries out ROI Pooling for Faster-RCNN.
 Depending on the mode, there are multiple output cases:
