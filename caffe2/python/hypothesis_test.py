@@ -2005,7 +2005,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_distances(self, n, dim, gc, dc):
         X = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         Y = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
@@ -2025,6 +2025,9 @@ class TestOperators(hu.HypothesisTestCase):
                                    np.square(X - Y).sum(axis=1) * 0.5,
                                    rtol=1e-4, atol=1e-4)
         check_grad(l2_op)
+        if gc.device_type == 1:
+            # Only SquaredL2Distance has CUDA implementation
+            return
 
         dot_op = core.CreateOperator("DotProduct", ["X", "Y"], ["dot"])
         self.ws.run(dot_op)
