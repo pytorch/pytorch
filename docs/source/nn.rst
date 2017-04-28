@@ -855,9 +855,12 @@ torch.nn.init
 =============
 
 .. currentmodule:: torch.nn.init
+.. autofunction:: calculate_gain
 .. autofunction:: uniform
 .. autofunction:: normal
 .. autofunction:: constant
+.. autofunction:: eye
+.. autofunction:: dirac
 .. autofunction:: xavier_uniform
 .. autofunction:: xavier_normal
 .. autofunction:: kaiming_uniform

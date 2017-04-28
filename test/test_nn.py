@@ -1,5 +1,6 @@
 import math
 import random
+import string
 import unittest
 import itertools
 import contextlib
@@ -2106,6 +2107,47 @@ class TestNNInit(TestCase):
     def _random_float(self, a, b):
         return (b - a) * random.random() + a
 
+    def test_calculate_gain_linear(self):
+        for fn in ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose2d', 'conv_transpose2d', 'conv_transpose3d']:
+            gain = init.calculate_gain(fn)
+            self.assertEqual(gain, 1)
+
+    def test_calculate_gain_nonlinear(self):
+        for fn in ['sigmoid', 'tanh', 'relu', 'leaky_relu']:
+            gain = init.calculate_gain(fn)
+            if fn == 'sigmoid':
+                self.assertEqual(gain, 1)
+            elif fn == 'tanh':  # 5 / 3
+                self.assertEqual(gain, 1.6666666666666667)
+            elif fn == 'relu':  # sqrt(2)
+                self.assertEqual(gain, 1.4142135623730951)
+            elif fn == 'leaky_relu':  # sqrt(2 / 1 + slope^2))
+                self.assertEqual(gain, 1.4141428569978354)
+
+    def test_calculate_gain_leaky_relu(self):
+        for param in [None, 0, 0.01, 10]:
+            gain = init.calculate_gain('leaky_relu', param)
+            if param is None:  # Default slope is 0.01
+                self.assertEqual(gain, 1.4141428569978354)
+            elif param == 0:  # No slope = same gain as normal ReLU
+                self.assertEqual(gain, 1.4142135623730951)
+            elif param == 0.01:
+                self.assertEqual(gain, 1.4141428569978354)
+            elif param == 10:
+                self.assertEqual(gain, 0.14071950894605836)
+
+    def test_calculate_gain_leaky_relu_only_accepts_numbers(self):
+        for param in [True, [1], {'a': 'b'}]:
+            with self.assertRaises(ValueError):
+                init.calculate_gain('leaky_relu', param)
+
+    def test_calculate_gain_only_accepts_valid_nonlinearities(self):
+        for n in [2, 5, 25]:
+            # Generate random strings of lengths that definitely aren't supported
+            random_string = ''.join([random.choice(string.ascii_lowercase) for i in range(n)])
+            with self.assertRaises(ValueError):
+                init.calculate_gain(random_string)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_uniform(self):
         for as_variable in [True, False]:
@@ -2137,6 +2179,79 @@ class TestNNInit(TestCase):
                     input_tensor = input_tensor.data
 
                 self.assertEqual(input_tensor, input_tensor.clone().fill_(val))
+
+    def test_eye(self):
+        for as_variable in [True, False]:
+            input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5, as_variable=as_variable)
+            init.eye(input_tensor)
+            if as_variable:
+                input_tensor = input_tensor.data
+
+            # Check every single element
+            for i in range(input_tensor.size(0)):
+                for j in range(input_tensor.size(1)):
+                    if i == j:
+                        assert input_tensor[i][j] == 1
+                    else:
+                        assert input_tensor[i][j] == 0
+
+    def test_eye_only_works_on_2d_inputs(self):
+        for as_variable in [True, False]:
+            for dims in [1, 3]:
+                with self.assertRaises(ValueError):
+                    tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
+                    init.eye(tensor)
+
+    def test_dirac_properties(self):
+        for as_variable in [True, False]:
+            for dims in [3, 4, 5]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
+                init.dirac(input_tensor)
+                if as_variable:
+                    input_tensor = input_tensor.data
+
+                c_out, c_in = input_tensor.size(0), input_tensor.size(1)
+                min_d = min(c_out, c_in)
+                # Check number of nonzeros is equivalent to smallest dim
+                assert torch.nonzero(input_tensor).size(0) == min_d
+                # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
+                self.assertEqual(input_tensor.sum(), min_d)
+
+    def test_dirac_identity(self):
+        batch, in_c, out_c, size, kernel_size = 8, 3, 4, 5, 3
+        # Test 1D
+        input_var = Variable(torch.randn(batch, in_c, size))
+        filter_var = Variable(torch.zeros(out_c, in_c, kernel_size))
+        init.dirac(filter_var)
+        output_var = F.conv1d(input_var, filter_var)
+        input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
+        self.assertEqual(input_tensor[:, :, 1:-1], output_tensor[:, :in_c, :])  # Assert in_c outputs are preserved
+        assert torch.nonzero(output_tensor[:, in_c:, :]).numel() == 0  # Assert extra outputs are 0
+
+        # Test 2D
+        input_var = Variable(torch.randn(batch, in_c, size, size))
+        filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size))
+        init.dirac(filter_var)
+        output_var = F.conv2d(input_var, filter_var)
+        input_tensor, output_tensor = input_var.data, output_var.data
+        self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
+        assert torch.nonzero(output_tensor[:, in_c:, :, :]).numel() == 0
+
+        # Test 3D
+        input_var = Variable(torch.randn(batch, in_c, size, size, size))
+        filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size))
+        init.dirac(filter_var)
+        output_var = F.conv3d(input_var, filter_var)
+        input_tensor, output_tensor = input_var.data, output_var.data
+        self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
+        assert torch.nonzero(output_tensor[:, in_c:, :, :, :]).numel() == 0
+
+    def test_dirac_only_works_on_3_4_5d_inputs(self):
+        for as_variable in [True, False]:
+            for dims in [1, 2, 6]:
+                with self.assertRaises(ValueError):
+                    tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
+                    init.dirac(tensor)
 
     def test_xavier_uniform_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
