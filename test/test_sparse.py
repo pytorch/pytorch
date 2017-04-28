@@ -478,6 +478,13 @@ class TestSparse(TestCase):
         self.assertEqual(y1.to_dense(), expected)
         self.assertEqual(y2.to_dense(), expected)
 
+        y1 = x1 ** 2
+        y2 = x1.clone()
+        y2.pow_(2)
+        expected = x1.to_dense() ** 2
+        self.assertEqual(y1.to_dense(), expected)
+        self.assertEqual(y2.to_dense(), expected)
+
         y = x1.clone()
         y.zero_()
         expected = torch.zeros(x1.size())
