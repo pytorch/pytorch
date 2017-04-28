@@ -106,8 +106,6 @@ def default_collate(batch):
     elif isinstance(batch[0], collections.Mapping):
         return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
     elif isinstance(batch[0], collections.Sequence):
-        # if each batch element is not a tensor, then it should be a sequence
-        # of tensors; in that case we collate each element in the sequence
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
