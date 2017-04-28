@@ -7,6 +7,7 @@
 
 #include "caffe/proto/caffe.pb.h"
 #include "caffe2/core/db.h"
+#include "caffe2/utils/cast.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/thread_pool.h"
 #include "caffe2/operators/prefetch_op.h"
@@ -64,6 +65,9 @@ class ImageInputOp final
   // thread pool for parse + decode
   int num_decode_threads_;
   std::shared_ptr<TaskThreadPool> thread_pool_;
+
+  // Output type for GPU transform path
+  TensorProto_DataType output_type_;
 };
 
 
@@ -88,7 +92,9 @@ ImageInputOp<Context>::ImageInputOp(
               "use_gpu_transform", 0)),
         num_decode_threads_(OperatorBase::template GetSingleArgument<int>(
               "decode_threads", 4)),
-        thread_pool_(new TaskThreadPool(num_decode_threads_))
+        thread_pool_(new TaskThreadPool(num_decode_threads_)),
+        // output type only supported with CUDA and use_gpu_transform for now
+        output_type_(cast::GetCastDataType(this->arg_helper(), "output_type"))
 {
   if (operator_def.input_size() == 0) {
     LOG(ERROR) << "You are using an old ImageInputOp format that creates "
@@ -122,7 +128,9 @@ ImageInputOp<Context>::ImageInputOp(
   LOG(INFO) << "    " << (is_test_ ? "Central" : "Random") << " cropping image to " << crop_
             << (mirror_ ? " with " : " without ") << "random mirroring;";
   LOG(INFO) << "    Subtract mean " << mean_ << " and divide by std " << std_
-            << ".";
+            << ";";
+  LOG(INFO) << "    Outputting images as "
+            << OperatorBase::template GetSingleArgument<string>("output_type", "unknown") << ".";
   prefetched_image_.Resize(
       TIndex(batch_size_),
       TIndex(crop_),
@@ -454,8 +462,8 @@ bool ImageInputOp<Context>::Prefetch() {
     randgen_per_thread.emplace_back(meta_randgen());
   }
 
+  std::bernoulli_distribution mirror_this_image(0.5);
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
-    std::bernoulli_distribution mirror_this_image(0.5);
     std::mt19937* randgen = &randgen_per_thread[item_id % num_decode_threads_];
     std::string key, value;
     cv::Mat img;
@@ -531,7 +539,14 @@ bool ImageInputOp<Context>::CopyPrefetched() {
     label_output->CopyFrom(prefetched_label_, &context_);
   } else {
     if (gpu_transform_) {
-      TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_, image_output, std_, mean_, &context_);
+      // GPU transform kernel allows explicitly setting output type
+      if (output_type_ == TensorProto_DataType_FLOAT) {
+        TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_, image_output, std_, mean_, &context_);
+      } else if (output_type_ == TensorProto_DataType_FLOAT16) {
+        TransformOnGPU<uint8_t,float16,Context>(prefetched_image_on_device_, image_output, std_, mean_, &context_);
+      }  else {
+        return false;
+      }
     } else {
       image_output->CopyFrom(prefetched_image_on_device_, &context_);
     }
