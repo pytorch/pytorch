@@ -395,7 +395,6 @@ class TestOptim(TestCase):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
 
 
-
 class SchedulerTestNet(torch.nn.Module):  # copied from tutorial
     def __init__(self):
         super(SchedulerTestNet, self).__init__()
