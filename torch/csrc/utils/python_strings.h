@@ -2,6 +2,7 @@
 
 #include <Python.h>
 #include <stdexcept>
+#include <string>
 #include "object_ptr.h"
 
 // Utilities for handling Python strings. Note that PyString, when defined, is
