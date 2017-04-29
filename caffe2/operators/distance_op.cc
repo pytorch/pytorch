@@ -48,13 +48,52 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
     D = 0;
   }
   result->Resize(N);
-  float* result_data = result->mutable_data<float>();
-  const float* X_data = X.data<float>();
-  const float* Y_data = Y.data<float>();
+  float* result_data = result->template mutable_data<float>();
+  const float* X_data = X.template data<float>();
+  const float* Y_data = Y.template data<float>();
   for (int i = 0; i < N; ++i) { // TODO: multithreading
     auto offset = i * D;
     math::Dot<float, CPUContext>(
         D, X_data + offset, Y_data + offset, result_data + i, &context_);
+  }
+  return true;
+}
+
+template <>
+bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
+  auto& X = Input(X_IN);
+  auto& Y = Input(Y_IN);
+  auto& dDot = Input(DER_DOT_IN);
+  auto* dX = Output(DER_X_OUT);
+  auto* dY = Output(DER_Y_OUT);
+  int N, D;
+  if (X.size() > 0) {
+    N = X.ndim() > 0 ? X.dim32(0) : 1;
+    D = X.size() / N;
+  } else {
+    N = 0;
+    D = 0;
+  }
+  CAFFE_ENFORCE(X.ndim() == Y.ndim());
+  for (int i = 0; i < X.ndim(); ++i) {
+    CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
+  }
+  CAFFE_ENFORCE(dDot.ndim() == 1);
+  CAFFE_ENFORCE(dDot.dim32(0) == N);
+  dX->ResizeLike(X);
+  dY->ResizeLike(Y);
+
+  const auto* X_data = X.template data<float>();
+  const auto* Y_data = Y.template data<float>();
+  const auto* dDot_data = dDot.template data<float>();
+  auto* dX_data = dX->template mutable_data<float>();
+  auto* dY_data = dY->template mutable_data<float>();
+  for (int i = 0; i < N; ++i) { // TODO: multithreading
+    auto offset = i * D;
+    math::Scale<float, CPUContext>(
+        D, dDot_data[i], X_data + offset, dY_data + offset, &context_);
+    math::Scale<float, CPUContext>(
+        D, dDot_data[i], Y_data + offset, dX_data + offset, &context_);
   }
   return true;
 }

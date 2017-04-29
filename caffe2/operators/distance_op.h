@@ -92,44 +92,7 @@ class DotProductGradientOp final : public Operator<Context> {
       : Operator<Context>(def, ws) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override {
-    auto& X = Input(X_IN);
-    auto& Y = Input(Y_IN);
-    auto& dDot = Input(DER_DOT_IN);
-    auto* dX = Output(DER_X_OUT);
-    auto* dY = Output(DER_Y_OUT);
-    int N, D;
-    if (X.size() > 0) {
-      N = X.ndim() > 0 ? X.dim32(0) : 1;
-      D = X.size() / N;
-    } else {
-      N = 0;
-      D = 0;
-    }
-    CAFFE_ENFORCE(X.ndim() == Y.ndim());
-    for (int i = 0; i < X.ndim(); ++i) {
-      CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
-    }
-    CAFFE_ENFORCE(dDot.ndim() == 1);
-    CAFFE_ENFORCE(dDot.dim32(0) == N);
-    dX->ResizeLike(X);
-    dY->ResizeLike(Y);
-
-    const auto* X_data = X.template data<T>();
-    const auto* Y_data = Y.template data<T>();
-    const auto* dDot_data = dDot.template data<T>();
-    auto* dX_data = dX->template mutable_data<T>();
-    auto* dY_data = dY->template mutable_data<T>();
-    for (int i = 0; i < N; ++i) { // TODO: multithreading
-      auto offset = i * D;
-      math::Scale<T, Context>(
-          D, dDot_data[i], X_data + offset, dY_data + offset, &context_);
-      math::Scale<T, Context>(
-          D, dDot_data[i], Y_data + offset, dX_data + offset, &context_);
-    }
-
-    return true;
-  }
+  bool RunOnDevice() override;
 
  protected:
   INPUT_TAGS(X_IN, Y_IN, DER_DOT_IN);
