@@ -3,8 +3,21 @@ from .. import functional as F
 
 
 class Dropout(Module):
-    r"""Randomly zeroes some of the elements of the input tensor.
+    r"""During training, randomly zeroes some of the elements of the input
+    tensor with probability *p* using samples from a bernoulli distribution.
     The elements to zero are randomized on every forward call.
+
+    This has proven to be an effective technique for regularization and
+    preventing the co-adaptation of neurons as described in the paper
+    `Improving neural networks by preventing co-adaptation of feature
+    detectors`_.
+
+    Furthermore, the outputs are scaled by a factor of *1/(1-p)* during
+    training. This allows the input to be simply forwarded as-is during
+    evaluation.
+
+    During evaluation, Dropout does nothing more than forward the input such
+    that all elements of the input are considered.
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
