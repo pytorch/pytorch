@@ -117,17 +117,16 @@ class ReduceLROnPlateau(object):
             quantity monitored has stopped increasing.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes.
-        threshold_mode (str): One of {rel, abs}. In `rel` mode,
+        threshold_mode (str): One of `rel`, `abs`. In `rel` mode,
             dynamic_threshold = best * ( 1 + threshold ) in 'max'
-            mode or best * ( 1 - threshold ) in 'min' mode.
-            In 'abs' mode, dynamic_threshold = best + threshold in
-            'max' mode or best - threshold in 'min' mode.
+            mode or best * ( 1 - threshold ) in `min` mode.
+            In `abs` mode, dynamic_threshold = best + threshold in
+            `max` mode or best - threshold in `min` mode.
         cooldown (int): Number of epochs to wait before resuming
             normal operation after lr has been reduced.
         min_lr (float or list): S scalar or a list of scalars. A
             lower bound on the learning rate of all param groups
             or each group respectively.
-
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
