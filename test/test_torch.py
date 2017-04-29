@@ -3131,7 +3131,7 @@ class TestTorch(TestCase):
 
         invert_result = ~x
         for idx in iter_indices(x):
-            self.assertIs(1 - x[idx], invert_result[idx])
+            self.assertEqual(1 - x[idx], invert_result[idx])
 
         x_clone = x.clone()
         x_clone &= y
