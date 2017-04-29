@@ -5,12 +5,12 @@ from torch.optim.optimizer import Optimizer
 class LambdaLR(object):
     def __init__(self, optimizer, base_lr, lr_lambda):
         self.optimizer = optimizer
-        self.base_lr = base_lr
+        self.base_lrs = _make_lrs_for_groups(optimizer, base_lr)
         self.lr_lambda = lr_lambda
 
     def step(self, epoch):
-        for param_group in self.optimizer.param_groups:
-            param_group['lr'] = self.base_lr * self.lr_lambda(epoch)
+        for inx, param_group in enumerate(self.optimizer.param_groups):
+            param_group['lr'] = self.base_lrs[inx] * self.lr_lambda(epoch)
 
 
 class GroupLambdaLR(object):
@@ -30,6 +30,12 @@ class StepLR(LambdaLR):
     """Set the learning rate to the base_lr decayed by gamma
     every step_size epochs.
 
+    Args:
+        base_lr: a scalar or a list of scalars. The learning rate
+            at epoch 0 for all param groups or for each group
+            respectively.
+        gamma: the multiplicative factor of learning rate decay.
+        step_size: period of learning rate decay.
 
     Example:
         >>> # lr = 0.05     if epoch < 30
@@ -52,6 +58,12 @@ class MultiStepLR(LambdaLR):
     """Set the learning rate to the base_lr decayed by gamma
     once the number of epoch reaches one of the milestones.
 
+    Args:
+        base_lr: a scalar or a list of scalars. The learning rate
+            at epoch 0 for all param groups or for each group
+            respectively.
+        gamma: the multiplicative factor of learning rate decay.
+        milestones: a list of epoch indices. Must be increasing.
 
     Example:
         >>> # lr = 0.05     if epoch < 30
@@ -74,7 +86,14 @@ class MultiStepLR(LambdaLR):
 
 class ExponentialLR(LambdaLR):
     """Set the learning rate to the initial LR decayed by gamma in
-    every epoch."""
+    every epoch.
+
+    Args:
+        base_lr: a scalar or a list of scalars. The learning rate
+            at epoch 0 for all param groups or for each group
+            respectively.
+        gamma: the multiplicative factor of learning rate decay.
+    """
 
     def __init__(self, optimizer, base_lr, gamma):
         super(ExponentialLR, self).__init__(optimizer, base_lr,
