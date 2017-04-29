@@ -37,14 +37,14 @@ class StepLR(LambdaLR):
         >>> # lr = 0.005    if 30 <= epoch < 60
         >>> # lr = 0.0005   if 60 <= epoch < 90
         >>> # ...
-        >>> scheduler = StepLR(optimizer, base_lr=0.05, gamma=0.1, step_size=30)
+        >>> scheduler = StepLR(optimizer, base_lr=0.05, step_size=30, gamma=0.1)
         >>> for epoch in range(100):
         >>>     scheduler.step(epoch)
         >>>     train(...)
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, base_lr=0.1, gamma=0.1, step_size=30):
+    def __init__(self, optimizer, base_lr, step_size, gamma=0.1):
         super(StepLR, self).__init__(optimizer, base_lr,
                                      lambda epoch: gamma ** (epoch // step_size))
 
@@ -65,7 +65,7 @@ class MultiStepLR(LambdaLR):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, base_lr=0.1, gamma=0.1, milestones=(10, 20, 30)):
+    def __init__(self, optimizer, base_lr, milestones, gamma=0.1):
         milestones = sorted(milestones)
         super(MultiStepLR, self).__init__(optimizer, base_lr,
                                           lambda epoch: gamma ** bisect_right(milestones, epoch))
@@ -133,7 +133,7 @@ class ReduceLROnPlateau(object):
         self.patience = patience
         self.verbose = verbose
         self.cooldown = cooldown
-        self.cooldown_counter = 0  # Cooldown counter.
+        self.cooldown_counter = 0
         self.monitor_op = _MonitorOp(mode=mode, threshold=threshold,
                                      threshold_mode=threshold_mode)
         self.wait = 0
