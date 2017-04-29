@@ -201,13 +201,17 @@ class _DistTestBase(object):
         self._barrier()
 
     # BROADCAST
-    def _test_broadcast_helper(self, group, group_id, rank):
+    def _test_broadcast_helper(self, group, group_id, rank, cuda=False):
         for src in group:
             expected_tensor = _build_tensor(src + 1)
+            if cuda:
+                expected_tensor = expected_tensor.cuda()
             if rank == src:
                 dist.broadcast(expected_tensor, src, group_id)
             else:
                 tensor = _build_tensor(src + 1, -1)
+                if cuda:
+                    tensor = tensor.cuda()
                 dist.broadcast(tensor, src, group_id)
                 self.assertEqual(tensor, expected_tensor)
 
@@ -216,6 +220,11 @@ class _DistTestBase(object):
     def test_broadcast(self):
         group, group_id, rank = self._init_global_test()
         self._test_broadcast_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    def test_broadcast_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_broadcast_helper(group, group_id, rank, True)
 
     def test_broadcast_group(self):
         group, group_id, rank = self._init_group_test()
@@ -293,14 +302,19 @@ class _DistTestBase(object):
         )
 
     # ALL REDUCE
-    def _test_all_reduce_helper(self, group, group_id, rank, op, master_value, worker_value, expected_value):
+    def _test_all_reduce_helper(self, group, group_id, rank, op, master_value,
+                                worker_value, expected_value, cuda=False):
         for src in group:
             if rank == src:
                 tensor = _build_tensor(src + 1).fill_(master_value)
+                if cuda:
+                    tensor = tensor.cuda()
                 dist.all_reduce(tensor, op, group_id)
                 self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
             else:
                 tensor = _build_tensor(src + 1).fill_(worker_value)
+                if cuda:
+                    tensor = tensor.cuda()
                 dist.all_reduce(tensor, op, group_id)
                 self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
 
@@ -310,6 +324,13 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_global_test()
         self._test_all_reduce_helper(
             group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
+        )
+
+    @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    def test_all_reduce_sum_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1)), True
         )
 
     def test_all_reduce_product(self):

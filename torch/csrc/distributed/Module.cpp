@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "torch/csrc/utils/python_strings.h"
 #include "THDP.h"
 
 static std::unordered_map<std::string, THDChannelType> name2channel_type = {
@@ -85,6 +86,17 @@ PyObject* THDPModule_getNumProcesses(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef WITH_CUDA
+extern PyObject* THCPDoubleTensorClass;
+extern PyObject* THCPFloatTensorClass;
+extern PyObject* THCPHalfTensorClass;
+extern PyObject* THCPLongTensorClass;
+extern PyObject* THCPIntTensorClass;
+extern PyObject* THCPShortTensorClass;
+extern PyObject* THCPCharTensorClass;
+extern PyObject* THCPByteTensorClass;
+#endif
+
 static THDTensorDescriptor* _makeDescriptor(PyObject *obj)
 {
   PyObject *type = (PyObject*)Py_TYPE(obj);
@@ -99,6 +111,20 @@ static THDTensorDescriptor* _makeDescriptor(PyObject *obj)
   REGISTER_TH_DESCRIPTOR(CharTensor);
   REGISTER_TH_DESCRIPTOR(ByteTensor);
 #undef REGISTER_TH_DESCRIPTOR
+#ifdef WITH_CUDA
+#define REGISTER_THC_DESCRIPTOR(TYPE)                                           \
+  if (type == THCP##TYPE##Class)                                                \
+    return THDTensorDescriptor_newFromTHCuda##TYPE((THCuda##TYPE*)(((torch::THPVoidTensor*)obj)->cdata));
+  REGISTER_THC_DESCRIPTOR(DoubleTensor);
+  if (type == THCPFloatTensorClass)
+    return THDTensorDescriptor_newFromTHCudaFloatTensor((THCudaTensor*)(((torch::THPVoidTensor*)obj)->cdata));
+  REGISTER_THC_DESCRIPTOR(LongTensor);
+  REGISTER_THC_DESCRIPTOR(IntTensor);
+  REGISTER_THC_DESCRIPTOR(ShortTensor);
+  REGISTER_THC_DESCRIPTOR(CharTensor);
+  REGISTER_THC_DESCRIPTOR(ByteTensor);
+#undef REGISTER_THC_DESCRIPTOR
+#endif
   throw std::runtime_error(std::string("don't know how to create a THDTensorDesciptor for "
       "type ") + std::string(THPUtils_typename(obj)));
 }
