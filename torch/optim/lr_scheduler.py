@@ -31,11 +31,10 @@ class StepLR(LambdaLR):
     every step_size epochs.
 
     Args:
-        base_lr: a scalar or a list of scalars. The learning rate
-            at epoch 0 for all param groups or for each group
-            respectively.
-        gamma: the multiplicative factor of learning rate decay.
-        step_size: period of learning rate decay.
+        base_lr (float or list): Learning rate at epoch 0 for all
+            param groups or for each group respectively.
+        gamma (float): Multiplicative factor of learning rate decay.
+        step_size (int): Period of learning rate decay.
 
     Example:
         >>> # lr = 0.05     if epoch < 30
@@ -59,11 +58,10 @@ class MultiStepLR(LambdaLR):
     once the number of epoch reaches one of the milestones.
 
     Args:
-        base_lr: a scalar or a list of scalars. The learning rate
-            at epoch 0 for all param groups or for each group
-            respectively.
-        gamma: the multiplicative factor of learning rate decay.
-        milestones: a list of epoch indices. Must be increasing.
+        base_lr (float or list): Learning rate at epoch 0 for all
+            param groups or for each group respectively.
+        gamma (float): Multiplicative factor of learning rate decay.
+        milestones (list): List of epoch indices. Must be increasing.
 
     Example:
         >>> # lr = 0.05     if epoch < 30
@@ -89,10 +87,9 @@ class ExponentialLR(LambdaLR):
     every epoch.
 
     Args:
-        base_lr: a scalar or a list of scalars. The learning rate
-            at epoch 0 for all param groups or for each group
-            respectively.
-        gamma: the multiplicative factor of learning rate decay.
+        base_lr (float or list): Learning rate at epoch 0 for all
+            param groups or for each group respectively.
+        gamma (float): Multiplicative factor of learning rate decay.
     """
 
     def __init__(self, optimizer, base_lr, gamma):
@@ -108,29 +105,28 @@ class ReduceLROnPlateau(object):
     of epochs, the learning rate is reduced.
 
     Args:
-        factor: factor by which the learning rate will
-            be reduced. new_lr = lr * factor
-        patience: number of epochs with no improvement
-            after which learning rate will be reduced.
-        verbose: int. 0: quiet, 1: update messages.
-        mode: one of {min, max}. In `min` mode,
-            lr will be reduced when the quantity
-            monitored has stopped decreasing; in `max`
-            mode it will be reduced when the quantity
-            monitored has stopped increasing.
-        threshold: threshold for measuring the new optimum,
+        factor (float): Factor by which the learning rate will be
+            reduced. new_lr = lr * factor
+        patience (int): Number of epochs with no improvement after
+            which learning rate will be reduced.
+        verbose (bool): If True, prints a message to stdout for
+            each update
+        mode (str): One of `min`, `max`. In `min` mode, lr will
+            be reduced when the quantity monitored has stopped
+            decreasing; in `max` mode it will be reduced when the
+            quantity monitored has stopped increasing.
+        threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes.
-        threshold_mode: one of {rel, abs}. In 'rel' mode,
-            dynamic_threshold = best * ( 1 + threshold )
-            in 'max' mode or best * ( 1 - threshold ) in
-            'min' mode. In 'abs' mode, dynamic_threshold =
-            best + threshold in 'max' mode or
-            best - threshold in 'min' mode.
-        cooldown: number of epochs to wait before resuming
+        threshold_mode (str): One of {rel, abs}. In `rel` mode,
+            dynamic_threshold = best * ( 1 + threshold ) in 'max'
+            mode or best * ( 1 - threshold ) in 'min' mode.
+            In 'abs' mode, dynamic_threshold = best + threshold in
+            'max' mode or best - threshold in 'min' mode.
+        cooldown (int): Number of epochs to wait before resuming
             normal operation after lr has been reduced.
-        min_lr: a scalar or a list of scalars. A lower bound
-            on the learning rate of all param groups or each
-            group respectively.
+        min_lr (float or list): S scalar or a list of scalars. A
+            lower bound on the learning rate of all param groups
+            or each group respectively.
 
 
     Example:
