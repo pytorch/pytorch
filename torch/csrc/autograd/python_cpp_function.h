@@ -30,15 +30,17 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   return obj.release();
 }
 
-PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name);
+PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
+  PyGetSetDef* function_properties, PyMethodDef* function_methods);
 
 PyObject* registerFunctionHook(Function& fn, PyObject* hook);
 
 template<typename Ctor>
-PyTypeObject* createForwardFunctionPyTypeObject(PyTypeObject& type, const char* name)
+PyTypeObject* createForwardFunctionPyTypeObject(PyTypeObject& type, const char* name,
+  PyGetSetDef* function_properties=NULL, PyMethodDef* function_methods=NULL)
 {
   type.tp_new = &CppFunction_pynew<Ctor>;
-  return _initFunctionPyTypeObject(type, name);
+  return _initFunctionPyTypeObject(type, name, function_properties, function_methods);
 }
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype);

@@ -1,6 +1,7 @@
 #include <Python.h>
 #include "batch_normalization.h"
 #include "convolution.h"
+#include "convolution_attr.h"
 #include "accumulate_grad.h"
 #include "basic_ops.h"
 #include "tensor.h"
@@ -62,9 +63,10 @@ struct NoCtor {
 };
 
 template<typename C, typename T>
-static void addClass(PyObject* module, PyTypeObject& type, const char* name)
+static void addClass(PyObject* module, PyTypeObject& type, const char* name,
+  PyGetSetDef* function_properties=NULL, PyMethodDef* function_methods=NULL)
 {
-  createForwardFunctionPyTypeObject<T>(type, name);
+  createForwardFunctionPyTypeObject<T>(type, name, function_properties, function_methods);
   Py_INCREF(&type);
   PyModule_AddObject(module, name, (PyObject*)&type);
   registerCppFunction(typeid(C), &type);
@@ -75,14 +77,13 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   THPObjectPtr module = PyModule_New("torch._C._functions");
   if (!module) return false;
 
-
   static PyTypeObject BatchNormClass, BatchNormBackwardClass;
   addClass<BatchNormForward, BatchNormCtor>(module, BatchNormClass, "BatchNorm");
   addClass<BatchNormBackward, NoCtor>(module, BatchNormBackwardClass, "BatchNormBackward");
 
   static PyTypeObject ConvClass, ConvBackwardClass;
-  addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd");
-  addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward");
+  addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd", attributes::conv_forward_properties);
+  addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward", attributes::conv_backward_properties);
 
   static PyTypeObject AccumulateGradClass;
   addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad");
