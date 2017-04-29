@@ -1,5 +1,6 @@
 """Functional interface"""
 
+import math
 import torch
 from . import _functions
 from .modules import utils
@@ -639,14 +640,28 @@ def pad(input, pad, mode='constant', value=0):
     else:
         raise NotImplementedError("Only 4D and 5D padding is supported for now")
 
+
+def crop_offsets(old_len, new_len):
+    offset = (old_len - new_len) / 2
+    return math.ceil(offset), old_len - math.floor(offset)
+
+
 def center_crop(x, *args):
-    ndim = len(x.size()[2:])
+    dims = x.size()[2:]
+    ndim = len(dims)
+    assert ndim == len(args), 'Crop dimensions do not match input dimensions'
     if ndim == 1:
-        return Crop1d(args)(x)
+        start, stop = crop_offsets(dims[0], args[0])
+        return x[:, :, start:stop]
     if ndim == 2:
-        return Crop2d(args)(x)
+        hstart, hstop = crop_offsets(dims[0], args[0])
+        wstart, wstop = crop_offsets(dims[1], args[1])
+        return x[:, :, hstart:hstop, wstart:wstop]
     if ndim == 3:
-        return Crop3d(args)(x)
+        hstart, hstop = crop_offsets(dims[0], args[0])
+        wstart, wstop = crop_offsets(dims[1], args[1])
+        dstart, dstop = crop_offsets(dims[2], args[2])
+        return x[:, :, hstart:hstop, wstart:wstop, dstart:dstop]
     raise NotImplementedError("Only 1D, 2D and 3D cropping is supported for now")
 
 # distance

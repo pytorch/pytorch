@@ -682,17 +682,21 @@ class TestNN(NNTestCase):
         # This should work though
         l2.weight = Parameter(torch.randn(10, 10))
 
-    def test_crop(self):
-        c1 = nn.Crop1d(4)
-        c2 = nn.Crop2d((6, 10))
-        c3 = nn.Crop3d((6, 10, 10))
-        v1 = Variable(torch.randn(1, 1, 10))
-        v2 = Variable(torch.randn(1, 1, 10, 20))
-        v3 = Variable(torch.randn(1, 1, 10, 20, 30))
-
-        self.assertEqual(c1(v1).sum(), v1[:, :, 3:7].sum())
-        self.assertEqual(c2(v2).sum(), v2[:, :, 2:8, 5:15].sum())
-        self.assertEqual(c3(v3).sum(), v3[:, :, 2:8, 5:15, 10:20].sum())
+    def test_center_crop(self):
+        t1 = torch.randn(1, 1, 10)
+        t2 = torch.randn(1, 1, 10, 20)
+        t3 = torch.randn(1, 1, 10, 20, 30)
+        self.assertEqual(F.center_crop(t1, 4), t1[:, :, 3:7])
+        self.assertEqual(F.center_crop(t2, 6, 10), t2[:, :, 2:8, 5:15])
+        self.assertEqual(F.center_crop(t3, 6, 10, 10), t3[:, :, 2:8, 5:15, 10:20])
+        with self.assertRaises(AssertionError):
+            F.center_crop(t1)
+        with self.assertRaises(AssertionError):
+            F.center_crop(t2, 1)
+        with self.assertRaises(AssertionError):
+            F.center_crop(t2, 3)
+        with self.assertRaises(NotImplementedError):
+            F.center_crop(torch.randn(1, 1, 10, 10, 10, 10), 2, 2, 2, 2)
 
     def test_clip_grad_norm(self):
         l = nn.Linear(10, 10)
@@ -2793,6 +2797,11 @@ new_module_tests = [
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple'
+    ),
+    dict(
+        module_name='CenterCrop',
+        constructor_args=((3, 4),),
+        input=torch.rand(1, 1, 10, 10),
     ),
 ]
 
