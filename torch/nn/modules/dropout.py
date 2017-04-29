@@ -13,11 +13,7 @@ class Dropout(Module):
     detectors`_.
 
     Furthermore, the outputs are scaled by a factor of *1/(1-p)* during
-    training. This allows the input to be simply forwarded as-is during
-    evaluation.
-
-    During evaluation, Dropout does nothing more than forward the input such
-    that all elements of the input are considered.
+    training. This means that during evaluation the module simply computes
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
@@ -32,6 +28,10 @@ class Dropout(Module):
         >>> m = nn.Dropout(p=0.2)
         >>> input = autograd.Variable(torch.randn(20, 16))
         >>> output = m(input)
+
+    .. _Improving neural networks by preventing co-adaptation of feature
+    detectors:
+    https://arxiv.org/abs/1207.0580
     """
 
     def __init__(self, p=0.5, inplace=False):
