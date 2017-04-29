@@ -382,8 +382,7 @@ class _TensorBase(object):
         return self.copy_((self + other).eq(1))
 
     def __invert__(self):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
+        if (type(self).__name__ != 'ByteTensor'):
             raise RuntimeError('logical operations are supported on ByteTensors only')
         return (1 - self)
 
