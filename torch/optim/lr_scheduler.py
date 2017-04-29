@@ -66,7 +66,9 @@ class MultiStepLR(LambdaLR):
     """
 
     def __init__(self, optimizer, base_lr, milestones, gamma=0.1):
-        milestones = sorted(milestones)
+        if not list(milestones) == sorted(milestones):
+            raise ValueError('Milestones should be a list of'
+                             ' increasing integers. Got {}',milestones)
         super(MultiStepLR, self).__init__(optimizer, base_lr,
                                           lambda epoch: gamma ** bisect_right(milestones, epoch))
 
@@ -126,8 +128,7 @@ class ReduceLROnPlateau(object):
                  cooldown=0, min_lr=0):
 
         if factor >= 1.0:
-            raise ValueError('ReduceLROnPlateau '
-                             'does not support a factor >= 1.0.')
+            raise ValueError('Factor should be < 1.0.')
         self.factor = factor
         self.min_lr = min_lr
         self.patience = patience
@@ -138,7 +139,9 @@ class ReduceLROnPlateau(object):
                                      threshold_mode=threshold_mode)
         self.wait = 0
         self.best = 0
-        assert isinstance(optimizer, Optimizer)
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError('{} is not an Optimizer'.format(
+                type(optimizer).__name__))
         self.optimizer = optimizer
         self._reset()
 
@@ -175,7 +178,8 @@ class ReduceLROnPlateau(object):
                 new_lr = max(new_lr, self.min_lr)
                 param_group['lr'] = new_lr
                 if self.verbose > 0:
-                    print('Epoch %05d: reducing learning rate of group %d to %s.' % (epoch, inx_group, new_lr))
+                    print('Epoch %05d: reducing learning rate'
+                          ' of group %d to %s.' % (epoch, inx_group, new_lr))
 
     def in_cooldown(self):
         return self.cooldown_counter > 0
@@ -186,7 +190,8 @@ class _MonitorOp(object):
         if mode not in ['min', 'max']:
             raise RuntimeError('Learning Rate Plateau Reducing mode %s is unknown!')
         if threshold_mode not in ['rel', 'abs']:
-            raise RuntimeError('Learning Rate Plateau threshold mode %s is unknown!')
+            raise RuntimeError('Learning Rate Plateau Reducing'
+                               ' threshold mode %s is unknown!')
         if mode == 'min' and threshold_mode == 'rel':
             rel_epsilon = 1. - threshold
             self.monitor_op = lambda a, best: np.less(a, best * rel_epsilon)
