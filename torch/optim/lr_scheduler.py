@@ -230,9 +230,10 @@ class ReduceLROnPlateau(object):
 def _make_lrs_for_groups(optimizer, lr):
     if isinstance(lr, list) or isinstance(lr, tuple):
         if len(lr) != len(optimizer.param_groups):
-            raise ValueError('len(lr)={} does not match'
-                             ' len(param_groups)={}'.format(
-                                len(lr), len(optimizer.param_groups)))
+            raise ValueError(
+                'len(lr)={} does not match len(param_groups)={}'.format(
+                    len(lr), len(optimizer.param_groups)
+                ))
     else:
         lr = [lr for _ in range(len(optimizer.param_groups))]
     return lr
