@@ -10,10 +10,11 @@ class Dropout(Module):
     This has proven to be an effective technique for regularization and
     preventing the co-adaptation of neurons as described in the paper
     `Improving neural networks by preventing co-adaptation of feature
-    detectors`_.
+    detectors`_ .
 
     Furthermore, the outputs are scaled by a factor of *1/(1-p)* during
-    training. This means that during evaluation the module simply computes
+    training. This means that during evaluation the module simply computes an
+    identity function.
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
@@ -29,9 +30,7 @@ class Dropout(Module):
         >>> input = autograd.Variable(torch.randn(20, 16))
         >>> output = m(input)
 
-    .. _Improving neural networks by preventing co-adaptation of feature
-    detectors:
-    https://arxiv.org/abs/1207.0580
+    .. _Improving neural networks by preventing co-adaptation of feature detectors: https://arxiv.org/abs/1207.0580
     """
 
     def __init__(self, p=0.5, inplace=False):
