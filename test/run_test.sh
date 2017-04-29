@@ -38,9 +38,6 @@ $PYCMD test_legacy_nn.py $@
 echo "Running optim tests"
 $PYCMD test_optim.py $@
 
-echo "Running scheduler tests"
-$PYCMD test_scheduler.py $@
-
 echo "Running multiprocessing tests"
 $PYCMD test_multiprocessing.py $@
 MULTIPROCESSING_METHOD=spawn $PYCMD test_multiprocessing.py $@
