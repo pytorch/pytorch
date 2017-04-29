@@ -4,6 +4,7 @@ import torch
 from . import _functions
 from .modules import utils
 from ._functions.padding import ConstantPad2d
+from ..autograd import _functions as _autograd_functions
 from .modules.utils import _single, _pair, _triple
 
 # Convolutions
@@ -407,7 +408,7 @@ def hardshrink(input, lambd=0.5):
 
 
 def tanhshrink(input):
-    return input - _functions.thnn.Tanh()(input)
+    return input - _autograd_functions.Tanh()(input)
 
 
 def softsign(input):
@@ -435,11 +436,11 @@ def log_softmax(input):
 
 
 def tanh(input):
-    return _functions.thnn.Tanh()(input)
+    return _autograd_functions.Tanh()(input)
 
 
 def sigmoid(input):
-    return _functions.thnn.Sigmoid()(input)
+    return _autograd_functions.Sigmoid()(input)
 
 
 # etc.
