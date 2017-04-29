@@ -1625,8 +1625,7 @@
     - THTensor* tensor2
 ]]
 
-#ifndef THP_LAPACK_CONSTANTS
-#define THP_LAPACK_CONSTANTS
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
 // We need to pass pointers to chars to tensor lapack functions...
 static const char __U = 'U';
 static const char __L = 'L';
