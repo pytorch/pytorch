@@ -109,7 +109,9 @@ class ReduceLROnPlateau(object):
             best - threshold in 'min' mode.
         cooldown: number of epochs to wait before resuming
             normal operation after lr has been reduced.
-        min_lr: lower bound on the learning rate.
+        min_lr: a scalar or a list of scalars. A lower bound
+            on the learning rate of all param groups or each
+            group respectively.
 
 
     Example:
@@ -129,7 +131,7 @@ class ReduceLROnPlateau(object):
         if factor >= 1.0:
             raise ValueError('Factor should be < 1.0.')
         self.factor = factor
-        self.min_lr = min_lr
+        self.min_lrs = _make_lrs_for_groups(optimizer, min_lr)
         self.patience = patience
         self.verbose = verbose
         self.cooldown = cooldown
@@ -155,7 +157,7 @@ class ReduceLROnPlateau(object):
         self.best = self.mode_worse
         self.cooldown_counter = 0
         self.wait = 0
-        self.lr_epsilon = self.min_lr * 1e-4
+        self.lr_epsilons = [min_lr * 1e-4 for min_lr in self.min_lrs]
 
     def step(self, epoch, metrics):
         current = metrics
@@ -177,9 +179,9 @@ class ReduceLROnPlateau(object):
     def _reduce_lr(self, epoch):
         for inx_group, param_group in enumerate(self.optimizer.param_groups, 0):
             old_lr = float(param_group['lr'])
-            if old_lr > self.min_lr + self.lr_epsilon:
+            if old_lr > self.min_lrs[inx_group] + self.lr_epsilons[inx_group]:
                 new_lr = old_lr * self.factor
-                new_lr = max(new_lr, self.min_lr)
+                new_lr = max(new_lr, self.min_lrs[inx_group])
                 param_group['lr'] = new_lr
                 if self.verbose:
                     print('Epoch %05d: reducing learning rate'
@@ -208,3 +210,14 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max' and epsilon_mode == 'abs':
             self.is_better = lambda a, best: a > best + threshold
             self.mode_worse = -float('Inf')
+
+
+def _make_lrs_for_groups(optimizer, lr):
+    if isinstance(lr, list) or isinstance(lr, tuple):
+        if len(lr) != len(optimizer.param_groups):
+            raise ValueError('len(lr)={} does not match'
+                             ' len(param_groups)={}'.format(
+                                len(lr), len(optimizer.param_groups)))
+    else:
+        lr = [lr for _ in range(len(optimizer.param_groups))]
+    return lr

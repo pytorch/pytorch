@@ -514,6 +514,16 @@ class TestLRScheduler(TestCase):
         epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs, verbose=0)
 
+    def test_reduce_lr_on_plateau8(self):
+        for param_group in self.opt.param_groups:
+            param_group['lr'] = 0.5
+        targets = [[0.5] * 6 + [0.4] * 14, [0.5] * 6 + [0.3] * 14]
+        metrics = [1.5 * (1.005 ** i) for i in range(20)]
+        scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel', min_lr=[0.4, 0.3],
+                                      threshold=0.1, patience=5, cooldown=5, verbose=0)
+        epochs = 20
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs, verbose=0)
+
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):
             scheduler.step(epoch)
