@@ -23,21 +23,25 @@
   }
 
 
+// TODO: gloo uses stdint types for integral values and there's some weird template
+// magic going on that mangles names so that they don't always match the types
+// below. Only float and double are left enabled for now, because they're most
+// useful and unambiguous.
 #define GENERATE_ALL_TYPES(type, func, args...)                               \
   switch (type) {                                                             \
-    case ::thpp::Type::CHAR: func<char>(args); break;                         \
-    case ::thpp::Type::UCHAR: func<unsigned char>(args); break;               \
     case ::thpp::Type::FLOAT: func<float>(args); break;                       \
     case ::thpp::Type::DOUBLE: func<double>(args); break;                     \
+    /* case ::thpp::Type::CHAR: func<char>(args); break; */                   \
+    /* case ::thpp::Type::UCHAR: func<unsigned char>(args); break; */         \
     /* case ::thpp::Type::HALF: func<float>(args); break; */                  \
-    case ::thpp::Type::SHORT: func<short>(args); break;                       \
-    case ::thpp::Type::USHORT: func<unsigned short>(args); break;             \
-    case ::thpp::Type::INT: func<int>(args); break;                           \
-    case ::thpp::Type::UINT: func<unsigned int>(args); break;                 \
-    case ::thpp::Type::LONG: func<long>(args); break;                         \
-    case ::thpp::Type::ULONG: func<unsigned long>(args); break;               \
-    case ::thpp::Type::LONG_LONG: func<long long>(args); break;               \
-    case ::thpp::Type::ULONG_LONG: func<unsigned long long>(args); break;     \
+    /* case ::thpp::Type::SHORT: func<short>(args); break; */                 \
+    /* case ::thpp::Type::USHORT: func<unsigned short>(args); break; */       \
+    /* case ::thpp::Type::INT: func<int>(args); break; */                     \
+    /* case ::thpp::Type::UINT: func<unsigned int>(args); break; */           \
+    /* case ::thpp::Type::LONG: func<long>(args); break; */                   \
+    /* case ::thpp::Type::ULONG: func<unsigned long>(args); break; */         \
+    /* case ::thpp::Type::LONG_LONG: func<long long>(args); break; */         \
+    /* case ::thpp::Type::ULONG_LONG: func<unsigned long long>(args); break; */ \
     default:                                                                  \
       throw std::runtime_error("Invalid " + std::string(#func) + " function type"); \
   }
@@ -132,10 +136,16 @@ rank_type DataChannelGloo::getNumProcesses() {
 template<typename T>
 void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
                                  thpp::Tensor& input, THDGroup group_id) {
+  auto input_device = getDeviceType(input);
+  for (auto& out : output) {
+    if (input_device != getDeviceType(*out)) {
+      throw std::runtime_error("allGather got input and output on different devices");
+    }
+  }
   std::uint64_t tensor_bytes = input.elementSize() * input.numel();
   std::uint64_t all_tensor_bytes = tensor_bytes * output.size();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
-    group_id, _groups.at(group_id), tensor_bytes, all_tensor_bytes, input.numel());
+    group_id, _groups.at(group_id), input_device, tensor_bytes, all_tensor_bytes, input.numel());
 
   std::memcpy(GlooCache::input_buffer(ret).get(), input.data(), tensor_bytes);
 
@@ -186,14 +196,14 @@ void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
                                  THDGroup group_id) {
   std::uint64_t tensor_bytes = t.elementSize() * t.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
-    group_id, _groups.at(group_id), tensor_bytes, t.numel(), operation);
+    group_id, _groups.at(group_id), getDeviceType(t), tensor_bytes, t.numel(), operation);
 
-  std::memcpy(GlooCache::input_buffer(ret).get(), t.data(), tensor_bytes);
+  GlooCache::memcpy_input(ret, t);
   {
     std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
     GlooCache::algorithm(ret)->run();
   }
-  std::memcpy(t.data(), GlooCache::output_buffer(ret).get(), tensor_bytes);
+  GlooCache::memcpy_output(ret, t);
 }
 
 void DataChannelGloo::allReduce(thpp::Tensor& data, THDReduceOp operation,
@@ -215,19 +225,21 @@ void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
                                  THDGroup group_id) {
   std::uint64_t tensor_bytes = data.elementSize() * data.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::BROADCAST, T>(
-    group_id, _groups.at(group_id), tensor_bytes, data.numel(),
+    group_id, _groups.at(group_id), getDeviceType(data), tensor_bytes, data.numel(),
     _groups.at(group_id).mustGetGroupRank(src_rank));
 
-  if (_rank == src_rank)
-    std::memcpy(GlooCache::input_buffer(ret).get(), data.data(), tensor_bytes);
+  if (_rank == src_rank) {
+    GlooCache::memcpy_input(ret, data);
+  }
 
   {
     std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
     GlooCache::algorithm(ret)->run();
   }
 
-  if (_rank != src_rank)
-    std::memcpy(data.data(), GlooCache::output_buffer(ret).get(), tensor_bytes);
+  if (_rank != src_rank) {
+    GlooCache::memcpy_output(ret, data);
+  }
 }
 
 

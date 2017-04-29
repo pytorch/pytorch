@@ -1,5 +1,6 @@
 #pragma once
 
+#include <THPP/Tensor.hpp>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <cstdlib>
@@ -46,9 +47,20 @@ enum class CollectiveType : std::uint8_t {
   LAST
 };
 
+enum class DeviceType : std::uint8_t {
+  CPU,
+  CUDA,
+  LAST
+};
+
+inline DeviceType getDeviceType(thpp::Tensor& tensor) {
+    return tensor.isCuda() ? DeviceType::CUDA : DeviceType::CPU;
+}
+
 } // namespace thd
 
 MAKE_HASHABLE(::thd::CollectiveType, static_cast<std::uint8_t>(t));
+MAKE_HASHABLE(::thd::DeviceType, static_cast<std::uint8_t>(t));
 
 
 namespace thd {

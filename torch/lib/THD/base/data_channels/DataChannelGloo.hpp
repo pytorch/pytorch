@@ -81,7 +81,7 @@ private:
   std::shared_ptr<store_type> _store;
   std::shared_ptr<::gloo::transport::Device> _device;
   std::unordered_map<THDGroup, DataChannel::Group> _groups;
-  
+
   std::unique_ptr<GlooCache> _cache;
 
   // Workers

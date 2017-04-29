@@ -93,6 +93,7 @@ function build_nccl() {
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
    cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
+   ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
    cd ../..
 }
 
@@ -114,7 +115,11 @@ CPP_FLAGS=" -std=c++11 "
 build libshm
 
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
-    build gloo
+    GLOO_FLAGS=""
+    if [[ $WITH_CUDA -eq 1 ]]; then
+        GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
+    fi
+    build gloo "$GLOO_FLAGS"
     build THD
 fi
 
