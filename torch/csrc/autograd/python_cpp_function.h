@@ -30,6 +30,21 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   return obj.release();
 }
 
+PyObject* next_functions(THPCppFunction* self, PyObject* hook);
+PyObject* register_hook_dict(PyObject* self, PyObject* _var);
+PyObject* register_hook(PyObject* self, PyObject* hook);
+
+static struct PyMethodDef default_methods[] = {
+  {(char*)"_register_hook_dict", (PyCFunction)register_hook_dict, METH_O, NULL},
+  {(char*)"register_hook", (PyCFunction)register_hook, METH_O, NULL},
+  {NULL}
+};
+
+static struct PyGetSetDef default_properties[] = {
+  {(char*)"next_functions", (getter)next_functions, NULL, NULL, NULL},
+  {NULL}
+};
+
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   PyGetSetDef* function_properties, PyMethodDef* function_methods);
 
