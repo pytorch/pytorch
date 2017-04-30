@@ -2,6 +2,7 @@
 
 #include <Python.h>
 #include "convolution.h"
+#include "torch/csrc/autograd/THP.h"
 #include "torch/csrc/autograd/python_cpp_function_attr.h"
 
 
