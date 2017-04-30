@@ -209,9 +209,8 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
           tuple (sh x sw). Default is equal to kernel size
         padding: implicit zero padding on the input, a single number or
           a tuple (padh x padw), Default: 0
-        ceil_mode: operation that defines spatial output shape
-        count_include_pad: divide by the number of elements inside the
-          original non-padded image or kh * kw
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula to compute the output shape
+        count_include_pad: when True, will include the zero-padding in the averaging calculation
     """
     return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                      ceil_mode, count_include_pad)(input)
@@ -219,7 +218,7 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
 
 def avg_pool3d(input, kernel_size, stride=None):
     """Applies 3D average-pooling operation in kt x kh x kw regions by step
-    size kt x dh x dw steps. The number of output features is equal to the
+    size dt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
     """
     return _functions.thnn.AvgPool3d(kernel_size, stride)(input)
