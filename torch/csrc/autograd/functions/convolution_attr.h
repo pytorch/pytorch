@@ -17,7 +17,7 @@ PyObject* conv_stride(THPCppFunction* self, PyObject* hook)
   THPObjectPtr py_stride = PyTuple_New(num_elems);
   if (!py_stride) return NULL;
   for (size_t i = 0; i < num_elems; ++i) {
-    PyTuple_SET_ITEM(py_stride.get(), i, PyLong_FromLong(stride[i]));
+    PyTuple_SET_ITEM(py_stride.get(), i, PyInt_FromLong(stride[i]));
   }
   return py_stride.release();
 }
@@ -30,7 +30,7 @@ PyObject* conv_padding(THPCppFunction* self, PyObject* hook)
   THPObjectPtr py_padding = PyTuple_New(num_elems);
   if (!py_padding) return NULL;
   for (size_t i = 0; i < num_elems; ++i) {
-    PyTuple_SET_ITEM(py_padding.get(), i, PyLong_FromLong(padding[i]));
+    PyTuple_SET_ITEM(py_padding.get(), i, PyInt_FromLong(padding[i]));
   }
   return py_padding.release();
 }
@@ -43,7 +43,7 @@ PyObject* conv_dilation(THPCppFunction* self, PyObject* hook)
   THPObjectPtr py_dilation = PyTuple_New(num_elems);
   if (!py_dilation) return NULL;
   for (size_t i = 0; i < num_elems; ++i) {
-    PyTuple_SET_ITEM(py_dilation.get(), i, PyLong_FromLong(dilation[i]));
+    PyTuple_SET_ITEM(py_dilation.get(), i, PyInt_FromLong(dilation[i]));
   }
   return py_dilation.release();
 }
@@ -66,7 +66,7 @@ PyObject* conv_output_padding(THPCppFunction* self, PyObject* hook)
   THPObjectPtr py_output_padding = PyTuple_New(num_elems);
   if (!py_output_padding) return NULL;
   for (size_t i = 0; i < num_elems; ++i) {
-    PyTuple_SET_ITEM(py_output_padding.get(), i, PyLong_FromLong(output_padding[i]));
+    PyTuple_SET_ITEM(py_output_padding.get(), i, PyInt_FromLong(output_padding[i]));
   }
   return py_output_padding.release();
 }
@@ -75,7 +75,7 @@ template<class T>
 PyObject* conv_groups(THPCppFunction* self, PyObject* hook)
 {
   int groups = std::static_pointer_cast<T>(self->cdata)->groups;
-  return PyLong_FromLong(groups);
+  return PyInt_FromLong(groups);
 }
 
 static struct PyGetSetDef conv_forward_properties[] = {
