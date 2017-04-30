@@ -95,23 +95,35 @@ PyObject* getValueAttr(PyObject* obj, void* _unused)
 }
 
 static struct PyGetSetDef conv_forward_properties[] = {
-  {(char*)"stride", (getter)getTupleAttr<ConvForward,std::vector<int>,ConvParams,&ConvParams::stride,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"padding", (getter)getTupleAttr<ConvForward,std::vector<int>,ConvParams,&ConvParams::padding,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"dilation", (getter)getTupleAttr<ConvForward,std::vector<int>,ConvParams,&ConvParams::dilation,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"transposed", (getter)getValueAttr<ConvForward,bool,ConvParams,&ConvParams::transposed,long,PyBool_FromLong>, NULL, NULL, NULL},
-  {(char*)"output_padding", (getter)getTupleAttr<ConvForward,std::vector<int>,ConvParams,&ConvParams::output_padding,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"groups", (getter)getValueAttr<ConvForward,int,ConvParams,&ConvParams::groups,long,PyLong_FromLong>, NULL, NULL, NULL},
+  {(char*)"stride", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+                                         &ConvParams::stride, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+                                         &ConvParams::padding, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"dilation", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+                                         &ConvParams::dilation, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"transposed", (getter)getValueAttr<ConvForward, bool, ConvParams, 
+                                         &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
+  {(char*)"output_padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+                                         &ConvParams::output_padding, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"groups", (getter)getValueAttr<ConvForward, int, ConvParams, 
+                                         &ConvParams::groups, long, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"next_functions", (getter)next_functions, NULL, NULL, NULL},
   {NULL}
 };
 
 static struct PyGetSetDef conv_backward_properties[] = {
-  {(char*)"stride", (getter)getTupleAttr<ConvBackward,std::vector<int>,ConvParams,&ConvParams::stride,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"padding", (getter)getTupleAttr<ConvBackward,std::vector<int>,ConvParams,&ConvParams::padding,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"dilation", (getter)getTupleAttr<ConvBackward,std::vector<int>,ConvParams,&ConvParams::dilation,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"transposed", (getter)getValueAttr<ConvBackward,bool,ConvParams,&ConvParams::transposed,long,PyBool_FromLong>, NULL, NULL, NULL},
-  {(char*)"output_padding", (getter)getTupleAttr<ConvBackward,std::vector<int>,ConvParams,&ConvParams::output_padding,long,PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"groups", (getter)getValueAttr<ConvBackward,int,ConvParams,&ConvParams::groups,long,PyLong_FromLong>, NULL, NULL, NULL},
+  {(char*)"stride", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+                                         &ConvParams::stride, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+                                         &ConvParams::padding, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"dilation", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+                                         &ConvParams::dilation, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"transposed", (getter)getValueAttr<ConvBackward, bool, ConvParams, 
+                                         &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
+  {(char*)"output_padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+                                         &ConvParams::output_padding, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"groups", (getter)getValueAttr<ConvBackward, int, ConvParams, 
+                                         &ConvParams::groups, long, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"next_functions", (getter)next_functions, NULL, NULL, NULL},
   {NULL}
 };
