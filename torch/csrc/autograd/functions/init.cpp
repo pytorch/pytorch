@@ -4,6 +4,7 @@
 #include "accumulate_grad.h"
 #include "basic_ops.h"
 #include "tensor.h"
+#include "torch/csrc/THP.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/utils/tuple_parser.h"
 
