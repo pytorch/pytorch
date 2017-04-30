@@ -195,7 +195,7 @@ typedef int (*setter)(PyObject *, PyObject *, void *);
 PyObject *THPVariable_get_version(THPVariable *self)
 {
   auto& var = *self->cdata;
-  return PyLong_FromLong(**var.version_counter);
+  return PyInt_FromLong(**var.version_counter);
 }
 
 PyObject *THPVariable_get_grad_fn(THPVariable *self)
@@ -291,7 +291,7 @@ int THPVariable_set_volatile(THPVariable *self, PyObject *obj)
 PyObject *THPVariable_get_output_nr(THPVariable *self)
 {
   auto& var = *self->cdata;
-  return PyLong_FromLong(var.output_nr);
+  return PyInt_FromLong(var.output_nr);
 }
 
 PyObject *THPVariable_get_requires_grad(THPVariable *self)
