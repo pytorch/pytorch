@@ -303,19 +303,19 @@ Normalization layers
     :members:
 
 :hidden:`InstanceNorm1d`
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm1d
     :members:
 
 :hidden:`InstanceNorm2d`
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm2d
     :members:
 
 :hidden:`InstanceNorm3d`
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm3d
     :members:
