@@ -84,8 +84,11 @@ class InstanceNorm1d(_InstanceNorm):
 
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+
     .. math::
+
         y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).

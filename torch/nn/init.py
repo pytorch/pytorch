@@ -7,6 +7,7 @@ from torch.autograd import Variable
 
 def calculate_gain(nonlinearity, param=None):
     """Return the recommended gain value for the given nonlinearity function. The values are as follows:
+
     ============ ==========================================
     nonlinearity gain
     ============ ==========================================
@@ -179,7 +180,7 @@ def xavier_uniform(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-a, a)` where
-    :math:`a = gain \times \sqrt{2 / (fan\_in + fan\_out)} \times \sqrt{3}`. Also known as Glorot initialisation.
+    :math:`a = gain \\times \sqrt{2 / (fan\_in + fan\_out)} \\times \sqrt{3}`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -203,7 +204,7 @@ def xavier_normal(tensor, gain=1):
     """Fills the input Tensor or Variable with values according to the method described in "Understanding the
     difficulty of training deep feedforward neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    :math:`std = gain \times \sqrt{2 / (fan\_in + fan\_out)}`. Also known as Glorot initialisation.
+    :math:`std = gain \\times \sqrt{2 / (fan\_in + fan\_out)}`. Also known as Glorot initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -236,7 +237,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015), using a uniform
     distribution. The resulting tensor will have values sampled from :math:`U(-bound, bound)` where
-    :math:`bound = \sqrt{2 / ((1 + a^2) \times fan\_in)} \times \sqrt{3}`. Also known as He initialisation.
+    :math:`bound = \sqrt{2 / ((1 + a^2) \\times fan\_in)} \\times \sqrt{3}`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
@@ -263,7 +264,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
     """Fills the input Tensor or Variable with values according to the method described in "Delving deep into
     rectifiers: Surpassing human-level performance on ImageNet classification" - He, K. et al. (2015), using a normal
     distribution. The resulting tensor will have values sampled from :math:`N(0, std)` where
-    :math:`std = \sqrt{2 / ((1 + a^2) \times fan\_in)}`. Also known as He initialisation.
+    :math:`std = \sqrt{2 / ((1 + a^2) \\times fan\_in)}`. Also known as He initialisation.
 
     Args:
         tensor: an n-dimensional torch.Tensor or autograd.Variable
