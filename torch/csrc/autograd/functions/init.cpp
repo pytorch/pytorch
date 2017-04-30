@@ -95,6 +95,7 @@ PyObject* getValueAttr(PyObject* obj, void* _unused)
 }
 
 static struct PyGetSetDef conv_forward_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"stride", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
                                          &ConvParams::stride, long, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
@@ -107,11 +108,11 @@ static struct PyGetSetDef conv_forward_properties[] = {
                                          &ConvParams::output_padding, long, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"groups", (getter)getValueAttr<ConvForward, int, ConvParams, 
                                          &ConvParams::groups, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"next_functions", (getter)next_functions, NULL, NULL, NULL},
   {NULL}
 };
 
 static struct PyGetSetDef conv_backward_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"stride", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
                                          &ConvParams::stride, long, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
@@ -124,7 +125,6 @@ static struct PyGetSetDef conv_backward_properties[] = {
                                          &ConvParams::output_padding, long, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"groups", (getter)getValueAttr<ConvBackward, int, ConvParams, 
                                          &ConvParams::groups, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"next_functions", (getter)next_functions, NULL, NULL, NULL},
   {NULL}
 };
 

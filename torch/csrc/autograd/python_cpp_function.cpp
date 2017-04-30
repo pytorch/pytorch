@@ -129,6 +129,17 @@ PyObject* register_hook(PyObject* self, PyObject* hook)
   return registerFunctionHook(fn, hook);
 }
 
+
+static struct PyMethodDef default_methods[] = {
+  THP_FUNCTION_DEFAULT_METHODS,
+  {NULL}
+};
+
+static struct PyGetSetDef default_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
+  {NULL}
+};
+
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   PyGetSetDef* function_properties, PyMethodDef* function_methods)
 {
