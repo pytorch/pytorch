@@ -2216,22 +2216,6 @@ class TestOperators(hu.HypothesisTestCase):
             return list(xs) + [coalesced]
         self.assertReferenceChecks(gc, op, Xs, unsafe_coalesce)
 
-    @given(X=hu.tensor(min_dim=2,
-                       max_dim=2,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           **hu.gcs_cpu_only)
-    def test_normalize(self, X, gc, dc):
-        op = core.CreateOperator("Normalize", "X", "Y")
-
-        def ref_normalize(X):
-            x_normed = X / (
-                np.sqrt((X**2).sum(-1))[:, np.newaxis] + np.finfo(X.dtype).tiny)
-            return (x_normed,)
-
-        self.assertReferenceChecks(gc, op, [X], ref_normalize)
-        self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
-
     @given(inp=_dtypes().flatmap(lambda dt: _tensor_and_indices(
         elements=st.floats(min_value=0.5, max_value=10), dtype=dt)),
         **hu.gcs_cpu_only)

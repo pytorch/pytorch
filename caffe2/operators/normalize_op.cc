@@ -21,20 +21,18 @@ bool NormalizeOp<T, Context>::RunOnDevice() {
 template <typename T, class Context>
 bool NormalizeGradientOp<T, Context>::RunOnDevice() {
   auto& input = Input(INPUT);
+  auto& output = Input(OUTPUT);
   DCHECK_EQ(input.ndim(), 2);
   auto m = input.dim32(input.ndim() - 1);
   auto n = input.size() / m;
   Output(GRAD_IN)->ResizeLike(input);
   ConstEigenArrayMap<T> inputMat(input.template data<T>(), m, n);
+  ConstEigenArrayMap<T> outputMat(output.template data<T>(), m, n);
   ConstEigenArrayMap<T> gradOutMat(Input(GRAD_OUT).template data<T>(), m, n);
   EigenArrayMap<T> gradInMat(Output(GRAD_IN)->template mutable_data<T>(), m, n);
 
-  auto square = inputMat.square();
-  auto norm = square.colwise().sum().sqrt();
-
-  gradInMat = gradOutMat.rowwise() * norm.inverse() -
-      ((inputMat.rowwise() / norm.pow(3)).rowwise() *
-       (gradOutMat * inputMat).colwise().sum());
+  gradInMat = ((outputMat / inputMat) * (gradOutMat - outputMat)).rowwise() *
+      (gradOutMat * inputMat).colwise().sum();
   return true;
 }
 
@@ -45,16 +43,17 @@ Given a matrix, apply L2-normalization along the last dimension.
 
 REGISTER_CPU_OPERATOR(NormalizeGradient,
                       NormalizeGradientOp<float, CPUContext>);
-OPERATOR_SCHEMA(NormalizeGradient).NumInputs(2).NumOutputs(1);
+OPERATOR_SCHEMA(NormalizeGradient).NumInputs(3).NumOutputs(1);
 
 class GetNormalizeGradient final : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE_EQ(def_.input_size(), 1);
-    return SingleGradientDef("NormalizeGradient",
-                             "",
-                             vector<string>{I(0), GO(0)},
-                             vector<string>{GI(0)});
+    return SingleGradientDef(
+        "NormalizeGradient",
+        "",
+        vector<string>{I(0), O(0), GO(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Normalize, GetNormalizeGradient);
