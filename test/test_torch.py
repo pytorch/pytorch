@@ -561,7 +561,9 @@ class TestTorch(TestCase):
         self.assertEqual(res5, res.sum(0, False))
 
         res6 = torch.addbmm(.1, res2, .5, b1, b2)
-        self.assertEqual(res6, res2 * .1 + res.sum(0) * .5)
+        # temporarily need to select to remove leading dimension,
+        # because addbmm does not currently broadcast
+        self.assertEqual(res6, res2 * .1 + (res.sum(0) * .5).select(0,0))
 
     def test_baddbmm(self):
         num_batches = 10
@@ -668,7 +670,10 @@ class TestTorch(TestCase):
         m2 = torch.randn(10, 10 * 10)
         sm1 = m1[4]
         sm2 = m2[4]
-        res1 = torchfn(sm1, sm2)
+
+        # suppress broadcastable warning
+        with warnings.catch_warnings(record=True):
+            res1 = torchfn(sm1, sm2)
         res2 = reference_implementation(res1.clone())
         self.assertEqual(res1, res2)
 
@@ -677,7 +682,9 @@ class TestTorch(TestCase):
         m2 = torch.randn(10 * 10, 10 * 10)
         sm1 = m1[:, 4]
         sm2 = m2[:, 4]
-        res1 = torchfn(sm1, sm2)
+        # suppress broadcastable warning
+        with warnings.catch_warnings(record=True):
+            res1 = torchfn(sm1, sm2)
         res2 = reference_implementation(res1.clone())
         self.assertEqual(res1, res2)
 
@@ -970,7 +977,6 @@ class TestTorch(TestCase):
                     dims_small = [ds] + dims_small
             return (dims_small, dims_large, dims_full)
 
-
         # all out-of-place functions
         fns = [
             "dist", "atan2", "pow", "lerp", "add",
@@ -981,7 +987,7 @@ class TestTorch(TestCase):
         # functions with no inplace equivalent
         fns_no_inplace = ["dist"]
         # functions with fallback to equal nElem behavior
-        fns_fallback = ["add", "sub", "div", "mul"]
+        fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder"]
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = select_broadcastable_dims()
@@ -1027,11 +1033,15 @@ class TestTorch(TestCase):
             if fn not in fns_no_inplace:
                 # in-place tensor is not broadcastable; test only guaranteed
                 # to work by broadcasting other argument
+
+                # need to clone largeExpanded so we can reuse
+                largeExpandedClone = largeExpanded.clone()
+
                 def tensorfn_inplace(t0, t1):
                     t0_fn = getattr(t0, fn + "_")
                     return t0_fn(t1) if fn != "lerp" else t0_fn(t1, 0.5)
                 r1 = tensorfn_inplace(largeExpanded, smallExpanded)
-                r2 = tensorfn_inplace(largeExpanded, small)
+                r2 = tensorfn_inplace(largeExpandedClone, small)
                 self.assertEqual(r1, r2)
 
                 broadcastable = (dims_small == dims_full)
@@ -1042,11 +1052,12 @@ class TestTorch(TestCase):
                         self.assertRaises(RuntimeError, lambda: tensorfn_inplace(small, large))
 
     def test_broadcast(self):
-        self._test_broadcast(self, lambda t: t)
+        for i in range(100):
+            self._test_broadcast(self, lambda t: t)
 
     @staticmethod
     def _test_broadcast_fallback(self, cast):
-        fns_fallback = ["add", "sub", "div", "mul"]
+        fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder"]
         for fn in fns_fallback:
             # case 1: both broadcastable and nElems equal -- verify that we broadcast
             t0 = torch.randn(1, 4).float()
@@ -2528,7 +2539,9 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.view(3, -1).size(), target)
         tensor_view = tensor.view(5, 3)
         tensor_view.fill_(random.uniform(0, 1))
-        self.assertEqual((tensor_view - tensor).abs().max(), 0)
+        # suppress broadcastable warning
+        with warnings.catch_warnings(record=True):
+            self.assertEqual((tensor_view - tensor).abs().max(), 0)
         self.assertEqual(empty.view_as(empty), empty)
         self.assertEqual(empty.view(0), empty)
         self.assertRaises(RuntimeError, lambda: tensor.view(15, 0))
