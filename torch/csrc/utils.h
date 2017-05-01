@@ -25,17 +25,6 @@
     (throw std::runtime_error("Could not unpack long"), 0))
 #endif
 
-
-#if PY_MAJOR_VERSION == 2
-#define THPUtils_bytesFromString(c_string)   PyString_FromString(c_string)
-#define THPUtils_checkBytes(obj)             PyString_Check(obj)
-#define THPUtils_bytesAsString(obj)          PyString_AS_STRING(obj)
-#else
-#define THPUtils_bytesFromString(c_string)   PyBytes_FromString(c_string)
-#define THPUtils_checkBytes(obj)             PyBytes_Check(obj)
-#define THPUtils_bytesAsString(obj)          PyBytes_AS_STRING(obj)
-#endif
-
 #if PY_MAJOR_VERSION == 2
 #define THPUtils_checkReal_FLOAT(object)                                       \
     (PyFloat_Check(object) || PyLong_Check(object) || PyInt_Check(object))

@@ -11,6 +11,7 @@ void THNN_(PReLU_updateOutput)(
 {
   THCTensor_(resizeAs)(state, output, input);
 
+  weight = THCTensor_(newContiguous)(state, weight);
   real *w = THCTensor_(data)(state, weight);
 
   if (nOutputPlane == 0)
@@ -40,6 +41,8 @@ void THNN_(PReLU_updateOutput)(
     THCudaCheck(cudaGetLastError());
     THCTensor_(free)(state, input);
   }
+
+  THCTensor_(free)(state, weight);
 }
 
 void THNN_(PReLU_updateGradInput)(
@@ -53,6 +56,7 @@ void THNN_(PReLU_updateGradInput)(
   THCUNN_check_nElement(state, input, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
+  weight = THCTensor_(newContiguous)(state, weight);
   real *w = THCTensor_(data)(state, weight);
   if (nOutputPlane == 0)
   {
@@ -84,6 +88,7 @@ void THNN_(PReLU_updateGradInput)(
     THCTensor_(free)(state, input);
     THCTensor_(free)(state, gradOutput);
   }
+  THCTensor_(free)(state, weight);
 }
 
 void THNN_(PReLU_accGradParameters)(

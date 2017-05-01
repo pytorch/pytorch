@@ -294,6 +294,28 @@ void THCTensor_(resize5d)(THCState *state, THCTensor *self, long size0, long siz
   THCTensor_(resizeNd)(state, self, 5, size, NULL);
 }
 
+THCTensor* THCTensor_(newExpand)(THCState *state, THCTensor *tensor, THLongStorage *sizes) {
+  THArgCheck(THLongStorage_size(sizes) >= THCTensor_(nDimension)(state, tensor), 1, "the number of sizes provided \
+      must be greater or equal to the number of dimensions in the tensor");
+  THArgCheck(THCTensor_(nDimension)(state, tensor) > 0, 0, "can't expand an empty tensor");
+
+  long *expandedSizes;
+  long *expandedStrides;
+  THLongStorage_calculateExpandGeometry(tensor->size,
+                                        tensor->stride,
+                                        THCTensor_(nDimension)(state, tensor),
+                                        sizes,
+                                        &expandedSizes,
+                                        &expandedStrides);
+
+  THCTensor *result = THCTensor_(new)(state);
+  THCTensor_(setStorageNd)(state, result, THCTensor_(storage)(state, tensor), THCTensor_(storageOffset)(state, tensor), THLongStorage_size(sizes), expandedSizes, expandedStrides);
+  THFree(expandedSizes);
+  THFree(expandedStrides);
+
+  return result;
+}
+
 void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src)
 {
   if(self != src)

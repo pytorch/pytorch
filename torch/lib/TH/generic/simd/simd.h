@@ -78,7 +78,13 @@ static inline uint32_t detectHostSIMDExtensions()
 
 static inline uint32_t detectHostSIMDExtensions()
 {
-  return SIMDExtension_VSX;
+  uint32_t hostSimdExts = SIMDExtension_DEFAULT;
+  char *evar;
+
+  evar = getenv("TH_NO_VSX");
+  if (evar == NULL || strncmp(evar, "1", 2) != 0)
+    hostSimdExts = SIMDExtension_VSX;
+  return hostSimdExts;
 }
 
  #else //PPC64 without VSX
@@ -89,7 +95,7 @@ static inline uint32_t detectHostSIMDExtensions()
 }
 
  #endif
-  
+
 #else   // x86
 static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
 {
@@ -146,7 +152,7 @@ static inline uint32_t detectHostSIMDExtensions()
 
   evar = getenv("TH_NO_SSE");
   if (evar == NULL || strncmp(evar, "1", 2) != 0)
-    TH_NO_SSE = 0;  
+    TH_NO_SSE = 0;
   if (edx & CPUID_SSE_BIT && TH_NO_SSE == 0) {
     hostSimdExts |= SIMDExtension_SSE;
   }

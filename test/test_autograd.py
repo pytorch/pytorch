@@ -717,6 +717,17 @@ class TestAutograd(TestCase):
         self._test_setitem_tensor((5, 5), Variable(mask))
         self._test_setitem_tensor((5,), Variable(mask[0]))
 
+    def test_stack(self):
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        y = Variable(torch.randn(10, 10), requires_grad=True)
+        z = Variable(torch.randn(10, 10), requires_grad=True)
+        stacked = torch.stack([x, y, z], 0)
+        grad = torch.randn(3, 10, 10)
+        stacked.backward(grad)
+        self.assertEqual(x.grad.data, grad[0])
+        self.assertEqual(y.grad.data, grad[1])
+        self.assertEqual(z.grad.data, grad[2])
+
     def test_unused_output(self):
         x = Variable(torch.randn(10, 10), requires_grad=True)
         outputs = x.chunk(5)
@@ -1329,6 +1340,7 @@ function_tests = [
 ]
 
 
+# (name, size, args...)
 method_tests = [
     ('add', (S, S, S), ((S, S, S),)),
     ('add', (S, S, S), (3.14,), 'constant'),

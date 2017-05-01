@@ -156,7 +156,7 @@ class TestSparse(TestCase):
             [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
         ])
         exp_v = ValueTensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
-        x.contiguous()
+        x = self.safeCoalesce(x)
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
@@ -174,7 +174,7 @@ class TestSparse(TestCase):
         ])
         exp_v = ValueTensor([2, 1, 3, 4])
 
-        x.contiguous()
+        x = self.safeCoalesce(x)
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
@@ -193,7 +193,7 @@ class TestSparse(TestCase):
         ])
         exp_v = ValueTensor([6, 4])
 
-        x.contiguous()
+        x = self.safeCoalesce(x)
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
@@ -224,7 +224,7 @@ class TestSparse(TestCase):
             [2, 3], [1, 2], [6, 7], [4, 5], [10, 11],
             [3, 4], [5, 6], [9, 10], [8, 9], [7, 8],
         ])
-        x.contiguous()
+        x = self.safeCoalesce(x)
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
@@ -242,7 +242,7 @@ class TestSparse(TestCase):
         ])
         exp_v = ValueTensor([[2, 2, 2], [1, 1, 1], [3, 3, 3], [4, 4, 4]])
 
-        x.contiguous()
+        x = self.safeCoalesce(x)
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
@@ -261,7 +261,7 @@ class TestSparse(TestCase):
         ])
         exp_v = ValueTensor([[6, 4, 5], [4, 3, 4]])
 
-        x.contiguous()
+        x = self.safeCoalesce(x)
         self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
@@ -478,10 +478,28 @@ class TestSparse(TestCase):
         self.assertEqual(y1.to_dense(), expected)
         self.assertEqual(y2.to_dense(), expected)
 
+        # TODO: add back inplace support
+        y1 = x1 ** 2
+        y2 = x1.clone()
+        y2 = y2.pow(2)
+        expected = x1.to_dense() ** 2
+        self.assertEqual(y1.to_dense(), expected)
+        self.assertEqual(y2.to_dense(), expected)
+
         y = x1.clone()
         y.zero_()
         expected = torch.zeros(x1.size())
         self.assertEqual(y.to_dense(), expected)
+
+        self.assertFalse(x1.is_coalesced())
+        y = x1.coalesce()
+        z = x1.coalesce()
+        self.assertFalse(x1.is_coalesced())
+        self.assertTrue(y.is_coalesced())
+        self.assertEqual(x1, y)
+        # check that coalesce is out of place
+        y.values().add_(1)
+        self.assertEqual(z.values() + 1, y.values())
 
     def _test_basic_ops(self, is_cuda):
         self._test_basic_ops_shape(is_cuda, [5, 6])

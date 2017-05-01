@@ -192,6 +192,7 @@ ${cpu}
 
     OUT_INIT = """
     __out = kwargs ? PyDict_GetItemString(kwargs, "out") : NULL;
+    if (__out == Py_None) { __out = NULL; __dictcount--; __argcount--; }
     """
 
     def __init__(self):

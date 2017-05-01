@@ -62,9 +62,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: isContiguous
+  name: isCoalesced
   sparse: yes
-  python_name: is_contiguous
+  python_name: is_coalesced
   return: bool
   arguments:
   - THSTensor* self
@@ -89,9 +89,10 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: contiguous
+  name: coalesce
+  cname: newCoalesce
   sparse: yes
-  return: argument 0
+  return: THSTensor*
   arguments:
   - THSTensor* self
 ]]
@@ -394,6 +395,20 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - THSTensor* self
+    - THSTensor* self
+    - real value
+]]
+
+[[
+  name: pow
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
+  sparse: yes
+  cname: pow
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
     - THSTensor* self
     - real value
 ]]

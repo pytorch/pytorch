@@ -302,6 +302,23 @@ Normalization layers
 .. autoclass:: BatchNorm3d
     :members:
 
+:hidden:`InstanceNorm1d`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: InstanceNorm1d
+    :members:
+
+:hidden:`InstanceNorm2d`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: InstanceNorm2d
+    :members:
+
+:hidden:`InstanceNorm3d`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: InstanceNorm3d
+    :members:
 
 Recurrent layers
 ----------------------------------
@@ -838,9 +855,12 @@ torch.nn.init
 =============
 
 .. currentmodule:: torch.nn.init
+.. autofunction:: calculate_gain
 .. autofunction:: uniform
 .. autofunction:: normal
 .. autofunction:: constant
+.. autofunction:: eye
+.. autofunction:: dirac
 .. autofunction:: xavier_uniform
 .. autofunction:: xavier_normal
 .. autofunction:: kaiming_uniform

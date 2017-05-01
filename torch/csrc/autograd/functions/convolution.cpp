@@ -55,6 +55,20 @@ auto ConvParams::view1d_as_2d() -> void {
   }
 }
 
+auto ConvParams::use_cudnn(const Tensor& input) const -> bool {
+#ifdef WITH_CUDNN
+  if (!input.isCuda() || !cudnn_enabled) {
+    return false;
+  }
+  if (is_dilated()) {
+    cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
+    return ((CUDNN_VERSION >=6021) || (CUDNN_VERSION >= 6000 && prop->major >= 5 )) && !transposed;
+  }
+  return true;
+#endif
+  return false;
+}
+
 auto ConvForward::output_size(Tensor& input, Tensor& weight) -> std::vector<long> {
   auto in_size = input.sizes();
   auto weight_size = weight.sizes();
@@ -125,19 +139,12 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   auto weight_size = weight->sizes();
   std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
 
-  bool use_cudnn = false;
-#ifdef WITH_CUDNN
-  cudaDeviceProp* prop =
-    THCState_getCurrentDeviceProperties(state);
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000) && (!is_dilated() || prop->major >= 5) ) && cudnn_enabled;
-#endif
-
   std::unique_ptr<Tensor> output;
   tensor_list columns(groups);
   tensor_list ones(groups);
   std::unique_ptr<Convolution> convolution;
 
-  if (use_cudnn) {
+  if (use_cudnn(*input)) {
 #ifdef WITH_CUDNN
     output = input->newTensor();
     output->resize(output_size(*input, *weight));
@@ -213,12 +220,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   auto weight_size = weight->sizes();
   std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
 
-  bool use_cudnn = false;
-#ifdef WITH_CUDNN
-  cudaDeviceProp* prop =
-    THCState_getCurrentDeviceProperties(state);
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000) && (!is_dilated() || prop->major >= 5) ) && cudnn_enabled;
-#endif
+  bool use_cudnn = this->use_cudnn(*input);
 
   std::unique_ptr<Tensor> grad_input;
   std::unique_ptr<Tensor> grad_weight;
