@@ -590,6 +590,14 @@ class Repeat(Function):
             grad_input = sum(grad_input.chunk(repeat, dim))
         return grad_input
 
+def reverse_cumsum(x, dim):
+    ret = torch.cumsum(-x, dim=dim)
+    
+    end_idx = ret.size(dim) - 1
+    ret_sum = ret.narrow(dim, end_idx, 1)
+    ret -= ret_sum.expand_as(ret)
+    ret += x
+    return ret
 
 class Cumsum(Function):
 
@@ -601,14 +609,8 @@ class Cumsum(Function):
         return torch.cumsum(input, dim=self.dim)
 
     def backward(self, grad_output):
-        grad_input = torch.cumsum(-grad_output, dim=self.dim)
-
-        end_idx = grad_input.size(self.dim) - 1
-        grad_sum = grad_input.narrow(self.dim, end_idx, 1)
-        grad_input -= grad_sum.expand_as(grad_input)
-        grad_input += grad_output
-        return grad_input
-
+        return reverse_cumsum(grad_output, dim=self.dim)
+        
 class Cumprod(Function):
     
     def __init__(self, dim):
@@ -616,9 +618,27 @@ class Cumprod(Function):
         self.dim = dim
 
     def forward(self, input):
+        self.save_for_backward(input)
         return torch.cumprod(input, dim=self.dim)
 
     def backward(self, grad_output):
-        assert False, "Backward of Cumprod not implemented"
+        '''
+        There are two algorithms to do this, the naive one
+        which works with all types of inputs is slow, namely
+        O(n^2) where n = input.size(self.dim).
+
+        The second one is much faster, namely O(n), but
+        requires nonzero inputs. This implementation checks
+        for 0s in the inputs and then decides which one to use.
+        '''
+        input, = self.saved_tensors
+        output = torch.cumprod(input, dim=self.dim)
+        if (input == 0).any():
+            assert False, "Not implemented with 0 in the input"
+        else:
+            return reverse_cumsum(output * grad_output) / input
+
+        
+        
 
 # TODO: unfold
