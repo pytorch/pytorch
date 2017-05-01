@@ -83,7 +83,7 @@ class Nadam(Optimizer):
 
                 denom = exp_avg_sq_prime.sqrt_().add_(group['eps'])
 
-                p.data.addcdiv_(-group['lr']*(1. - momentum_cache_t)/(1. - m_schedule_new), grad, denom)
-                p.data.addcdiv_(-group['lr']*momentum_cache_t_1/(1. - m_schedule_next), exp_avg, denom)
+                p.data.addcdiv_(-group['lr'] * (1. - momentum_cache_t) / (1. - m_schedule_new), grad, denom)
+                p.data.addcdiv_(-group['lr'] * momentum_cache_t_1 / (1. - m_schedule_next), exp_avg, denom)
 
         return loss
