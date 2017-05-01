@@ -526,6 +526,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - THTensor* self
     - arg: THSize* size
       long_args: True
+    - CONSTANT 1
 ]]
 
 [[
