@@ -24,9 +24,9 @@ class Nadam(Optimizer):
 
     def __init__(self, params, lr=2e-3, betas=(0.975, 0.999), eps=1e-8,
                  schedule_decay=0, weight_decay=0):
-        defaults = dict(lr=lr, beta1=betas[0], beta2=betas[1], eps=eps,
-                        schedule_decay=1 - schedule_decay, weight_decay=weight_decay,
-                        prod_beta1=betas[0])
+        defaults = dict(lr=lr, betas=betas, eps=eps,
+                        schedule_decay=schedule_decay, weight_decay=weight_decay,
+                        prod_beta1=1.)
         super(Nadam, self).__init__(params, defaults)
 
     def step(self, closure=None):
@@ -41,12 +41,7 @@ class Nadam(Optimizer):
             loss = closure()
 
         for group in self.param_groups:
-            beta1, beta2 = group['beta1'], group['beta2']
-            prod_beta1 = group['prod_beta1']
-            next_beta1 = beta1 * group['schedule_decay']
-            next_prod_beta1 = prod_beta1 * next_beta1
-            bias_correction1 = (1 - beta1) / (1 - prod_beta1)
-            next_bias_correction1 = next_beta1 / (1 - next_prod_beta1)
+            beta1, beta2 = group['betas']
 
             for p in group['params']:
                 if p.grad is None:
@@ -68,21 +63,29 @@ class Nadam(Optimizer):
                 if group['weight_decay'] != 0:
                     grad = grad.add(group['weight_decay'], p.data)
 
+                schedule_decay = group['schedule_decay']
+                cur_beta1 = beta1 * (1. - 0.5 * (0.96 ** (state['step'] * schedule_decay)))
+                next_beta1 = beta1 * (1. - 0.5 * (0.96 ** ((state['step'] + 1) * schedule_decay)))
+                prod_beta1 = group['prod_beta1']
+                prod_beta1 *= cur_beta1
+                next_prod_beta1 = prod_beta1 * next_beta1
+                bias_correction1 = (1 - cur_beta1) / (1 - prod_beta1)
+                next_bias_correction1 = next_beta1 / (1 - next_prod_beta1)
+
                 # Decay the first and second moment running average coefficient
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
+                exp_avg.mul_(cur_beta1).add_(1 - cur_beta1, grad)
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
 
                 sqrt_bias_correction2 = math.sqrt((1 - beta2 ** state['step']) / beta2)
                 step_size = group['lr'] * sqrt_bias_correction2
 
-                denom = exp_avg_sq.add(group['eps'] * sqrt_bias_correction2).sqrt_()
+                denom = exp_avg_sq.sqrt().add_(group['eps'])
 
                 # For memory efficiency, separate update into two
                 p.data.addcdiv_(-step_size * next_bias_correction1, exp_avg, denom)
                 p.data.addcdiv_(-step_size * bias_correction1, grad, denom)
 
-            # update beta1
-            group['beta1'] = next_beta1
-            group['prod_beta1'] = next_prod_beta1
+                # update prod_beta1
+                group['prod_beta1'] = prod_beta1
 
         return loss
