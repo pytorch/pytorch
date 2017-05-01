@@ -43,10 +43,7 @@ class BrewTest(unittest.TestCase):
 
         workspace.FeedBlob("x", X)
         model = ModelHelper(name="test_model")
-        out = brew.fc(model, "x", "out_1", k, n)
-        out = brew.packed_fc(model, out, "out_2", n, n)
-        out = brew.fc_decomp(model, out, "out_3", n, n)
-        out = brew.fc_prune(model, out, "out_4", n, n)
+        brew.fc(model, "x", "out_1", k, n)
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
