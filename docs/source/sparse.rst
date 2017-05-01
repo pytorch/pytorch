@@ -1,7 +1,7 @@
 .. currentmodule:: torch.sparse
 
-Sparse tensors
-==============
+torch.sparse
+============
 
 .. warning::
 
