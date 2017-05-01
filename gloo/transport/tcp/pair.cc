@@ -119,6 +119,14 @@ void Pair::listen() {
     signalIoFailure(GLOO_ERROR_MSG("socket: ", strerror(errno)));
   }
 
+  // Set SO_REUSEADDR to signal that reuse of the listening port is OK.
+  int on = 1;
+  rv = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+  if (rv == -1) {
+    close(fd);
+    signalIoFailure(GLOO_ERROR_MSG("setsockopt: ", strerror(errno)));
+  }
+
   rv = bind(fd, (const sockaddr*)&attr.ai_addr, attr.ai_addrlen);
   if (rv == -1) {
     close(fd);
@@ -196,6 +204,15 @@ void Pair::connect(const Address& peer) {
   fd_ = socket(peer_.ss_.ss_family, SOCK_STREAM | SOCK_NONBLOCK, 0);
   if (fd_ == -1) {
     signalIoFailure(GLOO_ERROR_MSG("socket: ", strerror(errno)));
+  }
+
+  // Set SO_REUSEADDR to signal that reuse of the source port is OK.
+  int on = 1;
+  rv = setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+  if (rv == -1) {
+    close(fd_);
+    fd_ = FD_INVALID;
+    signalIoFailure(GLOO_ERROR_MSG("setsockopt: ", strerror(errno)));
   }
 
   // Connect to peer
