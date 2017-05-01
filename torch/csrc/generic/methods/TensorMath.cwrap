@@ -610,7 +610,8 @@
       return: accreal
       arguments:
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self
         - arg: real p
           default: AS_REAL(2)
 ]]
@@ -673,7 +674,8 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - THTensor* other
+    - arg: THTensor* other
+      broadcast: self
 ]]
 
 [[
@@ -684,7 +686,8 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - THTensor* other
+    - arg: THTensor* other
+      broadcast: self inplace
 ]]
 
 
@@ -708,7 +711,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - THTensor* exponent
+        - arg: THTensor* exponent
+          broadcast: self
     - cname: tpow
       arguments:
         - arg: THTensor* destination
@@ -732,7 +736,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* exponent
+        - arg: THTensor* exponent
+          broadcast: self inplace
 ]]
 
 [[
@@ -745,7 +750,8 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - THTensor* end
+    - arg: THTensor* end
+      broadcast: self
     - real weight
 ]]
 
@@ -757,7 +763,8 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - THTensor* end
+    - arg: THTensor* end
+      broadcast: self inplace
     - real weight
 ]]
 
@@ -942,7 +949,8 @@
         - THTensor* self
         - arg: real value
           default: AS_REAL(1)
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
     - sparse: True
       cname: spcadd
       arguments:
@@ -969,7 +977,8 @@
         - THTensor* self
         - arg: real value
           default: AS_REAL(1)
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
     - sparse: True
       cname: spcadd
       arguments:
@@ -999,7 +1008,8 @@
         - THTensor* self
         - arg: real value
           default: AS_REAL(1)
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -1017,7 +1027,8 @@
         - THTensor* self
         - arg: real value
           default: AS_REAL(1)
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 
@@ -1037,7 +1048,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -1053,7 +1065,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 
@@ -1073,7 +1086,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -1089,7 +1103,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 
@@ -1109,7 +1124,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self
 ]]
 
 [[
@@ -1125,7 +1141,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace
 ]]
 
 
@@ -1145,7 +1162,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self
 ]]
 
 [[
@@ -1161,7 +1179,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace
 ]]
 
 [[
