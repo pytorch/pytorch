@@ -21,7 +21,6 @@ by providing these two tensors, as well as the size of the sparse tensor
     >>> i = torch.LongTensor([[0, 1], [2, 0]])
     >>> v = torch.FloatTensor([3, 4])
     >>> torch.sparse.FloatTensor(i, v, torch.Size([2,3])).to_dense()
-
      0  0  3
      4  0  0
     [torch.FloatTensor of size 2x2]
@@ -32,7 +31,6 @@ dimensions are sparse, and the rest of the dimensions are dense.
     >>> i = torch.LongTensor([[2, 4]])
     >>> v = torch.FloatTensor([[1, 3], [5, 7]])
     >>> torch.sparse.FloatTensor(i, v).to_dense()
-
      0  0
      0  0
      1  3
