@@ -632,13 +632,63 @@ class Cumprod(Function):
         for 0s in the inputs and then decides which one to use.
         '''
         input, = self.saved_tensors
-        output = torch.cumprod(input, dim=self.dim)
+        dim_size = input.size(self.dim)
         if (input == 0).any():
-            assert False, "Not implemented with 0 in the input"
-        else:
-            return reverse_cumsum(output * grad_output) / input
+            ones = input.index_select(self.dim,
+                    torch.LongTensor(range(1))).fill_(1).clone()
+            zeros = ones.clone().fill_(0)
+            grad_input = grad_output.new(input.size()).zero_() 
+            for k in range(dim_size):
+                if 0 < k and k < dim_size - 1:
+                    prods_until_k = torch.prod(input.index_select(self.dim,
+                        torch.LongTensor(range(k))), dim=self.dim)
 
+                    prods_from_k_plus_1 = torch.cumprod(input.index_select(
+                        self.dim, torch.LongTensor(range(k+1,
+                        dim_size))), dim=self.dim)
+
+                    ommitted_products = prods_until_k.expand_as(
+                        prods_from_k_plus_1) * prods_from_k_plus_1
+
+                    ommitted_products = torch.cat((prods_until_k,
+                        ommitted_products), self.dim)
+                elif k == dim_size - 1:
+                    prods_until_k = torch.prod(input.index_select(self.dim,
+                        torch.LongTensor(range(k))), dim=self.dim)
+
+                    ommitted_products = prods_until_k
+                else: #k == 0
+                    prods_from_k_plus_1 = torch.cumprod(input.index_select(
+                        self.dim, torch.LongTensor(range(k+1,
+                        dim_size))), dim=self.dim)
+
+                    ommitted_products = torch.cat((ones, prods_from_k_plus_1),
+                        self.dim)
+                
+                # At this point ommitted_products is the same size
+                # as input, except on the dimension dim where it's
+                # dim_size - k
+                assert ommitted_products.size()[self.dim] == dim_size - k, \
+                    "Dimension error"
+
+                if k != 0:
+                    size_to_expand = [l for l in input.size()]
+                    size_to_expand[self.dim] = k # Adding zeros to missing dimensions
+                    size_to_expand = torch.Size(size_to_expand)
+                    expanded_zeros = zeros.expand(size_to_expand)
+                    ommitted_products = torch.cat((zeros.expand(size_to_expand),
+                            ommitted_products), self.dim)
+
+                grad_input.index_copy_(self.dim, torch.LongTensor(range(k,k+1)), 
+                        torch.sum(grad_output * ommitted_products, dim=self.dim))
+
+        else:
+            output = torch.cumprod(input, dim=self.dim)
+            grad_input = reverse_cumsum(output * grad_output, dim=self.dim) / input      
         
-        
+        return grad_input
 
 # TODO: unfold
+
+
+
