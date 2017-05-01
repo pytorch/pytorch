@@ -8,10 +8,12 @@ from common import TestCase, run_tests
 from common_nn import TEST_CUDA
 from numbers import Number
 
+
 def cpu_only(inner):
     def outer(self, *args, **kwargs):
         unittest.skipIf(self.is_cuda, "Test is CPU-only")(inner)(self, *args, **kwargs)
     return outer
+
 
 class TestSparse(TestCase):
 
@@ -508,6 +510,7 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([10, 10, 10], [3])
         self._test_sparse_mask_shape([50, 30, 20], [2])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
+
 
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaSparse(TestSparse):
