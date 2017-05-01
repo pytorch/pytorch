@@ -77,16 +77,13 @@ class Nadam(Optimizer):
                 # Decay the first and second moment running average coefficient
                 bias_correction2 = 1 - beta2 ** state['step']
 
-                grad_prime = grad.div(1. - m_schedule_new)
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_prime = exp_avg.div(1. - m_schedule_next)
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
                 exp_avg_sq_prime = exp_avg_sq.div(1. - bias_correction2)
 
-                exp_avg_bar = grad_prime.mul_(
-                    1. - momentum_cache_t).add_(momentum_cache_t_1, exp_avg_prime)
                 denom = exp_avg_sq_prime.sqrt_().add_(group['eps'])
 
-                p.data.addcdiv_(-group['lr'], exp_avg_bar, denom)
+                p.data.addcdiv_(-group['lr'] * (1. - momentum_cache_t) / (1. - m_schedule_new), grad, denom)
+                p.data.addcdiv_(-group['lr'] * momentum_cache_t_1 / (1. - m_schedule_next), exp_avg, denom)
 
         return loss
