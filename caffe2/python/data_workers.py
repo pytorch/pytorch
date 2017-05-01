@@ -154,7 +154,7 @@ class DataInputCoordinator(object):
         return self._active
 
     def init(self, global_coordinator):
-        if self._init_fun:
+        if self._init_fun and not self._started:
             self._init_fun(self, global_coordinator)
 
     def _start(self):
@@ -181,7 +181,8 @@ class DataInputCoordinator(object):
                 )
 
             # Release memory for the scratch blobs
-            utils.ResetBlobs(self._scratch_blobs)
+            if len(self._scratch_blobs) > 0:
+                utils.ResetBlobs(self._scratch_blobs)
             self._started = False
         finally:
             self._log_inputs_per_interval(0, force=True)
@@ -386,6 +387,12 @@ class GlobalCoordinator(object):
             c.init(self)
             c._start()
 
+    def set_batch_size(self, name, batch_size):
+        log.info("Set batch size {}: {}".format(name, batch_size))
+        for c in self._coordinators:
+            if c._input_source_name == name:
+                c._batch_size = batch_size
+
     def stop(self):
         all_success = True
         for c in self._coordinators:
@@ -408,7 +415,6 @@ class GlobalCoordinator(object):
             c for c in self._coordinators
             if c._input_source_name != input_source_name
         ]
-
 
     def register_shutdown_handler(self):
         def cleanup():
@@ -440,6 +446,7 @@ def fetcher(coordinator, worker_id, fetch_fun, batch_size, input_blob_names):
 
             coordinator.put(input_data)
         except Exception as e:
+            print(e)
             logging.exception("Exception in fetcher", e)
             coordinator._stop("Exception in fetcher {}: {}".format(
                 worker_id, e

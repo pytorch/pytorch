@@ -64,7 +64,8 @@ class ModelTrainerLog():
 
         if external_loggers is not None:
             self.external_loggers = external_loggers
-            runtime_args = dict(vars(runtime_args))
+            if not isinstance(runtime_args, dict):
+                runtime_args = dict(vars(runtime_args))
             runtime_args['experiment_id'] = self.experiment_id
             runtime_args['hostname'] = socket.gethostname()
             for logger in self.external_loggers:
