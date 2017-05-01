@@ -34,18 +34,16 @@ class TestSparse(TestCase):
         # at the end.
 
         if isinstance(with_size, Number):
-            v = torch.randn(nnz)
-            i = (torch.rand(d, nnz) * with_size).type(torch.LongTensor)
-            x = torch.sparse.DoubleTensor(i, v)
-        else:
-            # Generate a sparse tensor with d sparse dimensions; the
-            # rest the dimensions with_size[d:] are dense.
-            v_size = [nnz] + list(with_size[d:])
-            v = torch.randn(*v_size)
-            i = torch.rand(d, nnz) * \
-                torch.Tensor(with_size[:d]).repeat(nnz, 1).transpose(0, 1)
-            i = i.type(torch.LongTensor)
-            x = torch.sparse.DoubleTensor(i, v, torch.Size(with_size))
+            with_size = [with_size] * d
+
+        # Generate a sparse tensor with d sparse dimensions; the
+        # rest the dimensions with_size[d:] are dense.
+        v_size = [nnz] + list(with_size[d:])
+        v = torch.randn(*v_size)
+        i = torch.rand(d, nnz) * \
+            torch.Tensor(with_size[:d]).repeat(nnz, 1).transpose(0, 1)
+        i = i.type(torch.LongTensor)
+        x = torch.sparse.DoubleTensor(i, v, torch.Size(with_size))
 
         if self.is_cuda:
             return x.cuda(), i.cuda(), v.cuda()
