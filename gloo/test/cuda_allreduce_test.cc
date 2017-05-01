@@ -167,9 +167,10 @@ INSTANTIATE_TEST_CASE_P(
     AllreduceHalvingDoubling,
     CudaAllreduceTest,
     ::testing::Combine(
-      ::testing::ValuesIn(std::vector<int>({8, 16, 32})),
-      ::testing::ValuesIn(std::vector<int>({1, 9, 64, 1000})),
-      ::testing::Values(allreduceHalvingDoubling)));
+        ::testing::ValuesIn(
+          std::vector<int>({2, 3, 4, 5, 6, 7, 8, 9, 13, 16, 24, 32})),
+        ::testing::ValuesIn(std::vector<int>({1, 64, 1000})),
+        ::testing::Values(allreduceHalvingDoubling)));
 
 static std::function<Func> allreduceHalvingDoublingPipelined = [](
     std::shared_ptr<::gloo::Context>& context,
@@ -185,9 +186,10 @@ INSTANTIATE_TEST_CASE_P(
     AllreduceHalvingDoublingPipelined,
     CudaAllreduceTest,
     ::testing::Combine(
-      ::testing::ValuesIn(std::vector<int>({2, 8, 16, 32})),
-      ::testing::ValuesIn(std::vector<int>({1, 9, 64, 1000})),
-      ::testing::Values(allreduceHalvingDoublingPipelined)));
+        ::testing::ValuesIn(
+          std::vector<int>({2, 3, 4, 5, 6, 7, 8, 9, 13, 16, 24, 32})),
+        ::testing::ValuesIn(std::vector<int>({1, 64, 1000})),
+        ::testing::Values(allreduceHalvingDoublingPipelined)));
 
 } // namespace
 } // namespace test

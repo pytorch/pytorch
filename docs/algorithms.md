@@ -110,6 +110,16 @@ performing the send. In the majority of cases these notification messages will
 arrive long before the step of the allgather where they are processed, so their
 effect on performance should be minimal.
 
+When running on non-power-of-two number of processes, the algorithm works by
+breaking up execution into blocks that are powers of two and communicating
+interblock after the intrablock reduce-scatter. Non-power-of-two cases will have
+some degree of load imbalance compared to power-of-two, but cases with few large
+blocks (e.g. 8 + 4 or 16 + 8) should still perform relatively well.
+
+The halving-doubling / binary-blocks algorithm is described and analyzed in
+(Thakur et al., Optimization of Collective Communication Operations in MPICH,
+IJHPCA, 2005).
+
 ### cuda_allreduce_ring
 
 CUDA-aware implementation of `allreduce_ring`. GPU side buffers are
@@ -131,8 +141,16 @@ available.
 
 ### cuda_allreduce_halving_doubling
 
-CUDA-aware implementation of `allreduce_halving_doubling`. Currently no
-pipelining is done between reduction/broadcast steps and the communication.
+CUDA-aware implementation of `allreduce_halving_doubling` with no
+pipelining between reduction/broadcast steps and the communication.
+
+### cuda_allreduce_halving_doubling_pipelined
+
+CUDA-aware implementation of `allreduce_halving_doubling` with pipelining
+between local reduction/broadcast steps and communication. Local reduction step
+is split into two steps (since the first communication step sends half the
+buffer size). Final broadcast is pipelined across lgP steps, with each step
+corresponding to a receive during the allgather phase.
 
 ## Barrier
 

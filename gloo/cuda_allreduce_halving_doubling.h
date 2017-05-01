@@ -36,6 +36,7 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
 
  protected:
 
+  void initBinaryBlocks();
   void devicePointerInit();
 
   // Both workspace types have their own initialization function.
@@ -65,10 +66,10 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
 
   const int count_;
   const int bytes_;
+  const size_t steps_;
   const size_t chunks_;
   const size_t chunkSize_;
   const size_t chunkBytes_;
-  const size_t steps_;
 
   const CudaReductionFunction<T>* fn_;
 
@@ -87,8 +88,15 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBufs_;
   std::vector<std::unique_ptr<transport::Buffer>> recvDataBufs_;
 
+  std::unique_ptr<transport::Buffer> smallerBlockSendDataBuf_;
+  std::unique_ptr<transport::Buffer> smallerBlockRecvDataBuf_;
+
+  std::vector<std::unique_ptr<transport::Buffer>> largerBlockSendDataBufs_;
+  std::vector<std::unique_ptr<transport::Buffer>> largerBlockRecvDataBufs_;
+
   std::vector<size_t> sendCounts_;
   std::vector<size_t> recvCounts_;
+  size_t sendCountToLargerBlock_;
 
   int dummy_;
   std::vector<std::unique_ptr<transport::Buffer>> sendNotificationBufs_;
@@ -114,6 +122,17 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
   std::vector<std::unique_ptr<LocalOp<T>>> broadcastOps_;
 
   bool pipelined_;
+
+  // for non-power-of-two number of processes, partition the processes into
+  // binary blocks and keep track of which block each process is in, as well as
+  // the adjoining larger and smaller blocks (with which communication will be
+  // required)
+  uint32_t offsetToMyBinaryBlock_;
+  uint32_t myBinaryBlockSize_;
+  uint32_t stepsWithinBlock_;
+  uint32_t rankInBinaryBlock_;
+  uint32_t nextSmallerBlockSize_;
+  uint32_t nextLargerBlockSize_;
 };
 
 } // namespace gloo

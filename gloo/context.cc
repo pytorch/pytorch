@@ -29,8 +29,8 @@ std::unique_ptr<transport::Pair>& Context::getPair(int i) {
   return pairs_.at(i);
 }
 
-int Context::nextSlot() {
-  return slot_++;
+int Context::nextSlot(int numToSkip) {
+  return slot_ += numToSkip;
 }
 
 } // namespace gloo

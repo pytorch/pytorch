@@ -143,9 +143,10 @@ INSTANTIATE_TEST_CASE_P(
     AllreduceHalvingDoubling,
     AllreduceTest,
     ::testing::Combine(
-      ::testing::ValuesIn(std::vector<int>({2, 8, 16, 32})),
-      ::testing::ValuesIn(std::vector<int>({1, 9, 64, 1000})),
-      ::testing::Values(allreduceHalvingDoubling)));
+        ::testing::ValuesIn(
+          std::vector<int>({2, 3, 4, 5, 6, 7, 8, 9, 13, 16, 24, 32})),
+        ::testing::ValuesIn(std::vector<int>({1, 64, 1000})),
+        ::testing::Values(allreduceHalvingDoubling)));
 
 } // namespace
 } // namespace test

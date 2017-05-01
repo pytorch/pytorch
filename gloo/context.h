@@ -26,7 +26,7 @@ class Context {
 
   std::unique_ptr<transport::Pair>& getPair(int i);
 
-  int nextSlot();
+  int nextSlot(int numToSkip = 1);
 
  protected:
   std::vector<std::unique_ptr<transport::Pair>> pairs_;
