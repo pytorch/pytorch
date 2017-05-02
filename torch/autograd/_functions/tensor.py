@@ -633,19 +633,27 @@ class Cumprod(Function):
         '''
         input, = self.saved_tensors
         dim_size = input.size(self.dim)
+        
+        if dim_size == 1:
+            return grad_output.clone()
+
+        if input.is_cuda:
+            LT = torch.cuda.LongTensor
+        else:
+            LT = torch.LongTensor
+
         if (input == 0).any():
             ones = input.index_select(self.dim,
-                    torch.LongTensor(range(1))).fill_(1).clone()
+                    LT(range(1))).fill_(1).clone()
             zeros = ones.clone().fill_(0)
             grad_input = grad_output.new(input.size()).zero_() 
             for k in range(dim_size):
                 if 0 < k and k < dim_size - 1:
                     prods_until_k = torch.prod(input.index_select(self.dim,
-                        torch.LongTensor(range(k))), dim=self.dim)
+                        LT(range(k))), dim=self.dim)
 
                     prods_from_k_plus_1 = torch.cumprod(input.index_select(
-                        self.dim, torch.LongTensor(range(k+1,
-                        dim_size))), dim=self.dim)
+                        self.dim, LT(range(k+1, dim_size))), dim=self.dim)
 
                     ommitted_products = prods_until_k.expand_as(
                         prods_from_k_plus_1) * prods_from_k_plus_1
@@ -654,13 +662,12 @@ class Cumprod(Function):
                         ommitted_products), self.dim)
                 elif k == dim_size - 1:
                     prods_until_k = torch.prod(input.index_select(self.dim,
-                        torch.LongTensor(range(k))), dim=self.dim)
+                        LT(range(k))), dim=self.dim)
 
                     ommitted_products = prods_until_k
                 else: #k == 0
                     prods_from_k_plus_1 = torch.cumprod(input.index_select(
-                        self.dim, torch.LongTensor(range(k+1,
-                        dim_size))), dim=self.dim)
+                        self.dim, LT(range(k+1, dim_size))), dim=self.dim)
 
                     ommitted_products = torch.cat((ones, prods_from_k_plus_1),
                         self.dim)
@@ -679,7 +686,7 @@ class Cumprod(Function):
                     ommitted_products = torch.cat((zeros.expand(size_to_expand),
                             ommitted_products), self.dim)
 
-                grad_input.index_copy_(self.dim, torch.LongTensor(range(k,k+1)), 
+                grad_input.index_copy_(self.dim, LT(range(k,k+1)), 
                         torch.sum(grad_output * ommitted_products, dim=self.dim))
 
         else:
