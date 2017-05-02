@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <exception>
 #include <map>
@@ -50,6 +51,7 @@ class Buffer : public ::gloo::transport::Buffer {
 
   int recvCompletions_;
   int sendCompletions_;
+  std::atomic<int> sendPending_;
 
   std::exception_ptr ex_;
 

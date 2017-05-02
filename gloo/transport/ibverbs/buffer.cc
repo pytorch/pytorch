@@ -28,6 +28,7 @@ Buffer::Buffer(Pair* pair, int slot, void* ptr, size_t size)
       pair_(pair),
       recvCompletions_(0),
       sendCompletions_(0),
+      sendPending_(0),
       ex_(nullptr) {
   mr_ = ibv_reg_mr(
       pair_->dev_->pd_,
@@ -87,8 +88,11 @@ void Buffer::waitSend() {
   if (pair_->sync_) {
     // We can assume a single pair is never used by more than one
     // thread, so there is no need to acquire the mutex here.
-    while (sendCompletions_ == 0) {
-      pair_->pollCompletions();
+    if (sendCompletions_ == 0) {
+      GLOO_ENFORCE_GT(sendPending_, 0, "No send to wait for");
+      while (sendCompletions_ == 0) {
+        pair_->pollCompletions();
+      }
     }
     sendCompletions_--;
   } else {
@@ -96,9 +100,12 @@ void Buffer::waitSend() {
     // hasn't arrived yet, wait until it does.
     std::unique_lock<std::mutex> lock(m_);
     checkErrorState();
-    while (sendCompletions_ == 0) {
-      sendCv_.wait(lock);
-      checkErrorState();
+    if (sendCompletions_ == 0) {
+      GLOO_ENFORCE_GT(sendPending_, 0, "No send to wait for");
+      while (sendCompletions_ == 0) {
+        sendCv_.wait(lock);
+        checkErrorState();
+      }
     }
     sendCompletions_--;
   }
@@ -147,6 +154,9 @@ void Buffer::send(size_t offset, size_t length, size_t roffset) {
   if (rv != 0) {
     pair_->signalIoFailure(GLOO_ERROR_MSG("ibv_post_send: ", rv));
   }
+
+  // Increment number of sends in flight
+  sendPending_++;
 }
 
 void Buffer::handleCompletion(struct ibv_wc* wc) {
@@ -167,6 +177,7 @@ void Buffer::handleCompletion(struct ibv_wc* wc) {
     }
     std::unique_lock<std::mutex> lock(m_);
     sendCompletions_++;
+    sendPending_--;
     sendCv_.notify_one();
   } else {
     GLOO_ENFORCE(false, "Unexpected completion (opcode: ", wc->opcode, ")");

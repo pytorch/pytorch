@@ -28,6 +28,7 @@ Buffer::Buffer(Pair* pair, int slot, void* ptr, size_t size)
       pair_(pair),
       recvCompletions_(0),
       sendCompletions_(0),
+      sendPending_(0),
       ex_(nullptr) {}
 
 Buffer::~Buffer() {
@@ -83,6 +84,7 @@ void Buffer::waitRecv() {
 void Buffer::handleSendCompletion() {
   std::lock_guard<std::mutex> lock(m_);
   sendCompletions_++;
+  sendPending_--;
   sendCv_.notify_one();
 }
 
@@ -102,19 +104,22 @@ void Buffer::waitSend() {
       return sendCompletions_ > 0;
     };
     std::unique_lock<std::mutex> lock(m_);
-    if (timeout == kNoTimeout) {
-      // No timeout set. Wait for write to complete.
-      sendCv_.wait(lock, pred);
-    } else {
-      auto done = sendCv_.wait_for(lock, timeout, pred);
-      if (!done) {
-        // Release the mutex before calling into the pair to avoid deadlock.
-        // Calling signalIoFailureExternal() will throw, so no need to
-        // reacquire.
-        lock.unlock();
-        pair_->signalIoFailureExternal(
-            GLOO_ERROR_MSG("Write timeout ", pair_->peer().str()));
-        GLOO_ENFORCE(false, "Unexpected code path");
+    if (sendCompletions_ == 0) {
+      GLOO_ENFORCE_GT(sendPending_, 0, "No send to wait for");
+      if (timeout == kNoTimeout) {
+        // No timeout set. Wait for write to complete.
+        sendCv_.wait(lock, pred);
+      } else {
+        auto done = sendCv_.wait_for(lock, timeout, pred);
+        if (!done) {
+          // Release the mutex before calling into the pair to avoid
+          // deadlock. Calling signalIoFailureExternal() will throw,
+          // so no need to reacquire.
+          lock.unlock();
+          pair_->signalIoFailureExternal(
+              GLOO_ERROR_MSG("Write timeout ", pair_->peer().str()));
+          GLOO_ENFORCE(false, "Unexpected code path");
+        }
       }
     }
     sendCompletions_--;
@@ -144,6 +149,9 @@ void Buffer::send(size_t offset, size_t length, size_t roffset) {
   op.preamble_.length_ = length;
   op.preamble_.roffset_ = roffset;
   op.buf_ = this;
+
+  // Increment number of sends in flight
+  sendPending_++;
 
   // Pass to pair
   pair_->send(op);
