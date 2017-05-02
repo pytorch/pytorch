@@ -29,6 +29,7 @@ def Parallelize_GPU(
     net_type='dag',
     broadcast_computed_params=True,
     optimize_gradient_memory=False,
+    use_nccl=False,
 ):
     '''
     Function to create a model that can run on many GPUs.
@@ -145,7 +146,7 @@ def Parallelize_GPU(
         _BroadcastComputedParams(devices, model_helper_obj, rendezvous)
 
     if len(model_helper_obj._grad_names) > 0:
-        _AllReduceGradients(devices, model_helper_obj, rendezvous)
+        _AllReduceGradients(devices, model_helper_obj, rendezvous, use_nccl)
     else:
         log.info("NOTE: Param builder function did not create any parameters.")
 
@@ -297,6 +298,37 @@ def _Broadcast(devices, model, net, param):
             )
 
 
+def _AllReduce(devices, model, net, param):
+    ''' Non-NCCL allreduce '''
+    grads_group = model._device_grouped_blobs[param].values()
+
+    def sum2(d1i, d2i):
+        d1 = model._devices[d1i]
+        d2 = model._devices[d2i]
+        device_opt = core.DeviceOption(caffe2_pb2.CUDA, d1)
+        with core.DeviceScope(device_opt):
+            net.Sum(
+                [grads_group[d1], grads_group[d2]], [grads_group[d1]],
+                name="dpm",
+            )
+    if len(devices) == 8:
+        # Special tree reduction for 8 gpus, TODO generalize like in muji.py
+        for j in range(4):
+            sum2(j * 2, j * 2 + 1)
+        for j in range(2):
+            sum2(j * 4, j * 4 + 2)
+        sum2(0, 4)
+        _Broadcast(devices, model, net, param)
+    elif len(devices) == 4:
+        sum2(0, 1)
+        sum2(2, 3)
+        sum2(0, 2)
+        _Broadcast(devices, model, net, param)
+    else:
+        model.Sum(grads_group, grads_group[0], name="dpm")
+        _Broadcast(devices, model, net, param)
+
+
 def _SyncParams(devices, model, net, unique_param_names=None):
     if unique_param_names is None:
         unique_param_names = model._param_names
@@ -370,9 +402,9 @@ def _AddDistributedParameterSync(
                 net.CopyCPUToGPU(param_cpu, param)
 
 
-def _AllReduceGradients(devices, model, rendezvous):
+def _AllReduceGradients(devices, model, rendezvous, use_nccl):
     if rendezvous is None:
-        _AllReduceGradientsSingleHost(devices, model)
+        _AllReduceGradientsSingleHost(devices, model, use_nccl)
     else:
         _AllReduceGradientsDistributed(devices, model, rendezvous)
 
@@ -486,7 +518,7 @@ def _AllReduceGradientsDistributed(
         counter += 1
 
 
-def _AllReduceGradientsSingleHost(devices, model):
+def _AllReduceGradientsSingleHost(devices, model, use_nccl):
     """Performs NCCL AllReduce to distribute gradients to all the GPUs."""
 
     if len(devices) == 1:
@@ -511,14 +543,18 @@ def _AllReduceGradientsSingleHost(devices, model):
         if _IsGPUBlob(model, grad_name):
             with core.DeviceScope(master_device_opt):
                 if not isinstance(grads_group[0], core.GradientSlice):
-                    model.NCCLAllreduce(
-                        grads_group,
-                        grads_group,
-                        control_input=last_out,
-                    )
+                    if use_nccl:
+                        model.NCCLAllreduce(
+                            grads_group,
+                            grads_group,
+                            control_input=last_out,
+                        )
 
-                    # last_out is used to serialize the execution of nccls
-                    last_out = grads_group[0]
+                        # last_out is used to serialize the execution of nccls
+                        last_out = grads_group[0]
+                    else:
+                        _AllReduce(devices, model, model.net, grad_name)
+
                 else:
                     # Sparse gradients: all-gather for indices and values
                     master_ns = "gpu_{}".format(devices[0])
@@ -605,6 +641,8 @@ def _AnalyzeOperators(model):
     '''
     for op in model.Proto().op:
         if "NCCL" in op.type or "Copy" in op.type or "Concat" in op.type:
+            continue
+        if "Sum" == op.type and op.name == "dpm":
             continue
         if "Allreduce" in op.type and "GLOO" in op.engine:
             continue
