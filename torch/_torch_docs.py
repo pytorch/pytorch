@@ -1059,7 +1059,7 @@ Get the k-th diagonal of a given matrix::
 
 add_docstr(torch._C.dist,
            """
-dist(input, other, p=2, out=None) -> Tensor
+dist(input, other, p=2) -> float
 
 Returns the p-norm of (:attr:`input` - :attr:`other`)
 
@@ -1067,7 +1067,6 @@ Args:
     input (Tensor): the input `Tensor`
     other (Tensor): the Right-hand-side input `Tensor`
     p (float, optional): The norm to be computed.
-    out (Tensor, optional): The result `Tensor`
 
 Example::
 
