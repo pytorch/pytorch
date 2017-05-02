@@ -362,7 +362,7 @@ Returns the number of dimensions of this tensor.
 
 add_docstr(torch._C.FloatTensorBase.dist,
            """
-dist(other, p=2) -> Tensor
+dist(other, p=2) -> float
 
 See :func:`torch.dist`
 """)
