@@ -503,6 +503,12 @@ Loss functions
 .. autoclass:: MultiMarginLoss
     :members:
 
+:hidden:`TripletMarginLoss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TripletMarginLoss
+    :members:
+
 
 Vision layers
 ----------------
@@ -837,6 +843,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: smooth_l1_loss
+
+:hidden:`triplet_margin_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: triplet_margin_loss
 
 Vision functions
 ----------------

@@ -105,9 +105,11 @@ class InstanceNorm2d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+
     Shape:
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
+
     Examples:
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm2d(100)
