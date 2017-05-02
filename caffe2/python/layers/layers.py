@@ -28,6 +28,43 @@ def get_categorical_limit(record):
     return record[key].metadata.categorical_limit
 
 
+def set_request_only(field):
+    for f in field.all_scalars():
+        categorical_limit, expected_value = None, None
+        if not f.metadata:
+            feature_specs = schema.FeatureSpec(
+                feature_is_request_only=True,
+            )
+        elif not f.metadata.feature_specs:
+            categorical_limit = f.metadata.categorical_limit
+            expected_value = f.metadata.expected_value
+            feature_specs = schema.FeatureSpec(
+                feature_is_request_only=True,
+            )
+        else:
+            categorical_limit = f.metadata.categorical_limit
+            expected_value = f.metadata.expected_value
+            feature_specs = schema.FeatureSpec(
+                feature_type=f.metadata.feature_specs.feature_type,
+                feature_names=f.metadata.feature_specs.feature_names,
+                feature_ids=f.metadata.feature_specs.feature_ids,
+                feature_is_request_only=True,
+            )
+
+        # make sure not to set categorical_limit for a non-integer field
+        if not np.issubdtype(f.field_type(), np.integer):
+            assert categorical_limit is None, \
+                "categorical_limit shouldn't be set for no-integer field"
+
+        f.set_metadata(
+            schema.Metadata(
+                categorical_limit=categorical_limit,
+                expected_value=expected_value,
+                feature_specs=feature_specs,
+            )
+        )
+
+
 class InstantiationContext(object):
     """
     List of contexts where layer could be instantitated
@@ -73,7 +110,7 @@ LayerParameter = namedtuple(
 LayerParameter.__new__.__defaults__ = (None, None, None, None)
 
 
-def _is_request_only_scalar(scalar):
+def is_request_only_scalar(scalar):
     if len(scalar.field_metadata()) == 0:
         return False
     for metadata in scalar.field_metadata():
@@ -124,7 +161,7 @@ class ModelLayer(object):
         if len(input_record.all_scalars()) == 0:
             self.request_only = False
         for scalar in input_record.all_scalars():
-            if not _is_request_only_scalar(scalar):
+            if not is_request_only_scalar(scalar):
                 self.request_only = False
                 break
 
@@ -165,6 +202,8 @@ class ModelLayer(object):
 
     @property
     def output_schema(self):
+        if self.request_only:
+            set_request_only(self._output_schema)
         self._check_output_schema()
         return self._output_schema
 

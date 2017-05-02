@@ -49,17 +49,6 @@ class SparseLookup(ModelLayer):
             model.net.NextScopedBlob(name + '_output'),
         )
 
-        if self.request_only:
-            schema.attach_metadata_to_scalars(
-                self.output_schema,
-                schema.Metadata(
-                    categorical_limit=None,
-                    expected_value=None,
-                    feature_specs=schema.FeatureSpec(
-                        feature_is_request_only=True
-                    )
-                )
-            )
         scale = math.sqrt(1.0 / input_dim)
         self.shape = [input_dim] + inner_shape
         self.weight_init = weight_init if weight_init else (
