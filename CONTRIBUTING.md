@@ -70,6 +70,16 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+If you are working on C files, you will need to build your changes:
+
+```
+(rm -rf build; python setup.py develop)
+```
+
+We recommend removing the `build` directory before rebuilding because
+setup.py's recompilation checking is not great, and it will often fail
+to rebuild C code after you modify code in a `generic` directory.
+
 #### C++ Development tips
 
 When you are developing on the C++ side of things, the environment variables `DEBUG` and `NO_CUDA` are helpful.
