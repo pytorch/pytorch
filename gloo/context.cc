@@ -30,7 +30,9 @@ std::unique_ptr<transport::Pair>& Context::getPair(int i) {
 }
 
 int Context::nextSlot(int numToSkip) {
-  return slot_ += numToSkip;
+  auto temp = slot_;
+  slot_ += numToSkip;
+  return temp;
 }
 
 } // namespace gloo

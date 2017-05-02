@@ -93,9 +93,8 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
   // pair are needed (one for regular sends and one for notifications). For
   // simplicity, the same mapping is used on all processes so that the slots
   // trivially match across processes
-  this->context_->nextSlot(
-      2 * ((this->contextSize_ - 2) * this->contextSize_ +
-           (this->contextSize_ - 1)));
+  slotOffset_ = this->context_->nextSlot(
+      2 * this->contextSize_ * (this->contextSize_ - 1));
 
   auto newStream = true;
   if (streams.size() > 0) {
@@ -126,8 +125,9 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
     const int destRank = static_cast<int>((this->context_->rank) ^ bitmask);
     commPairs_.push_back(this->context_->getPair(destRank));
     const auto myRank = this->context_->rank;
-    auto slot = 2 * (std::min(myRank, destRank) * this->contextSize_ +
-                     std::max(myRank, destRank));
+    auto slot = slotOffset_ +
+        2 * (std::min(myRank, destRank) * this->contextSize_ +
+             std::max(myRank, destRank));
     sendOffsets_[i] = sendOffset + ((destRank & bitmask) ? stepChunkSize : 0);
     recvOffsets_[i] =
         recvOffset + ((this->context_->rank & bitmask) ? stepChunkSize : 0);
@@ -173,8 +173,9 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
     const int destRank = static_cast<int>(
         offsetToSmallerBlock + rankInBinaryBlock_ % nextSmallerBlockSize_);
     const auto myRank = this->context_->rank;
-    const auto slot = 2 * (std::min(myRank, destRank) * this->contextSize_ +
-                           std::max(myRank, destRank));
+    const auto slot = slotOffset_ +
+        2 * (std::min(myRank, destRank) * this->contextSize_ +
+             std::max(myRank, destRank));
     commPairs_.push_back(this->context_->getPair(destRank));
     smallerBlockSendDataBuf_ = std::move(
         commPairs_.back().get()->createSendBuffer(slot, *scratch_, bytes_));
@@ -213,8 +214,9 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
           reverseLastNBits(destOrdinal, log2(nextLargerBlockSize_));
       commPairs_.push_back(this->context_->getPair(destRank));
       const auto myRank = this->context_->rank;
-      const auto slot = 2 * (std::min(myRank, destRank) * this->contextSize_ +
-                             std::max(myRank, destRank));
+      const auto slot = slotOffset_ +
+          2 * (std::min(myRank, destRank) * this->contextSize_ +
+               std::max(myRank, destRank));
       largerBlockSendDataBufs_.push_back(
           commPairs_.back().get()->createSendBuffer(slot, *scratch_, bytes_));
       if (sendCountToLargerBlock_ * i < totalItemsToSend) {

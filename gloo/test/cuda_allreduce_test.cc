@@ -54,6 +54,44 @@ class CudaAllreduceTest : public CudaBaseTest,
   }
 };
 
+static std::function<Func> allreduceRing = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+    new ::gloo::CudaAllreduceRing<float>(context, ptrs, count, streams));
+};
+
+static std::function<Func> allreduceRingChunked = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+    new ::gloo::CudaAllreduceRingChunked<float>(context, ptrs, count, streams));
+};
+
+static std::function<Func> allreduceHalvingDoubling = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+      new ::gloo::CudaAllreduceHalvingDoubling<float>(
+          context, ptrs, count, streams));
+};
+
+static std::function<Func> allreduceHalvingDoublingPipelined = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+      new ::gloo::CudaAllreduceHalvingDoublingPipelined<float>(
+          context, ptrs, count, streams));
+};
+
 TEST_P(CudaAllreduceTest, SinglePointer) {
   auto size = std::get<0>(GetParam());
   auto count = std::get<1>(GetParam());
@@ -110,6 +148,37 @@ TEST_P(CudaAllreduceTest, MultiPointerAsync) {
     });
 }
 
+TEST_F(CudaAllreduceTest, MultipleAlgorithms) {
+  auto size = 4;
+  auto count = 1000;
+  auto fns = {allreduceRing,
+             allreduceRingChunked,
+             allreduceHalvingDoubling,
+             allreduceHalvingDoublingPipelined};
+
+  for (const auto& fn : fns) {
+    spawn(size, [&](std::shared_ptr<Context> context) {
+      // Run algorithm
+      auto fixture = CudaFixture(context, 1, count);
+      auto ptrs = fixture.getFloatPointers();
+
+      auto algorithm = fn(context, ptrs, count, {});
+      fixture.assignValues();
+      algorithm->run();
+
+      // Verify result
+      assertResult(fixture);
+
+      auto algorithm2 = fn(context, ptrs, count, {});
+      fixture.assignValues();
+      algorithm2->run();
+
+      // Verify result
+      assertResult(fixture);
+    });
+  }
+}
+
 std::vector<int> genMemorySizes() {
   std::vector<int> v;
   v.push_back(sizeof(float));
@@ -119,15 +188,6 @@ std::vector<int> genMemorySizes() {
   return v;
 }
 
-static std::function<Func> allreduceRing = [](
-    std::shared_ptr<::gloo::Context>& context,
-    std::vector<float*> ptrs,
-    int count,
-    std::vector<cudaStream_t> streams) {
-  return std::unique_ptr<::gloo::Algorithm>(
-    new ::gloo::CudaAllreduceRing<float>(context, ptrs, count, streams));
-};
-
 INSTANTIATE_TEST_CASE_P(
     AllreduceRing,
     CudaAllreduceTest,
@@ -135,15 +195,6 @@ INSTANTIATE_TEST_CASE_P(
       ::testing::Range(2, 16),
       ::testing::ValuesIn(genMemorySizes()),
       ::testing::Values(allreduceRing)));
-
-static std::function<Func> allreduceRingChunked = [](
-    std::shared_ptr<::gloo::Context>& context,
-    std::vector<float*> ptrs,
-    int count,
-    std::vector<cudaStream_t> streams) {
-  return std::unique_ptr<::gloo::Algorithm>(
-    new ::gloo::CudaAllreduceRingChunked<float>(context, ptrs, count, streams));
-};
 
 INSTANTIATE_TEST_CASE_P(
     AllreduceRingChunked,
@@ -153,16 +204,6 @@ INSTANTIATE_TEST_CASE_P(
       ::testing::ValuesIn(genMemorySizes()),
       ::testing::Values(allreduceRingChunked)));
 
-static std::function<Func> allreduceHalvingDoubling = [](
-    std::shared_ptr<::gloo::Context>& context,
-    std::vector<float*> ptrs,
-    int count,
-    std::vector<cudaStream_t> streams) {
-  return std::unique_ptr<::gloo::Algorithm>(
-      new ::gloo::CudaAllreduceHalvingDoubling<float>(
-          context, ptrs, count, streams));
-};
-
 INSTANTIATE_TEST_CASE_P(
     AllreduceHalvingDoubling,
     CudaAllreduceTest,
@@ -171,16 +212,6 @@ INSTANTIATE_TEST_CASE_P(
           std::vector<int>({2, 3, 4, 5, 6, 7, 8, 9, 13, 16, 24, 32})),
         ::testing::ValuesIn(std::vector<int>({1, 64, 1000})),
         ::testing::Values(allreduceHalvingDoubling)));
-
-static std::function<Func> allreduceHalvingDoublingPipelined = [](
-    std::shared_ptr<::gloo::Context>& context,
-    std::vector<float*> ptrs,
-    int count,
-    std::vector<cudaStream_t> streams) {
-  return std::unique_ptr<::gloo::Algorithm>(
-      new ::gloo::CudaAllreduceHalvingDoublingPipelined<float>(
-          context, ptrs, count, streams));
-};
 
 INSTANTIATE_TEST_CASE_P(
     AllreduceHalvingDoublingPipelined,

@@ -98,9 +98,8 @@ class AllreduceHalvingDoubling : public Algorithm {
     // pair are needed (one for regular sends and one for notifications). For
     // simplicity, the same mapping is used on all processes so that the slots
     // trivially match across processes
-    this->context_->nextSlot(
-        2 * ((this->contextSize_ - 2) * this->contextSize_ +
-             (this->contextSize_ - 1)));
+    slotOffset_ = this->context_->nextSlot(
+        2 * this->contextSize_ * (this->contextSize_ - 1));
 
     size_t bitmask = 1;
     size_t stepChunkSize = chunkSize_ << (steps_ - 1);
@@ -123,8 +122,9 @@ class AllreduceHalvingDoubling : public Algorithm {
         }
       }
       int myRank = this->context_->rank;
-      auto slot = 2 * (std::min(myRank, destRank) * this->contextSize_ +
-                       std::max(myRank, destRank));
+      auto slot = slotOffset_ +
+          2 * (std::min(myRank, destRank) * this->contextSize_ +
+               std::max(myRank, destRank));
       sendDataBufs_.push_back(
           commPairs_[i].get()->createSendBuffer(slot, ptrs_[0], bytes_));
       if (recvOffsets_[i] < count_) {
@@ -160,8 +160,9 @@ class AllreduceHalvingDoubling : public Algorithm {
           offsetToSmallerBlock + rankInBinaryBlock_ % nextSmallerBlockSize_;
       commPairs_.push_back(this->context_->getPair(destRank));
       int myRank = this->context_->rank;
-      const auto slot = 2 * (std::min(myRank, destRank) * this->contextSize_ +
-                             std::max(myRank, destRank));
+      const auto slot = slotOffset_ +
+          2 * (std::min(myRank, destRank) * this->contextSize_ +
+               std::max(myRank, destRank));
       smallerBlockSendDataBuf_ = std::move(
           commPairs_.back().get()->createSendBuffer(slot, ptrs_[0], bytes_));
       const auto itemCount = recvCounts_[stepsWithinBlock_ - 1];
@@ -199,8 +200,9 @@ class AllreduceHalvingDoubling : public Algorithm {
             reverseLastNBits(destOrdinal, log2(nextLargerBlockSize_));
         commPairs_.push_back(this->context_->getPair(destRank));
         const int myRank = this->context_->rank;
-        const auto slot = 2 * (std::min(myRank, destRank) * this->contextSize_ +
-                               std::max(myRank, destRank));
+        const auto slot = slotOffset_ +
+            2 * (std::min(myRank, destRank) * this->contextSize_ +
+                 std::max(myRank, destRank));
         largerBlockSendDataBufs_.push_back(
             commPairs_.back().get()->createSendBuffer(slot, ptrs[0], bytes_));
         if (sendCountToLargerBlock_ * i < totalItemsToSend) {
@@ -378,6 +380,8 @@ class AllreduceHalvingDoubling : public Algorithm {
   uint32_t rankInBinaryBlock_;
   uint32_t nextSmallerBlockSize_;
   uint32_t nextLargerBlockSize_;
+
+  int slotOffset_;
 };
 
 } // namespace gloo

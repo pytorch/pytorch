@@ -133,6 +133,8 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
   uint32_t rankInBinaryBlock_;
   uint32_t nextSmallerBlockSize_;
   uint32_t nextLargerBlockSize_;
+
+  int slotOffset_;
 };
 
 } // namespace gloo

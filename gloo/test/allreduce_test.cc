@@ -60,6 +60,32 @@ TYPED_TEST(AllreduceConstructorTest, SpecifyReductionFunction) {
     });
 }
 
+static std::function<Func> allreduceRing = [](
+    std::shared_ptr<::gloo::Context> context,
+    std::vector<float*> dataPtrs,
+    int dataSize) {
+  ::gloo::AllreduceRing<float> algorithm(context, dataPtrs, dataSize);
+  algorithm.run();
+};
+
+static std::function<Func> allreduceRingChunked = [](
+    std::shared_ptr<::gloo::Context> context,
+    std::vector<float*> dataPtrs,
+    int dataSize) {
+  ::gloo::AllreduceRingChunked<float> algorithm(
+      context, dataPtrs, dataSize);
+  algorithm.run();
+};
+
+static std::function<Func> allreduceHalvingDoubling = [](
+    std::shared_ptr<::gloo::Context> context,
+    std::vector<float*> dataPtrs,
+    int dataSize) {
+  ::gloo::AllreduceHalvingDoubling<float> algorithm(
+      context, dataPtrs, dataSize);
+  algorithm.run();
+};
+
 // Test fixture.
 class AllreduceTest : public BaseTest,
                       public ::testing::WithParamInterface<Param> {};
@@ -88,6 +114,43 @@ TEST_P(AllreduceTest, SinglePointer) {
   });
 }
 
+TEST_F(AllreduceTest, MultipleAlgorithms) {
+  auto contextSize = 4;
+  auto dataSize = 1000;
+  auto fns = {allreduceRing, allreduceRingChunked, allreduceHalvingDoubling};
+
+  spawnThreads(contextSize, [&](int contextRank) {
+    auto context =
+        std::make_shared<::gloo::rendezvous::Context>(contextRank, contextSize);
+    context->connectFullMesh(*store_, device_);
+
+    std::unique_ptr<float[]> ptr(new float[dataSize]);
+    for (const auto& fn : fns) {
+      for (int i = 0; i < dataSize; i++) {
+        ptr[i] = contextRank;
+      }
+
+      fn(context, {ptr.get()}, dataSize);
+
+      auto expected = (contextSize * (contextSize - 1)) / 2;
+      for (int i = 0; i < dataSize; i++) {
+        ASSERT_EQ(expected, ptr[i]) << "Mismatch at index " << i;
+      }
+
+      for (int i = 0; i < dataSize; i++) {
+        ptr[i] = contextRank;
+      }
+
+      fn(context, {ptr.get()}, dataSize);
+
+      expected = (contextSize * (contextSize - 1)) / 2;
+      for (int i = 0; i < dataSize; i++) {
+        ASSERT_EQ(expected, ptr[i]) << "Mismatch at index " << i;
+      }
+    }
+  });
+}
+
 std::vector<int> genMemorySizes() {
   std::vector<int> v;
   v.push_back(sizeof(float));
@@ -97,14 +160,6 @@ std::vector<int> genMemorySizes() {
   return v;
 }
 
-static std::function<Func> allreduceRing = [](
-    std::shared_ptr<::gloo::Context> context,
-    std::vector<float*> dataPtrs,
-    int dataSize) {
-  ::gloo::AllreduceRing<float> algorithm(context, dataPtrs, dataSize);
-  algorithm.run();
-};
-
 INSTANTIATE_TEST_CASE_P(
     AllreduceRing,
     AllreduceTest,
@@ -113,15 +168,6 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::ValuesIn(genMemorySizes()),
         ::testing::Values(allreduceRing)));
 
-static std::function<Func> allreduceRingChunked = [](
-    std::shared_ptr<::gloo::Context> context,
-    std::vector<float*> dataPtrs,
-    int dataSize) {
-  ::gloo::AllreduceRingChunked<float> algorithm(
-      context, dataPtrs, dataSize);
-  algorithm.run();
-};
-
 INSTANTIATE_TEST_CASE_P(
     AllreduceRingChunked,
     AllreduceTest,
@@ -129,15 +175,6 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::Range(2, 16),
         ::testing::ValuesIn(genMemorySizes()),
         ::testing::Values(allreduceRingChunked)));
-
-static std::function<Func> allreduceHalvingDoubling = [](
-    std::shared_ptr<::gloo::Context> context,
-    std::vector<float*> dataPtrs,
-    int dataSize) {
-  ::gloo::AllreduceHalvingDoubling<float> algorithm(
-      context, dataPtrs, dataSize);
-  algorithm.run();
-};
 
 INSTANTIATE_TEST_CASE_P(
     AllreduceHalvingDoubling,

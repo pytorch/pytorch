@@ -58,6 +58,40 @@ TEST_P(AllgatherTest, VarNumPointer) {
   });
 }
 
+TEST_F(AllgatherTest, MultipleAlgorithms) {
+  auto contextSize = 4;
+  auto dataSize = 1000;
+  auto numPtrs = 8;
+
+  spawn(contextSize, [&](std::shared_ptr<Context> context) {
+    Fixture inFixture(context, numPtrs, dataSize);
+    inFixture.assignValues();
+
+    std::unique_ptr<float[]> outPtr =
+        gloo::make_unique<float[]>(numPtrs * dataSize * contextSize);
+
+    for (int alg = 0; alg < 2; alg++) {
+      AllgatherRing<float> algorithm(
+          context, inFixture.getFloatPointers(), outPtr.get(), dataSize);
+      algorithm.run();
+
+      auto stride = contextSize * numPtrs;
+      for (int i = 0; i < contextSize; ++i) {
+        auto val = i * numPtrs;
+        for (int j = 0; j < dataSize; j++) {
+          float exp = j * stride + val;
+          for (int k = 0; k < numPtrs; ++k) {
+            ASSERT_EQ(
+                outPtr.get()[i * dataSize * numPtrs + k * dataSize + j],
+                exp + k)
+                << "Mismatch at index [" << i << ", " << j + dataSize << "]";
+          }
+        }
+      }
+    }
+  });
+}
+
 std::vector<int> genMemorySizes() {
   std::vector<int> v;
   v.push_back(sizeof(float));
