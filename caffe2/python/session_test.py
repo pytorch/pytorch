@@ -33,14 +33,14 @@ class TestLocalSession(TestCase):
             with core.NameScope('proc1'):
                 out = NewRecord(net, rec)
             net.Add([rec.uid(), rec.uid()], [out.uid()])
-            out.value.set(blob=rec.value())
+            out.value.set(blob=rec.value(), unsafe=True)
             return [net], out
 
         def proc2(rec):
             net = core.Net('proc2')
             with core.NameScope('proc2'):
                 out = NewRecord(net, rec)
-            out.uid.set(blob=rec.uid())
+            out.uid.set(blob=rec.uid(), unsafe=True)
             net.Sub([rec.value(), rec.value()], [out.value()])
             return [net], out
 
