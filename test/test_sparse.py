@@ -43,12 +43,12 @@ class TestSparse(TestCase):
             # We want to generate a tensor with a lot of uncoalesced
             # entries to stress test whether or not we handle this
             # (subtle) case correctly
-            v_size = [nnz*2] + list(with_size[d:])
+            v_size = [nnz * 2] + list(with_size[d:])
             v = torch.randn(*v_size)
             r = torch.rand(d, nnz)
             # Repeat the indexes, so every position shows up twice
             i = torch.cat([r, r], dim=1) * \
-                torch.Tensor(with_size[:d]).repeat(nnz*2, 1).transpose(0, 1)
+                torch.Tensor(with_size[:d]).repeat(nnz * 2, 1).transpose(0, 1)
             i = i.type(torch.LongTensor)
             x = torch.sparse.DoubleTensor(i, v, torch.Size(with_size))
             self.assert_uncoalesced(x)
