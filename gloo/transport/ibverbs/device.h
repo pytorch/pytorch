@@ -53,6 +53,7 @@ class Device : public ::gloo::transport::Device,
  protected:
   struct attr attr_;
   const std::string pciBusID_;
+  const bool hasNvPeerMem_;
   ibv_context* context_;
   ibv_pd* pd_;
   ibv_comp_channel* comp_channel_;

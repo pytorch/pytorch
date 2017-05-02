@@ -84,6 +84,7 @@ std::shared_ptr<::gloo::transport::Device> CreateDevice(
 Device::Device(const struct attr& attr, ibv_context* context)
     : attr_(attr),
       pciBusID_(infinibandToBusID(attr.name)),
+      hasNvPeerMem_(kernelModules().count("nv_peer_mem") > 0),
       context_(context) {
   int rv;
 
@@ -125,7 +126,7 @@ std::string Device::str() const {
   ss << ", index=" << attr_.index;
 
   // nv_peer_mem module must be loaded for GPUDirect
-  if (kernelModules().count("nv_peer_mem") > 0) {
+  if (hasNvPeerMem_) {
     ss << ", gpudirect=ok";
   }
 

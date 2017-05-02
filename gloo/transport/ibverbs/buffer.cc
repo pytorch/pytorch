@@ -9,6 +9,7 @@
 
 #include "gloo/transport/ibverbs/buffer.h"
 
+#include <errno.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -33,6 +34,20 @@ Buffer::Buffer(Pair* pair, int slot, void* ptr, size_t size)
       ptr_,
       size_,
       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+
+  // Provide hint if the error is EFAULT and nv_peer_mem is not loaded
+  if (mr_ == nullptr && errno == EFAULT) {
+    if (!pair->dev_->hasNvPeerMem_) {
+      GLOO_ENFORCE(
+        mr_ != nullptr,
+        "ibv_reg_mr: ",
+        strerror(errno),
+        " (kernel module 'nv_peer_mem' not loaded;"
+        " did you specify a pointer to GPU memory?)");
+    }
+  }
+
+  GLOO_ENFORCE(mr_ != nullptr, "ibv_reg_mr: ", strerror(errno));
 }
 
 Buffer::~Buffer() {
