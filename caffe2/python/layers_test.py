@@ -14,6 +14,10 @@ from caffe2.python.layer_test_util import (
     LayersTestCase,
     OpSpec,
 )
+from caffe2.python.layers.layers import (
+    set_request_only,
+    is_request_only_scalar,
+)
 
 
 class TestLayers(LayersTestCase):
@@ -457,3 +461,44 @@ class TestLayers(LayersTestCase):
         self.assertEqual(1, len(loss.field_types()))
         self.assertEqual(np.float32, loss.field_types()[0].base)
         self.assertEqual((1,), loss.field_types()[0].shape)
+
+    def testPropagateRequestOnly(self):
+        # test case when output is request only
+        input_record = self.new_record(schema.Struct(
+            ('input1', schema.Scalar((np.float32, (32, )))),
+            ('input2', schema.Scalar((np.float32, (64, )))),
+            ('input3', schema.Scalar((np.float32, (16, )))),
+        ))
+
+        set_request_only(input_record)
+        concat_output = self.model.Concat(input_record)
+        self.assertEqual(is_request_only_scalar(concat_output), True)
+
+        # test case when output is not request only
+        input_record2 = self.new_record(schema.Struct(
+            ('input4', schema.Scalar((np.float32, (100, ))))
+        )) + input_record
+
+        concat_output2 = self.model.Concat(input_record2)
+        self.assertEqual(is_request_only_scalar(concat_output2), False)
+
+    def testSetRequestOnly(self):
+        input_record = schema.Scalar(np.int64)
+        schema.attach_metadata_to_scalars(
+            input_record,
+            schema.Metadata(
+                categorical_limit=100000000,
+                expected_value=99,
+                feature_specs=schema.FeatureSpec(
+                    feature_ids=[1, 100, 1001]
+                )
+            )
+        )
+
+        set_request_only(input_record)
+        self.assertEqual(input_record.metadata.categorical_limit, 100000000)
+        self.assertEqual(input_record.metadata.expected_value, 99)
+        self.assertEqual(
+            input_record.metadata.feature_specs.feature_ids,
+            [1, 100, 1001]
+        )
