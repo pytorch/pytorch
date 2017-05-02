@@ -129,7 +129,7 @@ def recurrent_net(
         x[1] for x in initial_cell_inputs] + references
     all_outputs = []
 
-    cell_net.Proto().type = 'simple'
+    cell_net.Proto().type = 'rnn'
 
     # Internal arguments used by RecurrentNetwork operator
 
@@ -242,6 +242,10 @@ def recurrent_net(
         timestep="timestep" if timestep is None else str(timestep),
         **backward_args
     )
+
+    # Restore net type since 'rnn' is not recognized outside RNNs
+    cell_net.Proto().type = 'simple'
+
     # The last output is a list of step workspaces,
     # which is only needed internally for gradient propogation
     return results[:-1]
