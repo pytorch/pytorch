@@ -278,7 +278,8 @@ NetBase* Workspace::CreateNet(const NetDef& net_def, bool overwrite) {
   net_map_[net_def.name()] =
       unique_ptr<NetBase>(caffe2::CreateNet(net_def, this));
   if (net_map_[net_def.name()].get() == nullptr) {
-    LOG(ERROR) << "Error when creating the network.";
+    LOG(ERROR) << "Error when creating the network."
+               << "Maybe net type: [" << net_def.type() << "] does not exist";
     net_map_.erase(net_def.name());
     return nullptr;
   }
@@ -321,6 +322,11 @@ bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
 }
 bool Workspace::RunNetOnce(const NetDef& net_def) {
   std::unique_ptr<NetBase> net(caffe2::CreateNet(net_def, this));
+  if (net == nullptr) {
+    CAFFE_THROW(
+        "Could not create net: " + net_def.name() + " of type " +
+        net_def.type());
+  }
   if (!net->Run()) {
     LOG(ERROR) << "Error when running network " << net_def.name();
     return false;

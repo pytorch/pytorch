@@ -5,6 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/operators/recurrent_network_executor.h"
 #include "google/protobuf/text_format.h"
 
 namespace caffe2 {
@@ -177,6 +178,13 @@ class RecurrentNetworkOp final : public Operator<Context> {
     recurrentInputs_ = constructRecurrentInputs(sharedWs_);
     links_ = constructLinks();
     aliases_ = constructAliases();
+
+    if (stepNetDef_.type() == "rnn") {
+      LOG(INFO) << "Use RecurrentNetworkExecutor";
+      rnnExecutor_ = caffe2::make_unique<RecurrentNetworkExecutor>(stepNetDef_);
+    } else {
+      CAFFE_ENFORCE(stepNetDef_.type() == "" || stepNetDef_.type() == "simple");
+    }
   }
 
   std::vector<detail::RecurrentInput> constructRecurrentInputs(
@@ -304,13 +312,18 @@ class RecurrentNetworkOp final : public Operator<Context> {
       timestepBlob->template GetMutable<TensorCPU>()
           ->template mutable_data<int32_t>()[0] = t;
 
-      auto* stepNet = currentStepWorkspace->GetNet(stepNetDef_.name());
-      if (stepNet == nullptr) {
-        stepNet = currentStepWorkspace->CreateNet(stepNetDef_);
+      if (rnnExecutor_) {
+        rnnExecutor_->RunTimestep(t, currentStepWorkspace.get());
+      } else {
+        // Use plain Caffe2 nets
+        auto* stepNet = currentStepWorkspace->GetNet(stepNetDef_.name());
+        if (stepNet == nullptr) {
+          stepNet = currentStepWorkspace->CreateNet(stepNetDef_);
+        }
+        CAFFE_ENFORCE(stepNet, "Step Net construction failure");
+        // Since we have a SimpleNet, there are no races here.
+        stepNet->RunAsync();
       }
-      CAFFE_ENFORCE(stepNet, "Step Net construction failure");
-      // Since we have a SimpleNet, there are no races here.
-      stepNet->RunAsync();
     }
 
     for (const auto& alias : aliases_) {
@@ -323,6 +336,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
  protected:
   NetDef stepNetDef_;
   Workspace* sharedWs_;
+  std::unique_ptr<RecurrentNetworkExecutor> rnnExecutor_;
+
   std::vector<detail::Link> links_;
   std::vector<detail::OffsetAlias> aliases_;
   std::vector<detail::RecurrentInput> recurrentInputs_;
