@@ -108,7 +108,7 @@ class CRFWithLoss(object):
             [], "e_scores", shape=[1, self.num_classes_padded], values=e_scores
         )
 
-        zero_index = self.model.param_init_net.ConstantFill(
+        zero_index = self.model.net.ConstantFill(
             [], shape=[1, ], value=0
         )
         length = self.model.net.Gather(
