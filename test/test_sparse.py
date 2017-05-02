@@ -84,11 +84,11 @@ class TestSparse(TestCase):
         assert (z.values() > 1).sum() > 0
 
     def randn(self, *args, **kwargs):
-        # TODO: Maybe do this directly on GPU
-        x = torch.randn(*args, **kwargs)
-        if self.is_cuda:
-            x = x.cuda()
-        return x
+        """
+        Variant of torch.randn that also works in the TEST_CUDA case.
+        """
+        # TODO: Put this in torch.cuda.randn
+        return self.ValueTensor(*args, **kwargs).normal_()
 
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
