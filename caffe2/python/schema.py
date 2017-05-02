@@ -567,9 +567,9 @@ class Scalar(Field):
     def set_value(self, blob, throw_on_type_mismatch=False, unsafe=False):
         """Sets only the blob field still validating the existing dtype"""
         if self.dtype.base != np.void and throw_on_type_mismatch:
-            assert isinstance(blob, np.ndarray)
+            assert isinstance(blob, np.ndarray), "Got {!r}".format(blob)
             assert blob.dtype.base == self.dtype.base, (
-                "Expected {}, got {}".format(blob.dtype.base, blob.dtype.base))
+                "Expected {}, got {}".format(self.dtype.base, blob.dtype.base))
         self.set(dtype=self._original_dtype, blob=blob, unsafe=unsafe)
 
     def set(self, dtype=None, blob=None, metadata=None, unsafe=False):
