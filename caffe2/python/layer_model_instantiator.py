@@ -21,7 +21,7 @@ def generate_predict_net(model, include_tags=None):
     predict_net = core.Net('predict_net')
 
     for layer in _filter_layers(model.layers, include_tags):
-        if Tags.TRAIN_ONLY not in layer.tags:
+        if Tags.EXCLUDE_FROM_PREDICTION not in layer.tags:
             layer.add_operators(
                 predict_net, context=InstantiationContext.PREDICTION)
     return predict_net
@@ -31,7 +31,8 @@ def generate_eval_net(model, include_tags=None):
     eval_net = core.Net('eval_net')
 
     for layer in _filter_layers(model.layers, include_tags):
-        layer.add_operators(eval_net, context=InstantiationContext.EVAL)
+        if Tags.EXCLUDE_FROM_EVAL not in layer.tags:
+            layer.add_operators(eval_net, context=InstantiationContext.EVAL)
 
     input_schema = model.input_feature_schema + model.trainer_extra_schema
     output_schema = model.output_schema + model.metrics_schema
@@ -45,7 +46,8 @@ def _generate_training_net_only(model, include_tags=None):
     train_init_net = model.create_init_net('train_init_net')
 
     for layer in _filter_layers(model.layers, include_tags):
-        layer.add_operators(train_net, train_init_net)
+        if Tags.EXCLUDE_FROM_TRAIN not in layer.tags:
+            layer.add_operators(train_net, train_init_net)
 
     input_schema = model.input_feature_schema + model.trainer_extra_schema
     output_schema = model.output_schema + model.metrics_schema

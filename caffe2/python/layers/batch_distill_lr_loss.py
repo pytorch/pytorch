@@ -36,7 +36,7 @@ class BatchDistillLRLoss(ModelLayer):
             ),
             input_record
         )
-        self.tags.update({Tags.TRAIN_ONLY})
+        self.tags.update(Tags.TRAIN_ONLY)
 
         self.output_schema = schema.Scalar(
             np.float32,
@@ -87,6 +87,3 @@ class BatchDistillLRLoss(ModelLayer):
             [true_loss, teacher_loss],
             self.output_schema.field_blobs()
         )
-
-    def add_ops(self, net):
-        pass

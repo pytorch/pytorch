@@ -33,7 +33,7 @@ class BatchSigmoidCrossEntropyLoss(ModelLayer):
             input_record.label.field_type().shape, \
             "prediction and label must have the same shape"
 
-        self.tags.update({Tags.TRAIN_ONLY})
+        self.tags.update(Tags.TRAIN_ONLY)
 
         self.output_schema = schema.Scalar(
             (np.float32, tuple()), model.net.NextScopedBlob(name + '_loss')

@@ -7,7 +7,6 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
-from caffe2.python.layers.tags import Tags
 import numpy as np
 
 
@@ -29,7 +28,6 @@ class BatchSoftmaxLoss(ModelLayer):
             ),
             input_record
         )
-        self.tags.update({Tags.TRAIN_ONLY})
 
         self.output_schema = schema.Struct(
             (

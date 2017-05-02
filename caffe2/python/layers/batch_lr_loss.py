@@ -30,14 +30,14 @@ class BatchLRLoss(ModelLayer):
             ),
             input_record
         )
-        self.tags.update({Tags.TRAIN_ONLY})
+        self.tags.update(Tags.TRAIN_ONLY)
 
         self.output_schema = schema.Scalar(
             np.float32,
             model.net.NextScopedBlob(name + '_output'))
 
     # This should be a bit more complicated than it is right now
-    def add_train_ops(self, net):
+    def add_ops(self, net):
         class_probabilities = net.MakeTwoClass(
             self.input_record.prediction.field_blobs(),
             net.NextScopedBlob('two_class_predictions')
@@ -72,6 +72,3 @@ class BatchLRLoss(ModelLayer):
             net.AveragedLoss(xent, self.output_schema.field_blobs())
         else:
             net.ReduceFrontSum(xent, self.output_schema.field_blobs())
-
-    def add_ops(self, net):
-        pass
