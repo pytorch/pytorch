@@ -28,8 +28,8 @@ BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
-if [[ $(uname) == 'Darwin' ]]; then
-    LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
+if [[ $(uname) == 'Darwin' ]]; then    
+    LDFLAGS="$LDFLAGS -Qunused-arguments -Wl,-rpath,@loader_path"
     LD_POSTFIX=".1.dylib"
     LD_POSTFIX_UNVERSIONED=".dylib"
 else
