@@ -31,15 +31,15 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 }
 
 #define THP_FUNCTION_DEFAULT_METHODS \
-  {(char*)"_register_hook_dict", (PyCFunction)register_hook_dict, METH_O, NULL}, \
-  {(char*)"register_hook", (PyCFunction)register_hook, METH_O, NULL}
+  {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, NULL}, \
+  {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, NULL}
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES \
-  {(char*)"next_functions", (getter)next_functions, NULL, NULL, NULL}
+  {(char*)"next_functions", (getter)THPCppFunction_next_functions, NULL, NULL, NULL}
 
-PyObject* next_functions(THPCppFunction* self, PyObject* hook);
-PyObject* register_hook_dict(PyObject* self, PyObject* _var);
-PyObject* register_hook(PyObject* self, PyObject* hook);
+PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook);
+PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var);
+PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook);
 
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   PyGetSetDef* function_properties, PyMethodDef* function_methods);

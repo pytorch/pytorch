@@ -90,7 +90,7 @@ void THPCppFunction_dealloc(PyObject* self)
 
 } // namespace
 
-PyObject* next_functions(THPCppFunction* self, PyObject* hook)
+PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
 {
   auto& next_functions = self->cdata->next_functions;
   auto num_next = next_functions.size();
@@ -111,7 +111,7 @@ PyObject* next_functions(THPCppFunction* self, PyObject* hook)
   return py_functions.release();
 }
 
-PyObject* register_hook_dict(PyObject* self, PyObject* _var)
+PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
 {
   if (!THPVariable_Check(_var)) {
     return PyErr_Format(PyExc_TypeError, "_register_hook_dict expected a variable");
@@ -123,7 +123,7 @@ PyObject* register_hook_dict(PyObject* self, PyObject* _var)
   Py_RETURN_NONE;
 }
 
-PyObject* register_hook(PyObject* self, PyObject* hook)
+PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
 {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return registerFunctionHook(fn, hook);
