@@ -2496,6 +2496,62 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: reference[0.0, ..., 0.0:2.0])
         self.assertRaises(TypeError, lambda: reference[0.0, :, 0.0])
 
+    def test_advancedindex(self):
+        # Tests for Integer Array Indexing, Part I - Purely integer array
+        # indexing
+
+        # Case 1: Purely Integer Array Indexing
+        reference = self._consecutive((10))
+        self.assertEqual(reference[[0], ], self._consecutive((1)))
+        self.assertEqual(reference[[3], ], self._consecutive((1), 4))
+
+        # reference is 1 2
+        #              3 4
+        #              5 6
+        reference = self._consecutive((3, 2))
+        self.assertEqual(reference[[0], ], self._consecutive((2)))
+        self.assertEqual(reference[[1], ], self._consecutive((2), 2))
+        self.assertEqual(reference[[0, 1, 2], [0]], torch.Tensor([1, 3, 5]))
+        self.assertEqual(reference[[0, 1, 2], [1]], torch.Tensor([2, 4, 6]))
+        self.assertEqual(reference[[0], [0]], self._consecutive((1)))
+        self.assertEqual(reference[[2], [1]], self._consecutive((1), 6))
+        self.assertEqual(reference[[[0, 0], [1, 2]]], torch.Tensor([1, 2]))
+        self.assertEqual(reference[[[0, 1, 1, 0, 2], [1]]],
+                         torch.Tensor([2, 4, 4, 2, 6]))
+        self.assertEqual(reference[[[0, 0, 1, 1], [0, 1, 0, 0]]],
+                         torch.Tensor([1, 2, 3, 3]))
+
+        rows = [[0, 0],
+                [1, 2]]
+        columns = [0],
+        self.assertEqual(reference[rows, columns], torch.Tensor([[1, 1],
+                                                                [3, 5]]))
+
+        rows = [[0, 0],
+                [1, 2]]
+        columns = [1, 0]
+        self.assertEqual(reference[rows, columns], torch.Tensor([[2, 1],
+                                                                [4, 5]]))
+        rows = [[0, 0],
+                [1, 2]]
+        columns = [[0, 1],
+                   [1, 0]]
+        self.assertEqual(reference[rows, columns], torch.Tensor([[1, 2],
+                                                                [4, 5]]))
+
+        # reference is (0, ..., ...)
+        #                   [[1, 2,   3, 4],
+        #                    [5, 6,   7, 8],
+        #                    [9, 10, 11, 12]]
+        #              (1, ..., ...)
+        #                   [[13, 14, 15, 16],
+        #                    [17, 18, 19, 20],
+        #                    [21, 22, 23, 24]]
+        reference = self._consecutive((2, 3, 4))
+        # TODO: 3D Tensor tests
+
+        pass
+
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
         # This relies on __index__() being correct - but we have separate tests for that

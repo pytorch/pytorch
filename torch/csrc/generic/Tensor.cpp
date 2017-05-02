@@ -435,7 +435,6 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 #define THPIndexTensor_Check THPLongTensor_Check
 #endif
 
-
 static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
         THTensorPtr &tresult, THStorage* &sresult, long &storage_offset)
 {
@@ -448,6 +447,8 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
     int64_t idx;
     UNPACK_SCALAR(index);
     long dimsize = THTensor_(size)(LIBRARY_STATE tresult.get(), indexed_dim);
+
+    // If the user provided negative idx, convert to positive equivalent
     idx = (idx < 0) ? dimsize + idx : idx;
 
     if (dimsize <= 0) {
@@ -460,6 +461,9 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
       throw python_error();
     }
 
+    // If we are indexing a vector, set the storage to the storage underlying
+    // the vector, and the storage_offset to the location of the element at
+    // the specificed index. Otherwise, perform a selection
     if(THTensor_(nDimension)(LIBRARY_STATE tresult.get()) == 1) {
       sresult = tresult.get()->storage;
       storage_offset = tresult->storageOffset + tresult->stride[0] * idx;
@@ -469,10 +473,12 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
     }
   } else if (index == Py_None) {
     // _indexOnce will never be called with tresult == NULL, except for a None index
+    // e.g. x = torch.Tensor(5); y = x[5, None]
     if (!tresult) {
       tresult = THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, 1);
       sresult = NULL;
     } else {
+      // Insert a singleton dimension at indexed_dim, then bump indexed_dim
       THTensor_(unsqueeze1d)(LIBRARY_STATE tresult.get(), NULL, indexed_dim++);
     }
   // Indexing with a slice
@@ -488,6 +494,7 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
       PyErr_SetString(PyExc_ValueError, "result of slicing is an empty tensor");
       throw python_error();
     }
+    // Modify the Tensor to point to the sliced components
     tresult->storageOffset += tresult->stride[indexed_dim] * start;
     tresult->stride[indexed_dim] *= step;
     tresult->size[indexed_dim] = length;
@@ -498,14 +505,47 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
   return true;
 }
 
+static bool THPTensor_(_advancedIndex)(THPTensor *self, PyObject *index,
+    THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
+{
+  // Precondition: index is an object that specifies advanced indexing.
+  // For now, we only support the simple integer-array indexing strategy
+  // where there are ndim(self) indexing Long Tensors that can be broadcasted
+  // and iterated as one
 
+  Py_ssize_t size = PySequence_Size(index);
+  // TODO: assert size == self ndim
+
+  // Verify all inputs are Long Tensors
+  for (Py_ssize_t i = 0; i < size; ++i) {
+    if (!THPLongTensor_Check(PySequence_GetItem(index, i))) {
+      PyErr_Format(PyExc_TypeError,
+        "advanced indexing currently only supports LongTensors");
+      return false;
+    }
+  }
+
+  // Next, we want to shape the size of the output. It is the same size
+  // as the broadcast result of the index Tensors
+
+  return true;
+}
+
+// Handles indexing into a Tensor given a tuple, ellipses, sequence, etc. index
 static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
 {
+  /* THPTensor_(_advancedIndex)(self, index, tresult, sresult, storage_offset); */
+
+  // As a base case, we create a new Tensor that is a copy of the Tensor
+  // we are indexing
   tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
   sresult = NULL;
   int indexed_dim = 0;
+
   if(PyTuple_Check(index)) {
+    // num_index_dim is the number of indices in the tuple, num_effective_index
+    // is the number of non-None, non-ellipses indices
     long num_index_dim = (long)PyTuple_Size(index);
     long num_effective_index = num_index_dim;
     long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
@@ -528,6 +568,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
       return false;
     }
 
+    // Loop through the indices and perform the indiviudal indexing at each dim
     bool valid = true;
     for (int dim = 0; dim < num_index_dim; dim++) {
       if (dim == ellipsis_idx) {
@@ -546,8 +587,11 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     }
     if (valid) return true;
   } else if (index == Py_Ellipsis) {
+    // The result of indexing with an ellipsis only is just the entire existing
+    // Tensor
     return true;
   } else {
+    // index is a scalar, perform the indexing once on the 0th-dimension
     if (THPTensor_(_indexOnce)(index, indexed_dim, tresult, sresult, storage_offset))
       return true;
   }

@@ -130,6 +130,7 @@ THP_API void THPUtils_invalidArguments(
 
 bool THPUtils_checkIntTuple(PyObject *arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
+bool THPUtils_checkAdvancedIndexing(PyObject *arg);
 
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
 
