@@ -27,13 +27,13 @@ class BatchMSELoss(ModelLayer):
             ),
             input_record
         )
-        self.tags.update({Tags.TRAIN_ONLY})
+        self.tags.update(Tags.TRAIN_ONLY)
 
         self.output_schema = schema.Scalar(
             np.float32,
             model.net.NextScopedBlob(name + '_output'))
 
-    def add_train_ops(self, net):
+    def add_ops(self, net):
         prediction = net.Squeeze(
             self.input_record.prediction(),
             net.NextScopedBlob('squeezed_prediction'),
@@ -63,6 +63,3 @@ class BatchMSELoss(ModelLayer):
         )
 
         net.AveragedLoss(l2dist, self.output_schema.field_blobs())
-
-    def add_ops(self, net):
-        pass
