@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util, cnn
+from caffe2.python import core, workspace, test_util
 
 
 class TestScopes(test_util.TestCase):
@@ -274,7 +274,7 @@ class TestAutoNaming(test_util.TestCase):
             add_ops()
 
         # Force reset of lookup tables
-        dummy = a.Proto().name
+        a.Proto().name
 
         with core.NameScope('n2'):
             add_ops()
@@ -293,6 +293,19 @@ class TestAutoNaming(test_util.TestCase):
 
         a._CheckLookupTables()
         b._CheckLookupTables()
+
+
+class TestAppendNet(test_util.TestCase):
+
+    def test_external_inputs_merged_correctly(self):
+        netA = core.Net("A")
+        netA.Sum(["in1", "in2"], ["sum1"])
+        self.assertTrue("in1" in netA.external_inputs)
+
+        netB = core.Net("B")
+        netB.Sum(["in3", "in4"], ["in1"])
+        netB.AppendNet(netA)
+        self.assertFalse("in1" in netB.external_inputs)
 
 
 if __name__ == '__main__':
