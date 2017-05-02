@@ -25,7 +25,8 @@ class LayerModelHelper(model_helper.ModelHelper):
     operators from train net.
     """
 
-    def __init__(self, name, input_feature_schema, trainer_extra_schema):
+    def __init__(self, name, input_feature_schema, trainer_extra_schema,
+                 keep_blobs=False):
         super(LayerModelHelper, self).__init__(name=name)
         self._layer_names = set()
         self._layers = []
@@ -43,11 +44,11 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._input_feature_schema = schema.NewRecord(
             self.net,
             input_feature_schema
-        )
+        ) if not keep_blobs else input_feature_schema.clone()
         self._trainer_extra_schema = schema.NewRecord(
             self.net,
             trainer_extra_schema
-        )
+        ) if not keep_blobs else trainer_extra_schema.clone()
         self._metrics_schema = schema.Struct()
 
         self._init_global_constants()
