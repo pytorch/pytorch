@@ -11,7 +11,9 @@ from numbers import Number
 
 def cpu_only(inner):
     def outer(self, *args, **kwargs):
-        unittest.skipIf(self.is_cuda, "Test is CPU-only")(inner)(self, *args, **kwargs)
+        if self.is_cuda:
+            raise unittest.SkipTest("Test is CPU-only")
+        inner(self, *args, **kwargs)
     return outer
 
 
