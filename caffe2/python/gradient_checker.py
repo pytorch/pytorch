@@ -125,11 +125,25 @@ class GradientChecker:
         # Get gradients
         if isinstance(grad_name, core.GradientSlice):
             workspace.FeedBlob('zeros', np.zeros_like(x, dtype=np.float32))
-            workspace.FeedBlob('one', np.ones(1, dtype=np.float32))
+            workspace.FeedBlob('ones', np.ones(1, dtype=np.float32))
+            gv_cpu_op = core.CreateOperator(
+                'EnsureCPUOutput', grad_name.values, grad_name.values + '_cpu',
+                device_option=self._device_option
+            )
+            gi_cpu_op = core.CreateOperator(
+                'EnsureCPUOutput', grad_name.indices, grad_name.indices + '_cpu',
+                device_option=self._device_option
+            )
             sparse_to_dense_op = core.CreateOperator(
                 'ScatterWeightedSum',
-                ['zeros', 'one', grad_name.indices, grad_name.values, 'one'],
-                'zeros')
+                [
+                    'zeros', 'ones', grad_name.indices + '_cpu',
+                    grad_name.values + '_cpu', 'ones'
+                ],
+                'zeros',
+            )
+            workspace.RunOperatorOnce(gv_cpu_op)
+            workspace.RunOperatorOnce(gi_cpu_op)
             workspace.RunOperatorOnce(sparse_to_dense_op)
             grad = workspace.FetchBlob('zeros')
         else:
