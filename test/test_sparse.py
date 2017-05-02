@@ -35,6 +35,8 @@ class TestSparse(TestCase):
         # use torch.rand/torch.randn in this case because they are
         # CPU-only.  If you do this, you can remove the is_cuda branch
         # at the end.
+        #
+        # If you do this, be sure to update assert_uncoalesced too
 
         if isinstance(with_size, Number):
             with_size = [with_size] * d
@@ -69,7 +71,7 @@ class TestSparse(TestCase):
 
     def assert_uncoalesced(self, x):
         """
-        Test if a tensor is uncoalesced.  This is used to ensure
+        Test if a CPU tensor is uncoalesced.  This is used to ensure
         correctness of the uncoalesced tensor generation algorithm.
         """
         assert not x.is_coalesced()
@@ -79,7 +81,7 @@ class TestSparse(TestCase):
         # original was uncoalesced.)
         i = x.indices().clone()
         v = x.values().clone().fill_(1)
-        y = self.SparseTensor(i, v, x.size())
+        y = torch.sparse.DoubleTensor(i, v, x.size())
         z = self.safeCoalesce(y)
         assert (z.values() > 1).sum() > 0
 
