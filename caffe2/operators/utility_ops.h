@@ -473,6 +473,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     }
     return true;
   }
+  Tensor<CPUContext> x_data_host_;
+  Tensor<CPUContext> weights_host_;
+  Tensor<Context> x_data_device_;
+  Tensor<Context> weights_device_;
 };
 
 
