@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, rnn_cell, workspace, utils
+from caffe2.python import core, gradient_checker, rnn_cell, workspace
 from caffe2.python.attention import AttentionType
 from caffe2.python.cnn import CNNModelHelper
 import caffe2.python.hypothesis_test_util as hu
@@ -79,12 +79,12 @@ def lstm_reference(input, hidden_input, cell_input,
         gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
         gates = gates + input_t
         hidden_t, cell_t = lstm_unit(
-            hidden_t_prev,
-            cell_t_prev,
-            gates,
-            seq_lengths,
-            t,
-            forget_bias,
+            hidden_t_prev=hidden_t_prev,
+            cell_t_prev=cell_t_prev,
+            gates=gates,
+            seq_lengths=seq_lengths,
+            timestep=t,
+            forget_bias=forget_bias,
             drop_states=drop_states,
         )
         hidden[t + 1] = hidden_t
@@ -95,6 +95,32 @@ def lstm_reference(input, hidden_input, cell_input,
         cell[1:],
         cell[-1].reshape(1, N, D)
     )
+
+
+def multi_lstm_reference(input, hidden_input_list, cell_input_list,
+                            i2h_w_list, i2h_b_list, gates_w_list, gates_b_list,
+                            seq_lengths, forget_bias, drop_states=False):
+    num_layers = len(hidden_input_list)
+    assert len(cell_input_list) == num_layers
+    assert len(i2h_w_list) == num_layers
+    assert len(i2h_b_list) == num_layers
+    assert len(gates_w_list) == num_layers
+    assert len(gates_b_list) == num_layers
+
+    for i in range(num_layers):
+        layer_input = np.dot(input, i2h_w_list[i].T) + i2h_b_list[i]
+        h_all, h_last, c_all, c_last = lstm_reference(
+            layer_input,
+            hidden_input_list[i],
+            cell_input_list[i],
+            gates_w_list[i],
+            gates_b_list[i],
+            seq_lengths,
+            forget_bias,
+            drop_states=drop_states,
+        )
+        input = h_all
+    return h_all, h_last, c_all, c_last
 
 
 def lstm_with_attention_reference(
@@ -682,3 +708,145 @@ class RNNCellTest(hu.HypothesisTestCase):
             self.assertGradientChecks(
                 gc, op, inputs, i, [0, 1],
                 input_device_options=input_device_options)
+
+    @given(input_length=st.integers(2, 5),
+           dim_in=st.integers(1, 3),
+           max_num_units=st.integers(1, 3),
+           num_layers=st.integers(2, 3),
+           batch_size=st.integers(1, 3),
+           **hu.gcs)
+    def test_multi_lstm(
+        self,
+        input_length,
+        dim_in,
+        max_num_units,
+        num_layers,
+        batch_size,
+        gc,
+        dc,
+    ):
+        model = CNNModelHelper(name='external')
+        with core.DeviceScope(gc):
+            (
+                input_sequence,
+                seq_lengths,
+            ) = model.net.AddExternalInputs(
+                'input_sequence',
+                'seq_lengths',
+            )
+            dim_out = [
+                np.random.randint(1, max_num_units + 1)
+                for _ in range(num_layers)
+            ]
+            h_all, h_last, c_all, c_last = rnn_cell.LSTM(
+                model=model,
+                input_blob=input_sequence,
+                seq_lengths=seq_lengths,
+                initial_states=None,
+                dim_in=dim_in,
+                dim_out=dim_out,
+                scope='test',
+                outputs_with_grads=(0,),
+                return_params=False,
+                memory_optimization=False,
+                forget_bias=0.0,
+                forward_only=False,
+                return_last_layer_only=True,
+            )
+
+        workspace.RunNetOnce(model.param_init_net)
+
+        seq_lengths_val = np.random.randint(
+            1,
+            input_length + 1,
+            size=(batch_size),
+        ).astype(np.int32)
+        input_sequence_val = np.random.randn(
+            input_length,
+            batch_size,
+            dim_in,
+        ).astype(np.float32)
+        workspace.FeedBlob(seq_lengths, seq_lengths_val)
+        workspace.FeedBlob(input_sequence, input_sequence_val)
+
+        hidden_input_list = []
+        cell_input_list = []
+        i2h_w_list = []
+        i2h_b_list = []
+        gates_w_list = []
+        gates_b_list = []
+
+        for i in range(num_layers):
+            hidden_input_list.append(
+                workspace.FetchBlob('test/initial_hidden_state_{}'.format(i)),
+            )
+            cell_input_list.append(
+                workspace.FetchBlob('test/initial_cell_state_{}'.format(i)),
+            )
+            i2h_w_list.append(
+                workspace.FetchBlob('test/layer_{}/i2h_w'.format(i)),
+            )
+            i2h_b_list.append(
+                workspace.FetchBlob('test/layer_{}/i2h_b'.format(i)),
+            )
+            gates_w_list.append(
+                workspace.FetchBlob('test/layer_{}/gates_t_w'.format(i)),
+            )
+            gates_b_list.append(
+                workspace.FetchBlob('test/layer_{}/gates_t_b'.format(i)),
+            )
+
+        workspace.RunNetOnce(model.net)
+        h_all_calc = workspace.FetchBlob(h_all)
+        h_last_calc = workspace.FetchBlob(h_last)
+        c_all_calc = workspace.FetchBlob(c_all)
+        c_last_calc = workspace.FetchBlob(c_last)
+
+        h_all_ref, h_last_ref, c_all_ref, c_last_ref = multi_lstm_reference(
+            input_sequence_val,
+            hidden_input_list,
+            cell_input_list,
+            i2h_w_list,
+            i2h_b_list,
+            gates_w_list,
+            gates_b_list,
+            seq_lengths_val,
+            forget_bias=0.0,
+        )
+
+        h_all_delta = np.abs(h_all_ref - h_all_calc).sum()
+        h_last_delta = np.abs(h_last_ref - h_last_calc).sum()
+        c_all_delta = np.abs(c_all_ref - c_all_calc).sum()
+        c_last_delta = np.abs(c_last_ref - c_last_calc).sum()
+
+        self.assertAlmostEqual(h_all_delta, 0.0, places=5)
+        self.assertAlmostEqual(h_last_delta, 0.0, places=5)
+        self.assertAlmostEqual(c_all_delta, 0.0, places=5)
+        self.assertAlmostEqual(c_last_delta, 0.0, places=5)
+
+        input_values = {
+            'input_sequence': input_sequence_val,
+            'seq_lengths': seq_lengths_val,
+        }
+        for param in model.GetParams():
+            value = workspace.FetchBlob(param)
+            input_values[str(param)] = value
+
+        output_sum = model.net.SumElements(
+            [h_all],
+            'output_sum',
+            average=True,
+        )
+        fake_loss = model.net.Tanh(
+            output_sum,
+        )
+        for param in model.GetParams():
+            gradient_checker.NetGradientChecker.Check(
+                model.net,
+                outputs_with_grad=[fake_loss],
+                input_values=input_values,
+                input_to_check=str(param),
+                print_net=False,
+                step_size=0.0001,
+                threshold=0.05,
+            )

@@ -34,7 +34,7 @@ class NetGradientChecker(object):
             return sum([
                 workspace.blobs[output]
                 for output in outputs_with_grad
-            ])
+            ]).sum()
 
         def GetValue(dim, delta):
             input_value = input_values[input_to_check].copy()
