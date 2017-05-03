@@ -233,19 +233,19 @@ tests = [
                   reference_fn=lambda i, _: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
     OldModuleTest(nn.Max,
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.max(i, 0)[0].squeeze()),
+                  reference_fn=lambda i, _: torch.max(i, 0)[0]),
     OldModuleTest(nn.Max,
                   (1,),
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.max(i, 1)[0].squeeze(),
+                  reference_fn=lambda i, _: torch.max(i, 1)[0],
                   desc='with_dimension'),
     OldModuleTest(nn.Min,
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.min(i, 0)[0].squeeze()),
+                  reference_fn=lambda i, _: torch.min(i, 0)[0]),
     OldModuleTest(nn.Min,
                   (1,),
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.min(i, 1)[0].squeeze(),
+                  reference_fn=lambda i, _: torch.min(i, 1)[0],
                   desc='with_dimension'),
     OldModuleTest(nn.MixtureTable,
                   tuple(),
@@ -532,7 +532,7 @@ for p in (1, 2, 1.5):
                       (p,),
                       input_size=(4, 5),
                       # Eh, we need to use p as a default, so it's passed by value
-                      reference_fn=lambda i, _, p=p: i.div(i.norm(p, 1).expand_as(i)),
+                      reference_fn=lambda i, _, p=p: i.div(i.norm(p, 1, True).expand_as(i)),
                       desc=str(p)),
     )
 for p in range(1, 4 + 1):
@@ -807,7 +807,7 @@ class TestNN(NNTestCase):
         str(m)
 
         output = m.forward(input)
-        output2 = input.sum(1).expand(4, 5).repeat(num_modules, 1)
+        output2 = input.sum(1, True).expand(4, 5).repeat(num_modules, 1)
         self.assertEqual(output2, output)
 
         gradInput = m.backward(input, torch.ones(output2.size()))

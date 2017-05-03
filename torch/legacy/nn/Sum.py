@@ -20,7 +20,7 @@ class Sum(Module):
     def updateOutput(self, input):
         dimension = self._getPositiveDimension(input)
 
-        torch.sum(input, dimension, out=self.output)
+        torch.sum(input, dimension, out=self.output, keepdim=True)
         if self.sizeAverage:
             self.output.div_(input.size(dimension))
         if self.output.dim() > 1:
