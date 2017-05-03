@@ -41,10 +41,13 @@ def generate_data(T, shape, num_labels):
     np.random.seed(2603)
 
     for t in range(T):
-        if (t % 50 == 0):
+        if (t % (T // 10) == 0):
             print("Generating data {}/{}".format(t, T))
         # Randomize the seqlength
-        random_shape = [np.random.randint(1, shape[0])] + shape[1:]
+        random_shape = (
+            [np.random.randint(1, shape[0])] + shape[1:]
+            if t > 0 else shape
+        )
         X = np.random.rand(*random_shape).astype(np.float32)
         batch_size = random_shape[1]
         L = num_labels * batch_size
@@ -71,13 +74,13 @@ def create_model(args, queue, label_queue, input_shape):
     labels = model.DequeueBlobs(label_queue, "label")
 
     if args.implementation == "own":
-        output, last_hidden, _, last_state = rnn_cell.LSTM(
+        output, last_hidden, _, last_state = rnn_cell.layered_LSTM(
             model=model,
             input_blob=input_blob,
             seq_lengths=seq_lengths,
             initial_states=(hidden_init, cell_init),
             dim_in=args.input_dim,
-            dim_out=args.hidden_dim,
+            dim_out=[args.hidden_dim] * args.num_layers,
             scope="lstm1",
             memory_optimization=args.memory_optimization,
             forward_only=args.forward_only,
@@ -94,7 +97,7 @@ def create_model(args, queue, label_queue, input_shape):
             dim_in=args.input_dim,
             dim_out=args.hidden_dim,
             scope="cudnnlstm",
-            num_layers=1,
+            num_layers=args.num_layers,
         )
 
     else:
@@ -132,7 +135,7 @@ def Caffe2LSTM(args):
 
     workspace.FeedBlob(
         "seq_lengths",
-        np.array([args.seq_length // 2] * args.batch_size, dtype=np.int32)
+        np.array([args.seq_length] * args.batch_size, dtype=np.int32)
     )
 
     model, output = create_model(args, queue, label_queue, input_blob_shape)
@@ -144,11 +147,23 @@ def Caffe2LSTM(args):
     start_time = last_time
     num_iters = T // args.seq_length
     entries_per_iter = args.seq_length * args.batch_size
+    total_iters = 0
 
     # Run the Benchmark
+    log.info("------ Warming up ------")
+    workspace.RunNet(model.net.Proto().name)
+    num_iters = num_iters - 1
+
+    if (args.gpu):
+        log.info("Memory stats:")
+        stats = utils.GetGPUMemoryUsageStats()
+        log.info("GPU memory:\t{} MB".format(stats['max_total'] / 1024 / 1024))
+
     log.info("------ Starting benchmark ------")
+    start_time = time.time()
     for iteration in range(0, num_iters, args.iters_to_report):
         iters_once = min(args.iters_to_report, num_iters - iteration)
+        total_iters += iters_once
         workspace.RunNet(model.net.Proto().name, iters_once)
 
         new_time = time.time()
@@ -159,8 +174,8 @@ def Caffe2LSTM(args):
         ))
         last_time = new_time
 
-    log.info("Done. Total EPS: {}k".format(
-        entries_per_iter * num_iters / (time.time() - start_time) // 1000,
+    log.info("Done. Total EPS excluding 1st iteration: {}k".format(
+        total_iters * entries_per_iter / (time.time() - start_time) // 1000,
     ))
 
     if (args.gpu):
@@ -174,10 +189,11 @@ def Caffe2LSTM(args):
             )
             log.warning("This means that costly deallocations occured.")
 
+    return time.time() - start_time
 
-@utils.debug
+
 def Benchmark(args):
-    Caffe2LSTM(args)
+    return Caffe2LSTM(args)
 
 
 def GetArgumentParser():
@@ -239,6 +255,13 @@ def GetArgumentParser():
         "--forward_only",
         action="store_true",
         help="Whether to run only forward pass"
+    )
+    parser.add_argument(
+        "--num_layers",
+        type=int,
+        default=1,
+        help="Number of LSTM layers. All output dimensions are going to be"
+             "of hidden_dim size",
     )
 
     return parser
