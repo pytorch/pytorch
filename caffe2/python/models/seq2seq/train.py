@@ -1,5 +1,5 @@
-## @package seq2seq
-# Module caffe2.python.examples.seq2seq
+## @package train
+# Module caffe2.python.models.seq2seq.train
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -18,7 +18,9 @@ from itertools import izip
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
 from caffe2.python import core, workspace, rnn_cell, data_parallel_model
-from caffe2.python.examples import seq2seq_util
+import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
+from caffe2.python.models.seq2seq.seq2seq_model_helper import Seq2SeqModelHelper
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -33,15 +35,6 @@ Batch = collections.namedtuple('Batch', [
     'target_weights',
 ])
 
-_PAD_ID = 0
-_GO_ID = 1
-_EOS_ID = 2
-EOS = '<EOS>'
-UNK = '<UNK>'
-GO = '<GO>'
-PAD = '<PAD>'
-
-
 def prepare_batch(batch):
     encoder_lengths = [len(entry[0]) for entry in batch]
     max_encoder_length = max(encoder_lengths)
@@ -55,20 +48,20 @@ def prepare_batch(batch):
 
     for source_seq, target_seq in batch:
         encoder_pads = (
-            [_PAD_ID] * (max_encoder_length - len(source_seq))
+            [seq2seq_util.PAD_ID] * (max_encoder_length - len(source_seq))
         )
         batch_encoder_inputs.append(
             list(reversed(source_seq)) + encoder_pads
         )
 
         decoder_pads = (
-            [_PAD_ID] * (max_decoder_length - len(target_seq))
+            [seq2seq_util.PAD_ID] * (max_decoder_length - len(target_seq))
         )
-        target_seq_with_go_token = [_GO_ID] + target_seq
+        target_seq_with_go_token = [seq2seq_util.GO_ID] + target_seq
         decoder_lengths.append(len(target_seq_with_go_token))
         batch_decoder_inputs.append(target_seq_with_go_token + decoder_pads)
 
-        target_seq_with_eos = target_seq + [_EOS_ID]
+        target_seq_with_eos = target_seq + [seq2seq_util.EOS_ID]
         targets = target_seq_with_eos + decoder_pads
         batch_targets.append(targets)
 
@@ -76,7 +69,7 @@ def prepare_batch(batch):
             target_weights = [0] * len(targets)
         else:
             target_weights = [
-                1 if target != _PAD_ID else 0
+                1 if target != seq2seq_util.PAD_ID else 0
                 for target in targets
             ]
         batch_target_weights.append(target_weights)
@@ -109,11 +102,11 @@ class Seq2SeqModelCaffe2:
         self,
         init_params,
     ):
-        model = seq2seq_util.ModelHelper(init_params=init_params)
+        model = Seq2SeqModelHelper(init_params=init_params)
         self._build_shared(model)
         self._build_embeddings(model)
 
-        forward_model = seq2seq_util.ModelHelper(init_params=init_params)
+        forward_model = Seq2SeqModelHelper(init_params=init_params)
         self._build_shared(forward_model)
         self._build_embeddings(forward_model)
 
@@ -157,129 +150,6 @@ class Seq2SeqModelCaffe2:
         self.model = model
         self.forward_net = forward_model.net
 
-    def _build_embedding_encoder(
-        self,
-        model,
-        inputs,
-        input_lengths,
-        vocab_size,
-        embeddings,
-        embedding_size,
-        use_attention,
-        num_gpus,
-        forward_only=False,
-    ):
-        if num_gpus == 0:
-            embedded_encoder_inputs = model.net.Gather(
-                [embeddings, inputs],
-                ['embedded_encoder_inputs'],
-            )
-        else:
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                embedded_encoder_inputs_cpu = model.net.Gather(
-                    [embeddings, inputs],
-                    ['embedded_encoder_inputs_cpu'],
-                )
-            embedded_encoder_inputs = model.CopyCPUToGPU(
-                embedded_encoder_inputs_cpu,
-                'embedded_encoder_inputs',
-            )
-
-        if self.encoder_type == 'rnn':
-            assert len(self.encoder_params['encoder_layer_configs']) == 1
-            encoder_num_units = (
-                self.encoder_params['encoder_layer_configs'][0]['num_units']
-            )
-            encoder_initial_cell_state = model.param_init_net.ConstantFill(
-                [],
-                ['encoder_initial_cell_state'],
-                shape=[encoder_num_units],
-                value=0.0,
-            )
-            encoder_initial_hidden_state = (
-                model.param_init_net.ConstantFill(
-                    [],
-                    'encoder_initial_hidden_state',
-                    shape=[encoder_num_units],
-                    value=0.0,
-                )
-            )
-            # Choose corresponding rnn encoder function
-            if self.encoder_params['use_bidirectional_encoder']:
-                rnn_encoder_func = seq2seq_util.rnn_bidirectional_encoder
-                encoder_output_dim = 2 * encoder_num_units
-            else:
-                rnn_encoder_func = seq2seq_util.rnn_unidirectional_encoder
-                encoder_output_dim = encoder_num_units
-
-            (
-                encoder_outputs,
-                final_encoder_hidden_state,
-                final_encoder_cell_state,
-            ) = rnn_encoder_func(
-                model,
-                embedded_encoder_inputs,
-                input_lengths,
-                encoder_initial_hidden_state,
-                encoder_initial_cell_state,
-                embedding_size,
-                encoder_num_units,
-                use_attention,
-            )
-            weighted_encoder_outputs = None
-        else:
-            raise ValueError('Unsupported encoder type {}'.format(
-                self.encoder_type))
-
-        return (
-            encoder_outputs,
-            weighted_encoder_outputs,
-            final_encoder_hidden_state,
-            final_encoder_cell_state,
-            encoder_output_dim,
-        )
-
-    def output_projection(
-        self,
-        model,
-        decoder_outputs,
-        decoder_output_size,
-        target_vocab_size,
-        decoder_softmax_size,
-    ):
-        if decoder_softmax_size is not None:
-            decoder_outputs = model.FC(
-                decoder_outputs,
-                'decoder_outputs_scaled',
-                dim_in=decoder_output_size,
-                dim_out=decoder_softmax_size,
-            )
-            decoder_output_size = decoder_softmax_size
-
-        output_projection_w = model.param_init_net.XavierFill(
-            [],
-            'output_projection_w',
-            shape=[self.target_vocab_size, decoder_output_size],
-        )
-
-        output_projection_b = model.param_init_net.XavierFill(
-            [],
-            'output_projection_b',
-            shape=[self.target_vocab_size],
-        )
-        model.params.extend([
-            output_projection_w,
-            output_projection_b,
-        ])
-        output_logits = model.net.FC(
-            [
-                decoder_outputs,
-                output_projection_w,
-                output_projection_b,
-            ],
-            ['output_logits'],
-        )
-        return output_logits
 
     def _build_shared(self, model):
         optimizer_params = self.model_params['optimizer_params']
@@ -354,8 +224,9 @@ class Seq2SeqModelCaffe2:
             final_encoder_hidden_state,
             final_encoder_cell_state,
             encoder_output_dim,
-        ) = self._build_embedding_encoder(
+        ) = seq2seq_util.build_embedding_encoder(
             model=model,
+            encoder_params=self.encoder_params,
             inputs=encoder_inputs,
             input_lengths=encoder_lengths,
             vocab_size=self.source_vocab_size,
@@ -363,50 +234,20 @@ class Seq2SeqModelCaffe2:
             embedding_size=self.model_params['encoder_embedding_size'],
             use_attention=(attention_type != 'none'),
             num_gpus=self.num_gpus,
-            forward_only=forward_only,
         )
 
         assert len(self.model_params['decoder_layer_configs']) == 1
         decoder_num_units = (
             self.model_params['decoder_layer_configs'][0]['num_units']
         )
-
-        if attention_type == 'none':
-            decoder_initial_hidden_state = model.FC(
-                final_encoder_hidden_state,
-                'decoder_initial_hidden_state',
-                encoder_output_dim,
-                decoder_num_units,
-                axis=2,
-            )
-            decoder_initial_cell_state = model.FC(
-                final_encoder_cell_state,
-                'decoder_initial_cell_state',
-                encoder_output_dim,
-                decoder_num_units,
-                axis=2,
-            )
-        else:
-            decoder_initial_hidden_state = model.param_init_net.ConstantFill(
-                [],
-                'decoder_initial_hidden_state',
-                shape=[decoder_num_units],
-                value=0.0,
-            )
-            decoder_initial_cell_state = model.param_init_net.ConstantFill(
-                [],
-                'decoder_initial_cell_state',
-                shape=[decoder_num_units],
-                value=0.0,
-            )
-            initial_attention_weighted_encoder_context = (
-                model.param_init_net.ConstantFill(
-                    [],
-                    'initial_attention_weighted_encoder_context',
-                    shape=[encoder_output_dim],
-                    value=0.0,
-                )
-            )
+        initial_states = seq2seq_util.build_initial_rnn_decoder_states(
+            model=model,
+            encoder_num_units=encoder_output_dim,
+            decoder_num_units=decoder_num_units,
+            final_encoder_hidden_state=final_encoder_hidden_state,
+            final_encoder_cell_state=final_encoder_cell_state,
+            use_attention=(attention_type != 'none'),
+        )
 
         if self.num_gpus == 0:
             embedded_decoder_inputs = model.net.Gather(
@@ -430,10 +271,7 @@ class Seq2SeqModelCaffe2:
                 model=model,
                 input_blob=embedded_decoder_inputs,
                 seq_lengths=decoder_lengths,
-                initial_states=(
-                    decoder_initial_hidden_state,
-                    decoder_initial_cell_state,
-                ),
+                initial_states=initial_states,
                 dim_in=self.model_params['decoder_embedding_size'],
                 dim_out=decoder_num_units,
                 scope='decoder',
@@ -448,11 +286,9 @@ class Seq2SeqModelCaffe2:
                 model=model,
                 decoder_inputs=embedded_decoder_inputs,
                 decoder_input_lengths=decoder_lengths,
-                initial_decoder_hidden_state=decoder_initial_hidden_state,
-                initial_decoder_cell_state=decoder_initial_cell_state,
-                initial_attention_weighted_encoder_context=(
-                    initial_attention_weighted_encoder_context
-                ),
+                initial_decoder_hidden_state=initial_states[0],
+                initial_decoder_cell_state=initial_states[1],
+                initial_attention_weighted_encoder_context=initial_states[2],
                 encoder_output_dim=encoder_output_dim,
                 encoder_outputs=encoder_outputs,
                 decoder_input_dim=self.model_params['decoder_embedding_size'],
@@ -481,7 +317,7 @@ class Seq2SeqModelCaffe2:
             ],
             shape=[-1, decoder_output_size],
         )
-        output_logits = self.output_projection(
+        output_logits = seq2seq_util.output_projection(
             model=model,
             decoder_outputs=decoder_outputs_flattened,
             decoder_output_size=decoder_output_size,
@@ -775,48 +611,16 @@ class Seq2SeqModelCaffe2:
         return self.total_loss_scalar()
 
 
-def gen_vocab(corpus, unk_threshold):
-    vocab = collections.defaultdict(lambda: len(vocab))
-    freqs = collections.defaultdict(lambda: 0)
-    # Adding padding tokens to the vocabulary to maintain consistency with IDs
-    vocab[PAD]
-    vocab[GO]
-    vocab[EOS]
-    vocab[UNK]
-
-    with open(corpus) as f:
-        for sentence in f:
-            tokens = sentence.strip().split()
-            for token in tokens:
-                freqs[token] += 1
-    for token, freq in freqs.items():
-        if freq > unk_threshold:
-            # TODO: Add reverse lookup dict when it becomes necessary
-            vocab[token]
-
-    return vocab
-
-
-def get_numberized_sentence(sentence, vocab):
-    numerized_sentence = []
-    for token in sentence.strip().split():
-        if token in vocab:
-            numerized_sentence.append(vocab[token])
-        else:
-            numerized_sentence.append(vocab[UNK])
-    return numerized_sentence
-
-
 def gen_batches(source_corpus, target_corpus, source_vocab, target_vocab,
                 batch_size, max_length):
     with open(source_corpus) as source, open(target_corpus) as target:
         parallel_sentences = []
         for source_sentence, target_sentence in zip(source, target):
-            numerized_source_sentence = get_numberized_sentence(
+            numerized_source_sentence = seq2seq_util.get_numberized_sentence(
                 source_sentence,
                 source_vocab,
             )
-            numerized_target_sentence = get_numberized_sentence(
+            numerized_target_sentence = seq2seq_util.get_numberized_sentence(
                 target_sentence,
                 target_vocab,
             )
@@ -852,8 +656,14 @@ def gen_batches(source_corpus, target_corpus, source_vocab, target_vocab,
 
 
 def run_seq2seq_model(args, model_params=None):
-    source_vocab = gen_vocab(args.source_corpus, args.unk_threshold)
-    target_vocab = gen_vocab(args.target_corpus, args.unk_threshold)
+    source_vocab = seq2seq_util.gen_vocab(
+        args.source_corpus,
+        args.unk_threshold,
+    )
+    target_vocab = seq2seq_util.gen_vocab(
+        args.target_corpus,
+        args.unk_threshold,
+    )
     logger.info('Source vocab size {}'.format(len(source_vocab)))
     logger.info('Target vocab size {}'.format(len(target_vocab)))
 
@@ -891,9 +701,76 @@ def run_seq2seq_model(args, model_params=None):
                     forward_only=False,
                 )
             logger.info('\teval loss {}'.format(total_loss))
+            if args.checkpoint is not None:
+                checkpoint_path = '{0}-{1}'.format(args.checkpoint, i)
+                assert workspace.RunOperatorOnce(core.CreateOperator(
+                    'Save',
+                    model_obj.model.GetAllParams(),
+                    [],
+                    absolute_path=True,
+                    db=checkpoint_path,
+                    db_type='minidb',
+                ))
+                logger.info('Model saved to ' + checkpoint_path)
 
 
-def run_seq2seq_rnn_unidirection_with_no_attention(args):
+def main():
+    random.seed(31415)
+    parser = argparse.ArgumentParser(
+        description='Caffe2: Seq2Seq Training'
+    )
+    parser.add_argument('--source-corpus', type=str, default=None,
+                        help='Path to source corpus in a text file format. Each '
+                        'line in the file should contain a single sentence',
+                        required=True)
+    parser.add_argument('--target-corpus', type=str, default=None,
+                        help='Path to target corpus in a text file format',
+                        required=True)
+    parser.add_argument('--max-length', type=int, default=None,
+                        help='Maximal lengths of train and eval sentences')
+    parser.add_argument('--unk-threshold', type=int, default=50,
+                        help='Threshold frequency under which token becomes '
+                        'labeled unknown token')
+
+    parser.add_argument('--batch-size', type=int, default=32,
+                        help='Training batch size')
+    parser.add_argument('--epochs', type=int, default=10,
+                        help='Number of iterations over training data')
+    parser.add_argument('--learning-rate', type=float, default=0.5,
+                        help='Learning rate')
+    parser.add_argument('--max-gradient-norm', type=float, default=1.0,
+                        help='Max global norm of gradients at the end of each '
+                        'backward pass. We do clipping to match the number.')
+    parser.add_argument('--num-gpus', type=int, default=0,
+                        help='Number of GPUs for data parallel model')
+
+    parser.add_argument('--use-bidirectional-encoder', action='store_true',
+                        help='Set flag to use bidirectional recurrent network '
+                        'in encoder')
+    parser.add_argument('--use-attention', action='store_true',
+                        help='Set flag to use seq2seq with attention model')
+    parser.add_argument('--source-corpus-eval', type=str, default=None,
+                        help='Path to source corpus for evaluation in a text '
+                        'file format', required=True)
+    parser.add_argument('--target-corpus-eval', type=str, default=None,
+                        help='Path to target corpus for evaluation in a text '
+                        'file format', required=True)
+    parser.add_argument('--encoder-cell-num-units', type=int, default=256,
+                        help='Number of cell units in the encoder layer')
+    parser.add_argument('--decoder-cell-num-units', type=int, default=512,
+                        help='Number of cell units in the decoder layer')
+    parser.add_argument('--encoder-embedding-size', type=int, default=256,
+                        help='Size of embedding in the encoder layer')
+    parser.add_argument('--decoder-embedding-size', type=int, default=512,
+                        help='Size of embedding in the decoder layer')
+    parser.add_argument('--decoder-softmax-size', type=int, default=None,
+                        help='Size of softmax layer in the decoder')
+
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='Path to checkpoint')
+
+    args = parser.parse_args()
+
     run_seq2seq_model(args, model_params=dict(
         attention=('regular' if args.use_attention else 'none'),
         decoder_layer_configs=[
@@ -918,61 +795,6 @@ def run_seq2seq_rnn_unidirection_with_no_attention(args):
         decoder_softmax_size=args.decoder_softmax_size,
         max_gradient_norm=args.max_gradient_norm,
     ))
-
-
-def main():
-    random.seed(31415)
-    parser = argparse.ArgumentParser(
-        description='Caffe2: Seq2Seq Training'
-    )
-    parser.add_argument('--source-corpus', type=str, default=None,
-                        help='Path to source corpus in a text file format. Each '
-                        'line in the file should contain a single sentence',
-                        required=True)
-    parser.add_argument('--target-corpus', type=str, default=None,
-                        help='Path to target corpus in a text file format',
-                        required=True)
-    parser.add_argument('--max-length', type=int, default=None,
-                        help='Maximal lengths of train and eval sentences')
-    parser.add_argument('--batch-size', type=int, default=32,
-                        help='Training batch size')
-    parser.add_argument('--epochs', type=int, default=10,
-                        help='Number of iterations over training data')
-    parser.add_argument('--learning-rate', type=float, default=0.5,
-                        help='Learning rate')
-    parser.add_argument('--unk-threshold', type=int, default=50,
-                        help='Threshold frequency under which token becomes '
-                        'labeled unknown token')
-    parser.add_argument('--max-gradient-norm', type=float, default=1.0,
-                        help='Max global norm of gradients at the end of each '
-                        'backward pass. We do clipping to match the number.')
-    parser.add_argument('--use-bidirectional-encoder', action='store_true',
-                        help='Set flag to use bidirectional recurrent network '
-                        'in encoder')
-    parser.add_argument('--use-attention', action='store_true',
-                        help='Set flag to use seq2seq with attention model')
-    parser.add_argument('--source-corpus-eval', type=str, default=None,
-                        help='Path to source corpus for evaluation in a text '
-                        'file format', required=True)
-    parser.add_argument('--target-corpus-eval', type=str, default=None,
-                        help='Path to target corpus for evaluation in a text '
-                        'file format', required=True)
-    parser.add_argument('--encoder-cell-num-units', type=int, default=256,
-                        help='Number of cell units in the encoder layer')
-    parser.add_argument('--decoder-cell-num-units', type=int, default=512,
-                        help='Number of cell units in the decoder layer')
-    parser.add_argument('--encoder-embedding-size', type=int, default=256,
-                        help='Size of embedding in the encoder layer')
-    parser.add_argument('--decoder-embedding-size', type=int, default=512,
-                        help='Size of embedding in the decoder layer')
-    parser.add_argument('--decoder-softmax-size', type=int, default=128,
-                        help='Size of softmax layer in the decoder')
-    parser.add_argument('--num-gpus', type=int, default=0,
-                        help='Number of GPUs for data parallel model')
-
-    args = parser.parse_args()
-
-    run_seq2seq_rnn_unidirection_with_no_attention(args)
 
 
 if __name__ == '__main__':
