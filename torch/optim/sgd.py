@@ -85,18 +85,14 @@ class SGD(Optimizer):
                 d_p = p.grad.data
                 if weight_decay != 0:
                     if d_p.is_sparse:
+                        d_p = d_p.coalesce()
                         state = self.sparse_weight_decay_state(p)
                         state['step'] += 1
                         b = 1 - group['lr'] * weight_decay
-                        # TODO: Is this right? A little confused why
-                        # the indices here are nx1.
-                        indices = d_p.indices().squeeze()
-                        # Perform all of the delayed weight decay only
-                        # on the indices defined in d_p
-                        p_s = p.data.index_select(0, indices)
-                        d_s = (state['step'] - state['last_update'].index_select(0, indices)).type_as(p.data)
+                        p_s = p.data._sparse_mask(d_p)
+                        d_s = (state['step'] - state['last_update']._sparse_mask(d_p.int())).type_as(p.data)
                         p_s.mul_(torch.exp(math.log(b) * d_s))
-                        p.data.index_copy_(0, indices, p_s)
+                        p.data.index_copy_(0, d_p._indices(), p_s)
                         state['last_update'].index_fill_(0, indices, state['step'])
                     else:
                         d_p.add_(weight_decay, p.data)
