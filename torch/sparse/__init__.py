@@ -128,7 +128,7 @@ class _SparseBase(object):
 
     def __str__(self):
         return '{} with indices:\n{}and values:\n{}'.format(
-            self.__class__.__name__, self.indices(), self.values())
+            self.__class__.__name__, self._indices(), self._values())
 
 
 class DoubleTensor(_SparseBase, _C.SparseDoubleTensorBase, _TensorBase):
