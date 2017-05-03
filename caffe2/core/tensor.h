@@ -125,7 +125,7 @@ class Tensor {
   Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
       : meta_(TypeMeta::Make<T>()) {
     Resize(dims);
-    CAFFE_ENFORCE_EQ(values.size(), size_);
+    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size_);
     context->template Copy<T, CPUContext, Context>(size_, values.data(), mutable_data<T>());
   }
 
@@ -186,7 +186,7 @@ class Tensor {
    */
   template <class ContextForCopy>
   void Extend(TIndex num, float growthPct, ContextForCopy* context) {
-    CAFFE_ENFORCE_GE(dims_.size(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
     auto newDims = dims_;
     newDims[0] += num;
     if (!data_) {
@@ -240,8 +240,8 @@ class Tensor {
    * that the extra capacity after the end of the shurnk tensor is maintained.
    */
   void Shrink(TIndex outer_dim) {
-    CAFFE_ENFORCE(dims_.size() >= 1, "Tensor must be at least 1D");
-    CAFFE_ENFORCE(
+    CAFFE_ENFORCE_WITH_CALLER(dims_.size() >= 1, "Tensor must be at least 1D");
+    CAFFE_ENFORCE_WITH_CALLER(
         outer_dim <= dims_[0],
         "New outer dimension must be smaller than current.");
     dims_[0] = outer_dim;
@@ -313,10 +313,10 @@ class Tensor {
   inline void Reshape(const vector<TIndex>& dims) {
     TIndex new_size = 1;
     for (auto d : dims) {
-      CAFFE_ENFORCE_GE(d, 0);
+      CAFFE_ENFORCE_GE_WITH_CALLER(d, 0);
       new_size *= d;
     }
-    CAFFE_ENFORCE(
+    CAFFE_ENFORCE_WITH_CALLER(
         new_size == size_,
         "New size and old size are not equal. You cannot use Reshape, "
         "but should use Resize."
@@ -362,14 +362,14 @@ class Tensor {
    */
   void ShareData(const Tensor& src) {
     meta_ = src.meta();
-    CAFFE_ENFORCE_EQ(
+    CAFFE_ENFORCE_EQ_WITH_CALLER(
         src.size_,
         size_,
         "Size mismatch - did you call reshape before sharing the data?");
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
-    CAFFE_ENFORCE(
+    CAFFE_ENFORCE_WITH_CALLER(
         src.data_.get() || src.size_ == 0,
         "Source tensor has no content and has size > 0");
     // Finally, do sharing.
@@ -615,9 +615,11 @@ class Tensor {
    * call dim() instead.
    */
   inline int dim32(const int i) const {
-    DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
-    DCHECK_GE(i, 0) << "Cannot have negative index";
-    CAFFE_ENFORCE_LT(dims_[i], std::numeric_limits<int>::max());
+    #ifndef NDEBUG
+    CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
+    CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
+    #endif
+    CAFFE_ENFORCE_LT_WITH_CALLER(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
   }
 
@@ -627,8 +629,10 @@ class Tensor {
    * this function will produce a fatal message.
    */
   inline TIndex dim(const int i) const {
-    DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
-    DCHECK_GE(i, 0) << "Cannot have negative index";
+    #ifndef NDEBUG
+    CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
+    CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
+    #endif
     return dims_[i];
   }
 
