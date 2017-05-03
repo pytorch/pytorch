@@ -420,6 +420,7 @@ int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned
 }
 
 void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask) {
+  THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, mask, t));
   if(!THCSTensor_(isSameSizeAsDense)(state, mask, t)) {
     THError("sparseMask operands have incompatible sizes");

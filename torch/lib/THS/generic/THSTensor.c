@@ -465,6 +465,7 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
 }
 
 void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
+  THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
   THSTensor_(resizeAs)(r_, mask);
   if (mask->nnz == 0) {
     THSTensor_(zero)(r_);
