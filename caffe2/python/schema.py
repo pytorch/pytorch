@@ -298,6 +298,7 @@ class Struct(Field):
         for id, (_, field) in enumerate(self.fields.items()):
             field._set_parent(self, id)
         Field.__init__(self, self.fields.values())
+        self._frozen = True
 
     def _struct_from_nested_name(self, nested_name, field):
         def create_internal(nested_name, field):
@@ -414,6 +415,15 @@ class Struct(Field):
             return self.__dict__['fields'][item]
         except KeyError:
             raise AttributeError(item)
+
+    def __setattr__(self, key, value):
+        # Disable setting attributes after initialization to prevent false
+        # impression of being able to overwrite a field.
+        # Allowing setting internal states mainly so that _parent can be set
+        # post initialization.
+        if getattr(self, '_frozen', None) and not key.startswith('_'):
+            raise TypeError('Struct.__setattr__() is disabled after __init__()')
+        super(Struct, self).__setattr__(key, value)
 
     def __add__(self, other):
         """
