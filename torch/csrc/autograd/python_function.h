@@ -43,6 +43,8 @@ struct THPFunction {
     std::vector<bool> *is_variable_input;
     char has_freed_buffers;
 
+    // See a comment in THPFucntion_asFunction for details about this field.
+    std::weak_ptr<torch::autograd::PyFunction> cdata_ptr;
     torch::autograd::PyFunction cdata;
 };
 

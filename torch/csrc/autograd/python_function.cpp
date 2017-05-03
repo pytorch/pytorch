@@ -270,6 +270,7 @@ static void THPFunction_dealloc(THPFunction* self)
 {
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
+  self->cdata_ptr.~weak_ptr();
   self->cdata.~PyFunction();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -282,6 +283,7 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   // most fields
   THPFunction* self = (THPFunction*)obj;
   new (&self->cdata) torch::autograd::PyFunction(obj);
+  new (&self->cdata_ptr) std::weak_ptr<torch::autograd::PyFunction>();
   self->cdata.num_inputs = -1;
   self->cdata.is_stochastic = PyObject_IsInstance(obj, THPStochasticFunctionClass);
   return obj;
@@ -998,11 +1000,29 @@ struct Decref {
   }
 };
 
+// Similar to shared_from_this. There's a problem that the Python object
+// and its cdata depend on each other being alive, so we can't keep
+// shared_ptrs as members, but we'd like to be able to manage the lifetime of
+// the objects using shared_ptrs in the C++ graph. The only way to get a new
+// shared_ptr that references them is through THPFunction_asFunction. When
+// called for the first time it will allocate a new shared_ptr and save a
+// weak_ptr in cdata_ptr attr. Later, when we try to take another reference,
+// we'll try to lock cdata_ptr and return its value if successful. Otherwise it
+// means that all shared_ptrs returned previously have been freed, so we can
+// create a new one. This ensures that this object is managed by at most one
+// shared_ptr control block at any time - a guarantee we depend on in other places
+// (e.g. we use weak_ptrs in SavedVariable because we know it won't go out of scope).
 std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
 {
   if (!self) {
     return std::shared_ptr<PyFunction>();
   }
   Py_INCREF((PyObject*)self);
-  return std::shared_ptr<PyFunction>(&self->cdata, Decref());
+
+  auto ptr = self->cdata_ptr.lock();
+  if (ptr) return ptr;
+
+  ptr = std::shared_ptr<PyFunction>(&self->cdata, Decref());
+  self->cdata_ptr = ptr;
+  return ptr;
 }

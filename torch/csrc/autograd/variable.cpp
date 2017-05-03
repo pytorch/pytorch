@@ -93,7 +93,7 @@ auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
   // should have saved the grad accumulator. Even if the Variable no longer
   // alive, the accumulator should be kept alive by the references in the graph).
   if (requires_grad && !grad_fn && weak_grad_fn.expired() && grad_accumulator.expired())
-      throw std::logic_error("No grad accumulator for a saved leaf!");
+    throw std::logic_error("No grad accumulator for a saved leaf!");
   new_var->grad_accumulator = grad_accumulator;
 
   return new_var;
