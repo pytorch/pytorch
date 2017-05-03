@@ -164,6 +164,8 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 
   THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
+  THCIndexTensor_(free)(state, newIndices);
+  THCTensor_(free)(state, newValues);
 
   dst->coalesced = 1;
   THCudaCheck(cudaGetLastError());
