@@ -46,4 +46,4 @@ matrix:
         python: "3.6"
         addons: true
         install: pip install flake8
-        script: flake8
+        script: flake8 .
