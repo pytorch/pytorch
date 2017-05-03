@@ -447,8 +447,10 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    state = _functions.linear.Linear()
-    return state(input, weight) if bias is None else state(input, weight, bias)
+    if bias is None:
+        return _functions.linear.Linear.apply(input, weight)
+    else:
+        return _functions.linear.Linear.apply(input, weight, bias)
 
 
 def bilinear(input1, input2, weight, bias=None):
