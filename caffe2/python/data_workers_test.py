@@ -24,9 +24,22 @@ def dummy_fetcher(fetcher_id, batch_size):
     return [np.array(data), np.array(labels)]
 
 
+def dummy_fetcher_rnn(fetcher_id, batch_size):
+    # Hardcoding some input blobs
+    T = 20
+    N = batch_size
+    D = 33
+    data = np.random.rand(T, N, D)
+    label = np.random.randint(N, size=(T, N))
+    seq_lengths = np.random.randint(N, size=(N))
+    return [data, label, seq_lengths]
+
+
 class DataWorkersTest(unittest.TestCase):
 
     def testNonParallelModel(self):
+        workspace.ResetWorkspace()
+
         model = cnn.CNNModelHelper(name="test")
         old_seq_id = data_workers.global_coordinator._fetcher_id_seq
         coordinator = data_workers.init_data_input_workers(
@@ -63,16 +76,18 @@ class DataWorkersTest(unittest.TestCase):
         coordinator.stop_coordinator("unittest")
         self.assertEqual(coordinator._coordinators, [])
 
-
-    def testGracefulShutdown(self):
-        model = cnn.CNNModelHelper(name="test")
+    def testRNNInput(self):
+        workspace.ResetWorkspace()
+        model = cnn.CNNModelHelper(name="rnn_test")
         old_seq_id = data_workers.global_coordinator._fetcher_id_seq
         coordinator = data_workers.init_data_input_workers(
             model,
-            ["data", "label"],
-            dummy_fetcher,
+            ["data1", "label1", "seq_lengths1"],
+            dummy_fetcher_rnn,
             32,
             2,
+            dont_rebatch=False,
+            batch_columns=[1, 1, 0],
         )
         new_seq_id = data_workers.global_coordinator._fetcher_id_seq
         self.assertEqual(new_seq_id, old_seq_id + 2)
