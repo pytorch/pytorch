@@ -77,7 +77,7 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Non
     variables = tuple(variables)
 
     if grad_variables is None:
-        grad_variables = (None,) * variables
+        grad_variables = (None,) * len(variables)
     grad_variables, create_graph = _make_grads(variables, list(grad_variables), create_graph)
 
     if retain_variables is not None:
