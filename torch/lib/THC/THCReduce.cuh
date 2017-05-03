@@ -168,7 +168,8 @@ bool THC_reduceDim(THCState* state,
                    const ModifyOp& modifyOp,
                    const ReduceOp& reduceOp,
                    typename TensorUtils<TensorType>::DataType init,
-                   int dim) {
+                   int dim,
+                   int keepdim) {
   ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
 
   long reductionSize = TensorUtils<TensorType>::getSize(state, in, dim);
@@ -315,6 +316,10 @@ bool THC_reduceDim(THCState* state,
 #undef HANDLE_IN_CASE
 #undef HANDLE_OUT_CASE
 
+
+  if (!keepdim) {
+    TensorUtils<TensorType>::squeeze1d(state, out, out, dim);
+  }
   return true;
 }
 

@@ -206,7 +206,7 @@ void THNN_(SparseLinear_accGradParameters)(
       &one, THCTensor_(data)(state, gradWeight), inDim
   );
 
-  THCTensor_(sum)(state, buf, gradOutput, 0);
+  THCTensor_(sum)(state, buf, gradOutput, 0, 1);
   THCTensor_(resize1d)(state, buf, outDim);
   THCTensor_(cadd)(state, gradBias, gradBias, scale, buf);
 

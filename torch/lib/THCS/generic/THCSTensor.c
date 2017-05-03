@@ -151,7 +151,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
     THLongTensor *computed_sizes;
     THCudaLongTensor *ignore = THCudaLongTensor_new(state);
     THCIndexTensor *s = THCIndexTensor_(new)(state);
-    THCIndexTensor_(max)(state, s, ignore, indices, 1);
+    THCIndexTensor_(max)(state, s, ignore, indices, 1, 1);
     THCIndexTensor_(add)(state, s, s, 1);
 
     // TODO make sure this doesn't sync the hell out of everything

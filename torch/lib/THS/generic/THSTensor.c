@@ -151,7 +151,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
     ignore = THLongTensor_new();
     THLongTensor *computed_indices_sizes = THLongTensor_new();
     THLongTensor *computed_sizes = THLongTensor_newWithSize1d(nDimI + nDimV);
-    THLongTensor_max(computed_indices_sizes, ignore, indices, 1);
+    THLongTensor_max(computed_indices_sizes, ignore, indices, 1, 1);
     THLongTensor_add(computed_indices_sizes, computed_indices_sizes, 1);
     for (int d = 0; d < nDimI; d++) {
         THTensor_fastSet1d(computed_sizes, d, THTensor_fastGet1d(computed_indices_sizes, d));
