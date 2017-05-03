@@ -72,11 +72,13 @@ static void addClass(PyObject* module, PyTypeObject& type, const char* name,
   registerCppFunction(typeid(C), &type);
 }
 
-template<typename T, typename M, typename P, M P::*ptr, typename V, PyObject* (*Convert)(V)>
+template<typename T, typename ValueT, typename ParamsT, ValueT ParamsT::*ptr,
+         typename ConvertArgT, PyObject* (*Convert)(ConvertArgT)>
 PyObject* getTupleAttr(PyObject* obj, void* _unused)
 {
+  HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
-  auto& arr = std::static_pointer_cast<T>(self->cdata).get()->*ptr;
+  auto& arr = (T*)(self->cdata.get())->*ptr;
   auto num_elems = arr.size();
   THPObjectPtr py_tuple = PyTuple_New(num_elems);
   if (!py_tuple) return NULL;
@@ -84,14 +86,18 @@ PyObject* getTupleAttr(PyObject* obj, void* _unused)
     PyTuple_SET_ITEM(py_tuple.get(), i, Convert(arr[i]));
   }
   return py_tuple.release();
+  END_HANDLE_TH_ERRORS
 }
 
-template<typename T, typename M, typename P, M P::*ptr, typename V, PyObject* (*Convert)(V)>
+template<typename T, typename ValueT, typename ParamsT, ValueT ParamsT::*ptr,
+         typename ConvertArgT, PyObject* (*Convert)(ConvertArgT)>
 PyObject* getValueAttr(PyObject* obj, void* _unused)
 {
+  HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
-  auto& val = std::static_pointer_cast<T>(self->cdata).get()->*ptr;
+  auto& val = (T*)(self->cdata.get())->*ptr;
   return Convert(val);
+  END_HANDLE_TH_ERRORS
 }
 
 static struct PyGetSetDef conv_forward_properties[] = {
