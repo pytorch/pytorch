@@ -1041,7 +1041,7 @@ class TestAutograd(TestCase):
         x = Variable(torch.rand(2, 10), requires_grad=True)
         stddevs = Variable(torch.rand(2, 10) * 5, requires_grad=True)
         y = (x * 2).clamp(0, 1)
-        y = y / y.sum(1).expand_as(y)
+        y = y / y.sum(1, True).expand_as(y)
         samples_multi = y.multinomial(5)
         samples_multi_flat = y[0].multinomial(5)
         samples_bernoulli = y.bernoulli()
