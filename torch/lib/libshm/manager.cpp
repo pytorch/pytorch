@@ -26,8 +26,8 @@ const int SHUTDOWN_TIMEOUT = 2000; // 2s
 struct ClientSession {
   ClientSession(ManagerSocket s): socket(std::move(s)), pid(0) {}
 
-  pid_t pid;
   ManagerSocket socket;
+  pid_t pid;
 };
 
 
@@ -55,8 +55,9 @@ void unregister_fd(int fd) {
 
 
 void print_init_message(const char *message) {
-  write(1, message, strlen(message));
-  write(1, "\n", 1);
+  size_t unused;
+  unused = write(1, message, strlen(message));
+  unused = write(1, "\n", 1);
 }
 
 bool object_exists(const char *name) {
@@ -109,7 +110,7 @@ int main(int argc, char *argv[]) {
     if (nevents == 0 && client_sessions.size() == 0)
       break;
 
-    for (struct pollfd &pfd: pollfds) {
+    for (auto &pfd: pollfds) {
       if (pfd.revents & (POLLERR | POLLHUP)) {
         // some process died
         DEBUG("detaching process");
@@ -128,7 +129,7 @@ int main(int argc, char *argv[]) {
           // someone wants to register a segment
           DEBUG("got alloc info");
           auto &session = client_sessions.at(pfd.fd);
-          AllocInfo info = session.socket.recieve();
+          AllocInfo info = session.socket.receive();
           session.pid = info.pid;
           DEBUG("got alloc info: %d %d %s", (int)info.free, info.pid, info.filename);
           if (info.free) {

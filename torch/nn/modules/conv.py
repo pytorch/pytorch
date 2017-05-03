@@ -268,7 +268,7 @@ class Conv3d(_ConvNd):
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
-          the second `int` for the width dimension and the third `int` for the width dimension
+          the second `int` for the height dimension and the third `int` for the width dimension
 
     .. note::
 
@@ -407,11 +407,11 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
-        dilation = _single(1)
+        dilation = _single(dilation)
         output_padding = _single(output_padding)
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -421,7 +421,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
-            output_padding, self.groups)
+            output_padding, self.groups, self.dilation)
 
 
 class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
@@ -467,6 +467,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         output_padding (int or tuple, optional): Zero-padding added to one side of the output
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
+        dilation (int or tuple, optional): Spacing between kernel elements
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -506,11 +507,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
-        dilation = _pair(1)
+        dilation = _pair(dilation)
         output_padding = _pair(output_padding)
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -520,7 +521,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose2d(
             input, self.weight, self.bias, self.stride, self.padding,
-            output_padding, self.groups)
+            output_padding, self.groups, self.dilation)
 
 
 class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
@@ -566,6 +567,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         output_padding (int or tuple, optional): Zero-padding added to one side of the output
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
+        dilation (int or tuple, optional): Spacing between kernel elements
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
@@ -596,11 +598,11 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
-        dilation = _triple(1)
+        dilation = _triple(dilation)
         output_padding = _triple(output_padding)
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -610,7 +612,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
-            output_padding, self.groups)
+            output_padding, self.groups, self.dilation)
 
 
 # TODO: Conv2dLocal

@@ -31,18 +31,34 @@
 #define THIndexTensor THCudaLongTensor
 #define THIndexTensor_(NAME) TH_CONCAT_2(THCudaLongTensor_,NAME)
 #define THPIndexTensor THCPLongTensor
+#define THPIndexTensor_(NAME) TH_CONCAT_2(THCPLongTensor_,NAME)
 #define THPIndexTensorClass THCPLongTensorClass
 #else
 #define THIndexTensor THLongTensor
 #define THIndexTensor_(NAME) TH_CONCAT_2(THLongTensor_,NAME)
 #define THPIndexTensor THPLongTensor
+#define THPIndexTensor_(NAME) TH_CONCAT_2(THPLongTensor_,NAME)
 #define THPIndexTensorClass THPLongTensorClass
 #endif
 
 #if IS_CUDA
+#define THIntegerTensor THCudaIntTensor
+#define THIntegerTensor_(NAME) TH_CONCAT_2(THCudaIntTensor_,NAME)
+#define THPIntegerTensor THCPIntTensor
+#define THPIntegerTensorClass THCPIntTensorClass
+#else
+#define THIntegerTensor THIntTensor
+#define THIntegerTensor_(NAME) TH_CONCAT_2(THIntTensor_,NAME)
+#define THPIntegerTensor THPIntTensor
+#define THPIntegerTensorClass THPIntTensorClass
+#endif
+
+#if IS_CUDA
+#define THBoolTensor THCudaByteTensor
 #define THPBoolTensor THCPByteTensor
 #define THPBoolTensorClass THCPByteTensorClass
 #else
+#define THBoolTensor THByteTensor
 #define THPBoolTensor THPByteTensor
 #define THPBoolTensorClass THPByteTensorClass
 #endif
@@ -84,6 +100,7 @@ typedef THLongStorage THStride;
 #undef THIndexTensor_
 #undef THPIndexTensor
 #undef THPIndexTensorClass
+#undef THBoolTensor
 #undef THPBoolTensor
 #undef THPBoolTensorClass
 #undef RealStr

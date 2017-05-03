@@ -10,26 +10,50 @@
 #include <vector>
 
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/grad_buffer.h"
+#include "torch/csrc/autograd/input_buffer.h"
 
 namespace torch { namespace autograd {
 
+struct ReadyQueue;
+struct FunctionTask;
+struct GraphTask;
+
+// A single instance of this struct should be created through the whole process lifetime.
+// The worker thread creation logic and Engine's destructor rely on this.
 struct Engine {
-  using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, GradBuffer>>;
+  Engine();
+  virtual ~Engine();
+
+  using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, InputBuffer>>;
   using function_queue = std::vector<Function*>;
   using dependencies_type = std::unordered_map<Function*, int>;
+  using callback_type = std::function<bool (Function*, variable_list&)>;
+  using callback_map = std::unordered_map<Function*, callback_type>;
 
-  // Given a list of output variables and their gradients, computes the
-  // gradients of "root" variables by backpropagation.
-  static void backward(
-      const variable_list& variables,
-      tensor_list& grad_variables,
-      bool retain_variables);
 
-private:
-  static dependencies_type compute_dependencies(
-      function_queue queue,
-      ready_queue_type& ready);
+  // Given a list of (Function, int) pairs computes the value of the graph
+  // by following next_function references.
+  void execute(
+      const function_list& roots,
+      variable_list& inputs,
+      bool keep_graph,
+      const callback_map& callbacks = callback_map());
+
+protected:
+  function_queue find_roots(
+      const function_list& roots,
+      variable_list& inputs,
+      GraphTask& task);
+  void find_stochastic_functions(function_queue& queue, GraphTask& task);
+  void compute_dependencies(function_queue queue, GraphTask& task);
+  void evaluate_function(FunctionTask& task);
+  ReadyQueue& ready_queue(int device);
+  void start_threads();
+  virtual void thread_main(std::shared_ptr<ReadyQueue> queue);
+  virtual void thread_on_exception(FunctionTask& task, std::exception& e);
+
+  std::once_flag start_threads_flag;
+  std::vector<std::shared_ptr<ReadyQueue>> ready_queues;
 };
 
 }} // namespace torch::autograd

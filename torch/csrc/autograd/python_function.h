@@ -3,6 +3,7 @@
 #include <Python.h>
 #include <vector>
 #include <utility>
+#include <memory>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -10,10 +11,6 @@
 
 // (class, gpu id, sizes)
 using output_info_type = std::tuple<PyObject *, int, std::vector<long>>;
-// (tensor, version when saved, version counter)
-// or
-// (None, 0, nullptr)
-using saved_var_info_type = std::tuple<THPObjectPtr, int, std::unique_ptr<torch::autograd::VariableVersion>>;
 
 namespace torch { namespace autograd {
 
@@ -21,7 +18,10 @@ struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
+  variable_list legacy_apply(const variable_list& inputs);
+
   virtual void releaseVariables() override;
+  virtual std::string name() override;
 
   PyObject* obj;
 };
@@ -32,8 +32,6 @@ struct THPFunction {
     PyObject_HEAD
 
     PyObject *needs_input_grad;
-    PyObject *backward_hooks;
-    THPObjectPtr *output_backward_hooks;
 
     PyObject *to_save;
     PyObject *shared_pairs;
@@ -41,19 +39,20 @@ struct THPFunction {
     PyObject *dirty_tensors;
 
     std::vector<output_info_type> *output_info;
-    std::vector<saved_var_info_type> *saved_variables;
-    int num_inputs;
+    std::vector<torch::autograd::SavedVariable> *saved_variables;
+    std::vector<bool> *is_variable_input;
     char has_freed_buffers;
 
     torch::autograd::PyFunction cdata;
 };
 
 bool THPFunction_initModule(PyObject *module);
+extern PyTypeObject THPFunctionType;
 extern PyObject *THPFunctionClass;
 extern PyObject *THPStochasticFunctionClass;
 
 std::shared_ptr<torch::autograd::PyFunction> THPFunction_asFunction(THPFunction* self);
 
 inline bool THPFunction_Check(PyObject* obj) {
-  return PyObject_IsInstance(obj, THPFunctionClass);
+  return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);
 }

@@ -22,7 +22,7 @@ struct th_storage_traits {};
 template<typename real>
 struct THStorage : public interface_traits<real>::storage_interface_type {
   template<typename U>
-  friend class THTensor;
+  friend struct THTensor;
 
 private:
   using interface_type = typename interface_traits<real>::storage_interface_type;

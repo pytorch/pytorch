@@ -41,6 +41,18 @@ __device__ inline void bitonicSwap(K& kA, V& vA, bool& validA,
   }
 };
 
+template <typename Comparator, typename K>
+__device__ inline void bitonicSwapKeys(K& kA, bool& validA,
+                                       K& kB, bool& validB,
+                                       bool dir,
+                                       const Comparator& comp) {
+  bool swap = (comp(kA, kB) && validA) || !validB;
+  if (swap == dir) {
+    swapVars(kA, kB);
+    swapVars(validA, validB);
+  }
+}
+
 template <typename Comparator, typename K, typename V,
           typename IndexType, int Power2SortSize>
 __device__ inline void bitonicSort(K keys[Power2SortSize],
@@ -53,12 +65,9 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
 
 #pragma unroll
     for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
-
-      // Single warp per slice is completely synchronous
-      if (Power2SortSize > 64) {
-        __syncthreads();
-      }
-
+    
+      __syncthreads();
+      
       unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
       bitonicSwap<Comparator, K, V>(
         keys[pos], values[pos], valid[pos],
@@ -69,11 +78,9 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
 
 #pragma unroll
   for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
-    // Single warp per slice is completely synchronous
-    if (Power2SortSize > 64) {
-      __syncthreads();
-    }
-
+    
+    __syncthreads();
+    
     unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
     bitonicSwap<Comparator, K, V>(
       keys[pos], values[pos], valid[pos],
@@ -81,10 +88,45 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
       false, comp);
   }
 
-  // Single warp per slice is completely synchronous
-  if (Power2SortSize > 64) {
-    __syncthreads();
+  __syncthreads();
+  
+}
+
+template <typename Comparator, typename K,
+          typename IndexType, int Power2SortSize>
+__device__ inline void bitonicSortKeys(K keys[Power2SortSize],
+                                   bool valid[Power2SortSize],
+                                   const Comparator& comp) {
+#pragma unroll
+  for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
+    bool flag = ((threadIdx.x & (size / 2)) != 0);
+
+#pragma unroll
+    for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
+
+      __syncthreads();
+      
+      unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
+      bitonicSwapKeys<Comparator, K>(
+        keys[pos], valid[pos],
+        keys[pos + stride], valid[pos + stride],
+        flag, comp);
+    }
   }
+
+#pragma unroll
+  for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
+    __syncthreads();
+    
+    unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
+    bitonicSwapKeys<Comparator, K>(
+      keys[pos], valid[pos],
+      keys[pos + stride], valid[pos + stride],
+      false, comp);
+  }
+
+  __syncthreads();
+  
 }
 
 // Sorts (key, value) pairs (in different tensors) in-place; i.e.,
@@ -167,5 +209,7 @@ bitonicSortKVInPlace(TensorInfo<K, IndexType> keys,
     }
   }
 }
+
+unsigned long nextHighestPowerOf2(unsigned long n);
 
 #endif // THC_SORT_UTILS_INC

@@ -49,6 +49,9 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Returns:
         a :class:`PackedSequence` object
     """
+    if lengths[-1] <= 0:
+        raise ValueError("length of all samples has to be greater than 0, "
+                         "but found an element in 'lengths' that is <=0")
     if batch_first:
         input = input.transpose(0, 1)
 
@@ -86,7 +89,7 @@ def pad_packed_sequence(sequence, batch_first=False):
     It is an inverse operation to :func:`pack_padded_sequence`.
 
     The returned Variable's data will be of size TxBx*, where T is the length
-    of the longest sequence and B is the batch size. If ``batch_size`` is True,
+    of the longest sequence and B is the batch size. If ``batch_first`` is True,
     the data will be transposed into BxTx* format.
 
     Batch elements will be ordered decreasingly by their length.

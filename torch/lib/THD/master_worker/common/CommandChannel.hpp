@@ -2,11 +2,13 @@
 
 #include "RPC.hpp"
 
+#include <sys/poll.h>
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
+#include <tuple>
 #include <vector>
-
-#include <asio.hpp>
 
 namespace thd {
 
@@ -14,31 +16,40 @@ struct MasterCommandChannel {
   MasterCommandChannel();
   ~MasterCommandChannel();
 
-  std::unique_ptr<rpc::RPCMessage> recvMessage(int rank);
+  bool init();
+
   void sendMessage(std::unique_ptr<rpc::RPCMessage> msg, int rank);
 
 private:
-  int _rank;
-  asio::io_service _io;
-  int _world_size;
-  std::vector<asio::ip::tcp::socket> _sockets;
+  std::tuple<rank_type, std::string> recvError();
+  void errorHandler();
 
-  void _load_env(unsigned short& port, int& world_size);
+  rank_type _rank;
+  std::vector<int> _sockets;
+  std::unique_ptr<struct pollfd[]> _poll_events;
+
+  int _error_pipe; // informs error handler thread that we are exiting
+  std::unique_ptr<std::string> _error;
+  std::thread _error_thread;
+
+  port_type _port;
 };
 
 struct WorkerCommandChannel {
-  WorkerCommandChannel(int rank);
+  WorkerCommandChannel();
   ~WorkerCommandChannel();
 
+  bool init();
+
   std::unique_ptr<rpc::RPCMessage> recvMessage();
-  void sendMessage(std::unique_ptr<rpc::RPCMessage> msg);
+  void sendError(const std::string& error);
 
 private:
-  int _rank;
-  asio::io_service _io;
-  asio::ip::tcp::socket _socket;
+  rank_type _rank;
+  int _socket;
 
-  void _load_env(std::string& ip_addr, unsigned short& port);
+  std::string _master_addr;
+  port_type _master_port;
 };
 
 } // namespace thd

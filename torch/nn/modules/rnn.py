@@ -163,7 +163,7 @@ class RNN(RNNBase):
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
-        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
+        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
         skip_input: If True, The MM with the input is skipped for the first layer. Default: False
 
@@ -241,7 +241,7 @@ class LSTM(RNNBase):
         num_layers: Number of recurrent layers.
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
-        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
+        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
         skip_input: If True, The MM with the input is skipped for the first layer. Default: False
 
@@ -312,7 +312,7 @@ class GRU(RNNBase):
         num_layers: Number of recurrent layers.
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
-        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
+        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
         skip_input: If True, The first MM with the input is skipped for the first layer. Default: False
 

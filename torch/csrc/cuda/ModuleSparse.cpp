@@ -1,19 +1,18 @@
 #include "THCP.h"
 
-static bool THCSPModule_loadClasses(PyObject *module_dict)
+static bool THCSPModule_loadClasses(PyObject *sparse_module)
 {
-#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  ASSERT_NOT_NULL(THCSPDoubleTensorClass  = PyMapping_GetItemString(module_dict, (char*)"DoubleTensor"));
-  ASSERT_NOT_NULL(THCSPHalfTensorClass    = PyMapping_GetItemString(module_dict, (char*)"HalfTensor"));
-  ASSERT_NOT_NULL(THCSPFloatTensorClass   = PyMapping_GetItemString(module_dict, (char*)"FloatTensor"));
-  ASSERT_NOT_NULL(THCSPLongTensorClass    = PyMapping_GetItemString(module_dict, (char*)"LongTensor"));
-  ASSERT_NOT_NULL(THCSPIntTensorClass     = PyMapping_GetItemString(module_dict, (char*)"IntTensor"));
-  ASSERT_NOT_NULL(THCSPShortTensorClass   = PyMapping_GetItemString(module_dict, (char*)"ShortTensor"));
-  ASSERT_NOT_NULL(THCSPCharTensorClass    = PyMapping_GetItemString(module_dict, (char*)"CharTensor"));
-  ASSERT_NOT_NULL(THCSPByteTensorClass    = PyMapping_GetItemString(module_dict, (char*)"ByteTensor"));
-
+  if (!THCSPDoubleTensor_postInit(sparse_module)) return false;
+  if (!THCSPFloatTensor_postInit(sparse_module)) return false;
+#ifdef CUDA_HALF_TENSOR
+  if (!THCSPHalfTensor_postInit(sparse_module)) return false;
+#endif
+  if (!THCSPLongTensor_postInit(sparse_module)) return false;
+  if (!THCSPIntTensor_postInit(sparse_module)) return false;
+  if (!THCSPShortTensor_postInit(sparse_module)) return false;
+  if (!THCSPCharTensor_postInit(sparse_module)) return false;
+  if (!THCSPByteTensor_postInit(sparse_module)) return false;
   return true;
-#undef ASSERT_NOT_NULL
 }
 
 static bool THCSPModule_assignStateless()
@@ -31,7 +30,9 @@ static bool THCSPModule_assignStateless()
   PyObject *stateless;
   INIT_STATELESS(Double);
   INIT_STATELESS(Float);
+#ifdef CUDA_HALF_TENSOR
   INIT_STATELESS(Half);
+#endif
   INIT_STATELESS(Long);
   INIT_STATELESS(Int);
   INIT_STATELESS(Short);
@@ -46,9 +47,9 @@ static bool THCSPModule_assignStateless()
 // Sparse Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
-bool THCSPModule_initCudaSparse(PyObject *module_dict) {
+bool THCSPModule_initCudaSparse(PyObject *module) {
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
-  ASSERT_TRUE(THCSPModule_loadClasses(module_dict));
+  ASSERT_TRUE(THCSPModule_loadClasses(module));
   ASSERT_TRUE(THCSPModule_assignStateless());
   return true;
 #undef ASSERT_TRUE
@@ -56,11 +57,13 @@ bool THCSPModule_initCudaSparse(PyObject *module_dict) {
 
 PyObject * THCSPModule_initExtension(PyObject *self)
 {
-  PyObject *torch_module = PyImport_ImportModule("torch.cuda.sparse");
-  if (!torch_module) {
+  PyObject *module = PyImport_ImportModule("torch.cuda.sparse");
+  if (!module) {
     THPUtils_setError("class loader couldn't access torch.cuda.sparse module");
     return NULL;
   }
-  PyObject* module_dict = PyModule_GetDict(torch_module);
-  return PyBool_FromLong(THCSPModule_initCudaSparse(module_dict));
+  if (!THCSPModule_initCudaSparse(module)) {
+    return NULL;
+  }
+  Py_RETURN_NONE;
 }

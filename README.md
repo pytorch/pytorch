@@ -135,11 +135,11 @@ Writing new neural network modules, or interfacing with PyTorch's Tensor API was
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
-[or your favorite numpy based libraries such as SciPy](https://github.com/pytorch/tutorials/blob/master/Creating%20extensions%20using%20numpy%20and%20scipy.ipynb).
+[or your favorite numpy based libraries such as SciPy](http://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
 If you want to write your layers in C/C++, we provide an extension API based on
-[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.  
-There is no wrapper code that needs to be written. [You can see an example here](https://github.com/pytorch/extension-ffi).
+[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.
+There is no wrapper code that needs to be written. You can see [a tutorial here](http://pytorch.org/tutorials/advanced/c_extension.html) and [an example here](https://github.com/pytorch/extension-ffi).
 
 
 ## Installation
@@ -158,7 +158,7 @@ Once you have [anaconda](https://www.continuum.io/downloads) installed, here are
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x
+- [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
@@ -169,38 +169,38 @@ On Linux
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 
 # Install basic dependencies
-conda install numpy mkl setuptools cmake gcc cffi
+conda install numpy pyyaml mkl setuptools cmake gcc cffi
 
 # Add LAPACK support for the GPU
-conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
+conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
 On OSX
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy setuptools cmake cffi
+conda install numpy pyyaml setuptools cmake cffi
 ```
 
 #### Install PyTorch
+On Linux
 ```bash
-export MACOSX_DEPLOYMENT_TARGET=10.9 # if OSX
-pip install -r requirements.txt
 python setup.py install
+```
+
+On OSX
+```bash
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
 ### Docker image
 
-Dockerfiles are supplied to build images with cuda support and cudnn v5 and cudnn v6 RC. Build them as usual
+Dockerfile is supplied to build images with cuda support and cudnn v6. Build as usual
 ```
-docker build . -t pytorch-cudnnv5 
+docker build -t pytorch-cudnnv6 .
 ```
-or 
+and run  with nvidia-docker:
 ```
-docker build . -t pytorch-cudnnv6 -f tools/docker/Dockerfile-v6
-```
-and run them with nvidia-docker:
-```
-nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv5
+nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv6
 ```
 Please note that pytorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
@@ -210,7 +210,7 @@ should increase shared memory size either with --ipc=host or --shm-size command 
 ## Getting Started
 
 Three pointers to get you started:
-- [Tutorials: notebooks to get you started with understanding and using PyTorch](https://github.com/pytorch/tutorials)
+- [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - The API Reference: [http://pytorch.org/docs/](http://pytorch.org/docs/)
 
@@ -223,7 +223,7 @@ Three pointers to get you started:
 ## Releases and Contributing
 
 PyTorch has a 90 day release cycle (major releases). 
-It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+It's current state is Beta, we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 

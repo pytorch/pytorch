@@ -86,6 +86,19 @@ small helper functions::
         # return it.
         return Linear()(input, weight, bias)
 
+You probably want to check if the backward method you implemented actually
+computes the derivatives of your function. It is possible by comparing with
+numerical approximations using small finite differences::
+
+    from torch.autograd import gradcheck
+   
+    # gradchek takes a tuple of tensor as input, check if your gradient
+    # evaluated with these tensors are close enough to numerical
+    # approximations and returns True if they all verify this condition.
+    input = (Variable(torch.randn(20,20).double(), requires_grad=True),)
+    test = gradcheck(Linear(), input, eps=1e-6, atol=1e-4)
+    print(test)
+
 Extending :mod:`torch.nn`
 -------------------------
 
@@ -132,7 +145,7 @@ This is how a ``Linear`` module can be implemented::
             # nn.Parameters can never be volatile and, different than Variables,
             # they require gradients by default.
             self.weight = nn.Parameter(torch.Tensor(input_features, output_features))
-            if bias is not None:
+            if bias:
                 self.bias = nn.Parameter(torch.Tensor(output_features))
             else:
                 # You should always register all possible parameters, but the

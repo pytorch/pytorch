@@ -1,9 +1,8 @@
 import sys
 import torch._C as _C
 from collections import OrderedDict
+import torch.sparse as sparse
 import torch.utils.hooks as hooks
-
-from ._functions import *
 
 
 class Variable(_C._VariableBase):
@@ -12,7 +11,7 @@ class Variable(_C._VariableBase):
     Variable is a thin wrapper around a Tensor object, that also holds
     the gradient w.r.t. to it, and a reference to a function that created it.
     This reference allows retracing the whole chain of operations that
-    created the data. If the Variable has been created by the user, its creator
+    created the data. If the Variable has been created by the user, its grad_fn
     will be ``None`` and we call such objects *leaf* Variables.
 
     Since autograd only supports scalar valued function differentiation, grad
@@ -32,8 +31,9 @@ class Variable(_C._VariableBase):
             inference mode, i.e. don't save the history. See
             :ref:`excluding-subgraphs` for more details.
             Can be changed only on leaf Variables.
-        creator: Function of which the variable was an output. For leaf
-            (user created) variables it's ``None``. Read-only attribute.
+        is_leaf: Boolean indicating if the Variable is a graph leaf (i.e
+            if it was created by the user).
+        grad_fn: Gradient function graph trace.
 
     Parameters:
         data (any tensor class): Tensor to wrap.
@@ -62,26 +62,21 @@ class Variable(_C._VariableBase):
         raise AttributeError(name)
 
     def __getitem__(self, key):
-        if (isinstance(key, Variable) and
-                type(key.data).__name__ == 'ByteTensor'):
-            return MaskedSelect()(self, key)
-        return Index(key)(self)
+        if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
+            return MaskedSelect.apply(self, key)
+        return Index.apply(self, key)
 
     def __setitem__(self, key, value):
-        if (isinstance(key, Variable) and
-                type(key.data).__name__ == 'ByteTensor'):
+        if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
             if isinstance(value, Variable):
-                return MaskedCopy(inplace=True)(self, key, value)
+                return MaskedCopy.apply(self, key, value, True)
             else:
-                return MaskedFill(value, inplace=True)(self, key)
+                return MaskedFill.apply(self, key, value, True)
         else:
-            if isinstance(value, Variable):
-                return SetItem(key)(self, value)
-            else:
-                return SetItem(key, value)(self)
+            return SetItem.apply(self, key, value)
 
     def __deepcopy__(self, memo):
-        if self.creator is not None:
+        if not self.is_leaf:
             raise RuntimeError("Only Variables created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
         result = type(self)(self.data.clone())
@@ -105,7 +100,7 @@ class Variable(_C._VariableBase):
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
-        if self.creator is not None:
+        if not self.is_leaf:
             raise RuntimeError('__setstate__ can be only called on leaf variables')
         self.requires_grad, self.volatile, self._backward_hooks = state
 
@@ -118,7 +113,7 @@ class Variable(_C._VariableBase):
         The graph is differentiated using the chain rule. If the variable is
         non-scalar (i.e. its data has more than one element) and requires
         gradient, the function additionaly requires specifying ``gradient``.
-        It should be a tensor of matching type and location, that containins
+        It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
         This function accumulates gradients in the leaves - you might need to zero
@@ -142,6 +137,10 @@ class Variable(_C._VariableBase):
                     'backward should be called only on a scalar (i.e. 1-element tensor) '
                     'or with gradient w.r.t. the variable')
             gradient = self.data.new().resize_as_(self.data).fill_(1)
+        if not isinstance(gradient, Variable):
+            if gradient is not None and not torch.is_tensor(gradient):
+                raise TypeError("gradient has to be a Tensor, Variable or None")
+            gradient = Variable(gradient, volatile=True)
         self._execution_engine.run_backward((self,), (gradient,), retain_variables)
 
     def register_hook(self, hook):
@@ -150,7 +149,7 @@ class Variable(_C._VariableBase):
         The hook will be called every time a gradient with respect to the
         variable is computed. The hook should have the following signature::
 
-            hook(grad) -> Tensor or None
+            hook(grad) -> Variable or None
 
         The hook should not modify its argument, but it can optionally return
         a new gradient which will be used in place of :attr:`grad`.
@@ -176,24 +175,11 @@ class Variable(_C._VariableBase):
                                "doesn't require gradient")
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
-            if self.creator is not None:
-                self.creator._register_hook_dict(self)
+            if self.grad_fn is not None:
+                self.grad_fn._register_hook_dict(self)
         handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[id(handle)] = hook
+        self._backward_hooks[handle.id] = hook
         return handle
-
-    def _do_backward(self, grad_output, retain_variables):
-        assert len(grad_output) == 1
-        assert self._version == 0 and self.creator is None, \
-            "leaf variable was used in an inplace operation"
-        unpacked_grad = grad_output[0]
-        if self._backward_hooks:
-            for hook in self._backward_hooks.values():
-                result = hook(unpacked_grad)
-                if result is not None:
-                    unpacked_grad = result
-        self.grad.data.add_(unpacked_grad)
-        return tuple()
 
     def reinforce(self, reward):
         """Registers a reward obtained as a result of a stochastic process.
@@ -206,10 +192,10 @@ class Variable(_C._VariableBase):
             reward(Tensor): Tensor with per-element rewards. It has to match
                 the device location and shape of Variable's data.
         """
-        if not isinstance(self.creator, StochasticFunction):
+        if not isinstance(self.grad_fn, StochasticFunction):
             raise RuntimeError("reinforce() can be only called on outputs "
                                "of stochastic functions")
-        self.creator._reinforce(reward)
+        self.grad_fn._reinforce(reward)
 
     def detach(self):
         """Returns a new Variable, detached from the current graph.
@@ -224,12 +210,12 @@ class Variable(_C._VariableBase):
           errors in correctness checks.
         """
         result = NoGrad()(self)  # this is needed, because it merges version counters
-        result._creator = None
+        result._grad_fn = None
         return result
 
     def detach_(self):
         """Detaches the Variable from the graph that created it, making it a leaf."""
-        self._creator = None
+        self._grad_fn = None
         self.requires_grad = False
 
     def contiguous(self):
@@ -237,19 +223,22 @@ class Variable(_C._VariableBase):
         return self
 
     def clone(self):
-        return Clone()(self)
+        return Clone.apply(self)
 
     def type(self, t):
         if t != type(self.data):
-            return Type(t)(self)
+            return Type.apply(self, t)
         return self
+
+    def type_as(self, t):
+        return self.type(type(t.data))
 
     def _get_type(self, name):
         module = torch._import_dotted_name(self.data.__module__)
         return getattr(module, name)
 
     def cuda(self, device_id=None, async=False):
-        return CudaTransfer(device_id, async)(self)
+        return CudaTransfer.apply(self, device_id, async)
 
     def cpu(self):
         return self.type(getattr(torch, type(self.data).__name__))
@@ -283,10 +272,10 @@ class Variable(_C._VariableBase):
 
     def _add(self, other, inplace):
         if isinstance(other, Variable):
-            return Add(inplace)(self, other)
+            return Add.apply(self, other, inplace)
         else:
             assert not torch.is_tensor(other)
-            return AddConstant(other, inplace)(self)
+            return AddConstant.apply(self, other, inplace)
 
     def add(self, other):
         return self._add(other, False)
@@ -296,10 +285,10 @@ class Variable(_C._VariableBase):
 
     def _sub(self, other, inplace):
         if isinstance(other, Variable):
-            return Sub(inplace=inplace)(self, other)
+            return Sub.apply(self, other, inplace)
         else:
             assert not torch.is_tensor(other)
-            return SubConstant(other, inplace=inplace)(self)
+            return SubConstant.apply(self, other, inplace)
 
     def sub(self, other):
         return self._sub(other, False)
@@ -309,34 +298,33 @@ class Variable(_C._VariableBase):
 
     def mul(self, other):
         if isinstance(other, Variable):
-            return Mul()(self, other)
+            return Mul.apply(self, other)
         else:
             assert not torch.is_tensor(other)
-            return MulConstant(other)(self)
+            return MulConstant.apply(self, other)
 
     def mul_(self, other):
         if not isinstance(other, Variable) and not torch.is_tensor(other):
-            return MulConstant(other, inplace=True)(self)
+            return MulConstant.apply(self, other, True)
         raise RuntimeError("mul_ only supports scalar multiplication")
 
     def div(self, other):
         if isinstance(other, Variable):
-            return Div()(self, other)
+            return Div.apply(self, other)
         else:
             assert not torch.is_tensor(other)
-            return DivConstant(other)(self)
+            return DivConstant.apply(self, other)
 
     def div_(self, other):
-        if not isinstance(other, Variable) and not torch.is_tensor(other):
-            return DivConstant(other, inplace=True)(self)
-        raise RuntimeError("div_ only supports scalar multiplication")
+        assert not torch.is_tensor(other)
+        return DivConstant.apply(self, other, True)
 
     def pow(self, other):
         if isinstance(other, Variable):
-            return Pow()(self, other)
+            return Pow.apply(self, other)
         else:
             assert not torch.is_tensor(other)
-            return PowConstant(other)(self)
+            return PowConstant.apply(self, other)
 
     def exp(self):
         return Exp()(self)
@@ -351,10 +339,10 @@ class Variable(_C._VariableBase):
         return Log1p()(self)
 
     def neg(self):
-        return Negate()(self)
+        return Negate.apply(self)
 
     def neg_(self):
-        return Negate(inplace=True)(self)
+        return Negate.apply(self, True)
 
     def tanh(self):
         return Tanh()(self)
@@ -471,16 +459,16 @@ class Variable(_C._VariableBase):
         return Kthvalue(dim)(self)
 
     def sort(self, dim=None, descending=False):
-        return Sort(dim, descending)(self)
+        return Sort.apply(self, dim, descending, True)
 
     def topk(self, k, dim=None, largest=True, sorted=True):
-        return Topk(k, dim, largest, sorted)(self)
+        return Topk.apply(self, k, dim, largest, sorted, True)
 
     def view(self, *sizes):
-        return View(*sizes)(self)
+        return View.apply(self, sizes)
 
     def view_as(self, tensor):
-        return View(*tensor.size())(self)
+        return View.apply(self, tensor.size())
 
     def split(self, split_size, dim=0):
         return torch.split(self, split_size, dim)
@@ -490,7 +478,10 @@ class Variable(_C._VariableBase):
             repeats = repeats[0]
         else:
             repeats = torch.Size(repeats)
-        return Repeat(repeats)(self)
+        return Repeat.apply(self, repeats)
+
+    def cumsum(self, dim):
+        return Cumsum(dim)(self)
 
     def var(self, dim=None, unbiased=True):
         mean = self.mean(dim)
@@ -505,10 +496,10 @@ class Variable(_C._VariableBase):
     def std(self, dim=None, unbiased=True):
         return self.var(dim, unbiased).sqrt()
 
-    def renorm(self, norm_type, dim, maxnorm):
+    def renorm(self, p, dim, maxnorm):
         t = self.transpose(dim, 0)
         flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(norm_type, 1)
+        norms = flat.norm(p, 1)
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
@@ -546,10 +537,10 @@ class Variable(_C._VariableBase):
         return self._static_blas(Addr, (output, 0, 1, self, vector), False)
 
     def resize(self, *sizes):
-        return Resize(*sizes)(self)
+        return Resize.apply()(self, sizes)
 
     def resize_as(self, variable):
-        return Resize(*variable.size())(self)
+        return Resize.apply(self, variable.size())
 
     def addmm(self, *args):
         return self._blas(Addmm, args, False)
@@ -598,56 +589,56 @@ class Variable(_C._VariableBase):
     def addcdiv(self, *args):
         return self._addcop(Addcdiv, args)
 
-    def norm(self, norm_type=2, dim=None):
-        return Norm(norm_type, dim)(self)
+    def norm(self, p=2, dim=None):
+        return Norm(p, dim)(self)
 
-    def dist(self, tensor, norm_type=2):
-        return Norm(norm_type)(self - tensor)
+    def dist(self, tensor, p=2):
+        return Norm(p)(self - tensor)
 
     def index_add(self, dim, index, tensor):
-        return IndexAdd(dim)(self, index, tensor)
+        return IndexAdd.apply(self, dim, index, tensor)
 
     def index_add_(self, dim, index, tensor):
-        return IndexAdd(dim, True)(self, index, tensor)
+        return IndexAdd.apply(self, dim, index, tensor, True)
 
     def index_copy(self, dim, index, tensor):
-        return IndexCopy(dim)(self, index, tensor)
+        return IndexCopy.apply(self, dim, index, tensor)
 
     def index_copy_(self, dim, index, tensor):
-        return IndexCopy(dim, True)(self, index, tensor)
+        return IndexCopy.apply(self, dim, index, tensor, True)
 
     def index_fill(self, dim, index, value):
-        return IndexFill(dim, value)(self, index)
+        return IndexFill.apply(self, dim, index, value)
 
     def index_fill_(self, dim, index, value):
-        return IndexFill(dim, value, True)(self, index)
+        return IndexFill.apply(self, dim, index, value, True)
 
     def index_select(self, dim, index):
-        return IndexSelect(dim)(self, index)
+        return IndexSelect.apply(self, dim, index)
 
     def gather(self, dim, index):
-        return Gather(dim)(self, index)
+        return Gather.apply(self, dim, index)
 
     def scatter(self, dim, index, source):
-        return Scatter(dim)(self, index, source)
+        return Scatter.apply(self, dim, index, source)
 
     def scatter_(self, dim, index, source):
-        return Scatter(dim, True)(self, index, source)
+        return Scatter.apply(self, dim, index, source, True)
 
     def masked_copy(self, mask, variable):
-        return MaskedCopy()(self, mask, variable)
+        return MaskedCopy.apply(self, mask, variable)
 
     def masked_copy_(self, mask, variable):
-        return MaskedCopy(True)(self, mask, variable)
+        return MaskedCopy.apply(self, mask, variable, True)
 
     def masked_fill(self, mask, value):
-        return MaskedFill(value)(self, mask)
+        return MaskedFill.apply(self, mask, value)
 
     def masked_fill_(self, mask, value):
-        return MaskedFill(value, True)(self, mask)
+        return MaskedFill.apply(self, mask, value, True)
 
     def masked_select(self, mask):
-        return MaskedSelect()(self, mask)
+        return MaskedSelect.apply(self, mask)
 
     def expand(self, *sizes):
         if isinstance(sizes[0], torch.Size):
@@ -655,38 +646,39 @@ class Variable(_C._VariableBase):
                 raise ValueError("expand expects a several ints or a single "
                                  "torch.Size argument")
             sizes = sizes[0]
-        return Expand(sizes)(self)
+        return Expand.apply(self, sizes)
 
     def expand_as(self, tensor):
-        return Expand(tensor.size())(self)
+        return Expand.apply(self, tensor.size())
 
     def t(self):
-        return Transpose(0, 1)(self)
+        return Transpose.apply(self, 0, 1)
 
     def transpose(self, dim1, dim2):
-        return Transpose(dim1, dim2)(self)
+        return Transpose.apply(self, dim1, dim2)
 
     def select(self, dim, _index):
+        dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
-        return Index(index)(self)
+        return Index.apply(self, index)
 
     def narrow(self, dim, start_index, length):
+        dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + \
             (slice(start_index, start_index + length),)
-
-        return Index(index)(self)
+        return Index.apply(self, index)
 
     def chunk(self, num_chunks, dim=0):
-        return Chunk(num_chunks, dim)(self)
+        return Chunk.apply(self, num_chunks, dim)
 
     def squeeze(self, dim=None):
-        return Squeeze(dim)(self)
+        return Squeeze.apply(self, dim)
 
     def unsqueeze(self, dim):
-        return Unsqueeze(dim)(self)
+        return Unsqueeze.apply(self, dim)
 
     def permute(self, *permutation):
-        return Permute(permutation)(self)
+        return Permute.apply(self, permutation)
 
     def diag(self, diagonal_idx=0):
         return Diag(diagonal_idx)(self)
@@ -696,6 +688,12 @@ class Variable(_C._VariableBase):
 
     def triu(self, diagonal_idx=0):
         return Triu(diagonal_idx)(self)
+
+    def trace(self):
+        return Trace()(self)
+
+    def cross(self, other, dim=-1):
+        return Cross(dim)(self, other)
 
     def multinomial(self, num_samples=1, with_replacement=False):
         return Multinomial(num_samples, with_replacement)(self)
@@ -753,7 +751,7 @@ class Variable(_C._VariableBase):
         return self.sub_(other)
 
     def __rsub__(self, other):
-        return SubConstant(other, sub_tensor=True)(self)
+        return SubConstant.apply(other, self)
 
     def __mul__(self, other):
         return self.mul(other)
@@ -784,7 +782,7 @@ class Variable(_C._VariableBase):
     __truediv__ = __div__
 
     def __rdiv__(self, other):
-        return DivConstant(other, div_by_tensor=True)(self)
+        return DivConstant.apply(other, self)
     __rtruediv__ = __rdiv__
 
     def __idiv__(self, other):
@@ -797,10 +795,10 @@ class Variable(_C._VariableBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return PowConstant(other, tensor_power=True)(self)
+        return PowConstant.apply(other, self)
 
     def __neg__(self):
-        return Negate()(self)
+        return Negate.apply(self)
 
     def __len__(self):
         return len(self.data)
@@ -836,7 +834,7 @@ class Variable(_C._VariableBase):
 
         @staticmethod
         def cat(iterable, dim=0):
-            return Concat(dim)(*iterable)
+            return Concat.apply(dim, *iterable)
 
         @staticmethod
         def normal(means, std=1):
@@ -893,5 +891,6 @@ for method in dir(Variable):
     setattr(Variable._torch, method, as_static)
 
 
-from .engine import ImperativeEngine
+from ._functions import *
+from torch._C import _ImperativeEngine as ImperativeEngine
 Variable._execution_engine = ImperativeEngine()

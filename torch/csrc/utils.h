@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include <type_traits>
 
 #include "torch/csrc/utils/object_ptr.h"
 
@@ -22,17 +23,6 @@
 #define THPUtils_unpackLong(obj)                                               \
     (PyLong_Check(obj) ? PyLong_AsLong(obj) :                                  \
     (throw std::runtime_error("Could not unpack long"), 0))
-#endif
-
-
-#if PY_MAJOR_VERSION == 2
-#define THPUtils_bytesFromString(c_string)   PyString_FromString(c_string)
-#define THPUtils_checkBytes(obj)             PyString_Check(obj)
-#define THPUtils_bytesAsString(obj)          PyString_AS_STRING(obj)
-#else
-#define THPUtils_bytesFromString(c_string)   PyBytes_FromString(c_string)
-#define THPUtils_checkBytes(obj)             PyBytes_Check(obj)
-#define THPUtils_bytesAsString(obj)          PyBytes_AS_STRING(obj)
 #endif
 
 #if PY_MAJOR_VERSION == 2
@@ -143,7 +133,6 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
 
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
 
-#define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 // https://bugsfiles.kde.org/attachment.cgi?id=61186
 #if PY_VERSION_HEX >= 0x03020000
@@ -175,6 +164,21 @@ struct THPUtils_typeTraits {};
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
+PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
+
+template<typename _real, typename = void>
+struct mod_traits {};
+
+template<typename _real>
+struct mod_traits<_real, typename std::enable_if<std::is_floating_point<_real>::value>::type> {
+  static _real mod(_real a, _real b) { return fmod(a, b); }
+};
+
+template<typename _real>
+struct mod_traits<_real, typename std::enable_if<std::is_integral<_real>::value>::type> {
+  static _real mod(_real a, _real b) { return a % b; }
+};
+
 
 #endif /* _THP_CORE */
 

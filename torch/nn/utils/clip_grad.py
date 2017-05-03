@@ -10,8 +10,11 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
             gradients normalized
         max_norm (float or int): max norm of the gradients
         norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for infinity norm.
+
+    Returns:
+        Total norm of the parameters (viewed as a single vector).
     """
-    parameters = list(parameters)
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == float('inf'):
@@ -23,7 +26,7 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
             total_norm += param_norm ** norm_type
         total_norm = total_norm ** (1. / norm_type)
     clip_coef = max_norm / (total_norm + 1e-6)
-    if clip_coef >= 1:
-        return
-    for p in parameters:
-        p.grad.data.mul_(clip_coef)
+    if clip_coef < 1:
+        for p in parameters:
+            p.grad.data.mul_(clip_coef)
+    return total_norm

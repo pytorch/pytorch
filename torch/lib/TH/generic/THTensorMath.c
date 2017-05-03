@@ -9,10 +9,17 @@
 #define TH_OMP_OVERHEAD_THRESHOLD 100000
 
 #ifdef _OPENMP
+
+#ifndef _WIN32
+#define PRAGMA(P) _Pragma(#P)
+#else
+#define PRAGMA(P) __pragma(P)
+#endif
+
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR); \
-  _Pragma("omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)") \
+  PRAGMA(omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)) \
   { \
     size_t num_threads = omp_get_num_threads(); \
     size_t tid = omp_get_thread_num(); \
@@ -37,7 +44,7 @@
 #define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
-  _Pragma("omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)") \
+  PRAGMA(omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)) \
   { \
     size_t num_threads = omp_get_num_threads(); \
     size_t tid = omp_get_thread_num(); \
@@ -64,7 +71,7 @@
 #define TH_TENSOR_APPLY3_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
-  _Pragma("omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)") \
+  PRAGMA(omp parallel if (TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD)) \
   { \
     size_t num_threads = omp_get_num_threads(); \
     size_t tid = omp_get_thread_num(); \
@@ -708,7 +715,10 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
           rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
 #else
-          rp[i] = tp[i] - value * (tp[i] / value); // There is no NAN for integers
+          // There is no NAN for integers
+          rp[i] = tp[i] % value;
+          if (rp[i] * value < 0)
+            rp[i] += value;
 #endif
       }
   } else {
@@ -716,7 +726,8 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
 #else
        // There is no NAN for integers
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data - value * (*t_data / value););
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
+                                          if (*r__data * value < 0) *r__data += value;);
 #endif
   }
 }
@@ -984,7 +995,10 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
           rp[i] = (sp[i] == 0)? NAN : tp[i] - sp[i] * floor(tp[i] / sp[i]);
 #else
-          rp[i] = tp[i] - sp[i] * (tp[i] / sp[i]); // There is no NAN for integers
+          // There is no NAN for integers
+          rp[i] = tp[i] % sp[i];
+          if (rp[i] * sp[i] < 0)
+            rp[i] += sp[i];
 #endif
       }
   } else {
@@ -992,7 +1006,8 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
 #else
       // There is no NAN for integers
-      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data - *src_data * (*t_data / *src_data););
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data % *src_data;
+                                                     if (*r__data * *src_data < 0) *r__data += *src_data;);
 #endif
 
   }
@@ -1350,7 +1365,10 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
     THTensor_(copy)(r_, t);
   }
 
-  if(beta != 1)
+  if(beta == 0) {
+    THTensor_(zero)(r_);
+  }
+  else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
   if(r_->stride[0] == 1)
@@ -2494,7 +2512,9 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   int maxDim = dimension + 1;
   int allEmpty = 1;
   int allContiguous = 1;
-  int ldimension = dimension;
+
+  // cat_dimension is the actual dimension we cat along
+  int cat_dimension = dimension;
 
   for (i = 0; i < numInputs; i++)
   {
@@ -2503,13 +2523,13 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
 
   // When the user input dimension is -1 (i.e. -2 in C)
   // Then we pick the maximum last dimension across all tensors.
-  if ( dimension == -2 )
+  if ( dimension + TH_INDEX_BASE == -1 )
   {
-    ldimension = maxDim?(maxDim-1):0;
+    cat_dimension = maxDim?(maxDim-1):0;
   }
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
-  THArgCheck(ldimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
+  THArgCheck(cat_dimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
 
   size = THLongStorage_newWithSize(maxDim);
 
@@ -2517,7 +2537,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   {
     // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
     long dimSize = i < inputs[0]->nDimension ? inputs[0]->size[i] : THMin(inputs[0]->nDimension, 1);
-    if (i == ldimension)
+    if (i == cat_dimension)
     {
       for (j = 1; j < numInputs; j++)
       {
@@ -2564,7 +2584,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
 
     // First path is for contiguous inputs along dim 1
     // Second path for non-contiguous
-    if (ldimension == 0 && allContiguous)
+    if (cat_dimension == 0 && allContiguous)
     {
       real* result_data = result->storage->data + result->storageOffset;
       offset = 0;
@@ -2587,9 +2607,9 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
       {
         if (inputs[j]->nDimension)
         {
-          long dimSize = ldimension < inputs[j]->nDimension ? inputs[j]->size[ldimension] : 1;
+          long dimSize = cat_dimension < inputs[j]->nDimension ? inputs[j]->size[cat_dimension] : 1;
           THTensor *nt = THTensor_(newWithTensor)(result);
-          THTensor_(narrow)(nt, NULL, ldimension, offset, dimSize);
+          THTensor_(narrow)(nt, NULL, cat_dimension, offset, dimSize);
           THTensor_(copy)(nt, inputs[j]);
           THTensor_(free)(nt);
           offset += dimSize;
@@ -2677,7 +2697,7 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
 

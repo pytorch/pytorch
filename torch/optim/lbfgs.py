@@ -55,8 +55,16 @@ class LBFGS(Optimizer):
         return self._numel_cache
 
     def _gather_flat_grad(self):
-        return torch.cat(
-            tuple(param.grad.data.view(-1) for param in self._params), 0)
+        views = []
+        for p in self._params:
+            if p.grad is None:
+                view = p.data.new(p.data.numel()).zero_()
+            elif p.grad.data.is_sparse:
+                view = p.grad.data.to_dense().view(-1)
+            else:
+                view = p.grad.data.view(-1)
+            views.append(view)
+        return torch.cat(views, 0)
 
     def _add_grad(self, step_size, update):
         offset = 0
@@ -178,18 +186,14 @@ class LBFGS(Optimizer):
             ############################################################
             # compute step length
             ############################################################
-            # directional derivative
-            gtd = flat_grad.dot(d)  # g * d
-
-            # check that progress can be made along that direction
-            if gtd > -tolerance_change:
-                break
-
             # reset initial guess for step size
             if state['n_iter'] == 1:
                 t = min(1., 1. / abs_grad_sum) * lr
             else:
                 t = lr
+
+            # directional derivative
+            gtd = flat_grad.dot(d)  # g * d
 
             # optional line search: user function
             ls_func_evals = 0
@@ -222,6 +226,9 @@ class LBFGS(Optimizer):
                 break
 
             if abs_grad_sum <= tolerance_grad:
+                break
+
+            if gtd > -tolerance_change:
                 break
 
             if d.mul(t).abs_().sum() <= tolerance_change:

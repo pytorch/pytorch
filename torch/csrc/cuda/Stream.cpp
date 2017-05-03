@@ -15,24 +15,31 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   int current_device;
   THCudaCheck(cudaGetDevice(&current_device));
 
-  THPObjectPtr ptr = (PyObject *)type->tp_alloc(type, 0);
-  THCPStream* self = (THCPStream *)ptr.get();
-  THCStream* stream = NULL;
-  if (kwargs && PyDict_Size(kwargs) > 0) {
-    PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "_cdata");
-    if (cdata_ptr && PyDict_Size(kwargs) == 1 && THPUtils_checkLong(cdata_ptr)) {
-      stream = (THCStream*) PyLong_AsVoidPtr(cdata_ptr);
-      if (stream) {
-        THCStream_retain(stream);
-      }
-    } else {
-      THPUtils_setError("torch.cuda.Stream(): invalid keyword arguments");
-      return NULL;
-    }
-  } else {
-    stream = THCStream_new(cudaStreamNonBlocking);
+  int flags = cudaStreamNonBlocking;
+  int priority = 0;
+  unsigned long long cdata = 0;
+
+  static char *kwlist[] = {"priority", "_cdata", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iK", kwlist, &priority, &cdata)) {
+    return NULL;
   }
 
+  THPObjectPtr ptr = type->tp_alloc(type, 0);
+  if (!ptr) {
+    return NULL;
+  }
+
+  THCStream* stream;
+  if (cdata) {
+    stream = (THCStream*) cdata;
+    if (stream) {
+      THCStream_retain(stream);
+    }
+  } else {
+    stream = THCStream_newWithPriority(flags, priority);
+  }
+
+  THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream;
   self->device = stream ? stream->device : current_device;
   self->cuda_stream = stream ? stream->stream : NULL;

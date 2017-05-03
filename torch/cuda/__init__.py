@@ -26,12 +26,7 @@ def is_available():
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
             not torch._C._cuda_isDriverSufficient()):
         return False
-    try:
-        return torch._C._cuda_getDeviceCount() > 0
-    except RuntimeError as e:
-        if 'no CUDA-capable device is detected' in e.args[0]:
-            return False
-        raise
+    return torch._C._cuda_getDeviceCount() > 0
 
 
 def _sleep(cycles):
@@ -39,23 +34,16 @@ def _sleep(cycles):
 
 
 def _load_cudart():
-    system = platform.system()
-    lib_name = 'libcudart.' + ('dylib' if system == 'Darwin' else 'so')
-    lib_paths = [
-        lib_name,
-        os.path.join(torch._C._cuda_getLibPath(), lib_name),
-        os.path.join('/usr/local/cuda/lib64', lib_name),
-        os.path.join('/usr/local/cuda/lib', lib_name),
-    ]
-    for path in lib_paths:
-        try:
-            return ctypes.cdll.LoadLibrary(path)
-        except OSError:
-            pass
-    raise RuntimeError("couldn't find libcudart. Make sure CUDA libraries "
-                       "are installed in a default location, or that they're in " +
-                       ("DYLD_LIBRARY_PATH" if system == 'Darwin' else "LD_LIBRARY_PATH") +
-                       ".")
+    # First check the main program for CUDA symbols
+    lib = ctypes.cdll.LoadLibrary(None)
+    if hasattr(lib, 'cudaGetErrorName'):
+        return lib
+
+    raise RuntimeError(
+        "couldn't find libcudart. Make sure CUDA libraries are installed in a"
+        "default location, or that they're in {}."
+        .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
+                'LD_LIBRARY_PATH'))
 
 
 def _check_driver():
@@ -94,7 +82,8 @@ def _lazy_init():
         raise RuntimeError(
             "Cannot re-initialize CUDA in forked subprocess. " + msg)
     _check_driver()
-    assert torch._C._cuda_init()
+    torch._C._cuda_init()
+    torch._C._cuda_sparse_init()
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
@@ -196,8 +185,11 @@ def stream(stream):
 
 def device_count():
     """Returns the number of GPUs available."""
-    _lazy_init()
-    return torch._C._cuda_getDeviceCount()
+    if is_available():
+        _lazy_init()
+        return torch._C._cuda_getDeviceCount()
+    else:
+        return 0
 
 
 def current_device():
@@ -216,6 +208,11 @@ def current_stream():
     """Returns a currently selected :class:`Stream`."""
     _lazy_init()
     return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream())
+
+
+def current_blas_handle():
+    """Returns cublasHandle_t pointer to current cuBLAS handle"""
+    return torch._C._cuda_getCurrentBlasHandle()
 
 
 def _host_allocator():
@@ -242,20 +239,30 @@ from .random import *
 from ..tensor import _TensorBase
 from ..storage import _StorageBase
 
+
+def _dummy_type(name):
+    def init_err(self):
+        class_name = self.__class__.__name__
+        raise RuntimeError(
+            "Tried to instantiate dummy base class {}".format(class_name))
+    return type(storage_name, (object,), {"__init__": init_err})
+
+
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
     for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
-        torch._C.__dict__[storage_name] = type(storage_name, (object,), {})
-        torch._C.__dict__[tensor_name] = type(tensor_name, (object,), {})
+        torch._C.__dict__[storage_name] = _dummy_type(storage_name)
+        torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
-    torch._C.__dict__['_CudaStreamBase'] = type('CudaStreamBase', (object,), {})
+    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
 
 
 class _CudaBase(object):
     is_cuda = True
+    is_sparse = False
 
     def type(self, *args, **kwargs):
         with device(self.get_device()):
@@ -399,4 +406,5 @@ torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 torch._tensor_classes.add(HalfTensor)
 
+from . import sparse
 from .streams import Stream, Event

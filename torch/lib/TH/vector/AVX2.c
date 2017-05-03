@@ -1,10 +1,12 @@
+#if defined(__AVX2__)
 #ifndef _MSC_VER
 #include <x86intrin.h>
 #else
 #include <intrin.h>
 #endif
+#include "AVX2.h"
 
-static void THDoubleVector_cadd_AVX2(double *z, const double *x, const double *y, const double c, const ptrdiff_t n) {
+void THDoubleVector_cadd_AVX2(double *z, const double *x, const double *y, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256d YMM15 = _mm256_set_pd(c, c, c, c);
   __m256d YMM0, YMM1, YMM2, YMM3;
@@ -23,7 +25,7 @@ static void THDoubleVector_cadd_AVX2(double *z, const double *x, const double *y
   }
 }
 
-static void THFloatVector_cadd_AVX2(float *z, const float *x, const float *y, const float c, const ptrdiff_t n) {
+void THFloatVector_cadd_AVX2(float *z, const float *x, const float *y, const float c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256 YMM15 = _mm256_set_ps(c, c, c, c, c, c, c, c);
   __m256 YMM0, YMM1, YMM2, YMM3;
@@ -42,3 +44,4 @@ static void THFloatVector_cadd_AVX2(float *z, const float *x, const float *y, co
   }
 }
 
+#endif // defined(__AVX2__)

@@ -4,6 +4,7 @@ from ._utils import _type, _cuda, _range
 
 class _StorageBase(object):
     is_cuda = False
+    is_sparse = False
 
     def __str__(self):
         content = ' ' + '\n '.join(str(self[i]) for i in _range(len(self)))
@@ -99,6 +100,17 @@ class _StorageBase(object):
         else:
             self._share_fd_()
         return self
+
+    @classmethod
+    def _new_shared(cls, size):
+        """Creates a new storage in shared memory with the same data type"""
+        from torch.multiprocessing import get_sharing_strategy
+        if cls.is_cuda:
+            return cls(size)
+        elif get_sharing_strategy() == 'file_system':
+            return cls._new_using_filename(size)
+        else:
+            return cls._new_using_fd(size)
 
 
 _StorageBase.type = _type

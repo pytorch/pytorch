@@ -16,6 +16,7 @@ TH_API void THLapack_(geev)(char jobvl, char jobvr, int n, real *a, int lda, rea
 TH_API void THLapack_(gesvd)(char jobu, char jobvt, int m, int n, real *a, int lda, real *s, real *u, int ldu, real *vt, int ldvt, real *work, int lwork, int *info);
 /* LU decomposition */
 TH_API void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info);
+TH_API void THLapack_(getrs)(char trans, int n, int nrhs, real *a, int lda, int *ipiv, real *b, int ldb, int *info);
 /* Matrix Inverse */
 TH_API void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int lwork, int* info);
 

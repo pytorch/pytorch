@@ -75,13 +75,13 @@ def autograd_sharing(queue, ready, master_modified):
     ready.set()
     master_modified.wait()
 
-    expected_var = torch.range(1, 25).view(5, 5)
+    expected_var = torch.arange(1, 26).view(5, 5)
     expected_var[0, 0] = 1000
     is_ok = var.data.equal(expected_var)
     var.data[:] = torch.ones(5, 5)
 
-    is_ok &= var.grad.data.equal(torch.zeros(5, 5))
-    var.grad.data[:] = torch.ones(5, 5)
+    is_ok &= var.grad is None
+    var._grad = Variable(torch.ones(5, 5), requires_grad=False)
 
     queue.put(is_ok)
 
@@ -149,9 +149,6 @@ class leak_checker(object):
 
 class TestMultiprocessing(TestCase):
 
-    def __init__(self, *args, **kwargs):
-        super(TestMultiprocessing, self).__init__(*args, **kwargs)
-
     def _test_sharing(self, ctx=mp, type=torch.FloatTensor, repeat=1):
         def test_fill():
             x = torch.zeros(5, 5).type(type)
@@ -160,9 +157,11 @@ class TestMultiprocessing(TestCase):
             data = [x, x[:, 1]]
             q.put(data)
             p = ctx.Process(target=simple_fill, args=(q, e))
+            p.daemon = True
             lc.check_pid(p.pid)
             p.start()
-            e.wait()
+            e.wait(10)
+            self.assertTrue(e.is_set())
             self.assertTrue(data[0].eq(4).all())
             self.assertTrue(data[1].eq(4).all())
             p.join(1)
@@ -172,6 +171,7 @@ class TestMultiprocessing(TestCase):
             q = ctx.Queue()
             e = ctx.Event()
             p = ctx.Process(target=send_tensor, args=(q, e, type))
+            p.daemon = True
             lc.check_pid(p.pid)
             p.start()
             t1 = q.get()
@@ -183,7 +183,7 @@ class TestMultiprocessing(TestCase):
             self.assertFalse(p.is_alive())
 
         with leak_checker(self) as lc:
-            for i in range(repeat):
+            for _ in range(repeat):
                 test_fill()
                 test_receive()
 
@@ -193,7 +193,7 @@ class TestMultiprocessing(TestCase):
             data = [x.storage(), x.storage()[1:4], x, x[2], x[:, 1]]
             q = ctx.Queue()
             q.put(data)
-            new_data = q.get()
+            new_data = q.get(timeout=1)
             self.assertEqual(new_data, data, 0)
             storage_cdata = data[0]._cdata
             self.assertEqual(new_data[0]._cdata, storage_cdata)
@@ -264,15 +264,15 @@ class TestMultiprocessing(TestCase):
             q.get()
 
         with fs_sharing(), leak_checker(self) as lc:
-            for i in range(TEST_REPEATS):
+            for _ in range(TEST_REPEATS):
                 queue_put()
 
     def test_inherit_tensor(self):
         class SubProcess(mp.Process):
-
             def __init__(self, tensor):
                 super(SubProcess, self).__init__()
                 self.tensor = tensor
+                self.daemon = True
 
             def run(self):
                 self.tensor.add_(3)
@@ -280,7 +280,7 @@ class TestMultiprocessing(TestCase):
         t = torch.zeros(5, 5)
         p = SubProcess(t.share_memory_())
         p.start()
-        p.join()
+        p.join(1)
         self.assertEqual(t, torch.ones(5, 5) * 3, 0)
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
@@ -296,7 +296,7 @@ class TestMultiprocessing(TestCase):
         ctx = mp.get_context('spawn')
         tensors = []
         for i in range(5):
-            tensors += [torch.range(i * 5, (i * 5) + 4).cuda()]
+            tensors += [torch.arange(i * 5, (i + 1) * 5).cuda()]
 
         inq = ctx.Queue()
         outq = ctx.Queue()
@@ -311,7 +311,7 @@ class TestMultiprocessing(TestCase):
 
         for i, tensor in enumerate(tensors):
             v, device, tensor_size, storage_size = results[i]
-            self.assertEqual(v, torch.range(i * 5, (i * 5) + 4).sum())
+            self.assertEqual(v, torch.arange(i * 5, (i + 1) * 5).sum())
             self.assertEqual(device, 0)
             self.assertEqual(tensor_size, 5)
             self.assertEqual(storage_size, 5)
@@ -357,8 +357,9 @@ class TestMultiprocessing(TestCase):
         master_modified = mp.Event()
         queue = mp.Queue()
         p = mp.Process(target=autograd_sharing, args=(queue, ready, master_modified))
+        p.daemon = True
         p.start()
-        var.grad.data.zero_()
+        var._grad = Variable(torch.zeros(5, 5), requires_grad=False)
         queue.put(var)
 
         ready.wait()
@@ -371,7 +372,8 @@ class TestMultiprocessing(TestCase):
 
         self.assertEqual(var.data, torch.ones(5, 5))
         self.assertEqual(var.grad.data, torch.ones(5, 5) * 4)
-        p.join()
+        p.join(1)
+        self.assertFalse(p.is_alive())
 
     def test_variable_sharing(self):
         configs = [
@@ -380,13 +382,13 @@ class TestMultiprocessing(TestCase):
             (False, True),
         ]
         for requires_grad, volatile in configs:
-            var = Variable(torch.range(1, 25).view(5, 5),
+            var = Variable(torch.arange(1, 26).view(5, 5),
                            requires_grad=requires_grad,
                            volatile=volatile)
             self._test_autograd_sharing(var)
 
     def test_parameter_sharing(self):
-        param = Parameter(torch.range(1, 25).view(5, 5))
+        param = Parameter(torch.arange(1, 26).view(5, 5))
         self._test_autograd_sharing(param)
 
     def _test_is_shared(self):

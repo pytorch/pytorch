@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Generator.hpp"
 #include "Storage.hpp"
 #include "Type.hpp"
 
@@ -25,6 +26,10 @@ struct Tensor {
   virtual Tensor* clone() const = 0;
   virtual Tensor* clone_shallow() = 0;
   virtual std::unique_ptr<Tensor> contiguous() const = 0;
+  virtual Tensor* newSelect(int dimension, long sliceIndex) const = 0;
+  virtual Tensor* newNarrow(int dimension, long firstIndex, long size) const = 0;
+  virtual Tensor* newTranspose(int dimension1, int dimension2) const = 0;
+  virtual Tensor* newUnfold(int dimension, long size, long step) const = 0;
 
   virtual int nDim() const = 0;
   virtual long_range sizes() const = 0;
@@ -63,10 +68,32 @@ struct Tensor {
   virtual Tensor& select(const Tensor& src, int dimension, long sliceIndex) = 0;
   virtual Tensor& transpose(const Tensor& src, int dimension1, int dimension2) = 0;
   virtual Tensor& unfold(const Tensor& src, int dimension, long size, long step) = 0;
+  virtual Tensor& squeeze(const Tensor& src) = 0;
   virtual Tensor& squeeze(const Tensor& src, int dimension) = 0;
   virtual Tensor& unsqueeze(const Tensor& src, int dimension) = 0;
 
   virtual Tensor& copy(const Tensor& src) = 0;
+  virtual Tensor& gesv(const Tensor& ra, const Tensor& b, const Tensor& a) = 0;
+  virtual Tensor& trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                        const char *uplo, const char *trans, const char *diag) = 0;
+  virtual Tensor& gels(const Tensor& ra, const Tensor& b, const Tensor& a) = 0;
+  virtual Tensor& syev(const Tensor& rv, const Tensor& a,
+                       const char *jobz, const char *uplo) = 0;
+  virtual Tensor& geev(const Tensor& rv, const Tensor& a, const char *jobvr) = 0;
+  virtual Tensor& gesvd(const Tensor& rs, const Tensor& rv,
+                        const Tensor& a, const char *jobu) = 0;
+  virtual Tensor& gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                         const Tensor& a, const char *jobu) = 0;
+  virtual Tensor& getri(const Tensor& a) = 0;
+  virtual Tensor& potrf(const Tensor& a, const char *uplo) = 0;
+  virtual Tensor& potrs(const Tensor& b, const Tensor& a, const char *uplo) = 0;
+  virtual Tensor& potri(const Tensor& a, const char *uplo) = 0;
+  virtual Tensor& qr(const Tensor& rr, const Tensor& a) = 0;
+  virtual Tensor& geqrf(const Tensor& rtau, const Tensor& a) = 0;
+  virtual Tensor& orgqr(const Tensor& a, const Tensor& tau) = 0;
+  virtual Tensor& ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                        const char *side, const char *trans) = 0;
+
   virtual Tensor& cat(const std::vector<Tensor*>& src, int dimension) = 0;
   virtual Tensor& gather(const Tensor& src, int dimension, const Tensor& index) = 0;
   virtual Tensor& scatter(int dimension, const Tensor& index, const Tensor& src) = 0;
@@ -93,9 +120,18 @@ struct Tensor {
   virtual Tensor& cmin(const Tensor& src1, const Tensor& src2) = 0;
   virtual Tensor& zero() = 0;
 
+  virtual Tensor& maskedCopy(const Tensor& mask, const Tensor& src) = 0;
+  virtual Tensor& maskedSelect(const Tensor& mask, const Tensor& src) = 0;
+  // NOTE like in byte comparison operations, the order of arguments
+  // in nonzero is reversed compared to TH
+  virtual Tensor& nonzero(const Tensor& subscript) = 0;
+  virtual Tensor& indexSelect(const Tensor& src, int dim, const Tensor& index) = 0;
+  virtual Tensor& indexCopy(int dim, const Tensor& index, const Tensor& src) = 0;
+  virtual Tensor& indexAdd(int dim, const Tensor& index, const Tensor& src) = 0;
+
   virtual Tensor& diag(const Tensor& src, int k) = 0;
   virtual Tensor& eye(long n, long m) = 0;
-  // virtual Tensor& randperm() = 0; TODO
+  virtual Tensor& randperm(const Generator& _generator, long n) = 0;
   virtual Tensor& sort(const Tensor& ri, const Tensor& src,
                        int dimension, int desc) = 0;
   virtual Tensor& topk(const Tensor& ri, const Tensor& src,
@@ -128,6 +164,45 @@ struct Tensor {
   virtual Tensor& asin(const Tensor& src) = 0;
   virtual Tensor& sinh(const Tensor& src) = 0;
 
+  virtual Tensor& tan(const Tensor& src) = 0;
+  virtual Tensor& atan(const Tensor& src) = 0;
+  virtual Tensor& atan2(const Tensor& src1, const Tensor& src2) = 0;
+  virtual Tensor& tanh(const Tensor& src) = 0;
+  virtual Tensor& sqrt(const Tensor& src) = 0;
+  virtual Tensor& rsqrt(const Tensor& src) = 0;
+  virtual Tensor& ceil(const Tensor& src) = 0;
+  virtual Tensor& floor(const Tensor& src) = 0;
+  virtual Tensor& round(const Tensor& src) = 0;
+  virtual Tensor& trunc(const Tensor& src) = 0;
+  virtual Tensor& frac(const Tensor& src) = 0;
+  virtual Tensor& mean(const Tensor& src, int dimension) = 0;
+  virtual Tensor& std(const Tensor& src, int dimension, int flag) = 0;
+  virtual Tensor& var(const Tensor& src, int dimension, int flag) = 0;
+  virtual Tensor& rand(const Generator& _generator, THLongStorage *size) = 0;
+  virtual Tensor& randn(const Generator& _generator, THLongStorage *size) = 0;
+
+  virtual int logicalall() = 0;
+  virtual int logicalany() = 0;
+  virtual Tensor& random(const Generator& _generator) = 0;
+  virtual Tensor& geometric(const Generator& _generator, double p) = 0;
+  virtual Tensor& bernoulli(const Generator& _generator, double p) = 0;
+  virtual Tensor& bernoulli_FloatTensor(const Generator& _generator, const Tensor& p) = 0;
+  virtual Tensor& bernoulli_DoubleTensor(const Generator& _generator, const Tensor& p) = 0;
+  virtual Tensor& uniform(const Generator& _generator, double a, double b) = 0;
+  virtual Tensor& normal(const Generator& _generator, double mean, double stdv) = 0;
+  virtual Tensor& exponential(const Generator& _generator, double lambda) = 0;
+  virtual Tensor& cauchy(const Generator& _generator, double median, double sigma) = 0;
+  virtual Tensor& logNormal(const Generator& _generator, double mean, double stdv) = 0;
+
+  // Note: the order of *Tensor and *Prob_dist is reversed compared to
+  // the declarations in TH/generic/THTensorMath.h, so for instance
+  // the call:
+  // THRealTensor_multinomial(r, _generator, prob_dist, n_sample, with_replacement)
+  // is equivalent to `prob_dist->multinomial(r, _generator, n_sample, with_replacement)`.
+  // It is done this way so that the first argument can be casted onto a float tensor type.
+  virtual Tensor& multinomial(const Tensor& r, const Generator& _generator,
+                              int n_sample, int with_replacement) = 0;
+
   virtual thpp::Type type() const = 0;
   virtual bool isCuda() const = 0;
   virtual bool isSparse() const = 0;
@@ -140,8 +215,10 @@ struct TensorScalarInterface : public Tensor {
   using Tensor::cadd;
   using scalar_type = real;
   virtual TensorScalarInterface& fill(scalar_type value) = 0;
-
-  virtual TensorScalarInterface& scatterFill(int dimension, const Tensor& index, scalar_type value) = 0;
+  virtual TensorScalarInterface& maskedFill(const Tensor& mask, scalar_type value) = 0;
+  virtual TensorScalarInterface& indexFill(int dim, const Tensor& index, scalar_type value) = 0;
+  virtual TensorScalarInterface& scatterFill(int dimension, const Tensor& index,
+                                             scalar_type value) = 0;
   virtual scalar_type dot(const Tensor& source) = 0;
   virtual scalar_type minall() = 0;
   virtual scalar_type maxall() = 0;
@@ -202,6 +279,24 @@ struct TensorScalarInterface : public Tensor {
   virtual TensorScalarInterface& geValueT(const Tensor& t, scalar_type value) = 0;
   virtual TensorScalarInterface& neValueT(const Tensor& t, scalar_type value) = 0;
   virtual TensorScalarInterface& eqValueT(const Tensor& t, scalar_type value) = 0;
+
+  virtual TensorScalarInterface& pow(const Tensor& src, scalar_type value) = 0;
+  virtual TensorScalarInterface& tpow(scalar_type value, const Tensor& src) = 0;
+  virtual TensorScalarInterface& lerp(const Tensor& a, const Tensor& b, scalar_type weight) = 0;
+  virtual TensorScalarInterface& norm(const Tensor& src, scalar_type value, int dimension) = 0;
+  virtual TensorScalarInterface& renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) = 0;
+  virtual TensorScalarInterface& histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
+  virtual TensorScalarInterface& bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
+
+  virtual scalar_type dist(const Tensor& src, scalar_type value) = 0;
+  virtual scalar_type meanall() = 0;
+  virtual scalar_type varall() = 0;
+  virtual scalar_type stdall() = 0;
+  virtual scalar_type normall(scalar_type value) = 0;
+  virtual TensorScalarInterface& linspace(scalar_type a, scalar_type b, long n) = 0;
+  virtual TensorScalarInterface& logspace(scalar_type a, scalar_type b, long n) = 0;
+  virtual TensorScalarInterface& pstrf(const Tensor& rpiv, const Tensor& a,
+                                       const char *uplo, scalar_type tol) = 0;
 };
 
 using FloatTensor = TensorScalarInterface<double>;

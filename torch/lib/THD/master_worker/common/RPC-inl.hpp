@@ -21,21 +21,28 @@ inline void _appendType(ByteArray& str, thpp::Type _type) {
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
-    std::false_type is_tensor, std::false_type is_storage) {
+    std::false_type is_generator, std::false_type is_tensor, std::false_type is_storage) {
   _appendType(str, thpp::type_traits<T>::type);
   _appendScalar<T>(str, arg);
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
-    std::true_type is_tensor, std::false_type is_storage) {
+    std::true_type is_generator, std::false_type is_tensor, std::false_type is_storage) {
+  _appendType(str, thpp::Type::GENERATOR);
+  _appendScalar<object_id_type>(str, arg->generator_id);
+}
+
+template<typename T>
+inline void __appendData(ByteArray& str, const T& arg,
+    std::false_type is_generator, std::true_type is_tensor, std::false_type is_storage) {
   _appendType(str, thpp::Type::TENSOR);
   _appendScalar<object_id_type>(str, arg->tensor_id);
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
-    std::false_type is_tensor, std::true_type is_storage) {
+    std::false_type is_generator, std::false_type is_tensor, std::true_type is_storage) {
   _appendType(str, thpp::Type::STORAGE);
   _appendScalar<object_id_type>(str, arg->storage_id);
 }
@@ -45,6 +52,7 @@ inline void _appendData(ByteArray& str, const T& arg) {
   __appendData(
       str,
       arg,
+      is_any_of<T, THDGeneratorPtrTypes>(),
       is_any_of<T, THDTensorPtrTypes>(),
       is_any_of<T, THDStoragePtrTypes>()
   );
@@ -65,6 +73,7 @@ inline void _appendData(ByteArray& str, const std::vector<T>& arg) {
     __appendData(
         str,
         arg[i],
+        is_any_of<T, THDGeneratorPtrTypes>(),
         is_any_of<T, THDTensorPtrTypes>(),
         is_any_of<T, THDStoragePtrTypes>()
     );

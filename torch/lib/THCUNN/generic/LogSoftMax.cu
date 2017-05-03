@@ -40,13 +40,13 @@ void THNN_(LogSoftMax_updateOutput)(
     width = THCTensor_(size)(state, input, 2);
 
     // create contiguous tensor with cuda layout from tensor with torch layout
+    THCTensor *tinput = THCTensor_(new)(state);
     // C x H x W -> W x H x C
-    THCTensor_(transpose)(state, input, input, 0, 2);
+    THCTensor_(transpose)(state, tinput, input, 0, 2);
     // W x H x C -> H x W x C
-    THCTensor_(transpose)(state, input, input, 0, 1);
-    THCTensor *transposedInput = THCTensor_(newContiguous)(state, input);
-    THCTensor_(transpose)(state, input, input, 0, 1);
-    THCTensor_(transpose)(state, input, input, 0, 2);
+    THCTensor_(transpose)(state, tinput, tinput, 0, 1);
+    THCTensor *transposedInput = THCTensor_(newContiguous)(state, tinput);
+    THCTensor_(free)(state, tinput);
     input = transposedInput;
   }
   else if (ndims == 4)
@@ -59,12 +59,12 @@ void THNN_(LogSoftMax_updateOutput)(
 
     // create contiguous tensor with cuda layout from tensor with torch layout
     // B x C x H x W -> B x W x H x C
-    THCTensor_(transpose)(state, input, input, 1, 3);
+    THCTensor *tinput = THCTensor_(new)(state);
+    THCTensor_(transpose)(state, tinput, input, 1, 3);
     // B x W x H x C -> B x H x W x C
-    THCTensor_(transpose)(state, input, input, 1, 2);
-    THCTensor *transposedInput = THCTensor_(newContiguous)(state, input);
-    THCTensor_(transpose)(state, input, input, 1, 2);
-    THCTensor_(transpose)(state, input, input, 1, 3);
+    THCTensor_(transpose)(state, tinput, tinput, 1, 2);
+    THCTensor *transposedInput = THCTensor_(newContiguous)(state, tinput);
+    THCTensor_(free)(state, tinput);
     input = transposedInput;
   }
   else

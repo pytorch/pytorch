@@ -3,10 +3,13 @@
 set -e
 
 WITH_CUDA=0
+WITH_NCCL=0
 WITH_DISTRIBUTED=0
 for arg in "$@"; do
     if [[ "$arg" == "--with-cuda" ]]; then
         WITH_CUDA=1
+    elif [[ "$arg" == "--with-nccl" ]]; then
+        WITH_NCCL=1
     elif [[ "$arg" == "--with-distributed" ]]; then
         WITH_DISTRIBUTED=1
     else
@@ -20,12 +23,13 @@ cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
 BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
   -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
+  -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
   -I$INSTALL_DIR/include/THPP "
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
-if [[ $(uname) == 'Darwin' ]]; then
-    LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
+if [[ $(uname) == 'Darwin' ]]; then    
+    LDFLAGS="$LDFLAGS -Qunused-arguments -Wl,-rpath,@loader_path"
     LD_POSTFIX=".1.dylib"
     LD_POSTFIX_UNVERSIONED=".dylib"
 else
@@ -33,6 +37,12 @@ else
 fi
 C_FLAGS="$BASIC_C_FLAGS $LDFLAGS"
 function build() {
+  local extra_args
+  if [[ $# -lt 2 ]]; then
+    extra_args=""
+  else
+    extra_args="$2"
+  fi
   mkdir -p build/$1
   cd build/$1
   cmake ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
@@ -47,17 +57,22 @@ function build() {
               -DTHPP_LIBRARIES="$INSTALL_DIR/lib/libTHPP$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
               -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
+              -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
               -DTH_SO_VERSION=1 \
               -DTHC_SO_VERSION=1 \
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
               -DNO_CUDA=$((1-$WITH_CUDA)) \
-              -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release)
+              -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
+              $2
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
-  rm -rf $INSTALL_DIR/lib/lib$1$LD_POSTFIX_UNVERSIONED
+  local lib_prefix=$INSTALL_DIR/lib/lib$1
+  if [ -f "$lib_prefix$LD_POSTFIX" ]; then
+    rm -rf -- "$lib_prefix$LD_POSTFIX_UNVERSIONED"
+  fi
 
   if [[ $(uname) == 'Darwin' ]]; then
     cd tmp_install/lib
@@ -77,7 +92,8 @@ function build_nccl() {
                -DCMAKE_C_FLAGS="$C_FLAGS" \
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
-   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
+   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
+   ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
    cd ../..
 }
 
@@ -89,11 +105,9 @@ if [[ $WITH_CUDA -eq 1 ]]; then
     build THC
     build THCS
     build THCUNN
-    if [[ $(uname) != 'Darwin' ]]; then
-        if [[ `ldconfig -p | grep libnccl` == '' ]]; then
-          build_nccl
-        fi
-    fi
+fi
+if [[ $WITH_NCCL -eq 1 ]]; then
+    build_nccl
 fi
 
 build THPP
@@ -101,6 +115,11 @@ CPP_FLAGS=" -std=c++11 "
 build libshm
 
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
+    GLOO_FLAGS=""
+    if [[ $WITH_CUDA -eq 1 ]]; then
+        GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
+    fi
+    build gloo "$GLOO_FLAGS"
     build THD
 fi
 

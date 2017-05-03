@@ -1,12 +1,13 @@
 import torch
 from . import _tensor_str
-from ._utils import _type, _cuda, _range
+from ._utils import _type, _cuda, _range, _rebuild_tensor
 import sys
 
 
 class _TensorBase(object):
     #: bool: True if this is a CUDA tensor
     is_cuda = False
+    is_sparse = False
 
     def new(self, *args, **kwargs):
         """Constructs a new tensor of the same data type."""
@@ -103,7 +104,9 @@ class _TensorBase(object):
         return new_tensor
 
     def __reduce__(self):
-        return (type(self), (), self.__getstate__())
+        # NOTE: _rebuild_tensor does not call __setstate__
+        args = self.__getstate__()
+        return (_rebuild_tensor, args)
 
     def __getstate__(self):
         return (self.storage(),
@@ -142,14 +145,14 @@ class _TensorBase(object):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
     def split(self, split_size, dim=0):
-        """Splits this tensor into a list of tensors.
+        """Splits this tensor into a tuple of tensors.
 
         See :func:`torch.split`.
         """
         return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
-        """Splits this tensor into a list of tensors.
+        """Splits this tensor into a tuple of tensors.
 
         See :func:`torch.chunk`.
         """
@@ -437,6 +440,11 @@ class _TensorBase(object):
                 type(other).__name__ != 'ByteTensor'):
             raise RuntimeError('logical operations are supported on ByteTensors only')
         return self.copy_((self + other).eq(1))
+
+    def __invert__(self):
+        if type(self).__name__ != 'ByteTensor':
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return (1 - self)
 
     def __hash__(self):
         return id(self)

@@ -3,12 +3,12 @@
 #include "THP.h"
 
 // Adapted from fblualib
-void* ObjectPtrAllocator::malloc(long size) {
+void* ObjectPtrAllocator::malloc(ptrdiff_t size) {
   return allocator->malloc(allocatorContext, size);
 }
 
 
-void* ObjectPtrAllocator::realloc(void* ptr, long size) {
+void* ObjectPtrAllocator::realloc(void* ptr, ptrdiff_t size) {
   return allocator->realloc(allocatorContext, ptr, size);
 }
 
@@ -29,7 +29,7 @@ void StorageWeakRefAllocator::free(void* ptr) {
 
 
 #ifdef WITH_NUMPY
-void* NumpyArrayAllocator::realloc(void* ptr, long size) {
+void* NumpyArrayAllocator::realloc(void* ptr, ptrdiff_t size) {
   PyArrayObject *array_ptr = (PyArrayObject*)object.get();
   if (array_ptr && ptr == PyArray_DATA(array_ptr)) {
     void* newPtr = this->malloc(size);
@@ -44,22 +44,20 @@ void* NumpyArrayAllocator::realloc(void* ptr, long size) {
 
 void NumpyArrayAllocator::free(void* ptr) {
   PyArrayObject *array_ptr = (PyArrayObject*)object.get();
-  if (array_ptr && ptr == PyArray_DATA(array_ptr)) {
-    object = nullptr;
-    return;
-  }
-  allocator->free(allocatorContext, ptr);
+  if (!array_ptr || ptr != PyArray_DATA(array_ptr))
+    throw std::logic_error("invalid call to NumpyArrayAllocator::free()");
+  object = nullptr;
   delete this;
 }
 #endif
 
 template<typename T>
-static void * malloc_wrapper(void *ctx, long size) {
+static void * malloc_wrapper(void *ctx, ptrdiff_t size) {
   return ((T*)ctx)->malloc(size);
 }
 
 template<typename T>
-static void * realloc_wrapper(void *ctx, void *ptr, long size) {
+static void * realloc_wrapper(void *ctx, void *ptr, ptrdiff_t size) {
   return ((T*)ctx)->realloc(ptr, size);
 }
 

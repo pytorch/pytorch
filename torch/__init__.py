@@ -31,6 +31,13 @@ __all__ = [
 # automatically filled by the dynamic loader.
 import os as _dl_flags
 
+# if we have numpy, it *must* be imported before the call to setdlopenflags()
+# or there is risk that later c modules will segfault when importing numpy
+try:
+    import numpy as np
+except:
+    pass
+
 # first check if the os package has the required flags
 if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
     try:
@@ -81,7 +88,7 @@ def is_tensor(obj):
     Args:
         obj (Object): Object to test
     """
-    return obj.__class__ in _tensor_classes
+    return type(obj) in _tensor_classes
 
 
 def is_storage(obj):
@@ -90,7 +97,7 @@ def is_storage(obj):
     Args:
         obj (Object): Object to test
     """
-    return obj.__class__ in _storage_classes
+    return type(obj) in _storage_classes
 
 
 def set_default_tensor_type(t):
@@ -275,19 +282,21 @@ set_default_tensor_type('torch.FloatTensor')
 
 from .functional import *
 
+
 ################################################################################
 # Initialize extension
 ################################################################################
 
+def manager_path():
+    import os
+    path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
+    if not os.path.exists(path):
+        raise RuntimeError("Unable to find torch_shm_manager at " + path)
+    return path.encode('utf-8')
+
+
 # Shared memory manager needs to know the exact location of manager executable
-import os
-manager_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
-if sys.version_info[0] >= 3:
-    manager_path = bytes(manager_path, 'ascii')
-
-_C._initExtension(manager_path)
-
-del os
+_C._initExtension(manager_path())
 del manager_path
 
 ################################################################################
@@ -326,6 +335,8 @@ import torch.autograd
 import torch.nn
 import torch.optim
 import torch.multiprocessing
+import torch.sparse
+_C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs

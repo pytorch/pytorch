@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import traceback
 import torch
+import torch.utils.data
 import torch.cuda
 import warnings
 from torch.autograd import Variable
@@ -105,6 +106,44 @@ class DatasetMock(object):
 
     def __len__(self):
         return 10
+
+
+class TestDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = torch.randn(5, 3, 3, 2)
+        self.batch_size = 3
+
+    def test_single_keep(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=0,
+                                                 drop_last=False)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 2)
+
+    def test_single_drop(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=0,
+                                                 drop_last=True)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 1)
+
+    def test_multi_keep(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=2,
+                                                 drop_last=False)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 2)
+
+    def test_multi_drop(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=2,
+                                                 drop_last=True)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 1)
 
 
 class TestTrainer(TestCase):
@@ -297,7 +336,7 @@ class TestLuaReader(TestCase):
 
     @classmethod
     def init(cls):
-        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_modules.t7'
+        DATA_URL = 'https://download.pytorch.org/test_data/legacy_modules.t7'
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
         test_file_path = os.path.join(data_dir, 'legacy_modules.t7')
         succ = download_file(DATA_URL, test_file_path)

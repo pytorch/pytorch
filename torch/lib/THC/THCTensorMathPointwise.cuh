@@ -415,11 +415,17 @@ struct TensorDivOp<half> {
 template <typename T>
 struct TensorCRemainderOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = *in != 0 ? *out - *in * (*out / *in) : NAN;
+    *out =  *out % *in;
+    if ((*out * *in)<0){
+      *out += *in;
+    }
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in2 != 0 ? *in1 - *in2 * (*in1 / *in2) : NAN;
+    *out = *in1 % *in2;
+    if ((*out * *in2)<0){
+      *out += *in2;
+    }
   }
 };
 

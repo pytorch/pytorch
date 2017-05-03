@@ -35,7 +35,7 @@ Containers
     :members:
 
 :hidden:`ParameterList`
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ParameterList
     :members:
@@ -150,6 +150,31 @@ Pooling Layers
 .. autoclass:: LPPool2d
     :members:
 
+:hidden:`AdaptiveMaxPool1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveMaxPool1d
+    :members:
+
+:hidden:`AdaptiveMaxPool2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveMaxPool2d
+    :members:       
+
+:hidden:`AdaptiveAvgPool1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveAvgPool1d
+    :members:
+
+:hidden:`AdaptiveAvgPool2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveAvgPool2d
+    :members:
+
+       
 Non-linear Activations
 ----------------------------------
 
@@ -277,6 +302,23 @@ Normalization layers
 .. autoclass:: BatchNorm3d
     :members:
 
+:hidden:`InstanceNorm1d`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: InstanceNorm1d
+    :members:
+
+:hidden:`InstanceNorm2d`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: InstanceNorm2d
+    :members:
+
+:hidden:`InstanceNorm3d`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: InstanceNorm3d
+    :members:
 
 Recurrent layers
 ----------------------------------
@@ -356,6 +398,15 @@ Sparse layers
 ~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Embedding
+    :members:
+
+Distance functions
+----------------------------------
+
+:hidden:`PairwiseDistance`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: PairwiseDistance
     :members:
 
 
@@ -450,6 +501,12 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: MultiMarginLoss
+    :members:
+
+:hidden:`TripletMarginLoss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TripletMarginLoss
     :members:
 
 
@@ -605,6 +662,27 @@ Pooling functions
 
 .. autofunction:: lp_pool2d
 
+:hidden:`adaptive_max_pool1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_max_pool1d
+
+:hidden:`adaptive_max_pool2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_max_pool2d
+
+:hidden:`adaptive_avg_pool1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_avg_pool1d
+
+:hidden:`adaptive_avg_pool2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_avg_pool2d
+
+   
 Non-linear activation functions
 -------------------------------
 
@@ -728,6 +806,15 @@ Dropout functions
 
 .. autofunction:: dropout
 
+Distance functions
+----------------------------------
+
+:hidden:`pairwise_distance`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pairwise_distance
+
+
 Loss functions
 --------------
 
@@ -757,6 +844,11 @@ Loss functions
 
 .. autofunction:: smooth_l1_loss
 
+:hidden:`triplet_margin_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: triplet_margin_loss
+
 Vision functions
 ----------------
 
@@ -764,3 +856,25 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pixel_shuffle
+
+:hidden:`pad`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pad
+
+torch.nn.init
+=============
+
+.. currentmodule:: torch.nn.init
+.. autofunction:: calculate_gain
+.. autofunction:: uniform
+.. autofunction:: normal
+.. autofunction:: constant
+.. autofunction:: eye
+.. autofunction:: dirac
+.. autofunction:: xavier_uniform
+.. autofunction:: xavier_normal
+.. autofunction:: kaiming_uniform
+.. autofunction:: kaiming_normal
+.. autofunction:: orthogonal
+.. autofunction:: sparse

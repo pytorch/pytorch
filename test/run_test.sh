@@ -6,7 +6,7 @@ COVERAGE=0
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         -p|--python) PYCMD=$2; shift 2 ;;
-        -c|--coverage) COVERAGE=1; shift 2 ;;
+        -c|--coverage) COVERAGE=1; shift 1;;
         --) shift; break ;;
         *) echo "Invalid argument: $1!" ; exit 1 ;;
     esac
@@ -75,6 +75,11 @@ if [[ "$TEST_DISTRIBUTED" -eq 1 ]]; then
     BACKEND=tcp WORLD_SIZE=3 $PYCMD ./test_distributed.py
     distributed_tear_down
 
+    echo "Running distributed tests for the Gloo backend"
+    distributed_set_up
+    BACKEND=gloo WORLD_SIZE=3 $PYCMD ./test_distributed.py
+    distributed_tear_down
+
     echo "Running distributed tests for the MPI backend"
     distributed_set_up
     BACKEND=mpi mpiexec -n 3 $PYCMD ./test_distributed.py
@@ -82,8 +87,7 @@ if [[ "$TEST_DISTRIBUTED" -eq 1 ]]; then
 fi
 ################################################################################
 
-if [ "$1" == "coverage" ];
-then
+if [[ $COVERAGE -eq 1 ]]; then
     coverage combine
     coverage html
 fi

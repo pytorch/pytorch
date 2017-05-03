@@ -221,7 +221,7 @@ See :func:`torch.bmm`
 
 add_docstr(torch._C.FloatTensorBase.cauchy_,
            """
-cauchy_(generator=None, median=0, sigma=1) -> Tensor
+cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
 
 Fills the tensor with numbers drawn from the Cauchy distribution:
 
@@ -362,7 +362,7 @@ Returns the number of dimensions of this tensor.
 
 add_docstr(torch._C.FloatTensorBase.dist,
            """
-dist(other, p=2) -> Tensor
+dist(other, p=2) -> float
 
 See :func:`torch.dist`
 """)
@@ -445,7 +445,7 @@ In-place version of :meth:`~Tensor.exp`
 
 add_docstr(torch._C.FloatTensorBase.exponential_,
            """
-exponential_(generator=None, lambd=1) -> Tensor
+exponential_(lambd=1, *, generator=None) -> Tensor
 
 Fills this tensor with elements drawn from the exponential distribution:
 
@@ -533,7 +533,7 @@ See :func:`torch.gels`
 
 add_docstr(torch._C.FloatTensorBase.geometric_,
            """
-geometric_(generator=None, p) -> Tensor
+geometric_(p, *, generator=None) -> Tensor
 
 Fills this tensor with elements drawn from the geometric distribution:
 
@@ -648,7 +648,7 @@ Example:
 
 add_docstr(torch._C.FloatTensorBase.index_fill_,
            """
-index_fill_(dim, index, tensor) -> Tensor
+index_fill_(dim, index, val) -> Tensor
 
 Fills the elements of the original tensor with value :attr:`val` by selecting
 the indices in the order given in index.
@@ -761,7 +761,7 @@ In-place version of :meth:`~Tensor.log`
 """)
 
 add_docstr(torch._C.FloatTensorBase.log_normal_, u"""
-log_normal_(generator=None, mean=1, std=2)
+log_normal_(mean=1, std=2, *, generator=None)
 
 Fills this tensor with numbers samples from the log-normal distribution
 parameterized by the given mean (\u00B5) and standard deviation (\u03C3). Note that
@@ -895,7 +895,7 @@ In-place version of :meth:`~Tensor.mul`
 
 add_docstr(torch._C.FloatTensorBase.multinomial,
            """
-multinomial(generator=None, num_samples, replacement=False)
+multinomial(num_samples, replacement=False, *, generator=None)
 
 See :func:`torch.multinomial`
 """)
@@ -991,7 +991,7 @@ See :func:`torch.norm`
 
 add_docstr(torch._C.FloatTensorBase.normal_,
            """
-normal_(generator=None, mean=0, std=1)
+normal_(mean=0, std=1, *, generator=None)
 
 Fills this tensor with elements samples from the normal distribution
 parameterized by :attr:`mean` and :attr:`std`.
@@ -1085,11 +1085,11 @@ See :func:`torch.qr`
 
 add_docstr(torch._C.FloatTensorBase.random_,
            """
-random_(generator=None, from=0, to=None)
+random_(from=0, to=None, *, generator=None)
 
 Fills this tensor with numbers sampled from the uniform distribution or
-discrete uniform distribution over [from, to]. If not specified, :attr:`to`
-defaults to the largest value representable by this tensor's data type.
+discrete uniform distribution over [from, to - 1]. If not specified, the
+values are only bounded by this tensor's data type.
 """)
 
 add_docstr(torch._C.FloatTensorBase.reciprocal,
@@ -1590,7 +1590,7 @@ Args:
 
 Example::
 
-    >>> x = torch.range(1, 7)
+    >>> x = torch.arange(1, 8)
     >>> x
 
      1
@@ -1676,6 +1676,36 @@ Example:
     >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
     >>> z.size()
     torch.Size([2, 8])
+""")
+
+add_docstr(torch._C.FloatTensorBase.expand,
+           """
+expand(tensor, sizes) -> Tensor
+
+Returns a new view of the tensor with singleton dimensions expanded
+to a larger size.
+
+Tensor can be also expanded to a larger number of dimensions, and the
+new ones will be appended at the front.
+
+Expanding a tensor does not allocate new memory, but only creates a
+new view on the existing tensor where a dimension of size one is
+expanded to a larger size by setting the ``stride`` to 0. Any dimension
+of size 1 can be expanded to an arbitrary value without allocating new
+memory.
+
+Args:
+    *sizes (torch.Size or int...): The desired expanded size
+
+Example:
+    >>> x = torch.Tensor([[1], [2], [3]])
+    >>> x.size()
+    torch.Size([3, 1])
+    >>> x.expand(3, 4)
+     1  1  1  1
+     2  2  2  2
+     3  3  3  3
+    [torch.FloatTensor of size 3x4]
 """)
 
 add_docstr(torch._C.FloatTensorBase.zero_,

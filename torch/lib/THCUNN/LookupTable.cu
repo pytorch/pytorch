@@ -12,10 +12,7 @@
 #include <thrust/unique.h>
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
-
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
+#include "THCTensorSort.cuh"
 
 const int WARP_SIZE = 32;
 

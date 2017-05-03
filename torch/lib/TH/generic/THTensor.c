@@ -21,14 +21,14 @@ int THTensor_(nDimension)(const THTensor *self)
 long THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor",
-      dim+1, THTensor_(nDimension)(self));
+      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
   return self->size[dim];
 }
 
 long THTensor_(stride)(const THTensor *self, int dim)
 {
-  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor", dim+1,
-      THTensor_(nDimension)(self));
+  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
   return self->stride[dim];
 }
 
@@ -283,6 +283,23 @@ void THTensor_(resize5d)(THTensor *self, long size0, long size1, long size2, lon
     long size[5] = {size0, size1, size2, size3, size4};
 
   THTensor_(resizeNd)(self, 5, size, NULL);
+}
+
+THTensor* THTensor_(newExpand)(THTensor *tensor, THLongStorage *sizes) {
+  THArgCheck(THLongStorage_size(sizes) >= THTensor_(nDimension)(tensor), 1, "the number of sizes provided \
+      must be greater or equal to the number of dimensions in the tensor");
+  THArgCheck(THTensor_(nDimension)(tensor) > 0, 0, "can't expand an empty tensor");
+
+  long *expandedSizes;
+  long *expandedStrides;
+  THLongStorage_calculateExpandGeometry(tensor->size, tensor->stride, THTensor_(nDimension)(tensor), sizes, &expandedSizes, &expandedStrides);
+
+  THTensor *result = THTensor_(new)();
+  THTensor_(setStorageNd)(result, THTensor_(storage)(tensor), THTensor_(storageOffset)(tensor), THLongStorage_size(sizes), expandedSizes, expandedStrides);
+  THFree(expandedSizes);
+  THFree(expandedStrides);
+
+  return result;
 }
 
 void THTensor_(set)(THTensor *self, THTensor *src)
