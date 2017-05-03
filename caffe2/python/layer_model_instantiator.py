@@ -24,6 +24,9 @@ def generate_predict_net(model, include_tags=None):
         if Tags.EXCLUDE_FROM_PREDICTION not in layer.tags:
             layer.add_operators(
                 predict_net, context=InstantiationContext.PREDICTION)
+
+    predict_net.set_input_record(model.input_feature_schema.clone())
+    predict_net.set_output_record(model.output_schema.clone())
     return predict_net
 
 
