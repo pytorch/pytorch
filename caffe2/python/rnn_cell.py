@@ -204,63 +204,492 @@ class LSTMCell(RNNCell):
         return self.hidden_size
 
 
-def LSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
-         scope, outputs_with_grads=(0,), return_params=False,
-         memory_optimization=False, forget_bias=0.0, forward_only=False,
-         drop_states=False):
+class MILSTMCell(LSTMCell):
+
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+    ):
+        (
+            hidden_t_prev,
+            cell_t_prev,
+        ) = states
+
+        # hU^T
+        # Shape: [1, batch_size, 4 * hidden_size]
+        prev_t = model.FC(
+            hidden_t_prev, self.scope('prev_t'), dim_in=self.hidden_size,
+            dim_out=4 * self.hidden_size, axis=2)
+        # defining MI parameters
+        alpha = model.param_init_net.ConstantFill(
+            [],
+            [self.scope('alpha')],
+            shape=[4 * self.hidden_size],
+            value=1.0
+        )
+        beta1 = model.param_init_net.ConstantFill(
+            [],
+            [self.scope('beta1')],
+            shape=[4 * self.hidden_size],
+            value=1.0
+        )
+        beta2 = model.param_init_net.ConstantFill(
+            [],
+            [self.scope('beta2')],
+            shape=[4 * self.hidden_size],
+            value=1.0
+        )
+        b = model.param_init_net.ConstantFill(
+            [],
+            [self.scope('b')],
+            shape=[4 * self.hidden_size],
+            value=0.0
+        )
+        model.params.extend([alpha, beta1, beta2, b])
+        # alpha * (xW^T * hU^T)
+        # Shape: [1, batch_size, 4 * hidden_size]
+        alpha_tdash = model.net.Mul(
+            [prev_t, input_t],
+            self.scope('alpha_tdash')
+        )
+        # Shape: [batch_size, 4 * hidden_size]
+        alpha_tdash_rs, _ = model.net.Reshape(
+            alpha_tdash,
+            [self.scope('alpha_tdash_rs'), self.scope('alpha_tdash_old_shape')],
+            shape=[-1, 4 * self.hidden_size],
+        )
+        alpha_t = model.net.Mul(
+            [alpha_tdash_rs, alpha],
+            self.scope('alpha_t'),
+            broadcast=1,
+            use_grad_hack=1
+        )
+        # beta1 * hU^T
+        # Shape: [batch_size, 4 * hidden_size]
+        prev_t_rs, _ = model.net.Reshape(
+            prev_t,
+            [self.scope('prev_t_rs'), self.scope('prev_t_old_shape')],
+            shape=[-1, 4 * self.hidden_size],
+        )
+        beta1_t = model.net.Mul(
+            [prev_t_rs, beta1],
+            self.scope('beta1_t'),
+            broadcast=1,
+            use_grad_hack=1
+        )
+        # beta2 * xW^T
+        # Shape: [batch_szie, 4 * hidden_size]
+        input_t_rs, _ = model.net.Reshape(
+            input_t,
+            [self.scope('input_t_rs'), self.scope('input_t_old_shape')],
+            shape=[-1, 4 * self.hidden_size],
+        )
+        beta2_t = model.net.Mul(
+            [input_t_rs, beta2],
+            self.scope('beta2_t'),
+            broadcast=1,
+            use_grad_hack=1
+        )
+        # Add 'em all up
+        gates_tdash = model.net.Sum(
+            [alpha_t, beta1_t, beta2_t],
+            self.scope('gates_tdash')
+        )
+        gates_t = model.net.Add(
+            [gates_tdash, b],
+            self.scope('gates_t'),
+            broadcast=1,
+            use_grad_hack=1
+        )
+        # # Shape: [1, batch_size, 4 * hidden_size]
+        gates_t_rs, _ = model.net.Reshape(
+            gates_t,
+            [self.scope('gates_t_rs'), self.scope('gates_t_old_shape')],
+            shape=[1, -1, 4 * self.hidden_size],
+        )
+
+        hidden_t_intermediate, cell_t = model.net.LSTMUnit(
+            [hidden_t_prev, cell_t_prev, gates_t_rs, seq_lengths, timestep],
+            [self.scope('hidden_t_intermediate'), self.scope('cell_t')],
+            forget_bias=self.forget_bias,
+            drop_states=self.drop_states,
+        )
+        hidden_t = model.Copy(hidden_t_intermediate, self.scope('hidden_t'))
+        model.net.AddExternalOutputs(
+            cell_t,
+            hidden_t,
+        )
+        if self.memory_optimization:
+            self.recompute_blobs = [gates_t]
+        return hidden_t, cell_t
+
+
+class LSTMWithAttentionCell(RNNCell):
+
+    def __init__(
+        self,
+        encoder_output_dim,
+        encoder_outputs,
+        decoder_input_dim,
+        decoder_state_dim,
+        name,
+        attention_type,
+        weighted_encoder_outputs,
+        forget_bias,
+        lstm_memory_optimization,
+        attention_memory_optimization,
+        forward_only=False,
+    ):
+        super(LSTMWithAttentionCell, self).__init__(name, forward_only)
+        self.encoder_output_dim = encoder_output_dim
+        self.encoder_outputs = encoder_outputs
+        self.decoder_input_dim = decoder_input_dim
+        self.decoder_state_dim = decoder_state_dim
+        self.weighted_encoder_outputs = weighted_encoder_outputs
+        self.encoder_outputs_transposed = None
+        assert attention_type in [
+            AttentionType.Regular,
+            AttentionType.Recurrent,
+        ]
+        self.attention_type = attention_type
+        self.lstm_memory_optimization = lstm_memory_optimization
+        self.attention_memory_optimization = attention_memory_optimization
+
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+    ):
+        (
+            hidden_t_prev,
+            cell_t_prev,
+            attention_weighted_encoder_context_t_prev,
+        ) = states
+
+        gates_concatenated_input_t, _ = model.net.Concat(
+            [hidden_t_prev, attention_weighted_encoder_context_t_prev],
+            [
+                self.scope('gates_concatenated_input_t'),
+                self.scope('_gates_concatenated_input_t_concat_dims'),
+            ],
+            axis=2,
+        )
+        gates_t = model.FC(
+            gates_concatenated_input_t,
+            self.scope('gates_t'),
+            dim_in=self.decoder_state_dim + self.encoder_output_dim,
+            dim_out=4 * self.decoder_state_dim,
+            axis=2,
+        )
+        model.net.Sum([gates_t, input_t], gates_t)
+
+        hidden_t_intermediate, cell_t = model.net.LSTMUnit(
+            [
+                hidden_t_prev,
+                cell_t_prev,
+                gates_t,
+                seq_lengths,
+                timestep,
+            ],
+            ['hidden_t_intermediate', self.scope('cell_t')],
+        )
+        if self.attention_type == AttentionType.Recurrent:
+            (
+                attention_weighted_encoder_context_t,
+                self.attention_weights_3d,
+                attention_blobs,
+            ) = apply_recurrent_attention(
+                model=model,
+                encoder_output_dim=self.encoder_output_dim,
+                encoder_outputs_transposed=self.encoder_outputs_transposed,
+                weighted_encoder_outputs=self.weighted_encoder_outputs,
+                decoder_hidden_state_t=hidden_t_intermediate,
+                decoder_hidden_state_dim=self.decoder_state_dim,
+                scope=self.name,
+                attention_weighted_encoder_context_t_prev=(
+                    attention_weighted_encoder_context_t_prev
+                ),
+            )
+        else:
+            (
+                attention_weighted_encoder_context_t,
+                self.attention_weights_3d,
+                attention_blobs,
+            ) = apply_regular_attention(
+                model=model,
+                encoder_output_dim=self.encoder_output_dim,
+                encoder_outputs_transposed=self.encoder_outputs_transposed,
+                weighted_encoder_outputs=self.weighted_encoder_outputs,
+                decoder_hidden_state_t=hidden_t_intermediate,
+                decoder_hidden_state_dim=self.decoder_state_dim,
+                scope=self.name,
+            )
+        hidden_t = model.Copy(hidden_t_intermediate, self.scope('hidden_t'))
+        model.net.AddExternalOutputs(
+            cell_t,
+            hidden_t,
+            attention_weighted_encoder_context_t,
+        )
+        if self.attention_memory_optimization:
+            self.recompute_blobs.extend(attention_blobs)
+        if self.lstm_memory_optimization:
+            self.recompute_blobs.append(gates_t)
+
+        return hidden_t, cell_t, attention_weighted_encoder_context_t
+
+    def get_attention_weights(self):
+        # [batch_size, encoder_length, 1]
+        return self.attention_weights_3d
+
+    def prepare_input(self, model, input_blob):
+        if self.encoder_outputs_transposed is None:
+            self.encoder_outputs_transposed = model.Transpose(
+                self.encoder_outputs,
+                self.scope('encoder_outputs_transposed'),
+                axes=[1, 2, 0],
+            )
+        if self.weighted_encoder_outputs is None:
+            self.weighted_encoder_outputs = model.FC(
+                self.encoder_outputs,
+                self.scope('weighted_encoder_outputs'),
+                dim_in=self.encoder_output_dim,
+                dim_out=self.encoder_output_dim,
+                axis=2,
+            )
+
+        return model.FC(
+            input_blob,
+            self.scope('i2h'),
+            dim_in=self.decoder_input_dim,
+            dim_out=4 * self.decoder_state_dim,
+            axis=2,
+        )
+
+    def get_state_names(self):
+        return (
+            self.scope('hidden_t'),
+            self.scope('cell_t'),
+            self.scope('attention_weighted_encoder_context_t'),
+        )
+
+    def get_outputs_with_grads(self):
+        return [0, 4]
+
+    def get_output_size(self):
+        return self.decoder_state_dim + self.encoder_output_dim
+
+
+class MultiRNNCell(RNNCell):
+    '''
+    Multilayer RNN via the composition of RNNCell instance.
+
+    It is the resposibility of calling code to ensure the compatibility
+    of the successive layers in terms of input/output dimensiality, etc.,
+    and to ensure that their blobs do not have name conflicts, typically by
+    creating the cells with names that specify layer number.
+
+    Assumes first state (recurrent output) for each layer should be the input
+    to the next layer.
+    '''
+
+    def __init__(
+        self,
+        cells,
+        name,
+        forward_only=False,
+    ):
+        '''
+        cells: list of RNNCell instances, from input to output side.
+        '''
+        super(MultiRNNCell, self).__init__(name, forward_only)
+        self.cells = cells
+
+        self.state_names = []
+        for cell in self.cells:
+            self.state_names.extend(cell.get_state_names())
+
+        if len(self.state_names) != len(set(self.state_names)):
+            duplicates = {
+                state_name for state_name in self.state_names
+                if self.state_names.count(state_name) > 1
+            }
+            raise RuntimeError(
+                'Duplicate state names in MultiRNNCell: {}'.format(
+                    list(duplicates),
+                ),
+            )
+
+    def prepare_input(self, model, input_blob):
+        return self.cells[0].prepare_input(model, input_blob)
+
+    def _apply(self, model, input_t, seq_lengths, states, timestep):
+
+        states_per_layer = [len(cell.get_state_names()) for cell in self.cells]
+        assert len(states) == sum(states_per_layer)
+
+        next_states = []
+        states_index = 0
+
+        layer_input = input_t
+        for i, layer_cell in enumerate(self.cells):
+            num_states = states_per_layer[i]
+            layer_states = states[states_index:(states_index + num_states)]
+            states_index += num_states
+
+            if i > 0:
+                layer_input = layer_cell.prepare_input(model, layer_input)
+
+            layer_next_states = layer_cell._apply(
+                model,
+                layer_input,
+                seq_lengths,
+                layer_states,
+                timestep,
+            )
+            next_states.extend(layer_next_states)
+            layer_input = layer_next_states[0]
+        return next_states
+
+    def get_state_names(self):
+        return self.state_names
+
+
+def _LSTM(
+    cell_class,
+    model,
+    input_blob,
+    seq_lengths,
+    initial_states,
+    dim_in,
+    dim_out,
+    scope,
+    outputs_with_grads=(0,),
+    return_params=False,
+    memory_optimization=False,
+    forget_bias=0.0,
+    forward_only=False,
+    drop_states=False,
+    return_last_layer_only=True,
+):
     '''
     Adds a standard LSTM recurrent network operator to a model.
+
+    cell_class: LSTMCell or compatible subclass
 
     model: CNNModelHelper object new operators would be added to
 
     input_blob: the input sequence in a format T x N x D
-    where T is sequence size, N - batch size and D - input dimention
+            where T is sequence size, N - batch size and D - input dimension
 
     seq_lengths: blob containing sequence lengths which would be passed to
-    LSTMUnit operator
+            LSTMUnit operator
 
-    initial_states: a tupple of (hidden_input_blob, cell_input_blob)
-    which are going to be inputs to the cell net on the first iteration
+    initial_states: a list of (2 * num_layers) blobs representing the initial
+            hidden and cell states of each layer. If this argument is None,
+            these states will be added to the model as network parameters.
 
-    dim_in: input dimention
+    dim_in: input dimension
 
-    dim_out: output dimention
+    dim_out: number of units per LSTM layer
+            (use int for single-layer LSTM, list of ints for multi-layer)
 
-    outputs_with_grads : position indices of output blobs which will receive
-    external error gradient during backpropagation
+    outputs_with_grads : position indices of output blobs for LAST LAYER which
+            will receive external error gradient during backpropagation.
+            These outputs are: (h_all, h_last, c_all, c_last)
 
     return_params: if True, will return a dictionary of parameters of the LSTM
 
-    memory_optimization: if enabled, the LSTM step is recomputed on backward step
-                   so that we don't need to store forward activations for each
-                   timestep. Saves memory with cost of computation.
+    memory_optimization: if enabled, the LSTM step is recomputed on backward
+            step so that we don't need to store forward activations for each
+            timestep. Saves memory with cost of computation.
 
     forget_bias: forget gate bias (default 0.0)
 
     forward_only: whether to create a backward pass
+
+    drop_states: drop invalid states, passed through to LSTMUnit operator
+
+    return_last_layer_only: only return outputs from final layer
+            (so that length of results does depend on number of layers)
     '''
-    cell = LSTMCell(
-        input_size=dim_in,
-        hidden_size=dim_out,
-        forget_bias=forget_bias,
-        memory_optimization=memory_optimization,
-        name=scope,
-        forward_only=forward_only,
-        drop_states=drop_states,
-    )
-    result = cell.apply_over_sequence(
+    if type(dim_out) is not list and type(dim_out) is not tuple:
+        dim_out = [dim_out]
+    num_layers = len(dim_out)
+
+    cells = []
+    for i in range(num_layers):
+        name = '{}/layer_{}'.format(scope, i) if num_layers > 1 else scope
+        cell = cell_class(
+            input_size=(dim_in if i == 0 else dim_out[i - 1]),
+            hidden_size=dim_out[i],
+            forget_bias=forget_bias,
+            memory_optimization=memory_optimization,
+            name=name,
+            forward_only=forward_only,
+            drop_states=drop_states,
+        )
+        cells.append(cell)
+
+    if num_layers > 1:
+        multicell = MultiRNNCell(
+            cells,
+            name=scope,
+            forward_only=forward_only,
+        )
+    else:
+        multicell = cells[0]
+
+    if initial_states is None:
+        initial_states = []
+        for i in range(num_layers):
+            with core.NameScope(scope):
+                suffix = '_{}'.format(i) if num_layers > 1 else ''
+                initial_hidden = model.param_init_net.ConstantFill(
+                    [],
+                    'initial_hidden_state' + suffix,
+                    shape=[dim_out[i]],
+                    value=0.0,
+                )
+                initial_cell = model.param_init_net.ConstantFill(
+                    [],
+                    'initial_cell_state' + suffix,
+                    shape=[dim_out[i]],
+                    value=0.0,
+                )
+                initial_states.extend([initial_hidden, initial_cell])
+                model.params.extend([initial_hidden, initial_cell])
+
+    # outputs_with_grads argument indexes into final layer
+    outputs_with_grads = [4 * (num_layers - 1) + i for i in outputs_with_grads]
+
+    result = multicell.apply_over_sequence(
         model=model,
         inputs=input_blob,
         seq_lengths=seq_lengths,
         initial_states=initial_states,
         outputs_with_grads=outputs_with_grads,
     )
+
+    if return_last_layer_only:
+        result = result[4 * (num_layers - 1):]
     if return_params:
         result = list(result) + [{
             'input': cell.get_input_params(),
             'recurrent': cell.get_recurrent_params(),
         }]
     return tuple(result)
+
+
+LSTM = functools.partial(_LSTM, LSTMCell)
+
+MILSTM = functools.partial(_LSTM, MILSTMCell)
 
 
 def GetLSTMParamNames():
@@ -431,164 +860,6 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
         return output, hidden_output, cell_output
 
 
-class LSTMWithAttentionCell(RNNCell):
-
-    def __init__(
-        self,
-        encoder_output_dim,
-        encoder_outputs,
-        decoder_input_dim,
-        decoder_state_dim,
-        name,
-        attention_type,
-        weighted_encoder_outputs,
-        forget_bias,
-        lstm_memory_optimization,
-        attention_memory_optimization,
-        forward_only=False,
-    ):
-        super(LSTMWithAttentionCell, self).__init__(name, forward_only)
-        self.encoder_output_dim = encoder_output_dim
-        self.encoder_outputs = encoder_outputs
-        self.decoder_input_dim = decoder_input_dim
-        self.decoder_state_dim = decoder_state_dim
-        self.weighted_encoder_outputs = weighted_encoder_outputs
-        self.encoder_outputs_transposed = None
-        assert attention_type in [
-            AttentionType.Regular,
-            AttentionType.Recurrent,
-        ]
-        self.attention_type = attention_type
-        self.lstm_memory_optimization = lstm_memory_optimization
-        self.attention_memory_optimization = attention_memory_optimization
-
-    def _apply(
-        self,
-        model,
-        input_t,
-        seq_lengths,
-        states,
-        timestep,
-    ):
-        (
-            hidden_t_prev,
-            cell_t_prev,
-            attention_weighted_encoder_context_t_prev,
-        ) = states
-
-        gates_concatenated_input_t, _ = model.net.Concat(
-            [hidden_t_prev, attention_weighted_encoder_context_t_prev],
-            [
-                self.scope('gates_concatenated_input_t'),
-                self.scope('_gates_concatenated_input_t_concat_dims'),
-            ],
-            axis=2,
-        )
-        gates_t = model.FC(
-            gates_concatenated_input_t,
-            self.scope('gates_t'),
-            dim_in=self.decoder_state_dim + self.encoder_output_dim,
-            dim_out=4 * self.decoder_state_dim,
-            axis=2,
-        )
-        model.net.Sum([gates_t, input_t], gates_t)
-
-        hidden_t_intermediate, cell_t = model.net.LSTMUnit(
-            [
-                hidden_t_prev,
-                cell_t_prev,
-                gates_t,
-                seq_lengths,
-                timestep,
-            ],
-            ['hidden_t_intermediate', self.scope('cell_t')],
-        )
-        if self.attention_type == AttentionType.Recurrent:
-            (
-                attention_weighted_encoder_context_t,
-                self.attention_weights_3d,
-                attention_blobs,
-            ) = apply_recurrent_attention(
-                model=model,
-                encoder_output_dim=self.encoder_output_dim,
-                encoder_outputs_transposed=self.encoder_outputs_transposed,
-                weighted_encoder_outputs=self.weighted_encoder_outputs,
-                decoder_hidden_state_t=hidden_t_intermediate,
-                decoder_hidden_state_dim=self.decoder_state_dim,
-                scope=self.name,
-                attention_weighted_encoder_context_t_prev=(
-                    attention_weighted_encoder_context_t_prev
-                ),
-            )
-        else:
-            (
-                attention_weighted_encoder_context_t,
-                self.attention_weights_3d,
-                attention_blobs,
-            ) = apply_regular_attention(
-                model=model,
-                encoder_output_dim=self.encoder_output_dim,
-                encoder_outputs_transposed=self.encoder_outputs_transposed,
-                weighted_encoder_outputs=self.weighted_encoder_outputs,
-                decoder_hidden_state_t=hidden_t_intermediate,
-                decoder_hidden_state_dim=self.decoder_state_dim,
-                scope=self.name,
-            )
-        hidden_t = model.Copy(hidden_t_intermediate, self.scope('hidden_t'))
-        model.net.AddExternalOutputs(
-            cell_t,
-            hidden_t,
-            attention_weighted_encoder_context_t,
-        )
-        if self.attention_memory_optimization:
-            self.recompute_blobs.extend(attention_blobs)
-        if self.lstm_memory_optimization:
-            self.recompute_blobs.append(gates_t)
-
-        return hidden_t, cell_t, attention_weighted_encoder_context_t
-
-    def get_attention_weights(self):
-        # [batch_size, encoder_length, 1]
-        return self.attention_weights_3d
-
-    def prepare_input(self, model, input_blob):
-        if self.encoder_outputs_transposed is None:
-            self.encoder_outputs_transposed = model.Transpose(
-                self.encoder_outputs,
-                self.scope('encoder_outputs_transposed'),
-                axes=[1, 2, 0],
-            )
-        if self.weighted_encoder_outputs is None:
-            self.weighted_encoder_outputs = model.FC(
-                self.encoder_outputs,
-                self.scope('weighted_encoder_outputs'),
-                dim_in=self.encoder_output_dim,
-                dim_out=self.encoder_output_dim,
-                axis=2,
-            )
-
-        return model.FC(
-            input_blob,
-            self.scope('i2h'),
-            dim_in=self.decoder_input_dim,
-            dim_out=4 * self.decoder_state_dim,
-            axis=2,
-        )
-
-    def get_state_names(self):
-        return (
-            self.scope('hidden_t'),
-            self.scope('cell_t'),
-            self.scope('attention_weighted_encoder_context_t'),
-        )
-
-    def get_outputs_with_grads(self):
-        return [0, 4]
-
-    def get_output_size(self):
-        return self.decoder_state_dim + self.encoder_output_dim
-
-
 def LSTMWithAttention(
     model,
     decoder_inputs,
@@ -624,7 +895,7 @@ def LSTMWithAttention(
     model: CNNModelHelper object new operators would be added to
 
     decoder_inputs: the input sequence in a format T x N x D
-    where T is sequence size, N - batch size and D - input dimention
+    where T is sequence size, N - batch size and D - input dimension
 
     decoder_input_lengths: blob containing sequence lengths
     which would be passed to LSTMUnit operator
@@ -640,7 +911,7 @@ def LSTMWithAttention(
     encoder_outputs: the sequence, on which we compute the attention context
     at every iteration
 
-    decoder_input_dim: input dimention (last dimension on decoder_inputs)
+    decoder_input_dim: input dimension (last dimension on decoder_inputs)
 
     decoder_state_dim: size of hidden states of LSTM
 
@@ -687,180 +958,6 @@ def LSTMWithAttention(
         ),
         outputs_with_grads=None,
     )
-
-
-class MILSTMCell(LSTMCell):
-
-    def _apply(
-        self,
-        model,
-        input_t,
-        seq_lengths,
-        states,
-        timestep,
-    ):
-        (
-            hidden_t_prev,
-            cell_t_prev,
-        ) = states
-
-        # hU^T
-        # Shape: [1, batch_size, 4 * hidden_size]
-        prev_t = model.FC(
-            hidden_t_prev, self.scope('prev_t'), dim_in=self.hidden_size,
-            dim_out=4 * self.hidden_size, axis=2)
-        # defining MI parameters
-        alpha = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('alpha')],
-            shape=[4 * self.hidden_size],
-            value=1.0
-        )
-        beta1 = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('beta1')],
-            shape=[4 * self.hidden_size],
-            value=1.0
-        )
-        beta2 = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('beta2')],
-            shape=[4 * self.hidden_size],
-            value=1.0
-        )
-        b = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('b')],
-            shape=[4 * self.hidden_size],
-            value=0.0
-        )
-        model.params.extend([alpha, beta1, beta2, b])
-        # alpha * (xW^T * hU^T)
-        # Shape: [1, batch_size, 4 * hidden_size]
-        alpha_tdash = model.net.Mul(
-            [prev_t, input_t],
-            self.scope('alpha_tdash')
-        )
-        # Shape: [batch_size, 4 * hidden_size]
-        alpha_tdash_rs, _ = model.net.Reshape(
-            alpha_tdash,
-            [self.scope('alpha_tdash_rs'), self.scope('alpha_tdash_old_shape')],
-            shape=[-1, 4 * self.hidden_size],
-        )
-        alpha_t = model.net.Mul(
-            [alpha_tdash_rs, alpha],
-            self.scope('alpha_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # beta1 * hU^T
-        # Shape: [batch_size, 4 * hidden_size]
-        prev_t_rs, _ = model.net.Reshape(
-            prev_t,
-            [self.scope('prev_t_rs'), self.scope('prev_t_old_shape')],
-            shape=[-1, 4 * self.hidden_size],
-        )
-        beta1_t = model.net.Mul(
-            [prev_t_rs, beta1],
-            self.scope('beta1_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # beta2 * xW^T
-        # Shape: [batch_szie, 4 * hidden_size]
-        input_t_rs, _ = model.net.Reshape(
-            input_t,
-            [self.scope('input_t_rs'), self.scope('input_t_old_shape')],
-            shape=[-1, 4 * self.hidden_size],
-        )
-        beta2_t = model.net.Mul(
-            [input_t_rs, beta2],
-            self.scope('beta2_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # Add 'em all up
-        gates_tdash = model.net.Sum(
-            [alpha_t, beta1_t, beta2_t],
-            self.scope('gates_tdash')
-        )
-        gates_t = model.net.Add(
-            [gates_tdash, b],
-            self.scope('gates_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # # Shape: [1, batch_size, 4 * hidden_size]
-        gates_t_rs, _ = model.net.Reshape(
-            gates_t,
-            [self.scope('gates_t_rs'), self.scope('gates_t_old_shape')],
-            shape=[1, -1, 4 * self.hidden_size],
-        )
-
-        hidden_t_intermediate, cell_t = model.net.LSTMUnit(
-            [hidden_t_prev, cell_t_prev, gates_t_rs, seq_lengths, timestep],
-            [self.scope('hidden_t_intermediate'), self.scope('cell_t')],
-            forget_bias=self.forget_bias,
-            drop_states=self.drop_states,
-        )
-        hidden_t = model.Copy(hidden_t_intermediate, self.scope('hidden_t'))
-        model.net.AddExternalOutputs(
-            cell_t,
-            hidden_t,
-        )
-        if self.memory_optimization:
-            self.recompute_blobs = [gates_t]
-        return hidden_t, cell_t
-
-
-def MILSTM(model, input_blob, seq_lengths, initial_states, dim_in, dim_out,
-           scope, outputs_with_grads=(0,), memory_optimization=False,
-           forget_bias=0.0, forward_only=False, drop_states=False):
-    '''
-    Adds MI flavor of standard LSTM recurrent network operator to a model.
-    See https://arxiv.org/pdf/1606.06630.pdf
-
-    model: CNNModelHelper object new operators would be added to
-
-    input_blob: the input sequence in a format T x N x D
-    where T is sequence size, N - batch size and D - input dimention
-
-    seq_lengths: blob containing sequence lengths which would be passed to
-    LSTMUnit operator
-
-    initial_states: a tupple of (hidden_input_blob, cell_input_blob)
-    which are going to be inputs to the cell net on the first iteration
-
-    dim_in: input dimention
-
-    dim_out: output dimention
-
-    outputs_with_grads : position indices of output blobs which will receive
-    external error gradient during backpropagation
-
-    memory_optimization: if enabled, the LSTM step is recomputed on backward
-    step. So that we don't need to store forward activations for each timestep.
-    Saves memory with cost of computation.
-
-    forward_only run only forward pass
-    '''
-    cell = MILSTMCell(
-        input_size=dim_in,
-        hidden_size=dim_out,
-        forget_bias=forget_bias,
-        memory_optimization=memory_optimization,
-        name=scope,
-        forward_only=forward_only,
-        drop_states=drop_states,
-    )
-    result = cell.apply_over_sequence(
-        model=model,
-        inputs=input_blob,
-        seq_lengths=seq_lengths,
-        initial_states=initial_states,
-        outputs_with_grads=outputs_with_grads,
-    )
-    return tuple(result)
 
 
 class MILSTMWithAttentionCell(LSTMWithAttentionCell):
