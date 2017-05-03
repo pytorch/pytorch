@@ -11,7 +11,9 @@ from numbers import Number
 
 def cpu_only(inner):
     def outer(self, *args, **kwargs):
-        unittest.skipIf(self.is_cuda, "Test is CPU-only")(inner)(self, *args, **kwargs)
+        if self.is_cuda:
+            raise unittest.SkipTest("Test is CPU-only")
+        inner(self, *args, **kwargs)
     return outer
 
 
@@ -22,6 +24,7 @@ class TestSparse(TestCase):
         # We will subclass and override this method to implement CUDA
         # tests
         self.is_cuda = False
+        self.is_uncoalesced = False
         self.IndexTensor = torch.LongTensor
         self.ValueTensor = torch.DoubleTensor
         self.SparseTensor = torch.sparse.DoubleTensor
@@ -32,11 +35,25 @@ class TestSparse(TestCase):
         # use torch.rand/torch.randn in this case because they are
         # CPU-only.  If you do this, you can remove the is_cuda branch
         # at the end.
+        #
+        # If you do this, be sure to update assert_uncoalesced too
 
         if isinstance(with_size, Number):
-            v = torch.randn(nnz)
-            i = (torch.rand(d, nnz) * with_size).type(torch.LongTensor)
-            x = torch.sparse.DoubleTensor(i, v)
+            with_size = [with_size] * d
+
+        if self.is_uncoalesced:
+            # We want to generate a tensor with a lot of uncoalesced
+            # entries to stress test whether or not we handle this
+            # (subtle) case correctly
+            v_size = [nnz * 2] + list(with_size[d:])
+            v = torch.randn(*v_size)
+            r = torch.rand(d, nnz)
+            # Repeat the indexes, so every position shows up twice
+            i = torch.cat([r, r], dim=1) * \
+                torch.Tensor(with_size[:d]).repeat(nnz * 2, 1).transpose(0, 1)
+            i = i.type(torch.LongTensor)
+            x = torch.sparse.DoubleTensor(i, v, torch.Size(with_size))
+            self.assert_uncoalesced(x)
         else:
             # Generate a sparse tensor with d sparse dimensions; the
             # rest the dimensions with_size[d:] are dense.
@@ -52,12 +69,28 @@ class TestSparse(TestCase):
         else:
             return x, i.clone(), v.clone()
 
+    def assert_uncoalesced(self, x):
+        """
+        Test if a CPU tensor is uncoalesced.  This is used to ensure
+        correctness of the uncoalesced tensor generation algorithm.
+        """
+        assert not x.is_coalesced()
+        # Strategy: construct a new sparse tensor with the raw value
+        # field overwritten to a tensor of ones, coalesce it, and then
+        # check if any value entries are > 1 (which indicates that the
+        # original was uncoalesced.)
+        i = x.indices().clone()
+        v = x.values().clone().fill_(1)
+        y = torch.sparse.DoubleTensor(i, v, x.size())
+        z = self.safeCoalesce(y)
+        assert (z.values() > 1).sum() > 0
+
     def randn(self, *args, **kwargs):
-        # TODO: Maybe do this directly on GPU
-        x = torch.randn(*args, **kwargs)
-        if self.is_cuda:
-            x = x.cuda()
-        return x
+        """
+        Variant of torch.randn that also works in the TEST_CUDA case.
+        """
+        # TODO: Put this in torch.cuda.randn
+        return self.ValueTensor(*args, **kwargs).normal_()
 
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
@@ -69,7 +102,7 @@ class TestSparse(TestCase):
         self.assertEqual(i, x.indices())
         self.assertEqual(v, x.values())
         self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(x.nnz(), 10)
+        self.assertEqual(x.coalesce().nnz(), 10)
         for i in range(3):
             self.assertEqual(x.size(i), 100)
 
@@ -512,13 +545,27 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
 
 
+class TestUncoalescedSparse(TestSparse):
+    def setUp(self):
+        super(TestUncoalescedSparse, self).setUp()
+        self.is_uncoalesced = True
+
+
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaSparse(TestSparse):
     def setUp(self):
+        super(TestCudaSparse, self).setUp()
         self.is_cuda = True
         self.IndexTensor = torch.cuda.LongTensor
         self.ValueTensor = torch.cuda.DoubleTensor
         self.SparseTensor = torch.cuda.sparse.DoubleTensor
+
+
+@unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+class TestCudaUncoalescedSparse(TestCudaSparse):
+    def setUp(self):
+        super(TestCudaUncoalescedSparse, self).setUp()
+        self.is_uncoalesced = True
 
 if __name__ == '__main__':
     run_tests()
