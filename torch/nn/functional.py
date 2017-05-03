@@ -742,3 +742,29 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
     dist_hinge = torch.clamp(margin + d_p - d_n, min=0.0)
     loss = torch.mean(dist_hinge)
     return loss
+
+
+def lp_normalize(input, p, dim, eps=1e-12):
+    r"""Performs l_p normalization of inputs over specified dimension.
+
+    Does:
+
+    .. math::
+        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}
+
+    for each subtensor v over dimension dim of input.
+    """
+    return input / input.norm(p, dim).clamp(min=eps).expand_as(input)
+
+
+def l2_normalize(input, dim, eps=1e-12):
+    r"""Performs l_2 normalization of inputs over specified dimension.
+
+    Does:
+
+    .. math::
+        v = \frac{v}{\max(\lVert v \rVert, \epsilon)}
+
+    for each subtensor v over dimension dim of input.
+    """
+    return lp_normalize(input, p=2, dim=dim, eps=eps)
