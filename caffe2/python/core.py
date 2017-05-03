@@ -1654,7 +1654,7 @@ class Net(object):
         assert self._output_record is None, (
             'Output record cannot be reset')
         for blob in record.field_blobs():
-            assert self.BlobIsDefined(blob)
+            assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
             self.AddExternalOutput(blob)
         self._output_record = record

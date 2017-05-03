@@ -4,12 +4,17 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import numpy.testing as npt
 
 from caffe2.python import (
     layer_model_instantiator,
     schema,
     workspace,
 )
+from caffe2.python.layers.layers import (
+    InstantiationContext,
+)
+from caffe2.python.layers.tags import Tags
 from caffe2.python.layer_test_util import (
     LayersTestCase,
     OpSpec,
@@ -26,6 +31,7 @@ class TestLayers(LayersTestCase):
         output_dims = 2
         fc_without_bias = self.model.FCWithoutBias(
             self.model.input_feature_schema.float_features, output_dims)
+        self.model.output_schema = fc_without_bias
 
         self.assertEqual(
             schema.Scalar((np.float32, (output_dims, ))),
@@ -70,6 +76,7 @@ class TestLayers(LayersTestCase):
             "FC",
             output_dims,
         )
+        self.model.output_schema = sampled_fc
 
         # Check that we don't add prediction layer into the model
         self.assertEqual(1, len(self.model.layers))
@@ -351,6 +358,48 @@ class TestLayers(LayersTestCase):
             indices
         )
 
+    def testSelectRecordByContext(self):
+        float_features = self.model.input_feature_schema.float_features
+
+        float_array = np.array([1.0, 2.0], dtype=np.float32)
+
+        schema.FeedRecord(float_features, [float_array])
+
+        with Tags(Tags.EXCLUDE_FROM_PREDICTION):
+            log_float_features, = self.model.Log(float_features, 1)
+        joined = self.model.SelectRecordByContext(
+            schema.Struct(
+                (InstantiationContext.PREDICTION, float_features),
+                (InstantiationContext.TRAINING, log_float_features),
+                # TODO: TRAIN_ONLY layers are also generated in eval
+                (InstantiationContext.EVAL, log_float_features),
+            )
+        )
+
+        # model.output_schema has to a struct
+        self.model.output_schema = schema.Struct((
+            'joined', joined
+        ))
+        predict_net = layer_model_instantiator.generate_predict_net(self.model)
+        workspace.RunNetOnce(predict_net)
+        predict_output = schema.FetchRecord(predict_net.output_record())
+        npt.assert_array_equal(float_array,
+                               predict_output['joined']())
+        eval_net = layer_model_instantiator.generate_eval_net(self.model)
+        workspace.RunNetOnce(eval_net)
+        eval_output = schema.FetchRecord(eval_net.output_record())
+        npt.assert_array_equal(np.log(float_array),
+                               eval_output['joined']())
+        _, train_net = (
+            layer_model_instantiator.generate_training_nets_forward_only(
+                self.model
+            )
+        )
+        workspace.RunNetOnce(train_net)
+        train_output = schema.FetchRecord(train_net.output_record())
+        npt.assert_array_equal(np.log(float_array),
+                               train_output['joined']())
+
     def testFunctionalLayer(self):
         def normalize(net, in_record, out_record):
             mean = net.ReduceFrontMean(in_record(), 1)
@@ -364,7 +413,7 @@ class TestLayers(LayersTestCase):
 
         # Attach metadata to one of the outputs and use it in FC
         normalized[0].set_type((np.float32, 32))
-        self.model.FC(normalized[0], 2)
+        self.model.output_schema = self.model.FC(normalized[0], 2)
 
         predict_net = layer_model_instantiator.generate_predict_net(
             self.model)
@@ -388,7 +437,7 @@ class TestLayers(LayersTestCase):
             1, broadcast=1)
         # Attach metadata to one of the outputs and use it in FC
         normalized[0].set_type((np.float32, (32,)))
-        self.model.FC(normalized[0], 2)
+        self.model.output_schema = self.model.FC(normalized[0], 2)
 
         predict_net = layer_model_instantiator.generate_predict_net(
             self.model)
@@ -410,7 +459,7 @@ class TestLayers(LayersTestCase):
         assert len(softsign.field_types()) == 1
         assert softsign.field_types()[0].base == np.float32
         assert softsign.field_types()[0].shape == (32,)
-        self.model.FC(softsign[0], 2)
+        self.model.output_schema = self.model.FC(softsign[0], 2)
 
         predict_net = layer_model_instantiator.generate_predict_net(
             self.model)
