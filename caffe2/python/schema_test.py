@@ -155,6 +155,11 @@ class TestDB(unittest.TestCase):
                 ('a', schema.Scalar()),
                 ('a', schema.Scalar()))
 
+    def testAssignToField(self):
+        with self.assertRaises(TypeError):
+            s = schema.Struct(('a', schema.Scalar()))
+            s.a = schema.Scalar()
+
     def testPreservesEmptyFields(self):
         s = schema.Struct(
             ('a', schema.Scalar(np.float32)),
