@@ -52,13 +52,6 @@ namespace caffe2 {
           Naive##name##Functor,                                                \
           output_type>)
 
-#define EIGEN_SUB(x, y) ((x) - (y))
-EIGEN_FUNCTOR(Sub, EIGEN_SUB, NumericTypes, SameTypeAsInput);
-#undef EIGEN_SUB
-#define EIGEN_DIV(x, y) ((x) / (y))
-EIGEN_FUNCTOR(Div, EIGEN_DIV, NumericTypes, SameTypeAsInput);
-#undef EIGEN_DIV
-
 #define NAIVE_LT(x, y) ((x) < (y))
 NAIVE_FUNCTOR(LT, NAIVE_LT, NumericTypes, FixedType<bool>);
 #undef NAIVE_LT
@@ -94,23 +87,6 @@ struct NotFunctor {
 REGISTER_CPU_OPERATOR(
     Not,
     UnaryElementwiseOp<BoolTypes, CPUContext, NotFunctor>);
-
-void ElementWiseDivide(
-    CPUContext& context,
-    const int n,
-    float* dXdata,
-    float* dYdata,
-    const float* dZdata,
-    const float* Ydata,
-    const float* Zdata) {
-  ConstEigenVectorArrayMap<float> dZdataVec(dZdata, n);
-  ConstEigenVectorArrayMap<float> YdataVec(Ydata, n);
-  ConstEigenVectorArrayMap<float> ZdataVec(Zdata, n);
-  EigenVectorArrayMap<float>(dXdata, n) = dZdataVec / YdataVec;
-  EigenVectorArrayMap<float>(dYdata, n) = - (dZdataVec * ZdataVec) / YdataVec;
-}
-
-REGISTER_CPU_OPERATOR(DivGradient, DivGradientOp<CPUContext>);
 
 template <typename T>
 void SRLHelper::sum2one(const T* x, T* y, size_t n) {

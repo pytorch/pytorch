@@ -3,14 +3,6 @@
 
 namespace caffe2 {
 
-struct LogCUDAFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CUDAContext* device_context) {
-    math::Log<T, CUDAContext>(n, x, y, device_context);
-  }
-};
-
 struct SqrCUDAFunctor {
   template <typename T>
   inline void
@@ -21,9 +13,6 @@ struct SqrCUDAFunctor {
 
 namespace {
 
-REGISTER_CUDA_OPERATOR(
-    Log,
-    UnaryElementwiseOp<TensorTypes<float>, CUDAContext, LogCUDAFunctor>);
 REGISTER_CUDA_OPERATOR(
     Sqr,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SqrCUDAFunctor>);
