@@ -492,11 +492,11 @@ class TestSparse(TestCase):
 
     def _test_sparse_mask_fixed(self):
         i = self.IndexTensor([
-            [1, 3, 3, 0, 4],
-            [2, 1, 1, 2, 3],
+            [1, 3, 0, 4],
+            [2, 1, 2, 3],
         ])
-        v = self.ValueTensor([1, 2, 3, 4, 5])
-        x = self.SparseTensor(i, v, torch.Size([5, 4]))
+        v = self.ValueTensor([1, 2, 3, 4])
+        x = self.SparseTensor(i, v, torch.Size([5, 4])).coalesce()
         dense = self.ValueTensor([
             [1, 2, 3, 4],
             [5, 6, 7, 8],
@@ -504,7 +504,7 @@ class TestSparse(TestCase):
             [13, 14, 15, 16],
             [17, 18, 19, 20],
         ])
-        exp_v = self.ValueTensor([7, 14, 14, 3, 20])
+        exp_v = self.ValueTensor([7, 14, 3, 20])
         res = dense._sparse_mask(x)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
@@ -519,11 +519,14 @@ class TestSparse(TestCase):
 
     def _test_sparse_mask_hybrid_fixed(self):
         i = self.IndexTensor([
-            [1, 3, 3, 0, 4],
-            [2, 1, 1, 2, 3],
+            [1, 3, 0, 4],
+            [2, 1, 2, 3],
         ])
-        v = self.ValueTensor([[1, 2], [2, 3], [3, 4], [4, 5], [5, 6]])
-        x = self.SparseTensor(i, v, torch.Size([5, 4, 2]))
+        v = self.ValueTensor([[1, 2], [2, 3], [3, 4], [4, 5]])
+        # TODO: This is also testing that, if coalesce is a no-op,
+        # the indices don't get permuted. I don't know if we actually
+        # want to give this invariant.
+        x = self.SparseTensor(i, v, torch.Size([5, 4, 2])).coalesce()
         dense = self.ValueTensor([
             [[1, 3], [2, 2], [3, 3], [4, 2]],
             [[5, 7], [6, 7], [7, 9], [8, 9]],
@@ -532,7 +535,7 @@ class TestSparse(TestCase):
             [[17, 7], [18, 2], [19, 7], [20, 1]],
         ])
         res = dense._sparse_mask(x)
-        exp_v = self.ValueTensor([[7, 9], [14, 1], [14, 1], [3, 3], [20, 1]])
+        exp_v = self.ValueTensor([[7, 9], [14, 1], [3, 3], [20, 1]])
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)
 
