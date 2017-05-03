@@ -79,11 +79,11 @@ class TestSparse(TestCase):
         # field overwritten to a tensor of ones, coalesce it, and then
         # check if any value entries are > 1 (which indicates that the
         # original was uncoalesced.)
-        i = x.indices().clone()
-        v = x.values().clone().fill_(1)
+        i = x._indices().clone()
+        v = x._values().clone().fill_(1)
         y = torch.sparse.DoubleTensor(i, v, x.size())
         z = self.safeCoalesce(y)
-        assert (z.values() > 1).sum() > 0
+        assert (z._values() > 1).sum() > 0
 
     def randn(self, *args, **kwargs):
         """
@@ -95,21 +95,21 @@ class TestSparse(TestCase):
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
 
-        self.assertEqual(i, x.indices())
-        self.assertEqual(v, x.values())
+        self.assertEqual(i, x._indices())
+        self.assertEqual(v, x._values())
 
         x, i, v = self._gen_sparse(3, 10, [100, 100, 100])
-        self.assertEqual(i, x.indices())
-        self.assertEqual(v, x.values())
+        self.assertEqual(i, x._indices())
+        self.assertEqual(v, x._values())
         self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(x.coalesce().nnz(), 10)
+        self.assertEqual(x.coalesce()._nnz(), 10)
         for i in range(3):
             self.assertEqual(x.size(i), 100)
 
         # Make sure we can access empty indices / values
         x = self.SparseTensor()
-        self.assertEqual(x.indices().numel(), 0)
-        self.assertEqual(x.values().numel(), 0)
+        self.assertEqual(x._indices().numel(), 0)
+        self.assertEqual(x._values().numel(), 0)
 
     def test_to_dense(self):
         i = self.IndexTensor([
@@ -179,8 +179,8 @@ class TestSparse(TestCase):
         ])
         exp_v = self.ValueTensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         i = self.IndexTensor([
             [2, 0, 2, 1],
@@ -197,8 +197,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([2, 1, 3, 4])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         # Duplicate indices
         i = self.IndexTensor([
@@ -216,8 +216,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([6, 4])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
     def test_contig_hybrid(self):
         i = self.IndexTensor([
@@ -238,8 +238,8 @@ class TestSparse(TestCase):
             [3, 4], [5, 6], [9, 10], [8, 9], [7, 8],
         ])
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         i = self.IndexTensor([
             [2, 0, 2, 1],
@@ -256,8 +256,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([[2, 2, 2], [1, 1, 1], [3, 3, 3], [4, 4, 4]])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         # Duplicate indices
         i = self.IndexTensor([
@@ -275,8 +275,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([[6, 4, 5], [4, 3, 4]])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
@@ -463,8 +463,8 @@ class TestSparse(TestCase):
         self.assertTrue(y.is_coalesced())
         self.assertEqual(x1, y)
         # check that coalesce is out of place
-        y.values().add_(1)
-        self.assertEqual(z.values() + 1, y.values())
+        y._values().add_(1)
+        self.assertEqual(z._values() + 1, y._values())
 
     def test_basic_ops(self):
         self._test_basic_ops_shape([5, 6])
@@ -505,7 +505,7 @@ class TestSparse(TestCase):
             [17, 18, 19, 20],
         ])
         exp_v = self.ValueTensor([7, 14, 14, 3, 20])
-        res = dense.sparse_mask(x)
+        res = dense._sparse_mask(x)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
@@ -531,7 +531,7 @@ class TestSparse(TestCase):
             [[13, 5], [14, 1], [15, 1], [16, 6]],
             [[17, 7], [18, 2], [19, 7], [20, 1]],
         ])
-        res = dense.sparse_mask(x)
+        res = dense._sparse_mask(x)
         exp_v = self.ValueTensor([[7, 9], [14, 1], [14, 1], [3, 3], [20, 1]])
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)

@@ -27,8 +27,8 @@ def _type(self, new_type=None, async=False):
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
         new_type_name = new_type.__module__ + '.' + new_type.__name__
         new_values_type_name = new_type_name.replace('.sparse', '')
-        new_values = self.values().type(new_values_type_name, async)
-        return new_type(self.indices(), new_values, self.size())
+        new_values = self._values().type(new_values_type_name, async)
+        return new_type(self._indices(), new_values, self.size())
     if new_type.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
     return new_type(self.size()).copy_(self, async)
@@ -57,8 +57,8 @@ def _cuda(self, device=None, async=False):
     with torch.cuda.device(device):
         if self.is_sparse:
             new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
-            indices = self.indices().cuda(device, async)
-            values = self.values().cuda(device, async)
+            indices = self._indices().cuda(device, async)
+            values = self._values().cuda(device, async)
             return new_type(indices, values, self.size())
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
