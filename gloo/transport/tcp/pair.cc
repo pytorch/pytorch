@@ -240,33 +240,37 @@ void Pair::connect(const Address& peer) {
 //
 bool Pair::write(Op& op) {
   std::array<struct iovec, 2> iov;
-  int ioc = 0;
-  int nbytes = 0;
+  int ioc;
+  int nbytes;
+  int rv;
 
   verifyConnected();
 
-  // Include preamble if necessary
-  if (op.nwritten_ < sizeof(op.preamble_)) {
-    iov[ioc].iov_base = ((char*)&op.preamble_) + op.nwritten_;
-    iov[ioc].iov_len = sizeof(op.preamble_) - op.nwritten_;
+  for (;;) {
+    ioc = 0;
+    nbytes = 0;
+
+    // Include preamble if necessary
+    if (op.nwritten_ < sizeof(op.preamble_)) {
+      iov[ioc].iov_base = ((char*)&op.preamble_) + op.nwritten_;
+      iov[ioc].iov_len = sizeof(op.preamble_) - op.nwritten_;
+      nbytes += iov[ioc].iov_len;
+      ioc++;
+    }
+
+    // Include remaining piece of buffer
+    int offset = op.preamble_.offset_;
+    int length = op.preamble_.length_;
+    if (op.nwritten_ > sizeof(op.preamble_)) {
+      offset += op.nwritten_ - sizeof(op.preamble_);
+      length -= op.nwritten_ - sizeof(op.preamble_);
+    }
+    iov[ioc].iov_base = ((char*)op.buf_->ptr_) + offset;
+    iov[ioc].iov_len = length;
     nbytes += iov[ioc].iov_len;
     ioc++;
-  }
 
-  // Include remaining piece of buffer
-  int offset = op.preamble_.offset_;
-  int length = op.preamble_.length_;
-  if (op.nwritten_ > sizeof(op.preamble_)) {
-    offset += op.nwritten_ - sizeof(op.preamble_);
-    length -= op.nwritten_ - sizeof(op.preamble_);
-  }
-  iov[ioc].iov_base = ((char*)op.buf_->ptr_) + offset;
-  iov[ioc].iov_len = length;
-  nbytes += iov[ioc].iov_len;
-  ioc++;
-
-  int rv = 0;
-  for (;;) {
+    // Write
     rv = writev(fd_, iov.data(), ioc);
     if (rv == -1) {
       if (errno == EAGAIN) {
@@ -288,15 +292,27 @@ bool Pair::write(Op& op) {
       signalIoFailure(
           GLOO_ERROR_MSG("writev ", peer_.str(), ": ", strerror(errno)));
     }
+
+    // From write(2) man page (NOTES section):
+    //
+    //  If a write() is interrupted by a signal handler before any
+    //  bytes are written, then the call fails with the error EINTR;
+    //  if it is interrupted after at least one byte has been written,
+    //  the call succeeds, and returns the number of bytes written.
+    //
+    // If rv < nbytes we ALWAYS retry, regardless of sync/async mode,
+    // since an EINTR may or may not have happened. If this was not
+    // the case, and the kernel buffer is full, the next call to
+    // write(2) will return EAGAIN, which is handled appropriately.
+    op.nwritten_ += rv;
+    if (rv < nbytes) {
+      continue;
+    }
+
+    GLOO_ENFORCE_EQ(rv, nbytes);
     break;
   }
 
-  op.nwritten_ += rv;
-  if (rv < nbytes) {
-    return false;
-  }
-
-  GLOO_ENFORCE_EQ(rv, nbytes);
   return true;
 }
 
