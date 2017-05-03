@@ -66,7 +66,7 @@ class Bilinear(Module):
         for k in range(self.weight.size(0)):
             torch.mm(input[0], self.weight[k], out=self.buff2)
             self.buff2.mul_(input[1])
-            torch.sum(self.buff2, 1, out=self.output.narrow(1, k, 1))
+            torch.sum(self.buff2, 1, True, out=self.output.narrow(1, k, 1))
 
         if self.bias is not None:
             self.output.add_(self.bias.view(1, self.bias.nelement()).expand_as(self.output))
@@ -123,7 +123,7 @@ class Bilinear(Module):
             self.gradWeight[k].addmm_(self.buff1.t(), input[1])
 
         if self.bias is not None:
-            self.gradBias.add_(scale, gradOutput.sum(0))
+            self.gradBias.add_(scale, gradOutput.sum(0, True))
 
     def __repr__(self):
         return str(type(self)) + \
