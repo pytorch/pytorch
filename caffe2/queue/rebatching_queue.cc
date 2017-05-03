@@ -63,7 +63,9 @@ void concat(
   }
 }
 
-auto split(CPUContext& context, const std::vector<const TensorCPU*>& inputs) {
+std::vector<std::vector<TensorCPU>> split(
+    CPUContext& context,
+    const std::vector<const TensorCPU*>& inputs) {
   CAFFE_ENFORCE(!inputs.empty());
 
   const auto outputSize = inputs[0]->dims().at(0);
