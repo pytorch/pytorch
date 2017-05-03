@@ -1017,11 +1017,11 @@ std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
   if (!self) {
     return std::shared_ptr<PyFunction>();
   }
-  Py_INCREF((PyObject*)self);
 
   auto ptr = self->cdata_ptr.lock();
   if (ptr) return ptr;
 
+  Py_INCREF((PyObject*)self);
   ptr = std::shared_ptr<PyFunction>(&self->cdata, Decref());
   self->cdata_ptr = ptr;
   return ptr;
