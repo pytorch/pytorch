@@ -70,12 +70,22 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+If you are working on C files, you will need to build your changes:
+
+```
+(rm -rf build; python setup.py develop)
+```
+
+We recommend removing the `build` directory before rebuilding because
+setup.py's recompilation checking is not great, and it will often fail
+to rebuild C code after you modify code in a `generic` directory.
+
 #### C++ Development tips
 
-When you are developing on the C++ side of things, the environment variables `DEBUG` and `NOCUDA` are helpful.
+When you are developing on the C++ side of things, the environment variables `DEBUG` and `NO_CUDA` are helpful.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
-- `NOCUDA=1` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+- `NO_CUDA=1` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
 
 For example:
 ```

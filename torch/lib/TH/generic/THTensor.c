@@ -285,6 +285,23 @@ void THTensor_(resize5d)(THTensor *self, long size0, long size1, long size2, lon
   THTensor_(resizeNd)(self, 5, size, NULL);
 }
 
+THTensor* THTensor_(newExpand)(THTensor *tensor, THLongStorage *sizes) {
+  THArgCheck(THLongStorage_size(sizes) >= THTensor_(nDimension)(tensor), 1, "the number of sizes provided \
+      must be greater or equal to the number of dimensions in the tensor");
+  THArgCheck(THTensor_(nDimension)(tensor) > 0, 0, "can't expand an empty tensor");
+
+  long *expandedSizes;
+  long *expandedStrides;
+  THLongStorage_calculateExpandGeometry(tensor->size, tensor->stride, THTensor_(nDimension)(tensor), sizes, &expandedSizes, &expandedStrides);
+
+  THTensor *result = THTensor_(new)();
+  THTensor_(setStorageNd)(result, THTensor_(storage)(tensor), THTensor_(storageOffset)(tensor), THLongStorage_size(sizes), expandedSizes, expandedStrides);
+  THFree(expandedSizes);
+  THFree(expandedStrides);
+
+  return result;
+}
+
 void THTensor_(set)(THTensor *self, THTensor *src)
 {
   if(self != src)

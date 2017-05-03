@@ -257,9 +257,9 @@ tests = [
     ('transpose', new_t(1, 2, 3, 4), lambda t: [1, 2],),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [-1, -2], 'neg_dim'),
     ('to_list', small_3d, lambda t: [],),
-    ('topk', small_3d, lambda t: [2, 1, False, True], 'dim_sort'),
-    ('topk', small_3d, lambda t: [2, -1, False, True], 'neg_dim_sort'),
-    ('topk', small_3d, lambda t: [2, 1, True, True], 'dim_desc_sort'),
+    ('topk', small_3d_unique, lambda t: [2, 1, False, True], 'dim_sort'),
+    ('topk', small_3d_unique, lambda t: [2, -1, False, True], 'neg_dim_sort'),
+    ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort'),
     ('trace', medium_2d, lambda t: [],),
     ('tril', medium_2d, lambda t: [],),
     ('tril', medium_2d, lambda t: [2], 'positive'),
@@ -828,6 +828,15 @@ class TestCuda(TestCase):
 
     def test_btrisolve(self):
         TestTorch._test_btrisolve(self, lambda t: t.cuda())
+
+    def test_tensor_gather(self):
+        TestTorch._test_gather(self, lambda t: t.cuda(), False)
+
+    def test_tensor_scatter(self):
+        TestTorch._test_scatter(self, lambda t: t.cuda(), False)
+
+    def test_tensor_scatterFill(self):
+        TestTorch._test_scatterFill(self, lambda t: t.cuda(), False)
 
 
 if HAS_CUDA:

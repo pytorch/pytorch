@@ -41,7 +41,27 @@ auto THCSTensor<real>::clone_shallow() -> THCSTensor* {
 
 template<>
 auto THCSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
-  return std::unique_ptr<Tensor>(new THCSTensor(state, THCSTensor_(newContiguous)(state, tensor)));
+  throw std::runtime_error("THCSTensor::contiguous() not supported");
+}
+
+template<>
+auto THCSTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCSTensor* {
+  throw std::runtime_error("newSelect is not yet available for sparse tensors");
+}
+
+template<>
+auto THCSTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCSTensor* {
+  throw std::runtime_error("newNarrow is not yet available for sparse tensors");
+}
+
+template<>
+auto THCSTensor<real>::newTranspose(int dimension1, int dimension2) const -> THCSTensor* {
+  throw std::runtime_error("newTranspose is not yet available for sparse tensors");
+}
+
+template<>
+auto THCSTensor<real>::newUnfold(int dimension, long size, long step) const -> THCSTensor* {
+  throw std::runtime_error("newUnfold is not yet available for sparse tensors");
 }
 
 template<>
@@ -184,6 +204,11 @@ auto THCSTensor<real>::unfold(const Tensor& src, int dimension,
 }
 
 template<>
+auto THCSTensor<real>::squeeze(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::squeeze not supported");
+}
+
+template<>
 auto THCSTensor<real>::squeeze(const Tensor& src, int dimension) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::squeeze not supported");
 }
@@ -192,6 +217,96 @@ template<>
 auto THCSTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::unsqueeze not supported");
 }
+
+#define LAPACK_ERROR "Lapack operations are not available for sparse tensors"
+
+template<>
+auto THCSTensor<real>::gesv(const Tensor& ra, const Tensor& b, const Tensor& a) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+  return *this;
+}
+
+template<>
+auto THCSTensor<real>::trtrs(const Tensor& ra, const Tensor& b, const Tensor& a,
+                            const char *uplo, const char *trans, const char *diag) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::gels(const Tensor& ra, const Tensor& b, const Tensor& a) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::syev(const Tensor& rv, const Tensor& a,
+                           const char *jobz, const char *uplo) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::geev(const Tensor& rv, const Tensor& a, const char *jobvr) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::gesvd(const Tensor& rs, const Tensor& rv,
+                            const Tensor& a, const char *jobu) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::gesvd2(const Tensor& rs, const Tensor& rv, const Tensor& ra,
+                             const Tensor& a, const char *jobu) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::getri(const Tensor& a) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::potrf(const Tensor& a, const char *uplo) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::potrs(const Tensor& b, const Tensor& a, const char *uplo) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::potri(const Tensor& a, const char *uplo) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::qr(const Tensor& rr, const Tensor& a) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::geqrf(const Tensor& rtau, const Tensor& a) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::orgqr(const Tensor& a, const Tensor& tau) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::ormqr(const Tensor& a, const Tensor& tau, const Tensor& c,
+                            const char *side, const char *trans) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
+template<>
+auto THCSTensor<real>::pstrf(const Tensor& rpiv, const Tensor& a,
+                            const char *uplo, scalar_type tol) -> THCSTensor& {
+  throw std::runtime_error(LAPACK_ERROR);
+}
+
 
 #ifdef THCS_REAL_IS_HALF
 #define cast_scalar(v) THC_float2half(v)
@@ -205,6 +320,48 @@ template<>
 auto THCSTensor<real>::fill(scalar_type value) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::fill() not supported");
 }
+
+template<>
+auto THCSTensor<real>::maskedFill(const Tensor& mask, scalar_type value) -> THCSTensor& {
+  throw std::runtime_error("THSTensor::maskedFill() not supported");
+}
+
+
+template<>
+auto THCSTensor<real>::maskedCopy(const Tensor& mask, const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::maskedCopy() not supported");
+}
+
+template<>
+auto THCSTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::maskedSelect() not supported");
+}
+
+template<>
+auto THCSTensor<real>::nonzero(const Tensor& subscript) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::nonzero() not supported");
+}
+
+template<>
+auto THCSTensor<real>::indexSelect(const Tensor& src, int dim, const Tensor& index) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::indexSelect() not supported");
+}
+
+template<>
+auto THCSTensor<real>::indexCopy(int dim, const Tensor& index, const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::indexCopy() not supported");
+}
+
+template<>
+auto THCSTensor<real>::indexAdd(int dim, const Tensor& index, const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::indexAdd() not supported");
+}
+
+template<>
+auto THCSTensor<real>::indexFill(int dim, const Tensor& index, scalar_type value) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::indexFill() not supported");
+}
+
 
 template<>
 auto THCSTensor<real>::retain() -> THCSTensor& {
@@ -232,6 +389,11 @@ template<>
 auto THCSTensor<real>::range(scalar_type xmin, scalar_type xmax,
                            scalar_type step) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::range() not supported");
+}
+
+template<>
+auto THCSTensor<real>::randperm(const Generator& _generator, long n) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::randperm() not supported");
 }
 
 template<>
@@ -366,6 +528,228 @@ auto THCSTensor<real>::sinh(const Tensor& src) -> THCSTensor& {
 template<>
 auto THCSTensor<real>::copy(const Tensor& src) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::copy() not supported");
+}
+
+template<>
+auto THCSTensor<real>::tan(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::tan() not supported");
+}
+
+template<>
+auto THCSTensor<real>::atan(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::atan() not supported");
+}
+
+template<>
+auto THCSTensor<real>::atan2(const Tensor& src1, const Tensor& src2) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::atan2() not supported");
+}
+
+template<>
+auto THCSTensor<real>::tanh(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::tanh() not supported");
+}
+
+template<>
+auto THCSTensor<real>::pow(const Tensor& src, scalar_type value) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::pow() not supported");
+}
+
+template<>
+auto THCSTensor<real>::tpow(scalar_type value, const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::tpow() not supported");
+}
+
+template<>
+auto THCSTensor<real>::sqrt(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::sqrt() not supported");
+}
+
+template<>
+auto THCSTensor<real>::rsqrt(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::rsqrt() not supported");
+}
+
+template<>
+auto THCSTensor<real>::ceil(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::ceil() not supported");
+}
+
+template<>
+auto THCSTensor<real>::floor(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::floor() not supported");
+}
+
+template<>
+auto THCSTensor<real>::round(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::round() not supported");
+}
+
+template<>
+auto THCSTensor<real>::trunc(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::trunc() not supported");
+}
+
+template<>
+auto THCSTensor<real>::frac(const Tensor& src) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::frac() not supported");
+}
+
+template<>
+auto THCSTensor<real>::lerp(const Tensor& a, const Tensor& b, scalar_type weight) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::lerp() not supported");
+}
+
+template<>
+auto THCSTensor<real>::mean(const Tensor& src, int dimension) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::mean() not supported");
+}
+
+template<>
+auto THCSTensor<real>::std(const Tensor& src, int dimension, int flag) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::std() not supported");
+}
+
+template<>
+auto THCSTensor<real>::var(const Tensor& src, int dimension, int flag) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::var() not supported");
+}
+
+template<>
+auto THCSTensor<real>::norm(const Tensor& src, scalar_type value, int dimension) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::norm() not supported");
+}
+
+template<>
+auto THCSTensor<real>::renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::renorm() not supported");
+}
+
+template<>
+auto THCSTensor<real>::histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::histc() not supported");
+}
+
+template<>
+auto THCSTensor<real>::bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::bhistc() not supported");
+}
+
+template<>
+auto THCSTensor<real>::dist(const Tensor& src, scalar_type value) -> scalar_type {
+  throw std::runtime_error("THCSTensor::dist() not supported");
+}
+
+template<>
+auto THCSTensor<real>::meanall() -> scalar_type {
+  throw std::runtime_error("THCSTensor::meanall() not supported");
+}
+
+template<>
+auto THCSTensor<real>::varall() -> scalar_type {
+  throw std::runtime_error("THCSTensor::varall() not supported");
+}
+
+template<>
+auto THCSTensor<real>::stdall() -> scalar_type {
+  throw std::runtime_error("THCSTensor::stdall() not supported");
+}
+
+template<>
+auto THCSTensor<real>::normall(scalar_type value) -> scalar_type {
+  throw std::runtime_error("THCSTensor::normall() not supported");
+}
+
+template<>
+auto THCSTensor<real>::linspace(scalar_type a, scalar_type b, long n) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::linspace() not supported");
+}
+
+template<>
+auto THCSTensor<real>::logspace(scalar_type a, scalar_type b, long n) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::logspace() not supported");
+}
+
+template<>
+auto THCSTensor<real>::rand(const Generator& _generator, THLongStorage *size) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::rand() not supported");
+}
+
+template<>
+auto THCSTensor<real>::randn(const Generator& _generator, THLongStorage *size) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::randn() not supported");
+}
+
+template<>
+int THCSTensor<real>::logicalall() {
+  throw std::runtime_error("THCSTensor::logicalall() not supported");
+}
+
+template<>
+int THCSTensor<real>::logicalany() {
+  throw std::runtime_error("THCSTensor::logicalany() not supported");
+}
+
+template<>
+auto THCSTensor<real>::random(const Generator& _generator) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::random() not supported");
+}
+
+template<>
+auto THCSTensor<real>::geometric(const Generator& _generator, double p) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::geometric() not supported");
+}
+
+template<>
+auto THCSTensor<real>::bernoulli(const Generator& _generator, double p) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::bernoulli() not supported");
+}
+
+template<>
+auto THCSTensor<real>::bernoulli_FloatTensor(const Generator& _generator, const Tensor& p) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::bernoulli_FloatTensor() not supported");
+}
+
+template<>
+auto THCSTensor<real>::bernoulli_DoubleTensor(const Generator& _generator, const Tensor& p) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::bernoulli_DoubleTensor() not supported");
+}
+
+template<>
+auto THCSTensor<real>::uniform(const Generator& _generator, double a, double b) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::uniform() not supported");
+}
+
+template<>
+auto THCSTensor<real>::normal(const Generator& _generator, double mean, double stdv) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::normal() not supported");
+}
+
+template<>
+auto THCSTensor<real>::exponential(const Generator& _generator, double lambda) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::exponential() not supported");
+}
+
+template<>
+auto THCSTensor<real>::cauchy(const Generator& _generator, double median, double sigma) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::cauchy() not supported");
+}
+
+template<>
+auto THCSTensor<real>::logNormal(const Generator& _generator, double mean, double stdv) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::logNormal() not supported");
+}
+
+// Note: the order of *Tensor and *Prob_dist is reversed compared to
+// the declarations in TH/generic/THTensorMath.h, so for instance
+// the call:
+// THRealTensor_multinomial(r, _generator, prob_dist, n_sample, with_replacement)
+// is equivalent to `prob_dist->multinomial(r, _generator, n_sample, with_replacement)`.
+// It is done this way so that the first argument can be casted onto a float tensor type.
+template<>
+auto THCSTensor<real>::multinomial(const Tensor& r, const Generator& _generator,
+                                  int n_sample, int with_replacement) -> THCSTensor& {
+  throw std::runtime_error("THCSTensor::multinomial() not supported");
 }
 
 template<>

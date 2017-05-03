@@ -556,7 +556,6 @@
 
 [[
   name: topk
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0,1
   options:

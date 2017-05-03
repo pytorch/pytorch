@@ -55,6 +55,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: nnz
+  python_name: _nnz
   sparse: yes
   return: long
   arguments:
@@ -62,9 +63,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: isContiguous
+  name: isCoalesced
   sparse: yes
-  python_name: is_contiguous
+  python_name: is_coalesced
   return: bool
   arguments:
   - THSTensor* self
@@ -72,6 +73,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: indices
+  python_name: _indices
   sparse: yes
   cname: newIndices
   return: THIndexTensor*
@@ -81,6 +83,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: values
+  python_name: _values
   sparse: yes
   cname: newValues
   return: THTensor*
@@ -89,9 +92,10 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: contiguous
+  name: coalesce
+  cname: newCoalesce
   sparse: yes
-  return: argument 0
+  return: THSTensor*
   arguments:
   - THSTensor* self
 ]]
@@ -399,7 +403,21 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: sparse_mask
+  name: pow
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
+  sparse: yes
+  cname: pow
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - THSTensor* self
+    - real value
+]]
+
+[[
+  name: _sparse_mask
   cname: sparseMask
   return: argument 0
   arguments:

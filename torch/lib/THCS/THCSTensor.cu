@@ -1,7 +1,10 @@
 #include "THCSTensor.h"
 #include "THCApply.cuh"
+#include "THCTensorSort.cuh"
 #include "THCTensorMathPointwise.cuh"
 #include "stdio.h"
+
+const int WARP_SIZE = 32;
 
 template <typename IndexType, typename Real, typename Op>
 __device__ void applyOp2(
@@ -233,6 +236,81 @@ __global__ void THCSTensor_indexSparseIntersectionKernel(
     r_i++; t_i++; s_i++;
   }
   *resultNnz = r_i;
+}
+
+// template <typename Dtype, typename Acctype>
+// __global__ void THCSTensor_coalesceValuesKernel_gridStrided(
+//   long *segment_offsets, long *value_indices,
+//   Dtype *values, Dtype *newValues,
+//   long nnz, long newNnz, long stride) {
+//
+//   long chunksPerSeg = THCCeilDiv(stride, (long) blockDim.x);
+//   long numChunks = newNnz * chunksPerSeg;
+//   long chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
+//   long chunkStride = gridDim.x * blockDim.y;
+//
+//   for (long chunk = chunkOffset; chunk < numChunks; chunk += chunkStride) {
+//     long featureDim = (chunk % chunksPerSeg) * blockDim.x + threadIdx.x;
+//     if (featureDim < stride) {
+//       auto valFeat = values + featureDim;
+//       long seg = chunk / chunksPerSeg;
+//       auto begin = segment_offsets[seg];
+//       auto end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
+//       Acctype valSum = ScalarConvert<float, Acctype>::to(0);
+//       for (long valIdx = begin; valIdx < end; valIdx++) {
+//         const long valRow = value_indices[valIdx] * stride;
+//         valSum += ScalarConvert<Dtype, Acctype>::to(valFeat[valRow]);
+//       }
+//       newValues[seg * stride + featureDim] = ScalarConvert<Acctype, Dtype>::to(valSum);
+//     }
+//   }
+// }
+
+template <typename Dtype, typename Acctype>
+__global__ void THCSTensor_coalesceValuesKernel(
+  long *segment_offsets, long *value_indices,
+  Dtype *values, Dtype *newValues,
+  long nnz, long newNnz, long stride) {
+
+  int seg = blockIdx.x * 4 + threadIdx.y;
+
+  // Number of values proceessed by each thread (grain size)
+  const int SZ = 4;
+
+  if (seg < newNnz) {
+    const int newValueRow = seg * stride;
+    const int begin = segment_offsets[seg];
+    const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
+    const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+    Acctype tmp[SZ];
+    #pragma unroll
+    for (int ii = 0; ii < SZ; ii++) {
+      tmp[ii] = ScalarConvert<float, Acctype>::to(0);
+    }
+    for (int row = begin; row < end; row++) {
+      const int valueRow = ((int) value_indices[row]) * stride;
+
+
+      #pragma unroll
+      for (int ii = 0; ii < SZ; ii++)
+      {
+        int featureDim = startFeature + ii * WARP_SIZE;
+        if (featureDim < stride)
+        {
+          tmp[ii] += ScalarConvert<Dtype, Acctype>::to(values[valueRow + featureDim]);
+        }
+      }
+    }
+    #pragma unroll
+    for (int ii = 0; ii < SZ; ii++)
+    {
+      int featureDim = startFeature + ii * WARP_SIZE;
+      if (featureDim < stride)
+      {
+        newValues[newValueRow + featureDim] = ScalarConvert<Acctype, Dtype>::to(tmp[ii]);
+      }
+    }
+  }
 }
 
 #include "generic/THCSTensor.cu"

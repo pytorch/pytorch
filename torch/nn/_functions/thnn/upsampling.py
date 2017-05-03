@@ -4,6 +4,8 @@ from torch.autograd import Function
 from torch._thnn import type2backend
 
 from . import _all_functions
+from ...modules.utils import _pair
+from ...functional import _check_bilinear_2d_scale_factor
 
 
 class _UpsamplingBase(Function):
@@ -12,15 +14,21 @@ class _UpsamplingBase(Function):
         super(_UpsamplingBase, self).__init__()
         if size is None and scale_factor is None:
             raise ValueError('either size or scale_factor should be defined')
-        if scale_factor is not None and not isinstance(scale_factor, Integral):
-            raise ValueError('scale_factor must be of integer type')
-        if size is not None and not isinstance(size, tuple):
-            size = (size, size)
+        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
+            raise ValueError('scale_factor must be of integer type or tuple of integer types')
         self.size = size
         self.scale_factor = scale_factor
 
 
 class UpsamplingNearest2d(_UpsamplingBase):
+
+    def __init__(self, size=None, scale_factor=None):
+        super(UpsamplingNearest2d, self).__init__(size, scale_factor)
+
+        if self.scale_factor is not None and not isinstance(scale_factor, Integral):
+            raise ValueError('scale_factor must be of integer type for nearest neighbor sampling')
+
+        self.size = _pair(self.size) if self.size is not None else None
 
     def forward(self, input):
         assert input.dim() == 4
@@ -64,13 +72,21 @@ class UpsamplingNearest2d(_UpsamplingBase):
 
 class UpsamplingBilinear2d(_UpsamplingBase):
 
+    def __init__(self, size=None, scale_factor=None):
+        super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
+
+        if self.scale_factor is not None:
+            self.scale_factor = _check_bilinear_2d_scale_factor(self.scale_factor)
+
+        self.size = _pair(self.size) if self.size is not None else None
+
     def forward(self, input):
         assert input.dim() == 4
 
-        if self.scale_factor:
+        if self.scale_factor is not None:
             self.output_size = (
-                input.size(2) * self.scale_factor,
-                input.size(3) * self.scale_factor,
+                input.size(2) * self.scale_factor[0],
+                input.size(3) * self.scale_factor[1],
             )
         else:
             self.output_size = self.size
@@ -106,6 +122,9 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         )
         return grad_input
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.scale_factor = _tuple(self.scale_factor)
 
 _all_functions.append(UpsamplingNearest2d)
 _all_functions.append(UpsamplingBilinear2d)

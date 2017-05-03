@@ -14,7 +14,7 @@ typedef struct THSTensor
     THLongTensor *indices;
     THTensor *values;
     // Math operations can only be performed on ordered sparse tensors
-    int contiguous;
+    int coalesced;
     int refcount;
 
 } THSTensor;
@@ -41,7 +41,6 @@ TH_API THSTensor *THSTensor_(newWithSize3d)(long size0_, long size1_, long size2
 TH_API THSTensor *THSTensor_(newWithSize4d)(long size0_, long size1_, long size2_, long size3_);
 
 TH_API THSTensor *THSTensor_(newClone)(THSTensor *self);
-TH_API THSTensor *THSTensor_(newContiguous)(THSTensor *self);
 TH_API THSTensor *THSTensor_(newTranspose)(THSTensor *self, int dimension1_, int dimension2_);
 
 /**** reshaping methods ***/
@@ -56,9 +55,9 @@ TH_API THTensor *THSTensor_(toDense)(THSTensor *self);
 TH_API void THSTensor_(copy)(THSTensor *self, THSTensor *src);
 
 TH_API void THSTensor_(transpose)(THSTensor *self, int dimension1_, int dimension2_);
-TH_API int THSTensor_(isContiguous)(const THSTensor *self);
+TH_API int THSTensor_(isCoalesced)(const THSTensor *self);
 TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src);
-TH_API void THSTensor_(contiguous)(THSTensor *self);
+TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self);
 
 TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask);
 

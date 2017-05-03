@@ -21,7 +21,7 @@ except ImportError:
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 
-def load_url(url, model_dir=None):
+def load_url(url, model_dir=None, map_location=None):
     r"""Loads the Torch serialized object at the given URL.
 
     If the object is already present in `model_dir`, it's deserialied and
@@ -37,6 +37,7 @@ def load_url(url, model_dir=None):
     Args:
         url (string): URL of the object to download
         model_dir (string, optional): directory in which to save the object
+        map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
 
     Example:
         >>> state_dict = torch.utils.model_zoo.load_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
@@ -54,7 +55,7 @@ def load_url(url, model_dir=None):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = HASH_REGEX.search(filename).group(1)
         _download_url_to_file(url, cached_file, hash_prefix)
-    return torch.load(cached_file)
+    return torch.load(cached_file, map_location=map_location)
 
 
 def _download_url_to_file(url, dst, hash_prefix):

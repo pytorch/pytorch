@@ -1,8 +1,11 @@
 #include "DataChannel.hpp"
+#ifdef WITH_GLOO
+#include "data_channels/DataChannelGloo.hpp"
+#endif // WITH_GLOO
 #ifdef WITH_MPI
-#include "channels/DataChannelMPI.hpp"
+#include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
-#include "channels/DataChannelTCP.hpp"
+#include "data_channels/DataChannelTCP.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -17,6 +20,10 @@ DataChannel* DataChannel::newChannel(THDChannelType type) {
   else if (type == THDChannelMPI)
     return new DataChannelMPI();
 #endif // WITH_MPI
+#ifdef WITH_GLOO
+  else if (type == THDChannelGloo)
+    return new DataChannelGloo();
+#endif // WITH_GLOO
   throw std::runtime_error("unsupported data channel type");
 }
 
@@ -25,13 +32,13 @@ DataChannel::Group::Group()
 {}
 
 
-DataChannel::Group::Group(std::vector<int> ranks, int max_rank)
+DataChannel::Group::Group(std::vector<rank_type> ranks, rank_type max_rank)
 {
   if (ranks.size() == 0)
     throw std::logic_error("cannot create empty group");
 
   sort(ranks.begin(), ranks.end());
-  if (ranks.front() < 0 || ranks.back() > max_rank) {
+  if (ranks.back() > max_rank) {
     throw std::out_of_range(
       "array of ranks contains invalid rank, "
       "all ranks should be in range: [0, " + std::to_string(max_rank) + "]"
@@ -50,12 +57,12 @@ DataChannel::Group::~Group()
 {}
 
 
-std::size_t DataChannel::Group::size() const {
-  return _new2old.size();
+auto DataChannel::Group::size() const -> rank_type {
+  return static_cast<rank_type>(_new2old.size());
 }
 
 
-auto DataChannel::Group::mustGetGroupRank(int global_rank) const -> rank_type {
+auto DataChannel::Group::mustGetGroupRank(rank_type global_rank) const -> rank_type {
   rank_type group_rank;
   bool exists;
   std::tie(group_rank, exists) = getGroupRank(global_rank);
@@ -70,7 +77,7 @@ auto DataChannel::Group::mustGetGroupRank(int global_rank) const -> rank_type {
 }
 
 
-auto DataChannel::Group::getGroupRank(int global_rank) const -> std::pair<rank_type, bool> {
+auto DataChannel::Group::getGroupRank(rank_type global_rank) const -> std::pair<rank_type, bool> {
   auto global_rank_it = _old2new.find(global_rank); // O(1) operation
   if (global_rank_it != _old2new.end())
     return std::make_pair(global_rank_it->second, true);
@@ -79,7 +86,7 @@ auto DataChannel::Group::getGroupRank(int global_rank) const -> std::pair<rank_t
 }
 
 
-auto DataChannel::Group::mustGetGlobalRank(int group_rank) const -> rank_type {
+auto DataChannel::Group::mustGetGlobalRank(rank_type group_rank) const -> rank_type {
   rank_type global_rank;
   bool exists;
   std::tie(global_rank, exists) = getGlobalRank(group_rank);
@@ -95,8 +102,8 @@ auto DataChannel::Group::mustGetGlobalRank(int group_rank) const -> rank_type {
 }
 
 
-auto DataChannel::Group::getGlobalRank(int group_rank) const -> std::pair<rank_type, bool> {
-  if (group_rank < 0 || group_rank >= _new2old.size())
+auto DataChannel::Group::getGlobalRank(rank_type group_rank) const -> std::pair<rank_type, bool> {
+  if (group_rank >= _new2old.size())
     return std::make_pair(0, false);
 
   return std::make_pair(_new2old[group_rank], true);

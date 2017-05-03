@@ -109,7 +109,10 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
   int ndevice;
-  THCudaCheck(cudaGetDeviceCount(&ndevice));
+  if (cudaGetDeviceCount(&ndevice) != cudaSuccess) {
+    cudaGetLastError();
+    ndevice = 0;
+  }
   return PyLong_FromLong(ndevice);
   END_HANDLE_TH_ERRORS
 }
@@ -256,19 +259,6 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
   Py_RETURN_NONE;
 }
 
-PyObject * THCPModule_getLibPath(PyObject *_unused)
-{
-#define _STR(x) #x
-#define STR(x) _STR(x)
-#if PY_MAJOR_VERSION == 2
-  return PyString_FromString(STR(CUDA_LIB_PATH));
-#else
-  return PyUnicode_FromString(STR(CUDA_LIB_PATH));
-#endif
-#undef STR
-#undef _STR
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -313,7 +303,10 @@ PyObject * THCPModule_initExtension(PyObject *self)
     THPUtils_setError("class loader couldn't access torch module");
     return NULL;
   }
-  return PyBool_FromLong(THCPModule_initCuda(torch_module));
+  if (!THCPModule_initCuda(torch_module)) {
+    return NULL;
+  }
+  Py_RETURN_NONE;
 }
 
 #ifdef WITH_NCCL

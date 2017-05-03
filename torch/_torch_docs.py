@@ -1059,7 +1059,7 @@ Get the k-th diagonal of a given matrix::
 
 add_docstr(torch._C.dist,
            """
-dist(input, other, p=2, out=None) -> Tensor
+dist(input, other, p=2) -> float
 
 Returns the p-norm of (:attr:`input` - :attr:`other`)
 
@@ -1067,7 +1067,6 @@ Args:
     input (Tensor): the input `Tensor`
     other (Tensor): the Right-hand-side input `Tensor`
     p (float, optional): The norm to be computed.
-    out (Tensor, optional): The result `Tensor`
 
 Example::
 
@@ -1397,9 +1396,9 @@ Gathers values along an axis specified by `dim`.
 
 For a 3-D tensor the output is specified by::
 
-    out[i][j][k] = tensor[index[i][j][k]][j][k]  # dim=0
-    out[i][j][k] = tensor[i][index[i][j][k]][k]  # dim=1
-    out[i][j][k] = tensor[i][j][index[i][j][k]]  # dim=3
+    out[i][j][k] = input[index[i][j][k]][j][k]  # dim=0
+    out[i][j][k] = input[i][index[i][j][k]][k]  # dim=1
+    out[i][j][k] = input[i][j][index[i][j][k]]  # dim=2
 
 Args:
     input (Tensor): The source tensor
@@ -1758,12 +1757,14 @@ add_docstr(torch._C.kthvalue,
            """
 kthvalue(input, k, dim=None, out=None) -> (Tensor, LongTensor)
 
-Returns the :attr:`k`th smallest element of the given :attr:`input` Tensor along a given dimension.
+Returns the :attr:`k` th smallest element of the given :attr:`input` Tensor along a given dimension.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 A tuple of `(values, indices)` is returned, where the `indices` is the indices of
-the kth-smallest element in the original `input` Tensor in dimention `dim`.
+the kth-smallest element in the original `input` Tensor in dimention `dim`.  Both the
+:attr:`values` and :attr:`indices` tensors are the same size as :attr:`input` except in
+the dimension :attr:`dim` where they are of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -1793,6 +1794,21 @@ Example::
     [torch.LongTensor of size 1]
     )
 
+    >>> x=torch.arange(1,7).resize_(2,3)
+    >>> x
+
+    1  2  3
+    4  5  6
+    [torch.FloatTensor of size 2x3]
+
+    >>> torch.kthvalue(x,2,0)
+    (
+    4  5  6
+    [torch.FloatTensor of size 1x3]
+           ,
+    1  1  1
+    [torch.LongTensor of size 1x3]
+    )
 """)
 
 add_docstr(torch._C.le,

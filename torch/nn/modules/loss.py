@@ -217,7 +217,15 @@ class HingeEmbeddingLoss(_Loss):
 
     The `margin` has a default value of `1`, or can be set in the constructor.
     """
-    pass
+
+    def __init__(self, margin=1.0, size_average=True):
+        super(HingeEmbeddingLoss, self).__init__()
+        self.margin = margin
+        self.size_average = size_average
+
+    def forward(self, input, target):
+        return self._backend.HingeEmbeddingLoss(self.margin,
+                                                self.size_average)(input, target)
 
 
 class MultiLabelMarginLoss(_Loss):
@@ -440,7 +448,7 @@ class TripletMarginLoss(Module):
     .. math::
         L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)
 
-    where :math: `d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
+    where :math:`d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
 
     Args:
         anchor: anchor input tensor

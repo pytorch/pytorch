@@ -5,6 +5,7 @@ torch.egg-info/
 torch/version.py
 torch/csrc/generic/TensorMethods.cpp
 torch/lib/*.so*
+torch/lib/*.a*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/build
@@ -19,6 +20,7 @@ torch/csrc/nn/THCUNN.cpp
 torch/csrc/nn/THNN_generic.cwrap
 torch/csrc/nn/THNN_generic.cpp
 torch/csrc/nn/THNN_generic.h
+torch/csrc/generated
 docs/src/**/*
 test/data/legacy_modules.t7
 test/data/gpu_tensors.pt

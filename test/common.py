@@ -77,7 +77,7 @@ def to_gpu(obj, type_map={}):
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, Variable):
-        assert obj.creator is None
+        assert obj.is_leaf
         t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
         return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
     elif isinstance(obj, list):
@@ -125,6 +125,32 @@ class TestCase(unittest.TestCase):
             max_err = max(max_err, abs(x[index] - y[index]))
         self.assertLessEqual(max_err, prec, message)
 
+    def safeCoalesce(self, t):
+        tc = t.coalesce()
+
+        value_map = {}
+        for idx, val in zip(t._indices().t(), t._values()):
+            idx_tup = tuple(idx)
+            if idx_tup in value_map:
+                value_map[idx_tup] += val
+            else:
+                value_map[idx_tup] = val.clone() if torch.is_tensor(val) else val
+
+        new_indices = sorted(list(value_map.keys()))
+        new_values = [value_map[idx] for idx in new_indices]
+        if t._values().ndimension() < 2:
+            new_values = t._values().new(new_values)
+        else:
+            new_values = torch.stack(new_values)
+
+        new_indices = t._indices().new(new_indices).t()
+        tg = t.new(new_indices, new_values, t.size())
+
+        self.assertEqual(tc._indices(), tg._indices())
+        self.assertEqual(tc._values(), tg._values())
+
+        return tg
+
     def assertEqual(self, x, y, prec=None, message=''):
         if prec is None:
             prec = self.precision
@@ -150,10 +176,10 @@ class TestCase(unittest.TestCase):
                     self.assertLessEqual(max_err, prec, message)
             self.assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
-                x = x.clone().contiguous()
-                y = y.clone().contiguous()
-                assertTensorsEqual(x.indices(), y.indices())
-                assertTensorsEqual(x.values(), y.values())
+                x = self.safeCoalesce(x)
+                y = self.safeCoalesce(y)
+                assertTensorsEqual(x._indices(), y._indices())
+                assertTensorsEqual(x._values(), y._values())
             else:
                 assertTensorsEqual(x, y)
         elif type(x) == str and type(y) == str:

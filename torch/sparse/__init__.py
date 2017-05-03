@@ -78,12 +78,6 @@ class _SparseBase(object):
     def __matmul__(self, other):
         raise NotImplementedError
 
-    def __pow__(self, other):
-        raise NotImplementedError
-
-    def __ipow__(self, other):
-        raise NotImplementedError
-
     def __rdiv__(self, other):
         raise NotImplementedError
 
@@ -133,9 +127,8 @@ class _SparseBase(object):
         raise NotImplementedError
 
     def __str__(self):
-        self.contiguous()  # to make sure the output is consistent
         return '{} with indices:\n{}and values:\n{}'.format(
-            self.__class__.__name__, self.indices(), self.values())
+            self.__class__.__name__, self._indices(), self._values())
 
 
 class DoubleTensor(_SparseBase, _C.SparseDoubleTensorBase, _TensorBase):

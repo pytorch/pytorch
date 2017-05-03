@@ -13,8 +13,8 @@ typedef struct THCSTensor
     // as buffer, so we keep track of both
     THCIndexTensor *indices;
     THCTensor *values;
-    // Math operations can only be performed on ordered sparse tensors
-    int contiguous;
+    // Some math operations can only be performed on ordered sparse tensors
+    int coalesced;
     int refcount;
 
 } THCSTensor;
@@ -41,7 +41,6 @@ TH_API THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, long size0_, long
 TH_API THCSTensor *THCSTensor_(newWithSize4d)(THCState *state, long size0_, long size1_, long size2_, long size3_);
 
 TH_API THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self);
-TH_API THCSTensor *THCSTensor_(newContiguous)(THCState *state, THCSTensor *self);
 TH_API THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self, int dimension1_, int dimension2_);
 
 /**** reshaping methods ***/
@@ -58,8 +57,8 @@ TH_API THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self);
 TH_API void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src);
 
 TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimension1_, int dimension2_);
-TH_API int THCSTensor_(isContiguous)(THCState *state, const THCSTensor *self);
-TH_API void THCSTensor_(contiguous)(THCState *state, THCSTensor *self);
+TH_API int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self);
+TH_API THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self);
 
 TH_API void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask);
 
@@ -72,9 +71,9 @@ TH_API int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, u
 
 /* internal methods */
 TH_API void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, long *size);
-TH_API void THCSTensor_(reorder)(THCState *state, THCSTensor *self);
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, long nnz);
 TH_API THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
+TH_API THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self);
 
 #endif

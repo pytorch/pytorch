@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/variable.h"
 
+#include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
 using namespace torch;
@@ -12,89 +13,90 @@ Variable::Variable(
   bool requires_grad,
   bool is_volatile)
     : data(std::move(data))
-    , creator(nullptr)
+    , grad_fn(nullptr)
     , grad(nullptr)
     , version_counter(new VariableVersion())
+    , requires_grad(requires_grad)
+    , is_volatile(is_volatile)
     , output_nr(0)
     , pyobj(nullptr)
 {
   if (!this->data) {
     throw std::runtime_error("Variable data is NULL");
   }
-  this->is_volatile = is_volatile;
-  this->requires_grad = requires_grad;
 }
 
 Variable::Variable(
   std::unique_ptr<thpp::Tensor> data,
-  std::shared_ptr<Function> creator)
+  std::shared_ptr<Function> grad_fn)
     : data(std::move(data))
-    , creator(creator)
+    , grad_fn(grad_fn)
     , grad(nullptr)
     , version_counter(new VariableVersion())
-    , output_nr(creator->num_outputs++)
+    , requires_grad(grad_fn->is_executable)
+    , is_volatile(false)
+    , output_nr(grad_fn->num_inputs++)
     , pyobj(nullptr)
 {
   if (!this->data) {
     throw std::runtime_error("Variable data is NULL");
   }
-  this->is_volatile = creator->is_volatile;
-  this->requires_grad = creator->requires_grad;
-  previous_functions.resize(1);
-  previous_functions[0] = std::make_pair<>(creator, output_nr);
 }
 
-auto Variable::backward(std::shared_ptr<Variable> gradOutput) -> void {
-  if (!pre_hooks.empty()) {
-    for (auto& hook : pre_hooks) {
-      gradOutput = (*hook)(variable_list({gradOutput}))[0];
-    }
+auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
+  using weak_type = std::weak_ptr<Function>;
+
+  static std::shared_ptr<Function> null_shared_ptr;
+  static weak_type null_weak_ptr;
+
+  if (grad_fn) return nullptr;
+  if (!requires_grad) return nullptr;
+
+  auto result = grad_accumulator.lock();
+  if (result) return result;
+
+  // That didn't work, we need to allocate it, but taking into account that other
+  // threads might be doing the same thing.
+  std::lock_guard<std::mutex> lock(grad_accumulator_lock);
+
+  result = grad_accumulator.lock();
+  if (result) return result;
+
+  result = std::make_shared<AccumulateGrad>(shared_from_this());
+  grad_accumulator = result;
+  return result;
+}
+
+auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
+  if (!data) return nullptr;
+
+  int current_version = **version;
+  if (expected_version != current_version) {
+    throw std::runtime_error("one of the variables "
+        "needed for gradient computation has been modified by an "
+        "inplace operation");
   }
-  AutoGPU auto_gpu(gradOutput->data->getDevice());
-  if (!grad) {
-    std::unique_ptr<Tensor> data(gradOutput->data->clone());
-    grad = std::make_shared<Variable>(std::move(data), false, true);
-  } else if (grad->data->isSparse() && !gradOutput->data->isSparse()) {
-    auto* sum = gradOutput->data->clone();
-    sum->cadd(*sum, *grad->data);
-    grad->data.reset(sum);
+
+  auto new_var = std::make_shared<Variable>(
+      std::unique_ptr<thpp::Tensor>(data->clone_shallow()),
+      requires_grad, is_volatile);
+  if (!grad_fn && !weak_grad_fn.expired()) {
+    // there's no risk of race condition here, because weak_grad_fn is
+    // guaranteed to be valid for the entire duration of the call
+    // (of course only if it was used in the first place).
+    new_var->grad_fn = weak_grad_fn.lock();
   } else {
-    grad->data->cadd(*grad->data, *gradOutput->data);
+    new_var->grad_fn = grad_fn;
   }
-}
+  new_var->version_counter->join_with(*version);
+  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
+  // should have saved the grad accumulator. Even if the Variable no longer
+  // alive, the accumulator should be kept alive by the references in the graph).
+  if (requires_grad && !grad_fn && weak_grad_fn.expired() && grad_accumulator.expired())
+    throw std::logic_error("No grad accumulator for a saved leaf!");
+  new_var->grad_accumulator = grad_accumulator;
 
-auto Variable::apply(const variable_list& gradOutputs) -> variable_list {
-  if (creator || **version_counter != 0) {
-    throw std::runtime_error("leaf variable was used in an inplace operation");
-  }
-  if (gradOutputs.size() != 1) {
-    throw std::runtime_error("incorrect number of gradOutputs");
-  }
-  backward(gradOutputs[0]);
-  return variable_list();
-}
-
-auto Variable::save() const -> SavedVariable {
-  return SavedVariable(
-    std::unique_ptr<Tensor>(data->clone_shallow()),
-    **version_counter,
-    std::unique_ptr<VariableVersion>(version_counter->new_saved_ref()));
-}
-
-auto Variable::save_opt(Variable* var) -> SavedVariable {
- return var ? var->save() : SavedVariable();
-}
-
-auto SavedVariable::unpack() -> std::unique_ptr<thpp::Tensor>& {
-  if (data) {
-    int current_version = **version;
-    if (expected_version != current_version) {
-      throw std::runtime_error("one of the variables "
-          "needed for gradient computation has been modified by an "
-          "inplace operation");
-    }
-  }
-  return data;
+  return new_var;
 }
 
 }} // namespace torch::autograd

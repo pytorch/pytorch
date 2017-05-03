@@ -4,11 +4,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "torch/csrc/utils/python_strings.h"
 #include "THDP.h"
 
 static std::unordered_map<std::string, THDChannelType> name2channel_type = {
     {"mpi", THDChannelMPI},
     {"tcp", THDChannelTCP},
+    {"gloo", THDChannelGloo},
 };
 
 static bool THDPModule_loadClasses(PyObject *module_dict)
@@ -42,29 +44,13 @@ static bool THDPModule_loadClasses(PyObject *module_dict)
 static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;
 static std::unordered_map<PyObject*, THDGroup> obj2group;
 
-static THPObjectPtr _ensureBytes(PyObject *obj)
-{
-#if PY_MAJOR_VERSION == 2
-  if (PyString_Check(obj)) {
-#elif PY_MAJOR_VERSION == 3
-  if (PyBytes_Check(obj)) {
-#endif
-    Py_INCREF(obj);
-    return obj;
-  }
-  if (PyUnicode_Check(obj)) {
-    return PyUnicode_AsASCIIString(obj);
-  }
-  return NULL;
-}
-
-PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *_backend)
+PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *backend)
 {
   HANDLE_TH_ERRORS
-  THPObjectPtr backend_bytes = _ensureBytes(_backend);
-  THPUtils_assert(backend_bytes, "backend argument has to be a string/bytes "
-      "object, but got %s", THPUtils_typename(_backend));
-  char *backend_name = THPUtils_bytesAsString(backend_bytes.get());
+  THPUtils_assert(THPUtils_checkString(backend),
+      "backend argument has to be a string/bytes object, but got %s",
+      THPUtils_typename(backend));
+  std::string backend_name = THPUtils_unpackString(backend);
   THDChannelType channel_type = name2channel_type.at(backend_name);
   THPUtils_assert(THDProcessGroupInit(channel_type), "failed to initialize "
       "distributed library (THD)");
@@ -72,13 +58,13 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *_backend)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *_backend)
+PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *backend)
 {
   HANDLE_TH_ERRORS
-  THPObjectPtr backend_bytes = _ensureBytes(_backend);
-  THPUtils_assert(backend_bytes, "backend argument has to be a string/bytes "
-      "object, but got %s", THPUtils_typename(_backend));
-  char *backend_name = THPUtils_bytesAsString(backend_bytes.get());
+  THPUtils_assert(THPUtils_checkString(backend),
+      "backend argument has to be a string/bytes object, but got %s",
+      THPUtils_typename(backend));
+  std::string backend_name = THPUtils_unpackString(backend);
   THDChannelType channel_type = name2channel_type.at(backend_name);
   THPUtils_assert(THDMasterWorkerInit(channel_type), "failed to initialize "
       "distributed library (THD)");
@@ -100,6 +86,17 @@ PyObject* THDPModule_getNumProcesses(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef WITH_CUDA
+extern PyObject* THCPDoubleTensorClass;
+extern PyObject* THCPFloatTensorClass;
+extern PyObject* THCPHalfTensorClass;
+extern PyObject* THCPLongTensorClass;
+extern PyObject* THCPIntTensorClass;
+extern PyObject* THCPShortTensorClass;
+extern PyObject* THCPCharTensorClass;
+extern PyObject* THCPByteTensorClass;
+#endif
+
 static THDTensorDescriptor* _makeDescriptor(PyObject *obj)
 {
   PyObject *type = (PyObject*)Py_TYPE(obj);
@@ -114,6 +111,20 @@ static THDTensorDescriptor* _makeDescriptor(PyObject *obj)
   REGISTER_TH_DESCRIPTOR(CharTensor);
   REGISTER_TH_DESCRIPTOR(ByteTensor);
 #undef REGISTER_TH_DESCRIPTOR
+#ifdef WITH_CUDA
+#define REGISTER_THC_DESCRIPTOR(TYPE)                                           \
+  if (type == THCP##TYPE##Class)                                                \
+    return THDTensorDescriptor_newFromTHCuda##TYPE((THCuda##TYPE*)(((torch::THPVoidTensor*)obj)->cdata));
+  REGISTER_THC_DESCRIPTOR(DoubleTensor);
+  if (type == THCPFloatTensorClass)
+    return THDTensorDescriptor_newFromTHCudaFloatTensor((THCudaTensor*)(((torch::THPVoidTensor*)obj)->cdata));
+  REGISTER_THC_DESCRIPTOR(LongTensor);
+  REGISTER_THC_DESCRIPTOR(IntTensor);
+  REGISTER_THC_DESCRIPTOR(ShortTensor);
+  REGISTER_THC_DESCRIPTOR(CharTensor);
+  REGISTER_THC_DESCRIPTOR(ByteTensor);
+#undef REGISTER_THC_DESCRIPTOR
+#endif
   throw std::runtime_error(std::string("don't know how to create a THDTensorDesciptor for "
       "type ") + std::string(THPUtils_typename(obj)));
 }
