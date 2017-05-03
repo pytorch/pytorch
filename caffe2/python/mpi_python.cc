@@ -7,7 +7,7 @@ namespace caffe2 {
 
 namespace py = pybind11;
 
-PYBIND11_PLUGIN(mpi) {
+PYBIND11_PLUGIN(mpi_utils) {
   py::module m("mpi_utils", "MPI helper functions");
   m.def(
       "SetupPeers",
