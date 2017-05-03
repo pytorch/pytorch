@@ -497,6 +497,8 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
+        - arg: bool keepdim
+          default: "false"
 ]]
 
 [[
@@ -517,6 +519,8 @@
         - arg: long dim
           wrap_dim: self
         - CONSTANT false
+        - arg: bool keepdim
+          default: "false"
 ]]
 
 [[
@@ -537,6 +541,8 @@
         - arg: long dim
           wrap_dim: self
         - CONSTANT false
+        - arg: bool keepdim
+          default: "false"
 ]]
 
 [[
@@ -559,6 +565,8 @@
         - real p
         - arg: long dim
           wrap_dim: self
+        - arg: bool keepdim
+          default: "false"
 ]]
 
 [[
@@ -841,6 +849,8 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
+        - arg: bool keepdim
+          default: "false"
 ]]
 
 [[
@@ -859,6 +869,8 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
+        - arg: bool keepdim
+          default: "false"
 ]]
 
 [[
