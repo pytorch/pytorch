@@ -1,5 +1,7 @@
 """Functional interface"""
 
+from numbers import Integral
+
 import torch
 from . import _functions
 from .modules import utils
@@ -610,9 +612,21 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     Args:
         input (Variable): input
         size (int or Tuple[int, int]): output spatial size.
-        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
+
+
+def _check_bilinear_2d_scale_factor(scale_factor):
+    scale_factor = _pair(scale_factor)
+    try:
+        assert len(scale_factor) == 2
+        assert all(isinstance(s, Integral) and s >= 1 for s in scale_factor)
+    except AssertionError as e:
+        raise ValueError('scale_factor must be a non-negative integer, '
+                         'or a tuple of non-negative integers for bilinear upsamplings, but got: '
+                         '{}'.format(scale_factor))
+    return scale_factor
 
 
 def pad(input, pad, mode='constant', value=0):
