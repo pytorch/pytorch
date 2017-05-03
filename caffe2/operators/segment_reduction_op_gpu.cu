@@ -1,3 +1,4 @@
+#include <cub/device/device_scan.cuh>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
@@ -87,7 +88,6 @@ StripedScaleKernel(const int N, const int M, const T* alpha, const T* x, T* y) {
   }
 }
 
-namespace {
 template <typename T>
 __global__ void StripedAxpbyKernel(
     const int N,
@@ -101,7 +101,6 @@ __global__ void StripedAxpbyKernel(
   }
 }
 } // namespace
-}
 
 template <
     typename T,
@@ -153,28 +152,28 @@ class ReduceDimsGradientOp : public Operator<CUDAContext> {
         &context_);
 
     if (FIRSTDIMS) {
-      StripedAxpbyKernel<T><<<
-          CAFFE_GET_BLOCKS(N * M),
-          CAFFE_CUDA_NUM_THREADS,
-          0,
-          context_.cuda_stream()>>>(
-          N,
-          M,
-          alpha,
-          grad_in.template data<T>(),
-          static_cast<T>(0),
-          out_grad->template mutable_data<T>());
+      StripedAxpbyKernel<T>
+          <<<CAFFE_GET_BLOCKS(N * M),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context_.cuda_stream()>>>(
+              N,
+              M,
+              alpha,
+              grad_in.template data<T>(),
+              static_cast<T>(0),
+              out_grad->template mutable_data<T>());
     } else {
-      StripedScaleKernel<T><<<
-          CAFFE_GET_BLOCKS(N * M),
-          CAFFE_CUDA_NUM_THREADS,
-          0,
-          context_.cuda_stream()>>>(
-          N,
-          M,
-          grad_in.template data<T>(),
-          out_grad->template data<T>(),
-          out_grad->template mutable_data<T>());
+      StripedScaleKernel<T>
+          <<<CAFFE_GET_BLOCKS(N * M),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context_.cuda_stream()>>>(
+              N,
+              M,
+              grad_in.template data<T>(),
+              out_grad->template data<T>(),
+              out_grad->template mutable_data<T>());
     }
 
     return true;
@@ -206,5 +205,330 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(
     ReduceBackMeanGradient,
     ReduceDimsGradientOp<float, CUDAContext, false, true>);
+
+namespace {
+
+void inclusive_scan_wrapper(
+    const int* length_data,
+    int len_length,
+    Tensor<CUDAContext>* prefix_sum_buffer,
+    Tensor<CUDAContext>* prefix_sum_length_buffer,
+    CUDAContext* context_) {
+  // inclusive scan
+  size_t temp_storage_bytes = 0;
+  // Retrieve buffer size
+  cub::DeviceScan::InclusiveSum(
+      NULL,
+      temp_storage_bytes,
+      length_data,
+      prefix_sum_length_buffer->template mutable_data<int>(),
+      len_length,
+      context_->cuda_stream());
+  // Allocate temporary storage
+  auto buffer_size = temp_storage_bytes / sizeof(int);
+  buffer_size += temp_storage_bytes % sizeof(int) != 0 ? 1 : 0;
+  prefix_sum_buffer->Resize(buffer_size);
+  void* d_temp_storage =
+      static_cast<void*>(prefix_sum_buffer->template mutable_data<int>());
+  // Run inclusive prefix sum
+  cub::DeviceScan::InclusiveSum(
+      d_temp_storage,
+      temp_storage_bytes,
+      length_data,
+      prefix_sum_length_buffer->template mutable_data<int>(),
+      len_length,
+      context_->cuda_stream());
+}
+
+template <typename T>
+__global__ void length_sum_kernel(
+    const T* in,
+    T* out,
+    const int* prefix_sum_length_data,
+    int N,
+    int post,
+    int len_length) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start < N);
+  CUDA_KERNEL_ASSERT(end <= N);
+
+  for (int i = threadIdx.x; i < post; i += blockDim.x) {
+    T sum = (T)0;
+    for (int line = start; line < end; ++line) {
+      sum += in[line * post + i];
+    }
+    out[group * post + i] = sum;
+  }
+}
+
+template <typename T>
+__global__ void length_sum_gradient_kernel(
+    const T* grad_in,
+    T* grad_out,
+    const int* prefix_sum_length_data,
+    int N,
+    int post,
+    int len_length) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start < N);
+  CUDA_KERNEL_ASSERT(end <= N);
+
+  for (int i = threadIdx.x; i < post; i += blockDim.x) {
+    for (int line = start; line < end; ++line) {
+      grad_out[line * post + i] = grad_in[group * post + i];
+    }
+  }
+}
+
+template <typename T>
+__global__ void sparse_length_sum_kernel(
+    const T* in,
+    T* out,
+    const int* prefix_sum_length_data,
+    const TIndex* indicies,
+    int N,
+    int post,
+    int len_length,
+    int len_indicies) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start < len_indicies);
+  CUDA_KERNEL_ASSERT(end <= len_indicies);
+
+  for (int i = threadIdx.x; i < post; i += blockDim.x) {
+    T sum = (T)0;
+    for (int line = start; line < end; ++line) {
+      sum += in[indicies[line] * post + i];
+    }
+    out[group * post + i] = sum;
+  }
+}
+
+} // namespace
+
+template <typename T, class Context = CUDAContext, bool SparseFused = true>
+class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CUDASparseLengthsSumOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDASparseLengthsSumOp() {}
+
+  bool RunOnDevice() override {
+    auto& dataInput = Input(0);
+    auto& lengthsInput = Input(LENGTHS);
+    auto* output = Output(0);
+
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    const TIndex dataSize = dataInput.dim(0);
+    // Either first dim the data or how much we pull in indexies from it
+    TIndex dataToReduceSize;
+    const TIndex outputSize = lengthsInput.dim(0);
+    int len_length = outputSize;
+
+    const TIndex* indicies;
+    if (SparseFused) { // static if
+      auto& indiciesInput = Input(INDICES);
+      CAFFE_ENFORCE_EQ(1, indiciesInput.ndim(), "INDICES must be a vector");
+      indicies = indiciesInput.template data<TIndex>();
+      dataToReduceSize = indiciesInput.dim(0);
+    } else {
+      dataToReduceSize = dataSize;
+    }
+
+    auto shape = dataInput.dims();
+    shape[0] = outputSize;
+    output->Resize(shape);
+
+    // only compute this the first time
+    inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
+    inclusive_scan_wrapper(
+        lengthsInput.template data<int>(),
+        len_length,
+        &inclusive_scan_buffer_,
+        &inclusive_scan_length_buffer_,
+        &context_);
+
+    const T* in_data = dataInput.template data<T>();
+    T* out_data = output->template mutable_data<T>();
+    auto* prefix_sum_length_data =
+        inclusive_scan_length_buffer_.template data<int>();
+    int N = dataSize;
+    int post = dataInput.size_from_dim(1);
+
+    if (SparseFused) {
+      if (post > 128) {
+        sparse_length_sum_kernel<T>
+            <<<len_length, 512, 0, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                indicies,
+                N,
+                post,
+                len_length,
+                dataToReduceSize);
+      } else if (post > 64) {
+        sparse_length_sum_kernel<T>
+            <<<len_length, 128, 0, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                indicies,
+                N,
+                post,
+                len_length,
+                dataToReduceSize);
+      } else if (post > 32) {
+        sparse_length_sum_kernel<T>
+            <<<len_length, 64, 0, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                indicies,
+                N,
+                post,
+                len_length,
+                dataToReduceSize);
+      } else {
+        sparse_length_sum_kernel<T>
+            <<<len_length, 32, 0, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                indicies,
+                N,
+                post,
+                len_length,
+                dataToReduceSize);
+      }
+    } else {
+      if (post > 128) {
+        length_sum_kernel<T><<<len_length, 512, 0, context_.cuda_stream()>>>(
+            in_data, out_data, prefix_sum_length_data, N, post, len_length);
+      } else if (post > 64) {
+        length_sum_kernel<T><<<len_length, 128, 0, context_.cuda_stream()>>>(
+            in_data, out_data, prefix_sum_length_data, N, post, len_length);
+      } else if (post > 32) {
+        length_sum_kernel<T><<<len_length, 64, 0, context_.cuda_stream()>>>(
+            in_data, out_data, prefix_sum_length_data, N, post, len_length);
+      } else {
+        length_sum_kernel<T><<<len_length, 32, 0, context_.cuda_stream()>>>(
+            in_data, out_data, prefix_sum_length_data, N, post, len_length);
+      }
+    }
+    return true;
+  }
+
+  enum { INDICES = 1, LENGTHS = 1 + (SparseFused ? 1 : 0) };
+
+ private:
+  // menber field to manage memory
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+};
+
+template <typename T, class Context = CUDAContext>
+class CUDASparseLengthsSumGradientOp : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CUDASparseLengthsSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDASparseLengthsSumGradientOp() {}
+
+  bool RunOnDevice() override {
+    auto& segmentGradsInput = Input(0);
+    auto& lengthsInput = Input(1);
+    auto* dataGradsOutput = Output(0);
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    int len_length = lengthsInput.dim(0);
+    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
+
+    inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
+    inclusive_scan_wrapper(
+        lengthsInput.template data<int>(),
+        len_length,
+        &inclusive_scan_buffer_,
+        &inclusive_scan_length_buffer_,
+        &context_);
+
+    // compute output size using length
+    auto* prefix_sum_length_data =
+        inclusive_scan_length_buffer_.template data<int>();
+    output_size_buffer_.Resize(1);
+    auto* output_size = output_size_buffer_.template mutable_data<int>();
+
+    context_.template CopyItems<Context, CPUContext>(
+        inclusive_scan_length_buffer_.meta(),
+        1,
+        prefix_sum_length_data + len_length - 1,
+        output_size);
+    context_.FinishDeviceComputation();
+
+    auto shape = segmentGradsInput.dims();
+    int output_0dim = output_size[0];
+    shape[0] = output_0dim;
+    dataGradsOutput->Resize(shape);
+
+    const T* in_data = segmentGradsInput.template data<T>();
+    T* out_data = dataGradsOutput->template mutable_data<T>();
+
+    int N = output_0dim;
+    int post = segmentGradsInput.size_from_dim(1);
+
+    if (post > 128) {
+      length_sum_gradient_kernel<T>
+          <<<len_length, 512, 0, context_.cuda_stream()>>>(
+              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+    } else if (post > 64) {
+      length_sum_gradient_kernel<T>
+          <<<len_length, 128, 0, context_.cuda_stream()>>>(
+              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+    } else if (post > 32) {
+      length_sum_gradient_kernel<T>
+          <<<len_length, 64, 0, context_.cuda_stream()>>>(
+              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+    } else {
+      length_sum_gradient_kernel<T>
+          <<<len_length, 32, 0, context_.cuda_stream()>>>(
+              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+    }
+
+    return true;
+  }
+
+ private:
+  // menber field to manage memory
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor<CPUContext> output_size_buffer_;
+};
+
+REGISTER_CUDA_OPERATOR(
+    LengthsSum,
+    CUDASparseLengthsSumOp<float, CUDAContext, false>);
+REGISTER_CUDA_OPERATOR(
+    SparseLengthsSum,
+    CUDASparseLengthsSumOp<float, CUDAContext, true>);
+REGISTER_CUDA_OPERATOR(
+    LengthsSumGradient,
+    CUDASparseLengthsSumGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    SparseLengthsSumGradient,
+    CUDASparseLengthsSumGradientOp<float, CUDAContext>);
 
 } // namespace caffe2

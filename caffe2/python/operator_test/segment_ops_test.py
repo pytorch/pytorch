@@ -314,6 +314,35 @@ class TestSegmentOps(hu.HypothesisTestCase):
             REFERENCES_ALL
         )(self)
 
+    @given(**hu.gcs)
+    def test_lengths_sum_gpu(self, gc, dc):
+        X = np.random.rand(50, 3, 4, 5).astype(np.float32)
+        Y = np.asarray([20, 20, 10]).astype(np.int32)
+        op = core.CreateOperator("LengthsSum", ["X", "Y"], "out")
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+
+        X = np.random.rand(3, 64).astype(np.float32)
+        Y = np.asarray([20, 20, 10]).astype(np.int32)
+        op = core.CreateOperator("LengthsSumGradient", ["X", "Y"], "out")
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+
+    @given(**hu.gcs)
+    def test_sparse_lengths_sum_gpu(self, gc, dc):
+        X = np.random.rand(50, 3, 4, 5).astype(np.float32)
+        Y = np.random.randint(0, 50, size=10).astype(np.int64)
+        Z = np.asarray([4, 4, 2]).astype(np.int32)
+        op = core.CreateOperator("SparseLengthsSum", ["X", "Y", "Z"], "out")
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+
+        self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+
+        X = np.random.rand(3, 64).astype(np.float32)
+        Y = np.asarray([20, 20, 10]).astype(np.int32)
+        op = core.CreateOperator("SparseLengthsSumGradient", ["X", "Y"], "out")
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()
