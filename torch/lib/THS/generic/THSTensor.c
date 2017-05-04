@@ -510,6 +510,61 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THTensor_(free)(mask_values_);
 }
 
+// Given an index tensor indices into a dense tensor t, select just the
+// values index and create a corresponding sparse tensor.
+void THTensor_(sparseSelect)(THSTensor *r_, THTensor *t, THLongTensor *indices)
+{
+  THArgCheck(THLongTensor_nDimension(indices) == 2, 2, "indices must be nDim x nnz");
+  long nDim = THTensor_(nDimension)(t);
+  long nDimI = THLongTensor_size(indices, 0);
+  long nDimV = nDim - nDimI;
+  long nnz = THLongTensor_size(indices, 1);
+  THArgCheck(nDimI <= nDim, 2, "nDim of indices must be <= nDim of tensor");
+  // NB: In principle, we should check if resizing is necessary, but
+  // since this operator is not currently used inplace, that test will
+  // always return false.  So don't bother.
+  THSTensor_(rawResize)(r_, nDimI, nDimV, t->size);
+  if (nnz == 0) {
+    THSTensor_(zero)(r_);
+    return;
+  }
+  THTensor *r_values_ = THTensor_(new)();
+  long *size = THAlloc(sizeof(long) * (nDimV + 1));
+  size[0] = nnz;
+  for (int i = 0; i < nDimV; i++) {
+    size[i+1] = t->size[nDimI + i];
+  }
+  THTensor_(resizeNd)(r_values_, nDimV + 1, size, NULL);
+  THFree(size);
+  THLongTensor *r_indices_ = THLongTensor_newClone(indices);
+  THSTensor_(_move)(r_, r_indices_, r_values_);
+  r_->coalesced = 0;
+
+  if (nDim > nDimI) {
+    THTensor *srcBuffer = THTensor_(new)();
+    THTensor *dstBuffer = THTensor_(new)();
+    for (long i = 0; i < r_->nnz; i++) {
+      THTensor_(set)(srcBuffer, t);
+      for (long d = 0; d < nDimI; d++) {
+        THTensor_(select)(srcBuffer, srcBuffer, 0, THTensor_fastGet2d(indices, d, i));
+      }
+      THTensor_(select)(dstBuffer, r_values_, 0, i);
+      THTensor_(copy)(dstBuffer, srcBuffer);
+    }
+    THTensor_(free)(srcBuffer);
+    THTensor_(free)(dstBuffer);
+  } else {
+    for (long i = 0; i < r_->nnz; i++) {
+      long idx = 0;
+      for (long d = 0; d < nDimI; d++) {
+        idx += THTensor_fastGet2d(indices, d, i) * t->stride[d];
+      }
+      real val = (t->storage->data + t->storageOffset)[idx];
+      THTensor_fastSet1d(r_values_, i, val);
+    }
+  }
+}
+
 void THSTensor_(free)(THSTensor *self)
 {
   if(!self)

@@ -12,6 +12,9 @@ typedef struct THCSTensor
     // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
     // as buffer, so we keep track of both
     THCIndexTensor *indices;
+    // (nDimensionV + 1)-D tensor of nnz x (size of values) of values.
+    // Note that this tensor has one more dimension than nDimensionV,
+    // since we need a dimension for the sparse entries!
     THCTensor *values;
     // Some math operations can only be performed on ordered sparse tensors
     int coalesced;

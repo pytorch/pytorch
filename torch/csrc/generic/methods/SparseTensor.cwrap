@@ -428,6 +428,17 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: _sparse_select
+  cname: sparseSelect
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - THTensor* self
+    - THIndexTensor* indices
+]]
+
+[[
   name: getDevice
   sparse: yes
   python_name: get_device
