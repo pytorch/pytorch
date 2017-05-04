@@ -70,8 +70,8 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::generatorSeed, generatorSeed},
     {Functions::generatorManualSeed, generatorManualSeed},
 
-    {Functions::tensorCopyTH, tensorCopyTH}, // copy from TH to THD
-    {Functions::tensorCopyTHD, tensorCopyTHD}, // copy from THD to TH
+    {Functions::tensorCopyFromMaster, tensorCopyFromMaster},
+    {Functions::tensorCopyFromWorker, tensorCopyFromWorker},
     
     {Functions::tensorNew, tensorNew},
     {Functions::tensorNewWithSize, tensorNewWithSize},
