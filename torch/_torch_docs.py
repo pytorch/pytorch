@@ -3690,6 +3690,9 @@ When :attr:`dim` is given, a squeeze operation is done only in the given dimensi
 If `input` is of shape: :math:`(A x 1 x B)`, `squeeze(input, 0)` leaves the Tensor unchanged,
 but `squeeze(input, 1)` will squeeze the tensor to the shape :math:`(A x B)`.
 
+.. note:: As an exception to the above, a 1-dimensional tensor of size 1 will not
+          have its dimensions changed.
+
 .. note:: The returned Tensor shares the storage with the input Tensor,
           so changing the contents of one will change the contents of the other.
 
