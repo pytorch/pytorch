@@ -21,6 +21,7 @@
 namespace gloo {
 
 extern const cudaStream_t kStreamNotSet;
+extern const int kInvalidDeviceId;
 
 // Forward declarations
 template<typename T>
@@ -121,7 +122,7 @@ class CudaDevicePointer {
       : device_(nullptr),
         count_(0),
         owner_(false),
-        deviceId_(-1) {}
+        deviceId_(kInvalidDeviceId) {}
 
   // Move assignment operator
   CudaDevicePointer& operator=(CudaDevicePointer&&);

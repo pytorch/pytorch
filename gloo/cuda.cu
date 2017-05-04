@@ -13,6 +13,7 @@
 namespace gloo {
 
 const cudaStream_t kStreamNotSet = (cudaStream_t)(-1);
+const int kInvalidDeviceId = -1;
 
 // Default mutex to synchronize contentious CUDA and NCCL operations
 static std::mutex defaultCudaMutex;
@@ -42,11 +43,16 @@ CudaStream::CudaStream(CudaStream&& other) noexcept
       stream_(other.stream_),
       streamOwner_(other.streamOwner_),
       event_(other.event_) {
+  other.deviceId_ = kInvalidDeviceId;
   other.stream_ = nullptr;
   other.event_ = nullptr;
 }
 
 CudaStream::~CudaStream() {
+  if (deviceId_ == kInvalidDeviceId) {
+    return;
+  }
+
   if (event_ != nullptr) {
     // Make sure outstanding operations are complete. If the event
     // hasn't been queued this call will return immediately.
@@ -166,6 +172,7 @@ CudaDevicePointer<T>::CudaDevicePointer(CudaDevicePointer<T>&& other) noexcept
   // Nullify fields that would otherwise be destructed
   other.device_ = nullptr;
   other.owner_ = false;
+  other.deviceId_ = kInvalidDeviceId;
 }
 
 template<typename T>
@@ -179,13 +186,14 @@ CudaDevicePointer<T>& CudaDevicePointer<T>::operator=(
   // Nullify fields that would otherwise be destructed
   other.device_ = nullptr;
   other.owner_ = false;
+  other.deviceId_ = kInvalidDeviceId;
 
   return *this;
 }
 
 template<typename T>
 CudaDevicePointer<T>::~CudaDevicePointer() {
-  if (deviceId_ < 0) {
+  if (deviceId_ == kInvalidDeviceId) {
     return;
   }
   CudaDeviceScope scope(deviceId_);
