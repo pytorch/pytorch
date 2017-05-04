@@ -300,8 +300,10 @@ static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
       {
         /* retrieve position of max */
         long maxp = ind_p_k[i*outputWidth + j] - TH_INDEX_BASE;
-        /* update gradient */
-        gradInput_p_k[maxp] += gradOutput_p_k[i*outputWidth + j];
+	if (maxp != -1) {
+	  /* update gradient */
+	  gradInput_p_k[maxp] += gradOutput_p_k[i*outputWidth + j];
+	}
       }
     }
   }
