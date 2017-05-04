@@ -13,29 +13,32 @@ static std::unordered_map<std::string, THDChannelType> name2channel_type = {
     {"gloo", THDChannelGloo},
 };
 
-static bool THDPModule_loadClasses(PyObject *module_dict)
+static bool THDPModule_loadClasses(PyObject *self)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-// TODO THD: enable once master-worker is implemented
-#if 0
-  ASSERT_NOT_NULL(THDPDoubleStorageClass = PyMapping_GetItemString(module_dict, (char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THDPFloatStorageClass  = PyMapping_GetItemString(module_dict, (char*)"FloatStorage"));
-  //ASSERT_NOT_NULL(THDPHalfStorageClass   = PyMapping_GetItemString(module_dict, (char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THDPLongStorageClass   = PyMapping_GetItemString(module_dict, (char*)"LongStorage"));
-  ASSERT_NOT_NULL(THDPIntStorageClass    = PyMapping_GetItemString(module_dict, (char*)"IntStorage"));
-  ASSERT_NOT_NULL(THDPShortStorageClass  = PyMapping_GetItemString(module_dict, (char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THDPCharStorageClass   = PyMapping_GetItemString(module_dict, (char*)"CharStorage"));
-  ASSERT_NOT_NULL(THDPByteStorageClass   = PyMapping_GetItemString(module_dict, (char*)"ByteStorage"));
+  PyObject *torch_module = PyImport_ImportModule("torch.distributed");
+  if (!torch_module) {
+    THPUtils_setError("class loader couldn't access torch.distributed module");
+    return false;
+  }
 
-  ASSERT_NOT_NULL(THDPDoubleTensorClass  = PyMapping_GetItemString(module_dict, (char*)"DoubleTensor"));
-  //ASSERT_NOT_NULL(THDPHalfTensorClass    = PyMapping_GetItemString(module_dict, (char*)"HalfTensor"));
-  ASSERT_NOT_NULL(THDPFloatTensorClass   = PyMapping_GetItemString(module_dict, (char*)"FloatTensor"));
-  ASSERT_NOT_NULL(THDPLongTensorClass    = PyMapping_GetItemString(module_dict, (char*)"LongTensor"));
-  ASSERT_NOT_NULL(THDPIntTensorClass     = PyMapping_GetItemString(module_dict, (char*)"IntTensor"));
-  ASSERT_NOT_NULL(THDPShortTensorClass   = PyMapping_GetItemString(module_dict, (char*)"ShortTensor"));
-  ASSERT_NOT_NULL(THDPCharTensorClass    = PyMapping_GetItemString(module_dict, (char*)"CharTensor"));
-  ASSERT_NOT_NULL(THDPByteTensorClass    = PyMapping_GetItemString(module_dict, (char*)"ByteTensor"));
-#endif
+  if (!THDPDoubleTensor_postInit(torch_module)) return false;
+  if (!THDPFloatTensor_postInit(torch_module)) return false;
+  //if (!THDPHalfTensor_postInit(torch_module)) return false;
+  if (!THDPLongTensor_postInit(torch_module)) return false;
+  if (!THDPIntTensor_postInit(torch_module)) return false;
+  if (!THDPShortTensor_postInit(torch_module)) return false;
+  if (!THDPCharTensor_postInit(torch_module)) return false;
+  if (!THDPByteTensor_postInit(torch_module)) return false;
+
+  ASSERT_NOT_NULL(THDPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
+  ASSERT_NOT_NULL(THDPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
+  //ASSERT_NOT_NULL(THDPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
+  ASSERT_NOT_NULL(THDPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
+  ASSERT_NOT_NULL(THDPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
+  ASSERT_NOT_NULL(THDPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
+  ASSERT_NOT_NULL(THDPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
+  ASSERT_NOT_NULL(THDPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
 
   return true;
 #undef ASSERT_NOT_NULL

@@ -1504,7 +1504,7 @@
         - CONSTANT AS_REAL(0)
         - argument 0
         - CONSTANT AS_REAL(1)
-        - THSTensor* mat1
+        - THSTensor* self
         - THTensor* mat2
 ]]
 
@@ -1620,6 +1620,7 @@
         - THTensor* tensor1
         - THTensor* tensor2
     - cname: spaddcmul
+      defined_if: "!IS_DISTRIBUTED"
       return: argument 0
       arguments:
         - THTensor* self

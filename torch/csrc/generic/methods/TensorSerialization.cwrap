@@ -1,6 +1,8 @@
+#if !IS_DISTRIBUTED
 [[
   name: THPTensor_(writeMetadata)
   python_name: _write_metadata
+  defined_if: "!IS_DISTRIBUTED"
   only_register: True
 ]]
 PyObject * THPTensor_(writeMetadata)(THPTensor *self, PyObject *args)
@@ -21,6 +23,7 @@ PyObject * THPTensor_(writeMetadata)(THPTensor *self, PyObject *args)
 [[
   name: THPTensor_(newWithMetadataFile)
   python_name: _new_with_metadata_file
+  defined_if: "!IS_DISTRIBUTED"
   only_register: True
   method_flags: METH_STATIC
 ]]
@@ -40,6 +43,7 @@ PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
   THStorage *storage = ((THPStorage*)PyTuple_GET_ITEM(args, 1))->cdata;
   return THPTensor_(New)(THPTensor_(newWithMetadataFileRaw)(fd, storage));
 }
+#endif
 
 
 [[

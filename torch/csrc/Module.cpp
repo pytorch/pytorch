@@ -833,8 +833,7 @@ PyMODINIT_FUNC PyInit__C()
   Py_INCREF(has_cudnn);
   ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
 
-  // TODO THD: enable once master-worker mode is implemented
-#if 0 && defined(WITH_DISTRIBUTED)
+#ifdef WITH_DISTRIBUTED
   // See comment on CUDA objects
   ASSERT_TRUE(THDPDoubleStorage_init(module));
   ASSERT_TRUE(THDPFloatStorage_init(module));

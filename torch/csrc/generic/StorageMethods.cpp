@@ -9,12 +9,14 @@ static PyObject * THPStorage_(size)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
+#ifndef THD_GENERIC_FILE
 static PyObject * THPStorage_(dataPtr)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THStorage_(data)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
+#endif
 
 static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
@@ -23,10 +25,11 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
   END_HANDLE_TH_ERRORS
 }
 
+#ifndef THD_GENERIC_FILE
 static PyObject * THPStorage_(isPinned)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-#ifdef WITH_CUDA
+#if defined(WITH_CUDA)
   cudaPointerAttributes attr;
   cudaError_t err = cudaPointerGetAttributes(&attr, self->cdata->data);
   if (err != cudaSuccess) {
@@ -39,6 +42,7 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
 #endif
   END_HANDLE_TH_ERRORS
 }
+#endif
 
 static PyObject * THPStorage_(elementSize)(THPStorage *self)
 {
@@ -81,7 +85,7 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THC_GENERIC_FILE
+#if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
 static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
@@ -175,6 +179,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 }
 #endif
 
+#ifndef THD_GENERIC_FILE
 PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *file)
 {
   HANDLE_TH_ERRORS
@@ -221,6 +226,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   return (PyObject *) self;
   END_HANDLE_TH_ERRORS
 }
+#endif // !defined(THD_GENERIC_FILE)
 
 #ifdef THC_GENERIC_FILE
 PyObject * THPStorage_(getDevice)(THPStorage *self)
@@ -246,6 +252,7 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
   END_HANDLE_TH_ERRORS
 }
 
+#ifndef THD_GENERIC_FILE
 PyObject * THPStorage_(_rootStorage)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
@@ -263,6 +270,7 @@ PyObject * THPStorage_(_rootStorage)(THPStorage *self)
   return result;
   END_HANDLE_TH_ERRORS
 }
+#endif
 
 static PyMethodDef THPStorage_(methods)[] = {
   {"copy_", (PyCFunction)THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, NULL},
@@ -271,18 +279,22 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, NULL},
   {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, NULL},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
+#ifndef THD_GENERIC_FILE
   {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, NULL},
   {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, NULL},
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_O, NULL},
   {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, NULL},
   {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, NULL},
-#ifndef THC_GENERIC_FILE
+#endif // !defined(THD_GENERIC_FILE)
+#if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
   {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
 #endif
 #ifdef THC_GENERIC_FILE
   {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, NULL},
 #endif
   {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, NULL},
+#ifndef THD_GENERIC_FILE
   {"_root_storage", (PyCFunction)THPStorage_(_rootStorage), METH_NOARGS, NULL},
+#endif
   {NULL}
 };
