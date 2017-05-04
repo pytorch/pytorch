@@ -759,7 +759,7 @@ class TestNN(NNTestCase):
         b, c = input.size(0), input.size(1)
         input_var = Variable(input)
 
-        IN = cls(c, bias=False, eps=0)
+        IN = cls(c, eps=0)
 
         output = IN(input_var)
         out_reshaped = output.transpose(1, 0).contiguous().view(c, -1)
