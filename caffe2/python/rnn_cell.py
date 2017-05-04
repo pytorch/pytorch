@@ -666,6 +666,10 @@ def _LSTM(
                 initial_states.extend([initial_hidden, initial_cell])
                 model.params.extend([initial_hidden, initial_cell])
 
+    assert len(initial_states) == 2 * num_layers, \
+            "Incorrect initial_states, was expecting 2 * num_layers elements" \
+            + " but had only {}".format(len(initial_states))
+
     # outputs_with_grads argument indexes into final layer
     outputs_with_grads = [4 * (num_layers - 1) + i for i in outputs_with_grads]
 
