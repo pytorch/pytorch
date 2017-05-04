@@ -121,9 +121,10 @@ class CWrapPlugin(object):
         """Used to create a code template to wrap the options.
 
         This function returns a Template string that contains the function call
-        for the overall declaration, including the method definition and { ...
-        }. Look through the examples to get a sense of what this might look
-        like. The only requirements are that it contains unsubstituted template
+        for the overall declaration, including the method definition, opening
+        and closing brackets, and any additional code within the method body.
+        Look through the examples to get a sense of what this might look like.
+        The only requirements are that it contains unsubstituted template
         identifiers for anything the cwrap engine expects.
 
         Note that for any declaration only one Plugin can generate the wrapper
@@ -175,7 +176,8 @@ class CWrapPlugin(object):
 
         Args:
             arg: a dictionary specifying attributes of the arg to be accessed
-            option: ... ??
+            option: dictionary containing the information for this specific
+            option.
 
         Returns:
             A a string (note: not a Template string!) of code that can be used
@@ -310,7 +312,9 @@ class CWrapPlugin(object):
         """Used to modify the entire code body for an option.
 
         Code in this case is a string containing the entire generated code for
-        a specific option.
+        a specific option. Note that this body includes the checks for each
+        option, i.e. if (type checks for one permutation) { ... } else if (type
+        checks for another permutation) { ... } etc.
 
         Args:
             code: string representing the generated code for the option
