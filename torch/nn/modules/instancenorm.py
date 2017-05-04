@@ -67,10 +67,10 @@ class InstanceNorm1d(_InstanceNorm):
         - Output: :math:`(N, C, L)` (same shape as input)
 
     Examples:
-        >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm1d(100)
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm1d(100, affine=False)
+        >>> m = nn.InstanceNorm1d(100)
+        >>> # With Learnable Parameters
+        >>> m = nn.InstanceNorm1d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100))
         >>> output = m(input)
     """
@@ -111,10 +111,10 @@ class InstanceNorm2d(_InstanceNorm):
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
     Examples:
-        >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm2d(100)
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm2d(100, affine=False)
+        >>> m = nn.InstanceNorm2d(100)
+        >>> # With Learnable Parameters
+        >>> m = nn.InstanceNorm2d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
         >>> output = m(input)
     """
@@ -156,10 +156,10 @@ class InstanceNorm3d(_InstanceNorm):
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
 
     Examples:
-        >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm3d(100)
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm3d(100, affine=False)
+        >>> m = nn.InstanceNorm3d(100)
+        >>> # With Learnable Parameters
+        >>> m = nn.InstanceNorm3d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
         >>> output = m(input)
     """
