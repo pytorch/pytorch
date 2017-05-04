@@ -34,7 +34,6 @@ endif()
 
 # MPI-based binaries
 set(Caffe2_MPI_BINARY_SRCS
-    "fb_run_plan_mpi.cc"
     "run_plan_mpi.cc"
 )
 if(USE_MPI AND MPI_CXX_FOUND)
