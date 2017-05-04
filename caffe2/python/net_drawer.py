@@ -340,7 +340,7 @@ def main():
     parser = argparse.ArgumentParser(description="Caffe2 net drawer.")
     parser.add_argument(
         "--input",
-        type=str,
+        type=str, required=True,
         help="The input protobuf file."
     )
     parser.add_argument(
