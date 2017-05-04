@@ -590,14 +590,16 @@ class Repeat(Function):
             grad_input = sum(grad_input.chunk(repeat, dim))
         return grad_input
 
+
 def reverse_cumsum(x, dim):
     ret = torch.cumsum(-x, dim=dim)
-    
+
     end_idx = ret.size(dim) - 1
     ret_sum = ret.narrow(dim, end_idx, 1)
     ret -= ret_sum.expand_as(ret)
     ret += x
     return ret
+
 
 class Cumsum(Function):
 
@@ -610,9 +612,10 @@ class Cumsum(Function):
 
     def backward(self, grad_output):
         return reverse_cumsum(grad_output, dim=self.dim)
-        
+
+
 class Cumprod(Function):
-    
+
     def __init__(self, dim):
         super(Cumprod, self).__init__()
         self.dim = dim
@@ -623,79 +626,153 @@ class Cumprod(Function):
 
     def backward(self, grad_output):
         '''
-        There are two algorithms to do this, the naive one
-        which works with all types of inputs is slow, namely
-        O(n^2) where n = input.size(self.dim).
+        There are two algorithms to do this. The first one
+        is very efficient, but works only when there are no
+        nonzero elements in the input.
 
-        The second one is much faster, namely O(n), but
-        requires nonzero inputs. This implementation checks
-        for 0s in the inputs and then decides which one to use.
+        The second one is much more complex, but it doesn't
+        assume anything on the input. The main downside is
+        that it takes time O(n^2), where n = input.size(self.dim)
+        (i.e. the length of the cumulative product). This is in
+        contrast to the forward pass and the efficient algorithm,
+        which are both O(n).
+
+        The second algorithm is a simple application of the chain
+        rule. If x is an n-dimensional vector, and y = cumprod(x),
+        and F is the final cost, then
+
+        dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
+
+        The term dF / dy_j is just grad_output[j] (assuming again
+        everything is one-dimensional).
+
+        The term (dy_j / dx_k) is easilly seen to be
+
+        if j >= k
+            dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
+        else:
+            dy_j / dx_k = 0
+
+        Note that the indicator (j>=k) can be taken out
+        by replacing the sum in (1) with a sum from
+        j = k to n.
+
+        Thus,
+        df / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
+
+        with
+        dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i     (2)
+
+        Note that this last term is just the cumulative product
+        with k omitted. Thus, if x_k (the input) is nonzero, we can
+        just express this as
+
+        dy_j / dx_k = (prod_{1 <= i <= j} x_i) / x_k
+                    = y_j / x_k
+
+        So therefore,
+
+        df / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
+
+        so
+
+        grad_output = reverse_cumsum(grad_output * output) / input
+
+        If the input is nonzero, we need to calculate the dy_j / dx_k
+        by using the formula (2), called in the code omitted_products.
+
+        The way the code calculates it is simply by noting that
+
+        prod_{1 <= i <= j, i != k} x_i
+            = (prod_{1 <= i <= k} x_i) * (prod_{k + 1 <= i <= j} x_i)
+
+        the first term is calculated as prods_until_k, which since
+        doesn't depend in j is easy to vectorize.
+
+        The second term (indexed by j) is the cumulative product of
+        x_{k+1}, x_{k+2}, ..., x_n, and it's named in the code
+        prods_from_k_pkus_1, and it's calculated as a cumprod.
+
+        In order to vectorize this properly, we need to add to
+        omitted_products the dimensions where k > j, and therefore
+        dy_j / dx_k = 0, which is done right after the assert.
         '''
+
         input, = self.saved_tensors
         dim_size = input.size(self.dim)
-        
         if dim_size == 1:
-            return grad_output.clone()
+            return grad_output
+
+        #  Simple case with nonzero elements in the input
+        if (input != 0).all():
+            output = torch.cumprod(input, dim=self.dim)
+            return reverse_cumsum(output * grad_output, dim=self.dim) / input
 
         if input.is_cuda:
-            LT = torch.cuda.LongTensor
+            idx = torch.cuda.LongTensor(range(dim_size))
         else:
-            LT = torch.LongTensor
+            idx = torch.LongTensor(range(dim_size))
 
-        if (input == 0).any():
-            ones = input.index_select(self.dim,
-                    LT(range(1))).fill_(1).clone()
-            zeros = ones.clone().fill_(0)
-            grad_input = grad_output.new(input.size()).zero_() 
-            for k in range(dim_size):
-                if 0 < k and k < dim_size - 1:
-                    prods_until_k = torch.prod(input.index_select(self.dim,
-                        LT(range(k))), dim=self.dim)
+        ones = input.select(self.dim, 0).unsqueeze(self.dim).clone().fill_(1)
+        zeros = ones.clone().fill_(0)
+        grad_input = grad_output.new(input.size()).zero_()
+        for k in range(dim_size):
+            if k == 0:
+                prods_from_k_plus_1 = torch.cumprod(
+                    input.index_select(self.dim, idx[k + 1:dim_size]),
+                    dim=self.dim
+                )
 
-                    prods_from_k_plus_1 = torch.cumprod(input.index_select(
-                        self.dim, LT(range(k+1, dim_size))), dim=self.dim)
+                ommitted_products = torch.cat(
+                    (ones, prods_from_k_plus_1),
+                    self.dim
+                )
 
-                    ommitted_products = prods_until_k.expand_as(
-                        prods_from_k_plus_1) * prods_from_k_plus_1
+            elif k == dim_size - 1:
+                prods_until_k = torch.prod(
+                    input.index_select(self.dim, idx[:k]),
+                    dim=self.dim
+                )
 
-                    ommitted_products = torch.cat((prods_until_k,
-                        ommitted_products), self.dim)
-                elif k == dim_size - 1:
-                    prods_until_k = torch.prod(input.index_select(self.dim,
-                        LT(range(k))), dim=self.dim)
+                ommitted_products = prods_until_k
 
-                    ommitted_products = prods_until_k
-                else: #k == 0
-                    prods_from_k_plus_1 = torch.cumprod(input.index_select(
-                        self.dim, LT(range(k+1, dim_size))), dim=self.dim)
+            else:
+                prods_until_k = torch.prod(
+                    input.index_select(self.dim, idx[:k]),
+                    dim=self.dim
+                )
 
-                    ommitted_products = torch.cat((ones, prods_from_k_plus_1),
-                        self.dim)
-                
-                # At this point ommitted_products is the same size
-                # as input, except on the dimension dim where it's
-                # dim_size - k
-                assert ommitted_products.size()[self.dim] == dim_size - k, \
-                    "Dimension error"
+                prods_from_k_plus_1 = torch.cumprod(
+                    input.index_select(self.dim, idx[k + 1:dim_size]),
+                    dim=self.dim
+                )
 
-                if k != 0:
-                    size_to_expand = [l for l in input.size()]
-                    size_to_expand[self.dim] = k # Adding zeros to missing dimensions
-                    size_to_expand = torch.Size(size_to_expand)
-                    expanded_zeros = zeros.expand(size_to_expand)
-                    ommitted_products = torch.cat((zeros.expand(size_to_expand),
-                            ommitted_products), self.dim)
+                ommitted_products = prods_until_k.expand_as(
+                    prods_from_k_plus_1) * prods_from_k_plus_1
 
-                grad_input.index_copy_(self.dim, LT(range(k,k+1)), 
-                        torch.sum(grad_output * ommitted_products, dim=self.dim))
+                ommitted_products = torch.cat(
+                    (prods_until_k, ommitted_products), self.dim)
 
-        else:
-            output = torch.cumprod(input, dim=self.dim)
-            grad_input = reverse_cumsum(output * grad_output, dim=self.dim) / input      
-        
+            # At this point ommitted_products is the same size
+            # as input, except on the dimension dim where it's
+            # dim_size - k
+            assert ommitted_products.size(self.dim) == dim_size - k
+
+            if k != 0:
+                size_to_expand = list(input.size())
+                size_to_expand[self.dim] = k  # Adding zeros to missing dimensions
+                size_to_expand = torch.Size(size_to_expand)
+                ommitted_products = torch.cat(
+                    (zeros.expand(size_to_expand), ommitted_products),
+                    self.dim
+                )
+
+            grad_input.index_copy_(
+                self.dim,
+                idx.index(k),
+                torch.sum(grad_output * ommitted_products, dim=self.dim)
+            )
+
         return grad_input
 
 # TODO: unfold
-
-
-
