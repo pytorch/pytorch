@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TH/TH.h>
+#include <THPP/THPP.h>
 #include "../../THD.h"
 
 #define THDTensor         TH_CONCAT_3(THD,Real,Tensor)
