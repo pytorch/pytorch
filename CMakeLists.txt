@@ -57,8 +57,8 @@ option(USE_MPI "Use MPI" ON)
 option(USE_GLOO "Use Gloo" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
-option(BUILD_PYTHON "Build python binaries" ON)
-option(BUILD_BINARY "Build c++ binary executives" ON)
+option(BUILD_PYTHON "Build Python binaries" ON)
+option(BUILD_BINARY "Build C++ binaries" ON)
 
 # External projects
 include(ExternalProject)
