@@ -240,6 +240,8 @@ enum Functions: std::uint16_t {
   // communication requests
   sendTensor,
   sendStorage,
+
+  exit
 };
 
 } // namespace thd

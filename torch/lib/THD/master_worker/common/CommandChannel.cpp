@@ -1,4 +1,5 @@
 #include "CommandChannel.hpp"
+#include "Functions.hpp"
 #include "../../base/ChannelEnvVars.hpp"
 #include "../../base/ChannelUtils.hpp"
 
@@ -64,10 +65,16 @@ MasterCommandChannel::~MasterCommandChannel() {
     ::close(_error_pipe);
   }
 
-  for (auto socket : _sockets) {
-    if (socket != -1)
-      ::close(socket);
+  auto world_size = _sockets.size();
+  for (std::size_t i = 0; i < world_size; ++i) {
+    auto socket = _sockets[i];
+    if (socket == -1) continue;
+    try {
+      sendMessage(rpc::packMessage(Functions::exit), i);
+    } catch(...) {}
+    ::close(socket);
   }
+
 }
 
 bool MasterCommandChannel::init() {
