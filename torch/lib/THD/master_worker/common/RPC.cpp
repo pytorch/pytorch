@@ -135,6 +135,8 @@ THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
   thpp::Type type = unpackType(raw_message);
   if (type != thpp::Type::LONG_STORAGE)
     throw std::invalid_argument("expected THLongStorage in the raw message");
+  char is_null = unpackScalar<char>(raw_message);
+  if (is_null) return NULL;
   ptrdiff_t size = unpackScalar<ptrdiff_t>(raw_message);
   THLongStorage* storage = THLongStorage_newWithSize(size);
   long* data = storage->data;

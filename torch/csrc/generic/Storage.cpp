@@ -24,7 +24,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
 
 static THStorage* THPStorage_(newWithAllocator)(long size, THAllocator* allocator)
 {
-#ifdef THC_GENERIC_FILE
+#if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
   return NULL;
 #else
@@ -87,6 +87,10 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage(view_source, [offset, [size]])
   if (num_args < 4 && THPStorage_(Check)(first_arg)) {
+#ifdef THD_GENERIC_FILE
+    THPUtils_setError("distributed storages don't support storage views");
+    return NULL;
+#else
     THPStorage *storage_arg = (THPStorage *)first_arg;
     long numel = storage_arg->cdata->size;
     long offset = 0;
@@ -119,10 +123,14 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
     self->cdata = storage.release();
     return (PyObject*)self.release();
+#endif
   }
 
   // torch.Storage(sequence)
   if (num_args == 1 && PySequence_Check(first_arg)) {
+#ifdef THD_GENERIC_FILE
+    THPUtils_setError("distributed storages don't support construction from a sequence");
+#else
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
@@ -132,7 +140,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(first_arg, i);
         real value = THPUtils_(unpackReal)(item.get());
-#ifndef THC_GENERIC_FILE
+#if !defined(THC_GENERIC_FILE)
         self->cdata->data[i] = value;
 #else
         // TODO: this might be slow - consider batched updates?
@@ -148,9 +156,12 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       return NULL;
     }
     return (PyObject*)self.release();
+#endif
   }
 
+#ifndef THD_GENERIC_FILE
 invalid_arguments:
+#endif
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
           "no arguments",
           "(int size)",
@@ -186,6 +197,10 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
+#ifdef THD_GENERIC_FILE
+    THPUtils_setError("distributed storages don't support slicing");
+    return NULL;
+#else
     Py_ssize_t start, stop, slicelength, step;
     long len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
@@ -205,6 +220,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     PyObject *_ret = THPStorage_(New)(new_storage);
     new_storage.release();
     return _ret;
+#endif
   }
   PyErr_Format(PyExc_TypeError, "can't index a " THPStorageStr " with %s",
       THPUtils_typename(index));
@@ -307,6 +323,7 @@ THPCopyList THStorage_(copy_functions);
 
 void THPStorage_(initCopyMethods)()
 {
+#ifndef THD_GENERIC_FILE
   auto& h = THStorage_(copy_functions);
   // copy from CPU types
   THPInsertCopyFunction(h, &THStorage_(copyByte));
@@ -345,16 +362,21 @@ void THPStorage_(initCopyMethods)()
 #endif
   #undef THCpuStorage_
 #endif
+#endif // !defined(THD_GENERIC_FILE)
 }
 
 #include "StorageMethods.cpp"
+#ifndef THD_GENERIC_FILE
 #include "StorageSharing.cpp"
+#endif
 
 bool THPStorage_(init)(PyObject *module)
 {
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, THPStorage_(methods));
+#ifndef THD_GENERIC_FILE
   THPUtils_addPyMethodDefs(methods, THPStorage_(sharingMethods));
+#endif
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_(members);

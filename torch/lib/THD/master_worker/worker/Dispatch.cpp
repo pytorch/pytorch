@@ -147,6 +147,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorCmaxValue, tensorCmaxValue},
     {Functions::tensorCminValue, tensorCminValue},
 
+    {Functions::tensorFill, tensorFill},
     {Functions::tensorMaskedFill, tensorMaskedFill},
     {Functions::tensorMaskedCopy, tensorMaskedCopy},
     {Functions::tensorMaskedSelect, tensorMaskedSelect},

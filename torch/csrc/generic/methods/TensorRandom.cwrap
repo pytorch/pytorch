@@ -1,6 +1,6 @@
 [[
   name: randperm
-  defined_if: "!IS_CUDA"
+  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
   only_stateless: True
   return: argument 0
   arguments:
@@ -12,7 +12,7 @@
     - long n
 ]]
 
-#if !defined(TH_REAL_IS_HALF) && !IS_CUDA
+#if !defined(TH_REAL_IS_HALF) && !IS_CUDA && !IS_DISTRIBUTED
 static void THTensor_(random2__)(THTensor *self, THGenerator *gen, long a, long b)
 {
   THArgCheck(b > a, 2, "upper bound must be greater than lower bound");
@@ -28,7 +28,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 
 [[
   name: random_
-  defined_if: "!IS_CUDA"
+  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
   return: self
   options:
     - cname: random
@@ -407,7 +407,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 
 [[
   name: geometric_
-  defined_if: "!IS_CUDA"
+  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
   cname: geometric
   return: self
   arguments:
@@ -443,7 +443,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 
 [[
   name: bernoulli_
-  defined_if: "!IS_CUDA"
+  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
   return: self
   options:
     - cname: bernoulli

@@ -6,6 +6,133 @@ using namespace thd;
 using namespace rpc;
 using namespace master;
 
+void THDTensor_(gather)(THDTensor *self, THDTensor *src, int dim, THDLongTensor *index) {
+  THArgCheck(dim < self->nDimension, 2, "Index dimension is out of bounds");
+  THArgCheck(THDLongTensor_nDimension(index) == self->nDimension, 3,
+             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(src->nDimension == self->nDimension, 4,
+             "Input tensor must have same dimensions as output tensor");
+
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorGather,
+      self,
+      src,
+      dim,
+      index
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(scatter)(THDTensor *self, int dim, THDLongTensor *index, THDTensor *src) {
+  THArgCheck(dim < self->nDimension, 2, "Index dimension is out of bounds");
+  THArgCheck(THDLongTensor_nDimension(index) == self->nDimension, 3,
+             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(src->nDimension == self->nDimension, 4,
+             "Input tensor must have same dimensions as output tensor");
+
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorScatter,
+      self,
+      dim,
+      index,
+      src
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(scatterFill)(THDTensor *self, int dim, THDLongTensor *index, real val) {
+  THArgCheck(dim < self->nDimension, 2, "Index dimension is out of bounds");
+  THArgCheck(THDLongTensor_nDimension(index) == self->nDimension, 3,
+             "Index tensor must have same dimensions as output tensor");
+
+  masterCommandChannel->sendMessage(
+    packMessage(
+      Functions::tensorScatterFill,
+      self,
+      dim,
+      index,
+      val
+    ),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(max)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMax, self, indices_, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
+      dimension + TH_INDEX_BASE);
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMin, self, indices_, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, long k, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
+  THArgCheck(k > 0 && k <= src->size[dimension], 2, "selected index out of range");
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorKthvalue, self, indices_, src, k, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
+
+  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  THLongStorage_set(dim, dimension, 1);
+  THDTensor_(resize)(self, dim, NULL);
+  THDLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMode, self, indices_, src, dimension),
+    THDState::s_current_worker
+  );
+}
+
+void THDTensor_(median)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+  THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
+
+  long t_size_dim = src->size[dimension];
+  long k = (t_size_dim - 1) >> 1; /* take middle or one-before-middle element */
+
+  THDTensor_(kthvalue)(self, indices_, src, k + 1, dimension);
+}
+
 void THDTensor_(fill)(THDTensor *tensor, real value) {
   masterCommandChannel->sendMessage(
     packMessage(

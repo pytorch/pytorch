@@ -12,6 +12,12 @@
 #define AS_REAL(x) x
 #endif
 
+#ifdef THD_GENERIC_FILE
+#define IS_DISTRIBUTED true
+#else
+#define IS_DISTRIBUTED false
+#endif
+
 #ifndef THC_GENERIC_FILE
 #define IS_CUDA false
 #define CUDA_FLOAT false
@@ -33,6 +39,12 @@
 #define THPIndexTensor THCPLongTensor
 #define THPIndexTensor_(NAME) TH_CONCAT_2(THCPLongTensor_,NAME)
 #define THPIndexTensorClass THCPLongTensorClass
+#elif IS_DISTRIBUTED
+#define THIndexTensor THDLongTensor
+#define THIndexTensor_(NAME) TH_CONCAT_2(THDLongTensor_,NAME)
+#define THPIndexTensor THDPLongTensor
+#define THPIndexTensor_(NAME) TH_CONCAT_2(THDPLongTensor_,NAME)
+#define THPIndexTensorClass THDPLongTensorClass
 #else
 #define THIndexTensor THLongTensor
 #define THIndexTensor_(NAME) TH_CONCAT_2(THLongTensor_,NAME)
@@ -46,6 +58,11 @@
 #define THIntegerTensor_(NAME) TH_CONCAT_2(THCudaIntTensor_,NAME)
 #define THPIntegerTensor THCPIntTensor
 #define THPIntegerTensorClass THCPIntTensorClass
+#elif IS_DISTRIBUTED
+#define THIntegerTensor THDIntTensor
+#define THIntegerTensor_(NAME) TH_CONCAT_2(THDIntTensor_,NAME)
+#define THPIntegerTensor THDPIntTensor
+#define THPIntegerTensorClass THDPIntTensorClass
 #else
 #define THIntegerTensor THIntTensor
 #define THIntegerTensor_(NAME) TH_CONCAT_2(THIntTensor_,NAME)
@@ -57,16 +74,22 @@
 #define THBoolTensor THCudaByteTensor
 #define THPBoolTensor THCPByteTensor
 #define THPBoolTensorClass THCPByteTensorClass
+#elif IS_DISTRIBUTED
+#define THBoolTensor THDByteTensor
+#define THPBoolTensor THDPByteTensor
+#define THPBoolTensorClass THDPByteTensorClass
 #else
 #define THBoolTensor THByteTensor
 #define THPBoolTensor THPByteTensor
 #define THPBoolTensorClass THPByteTensorClass
 #endif
 
-#if !IS_CUDA
-#define THPModuleStr "torch."
-#else
+#if IS_CUDA
 #define THPModuleStr "torch.cuda."
+#elif IS_DISTRIBUTED
+#define THPModuleStr "torch.distributed."
+#else
+#define THPModuleStr "torch."
 #endif
 
 // The C API uses THLongStorage for size and stride, but the Python API uses
@@ -82,7 +105,9 @@ typedef THLongStorage THStride;
 !!inc methods/TensorRandom.cwrap
 !!inc methods/TensorCuda.cwrap
 
+#if !IS_DISTRIBUTED
 !!inc methods/SparseTensor.cwrap
+#endif
 
 // cwrap should put definitions before undefs, so let's mark this place
 // PUT DEFINITIONS IN HERE PLEASE
