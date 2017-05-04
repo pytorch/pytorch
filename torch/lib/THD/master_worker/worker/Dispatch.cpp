@@ -57,6 +57,11 @@ static void finalize(rpc::RPCMessage& raw_message) {
 using dispatch_fn = void (*)(rpc::RPCMessage&);
 using Functions = thd::Functions;
 
+void exitWorker(rpc::RPCMessage& msg) {
+  finalize(msg);
+  ::exit(0);
+}
+
 
 static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::generatorNew, generatorNew},
@@ -266,6 +271,8 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
 
     {Functions::sendTensor, sendTensor},
     {Functions::sendStorage, sendStorage},
+
+    {Functions::exit, exitWorker}
 };
 
 } // namespace detail

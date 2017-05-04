@@ -5,6 +5,7 @@
 #include "Worker.h"
 #include "Worker.hpp"
 
+#include <iostream>
 #include <stdexcept>
 
 namespace thd {
@@ -33,8 +34,9 @@ void THDWorkerMain() {
     try {
       execute(std::move(command));
     } catch (std::exception& e) {
+      std::cerr << "WORKER ERROR: " << e.what() << std::endl;
       workerCommandChannel->sendError(e.what());
-      throw e;
+      ::exit(1);
     }
   }
 }
