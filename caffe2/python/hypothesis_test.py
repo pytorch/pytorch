@@ -409,10 +409,12 @@ class TestOperators(hu.HypothesisTestCase):
            **hu.gcs_cpu_only)
     def test_last_n_windows(self, X, gc, dc):
         workspace.FeedBlob('input', X)
+        workspace.FeedBlob('next', np.array(0, dtype=np.int32))
+        workspace.CreateBlob('output')
         collect_net = core.Net('collect_net')
         collect_net.LastNWindowCollector(
-            ['input'],
-            ['output'],
+            ['output', 'next', 'input'],
+            ['output', 'next'],
             num_to_collect=7,
         )
         plan = core.Plan('collect_data')
