@@ -183,7 +183,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
       LOG(INFO) << "Use RecurrentNetworkExecutor";
       rnnExecutor_ = caffe2::make_unique<RecurrentNetworkExecutor>(stepNetDef_);
     } else {
-      CAFFE_ENFORCE(stepNetDef_.type() == "" || stepNetDef_.type() == "simple");
+      CAFFE_ENFORCE(stepNetDef_.type() != "async_dag");
     }
   }
 
