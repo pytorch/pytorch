@@ -51,7 +51,10 @@ class cwrap(object):
         with open(source, 'r') as f:
             declarations = f.read()
 
+        # wrap all the declarations in the source .cwrap file
         wrapper = self.wrap_declarations(declarations)
+
+        # let each plugin do any post-processing of the wrapped file
         for plugin in self.plugins:
             wrapper = plugin.process_full_file(wrapper)
 
