@@ -42,7 +42,13 @@ void RedisStoreHandler::set(const std::string& name, const std::string& data) {
   CAFFE_ENFORCE_NE(ptr, (void*)nullptr, redis_->errstr);
   redisReply* reply = static_cast<redisReply*>(ptr);
   CAFFE_ENFORCE_EQ(reply->type, REDIS_REPLY_INTEGER);
-  CAFFE_ENFORCE_EQ(reply->integer, 1, "Value at ", name, " was already set");
+  CAFFE_ENFORCE_EQ(
+      reply->integer,
+      1,
+      "Value at ",
+      name,
+      " was already set",
+      " (perhaps you reused a run ID you have used before?)");
 }
 
 std::string RedisStoreHandler::get(const std::string& name) {
