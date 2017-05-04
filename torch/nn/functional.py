@@ -755,4 +755,3 @@ def normalize(input, p, dim, eps=1e-12):
     for each subtensor v over dimension dim of input.
     """
     return input / input.norm(p, dim).clamp(min=eps).expand_as(input)
-
