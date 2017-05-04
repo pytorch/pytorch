@@ -823,10 +823,10 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
-    def test_lp_normalize(self):
+    def test_normalize(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.lp_normalize(x, p=1, dim=-1), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.l2_normalize(x, dim=-1), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.normalize(x, p=2, dim=-2), (inputs,)))
 
     def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
         def expected_indices(dim):
