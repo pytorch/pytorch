@@ -83,8 +83,13 @@ void THBlas_(scal)(long n, real a, real *x, long incx)
 #endif
   {
     long i;
-    for(i = 0; i < n; i++)
-      x[i*incx] *= a;
+    for(i = 0; i < n; i++) {
+      if (a == 0) {
+        x[i*incx] = 0;
+      } else {
+        x[i*incx] *= a;
+      }
+    }
   }
 }
 
