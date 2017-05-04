@@ -49,6 +49,7 @@ static void finalize(rpc::RPCMessage& raw_message) {
 #include "dispatch/Generator.cpp"
 #include "dispatch/Storage.cpp"
 #include "dispatch/Tensor.cpp"
+#include "dispatch/TensorCopy.cpp"
 #include "dispatch/TensorMath.cpp"
 #include "dispatch/TensorRandom.cpp"
 #include "dispatch/TensorLapack.cpp"
@@ -64,6 +65,9 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::generatorSeed, generatorSeed},
     {Functions::generatorManualSeed, generatorManualSeed},
 
+    {Functions::tensorCopyTH, tensorCopyTH}, // copy from TH to THD
+    {Functions::tensorCopyTHD, tensorCopyTHD}, // copy from THD to TH
+    
     {Functions::tensorNew, tensorNew},
     {Functions::tensorNewWithSize, tensorNewWithSize},
     {Functions::tensorNewWithStorage, tensorNewWithStorage},
