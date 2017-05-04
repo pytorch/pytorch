@@ -9,24 +9,14 @@ namespace gloo {
 
 template <typename T, class Context>
 void AllreduceOp<T, Context>::initializeRingFull() {
-  if (canUseHalvingDoubling()) {
-    algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<T>(
-        init_.context, init_.outputs, init_.size));
-  } else {
-    algorithm_.reset(
-        new ::gloo::AllreduceRing<T>(init_.context, init_.outputs, init_.size));
-  }
+  algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<T>(
+      init_.context, init_.outputs, init_.size));
 }
 
 template <typename T, class Context>
 void AllreduceOp<T, Context>::initializeRingChunked() {
-  if (canUseHalvingDoubling()) {
-    algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<T>(
-        init_.context, init_.outputs, init_.size));
-  } else {
-    algorithm_.reset(new ::gloo::AllreduceRingChunked<T>(
-        init_.context, init_.outputs, init_.size));
-  }
+  algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<T>(
+      init_.context, init_.outputs, init_.size));
 }
 
 namespace {
