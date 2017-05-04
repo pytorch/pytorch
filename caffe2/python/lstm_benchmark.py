@@ -41,7 +41,7 @@ def generate_data(T, shape, num_labels):
     np.random.seed(2603)
 
     for t in range(T):
-        if (t % (T // 10) == 0):
+        if (t % (max(10, T // 10)) == 0):
             print("Generating data {}/{}".format(t, T))
         # Randomize the seqlength
         random_shape = (
@@ -63,37 +63,44 @@ def generate_data(T, shape, num_labels):
 
 def create_model(args, queue, label_queue, input_shape):
     model = cnn.CNNModelHelper(name="LSTM_bench")
-    seq_lengths, hidden_init, cell_init, target = \
+    seq_lengths, target = \
         model.net.AddExternalInputs(
             'seq_lengths',
-            'hidden_init',
-            'cell_init',
             'target',
         )
+
     input_blob = model.DequeueBlobs(queue, "input_data")
     labels = model.DequeueBlobs(label_queue, "label")
 
+    init_blobs = []
     if args.implementation == "own":
-        output, last_hidden, _, last_state = rnn_cell.layered_LSTM(
+        for i in range(args.num_layers):
+            init_blobs.append("hidden_init_{}".format(i))
+            init_blobs.append("cell_init_{}".format(i))
+        model.net.AddExternalInputs(init_blobs)
+
+        output, last_hidden, _, last_state = rnn_cell.LSTM(
             model=model,
             input_blob=input_blob,
             seq_lengths=seq_lengths,
-            initial_states=(hidden_init, cell_init),
+            initial_states=init_blobs,
             dim_in=args.input_dim,
             dim_out=[args.hidden_dim] * args.num_layers,
             scope="lstm1",
             memory_optimization=args.memory_optimization,
             forward_only=args.forward_only,
             drop_states=True,
+            return_last_layer_only=True,
         )
     elif args.implementation == "cudnn":
         # We need to feed a placeholder input so that RecurrentInitOp
         # can infer the dimensions.
+        init_blobs = model.net.AddExternalInputs("hidden_init", "cell_init")
         model.param_init_net.ConstantFill([], input_blob, shape=input_shape)
         output, last_hidden, _ = rnn_cell.cudnn_LSTM(
             model=model,
             input_blob=input_blob,
-            initial_states=(hidden_init, cell_init),
+            initial_states=init_blobs,
             dim_in=args.input_dim,
             dim_out=args.hidden_dim,
             scope="cudnnlstm",
@@ -113,15 +120,15 @@ def create_model(args, queue, label_queue, input_shape):
         model.AddGradientOperators([loss])
 
     # carry states over
-    model.net.Copy(last_hidden, hidden_init)
-    model.net.Copy(last_hidden, cell_init)
+    for init_blob in init_blobs:
+        model.net.Copy(last_hidden, init_blob)
 
-    workspace.FeedBlob(hidden_init, np.zeros(
-        [1, args.batch_size, args.hidden_dim], dtype=np.float32
-    ))
-    workspace.FeedBlob(cell_init, np.zeros(
-        [1, args.batch_size, args.hidden_dim], dtype=np.float32
-    ))
+        sz = args.hidden_dim
+        if args.implementation == "cudnn":
+            sz *= args.num_layers
+        workspace.FeedBlob(init_blob, np.zeros(
+            [1, args.batch_size, sz], dtype=np.float32
+        ))
     return model, output
 
 
