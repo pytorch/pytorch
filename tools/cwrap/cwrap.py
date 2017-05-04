@@ -35,11 +35,11 @@ class cwrap(object):
     DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments,
                               ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
 
-    def __init__(self, source, destination=None, plugins=[], default_plugins=True):
+    def __init__(self, source, destination=None, plugins=None, default_plugins=True):
         if destination is None:
             destination = source.replace('.cwrap', '.cpp')
 
-        self.plugins = plugins
+        self.plugins = [] if plugins is None else plugins
         if default_plugins:
             defaults = [cls() for cls in self.DEFAULT_PLUGIN_CLASSES]
             self.plugins = defaults + self.plugins
@@ -136,6 +136,10 @@ class cwrap(object):
         return new_args
 
     def search_plugins(self, fnname, args, fallback):
+        """Search plugins for the given function to call with args.
+
+        If not found, call fallback with args.
+        """
         for plugin in self.plugins:
             wrapper = getattr(plugin, fnname)(*args)
             if wrapper is not None:
