@@ -1,5 +1,5 @@
 from bisect import bisect_right
-from torch.optim.optimizer import Optimizer
+from .optimizer import Optimizer
 
 
 class LambdaLR(object):
