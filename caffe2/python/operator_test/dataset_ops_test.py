@@ -510,9 +510,13 @@ class TestDatasetOps(TestCase):
             shape=[3, 2],
             values=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         )
+        input_array = np.array(range(1, 7), dtype=np.float32).reshape(3, 2)
+
+        workspace.CreateBlob('output')
+        workspace.FeedBlob('next', np.array(0, dtype=np.int32))
         collect_net.LastNWindowCollector(
-            ['input'],
-            ['output'],
+            ['output', 'next', 'input'],
+            ['output', 'next'],
             num_to_collect=7,
         )
         plan = core.Plan('collect_data')
@@ -522,10 +526,7 @@ class TestDatasetOps(TestCase):
         )
         workspace.RunPlan(plan)
         reference_result = workspace.FetchBlob('output')
-        self.assertSequenceEqual(
-            [item for sublist in reference_result for item in sublist],
-            [1, 2, 3, 4, 5, 6]
-        )
+        npt.assert_array_equal(input_array, reference_result)
 
         plan = core.Plan('collect_data')
         plan.AddStep(
@@ -534,10 +535,8 @@ class TestDatasetOps(TestCase):
         )
         workspace.RunPlan(plan)
         reference_result = workspace.FetchBlob('output')
-        self.assertSequenceEqual(
-            [item for sublist in reference_result for item in sublist],
-            [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6]
-        )
+        npt.assert_array_equal(input_array[[1, 2, 2, 0, 1, 2, 0]],
+                               reference_result)
 
         plan = core.Plan('collect_data')
         plan.AddStep(
@@ -546,10 +545,8 @@ class TestDatasetOps(TestCase):
         )
         workspace.RunPlan(plan)
         reference_result = workspace.FetchBlob('output')
-        self.assertSequenceEqual(
-            [item for sublist in reference_result for item in sublist],
-            [3, 4, 5, 6, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2]
-        )
+        npt.assert_array_equal(input_array[[2, 0, 1, 2, 2, 0, 1]],
+                               reference_result)
 
     def test_collect_tensor_ops(self):
         init_net = core.Net('init_net')
