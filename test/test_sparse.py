@@ -1,5 +1,6 @@
 import torch
 from torch import sparse
+from torch._utils import _import_dotted_name # ick
 
 import itertools
 import random
@@ -16,6 +17,57 @@ def cpu_only(inner):
         inner(self, *args, **kwargs)
     return outer
 
+
+class SparseSize:
+    """Represents the size of a sparse tensor.  There is a logical size which is
+    just a torch.Size (what you would have gotten if you called toDense) but
+    sparse tensors also carry extra metadata, which this class records."""
+    # TODO: Maybe promote this into a real thing.
+    def __init__(self, size, dimI, nnz):
+        self._size = size
+        self._nnz = nnz
+        self._dimI = dimI
+    def size(self):
+        """Logical size of the sparse tensor; i.e., what you would get if
+        you called s.to_dense().size()"""
+        return self._size
+    def dimI(self):
+        """Number of sparse dimensions in the sparse tensor.  Despite this
+        name, this is NOT the dimension of indices (indices is always 2D)."""
+        return self._dimI
+    def dimV(self):
+        """Number of dense dimensions in the sparse tensor.  Despite this name,
+        this value is ONE LESS than the dimensionality of _values()."""
+        return len(self.size()) - self.dimI()
+    def nnz(self):
+        """Number of non-zero values in the sparse tensor"""
+        return self._nnz
+    def indicesSize(self):
+        """Size of _indices()"""
+        return torch.Size([self.dimI(), self.nnz()])
+    def valuesSize(self):
+        """Size of _values()"""
+        return torch.Size((self.nnz(),) + self.size()[self.dimI():])
+    def new_sparse(self, new_type, indices=None, values=None):
+        """Create a new sparse tensor with the size specified by this size."""
+        # TODO: This code is disgusting
+        mod = new_type.__module__
+        cls = new_type.__name__
+        if indices is None:
+            indices = mod.LongTensor(self.indicesSize())
+        else:
+            assert indices.size() == self.indicesSize()
+        if values is None:
+            value_type = _import_dotted_name(mod.replace('.sparse', '') + '.' + cls)
+            values = value_type(self.valuesSize())
+        else:
+            assert values.size() == self.valuesSize()
+        return new_type(indices, values, self.size())
+
+def dense2sparse(dense_type):
+    mod = dense_type.__module__
+    cls = dense_type.__name__
+    return _import_dotted_name(mod + ".sparse." + cls)
 
 class TestSparse(TestCase):
 
@@ -487,22 +539,19 @@ class TestSparse(TestCase):
 
     def _test_sparse_mask_shape(self, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
-        x1, _, _ = self._gen_sparse(len(shape_i), 9, shape)
-        x2, _, _ = self._gen_sparse(len(shape_i), 12, shape)
-
-        y1 = x1 + x2
-        y2 = x1.clone()
-        y2.add_(x2)
-        expected = x1.to_dense() + x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        x, _, _ = self._gen_sparse(len(shape_i), 9, shape)
+        x = x.coalesce()
+        dense = self.randn(*shape)
+        dense._sparse_copy_(x)
+        y = dense._sparse_mask(x)
+        self.assertEqual(x, y)
 
     def _test_sparse_mask_fixed(self):
         i = self.IndexTensor([
             [1, 3, 0, 4],
             [2, 1, 2, 3],
         ])
-        v = self.ValueTensor([1, 2, 3, 4])
+        v = self.ValueTensor([100, 200, 300, 400])
         x = self.SparseTensor(i, v, torch.Size([5, 4])).coalesce()
         dense = self.ValueTensor([
             [1, 2, 3, 4],
@@ -516,8 +565,121 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
+        expected_dense = self.ValueTensor([
+            [1, 2, 300, 4],
+            [5, 6, 100, 8],
+            [9, 10, 11, 12],
+            [13, 200, 15, 16],
+            [17, 18, 19, 400],
+        ])
+        dense._sparse_copy_(x)
+        self.assertEqual(dense, expected_dense)
+
+    def prop_sparse_mask_const(self, x, s):
+        """sparse_mask does not mutate inputs."""
+        expected_x = x.clone()
+        expected_s = s.clone()
+        try:
+            x._sparse_mask(s)
+        except:
+            pass
+        self.assertEqual(x, expected_x)
+        self.assertEqual(s, expected_s)
+
+    def _sparse_mask_py(self, x, s):
+        """Python reference implementation of sparse_mask"""
+        if not s.is_coalesced():
+            raise ValueError("mask is not coalesced")
+        if x.size() != s.size():
+            raise ValueError("sparse_mask operands have incompatible sizes")
+        ss = SparseSize(size=x.size(), dimI=s._indices().size()[0], nnz=s._nnz())
+        r = ss.new_sparse(dense2sparse(type(x)), s._indices())
+        v = r._values()
+        for i, js in enumerate(s._indices().t()):
+            m = x
+            for j in js:
+                # NB: m[j] will happily accept a negative index; but sparse_mask
+                # really shouldnot!
+                if j < 0:
+                    raise IndexError("negative index is out of range")
+                m = m[j]
+            v[i] = m
+        return r
+
+    def prop_sparse_mask_py(self, x, s):
+        """sparse_mask agrees with reference implementation"""
+        # NB: It would be better if we could make more precise statements
+        # about what exceptions should be raised if there is an error,
+        # but the different APIs are actually quite inconsistent here.
+        expect_error = False
+        error = False
+        expected_r = None
+        try:
+            expected_r = self._sparse_mask_py(x.clone(), s.clone())
+        except (ValueError, RuntimeError, IndexError) as e:
+            expect_error = e
+        try:
+            r = x._sparse_mask(s)
+        except (ValueError, RuntimeError, IndexError) as e:
+            error = e
+        if expect_error and not error:
+            self.fail("Expected an error {:s}, but no error was thrown".format(repr(expect_error)))
+        elif not expect_error and error:
+            self.fail("Did not expect error, but {:s} was thrown".format(repr(error)))
+        elif not expect_error and not error:
+            self.assertEqual(r, expected_r)
+
+    def prop_sparse_mask(self, x, s):
+        self.prop_sparse_mask_const(x.clone(), s.clone())
+        self.prop_sparse_mask_py(x.clone(), s.clone())
+
+    def _mk_sparse(self, i, v, size=None):
+        if isinstance(size, list):
+            size = torch.Size(size)
+        s = self.SparseTensor(self.IndexTensor(i), self.ValueTensor(v), size)
+        return s
+
+    def _test_sparse_mask_oob(self):
+        def go(d, i, v, s, well_formed=False):
+            # CUDA has stronger invariants on sparse tensors being well-formed,
+            # so we can't easily test for OOB without triggering asserts
+            # earlier.  If we tighten up the CPU code, we probably have to get
+            # rid of these tests entirely.
+            if not well_formed and self.is_cuda:
+                return
+            sparse = self._mk_sparse(i, v, s)
+            if well_formed:
+                sparse.to_dense() # check that dims make sense
+            self.prop_sparse_mask(d, sparse.coalesce())
+
+        dense = self.ValueTensor([88,99])
+        go(dense, [[0,1]],  [88,99], [2], True)
+
+        dense = self.ValueTensor([42])
+        go(dense, [[0]],    [42], [1], True)
+        go(dense, [[9999]], [0],  [1])
+        go(dense, [[1]],    [0],  [1])
+        go(dense, [[-1]],   [0],  [1])
+        go(dense, [[1]],    [0],  [2], True)
+
+        dense = self.ValueTensor([
+            [1, 2, 3],
+            [4, 5, 6]
+        ])
+        go(dense, [[0]],    [[1, 2, 3]], [2, 3], True)
+        go(dense, [[1]],    [[4, 5, 6]], [2, 3], True)
+        go(dense, [[2]],    [[0, 0, 0]], [2, 3])
+        go(dense, [[-1]],   [[0, 0, 0]], [2, 3])
+        go(dense, [[0],
+                   [0]],    [1], [2, 3], True)
+        go(dense, [[1],
+                   [2]],    [6], [2, 3], True)
+        go(dense, [[0],
+                   [3]],    [0], [2, 3])
+
     def test_sparse_mask(self):
         self._test_sparse_mask_fixed()
+        self._test_sparse_mask_oob()
 
         self._test_sparse_mask_shape([5, 6])
         self._test_sparse_mask_shape([10, 10, 10])
@@ -529,7 +691,7 @@ class TestSparse(TestCase):
             [1, 3, 0, 4],
             [2, 1, 2, 3],
         ])
-        v = self.ValueTensor([[1, 2], [2, 3], [3, 4], [4, 5]])
+        v = self.ValueTensor([[100, 200], [200, 300], [300, 400], [400, 500]])
         # TODO: This is also testing that, if coalesce is a no-op,
         # the indices don't get permuted. I don't know if we actually
         # want to give this invariant.
@@ -545,6 +707,17 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([[7, 9], [14, 1], [3, 3], [20, 1]])
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)
+
+        expected_dense = self.ValueTensor([
+            [[1, 3], [2, 2], [300, 400], [4, 2]],
+            [[5, 7], [6, 7], [100, 200], [8, 9]],
+            [[9, 2], [10, 4], [11, 1], [12, 3]],
+            [[13, 5], [200, 300], [15, 1], [16, 6]],
+            [[17, 7], [18, 2], [19, 7], [400, 500]],
+        ])
+        dense._sparse_copy_(x)
+        self.assertEqual(dense, expected_dense)
+
 
     def test_sparse_mask_hybrid(self):
         self._test_sparse_mask_hybrid_fixed()

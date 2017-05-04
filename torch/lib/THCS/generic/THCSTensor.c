@@ -419,38 +419,43 @@ int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned
 #endif // DISABLE_CHECK_GPU
 }
 
-void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask) {
-  THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, mask, t));
-  if(!THCSTensor_(isSameSizeAsDense)(state, mask, t)) {
-    THError("sparseMask operands have incompatible sizes");
-  }
-  THCSTensor_(resizeAs)(state, r_, mask);
-  if (mask->nnz == 0) {
+void THCTensor_(sparseSelect)(THCState *state, THCSTensor *r_, THCTensor *t, THCIndexTensor *indices_) {
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, indices_, t));
+  long nDim = THCTensor_(nDimension)(state, t);
+  long nDimI = THCudaLongTensor_size(state, indices_, 0);
+  long nDimV = nDim - nDimI;
+  long nnz = THCudaLongTensor_size(state, indices_, 1);
+  THArgCheck(nDimI <= nDim, 2, "nDim of indices must be <= nDim of tensor");
+  THCSTensor_(rawResize)(state, r_, nDimI, nDimV, t->size);
+  if (nnz == 0) {
     THCSTensor_(zero)(state, r_);
     return;
   }
-  THCIndexTensor *maskIndices = THCSTensor_(newIndices)(state, mask);
-  THCTensor *maskValues = THCSTensor_(newValues)(state, mask);
   THCTensor *rValues = THCTensor_(new)(state);
-  THCTensor_(resizeAs)(state, rValues, maskValues);
-  THCSTensor_(_move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
-  r_->coalesced = mask->coalesced;
-  r_->nnz = mask->nnz;
+  long *size = THAlloc(sizeof(long) * (nDimV + 1));
+  size[0] = nnz;
+  for (int i = 0; i < nDimV; i++) {
+    size[i+1] = t->size[nDimI + i];
+  }
+  THCTensor_(resizeNd)(state, rValues, nDimV + 1, size, NULL);
+  THFree(size);
+  THCudaLongTensor *rIndices = THCudaLongTensor_newClone(state, indices_);
+  THCSTensor_(_move)(state, r_, rIndices, rValues);
+  r_->coalesced = 1; // invariant
 
-  THCudaLongTensor *indices = THCudaLongTensor_newWithSize1d(state, mask->nnz);
+  THCudaLongTensor *indices = THCudaLongTensor_newWithSize1d(state, nnz);
   THCudaLongTensor *indicesBuffer = THCudaLongTensor_new(state);
 
   THCudaLongTensor_zero(state, indices);
-  for (long d = 0; d < mask->nDimensionI; d++) {
-    THCudaLongTensor_mul(state, indices, indices, mask->size[d]);
-    THCudaLongTensor_select(state, indicesBuffer, maskIndices, 0, d);
+  for (long d = 0; d < nDimI; d++) {
+    THCudaLongTensor_mul(state, indices, indices, t->size[d]);
+    THCudaLongTensor_select(state, indicesBuffer, indices_, 0, d);
     THCudaLongTensor_cadd(state, indices, indices, 1, indicesBuffer);
   }
-  THLongStorage *viewSize = THLongStorage_newWithSize(1 + mask->nDimensionV);
+  THLongStorage *viewSize = THLongStorage_newWithSize(1 + nDimV);
   viewSize->data[0] = -1;
-  for (long d = 0; d < mask->nDimensionV; d++) {
-    viewSize->data[1 + d] = mask->size[mask->nDimensionI + d];
+  for (long d = 0; d < nDimV; d++) {
+    viewSize->data[1 + d] = t->size[nDimI + d];
   }
   THCTensor *t_view = THCTensor_(newView)(state, t, viewSize);
   THCTensor_(indexSelect)(state, rValues, t_view, 0, indices);
@@ -459,8 +464,57 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCudaLongTensor_free(state, indicesBuffer);
   THLongStorage_free(viewSize);
   THCTensor_(free)(state, t_view);
-  THCIndexTensor_(free)(state, maskIndices);
-  THCTensor_(free)(state, maskValues);
+}
+
+void THCTensor_(sparseCopy)(THCState *state, THCTensor *r_, THCTensor *dense, THCSTensor *sparse) {
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
+
+  THCTensor *r = r_;
+  if (r != dense) {
+    THCTensor_(retain)(state, r);
+    THCTensor_(resizeAs)(state, r, dense);
+    THCTensor_(copy)(state, r, dense);
+  } else {
+    r = THCTensor_(newContiguous)(state, r_);
+  }
+
+  const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
+  if (nnz == 0) {
+    THCTensor_(freeCopyTo)(state, r, r_);
+    return;
+  }
+
+  THCIndexTensor *indices = THCSTensor_(newIndices)(state, sparse);
+  THCTensor *values = THCSTensor_(newValues)(state, sparse);
+  long nDim = THCTensor_(nDimension)(state, dense);
+  long nDimI = THCSTensor_(nDimensionI)(state, sparse);
+
+  THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse);
+  THCIndexTensor_(resize1d)(state, indices1D, nnz);
+
+  long view_rows = 1;
+  long view_columns = 1;
+  THLongStorage *r_size = THCTensor_(newSizeOf)(state, r);
+  for (int i = 0; i < nDimI; i++)
+    view_rows *= r_size->data[i];
+  for (int i = nDimI; i < nDim; i++)
+    view_columns *= r_size->data[i];
+
+  THLongStorage *r_view_size = THLongStorage_newWithSize2(view_rows, view_columns);
+  THCTensor *r_view = THCTensor_(newView)(state, r, r_view_size);
+  THCTensor_(resize2d)(state, values, nnz, view_columns);
+
+  THCTensor_(indexCopy)(state, r_view, 0, indices1D, values);
+
+  THCIndexTensor_(free)(state, indices1D);
+  THLongStorage_free(r_size);
+  THLongStorage_free(r_view_size);
+  THCTensor_(free)(state, r_view);
+
+  THCudaCheck(cudaGetLastError());
+
+  THCIndexTensor_(free)(state, indices);
+  THCTensor_(free)(state, values);
 }
 
 #endif

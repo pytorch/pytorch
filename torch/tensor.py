@@ -93,6 +93,38 @@ class _TensorBase(object):
         """
         return self.storage().is_shared()
 
+    def _sparse_mask(self, mask):
+        """Returns a new sparse tensor with the same dimensions and size as
+        this tensor, but with only entries where the sparse mask tensor is
+        defined.
+
+        The mask tensor must be coalesced and needs to have the same
+        dimensionality as this tensor (but is allowed to have different
+        shape and type.)
+
+        .. note::
+
+            The returned sparse `Tensor` does **not** use the same
+            storage as the original `Tensor`
+
+        Args:
+            *mask (torch.sparse.Tensor): The sparse tensor to mask by.
+
+        Example:
+            >>> x = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+            >>> s = torch.sparse.Tensor()
+            >>> x._sparse_mask(s)
+        """
+        # This is implemented in Python because getting _sparse_mask
+        # to be polymorphic in the mask is quite difficult to do in
+        # C land.  We don't want people to use _sparse_select directly
+        # because it doesn't have the is_coalesced safety check.
+        if not mask.is_coalesced():
+            raise ValueError("mask must be coalesced")
+        if mask.size() != self.size():
+            raise ValueError("sparse_mask operands have incompatible sizes")
+        return self._sparse_select(mask._indices())
+
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:

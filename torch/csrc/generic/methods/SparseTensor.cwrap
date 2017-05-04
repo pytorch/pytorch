@@ -417,14 +417,24 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: _sparse_mask
-  cname: sparseMask
+  name: _sparse_select
+  cname: sparseSelect
   return: argument 0
   arguments:
     - arg: THSTensor* result
       output: True
     - THTensor* self
-    - THSTensor* mask
+    - THIndexTensor* indices
+]]
+
+[[
+  name: _sparse_copy_
+  cname: sparseCopy
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THTensor* self
+    - THSTensor* sparse
 ]]
 
 [[
