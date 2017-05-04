@@ -49,9 +49,9 @@ class Linear(Module):
 
     def forward(self, input):
         if self.bias is None:
-            return self._backend.Linear()(input, self.weight)
+            return self._backend.Linear.apply(input, self.weight)
         else:
-            return self._backend.Linear()(input, self.weight, self.bias)
+            return self._backend.Linear.apply(input, self.weight, self.bias)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
