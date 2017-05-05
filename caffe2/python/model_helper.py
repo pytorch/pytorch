@@ -51,6 +51,51 @@ class ParameterInfo(object):
         return self.name
 
 
+# _known_working_ops are operators that do not need special care.
+_known_working_ops = [
+    "Accuracy",
+    "Adam",
+    "Add",
+    "Adagrad",
+    "SparseAdagrad",
+    "AveragedLoss",
+    "Cast",
+    "Checkpoint",
+    "ConstantFill",
+    "Copy",
+    "CopyGPUToCPU",
+    "CopyCPUToGPU",
+    "DequeueBlobs",
+    "EnsureCPUOutput",
+    "Flatten",
+    "FlattenToVec",
+    "LabelCrossEntropy",
+    "LearningRate",
+    "MakeTwoClass",
+    "MatMul",
+    "NCCLAllreduce",
+    "NHWC2NCHW",
+    "PackSegments",
+    "Print",
+    "PRelu",
+    "Scale",
+    "ScatterWeightedSum",
+    "Sigmoid",
+    "SortedSegmentSum",
+    "Snapshot",  # Note: snapshot is deprecated, use Checkpoint
+    "Softmax",
+    "SoftmaxWithLoss",
+    "SquaredL2Distance",
+    "Squeeze",
+    "StopGradient",
+    "Summarize",
+    "Tanh",
+    "UnpackSegments",
+    "WeightedSum",
+    "ReduceFrontSum",
+]
+
+
 class ModelHelper(object):
     """A helper model so we can manange models more easily. It contains net def
     and parameter storages. You can add an Operator yourself, e.g.
@@ -302,50 +347,7 @@ class ModelHelper(object):
                 ' Did you mean: [' +
                 ','.join(workspace.C.nearby_opnames(op_type)) + ']'
             )
-        # known_working_ops are operators that do not need special care.
-        known_working_ops = [
-            "Accuracy",
-            "Adam",
-            "Add",
-            "Adagrad",
-            "SparseAdagrad",
-            "AveragedLoss",
-            "Cast",
-            "Checkpoint",
-            "ConstantFill",
-            "Copy",
-            "CopyGPUToCPU",
-            "CopyCPUToGPU",
-            "DequeueBlobs",
-            "EnsureCPUOutput",
-            "Flatten",
-            "FlattenToVec",
-            "LabelCrossEntropy",
-            "LearningRate",
-            "MakeTwoClass",
-            "MatMul",
-            "NCCLAllreduce",
-            "NHWC2NCHW",
-            "PackSegments",
-            "Print",
-            "PRelu",
-            "Scale",
-            "ScatterWeightedSum",
-            "Sigmoid",
-            "SortedSegmentSum",
-            "Snapshot", # Note: snapshot is deprecated, use Checkpoint
-            "Softmax",
-            "SoftmaxWithLoss",
-            "SquaredL2Distance",
-            "Squeeze",
-            "StopGradient",
-            "Summarize",
-            "Tanh",
-            "UnpackSegments",
-            "WeightedSum",
-            "ReduceFrontSum",
-        ]
-        if op_type not in known_working_ops:
+        if op_type not in _known_working_ops:
             if not self.allow_not_known_ops:
                 raise RuntimeError(
                     "Operator {} is not known to be safe".format(op_type))
@@ -353,6 +355,12 @@ class ModelHelper(object):
             logging.warning("You are creating an op that the ModelHelper "
                             "does not recognize: {}.".format(op_type))
         return self.net.__getattr__(op_type)
+
+    def __dir__(self):
+        return sorted(set(
+            dir(type(self)) +
+            self.__dict__.keys() +
+            _known_working_ops))
 
 
 def ExtractPredictorNet(
