@@ -176,6 +176,19 @@ if(USE_OPENCV)
   endif()
 endif()
 
+# ---[ FFMPEG
+if(USE_FFMPEG)
+  find_package(FFmpeg REQUIRED)
+  if (FFMPEG_FOUND)
+    message("Found FFMPEG/LibAV libraries")
+    include_directories(SYSTEM ${FFMPEG_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${FFMPEG_LIBRARIES})
+  else ()
+    message("Not compiling with FFmpeg. Suppress this warning with -DUSE_FFMPEG=OFF")
+    set(USE_FFMPEG OFF)
+  endif ()
+endif()
+
 # ---[ EIGEN
 include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/eigen)
 add_definitions(-DEIGEN_MPL2_ONLY)
