@@ -6,7 +6,7 @@
 #include <TH/TH.h>
 #include <libshm.h>
 #include "THDP.h"
-#include "copy_utils.h"
+#include "torch/csrc/copy_utils.h"
 
 #include "override_macros.h"
 

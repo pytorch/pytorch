@@ -12,12 +12,9 @@
 #include "torch/csrc/distributed/THDP.h"
 #include "torch/csrc/copy_utils.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/distributed/copy_utils.h"
 
 #include "override_macros.h"
 
 #define THD_GENERIC_FILE "torch/csrc/generic/Tensor.cpp"
 #include <THD/base/THDGenerateAllTypes.h>
-
-//#define THD_GENERIC_FILE "torch/csrc/generic/TensorCopy.cpp"
-//#include <THD/base/THDGenerateAllTypes.h>
-
