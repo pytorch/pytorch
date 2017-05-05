@@ -1222,8 +1222,6 @@ class Net(object):
 
     def AppendNet(self, net):
         assert isinstance(net, Net)
-        self._ExtendOps(net.Proto().op)
-
         for i in net.Proto().external_input:
             if (
                 i not in self.Proto().external_input and
@@ -1237,6 +1235,7 @@ class Net(object):
                 if o not in self.Proto().external_output
             ]
         )
+        self._ExtendOps(net.Proto().op)
         return self
 
     def LogInfo(self, *msg_or_blobs):
