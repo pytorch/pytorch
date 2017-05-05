@@ -153,7 +153,7 @@ if [ x"$BACKEND" = xtcp ]; then
     wait
 elif [ x"$BACKEND" = xmpi ]; then
     . "$environment"
-    export BACKEND MASTER_ADDR MASTER_PORT WORLD_SIZE
+    export BACKEND MASTER_ADDR MASTER_PORT
     mpirun -hosts "$hosts" -n "$WORLD_SIZE" >> ${output_file:-} \
         python "$engine" \
         ${min_num_tensors:-} ${min_bytes:-} ${max_num_tensors:-} ${max_bytes:-}
