@@ -3,8 +3,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
+
+from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
 
 from caffe2.python import (
     layer_model_instantiator,
@@ -189,6 +194,19 @@ class TestLayers(LayersTestCase):
             ('softmax', schema.Scalar((np.float32, (32,)))),
             ('loss', schema.Scalar(np.float32)),
         ), loss)
+
+    @given(
+        X=hu.arrays(dims=[5, 2]),
+        num_to_collect=st.integers(min_value=1, max_value=10),
+    )
+    def testLastNWindowCollector(self, X, num_to_collect):
+        input_record = self.new_record(schema.Scalar(np.float32))
+        schema.FeedRecord(input_record, [X])
+        last_n = self.model.LastNWindowCollector(input_record, num_to_collect)
+        self.run_train_net_forward_only()
+        output_record = schema.FetchRecord(last_n)
+        start = max(0, 5 - num_to_collect)
+        npt.assert_array_equal(X[start:], output_record())
 
     def testUniformSampling(self):
         input_record = self.new_record(schema.Scalar(np.int32))
