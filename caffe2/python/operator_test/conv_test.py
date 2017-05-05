@@ -190,7 +190,7 @@ class TestConvolution(hu.HypothesisTestCase):
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
-    def _nd_convlution_nchw(self, n, input_channels, output_channels,
+    def _nd_convolution_nchw(self, n, input_channels, output_channels,
                             batch_size, stride, size, kernel, dilation, pad,
                             use_bias, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
@@ -236,10 +236,10 @@ class TestConvolution(hu.HypothesisTestCase):
            pad=st.integers(0, 3),
            use_bias=st.booleans(),
            **hu.gcs)
-    def test_1d_convlution_nchw(self, input_channels, output_channels,
+    def test_1d_convolution_nchw(self, input_channels, output_channels,
                                 batch_size, stride, size, kernel, dilation, pad,
                                 use_bias, gc, dc):
-        self._nd_convlution_nchw(
+        self._nd_convolution_nchw(
             1, input_channels, output_channels, batch_size, stride, size,
             kernel, dilation, pad, use_bias, gc, dc
         )
@@ -254,10 +254,10 @@ class TestConvolution(hu.HypothesisTestCase):
            pad=st.integers(0, 2),
            use_bias=st.booleans(),
            **hu.gcs)
-    def test_3d_convlution_nchw(self, input_channels, output_channels,
+    def test_3d_convolution_nchw(self, input_channels, output_channels,
                                 batch_size, stride, size, kernel, dilation, pad,
                                 use_bias, gc, dc):
-        self._nd_convlution_nchw(
+        self._nd_convolution_nchw(
             3, input_channels, output_channels, batch_size, stride, size,
             kernel, dilation, pad, use_bias, gc, dc
         )
