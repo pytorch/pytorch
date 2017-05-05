@@ -9,11 +9,15 @@ import argparse
 import logging
 import numpy as np
 import time
+import os
 
 from caffe2.python import core, workspace, experiment_util, data_parallel_model, dyndep
 from caffe2.python import timeout_guard, cnn
 
 import caffe2.python.models.resnet as resnet
+import caffe2.python.predictor.predictor_exporter as pred_exp
+import caffe2.python.predictor.predictor_py_utils as pred_utils
+from caffe2.python.predictor_constants import predictor_constants as predictor_constants
 
 '''
 Parallelized multi-GPU distributed trainer for Resnet 50. Can be used to train
@@ -80,6 +84,63 @@ def AddMomentumParameterUpdate(train_model, LR):
             momentum=0.9,
             nesterov=1,
         )
+
+
+def GetCheckpointParams(train_model):
+    prefix = "gpu_{}".format(train_model._devices[0])
+    params = [str(p) for p in train_model.GetParams(prefix)]
+    params.extend([str(p) + "_momentum" for p in params])
+    params.extend([str(p) for p in train_model.GetComputedParams(prefix)])
+
+    assert len(params) > 0
+    return params
+
+
+def SaveModel(args, train_model, epoch):
+    prefix = "gpu_{}".format(train_model._devices[0])
+    predictor_export_meta = pred_exp.PredictorExportMeta(
+        predict_net=train_model.net.Proto(),
+        parameters=GetCheckpointParams(train_model),
+        inputs=[prefix + "/data"],
+        outputs=[prefix + "/softmax"],
+        shapes={
+            prefix + "/softmax": (1, args.num_labels),
+            prefix + "/data": (args.num_channels, args.image_size, args.image_size)
+        }
+    )
+
+    # save the train_model for the current epoch
+    model_path = "%s/%s_%d.mdl" % (
+        args.file_store_path,
+        args.save_model_name,
+        epoch,
+    )
+
+    # set db_type to be "minidb" instead of "log_file_db", which breaks
+    # the serialization in save_to_db. Need to switch back to log_file_db
+    # after migration
+    pred_exp.save_to_db(
+        db_type="minidb",
+        db_destination=model_path,
+        predictor_export_meta=predictor_export_meta,
+    )
+
+
+def LoadModel(path, model):
+    '''
+    Load pretrained model from file
+    '''
+    log.info("Loading path: {}".format(path))
+    meta_net_def = pred_exp.load_from_db(path, 'minidb')
+    init_net = core.Net(pred_utils.GetNet(
+        meta_net_def, predictor_constants.GLOBAL_INIT_NET_TYPE))
+    predict_init_net = core.Net(pred_utils.GetNet(
+        meta_net_def, predictor_constants.PREDICT_INIT_NET_TYPE))
+
+    predict_init_net.RunAllOnGPU()
+    init_net.RunAllOnGPU()
+    assert workspace.RunNetOnce(predict_init_net)
+    assert workspace.RunNetOnce(init_net)
 
 
 def RunEpoch(
@@ -219,7 +280,6 @@ def Train(args):
     else:
         rendezvous = None
 
-
     # Model building functions
     def create_resnet50_model_ops(model, loss_scale):
         [softmax, loss] = resnet.create_resnet50(
@@ -315,6 +375,25 @@ def Train(args):
     workspace.RunNetOnce(train_model.param_init_net)
     workspace.CreateNet(train_model.net)
 
+    epoch = 0
+    # load the pre-trained model and reset epoch
+    if args.load_model_path is not None:
+        LoadModel(args.load_model_path, train_model)
+        # Sync the model params
+        data_parallel_model.FinalizeAfterCheckpoint(
+            train_model,
+            GetCheckpointParams(train_model),
+        )
+
+        # reset epoch. load_model_path should end with *_X.mdl,
+        # where X is the epoch number
+        last_str = args.load_model_path.split('_')[-1]
+        if last_str.endswith('.mdl'):
+            epoch = int(last_str[:-4])
+            log.info("Reset epoch to {}".format(epoch))
+        else:
+            log.warning("The format of load_model_path doesn't match!")
+
     expname = "resnet50_gpu%d_b%d_L%d_lr%.2f_v2" % (
         args.num_gpus,
         total_batch_size,
@@ -324,7 +403,6 @@ def Train(args):
     explog = experiment_util.ModelTrainerLog(expname, args)
 
     # Run the training one epoch a time
-    epoch = 0
     while epoch < args.num_epochs:
         epoch = RunEpoch(
             args,
@@ -337,7 +415,16 @@ def Train(args):
             explog
         )
 
-    # TODO: save final model.
+        # Save the model for each epoch
+        SaveModel(args, train_model, epoch)
+
+        model_path = "%s/%s_" % (
+            args.file_store_path,
+            args.save_model_name
+        )
+        # remove the saved model from the previous epoch if it exists
+        if os.path.isfile(model_path + str(epoch - 1) + ".mdl"):
+            os.remove(model_path + str(epoch - 1) + ".mdl")
 
 
 def main():
@@ -386,6 +473,10 @@ def main():
                         help="Port of Redis server (for rendezvous)")
     parser.add_argument("--file_store_path", type=str, default="/tmp",
                         help="Path to directory to use for rendezvous")
+    parser.add_argument("--save_model_name", type=str, default="resnet50_model",
+                        help="Save the trained model to a given name")
+    parser.add_argument("--load_model_path", type=str, default=None,
+                        help="Load previously saved model to continue training")
     args = parser.parse_args()
 
     Train(args)
