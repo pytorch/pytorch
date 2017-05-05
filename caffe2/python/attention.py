@@ -166,29 +166,23 @@ def apply_recurrent_attention(
         scope=scope,
         name='weighted_decoder_hidden_state',
     )
-
     # [encoder_length, batch_size, encoder_output_dim]
     decoder_hidden_encoder_outputs_sum_tmp = model.net.Add(
         [
-            weighted_encoder_outputs,
+            weighted_prev_attention_context,
             weighted_decoder_hidden_state,
         ],
         s(scope, 'decoder_hidden_encoder_outputs_sum_tmp'),
-        broadcast=1,
-        use_grad_hack=1,
     )
-
     # [encoder_length, batch_size, encoder_output_dim]
     decoder_hidden_encoder_outputs_sum = model.net.Add(
         [
+            weighted_encoder_outputs,
             decoder_hidden_encoder_outputs_sum_tmp,
-            weighted_prev_attention_context,
         ],
         s(scope, 'decoder_hidden_encoder_outputs_sum'),
         broadcast=1,
-        use_grad_hack=1,
     )
-
     attention_logits_transposed = _calc_attention_logits_from_sum_match(
         model=model,
         decoder_hidden_encoder_outputs_sum=decoder_hidden_encoder_outputs_sum,
