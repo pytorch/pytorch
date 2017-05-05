@@ -79,13 +79,21 @@ class RNNCell(object):
         input_t = self.prepare_input(model, input_t)
         return self._apply(model, input_t, seq_lengths, states, timestep)
 
-    def _apply(self, model, input_t, seq_lengths, states, timestep):
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+        extra_inputs,
+    ):
         '''
         A single step of a recurrent network.
 
         model: CNNModelHelper object new operators would be added to
 
-        input_blob: single input with shape (1, batch_size, input_dim)
+        input_t: single input with shape (1, batch_size, input_dim)
 
         seq_lengths: blob containing sequence lengths which would be passed to
         LSTMUnit operator
@@ -95,6 +103,10 @@ class RNNCell(object):
         timestep: current recurrent iteration. Could be used together with
         seq_lengths in order to determine, if some shorter sequences
         in the batch have already ended.
+
+        extra_inputs: list of tuples (input, dim). specifies additional input
+        which is not subject to prepare_input(). (useful when a cell is a
+        component of a larger recurrent structure, e.g., attention)
         '''
         raise NotImplementedError('Abstract method')
 
@@ -118,6 +130,12 @@ class RNNCell(object):
         recurrent states for all steps with meaningful names.
         '''
         raise NotImplementedError('Abstract method')
+
+    def output_state_index(self):
+        '''
+        Return index into state list of the "primary" step-wise output.
+        '''
+        return 0
 
 
 class LSTMCell(RNNCell):
@@ -146,16 +164,34 @@ class LSTMCell(RNNCell):
         seq_lengths,
         states,
         timestep,
+        extra_inputs=None,
     ):
         hidden_t_prev, cell_t_prev = states
+
+        fc_input = hidden_t_prev
+        fc_input_dim = self.hidden_size
+
+        if extra_inputs is not None:
+            extra_input_blobs, extra_input_sizes = zip(*extra_inputs)
+            fc_input, _ = model.net.Concat(
+                [hidden_t_prev] + list(extra_input_blobs),
+                [
+                    self.scope('gates_concatenated_input_t'),
+                    self.scope('_gates_concatenated_input_t_concat_dims'),
+                ],
+                axis=2,
+            )
+            fc_input_dim += sum(extra_input_sizes)
+
         gates_t = model.FC(
-            hidden_t_prev,
+            fc_input,
             self.scope('gates_t'),
-            dim_in=self.hidden_size,
+            dim_in=fc_input_dim,
             dim_out=4 * self.hidden_size,
             axis=2,
         )
         model.net.Sum([gates_t, input_t], gates_t)
+
         hidden_t, cell_t = model.net.LSTMUnit(
             [
                 hidden_t_prev,
@@ -213,17 +249,33 @@ class MILSTMCell(LSTMCell):
         seq_lengths,
         states,
         timestep,
+        extra_inputs=None,
     ):
-        (
-            hidden_t_prev,
-            cell_t_prev,
-        ) = states
+        hidden_t_prev, cell_t_prev = states
 
-        # hU^T
-        # Shape: [1, batch_size, 4 * hidden_size]
+        fc_input = hidden_t_prev
+        fc_input_dim = self.hidden_size
+
+        if extra_inputs is not None:
+            extra_input_blobs, extra_input_sizes = zip(*extra_inputs)
+            fc_input, _ = model.net.Concat(
+                [hidden_t_prev] + list(extra_input_blobs),
+                [
+                    self.scope('gates_concatenated_input_t'),
+                    self.scope('_gates_concatenated_input_t_concat_dims'),
+                ],
+                axis=2,
+            )
+            fc_input_dim += sum(extra_input_sizes)
+
         prev_t = model.FC(
-            hidden_t_prev, self.scope('prev_t'), dim_in=self.hidden_size,
-            dim_out=4 * self.hidden_size, axis=2)
+            fc_input,
+            self.scope('prev_t'),
+            dim_in=fc_input_dim,
+            dim_out=4 * self.hidden_size,
+            axis=2,
+        )
+
         # defining MI parameters
         alpha = model.param_init_net.ConstantFill(
             [],
@@ -328,164 +380,6 @@ class MILSTMCell(LSTMCell):
         return hidden_t, cell_t
 
 
-class LSTMWithAttentionCell(RNNCell):
-
-    def __init__(
-        self,
-        encoder_output_dim,
-        encoder_outputs,
-        decoder_input_dim,
-        decoder_state_dim,
-        name,
-        attention_type,
-        weighted_encoder_outputs,
-        forget_bias,
-        lstm_memory_optimization,
-        attention_memory_optimization,
-        forward_only=False,
-    ):
-        super(LSTMWithAttentionCell, self).__init__(name, forward_only)
-        self.encoder_output_dim = encoder_output_dim
-        self.encoder_outputs = encoder_outputs
-        self.decoder_input_dim = decoder_input_dim
-        self.decoder_state_dim = decoder_state_dim
-        self.weighted_encoder_outputs = weighted_encoder_outputs
-        self.encoder_outputs_transposed = None
-        assert attention_type in [
-            AttentionType.Regular,
-            AttentionType.Recurrent,
-        ]
-        self.attention_type = attention_type
-        self.lstm_memory_optimization = lstm_memory_optimization
-        self.attention_memory_optimization = attention_memory_optimization
-
-    def _apply(
-        self,
-        model,
-        input_t,
-        seq_lengths,
-        states,
-        timestep,
-    ):
-        (
-            hidden_t_prev,
-            cell_t_prev,
-            attention_weighted_encoder_context_t_prev,
-        ) = states
-
-        gates_concatenated_input_t, _ = model.net.Concat(
-            [hidden_t_prev, attention_weighted_encoder_context_t_prev],
-            [
-                self.scope('gates_concatenated_input_t'),
-                self.scope('_gates_concatenated_input_t_concat_dims'),
-            ],
-            axis=2,
-        )
-        gates_t = model.FC(
-            gates_concatenated_input_t,
-            self.scope('gates_t'),
-            dim_in=self.decoder_state_dim + self.encoder_output_dim,
-            dim_out=4 * self.decoder_state_dim,
-            axis=2,
-        )
-        model.net.Sum([gates_t, input_t], gates_t)
-
-        hidden_t_intermediate, cell_t = model.net.LSTMUnit(
-            [
-                hidden_t_prev,
-                cell_t_prev,
-                gates_t,
-                seq_lengths,
-                timestep,
-            ],
-            ['hidden_t_intermediate', self.scope('cell_t')],
-        )
-        if self.attention_type == AttentionType.Recurrent:
-            (
-                attention_weighted_encoder_context_t,
-                self.attention_weights_3d,
-                attention_blobs,
-            ) = apply_recurrent_attention(
-                model=model,
-                encoder_output_dim=self.encoder_output_dim,
-                encoder_outputs_transposed=self.encoder_outputs_transposed,
-                weighted_encoder_outputs=self.weighted_encoder_outputs,
-                decoder_hidden_state_t=hidden_t_intermediate,
-                decoder_hidden_state_dim=self.decoder_state_dim,
-                scope=self.name,
-                attention_weighted_encoder_context_t_prev=(
-                    attention_weighted_encoder_context_t_prev
-                ),
-            )
-        else:
-            (
-                attention_weighted_encoder_context_t,
-                self.attention_weights_3d,
-                attention_blobs,
-            ) = apply_regular_attention(
-                model=model,
-                encoder_output_dim=self.encoder_output_dim,
-                encoder_outputs_transposed=self.encoder_outputs_transposed,
-                weighted_encoder_outputs=self.weighted_encoder_outputs,
-                decoder_hidden_state_t=hidden_t_intermediate,
-                decoder_hidden_state_dim=self.decoder_state_dim,
-                scope=self.name,
-            )
-        hidden_t = model.Copy(hidden_t_intermediate, self.scope('hidden_t'))
-        model.net.AddExternalOutputs(
-            cell_t,
-            hidden_t,
-            attention_weighted_encoder_context_t,
-        )
-        if self.attention_memory_optimization:
-            self.recompute_blobs.extend(attention_blobs)
-        if self.lstm_memory_optimization:
-            self.recompute_blobs.append(gates_t)
-
-        return hidden_t, cell_t, attention_weighted_encoder_context_t
-
-    def get_attention_weights(self):
-        # [batch_size, encoder_length, 1]
-        return self.attention_weights_3d
-
-    def prepare_input(self, model, input_blob):
-        if self.encoder_outputs_transposed is None:
-            self.encoder_outputs_transposed = model.Transpose(
-                self.encoder_outputs,
-                self.scope('encoder_outputs_transposed'),
-                axes=[1, 2, 0],
-            )
-        if self.weighted_encoder_outputs is None:
-            self.weighted_encoder_outputs = model.FC(
-                self.encoder_outputs,
-                self.scope('weighted_encoder_outputs'),
-                dim_in=self.encoder_output_dim,
-                dim_out=self.encoder_output_dim,
-                axis=2,
-            )
-
-        return model.FC(
-            input_blob,
-            self.scope('i2h'),
-            dim_in=self.decoder_input_dim,
-            dim_out=4 * self.decoder_state_dim,
-            axis=2,
-        )
-
-    def get_state_names(self):
-        return (
-            self.scope('hidden_t'),
-            self.scope('cell_t'),
-            self.scope('attention_weighted_encoder_context_t'),
-        )
-
-    def get_outputs_with_grads(self):
-        return [0, 4]
-
-    def get_output_size(self):
-        return self.decoder_state_dim + self.encoder_output_dim
-
-
 class MultiRNNCell(RNNCell):
     '''
     Multilayer RNN via the composition of RNNCell instance.
@@ -529,7 +423,15 @@ class MultiRNNCell(RNNCell):
     def prepare_input(self, model, input_blob):
         return self.cells[0].prepare_input(model, input_blob)
 
-    def _apply(self, model, input_t, seq_lengths, states, timestep):
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+        extra_inputs=None,
+    ):
 
         states_per_layer = [len(cell.get_state_names()) for cell in self.cells]
         assert len(states) == sum(states_per_layer)
@@ -552,6 +454,7 @@ class MultiRNNCell(RNNCell):
                 seq_lengths,
                 layer_states,
                 timestep,
+                extra_inputs=(None if i > 0 else extra_inputs),
             )
             next_states.extend(layer_next_states)
             layer_input = layer_next_states[0]
@@ -559,6 +462,234 @@ class MultiRNNCell(RNNCell):
 
     def get_state_names(self):
         return self.state_names
+
+    def output_state_index(self):
+        index = 0
+        for cell in self.cells[:-1]:
+            index += len(cell.get_state_names())
+        index += self.cells[-1].output_state_index()
+        return index
+
+
+class AttentionCell(RNNCell):
+
+    def __init__(
+        self,
+        encoder_output_dim,
+        encoder_outputs,
+        decoder_cell,
+        decoder_state_dim,
+        name,
+        attention_type,
+        weighted_encoder_outputs,
+        forget_bias,
+        attention_memory_optimization,
+        forward_only=False,
+    ):
+        super(AttentionCell, self).__init__(name, forward_only)
+        self.encoder_output_dim = encoder_output_dim
+        self.encoder_outputs = encoder_outputs
+        self.decoder_cell = decoder_cell
+        self.decoder_state_dim = decoder_state_dim
+        self.weighted_encoder_outputs = weighted_encoder_outputs
+        self.encoder_outputs_transposed = None
+        assert attention_type in [
+            AttentionType.Regular,
+            AttentionType.Recurrent,
+        ]
+        self.attention_type = attention_type
+        self.attention_memory_optimization = attention_memory_optimization
+
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+    ):
+        decoder_prev_states = states[:-1]
+        attention_weighted_encoder_context_t_prev = states[-1]
+
+        decoder_states = self.decoder_cell._apply(
+            model,
+            input_t,
+            seq_lengths,
+            decoder_prev_states,
+            timestep,
+            extra_inputs=[(
+                attention_weighted_encoder_context_t_prev,
+                self.encoder_output_dim,
+            )],
+        )
+
+        hidden_t_intermediate = \
+            decoder_states[self.decoder_cell.output_state_index()]
+
+        if self.attention_type == AttentionType.Recurrent:
+            (
+                attention_weighted_encoder_context_t,
+                self.attention_weights_3d,
+                attention_blobs,
+            ) = apply_recurrent_attention(
+                model=model,
+                encoder_output_dim=self.encoder_output_dim,
+                encoder_outputs_transposed=self.encoder_outputs_transposed,
+                weighted_encoder_outputs=self.weighted_encoder_outputs,
+                decoder_hidden_state_t=hidden_t_intermediate,
+                decoder_hidden_state_dim=self.decoder_state_dim,
+                scope=self.name,
+                attention_weighted_encoder_context_t_prev=(
+                    attention_weighted_encoder_context_t_prev
+                ),
+            )
+        else:
+            (
+                attention_weighted_encoder_context_t,
+                self.attention_weights_3d,
+                attention_blobs,
+            ) = apply_regular_attention(
+                model=model,
+                encoder_output_dim=self.encoder_output_dim,
+                encoder_outputs_transposed=self.encoder_outputs_transposed,
+                weighted_encoder_outputs=self.weighted_encoder_outputs,
+                decoder_hidden_state_t=hidden_t_intermediate,
+                decoder_hidden_state_dim=self.decoder_state_dim,
+                scope=self.name,
+            )
+
+        if self.attention_memory_optimization:
+            self.recompute_blobs.extend(attention_blobs)
+
+        hidden_t = model.Copy(
+            hidden_t_intermediate,
+            self.scope('hidden_t_external'),
+        )
+        output = list(decoder_states) + [attention_weighted_encoder_context_t]
+        output[self.decoder_cell.output_state_index()] = hidden_t
+        model.net.AddExternalOutputs(*output)
+
+        return output
+
+    def get_attention_weights(self):
+        # [batch_size, encoder_length, 1]
+        return self.attention_weights_3d
+
+    def prepare_input(self, model, input_blob):
+        if self.encoder_outputs_transposed is None:
+            self.encoder_outputs_transposed = model.Transpose(
+                self.encoder_outputs,
+                self.scope('encoder_outputs_transposed'),
+                axes=[1, 2, 0],
+            )
+        if self.weighted_encoder_outputs is None:
+            self.weighted_encoder_outputs = model.FC(
+                self.encoder_outputs,
+                self.scope('weighted_encoder_outputs'),
+                dim_in=self.encoder_output_dim,
+                dim_out=self.encoder_output_dim,
+                axis=2,
+            )
+
+        return self.decoder_cell.prepare_input(model, input_blob)
+
+    def get_state_names(self):
+        state_names = list(self.decoder_cell.get_state_names())
+        state_names[self.output_state_index()] = self.scope(
+            'hidden_t_external',
+        )
+        state_names.append(self.scope('attention_weighted_encoder_context_t'))
+        return state_names
+
+    def get_outputs_with_grads(self):
+        return [
+            self.output_state_index(),
+            len(self.get_state_names()) - 1,
+        ]
+
+    def get_output_size(self):
+        return self.decoder_state_dim + self.encoder_output_dim
+
+    def output_state_index(self):
+        return self.decoder_cell.output_state_index()
+
+
+class LSTMWithAttentionCell(AttentionCell):
+
+    def __init__(
+        self,
+        encoder_output_dim,
+        encoder_outputs,
+        decoder_input_dim,
+        decoder_state_dim,
+        name,
+        attention_type,
+        weighted_encoder_outputs,
+        forget_bias,
+        lstm_memory_optimization,
+        attention_memory_optimization,
+        forward_only=False,
+    ):
+        decoder_cell = LSTMCell(
+            input_size=decoder_input_dim,
+            hidden_size=decoder_state_dim,
+            forget_bias=forget_bias,
+            memory_optimization=lstm_memory_optimization,
+            name='{}/decoder'.format(name),
+            forward_only=False,
+            drop_states=False,
+        )
+        super(LSTMWithAttentionCell, self).__init__(
+            encoder_output_dim=encoder_output_dim,
+            encoder_outputs=encoder_outputs,
+            decoder_cell=decoder_cell,
+            decoder_state_dim=decoder_state_dim,
+            name=name,
+            attention_type=attention_type,
+            weighted_encoder_outputs=weighted_encoder_outputs,
+            forget_bias=forget_bias,
+            attention_memory_optimization=attention_memory_optimization,
+            forward_only=forward_only,
+        )
+
+
+class MILSTMWithAttentionCell(AttentionCell):
+
+    def __init__(
+        self,
+        encoder_output_dim,
+        encoder_outputs,
+        decoder_input_dim,
+        decoder_state_dim,
+        name,
+        attention_type,
+        weighted_encoder_outputs,
+        forget_bias,
+        lstm_memory_optimization,
+        attention_memory_optimization,
+        forward_only=False,
+    ):
+        decoder_cell = MILSTMCell(
+            input_size=decoder_input_dim,
+            hidden_size=decoder_state_dim,
+            forget_bias=forget_bias,
+            memory_optimization=lstm_memory_optimization,
+            name='{}/decoder'.format(name),
+            forward_only=False,
+            drop_states=False,
+        )
+        super(MILSTMWithAttentionCell, self).__init__(
+            encoder_output_dim=encoder_output_dim,
+            encoder_outputs=encoder_outputs,
+            decoder_cell=decoder_cell,
+            decoder_state_dim=decoder_state_dim,
+            name=name,
+            attention_type=attention_type,
+            weighted_encoder_outputs=weighted_encoder_outputs,
+            forget_bias=forget_bias,
+            attention_memory_optimization=attention_memory_optimization,
+            forward_only=forward_only,
+        )
 
 
 def _LSTM(
@@ -960,178 +1091,8 @@ def LSTMWithAttention(
             initial_decoder_cell_state,
             initial_attention_weighted_encoder_context,
         ),
-        outputs_with_grads=None,
+        outputs_with_grads=outputs_with_grads,
     )
-
-
-class MILSTMWithAttentionCell(LSTMWithAttentionCell):
-
-    def _apply(
-        self,
-        model,
-        input_t,
-        seq_lengths,
-        states,
-        timestep,
-    ):
-        (
-            hidden_t_prev,
-            cell_t_prev,
-            attention_weighted_encoder_context_t_prev,
-        ) = states
-
-        gates_concatenated_input_t, _ = model.net.Concat(
-            [hidden_t_prev, attention_weighted_encoder_context_t_prev],
-            [
-                self.scope('gates_concatenated_input_t'),
-                self.scope('_gates_concatenated_input_t_concat_dims'),
-            ],
-            axis=2,
-        )
-        # hU^T
-        # Shape: [1, batch_size, 4 * hidden_size]
-        prev_t = model.FC(
-            gates_concatenated_input_t,
-            self.scope('prev_t'),
-            dim_in=self.decoder_state_dim + self.encoder_output_dim,
-            dim_out=4 * self.decoder_state_dim,
-            axis=2,
-        )
-        # defining MI parameters
-        alpha = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('alpha')],
-            shape=[4 * self.decoder_state_dim],
-            value=1.0
-        )
-        beta1 = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('beta1')],
-            shape=[4 * self.decoder_state_dim],
-            value=1.0
-        )
-        beta2 = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('beta2')],
-            shape=[4 * self.decoder_state_dim],
-            value=1.0
-        )
-        b = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('b')],
-            shape=[4 * self.decoder_state_dim],
-            value=0.0
-        )
-        model.params.extend([alpha, beta1, beta2, b])
-        # alpha * (xW^T * hU^T)
-        # Shape: [1, batch_size, 4 * hidden_size]
-        alpha_tdash = model.net.Mul(
-            [prev_t, input_t],
-            self.scope('alpha_tdash')
-        )
-        # Shape: [batch_size, 4 * hidden_size]
-        alpha_tdash_rs, _ = model.net.Reshape(
-            alpha_tdash,
-            [self.scope('alpha_tdash_rs'), self.scope('alpha_tdash_old_shape')],
-            shape=[-1, 4 * self.decoder_state_dim],
-        )
-        alpha_t = model.net.Mul(
-            [alpha_tdash_rs, alpha],
-            self.scope('alpha_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # beta1 * hU^T
-        # Shape: [batch_size, 4 * hidden_size]
-        prev_t_rs, _ = model.net.Reshape(
-            prev_t,
-            [self.scope('prev_t_rs'), self.scope('prev_t_old_shape')],
-            shape=[-1, 4 * self.decoder_state_dim],
-        )
-        beta1_t = model.net.Mul(
-            [prev_t_rs, beta1],
-            self.scope('beta1_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # beta2 * xW^T
-        # Shape: [batch_szie, 4 * hidden_size]
-        input_t_rs, _ = model.net.Reshape(
-            input_t,
-            [self.scope('input_t_rs'), self.scope('input_t_old_shape')],
-            shape=[-1, 4 * self.decoder_state_dim],
-        )
-        beta2_t = model.net.Mul(
-            [input_t_rs, beta2],
-            self.scope('beta2_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # Add 'em all up
-        gates_tdash = model.net.Sum(
-            [alpha_t, beta1_t, beta2_t],
-            self.scope('gates_tdash')
-        )
-        gates_t = model.net.Add(
-            [gates_tdash, b],
-            self.scope('gates_t'),
-            broadcast=1,
-            use_grad_hack=1
-        )
-        # # Shape: [1, batch_size, 4 * hidden_size]
-        gates_t_rs, _ = model.net.Reshape(
-            gates_t,
-            [self.scope('gates_t_rs'), self.scope('gates_t_old_shape')],
-            shape=[1, -1, 4 * self.decoder_state_dim],
-        )
-
-        hidden_t_intermediate, cell_t = model.net.LSTMUnit(
-            [hidden_t_prev, cell_t_prev, gates_t_rs, seq_lengths, timestep],
-            [self.scope('hidden_t_intermediate'), self.scope('cell_t')],
-        )
-
-        if self.attention_type == AttentionType.Recurrent:
-            (
-                attention_weighted_encoder_context_t,
-                self.attention_weights_3d,
-                self.recompute_blobs,
-            ) = (
-                apply_recurrent_attention(
-                    model=model,
-                    encoder_output_dim=self.encoder_output_dim,
-                    encoder_outputs_transposed=self.encoder_outputs_transposed,
-                    weighted_encoder_outputs=self.weighted_encoder_outputs,
-                    decoder_hidden_state_t=hidden_t_intermediate,
-                    decoder_hidden_state_dim=self.decoder_state_dim,
-                    scope=self.name,
-                    attention_weighted_encoder_context_t_prev=(
-                        attention_weighted_encoder_context_t_prev
-                    ),
-                )
-            )
-        else:
-            (
-                attention_weighted_encoder_context_t,
-                self.attention_weights_3d,
-                self.recompute_blobs,
-            ) = (
-                apply_regular_attention(
-                    model=model,
-                    encoder_output_dim=self.encoder_output_dim,
-                    encoder_outputs_transposed=self.encoder_outputs_transposed,
-                    weighted_encoder_outputs=self.weighted_encoder_outputs,
-                    decoder_hidden_state_t=hidden_t_intermediate,
-                    decoder_hidden_state_dim=self.decoder_state_dim,
-                    scope=self.name,
-                )
-            )
-        hidden_t = model.Copy(hidden_t_intermediate, self.scope('hidden_t'))
-        model.net.AddExternalOutputs(
-            cell_t,
-            hidden_t,
-            attention_weighted_encoder_context_t,
-        )
-        return hidden_t, cell_t, attention_weighted_encoder_context_t
 
 
 def _layered_LSTM(
