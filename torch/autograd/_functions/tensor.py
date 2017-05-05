@@ -701,7 +701,7 @@ class Cumprod(Function):
         input, = self.saved_tensors
         dim_size = input.size(self.dim)
         if dim_size == 1:
-            return grad_output
+            return grad_output.clone()
 
         #  Simple case with nonzero elements in the input
         if (input != 0).all():
