@@ -199,7 +199,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(
       kernel_.size(),
       2,
-      "Only 2d convlution is supported for NHWC storage type");
+      "Only 2d convolution is supported for NHWC storage type");
 
   CAFFE_ENFORCE(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
