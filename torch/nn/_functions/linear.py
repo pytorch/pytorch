@@ -82,6 +82,6 @@ class Bilinear(Function):
             grad_weight = torch.mm(buff.t(), input2)
 
         if bias is not None and self.needs_input_grad[3]:
-            grad_bias = grad_output.sum(0)
+            grad_bias = grad_output.sum(0, True)
 
         return grad_input1, grad_input2, grad_weight, grad_bias
