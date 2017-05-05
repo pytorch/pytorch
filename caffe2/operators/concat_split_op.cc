@@ -7,9 +7,16 @@ REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
+    .Input(0, "input", "The tensor to split")
+    .Input(1, "split", "Optional list of output lengths (see also arg 'split')")
     .Arg("axis", "Which axis to split on")
+    .Arg("split", "length of each output")
     .Arg("order", "Either NHWC or NCWH, will split on C axis")
-    .SetDoc("Split a tensor into a list of tensors.");
+    .SetDoc(R"DOC(Split a tensor into a list of tensors, along the specified
+    'axis'. The lengths of the split can be specified using argument 'axis' or
+    optional second input blob to the operator. Otherwise, the tensor is split
+    to equal sized parts.
+    )DOC");
 OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
