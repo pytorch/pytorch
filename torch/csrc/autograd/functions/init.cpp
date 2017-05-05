@@ -61,10 +61,10 @@ struct NoCtor {
   }
 };
 
-template<typename C, typename T>
+template<typename C, typename T, int args, int required_args>
 static void addClass(PyObject* module, PyTypeObject& type, const char* name)
 {
-  createForwardFunctionPyTypeObject<T>(type, name);
+  createForwardFunctionPyTypeObject<T, args, required_args>(type, name);
   Py_INCREF(&type);
   PyModule_AddObject(module, name, (PyObject*)&type);
   registerCppFunction(typeid(C), &type);
@@ -75,14 +75,13 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   THPObjectPtr module = PyModule_New("torch._C._functions");
   if (!module) return false;
 
-
   static PyTypeObject BatchNormClass, BatchNormBackwardClass;
-  addClass<BatchNormForward, BatchNormCtor>(module, BatchNormClass, "BatchNorm");
-  addClass<BatchNormBackward, NoCtor>(module, BatchNormBackwardClass, "BatchNormBackward");
+  addClass<BatchNormForward, BatchNormCtor, 3, 1>(module, BatchNormClass, "BatchNorm");
+  addClass<BatchNormBackward, NoCtor, 1, 1>(module, BatchNormBackwardClass, "BatchNormBackward");
 
   static PyTypeObject ConvClass, ConvBackwardClass;
-  addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd");
-  addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward");
+  addClass<ConvForward, ConvCtor, 3, 2>(module, ConvClass, "ConvNd");
+  addClass<ConvBackward, NoCtor, 1, 1>(module, ConvBackwardClass, "ConvNdBackward");
 
   static PyTypeObject AccumulateGradClass;
   addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad");
