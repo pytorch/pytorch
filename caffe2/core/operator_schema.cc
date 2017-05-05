@@ -166,6 +166,11 @@ OpSchema& OpSchema::EnforceOneToOneInplace() {
   return EnforceInplace([](int in, int out) { return in == out; });
 }
 
+OpSchema& OpSchema::Private() {
+  private_ = true;
+  return *this;
+}
+
 OpSchema& OpSchema::TensorInferenceFunction(
     TensorInferenceFunctionType function) {
   tensor_inference_function_ = function;

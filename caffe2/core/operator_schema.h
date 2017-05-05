@@ -168,6 +168,9 @@ class OpSchema {
   // adding docs for temlated/macro ops.
   OpSchema& FillUsing(std::function<void(OpSchema&)> populator);
 
+  // Remove from documentation
+  OpSchema& Private();
+
   /**
    * @brief A function to allow one to get the number of outputs based on the
    * number of inputs, if this schema supports it.
@@ -185,6 +188,9 @@ class OpSchema {
   const std::vector<std::pair<const char*, const char*>>& output_desc() {
     return output_desc_;
   }
+  bool private_op() {
+    return private_;
+  }
 
  private:
   string file_;
@@ -197,6 +203,7 @@ class OpSchema {
   int max_input_ = std::numeric_limits<int>::max();
   int min_output_ = 0;
   int max_output_ = std::numeric_limits<int>::max();
+  bool private_ = false;
   std::function<bool(int)> num_inputs_allowed_
       = [](int) { return true; };
   std::function<bool(int)> num_outputs_allowed_
