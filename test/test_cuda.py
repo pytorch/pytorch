@@ -113,6 +113,10 @@ def small_2d_lapack_fat(t):
     return t(4, 3).copy_(torch.arange(1, 13).view(4, 3))
 
 
+def large_2d_lapack(t):
+    return t(1000, 1000).normal_()
+
+
 def new_t(*sizes):
     def tmp(t):
         return t(*sizes).copy_(torch.randn(*sizes))
@@ -280,6 +284,7 @@ tests = [
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
+    ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
 
 ]
 
@@ -294,6 +299,7 @@ custom_precision = {
     'baddbmm': 1e-4,
     'rsqrt': 1e-4,
     'cumprod': 1e-4,
+    'qr': 1e-4,
 }
 
 simple_pointwise = [
