@@ -748,6 +748,8 @@ class TestOperators(hu.HypothesisTestCase):
     # Reference
     @staticmethod
     def _dense_ftrl(alpha, beta, lambda1, lambda2, w, nz, g):
+        if isinstance(alpha, np.ndarray):
+            alpha = np.asscalar(alpha)
         n = np.take(nz, 0, axis=-1)
         z = np.take(nz, 1, axis=-1)
         # python port of Sigrid's implementation
@@ -823,6 +825,81 @@ class TestOperators(hu.HypothesisTestCase):
             return (w, nz)
 
         self.assertReferenceChecks(gc, op, [var, nz, indices, grad], ftrl)
+
+    # Reference
+    @staticmethod
+    def _dense_ftrl_send_alpha_by_input(beta, lambda1, lambda2, w, nz, g, alpha):
+        return TestOperators._dense_ftrl(alpha, beta, lambda1, lambda2, w, nz,
+                                         g)
+
+    @given(inputs=hu.tensors(n=4),
+           in_place=st.booleans(),
+           alpha=st.floats(min_value=0.01, max_value=0.1),
+           beta=st.floats(min_value=0.1, max_value=0.9),
+           lambda1=st.floats(min_value=0.001, max_value=0.1),
+           lambda2=st.floats(min_value=0.001, max_value=0.1),
+           engine=st.sampled_from([None, "SIMD"]),
+           **hu.gcs_cpu_only)
+    def test_ftrl_sgd_send_alpha_by_input(self, inputs, in_place, alpha, beta,
+                                          lambda1, lambda2, engine, gc, dc):
+        var, n, z, grad = inputs
+        n = np.abs(n)
+        nz = np.stack([n, z], axis=-1)
+        alpha = np.array(alpha).astype(np.float32)
+        op = core.CreateOperator(
+            "Ftrl",
+            ["var", "nz", "grad", "alpha"],
+            ["var" if in_place else "var_o",
+             "nz" if in_place else "nz_o"],
+            beta=beta, lambda1=lambda1, lambda2=lambda2,
+            engine=engine,
+            device_option=gc)
+        self.assertDeviceChecks(
+            dc, op, [var, nz, grad, alpha], [0])
+
+        self.assertReferenceChecks(
+            gc, op, [var, nz, grad, alpha],
+            partial(self._dense_ftrl_send_alpha_by_input, beta, lambda1, lambda2))
+
+    @given(inputs=hu.tensors(n=4),
+           alpha=st.floats(min_value=0.01, max_value=0.1),
+           beta=st.floats(min_value=0.1, max_value=0.9),
+           lambda1=st.floats(min_value=0.001, max_value=0.1),
+           lambda2=st.floats(min_value=0.001, max_value=0.1),
+           engine=st.sampled_from([None, "SIMD"]),
+           **hu.gcs_cpu_only)
+    def test_sparse_ftrl_sgd_send_alpha_by_input(self, inputs, alpha, beta,
+                                                 lambda1, lambda2, engine, gc,
+                                                 dc):
+        var, n, z, grad = inputs
+        # generate fake subset manually because hypothesis is too complicated :)
+        indices = np.arange(var.shape[0])
+        indices = indices[indices % 2 == 0]
+        grad = grad[indices]
+        n = np.abs(n)
+        nz = np.stack([n, z], axis=-1)
+        alpha = np.array(alpha).astype(np.float32)
+        op = core.CreateOperator(
+            "SparseFtrl",
+            ["var", "nz", "indices", "grad", "alpha"],
+            ["var", "nz"],
+            beta=beta, lambda1=lambda1, lambda2=lambda2,
+            engine=engine,
+            device_option=gc)
+        self.assertDeviceChecks(
+            dc, op, [var, nz, indices, grad, alpha], [0])
+
+        # Reference
+        def ftrl(w, nz, i, g, alpha):
+            sw, snz = self._dense_ftrl_send_alpha_by_input(beta, lambda1,
+                                                           lambda2, w[i], nz[i],
+                                                           g, alpha)
+            w[i] = sw
+            nz[i] = snz
+            return (w, nz)
+
+        self.assertReferenceChecks(gc, op, [var, nz, indices, grad, alpha],
+                                   ftrl)
 
     @given(input=hu.tensor(max_value=20,
                            max_dim=1,
