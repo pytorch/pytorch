@@ -162,7 +162,11 @@ def make_storage_reader(typename):
         # source:
         # https://github.com/torch/torch7/blob/master/generic/Storage.c#L244
         size = reader.read_long() * element_size
-        return python_class.from_buffer(reader.f.read(size), 'native')
+        # because there's no torch.cuda.FloatStorage.from_buffer
+        if python_class == torch.cuda.FloatStorage:
+            return torch.FloatStorage.from_buffer(reader.f.read(size), 'native').cuda()
+        else:
+            return python_class.from_buffer(reader.f.read(size), 'native')
     return read_storage
 
 
@@ -213,7 +217,8 @@ reader_registry['tds.Hash'] = tds_Hash_reader
 
 def _load_backend(obj):
     if hasattr(obj, '_type'):
-        obj._backend = type2backend[obj._type]
+        # because there's no torch.CudaTensor backend
+        obj._backend = type2backend[obj._type if obj._type != 'torch.CudaTensor' else 'torch.FloatTensor']
         return
     # Try to find tensor attributes and infer type from them
     for key in dir(obj):
@@ -249,6 +254,19 @@ def nn_reader(cls):
 reader_registry.update({('nn.' + name): nn_reader(module)
                         for name, module in nn.__dict__.items()
                         if name[0] != '_' and name[0].upper() == name[0]})
+
+cudnn = {
+        'SpatialConvolution': nn.SpatialConvolution,
+        'ReLU': nn.ReLU,
+        'SpatialAveragePooling': nn.SpatialAveragePooling,
+        'SpatialMaxPooling': nn.SpatialMaxPooling,
+        'SpatialBatchNormalization': nn.SpatialBatchNormalization,
+        'BatchNormalizaion': nn.BatchNormalization,
+        }
+
+reader_registry.update({('cudnn.' + name): nn_reader(module)
+    for name, module in cudnn.items()
+    if name[0] != '_' and name[0].upper() == name[0]})
 
 
 def custom_reader(cls):
