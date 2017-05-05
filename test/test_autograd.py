@@ -185,7 +185,7 @@ class TestAutograd(TestCase):
         expected_x_hv = torch.ones(2, 2) * 5
         expected_y_hv = torch.ones(2, 2) * 4
 
-        self.assertEqual(x_hv, expected_x_hv)
+        self.assertEqual(x_hv[0], expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
 
@@ -195,7 +195,7 @@ class TestAutograd(TestCase):
             grad_outputs=torch.ones(2, 2),
             only_inputs=False)
 
-        self.assertEqual(x_hv, expected_x_hv)
+        self.assertEqual(x_hv[0], expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad + expected_y_hv)
 
