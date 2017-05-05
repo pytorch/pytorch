@@ -21,13 +21,49 @@ class TileOp : public Operator<Context> {
   ~TileOp() {}
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(
-        OperatorBase::HasArgument("tiles"), "Argument `tiles` is missing.");
-    CAFFE_ENFORCE(
-        OperatorBase::HasArgument("axis"), "Argument `axis` is missing.");
-    CAFFE_ENFORCE_GT(tiles_, 0, "`tiles` must be > 0");
-
     const auto& input = Input(0);
+    std::array<int32_t, 2> temp_params = {{tiles_, axis_}};
+    if (InputSize() > 1) {
+      // We potentially have tiles and/or axis specified as inputs
+      // as well. We will check for them in that order. In other words:
+      // InputSize() == 2: tiles is specified
+      // InputSize() == 3: tiles is specified and axis.
+      // Anything specified as input will override the arguments
+      CAFFE_ENFORCE(
+          Input(1).ndim() == 1 && Input(1).size() == 1,
+          "Input `tiles` should be a vector of size 1.");
+
+      const auto& input1 = Input(1);
+      context_.template CopyItems<Context, CPUContext>(
+          input1.meta(), 1, static_cast<const char*>(input1.raw_data()),
+          &(temp_params[0]));
+
+      if (InputSize() > 2) {
+        CAFFE_ENFORCE(
+            Input(2).ndim() == 1 && Input(2).size() == 1,
+            "Input `axis` should be a vector of size 1.");
+
+        const auto& input2 = Input(2);
+        context_.template CopyItems<Context, CPUContext>(
+          input2.meta(), 1, static_cast<const char*>(input2.raw_data()),
+          &(temp_params[1]));
+      } else {
+        CAFFE_ENFORCE(
+            OperatorBase::HasArgument("axis"),
+            "Argument `axis` is missing and was not specified as input.");
+      }
+    } else {
+      CAFFE_ENFORCE(
+          OperatorBase::HasArgument("tiles"),
+          "Argument `tiles` is missing and was not specified as input.");
+      CAFFE_ENFORCE(
+          OperatorBase::HasArgument("axis"),
+          "Argument `axis` is missing and was not specified as input.");
+    }
+
+    tiles_ = temp_params[0];
+    axis_ = temp_params[1];
+
     auto* output = Output(0);
     const auto axis = input.canonical_axis_index(axis_);
 
@@ -80,11 +116,47 @@ class TileGradientOp : public Operator<Context> {
   ~TileGradientOp() {}
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(
-        OperatorBase::HasArgument("tiles"), "Argument `tiles` is missing.");
-    CAFFE_ENFORCE(
-        OperatorBase::HasArgument("axis"), "Argument `axis` is missing.");
-    CAFFE_ENFORCE_GT(tiles_, 0, "`tiles` must be > 0");
+    std::array<int32_t, 2> temp_params = {{tiles_, axis_}};
+    if (InputSize() > 1) {
+      // We potentially have tiles and/or axis specified as inputs
+      // as well. We will check for them in that order. In other words:
+      // InputSize() == 2: tiles is specified
+      // InputSize() == 3: tiles is specified and axis.
+      // Anything specified as input will override the arguments
+      CAFFE_ENFORCE(
+          Input(1).ndim() == 1 && Input(1).size() == 1,
+          "Input `tiles` should be a vector of size 1.");
+
+      const auto& input1 = Input(1);
+      context_.template CopyItems<Context, CPUContext>(
+          input1.meta(), 1, static_cast<const char*>(input1.raw_data()),
+          &(temp_params[0]));
+
+      if (InputSize() > 2) {
+       CAFFE_ENFORCE(
+            Input(2).ndim() == 1 && Input(2).size() == 1,
+            "Input `axis` should be a vector of size 1.");
+
+        const auto& input2 = Input(2);
+        context_.template CopyItems<Context, CPUContext>(
+          input2.meta(), 1, static_cast<const char*>(input2.raw_data()),
+          &(temp_params[1]));
+      } else {
+        CAFFE_ENFORCE(
+            OperatorBase::HasArgument("axis"),
+            "Argument `axis` is missing and was not specified as input.");
+      }
+    } else {
+      CAFFE_ENFORCE(
+          OperatorBase::HasArgument("tiles"),
+          "Argument `tiles` is missing and was not specified as input.");
+      CAFFE_ENFORCE(
+          OperatorBase::HasArgument("axis"),
+          "Argument `axis` is missing and was not specified as input.");
+    }
+
+    tiles_ = temp_params[0];
+    axis_ = temp_params[1];
 
     const auto& input = Input(0);
     auto* output = Output(0);
