@@ -81,7 +81,6 @@ def recurrent_net(
     inner_outputs = list(cell_net.Proto().external_output)
     # These gradients are expected to be available during the backward pass
     inner_outputs_map = {o: o + '_grad' for o in inner_outputs}
-    recompute_blobs_on_backward = set()
 
     # compute the backward pass of the cell net
     if not forward_only:
@@ -215,6 +214,8 @@ def recurrent_net(
         param_grads = [str(backward_mapping[x])
                        for x in references
                        if x in backward_mapping.keys()]
+        if recompute_blobs_on_backward is None:
+            recompute_blobs_on_backward = set()
         backward_args = {
             'param': map(all_inputs.index, params),
             'backward_link_internal': map(str, backward_link_internal),
